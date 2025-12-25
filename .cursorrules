@@ -1,0 +1,151 @@
+# Basketball Tracker - Cursor AI Configuration
+
+## Project Overview
+This is an open-source basketball tracking application with:
+- React Native/Expo mobile app (iOS-first)
+- Node.js/TypeScript backend with Express
+- Event-driven architecture using Kafka and Flink
+- AWS infrastructure (ECS, RDS, ElastiCache, S3)
+- Apache 2.0 license
+
+## Code Style & Standards
+
+### TypeScript
+- Use strict mode (`strict: true` in tsconfig.json)
+- Prefer explicit types over `any`
+- Use interfaces for object shapes, types for unions/intersections
+- Use `const` assertions where appropriate
+- Prefer async/await over promises
+
+### Naming Conventions
+- **Files**: kebab-case for files (e.g., `game-service.ts`)
+- **Classes**: PascalCase (e.g., `GameService`)
+- **Functions/Variables**: camelCase (e.g., `getGameStats`)
+- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_PLAYERS`)
+- **Types/Interfaces**: PascalCase (e.g., `GameEvent`)
+
+### Code Organization
+- One class/interface per file when possible
+- Group related functionality in modules
+- Use barrel exports (`index.ts`) for clean imports
+- Keep functions focused and single-purpose
+
+## Architecture Patterns
+
+### Event-Driven Design
+- Use Kafka for event streaming
+- Events should be immutable and versioned
+- Use Flink for stream processing and aggregation
+- Keep event schemas in `streaming/kafka/schemas/`
+
+### Backend Structure
+- **API Routes**: Handle HTTP requests, delegate to services
+- **Services**: Business logic, orchestration
+- **Models**: Database access via Prisma
+- **Kafka**: Producers/consumers for event streaming
+- **WebSocket**: Real-time game updates
+
+### Mobile App Structure
+- **Components**: Reusable UI components
+- **Screens**: Page-level components (Expo Router)
+- **Services**: API clients, WebSocket connections
+- **Store**: Zustand state management
+- **Hooks**: Custom React hooks
+
+## Documentation Requirements
+
+### Code Comments
+- Document public APIs and complex logic
+- Use JSDoc for functions/classes
+- Explain "why" not just "what" for non-obvious code
+- Keep comments up-to-date with code changes
+
+### Example:
+```typescript
+/**
+ * Publishes a game event to Kafka for real-time processing.
+ * Events are consumed by Flink for statistics aggregation.
+ * 
+ * @param gameId - The ID of the game
+ * @param event - The game event to publish
+ * @returns Promise resolving when event is published
+ */
+async function publishGameEvent(gameId: string, event: GameEvent): Promise<void> {
+  // Implementation
+}
+```
+
+## Testing Expectations
+
+- Write unit tests for business logic
+- Test error cases and edge conditions
+- Mock external dependencies (Kafka, database)
+- Use descriptive test names: `describe('GameService', () => { it('should calculate player stats correctly', ...) })`
+
+## AWS & Infrastructure
+
+- Use environment variables for configuration
+- Store secrets in AWS Secrets Manager (production)
+- Use AWS SDK v3 for AWS service interactions
+- Follow AWS best practices for resource naming and tagging
+
+## Database (Prisma)
+
+- Use migrations for schema changes
+- Keep migrations focused and reversible
+- Use transactions for multi-step operations
+- Index frequently queried fields
+
+## Error Handling
+
+- Use custom error classes for different error types
+- Return appropriate HTTP status codes
+- Log errors with context (userId, gameId, etc.)
+- Don't expose internal error details to clients
+
+## Performance Considerations
+
+- Use Redis for caching frequently accessed data
+- Implement pagination for list endpoints
+- Use database indexes appropriately
+- Consider connection pooling for database
+
+## Security
+
+- Validate all user inputs (use Zod schemas)
+- Use parameterized queries (Prisma handles this)
+- Implement rate limiting for API endpoints
+- Use JWT for authentication, store securely
+- Follow principle of least privilege for AWS IAM roles
+
+## Git & Version Control
+
+- Write clear, descriptive commit messages
+- Use conventional commits when possible (feat:, fix:, docs:, etc.)
+- Keep commits focused and atomic
+- Reference issue numbers in commits
+
+## When Making Changes
+
+1. **Check existing patterns** - Follow established code patterns
+2. **Update tests** - Add/update tests for new/changed functionality
+3. **Update docs** - Update relevant documentation
+4. **Consider backwards compatibility** - Especially for API changes
+5. **Test locally** - Ensure everything works before committing
+
+## Mobile App Specific
+
+- Test on iOS devices/simulators
+- Follow React Native best practices
+- Use Expo Router for navigation
+- Handle offline scenarios gracefully
+- Optimize images and assets
+
+## Questions or Uncertainties
+
+When in doubt:
+- Follow existing patterns in the codebase
+- Check similar implementations
+- Ask for clarification rather than guessing
+- Document assumptions in code comments
+
