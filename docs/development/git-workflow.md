@@ -89,14 +89,35 @@ For the backend work we just completed:
    - Less ideal, but works if you want to keep everything together
    - You can always reorganize later with interactive rebase
 
-## Merging Strategy
+## Pushing to GitHub
 
-When ready to merge a feature:
+**When to push `develop` to GitHub:**
+- ✅ After completing a feature and merging it to `develop`
+- ✅ Before starting a new feature (so others can see your work)
+- ✅ Regularly to backup your work
+- ✅ When you want to collaborate with others
 
-1. Ensure feature branch is up to date with `develop`
-2. Merge to `develop` (or create PR if using GitHub)
-3. Test on `develop`
-4. When `develop` is stable, merge to `main` for releases
+**Best Practice:** Push `develop` after each completed feature merge.
+
+## Merging to Main
+
+**When to merge `develop` → `main`:**
+- ✅ When you have a **stable, working version** ready for production
+- ✅ When you want to create a **release** or **tag a version**
+- ✅ When you have **tested everything** and it's ready for users
+- ✅ Before deploying to production
+
+**Typical workflow:**
+1. Complete features on `develop` (backend, mobile, etc.)
+2. Test everything thoroughly on `develop`
+3. When stable and ready, merge `develop` → `main`
+4. Tag the release: `git tag -a v0.1.0 -m "Initial release"`
+5. Push tags: `git push origin --tags`
+
+**For this project:**
+- `main` = Production-ready, deployable code
+- `develop` = Integration branch for active development
+- Merge to `main` when you have a working MVP or major milestone
 
 ## Example: Current Project
 
