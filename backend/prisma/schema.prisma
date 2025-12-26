@@ -1,0 +1,198 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  COACH
+  PARENT
+  PLAYER
+  ADMIN
+}
+
+enum GameStatus {
+  SCHEDULED
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+enum GameEventType {
+  SHOT
+  REBOUND
+  ASSIST
+  TURNOVER
+  FOUL
+  SUBSTITUTION
+  STEAL
+  BLOCK
+  TIMEOUT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      UserRole @default(PLAYER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  coachedTeams Team[]        @relation("TeamCoach")
+  teamMembers  TeamMember[]
+  gameEvents   GameEvent[]
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model League {
+  id        String   @id @default(uuid())
+  name      String
+  season    String
+  year      Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teams Team[]
+
+  @@index([year, season])
+}
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String
+  leagueId  String
+  coachId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  league      League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  coach       User         @relation("TeamCoach", fields: [coachId], references: [id])
+  members     TeamMember[]
+  games       Game[]
+
+  @@index([leagueId])
+  @@index([coachId])
+}
+
+model TeamMember {
+  id          String   @id @default(uuid())
+  teamId      String
+  playerId    String
+  jerseyNumber Int?
+  position    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  player User @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, playerId])
+  @@index([teamId])
+  @@index([playerId])
+}
+
+model Game {
+  id         String     @id @default(uuid())
+  teamId     String
+  opponent   String
+  date       DateTime
+  status     GameStatus @default(SCHEDULED)
+  homeScore  Int        @default(0)
+  awayScore  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  team       Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  events     GameEvent[]
+
+  @@index([teamId])
+  @@index([date])
+  @@index([status])
+}
+
+model GameEvent {
+  id        String        @id @default(uuid())
+  gameId    String
+  playerId  String?
+  eventType GameEventType
+  timestamp DateTime      @default(now())
+  metadata  Json          @default("{}")
+  createdAt DateTime      @default(now())
+
+  game   Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  player User? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+
+  @@index([gameId])
+  @@index([playerId])
+  @@index([eventType])
+  @@index([timestamp])
+}
+
+model PlayerStats {
+  id                    String   @id @default(uuid())
+  playerId              String
+  gameId                String
+  points                Int      @default(0)
+  rebounds              Int      @default(0)
+  assists               Int      @default(0)
+  steals                Int      @default(0)
+  blocks                Int      @default(0)
+  turnovers             Int      @default(0)
+  fouls                 Int      @default(0)
+  fieldGoalsMade         Int      @default(0)
+  fieldGoalsAttempted    Int      @default(0)
+  threePointersMade      Int      @default(0)
+  threePointersAttempted Int      @default(0)
+  freeThrowsMade         Int      @default(0)
+  freeThrowsAttempted    Int      @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([playerId, gameId])
+  @@index([playerId])
+  @@index([gameId])
+}
+
+model TeamStats {
+  id                   String   @id @default(uuid())
+  teamId               String
+  gameId               String
+  points               Int      @default(0)
+  rebounds             Int      @default(0)
+  assists              Int      @default(0)
+  turnovers            Int      @default(0)
+  fieldGoalPercentage  Float    @default(0)
+  threePointPercentage Float    @default(0)
+  freeThrowPercentage  Float    @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([teamId, gameId])
+  @@index([teamId])
+  @@index([gameId])
+}
+
