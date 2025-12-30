@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import authRoutes from './auth/routes';
 
 const router = Router();
 
-// API routes will be registered here
-// Example: router.use('/auth', authRoutes);
+// API routes
+router.use('/auth', authRoutes);
 // Example: router.use('/games', gameRoutes);
 
 router.get('/', (_req, res) => {
