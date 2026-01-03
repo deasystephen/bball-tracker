@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useAuthStore } from '../store/auth-store';
+import '../i18n/config'; // Initialize i18n
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,6 +14,7 @@ const queryClient = new QueryClient({
 
 /**
  * Root layout - navigation is handled by index.tsx after mount
+ * Includes i18n initialization and theme support
  */
 export default function RootLayout() {
   return (

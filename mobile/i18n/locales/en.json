@@ -1,0 +1,64 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "confirm": "Confirm",
+    "close": "Close"
+  },
+  "navigation": {
+    "home": "Home",
+    "games": "Games",
+    "stats": "Stats",
+    "profile": "Profile",
+    "manage": "Manage"
+  },
+  "leagues": {
+    "title": "Leagues",
+    "create": "Create League",
+    "name": "League Name",
+    "season": "Season",
+    "year": "Year",
+    "noLeagues": "No leagues found",
+    "createNew": "Create New League"
+  },
+  "teams": {
+    "title": "Teams",
+    "create": "Create Team",
+    "edit": "Edit Team",
+    "name": "Team Name",
+    "league": "League",
+    "coach": "Coach",
+    "players": "Players",
+    "roster": "Roster",
+    "addPlayer": "Add Player",
+    "noTeams": "No teams found",
+    "createNew": "Create New Team",
+    "details": "Team Details",
+    "managePlayers": "Manage Players"
+  },
+  "players": {
+    "title": "Players",
+    "name": "Player Name",
+    "jerseyNumber": "Jersey Number",
+    "position": "Position",
+    "addToTeam": "Add to Team",
+    "removeFromTeam": "Remove from Team"
+  },
+  "games": {
+    "title": "Games",
+    "create": "Create Game",
+    "opponent": "Opponent",
+    "date": "Date",
+    "status": "Status",
+    "scheduled": "Scheduled",
+    "inProgress": "In Progress",
+    "finished": "Finished",
+    "cancelled": "Cancelled"
+  }
+}

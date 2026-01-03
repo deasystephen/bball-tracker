@@ -19,6 +19,17 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="teams"
+        options={{
+          title: 'Teams',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people" size={size} color={color} />
+          ),
+          tabBarActiveTintColor: '#007AFF',
+          tabBarInactiveTintColor: '#999',
+        }}
+      />
+      <Tabs.Screen
         name="games"
         options={{
           title: 'Games',
