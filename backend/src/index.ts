@@ -1,14 +1,13 @@
+// Load environment variables FIRST, before any other imports
+import './config/env';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);

@@ -1,5 +1,8 @@
 /**
  * WorkOS client configuration and initialization
+ * 
+ * NOTE: This module assumes dotenv has been loaded via '../config/env'
+ * which should be imported first in index.ts
  */
 
 import { WorkOS } from '@workos-inc/node';

@@ -39,20 +39,82 @@
 
 **Important**: This must match exactly what's in your `.env` file.
 
-## Step 6: Update Your .env File
+## Step 6: Configure Email/Password Authentication
+
+**GOOD NEWS**: For email/password authentication using WorkOS AuthKit, you can use the `authkit` provider - no Connection setup required!
+
+### Option 1: Use AuthKit Provider (Recommended for Email/Password)
+
+This is the simplest approach for email/password authentication:
+
+1. In your `.env` file, set:
+   ```env
+   WORKOS_PROVIDER="authkit"
+   ```
+
+2. That's it! The code will automatically use `provider: "authkit"` if no other connection/organization/provider is set.
+
+This enables WorkOS AuthKit's default email/password authentication flow. Users can sign up and sign in with email and password.
+
+**Reference**: [WorkOS AuthKit Authentication Documentation](https://workos.com/docs/reference/authkit/authentication)
+
+### Option 2: Create a Connection (For Custom Auth Methods)
+
+If you want to use specific authentication methods like Magic Link or OTP:
+
+1. In WorkOS dashboard, navigate to **"User Management"** in the left sidebar
+2. Click on **"Connections"** (or look for a "Connections" tab/section)
+3. Click **"Create Connection"** or **"Add Connection"** button
+4. Select your preferred authentication method:
+   - **"Email Magic Link"** - Passwordless, sends magic link to email
+   - **"Email OTP"** - Passwordless, sends one-time code to email  
+   - **"Email/Password"** - Traditional email and password (if available)
+5. Give it a name (e.g., "Basketball Tracker Email Auth")
+6. Click **"Create"** or **"Save"**
+7. **Copy the Connection ID** - it will start with `conn_` (e.g., `conn_01ABC123...`)
+8. Add `WORKOS_CONNECTION_ID="conn_..."` to your `.env` file
+
+## Step 7: Update Your .env File
 
 Open `backend/.env` and update these values:
+
+### For Email/Password Authentication (Recommended)
 
 ```env
 WORKOS_API_KEY="sk_test_YOUR_API_KEY_HERE"
 WORKOS_CLIENT_ID="client_YOUR_CLIENT_ID_HERE"
 WORKOS_ENVIRONMENT="sandbox"
 WORKOS_REDIRECT_URI="http://localhost:3000/api/v1/auth/callback"
+WORKOS_PROVIDER="authkit"
+# Leave these empty (not needed for basic email/password):
+# WORKOS_CONNECTION_ID=""
+# WORKOS_ORGANIZATION_ID=""
 ```
 
-Replace `YOUR_API_KEY_HERE` and `YOUR_CLIENT_ID_HERE` with the actual values from Steps 3 and 4.
+**Important**: 
+- ✅ **For email/password auth**: Set `WORKOS_PROVIDER="authkit"` (simplest approach)
+- ✅ The code will default to `authkit` if nothing is set, but it's better to be explicit
+- ❌ Don't set `WORKOS_CONNECTION_ID` unless you created a custom connection (Option 2 in Step 6)
+- ❌ Don't set `WORKOS_ORGANIZATION_ID` unless you're using enterprise SSO
 
-## Step 7: Run Database Migration (if needed)
+### Alternative: Using a Connection ID
+
+If you created a Connection in Step 6 (Option 2):
+
+```env
+WORKOS_API_KEY="sk_test_YOUR_API_KEY_HERE"
+WORKOS_CLIENT_ID="client_YOUR_CLIENT_ID_HERE"
+WORKOS_ENVIRONMENT="sandbox"
+WORKOS_REDIRECT_URI="http://localhost:3000/api/v1/auth/callback"
+WORKOS_CONNECTION_ID="conn_YOUR_CONNECTION_ID_HERE"
+# Leave these empty:
+# WORKOS_ORGANIZATION_ID=""
+# WORKOS_PROVIDER=""
+```
+
+Replace the values with the actual ones from Steps 3, 4, and 6.
+
+## Step 8: Run Database Migration (if needed)
 
 If you haven't run the migration yet:
 
@@ -63,7 +125,7 @@ npm run prisma:migrate
 
 This will ensure your database schema matches the Prisma schema (which already has WorkOS fields).
 
-## Step 8: Verify Setup
+## Step 9: Verify Setup
 
 Run the verification script:
 
@@ -77,7 +139,7 @@ Or manually check:
 - WorkOS client initializes correctly
 - Database schema is up to date
 
-## Step 9: Test the Integration
+## Step 10: Test the Integration
 
 1. Start your backend server:
    ```bash
@@ -102,13 +164,26 @@ Or manually check:
 - Check that the variable name is exactly `WORKOS_API_KEY`
 - Restart your server after updating `.env`
 
+### "organization_invalid" Error
+- ❌ **You're using `WORKOS_ORGANIZATION_ID` for email/password auth** - this is wrong!
+- ✅ **Solution**: Remove `WORKOS_ORGANIZATION_ID` from your `.env` file
+- ✅ **For email/password**: Don't set `WORKOS_CONNECTION_ID` either - leave it empty!
+- ✅ Email/password authentication works by default without any connection/organization
+- Organizations are ONLY for enterprise SSO, not consumer email/password auth
+
 ### "Invalid redirect URI"
 - Make sure the redirect URI in WorkOS dashboard matches exactly: `http://localhost:3000/api/v1/auth/callback`
+- For mobile apps, also add: `bball-tracker://auth/callback`
 - Check that it's added in the WorkOS Configuration → Redirect URIs section
 
 ### "Client ID not found"
 - Verify your `WORKOS_CLIENT_ID` in `.env` matches the Client ID in WorkOS dashboard
 - Make sure you're using the Client ID (starts with `client_`), not the API key
+
+### "No connections are available" or "Connection not found"
+- **For email/password auth**: You don't need a Connection! Leave `WORKOS_CONNECTION_ID` empty
+- Only create a Connection if you want SSO or OAuth (Google, Microsoft, etc.)
+- Make sure email/password is enabled in WorkOS dashboard: User Management → Authentication
 
 ### Database errors
 - Make sure PostgreSQL is running: `docker-compose up -d` (if using Docker)

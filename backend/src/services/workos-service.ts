@@ -8,13 +8,49 @@ import prisma from '../models';
 export class WorkOSService {
   /**
    * Get authorization URL for user login
+   * For email/password auth: No connection/organization/provider needed (enabled by default)
+   * For SSO/OAuth: Requires WORKOS_CONNECTION_ID or WORKOS_ORGANIZATION_ID
+   * @param state - Optional state parameter for OAuth flow
+   * @param customRedirectUri - Optional custom redirect URI (for mobile deep linking)
    */
-  static async getAuthorizationUrl(state?: string): Promise<string> {
-    return workos.userManagement.getAuthorizationUrl({
+  static async getAuthorizationUrl(state?: string, customRedirectUri?: string): Promise<string> {
+    const connectionId = process.env.WORKOS_CONNECTION_ID;
+    const organizationId = process.env.WORKOS_ORGANIZATION_ID;
+    const provider = process.env.WORKOS_PROVIDER;
+
+    // Use custom redirect URI if provided (for mobile), otherwise use default
+    const redirectUri = customRedirectUri || WORKOS_REDIRECT_URI;
+
+    // Base params - always required
+    const params: {
+      clientId: string;
+      redirectUri: string;
+      state?: string;
+      connectionId?: string;
+      organizationId?: string;
+      provider?: string;
+    } = {
       clientId: WORKOS_CLIENT_ID,
-      redirectUri: WORKOS_REDIRECT_URI,
+      redirectUri,
       state: state || undefined,
-    });
+    };
+
+    // WorkOS SDK requires one of: connectionId, organizationId, or provider
+    // For email/password auth using AuthKit, use provider: "authkit"
+    // See: https://workos.com/docs/reference/authkit/authentication
+    if (connectionId) {
+      params.connectionId = connectionId;
+    } else if (organizationId) {
+      params.organizationId = organizationId;
+    } else if (provider) {
+      params.provider = provider;
+    } else {
+      // Default to "authkit" provider for email/password authentication
+      // This enables WorkOS AuthKit's default email/password flow
+      params.provider = 'authkit';
+    }
+
+    return workos.userManagement.getAuthorizationUrl(params);
   }
 
   /**
