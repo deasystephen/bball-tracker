@@ -13,16 +13,51 @@ This guide walks through testing the complete flow: **League → Team → Player
 
 First, authenticate with WorkOS to get an access token:
 
-```bash
-# Start the login flow (this will open a browser)
-curl http://localhost:3000/api/v1/auth/login?format=json
+### Method 1: Browser Authentication (Recommended)
 
-# After authenticating, you'll get redirected with a code
-# Exchange the code for a token:
-curl -X GET "http://localhost:3000/api/v1/auth/callback?code=YOUR_CODE_HERE"
+1. **Open your browser** and visit:
+   ```
+   http://localhost:3000/api/v1/auth/login
+   ```
+   This will redirect you to WorkOS for authentication.
+
+2. **Sign in with WorkOS** (email/password)
+
+3. **After authentication**, WorkOS will redirect you back to:
+   ```
+   http://localhost:3000/api/v1/auth/callback?code=...
+   ```
+
+4. **The callback endpoint** will automatically exchange the code for a token and return a JSON response like:
+   ```json
+   {
+     "success": true,
+     "accessToken": "your_access_token_here",
+     "user": { ... }
+   }
+   ```
+
+5. **Copy the `accessToken`** from the response.
+
+### Method 2: Get URL First (Alternative)
+
+If you want to see the URL first:
+
+```bash
+# Get the authorization URL
+curl http://localhost:3000/api/v1/auth/login?format=json
 ```
 
-Save the `accessToken` from the response. Set it as an environment variable:
+This returns:
+```json
+{"url": "https://api.workos.com/user_management/authorize?..."}
+```
+
+Then manually visit that URL in your browser and follow the same steps as Method 1.
+
+### Save Your Token
+
+Set it as an environment variable for the test script:
 
 ```bash
 export TOKEN="your_access_token_here"
