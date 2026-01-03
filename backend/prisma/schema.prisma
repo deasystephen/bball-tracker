@@ -37,13 +37,15 @@ enum GameEventType {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  password  String
-  role      UserRole @default(PLAYER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String    @id @default(uuid())
+  workosUserId     String?   @unique
+  email            String    @unique
+  name             String
+  emailVerified    Boolean   @default(false)
+  profilePictureUrl String?
+  role             UserRole  @default(PLAYER)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
   coachedTeams Team[]        @relation("TeamCoach")
@@ -53,6 +55,7 @@ model User {
 
   @@index([email])
   @@index([role])
+  @@index([workosUserId])
 }
 
 model RefreshToken {

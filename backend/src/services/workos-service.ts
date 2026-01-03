@@ -116,6 +116,7 @@ export class WorkOSService {
           email: workosUser.email,
           name: fullName,
           emailVerified: workosUser.emailVerified || false,
+          profilePictureUrl: workosUser.profilePictureUrl || null,
         },
       });
     }
@@ -129,6 +130,7 @@ export class WorkOSService {
         name: fullName,
         role: 'PLAYER', // Default role
         emailVerified: workosUser.emailVerified || false,
+        profilePictureUrl: workosUser.profilePictureUrl || null,
       },
     });
   }
