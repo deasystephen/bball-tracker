@@ -116,6 +116,7 @@ export class WorkOSService {
           email: workosUser.email,
           name: fullName,
           emailVerified: workosUser.emailVerified || false,
+          profilePictureUrl: workosUser.profilePictureUrl || null,
         },
       });
     }
@@ -129,19 +130,39 @@ export class WorkOSService {
         name: fullName,
         role: 'PLAYER', // Default role
         emailVerified: workosUser.emailVerified || false,
+        profilePictureUrl: workosUser.profilePictureUrl || null,
       },
     });
   }
 
   /**
    * Verify WorkOS access token and get user
-   * The access token is used as the user ID in WorkOS API
+   * WorkOS access tokens are JWTs that contain user information
+   * We decode the JWT to extract the user ID (sub claim), then fetch user details
    */
   static async verifyToken(accessToken: string) {
     try {
-      // WorkOS access tokens can be used to get user info
-      // The token itself contains user information
-      const user = await workos.userManagement.getUser(accessToken);
+      // WorkOS access tokens are JWTs
+      // Decode the token to get the user ID from the 'sub' claim
+      const base64Url = accessToken.split('.')[1];
+      if (!base64Url) {
+        throw new Error('Invalid token format');
+      }
+
+      // Decode base64url (JWT uses base64url encoding)
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+      const decoded = Buffer.from(base64 + padding, 'base64').toString('utf-8');
+      const payload = JSON.parse(decoded);
+
+      // Extract user ID from 'sub' claim
+      const userId = payload.sub;
+      if (!userId) {
+        throw new Error('Token does not contain user ID');
+      }
+
+      // Get user from WorkOS using the user ID
+      const user = await workos.userManagement.getUser(userId);
       return user;
     } catch (error) {
       console.error('Error verifying WorkOS token:', error);

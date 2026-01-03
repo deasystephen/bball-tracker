@@ -41,8 +41,20 @@ app.use('/api/v1', apiRouter);
 setupWebSocketHandlers(io);
 
 // Error handling middleware
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+import { AppError } from './utils/errors';
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
   console.error('Error:', err);
+  
+  // If it's an AppError, use its status code
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({
+      error: err.message,
+    });
+    return;
+  }
+  
+  // Otherwise, return 500
   res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
