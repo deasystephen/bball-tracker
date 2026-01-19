@@ -36,6 +36,14 @@ enum GameEventType {
   TIMEOUT
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
 model User {
   id               String    @id @default(uuid())
   workosUserId     String?   @unique
@@ -48,10 +56,12 @@ model User {
   updatedAt        DateTime  @updatedAt
 
   // Relations
-  coachedTeams Team[]        @relation("TeamCoach")
-  teamMembers  TeamMember[]
-  gameEvents   GameEvent[]
-  refreshTokens RefreshToken[]
+  coachedTeams        Team[]           @relation("TeamCoach")
+  teamMembers         TeamMember[]
+  gameEvents          GameEvent[]
+  refreshTokens       RefreshToken[]
+  sentInvitations     TeamInvitation[] @relation("SentInvitations")
+  receivedInvitations  TeamInvitation[] @relation("PlayerInvitations")
 
   @@index([email])
   @@index([role])
@@ -92,10 +102,11 @@ model Team {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  league      League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  coach       User         @relation("TeamCoach", fields: [coachId], references: [id])
+  league      League           @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  coach       User             @relation("TeamCoach", fields: [coachId], references: [id])
   members     TeamMember[]
   games       Game[]
+  invitations TeamInvitation[]
 
   @@index([leagueId])
   @@index([coachId])
@@ -116,6 +127,34 @@ model TeamMember {
   @@unique([teamId, playerId])
   @@index([teamId])
   @@index([playerId])
+}
+
+model TeamInvitation {
+  id          String           @id @default(uuid())
+  teamId      String
+  playerId    String
+  invitedById String
+  status      InvitationStatus @default(PENDING)
+  token       String           @unique
+  jerseyNumber Int?
+  position    String?
+  message     String?
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  acceptedAt  DateTime?
+  rejectedAt  DateTime?
+
+  team      Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  player    User @relation("PlayerInvitations", fields: [playerId], references: [id], onDelete: Cascade)
+  invitedBy User @relation("SentInvitations", fields: [invitedById], references: [id])
+
+  @@unique([teamId, playerId, status], name: "unique_pending_invitation")
+  @@index([playerId])
+  @@index([teamId])
+  @@index([status])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model Game {

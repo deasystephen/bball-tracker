@@ -1,0 +1,64 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "confirm": "Confirmar",
+    "close": "Cerrar"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "games": "Juegos",
+    "stats": "Estadísticas",
+    "profile": "Perfil",
+    "manage": "Administrar"
+  },
+  "leagues": {
+    "title": "Ligas",
+    "create": "Crear Liga",
+    "name": "Nombre de la Liga",
+    "season": "Temporada",
+    "year": "Año",
+    "noLeagues": "No se encontraron ligas",
+    "createNew": "Crear Nueva Liga"
+  },
+  "teams": {
+    "title": "Equipos",
+    "create": "Crear Equipo",
+    "edit": "Editar Equipo",
+    "name": "Nombre del Equipo",
+    "league": "Liga",
+    "coach": "Entrenador",
+    "players": "Jugadores",
+    "roster": "Plantilla",
+    "addPlayer": "Agregar Jugador",
+    "noTeams": "No se encontraron equipos",
+    "createNew": "Crear Nuevo Equipo",
+    "details": "Detalles del Equipo",
+    "managePlayers": "Administrar Jugadores"
+  },
+  "players": {
+    "title": "Jugadores",
+    "name": "Nombre del Jugador",
+    "jerseyNumber": "Número de Camiseta",
+    "position": "Posición",
+    "addToTeam": "Agregar al Equipo",
+    "removeFromTeam": "Quitar del Equipo"
+  },
+  "games": {
+    "title": "Juegos",
+    "create": "Crear Juego",
+    "opponent": "Oponente",
+    "date": "Fecha",
+    "status": "Estado",
+    "scheduled": "Programado",
+    "inProgress": "En Progreso",
+    "finished": "Finalizado",
+    "cancelled": "Cancelado"
+  }
+}

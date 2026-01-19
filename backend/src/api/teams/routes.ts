@@ -8,11 +8,12 @@ import { authenticate } from '../auth/middleware';
 import {
   createTeamSchema,
   updateTeamSchema,
-  addPlayerSchema,
   updateTeamMemberSchema,
   teamQuerySchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { createInvitationSchema } from '../invitations/schemas';
+import { InvitationService } from '../../services/invitation-service';
 
 const router = Router();
 
@@ -175,38 +176,50 @@ router.delete('/:id', async (req, res) => {
 
 /**
  * POST /api/v1/teams/:id/players
- * Add a player to a team
+ * DEPRECATED: Use POST /api/v1/teams/:id/invitations instead
+ * Players must be invited and accept invitations to join teams
  */
-router.post('/:id/players', async (req, res) => {
+router.post('/:id/players', async (_req, res) => {
+  res.status(410).json({
+    error: 'This endpoint has been removed. Please use the invitation system: POST /api/v1/teams/:id/invitations',
+    deprecated: true,
+  });
+});
+
+/**
+ * POST /api/v1/teams/:teamId/invitations
+ * Create a new team invitation (coach only)
+ */
+router.post('/:teamId/invitations', async (req, res) => {
   try {
     // Validate request body
-    const validationResult = addPlayerSchema.safeParse(req.body);
+    const validationResult = createInvitationSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
         validationResult.error.errors.map((e) => e.message).join(', ')
       );
     }
 
-    const teamMember = await TeamService.addPlayer(
-      req.params.id,
+    const invitation = await InvitationService.createInvitation(
+      req.params.teamId,
       validationResult.data,
       req.user!.id
     );
 
     res.status(201).json({
       success: true,
-      teamMember,
+      invitation,
     });
   } catch (error) {
-    console.error('Error adding player to team:', error);
+    console.error('Error creating invitation:', error);
     if (
+      error instanceof BadRequestError ||
       error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
+      error instanceof ForbiddenError
     ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
-      res.status(500).json({ error: 'Failed to add player to team' });
+      res.status(500).json({ error: 'Failed to create invitation' });
     }
   }
 });
