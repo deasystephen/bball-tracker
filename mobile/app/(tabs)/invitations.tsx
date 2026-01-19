@@ -254,6 +254,8 @@ export default function InvitationsScreen() {
       return null;
     }
 
+    const deviceTime = new Date().toISOString();
+
     return (
       <Card variant="outline" style={styles.debugCard}>
         <ThemedText variant="captionBold" color="textSecondary" selectable>
@@ -289,6 +291,14 @@ export default function InvitationsScreen() {
           </ThemedText>
           <ThemedText variant="caption" color="textSecondary" selectable>
             {accessToken ? `${accessToken.slice(0, 8)}...` : 'none'}
+          </ThemedText>
+        </View>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            deviceTime
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {deviceTime}
           </ThemedText>
         </View>
       </Card>
