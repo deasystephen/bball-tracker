@@ -188,19 +188,19 @@ export default function InvitationsScreen() {
 
         {__DEV__ && (
           <View style={styles.debugBlock}>
-            <ThemedText variant="captionBold" color="textSecondary">
+            <ThemedText variant="captionBold" color="textSecondary" selectable>
               Debug
             </ThemedText>
-            <ThemedText variant="caption" color="textTertiary">
+            <ThemedText variant="caption" color="textTertiary" selectable>
               invitationId: {item.id}
             </ThemedText>
-            <ThemedText variant="caption" color="textTertiary">
+            <ThemedText variant="caption" color="textTertiary" selectable>
               playerId: {item.playerId}
             </ThemedText>
-            <ThemedText variant="caption" color="textTertiary">
+            <ThemedText variant="caption" color="textTertiary" selectable>
               invitedById: {item.invitedById}
             </ThemedText>
-            <ThemedText variant="caption" color="textTertiary">
+            <ThemedText variant="caption" color="textTertiary" selectable>
               expiresAt: {item.expiresAt}
             </ThemedText>
           </View>
@@ -256,38 +256,38 @@ export default function InvitationsScreen() {
 
     return (
       <Card variant="outline" style={styles.debugCard}>
-        <ThemedText variant="captionBold" color="textSecondary">
+        <ThemedText variant="captionBold" color="textSecondary" selectable>
           Debug
         </ThemedText>
         <View style={styles.debugRow}>
-          <ThemedText variant="caption" color="textTertiary">
+          <ThemedText variant="caption" color="textTertiary" selectable>
             currentUserId
           </ThemedText>
-          <ThemedText variant="caption" color="textSecondary">
+          <ThemedText variant="caption" color="textSecondary" selectable>
             {user?.id ?? 'none'}
           </ThemedText>
         </View>
         <View style={styles.debugRow}>
-          <ThemedText variant="caption" color="textTertiary">
+          <ThemedText variant="caption" color="textTertiary" selectable>
             email
           </ThemedText>
-          <ThemedText variant="caption" color="textSecondary">
+          <ThemedText variant="caption" color="textSecondary" selectable>
             {user?.email ?? 'none'}
           </ThemedText>
         </View>
         <View style={styles.debugRow}>
-          <ThemedText variant="caption" color="textTertiary">
+          <ThemedText variant="caption" color="textTertiary" selectable>
             role
           </ThemedText>
-          <ThemedText variant="caption" color="textSecondary">
+          <ThemedText variant="caption" color="textSecondary" selectable>
             {user?.role ?? 'none'}
           </ThemedText>
         </View>
         <View style={styles.debugRow}>
-          <ThemedText variant="caption" color="textTertiary">
+          <ThemedText variant="caption" color="textTertiary" selectable>
             token
           </ThemedText>
-          <ThemedText variant="caption" color="textSecondary">
+          <ThemedText variant="caption" color="textSecondary" selectable>
             {accessToken ? `${accessToken.slice(0, 8)}...` : 'none'}
           </ThemedText>
         </View>
