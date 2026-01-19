@@ -19,12 +19,14 @@ import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuthStore } from '../../store/auth-store';
 
 export default function InvitationsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
+  const { user, accessToken } = useAuthStore();
 
   const {
     data: invitationsData,
@@ -184,6 +186,26 @@ export default function InvitationsScreen() {
           </View>
         </View>
 
+        {__DEV__ && (
+          <View style={styles.debugBlock}>
+            <ThemedText variant="captionBold" color="textSecondary" selectable>
+              Debug
+            </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" selectable>
+              invitationId: {item.id}
+            </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" selectable>
+              playerId: {item.playerId}
+            </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" selectable>
+              invitedById: {item.invitedById}
+            </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" selectable>
+              expiresAt: {item.expiresAt}
+            </ThemedText>
+          </View>
+        )}
+
         {isPending && (
           <View style={styles.actionButtons}>
             {canAccept && (
@@ -227,12 +249,69 @@ export default function InvitationsScreen() {
     );
   }
 
+  const renderDebugCard = () => {
+    if (!__DEV__) {
+      return null;
+    }
+
+    const deviceTime = new Date().toISOString();
+
+    return (
+      <Card variant="outline" style={styles.debugCard}>
+        <ThemedText variant="captionBold" color="textSecondary" selectable>
+          Debug
+        </ThemedText>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            currentUserId
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {user?.id ?? 'none'}
+          </ThemedText>
+        </View>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            email
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {user?.email ?? 'none'}
+          </ThemedText>
+        </View>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            role
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {user?.role ?? 'none'}
+          </ThemedText>
+        </View>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            token
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {accessToken ? `${accessToken.slice(0, 8)}...` : 'none'}
+          </ThemedText>
+        </View>
+        <View style={styles.debugRow}>
+          <ThemedText variant="caption" color="textTertiary" selectable>
+            deviceTime
+          </ThemedText>
+          <ThemedText variant="caption" color="textSecondary" selectable>
+            {deviceTime}
+          </ThemedText>
+        </View>
+      </Card>
+    );
+  };
+
   if (invitations.length === 0) {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingHorizontal: padding }]}>
           <ThemedText variant="h1">Invitations</ThemedText>
         </View>
+        {renderDebugCard()}
         <EmptyState
           icon="mail-outline"
           title="No Invitations"
@@ -250,6 +329,7 @@ export default function InvitationsScreen() {
           {invitations.length} {invitations.length === 1 ? 'invitation' : 'invitations'}
         </ThemedText>
       </View>
+      <View style={{ paddingHorizontal: padding }}>{renderDebugCard()}</View>
 
       <FlatList
         data={invitations}
@@ -284,6 +364,20 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: spacing.xl,
+  },
+  debugCard: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+  },
+  debugBlock: {
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+  },
+  debugRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   invitationCard: {
     marginBottom: spacing.md,
