@@ -25,9 +25,11 @@ import {
 } from '../../../components';
 import {
   useTeam,
-  useAddPlayerToTeam,
   useRemovePlayerFromTeam,
 } from '../../../hooks/useTeams';
+import {
+  useCreateInvitation,
+} from '../../../hooks/useInvitations';
 import {
   usePlayers,
   useCreatePlayer,
@@ -59,9 +61,9 @@ export default function ManagePlayersScreen() {
   const [position, setPosition] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
-  const addPlayer = useAddPlayerToTeam();
   const removePlayer = useRemovePlayerFromTeam();
   const createPlayer = useCreatePlayer();
+  const createInvitation = useCreateInvitation();
 
   // Search for players
   const { data: playersData, isLoading: searchingPlayers } = usePlayers({
@@ -72,7 +74,7 @@ export default function ManagePlayersScreen() {
 
   const players = playersData?.players || [];
 
-  const handleCreateAndAddPlayer = async () => {
+  const handleCreateAndInvitePlayer = async () => {
     if (!newPlayerName.trim() || !newPlayerEmail.trim()) {
       Alert.alert('Error', 'Name and email are required');
       return;
@@ -85,8 +87,8 @@ export default function ManagePlayersScreen() {
         email: newPlayerEmail.trim(),
       });
 
-      // Then add to team
-      await addPlayer.mutateAsync({
+      // Then send invitation
+      await createInvitation.mutateAsync({
         teamId: id,
         data: {
           playerId: newPlayerResult.player.id,
@@ -103,23 +105,23 @@ export default function ManagePlayersScreen() {
       setShowCreateForm(false);
       setSearchQuery('');
       setSelectedPlayer(null);
-      Alert.alert('Success', 'Player created and added to team');
+      Alert.alert('Success', 'Player created and invitation sent');
     } catch (error) {
       Alert.alert(
         'Error',
-        error instanceof Error ? error.message : 'Failed to create and add player'
+        error instanceof Error ? error.message : 'Failed to create player and send invitation'
       );
     }
   };
 
-  const handleAddSelectedPlayer = async () => {
+  const handleInviteSelectedPlayer = async () => {
     if (!selectedPlayer) {
       Alert.alert('Error', 'Please select a player');
       return;
     }
 
     try {
-      await addPlayer.mutateAsync({
+      await createInvitation.mutateAsync({
         teamId: id,
         data: {
           playerId: selectedPlayer.id,
@@ -132,11 +134,11 @@ export default function ManagePlayersScreen() {
       setPosition('');
       setSelectedPlayer(null);
       setSearchQuery('');
-      Alert.alert('Success', 'Player added to team');
+      Alert.alert('Success', 'Invitation sent to player');
     } catch (error) {
       Alert.alert(
         'Error',
-        error instanceof Error ? error.message : 'Failed to add player'
+        error instanceof Error ? error.message : 'Failed to send invitation'
       );
     }
   };
@@ -216,10 +218,10 @@ export default function ManagePlayersScreen() {
         keyboardShouldPersistTaps="handled"
       >
 
-        {/* Add Player Form */}
+        {/* Invite Player Form */}
         <Card variant="elevated" style={styles.formCard}>
           <ThemedText variant="h4" style={styles.formTitle}>
-            Add Player
+            Invite Player
           </ThemedText>
 
           {!showCreateForm ? (
@@ -325,9 +327,9 @@ export default function ManagePlayersScreen() {
               <View style={styles.actionButtons}>
                 {selectedPlayer ? (
                   <Button
-                    title="Add Selected Player"
-                    onPress={handleAddSelectedPlayer}
-                    loading={addPlayer.isPending}
+                    title="Send Invitation"
+                    onPress={handleInviteSelectedPlayer}
+                    loading={createInvitation.isPending}
                     fullWidth
                   />
                 ) : (
@@ -378,9 +380,9 @@ export default function ManagePlayersScreen() {
 
               <View style={styles.actionButtons}>
                 <Button
-                  title="Create & Add to Team"
-                  onPress={handleCreateAndAddPlayer}
-                  loading={createPlayer.isPending || addPlayer.isPending}
+                  title="Create & Send Invitation"
+                  onPress={handleCreateAndInvitePlayer}
+                  loading={createPlayer.isPending || createInvitation.isPending}
                   disabled={!newPlayerName.trim() || !newPlayerEmail.trim()}
                   fullWidth
                 />

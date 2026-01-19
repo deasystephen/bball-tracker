@@ -52,6 +52,18 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="invitations"
+        options={{
+          title: 'Invitations',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="mail" size={size} color={color} />
+          ),
+          tabBarActiveTintColor: '#007AFF',
+          tabBarInactiveTintColor: '#999',
+          tabBarBadge: undefined, // Can be set dynamically based on pending count
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
