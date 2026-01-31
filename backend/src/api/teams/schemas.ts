@@ -9,9 +9,7 @@ import { z } from 'zod';
  */
 export const createTeamSchema = z.object({
   name: z.string().min(1, 'Team name is required').max(100, 'Team name too long'),
-  leagueId: z.string().uuid('Invalid league ID format'),
-  coachId: z.string().uuid('Invalid coach ID format').optional(),
-  // coachId is optional - if not provided, will use the authenticated user
+  seasonId: z.string().uuid('Invalid season ID format'),
 });
 
 /**
@@ -19,7 +17,7 @@ export const createTeamSchema = z.object({
  */
 export const updateTeamSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  leagueId: z.string().uuid().optional(),
+  seasonId: z.string().uuid().optional(),
 });
 
 /**
@@ -40,11 +38,40 @@ export const updateTeamMemberSchema = z.object({
 });
 
 /**
+ * Schema for adding a staff member to a team
+ */
+export const addStaffSchema = z.object({
+  userId: z.string().uuid('Invalid user ID format'),
+  roleName: z.string().min(1, 'Role name is required'),
+});
+
+/**
+ * Schema for removing a staff member from a team
+ */
+export const removeStaffSchema = z.object({
+  userId: z.string().uuid('Invalid user ID format'),
+  roleName: z.string().min(1, 'Role name is required'),
+});
+
+/**
+ * Schema for creating a custom team role
+ */
+export const createRoleSchema = z.object({
+  name: z.string().min(1, 'Role name is required').max(50, 'Role name too long'),
+  description: z.string().max(255).optional(),
+  canManageTeam: z.boolean().optional().default(false),
+  canManageRoster: z.boolean().optional().default(false),
+  canTrackStats: z.boolean().optional().default(false),
+  canViewStats: z.boolean().optional().default(true),
+  canShareStats: z.boolean().optional().default(false),
+});
+
+/**
  * Schema for team query parameters
  */
 export const teamQuerySchema = z.object({
+  seasonId: z.string().uuid().optional(),
   leagueId: z.string().uuid().optional(),
-  coachId: z.string().uuid().optional(),
   playerId: z.string().uuid().optional(), // Teams where this player is a member
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -54,4 +81,7 @@ export type CreateTeamInput = z.infer<typeof createTeamSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
 export type UpdateTeamMemberInput = z.infer<typeof updateTeamMemberSchema>;
+export type AddStaffInput = z.infer<typeof addStaffSchema>;
+export type RemoveStaffInput = z.infer<typeof removeStaffSchema>;
+export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;

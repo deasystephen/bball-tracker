@@ -31,7 +31,7 @@ router.post('/', async (req, res) => {
       );
     }
 
-    const league = await LeagueService.createLeague(validationResult.data);
+    const league = await LeagueService.createLeague(validationResult.data, req.user!.id);
 
     res.status(201).json({
       success: true,
@@ -115,7 +115,8 @@ router.patch('/:id', async (req, res) => {
 
     const league = await LeagueService.updateLeague(
       req.params.id,
-      validationResult.data
+      validationResult.data,
+      req.user!.id
     );
 
     res.json({
@@ -138,7 +139,7 @@ router.patch('/:id', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
   try {
-    await LeagueService.deleteLeague(req.params.id);
+    await LeagueService.deleteLeague(req.params.id, req.user!.id);
 
     res.json({
       success: true,

@@ -6,11 +6,12 @@ import prisma from '../models';
 import { GameEventType, Prisma } from '@prisma/client';
 import { CreateGameEventInput, GameEventQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 
 export class GameEventService {
   /**
-   * Verify user has access to a game (coach or team member)
-   * Returns the game with team info if access is granted
+   * Verify user has access to a game and return permissions
+   * Returns the game and user permissions
    */
   private static async verifyGameAccess(gameId: string, userId: string) {
     const game = await prisma.game.findUnique({
@@ -32,29 +33,29 @@ export class GameEventService {
       throw new NotFoundError('Game not found');
     }
 
-    const isCoach = game.team.coachId === userId;
-    const isTeamMember = game.team.members.some((member) => member.playerId === userId);
-
-    if (!isCoach && !isTeamMember) {
+    const hasAccess = await canAccessTeam(userId, game.teamId);
+    if (!hasAccess) {
       throw new ForbiddenError('You do not have access to this game');
     }
 
-    return { game, isCoach };
+    const canTrackStats = await hasTeamPermission(userId, game.teamId, 'canTrackStats');
+    const canManageTeam = await hasTeamPermission(userId, game.teamId, 'canManageTeam');
+
+    return { game, canTrackStats, canManageTeam };
   }
 
   /**
    * Create a new game event
    * @param gameId Game ID
    * @param data Event creation data
-   * @param userId ID of the user creating the event (must be coach or team member)
+   * @param userId ID of the user creating the event (must have canTrackStats permission)
    */
   static async createEvent(gameId: string, data: CreateGameEventInput, userId: string) {
-    const { game, isCoach } = await this.verifyGameAccess(gameId, userId);
-    const isTeamMember = game.team.members.some((member) => member.playerId === userId);
+    const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
-    // Only coach or team members can create events
-    if (!isCoach && !isTeamMember) {
-      throw new ForbiddenError('Only team coach or members can create game events');
+    // Must have canTrackStats permission to create events
+    if (!canTrackStats) {
+      throw new ForbiddenError('You do not have permission to create game events');
     }
 
     // Verify player exists and is on the team if playerId is provided
@@ -130,7 +131,7 @@ export class GameEventService {
         },
       },
       orderBy: {
-        timestamp: 'asc',
+        timestamp: 'desc', // Most recent first
       },
       take: query.limit,
       skip: query.offset,
@@ -180,13 +181,14 @@ export class GameEventService {
    * Delete a game event
    * @param gameId Game ID
    * @param eventId Event ID
-   * @param userId User ID (must be coach)
+   * @param userId User ID (must have canTrackStats permission)
    */
   static async deleteEvent(gameId: string, eventId: string, userId: string) {
-    const { isCoach } = await this.verifyGameAccess(gameId, userId);
+    const { canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
-    if (!isCoach) {
-      throw new ForbiddenError('Only the team coach can delete game events');
+    // Must have canTrackStats permission to delete events (for undo functionality)
+    if (!canTrackStats) {
+      throw new ForbiddenError('You do not have permission to delete game events');
     }
 
     const event = await prisma.gameEvent.findUnique({

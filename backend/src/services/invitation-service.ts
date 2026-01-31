@@ -13,6 +13,7 @@ import {
   ForbiddenError,
 } from '../utils/errors';
 import { randomBytes } from 'crypto';
+import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 
 export class InvitationService {
   /**
@@ -27,14 +28,14 @@ export class InvitationService {
    * Create a new team invitation
    * @param teamId Team ID
    * @param data Invitation data
-   * @param userId User ID (must be coach)
+   * @param userId User ID (must have canManageRoster permission)
    */
   static async createInvitation(
     teamId: string,
     data: CreateInvitationInput,
     userId: string
   ) {
-    // Get team and verify access
+    // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
     });
@@ -43,21 +44,19 @@ export class InvitationService {
       throw new NotFoundError('Team not found');
     }
 
-    if (team.coachId !== userId) {
-      throw new ForbiddenError('Only the team coach can send invitations');
+    // Check permission
+    const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
+    if (!canManageRoster) {
+      throw new ForbiddenError('You do not have permission to send invitations for this team');
     }
 
-    // Verify player exists and is actually a player
+    // Verify user exists
     const player = await prisma.user.findUnique({
       where: { id: data.playerId },
     });
 
     if (!player) {
-      throw new NotFoundError('Player not found');
-    }
-
-    if (player.role !== 'PLAYER') {
-      throw new BadRequestError('Can only invite users with PLAYER role');
+      throw new NotFoundError('User not found');
     }
 
     // Check if player is already on the team
@@ -112,12 +111,16 @@ export class InvitationService {
           select: {
             id: true,
             name: true,
-            league: {
+            season: {
               select: {
                 id: true,
                 name: true,
-                season: true,
-                year: true,
+                league: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -158,36 +161,17 @@ export class InvitationService {
     }
 
     if (teamId) {
-      // Verify user has access to this team (coach or player)
-      const team = await prisma.team.findUnique({
-        where: { id: teamId },
-      });
-
-      if (!team) {
-        throw new NotFoundError('Team not found');
-      }
-
-      // Only coach or players on the team can see invitations
-      if (team.coachId !== userId) {
-        const isMember = await prisma.teamMember.findUnique({
-          where: {
-            teamId_playerId: {
-              teamId,
-              playerId: userId,
-            },
-          },
-        });
-
-        if (!isMember) {
-          throw new ForbiddenError('You do not have access to this team\'s invitations');
-        }
+      // Verify user has access to this team
+      const hasAccess = await canAccessTeam(userId, teamId);
+      if (!hasAccess) {
+        throw new ForbiddenError('You do not have access to this team\'s invitations');
       }
 
       where.teamId = teamId;
     }
 
     if (playerId) {
-      // Verify user is requesting their own invitations or is a coach
+      // Verify user is requesting their own invitations or has permission
       if (playerId !== userId) {
         const user = await prisma.user.findUnique({
           where: { id: userId },
@@ -215,12 +199,16 @@ export class InvitationService {
           select: {
             id: true,
             name: true,
-            league: {
+            season: {
               select: {
                 id: true,
                 name: true,
-                season: true,
-                year: true,
+                league: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -269,12 +257,16 @@ export class InvitationService {
           select: {
             id: true,
             name: true,
-            league: {
+            season: {
               select: {
                 id: true,
                 name: true,
-                season: true,
-                year: true,
+                league: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -300,27 +292,11 @@ export class InvitationService {
       throw new NotFoundError('Invitation not found');
     }
 
-    // Verify user has access (coach, player, or team member)
-    const team = await prisma.team.findUnique({
-      where: { id: invitation.teamId },
-    });
-
-    if (!team) {
-      throw new NotFoundError('Team not found');
-    }
-
-    const isCoach = team.coachId === userId;
+    // Verify user has access (team access or is the invited player)
+    const hasAccess = await canAccessTeam(userId, invitation.teamId);
     const isPlayer = invitation.playerId === userId;
-    const isMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_playerId: {
-          teamId: invitation.teamId,
-          playerId: userId,
-        },
-      },
-    });
 
-    if (!isCoach && !isPlayer && !isMember) {
+    if (!hasAccess && !isPlayer) {
       throw new ForbiddenError('You do not have access to this invitation');
     }
 
@@ -466,25 +442,23 @@ export class InvitationService {
   }
 
   /**
-   * Cancel an invitation (coach only)
+   * Cancel an invitation (must have canManageRoster permission)
    * @param invitationId Invitation ID
-   * @param userId User ID (must be coach)
+   * @param userId User ID
    */
   static async cancelInvitation(invitationId: string, userId: string) {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
-      include: {
-        team: true,
-      },
     });
 
     if (!invitation) {
       throw new NotFoundError('Invitation not found');
     }
 
-    // Verify user is the coach
-    if (invitation.team.coachId !== userId) {
-      throw new ForbiddenError('Only the team coach can cancel invitations');
+    // Check permission
+    const canManageRoster = await hasTeamPermission(userId, invitation.teamId, 'canManageRoster');
+    if (!canManageRoster) {
+      throw new ForbiddenError('You do not have permission to cancel invitations for this team');
     }
 
     // Check invitation status

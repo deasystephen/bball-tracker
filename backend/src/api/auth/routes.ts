@@ -10,10 +10,13 @@ import prisma from '../../models';
 const router = Router();
 
 /**
- * GET /api/v1/auth/debug (development only)
- * Debug endpoint to check WorkOS configuration
+ * Development-only endpoints
  */
 if (process.env.NODE_ENV === 'development') {
+  /**
+   * GET /api/v1/auth/debug
+   * Debug endpoint to check WorkOS configuration
+   */
   router.get('/debug', (_req, res) => {
     res.json({
       hasApiKey: !!process.env.WORKOS_API_KEY,
@@ -25,14 +28,86 @@ if (process.env.NODE_ENV === 'development') {
       connectionId: process.env.WORKOS_CONNECTION_ID || 'NOT SET',
       organizationId: process.env.WORKOS_ORGANIZATION_ID || 'NOT SET',
       provider: process.env.WORKOS_PROVIDER || 'NOT SET',
-      authMethod: process.env.WORKOS_CONNECTION_ID 
-        ? 'connectionId (SSO/OAuth)' 
-        : process.env.WORKOS_ORGANIZATION_ID 
-        ? 'organizationId (SSO)' 
-        : process.env.WORKOS_PROVIDER 
-        ? 'provider (OAuth)' 
+      authMethod: process.env.WORKOS_CONNECTION_ID
+        ? 'connectionId (SSO/OAuth)'
+        : process.env.WORKOS_ORGANIZATION_ID
+        ? 'organizationId (SSO)'
+        : process.env.WORKOS_PROVIDER
+        ? 'provider (OAuth)'
         : 'email/password (default - no config needed)',
     });
+  });
+
+  /**
+   * POST /api/v1/auth/dev-login
+   * Development-only endpoint to bypass WorkOS and login directly by email
+   * Body: { email: string }
+   */
+  router.post('/dev-login', async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+
+      // Find user by email
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+        },
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          error: 'User not found',
+          hint: 'Available test users: coach.smith@example.com, coach.johnson@example.com'
+        });
+      }
+
+      // Generate a simple dev token (NOT secure, only for development)
+      const devToken = Buffer.from(JSON.stringify({
+        userId: user.id,
+        email: user.email,
+        exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+      })).toString('base64');
+
+      return res.json({
+        success: true,
+        user,
+        accessToken: `dev_${devToken}`,
+      });
+    } catch (error) {
+      console.error('Dev login error:', error);
+      return res.status(500).json({ error: 'Dev login failed' });
+    }
+  });
+
+  /**
+   * GET /api/v1/auth/dev-users
+   * List available test users for dev login
+   */
+  router.get('/dev-users', async (_req, res) => {
+    try {
+      const users = await prisma.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+        },
+        orderBy: { role: 'asc' },
+      });
+
+      res.json({ users });
+    } catch (error) {
+      console.error('Error listing dev users:', error);
+      res.status(500).json({ error: 'Failed to list users' });
+    }
   });
 }
 

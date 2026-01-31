@@ -75,12 +75,16 @@ export class PlayerService {
               select: {
                 id: true,
                 name: true,
-                league: {
+                season: {
                   select: {
                     id: true,
                     name: true,
-                    season: true,
-                    year: true,
+                    league: {
+                      select: {
+                        id: true,
+                        name: true,
+                      },
+                    },
                   },
                 },
               },

@@ -5,26 +5,28 @@
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 
 export class GameService {
   /**
    * Create a new game
    * @param data Game creation data
-   * @param userId ID of the user creating the game (must be coach of the team)
+   * @param userId ID of the user creating the game (must have canManageTeam permission)
    */
   static async createGame(data: CreateGameInput, userId: string) {
-    // Verify team exists and user is the coach
+    // Verify team exists
     const team = await prisma.team.findUnique({
       where: { id: data.teamId },
-      include: { coach: true },
     });
 
     if (!team) {
       throw new NotFoundError('Team not found');
     }
 
-    if (team.coachId !== userId) {
-      throw new ForbiddenError('Only the team coach can create games');
+    // Check permission
+    const canManage = await hasTeamPermission(userId, data.teamId, 'canManageTeam');
+    if (!canManage) {
+      throw new ForbiddenError('You do not have permission to create games for this team');
     }
 
     // Convert date string to Date if needed
@@ -43,12 +45,21 @@ export class GameService {
       include: {
         team: {
           include: {
-            league: true,
-            coach: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+            season: {
+              include: {
+                league: true,
+              },
+            },
+            staff: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+                role: true,
               },
             },
           },
@@ -70,12 +81,21 @@ export class GameService {
       include: {
         team: {
           include: {
-            league: true,
-            coach: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+            season: {
+              include: {
+                league: true,
+              },
+            },
+            staff: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+                role: true,
               },
             },
             members: {
@@ -111,13 +131,8 @@ export class GameService {
       throw new NotFoundError('Game not found');
     }
 
-    // Check if user has access (coach, team member, or admin)
-    const hasAccess =
-      game.team.coachId === userId ||
-      game.team.members.some((member) => member.playerId === userId);
-
-    // TODO: Add admin role check when roles are implemented
-    // For now, allow access if user is coach or team member
+    // Check if user has access
+    const hasAccess = await canAccessTeam(userId, game.teamId);
 
     if (!hasAccess) {
       throw new ForbiddenError('You do not have access to this game');
@@ -153,34 +168,52 @@ export class GameService {
       }
     }
 
-    // Filter by user access (coach or team member)
-    const userTeams = await prisma.team.findMany({
-      where: {
-        OR: [
-          { coachId: userId },
-          {
-            members: {
-              some: {
-                playerId: userId,
+    // Check if user is system admin (can see all games)
+    const isSysAdmin = await isSystemAdmin(userId);
+
+    if (!isSysAdmin) {
+      // Filter by user access (staff or team member)
+      const userTeams = await prisma.team.findMany({
+        where: {
+          OR: [
+            {
+              staff: {
+                some: {
+                  userId,
+                },
               },
             },
-          },
-        ],
-      },
-      select: { id: true },
-    });
+            {
+              members: {
+                some: {
+                  playerId: userId,
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
 
-    const teamIds = userTeams.map((team) => team.id);
-    if (teamIds.length > 0) {
-      where.teamId = { in: teamIds };
-    } else {
-      // User has no teams, return empty result
-      return {
-        games: [],
-        total: 0,
-        limit: query.limit,
-        offset: query.offset,
-      };
+      const teamIds = userTeams.map((team) => team.id);
+      if (teamIds.length > 0) {
+        // If teamId was specified, verify user has access
+        if (where.teamId) {
+          if (!teamIds.includes(where.teamId)) {
+            throw new ForbiddenError('You do not have access to this team');
+          }
+        } else {
+          where.teamId = { in: teamIds };
+        }
+      } else {
+        // User has no teams, return empty result
+        return {
+          games: [],
+          total: 0,
+          limit: query.limit,
+          offset: query.offset,
+        };
+      }
     }
 
     // Get total count
@@ -192,12 +225,21 @@ export class GameService {
       include: {
         team: {
           include: {
-            league: true,
-            coach: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+            season: {
+              include: {
+                league: true,
+              },
+            },
+            staff: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+                role: true,
               },
             },
           },
@@ -222,23 +264,38 @@ export class GameService {
    * Update a game
    * @param gameId Game ID
    * @param data Update data
-   * @param userId User ID (must be coach)
+   * @param userId User ID (must have canManageTeam or canTrackStats permission)
    */
   static async updateGame(gameId: string, data: UpdateGameInput, userId: string) {
-    // Get game and verify access
+    // Get game
     const game = await prisma.game.findUnique({
       where: { id: gameId },
-      include: {
-        team: true,
-      },
     });
 
     if (!game) {
       throw new NotFoundError('Game not found');
     }
 
-    if (game.team.coachId !== userId) {
-      throw new ForbiddenError('Only the team coach can update games');
+    // Check permission - canManageTeam for full updates, canTrackStats for score updates during game
+    const canManage = await hasTeamPermission(userId, game.teamId, 'canManageTeam');
+    const canTrack = await hasTeamPermission(userId, game.teamId, 'canTrackStats');
+
+    // If only updating scores and game is IN_PROGRESS, allow with canTrackStats
+    const isScoreOnlyUpdate =
+      data.homeScore !== undefined || data.awayScore !== undefined;
+    const isStatusUpdate = data.status !== undefined;
+    const isOtherUpdate = data.opponent !== undefined || data.date !== undefined;
+
+    if (!canManage) {
+      if (isOtherUpdate) {
+        throw new ForbiddenError('You do not have permission to update this game');
+      }
+      if (isStatusUpdate && !canTrack) {
+        throw new ForbiddenError('You do not have permission to update game status');
+      }
+      if (isScoreOnlyUpdate && !canTrack) {
+        throw new ForbiddenError('You do not have permission to update game scores');
+      }
     }
 
     // Build update data
@@ -271,12 +328,21 @@ export class GameService {
       include: {
         team: {
           include: {
-            league: true,
-            coach: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+            season: {
+              include: {
+                league: true,
+              },
+            },
+            staff: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                  },
+                },
+                role: true,
               },
             },
           },
@@ -290,23 +356,22 @@ export class GameService {
   /**
    * Delete a game
    * @param gameId Game ID
-   * @param userId User ID (must be coach)
+   * @param userId User ID (must have canManageTeam permission)
    */
   static async deleteGame(gameId: string, userId: string) {
-    // Get game and verify access
+    // Get game
     const game = await prisma.game.findUnique({
       where: { id: gameId },
-      include: {
-        team: true,
-      },
     });
 
     if (!game) {
       throw new NotFoundError('Game not found');
     }
 
-    if (game.team.coachId !== userId) {
-      throw new ForbiddenError('Only the team coach can delete games');
+    // Check permission
+    const canManage = await hasTeamPermission(userId, game.teamId, 'canManageTeam');
+    if (!canManage) {
+      throw new ForbiddenError('You do not have permission to delete this game');
     }
 
     // Delete the game (cascade will handle events)

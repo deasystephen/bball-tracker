@@ -33,16 +33,49 @@ export async function authenticate(
 ): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedError('Authorization token required');
     }
 
     const token = authHeader.substring(7);
-    
+
+    // Check for dev token (development only)
+    if (process.env.NODE_ENV === 'development' && token.startsWith('dev_')) {
+      const devTokenData = token.substring(4);
+      try {
+        const decoded = JSON.parse(Buffer.from(devTokenData, 'base64').toString());
+
+        // Check expiration
+        if (decoded.exp < Date.now()) {
+          throw new UnauthorizedError('Dev token expired');
+        }
+
+        // Get user from database
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.userId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+          },
+        });
+
+        if (!user) {
+          throw new UnauthorizedError('User not found');
+        }
+
+        req.user = user;
+        return next();
+      } catch (e) {
+        throw new UnauthorizedError('Invalid dev token');
+      }
+    }
+
     // Verify token with WorkOS
     const workosUser = await WorkOSService.verifyToken(token);
-    
+
     if (!workosUser) {
       throw new UnauthorizedError('Invalid or expired token');
     }

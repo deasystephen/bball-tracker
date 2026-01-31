@@ -10,11 +10,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =============================================================================
+// ENUMS
+// =============================================================================
+
 enum UserRole {
-  COACH
-  PARENT
   PLAYER
+  PARENT
+  COACH
   ADMIN
+}
+
+enum GuardianRelationship {
+  MOTHER
+  FATHER
+  GUARDIAN
+  OTHER
+}
+
+enum TeamRoleType {
+  HEAD_COACH
+  ASSISTANT_COACH
+  TEAM_MANAGER
+  CUSTOM
 }
 
 enum GameStatus {
@@ -44,24 +62,31 @@ enum InvitationStatus {
   CANCELLED
 }
 
+// =============================================================================
+// USER & AUTHENTICATION
+// =============================================================================
+
 model User {
-  id               String    @id @default(uuid())
-  workosUserId     String?   @unique
-  email            String    @unique
-  name             String
-  emailVerified    Boolean   @default(false)
+  id                String    @id @default(uuid())
+  workosUserId      String?   @unique
+  email             String    @unique
+  name              String
+  emailVerified     Boolean   @default(false)
   profilePictureUrl String?
-  role             UserRole  @default(PLAYER)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  role              UserRole  @default(PLAYER)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Relations
-  coachedTeams        Team[]           @relation("TeamCoach")
   teamMembers         TeamMember[]
+  teamStaff           TeamStaff[]
   gameEvents          GameEvent[]
   refreshTokens       RefreshToken[]
-  sentInvitations     TeamInvitation[] @relation("SentInvitations")
-  receivedInvitations  TeamInvitation[] @relation("PlayerInvitations")
+  sentInvitations     TeamInvitation[]  @relation("SentInvitations")
+  receivedInvitations TeamInvitation[]  @relation("PlayerInvitations")
+  leagueAdmins        LeagueAdmin[]
+  guardiansAsParent   Guardian[]        @relation("GuardianParent")
+  guardiansAsChild    Guardian[]        @relation("GuardianChild")
 
   @@index([email])
   @@index([role])
@@ -81,45 +106,149 @@ model RefreshToken {
   @@index([token])
 }
 
+// =============================================================================
+// GUARDIAN (Parent-Child Relationship)
+// =============================================================================
+
+model Guardian {
+  id           String               @id @default(uuid())
+  parentId     String
+  childId      String
+  relationship GuardianRelationship
+  isPrimary    Boolean              @default(false)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  parent User @relation("GuardianParent", fields: [parentId], references: [id], onDelete: Cascade)
+  child  User @relation("GuardianChild", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId])
+  @@index([parentId])
+  @@index([childId])
+}
+
+// =============================================================================
+// LEAGUE & SEASON
+// =============================================================================
+
 model League {
   id        String   @id @default(uuid())
   name      String
-  season    String
-  year      Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  teams Team[]
+  seasons Season[]
+  admins  LeagueAdmin[]
 
-  @@index([year, season])
+  @@index([name])
 }
+
+model Season {
+  id        String    @id @default(uuid())
+  leagueId  String
+  name      String    // e.g., "Spring 2024", "Fall 2024"
+  startDate DateTime?
+  endDate   DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  teams  Team[]
+
+  @@unique([leagueId, name])
+  @@index([leagueId])
+  @@index([isActive])
+}
+
+model LeagueAdmin {
+  id        String   @id @default(uuid())
+  leagueId  String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, userId])
+  @@index([leagueId])
+  @@index([userId])
+}
+
+// =============================================================================
+// TEAM & ROLES
+// =============================================================================
 
 model Team {
   id        String   @id @default(uuid())
   name      String
-  leagueId  String
-  coachId   String
+  seasonId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  league      League           @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  coach       User             @relation("TeamCoach", fields: [coachId], references: [id])
+  season      Season           @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   members     TeamMember[]
+  staff       TeamStaff[]
+  roles       TeamRole[]
   games       Game[]
   invitations TeamInvitation[]
 
-  @@index([leagueId])
-  @@index([coachId])
+  @@index([seasonId])
+  @@index([name])
+}
+
+model TeamRole {
+  id          String       @id @default(uuid())
+  teamId      String
+  type        TeamRoleType
+  name        String       // "Head Coach", "Assistant Coach", "Team Manager", or custom
+  description String?
+
+  // Permissions
+  canManageTeam   Boolean @default(false) // Full team admin
+  canManageRoster Boolean @default(false) // Add/remove players, send invitations
+  canTrackStats   Boolean @default(false) // Live game stat tracking
+  canViewStats    Boolean @default(false) // View player/team statistics
+  canShareStats   Boolean @default(false) // Share/export stats
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team  Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  staff TeamStaff[]
+
+  @@unique([teamId, name])
+  @@index([teamId])
+  @@index([type])
+}
+
+model TeamStaff {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role TeamRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId, roleId])
+  @@index([teamId])
+  @@index([userId])
+  @@index([roleId])
 }
 
 model TeamMember {
-  id          String   @id @default(uuid())
-  teamId      String
-  playerId    String
+  id           String   @id @default(uuid())
+  teamId       String
+  playerId     String
   jerseyNumber Int?
-  position    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  position     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   player User @relation(fields: [playerId], references: [id], onDelete: Cascade)
@@ -130,20 +259,20 @@ model TeamMember {
 }
 
 model TeamInvitation {
-  id          String           @id @default(uuid())
-  teamId      String
-  playerId    String
-  invitedById String
-  status      InvitationStatus @default(PENDING)
-  token       String           @unique
+  id           String           @id @default(uuid())
+  teamId       String
+  playerId     String
+  invitedById  String
+  status       InvitationStatus @default(PENDING)
+  token        String           @unique
   jerseyNumber Int?
-  position    String?
-  message     String?
-  expiresAt   DateTime
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  acceptedAt  DateTime?
-  rejectedAt  DateTime?
+  position     String?
+  message      String?
+  expiresAt    DateTime
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  acceptedAt   DateTime?
+  rejectedAt   DateTime?
 
   team      Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   player    User @relation("PlayerInvitations", fields: [playerId], references: [id], onDelete: Cascade)
@@ -157,19 +286,23 @@ model TeamInvitation {
   @@index([expiresAt])
 }
 
-model Game {
-  id         String     @id @default(uuid())
-  teamId     String
-  opponent   String
-  date       DateTime
-  status     GameStatus @default(SCHEDULED)
-  homeScore  Int        @default(0)
-  awayScore  Int        @default(0)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+// =============================================================================
+// GAMES & EVENTS
+// =============================================================================
 
-  team       Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  events     GameEvent[]
+model Game {
+  id        String     @id @default(uuid())
+  teamId    String
+  opponent  String
+  date      DateTime
+  status    GameStatus @default(SCHEDULED)
+  homeScore Int        @default(0)
+  awayScore Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  team   Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  events GameEvent[]
 
   @@index([teamId])
   @@index([date])
@@ -194,25 +327,29 @@ model GameEvent {
   @@index([timestamp])
 }
 
+// =============================================================================
+// STATISTICS
+// =============================================================================
+
 model PlayerStats {
-  id                    String   @id @default(uuid())
-  playerId              String
-  gameId                String
-  points                Int      @default(0)
-  rebounds              Int      @default(0)
-  assists               Int      @default(0)
-  steals                Int      @default(0)
-  blocks                Int      @default(0)
-  turnovers             Int      @default(0)
-  fouls                 Int      @default(0)
+  id                     String   @id @default(uuid())
+  playerId               String
+  gameId                 String
+  points                 Int      @default(0)
+  rebounds               Int      @default(0)
+  assists                Int      @default(0)
+  steals                 Int      @default(0)
+  blocks                 Int      @default(0)
+  turnovers              Int      @default(0)
+  fouls                  Int      @default(0)
   fieldGoalsMade         Int      @default(0)
   fieldGoalsAttempted    Int      @default(0)
   threePointersMade      Int      @default(0)
   threePointersAttempted Int      @default(0)
   freeThrowsMade         Int      @default(0)
   freeThrowsAttempted    Int      @default(0)
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   @@unique([playerId, gameId])
   @@index([playerId])
@@ -230,11 +367,10 @@ model TeamStats {
   fieldGoalPercentage  Float    @default(0)
   threePointPercentage Float    @default(0)
   freeThrowPercentage  Float    @default(0)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@unique([teamId, gameId])
   @@index([teamId])
   @@index([gameId])
 }
-

@@ -14,7 +14,10 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "type-check": "tsc --noEmit",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "db:seed": "npx prisma db seed",
+    "db:reset": "tsx prisma/reset.ts",
+    "db:fresh": "tsx prisma/reset.ts && npx prisma db seed"
   },
   "keywords": [
     "basketball",
@@ -34,6 +37,9 @@
     "socket.io": "^4.6.1",
     "kafkajs": "^2.2.4",
     "ioredis": "^5.3.2"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
