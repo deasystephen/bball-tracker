@@ -4,11 +4,14 @@
 
 import { Router } from 'express';
 import { GameService } from '../../services/game-service';
+import { GameEventService } from '../../services/game-event-service';
 import { authenticate } from '../auth/middleware';
 import {
   createGameSchema,
   updateGameSchema,
   gameQuerySchema,
+  createGameEventSchema,
+  gameEventQuerySchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 
@@ -163,6 +166,146 @@ router.delete('/:id', async (req, res) => {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete game' });
+    }
+  }
+});
+
+// ============================================
+// Game Event Routes
+// ============================================
+
+/**
+ * POST /api/v1/games/:gameId/events
+ * Create a game event
+ */
+router.post('/:gameId/events', async (req, res) => {
+  try {
+    // Validate request body
+    const validationResult = createGameEventSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.errors.map((e) => e.message).join(', ')
+      );
+    }
+
+    const event = await GameEventService.createEvent(
+      req.params.gameId,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(201).json({
+      success: true,
+      event,
+    });
+  } catch (error) {
+    console.error('Error creating game event:', error);
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to create game event' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/games/:gameId/events
+ * List events for a game
+ */
+router.get('/:gameId/events', async (req, res) => {
+  try {
+    // Validate query parameters
+    const validationResult = gameEventQuerySchema.safeParse(req.query);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.errors.map((e) => e.message).join(', ')
+      );
+    }
+
+    const result = await GameEventService.listEvents(
+      req.params.gameId,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error listing game events:', error);
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to list game events' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/games/:gameId/events/:eventId
+ * Get a single game event
+ */
+router.get('/:gameId/events/:eventId', async (req, res) => {
+  try {
+    const event = await GameEventService.getEventById(
+      req.params.gameId,
+      req.params.eventId,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      event,
+    });
+  } catch (error) {
+    console.error('Error getting game event:', error);
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to get game event' });
+    }
+  }
+});
+
+/**
+ * DELETE /api/v1/games/:gameId/events/:eventId
+ * Delete a game event
+ */
+router.delete('/:gameId/events/:eventId', async (req, res) => {
+  try {
+    await GameEventService.deleteEvent(
+      req.params.gameId,
+      req.params.eventId,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      message: 'Game event deleted successfully',
+    });
+  } catch (error) {
+    console.error('Error deleting game event:', error);
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to delete game event' });
     }
   }
 });

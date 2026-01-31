@@ -43,3 +43,34 @@ export const gameQuerySchema = z.object({
 export type CreateGameInput = z.infer<typeof createGameSchema>;
 export type UpdateGameInput = z.infer<typeof updateGameSchema>;
 export type GameQueryParams = z.infer<typeof gameQuerySchema>;
+
+// ============================================
+// Game Event Schemas
+// ============================================
+
+import { GameEventType } from '@prisma/client';
+
+/**
+ * Schema for creating a game event
+ */
+export const createGameEventSchema = z.object({
+  playerId: z.string().uuid('Invalid player ID format').optional(),
+  eventType: z.nativeEnum(GameEventType, {
+    errorMap: () => ({ message: 'Invalid event type' }),
+  }),
+  timestamp: z.string().datetime('Invalid timestamp format').or(z.date()).optional(),
+  metadata: z.record(z.unknown()).optional().default({}),
+});
+
+/**
+ * Schema for game event query parameters
+ */
+export const gameEventQuerySchema = z.object({
+  eventType: z.nativeEnum(GameEventType).optional(),
+  playerId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
+export type CreateGameEventInput = z.infer<typeof createGameEventSchema>;
+export type GameEventQueryParams = z.infer<typeof gameEventQuerySchema>;
