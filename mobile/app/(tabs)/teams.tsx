@@ -81,7 +81,8 @@ export default function TeamsScreen() {
 
   const renderTeam = ({ item }: { item: Team }) => {
     const memberCount = item.members?.length || 0;
-    const leagueName = item.league?.name || 'No League';
+    const leagueName = item.season?.league?.name || 'No League';
+    const seasonName = item.season?.name || '';
 
     return (
       <Card
@@ -102,7 +103,7 @@ export default function TeamsScreen() {
           <View style={styles.infoRow}>
             <Ionicons name="trophy-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary" style={styles.infoText}>
-              {leagueName}
+              {leagueName}{seasonName ? ` - ${seasonName}` : ''}
             </ThemedText>
           </View>
           <View style={styles.infoRow}>

@@ -21,11 +21,11 @@ import {
   ErrorState,
   Button,
 } from '../../components';
-import { useTeam, useDeleteTeam } from '../../hooks/useTeams';
+import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
-import { getHorizontalPadding, getResponsiveValue } from '../../utils/responsive';
+import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 
@@ -41,7 +41,12 @@ export default function TeamDetailsScreen() {
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
 
-  const isCoach = team?.coachId === user?.id;
+  const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam');
+  const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster');
+
+  // Get head coach(es) for display
+  const headCoaches = team?.staff?.filter((s) => s.role.type === 'HEAD_COACH') ?? [];
+  const otherStaff = team?.staff?.filter((s) => s.role.type !== 'HEAD_COACH') ?? [];
 
   const handleDelete = () => {
     Alert.alert(
@@ -118,7 +123,7 @@ export default function TeamDetailsScreen() {
             {team.name}
           </ThemedText>
         </View>
-        {isCoach && (
+        {canManageTeam && (
           <View style={styles.headerActions}>
             <TouchableOpacity onPress={handleEdit} style={styles.iconButton}>
               <Ionicons name="create-outline" size={24} color={colors.primary} />
@@ -138,37 +143,66 @@ export default function TeamDetailsScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* League Info */}
-        {team.league && (
+        {/* Season/League Info */}
+        {team.season && (
           <Card variant="elevated" style={styles.card}>
             <View style={styles.infoRow}>
               <Ionicons name="trophy-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  League
+                  League & Season
                 </ThemedText>
-                <ThemedText variant="bodyBold">{team.league.name}</ThemedText>
+                <ThemedText variant="bodyBold">{team.season.league.name}</ThemedText>
                 <ThemedText variant="caption" color="textTertiary">
-                  {team.league.season} {team.league.year}
+                  {team.season.name}
+                  {team.season.isActive && (
+                    <ThemedText variant="caption" color="success"> (Active)</ThemedText>
+                  )}
                 </ThemedText>
               </View>
             </View>
           </Card>
         )}
 
-        {/* Coach Info */}
-        {team.coach && (
+        {/* Head Coach Info */}
+        {headCoaches.length > 0 && (
           <Card variant="elevated" style={styles.card}>
             <View style={styles.infoRow}>
               <Ionicons name="person-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  Coach
+                  {headCoaches.length === 1 ? 'Head Coach' : 'Head Coaches'}
                 </ThemedText>
-                <ThemedText variant="bodyBold">{team.coach.name}</ThemedText>
-                <ThemedText variant="caption" color="textTertiary">
-                  {team.coach.email}
+                {headCoaches.map((coach) => (
+                  <View key={coach.id} style={styles.staffMember}>
+                    <ThemedText variant="bodyBold">{coach.user.name}</ThemedText>
+                    <ThemedText variant="caption" color="textTertiary">
+                      {coach.user.email}
+                    </ThemedText>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </Card>
+        )}
+
+        {/* Other Staff */}
+        {otherStaff.length > 0 && (
+          <Card variant="elevated" style={styles.card}>
+            <View style={styles.infoRow}>
+              <Ionicons name="people-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <ThemedText variant="caption" color="textSecondary">
+                  Staff
                 </ThemedText>
+                {otherStaff.map((staff) => (
+                  <View key={staff.id} style={styles.staffMember}>
+                    <ThemedText variant="bodyBold">{staff.user.name}</ThemedText>
+                    <ThemedText variant="caption" color="textTertiary">
+                      {staff.role.name}
+                    </ThemedText>
+                  </View>
+                ))}
               </View>
             </View>
           </Card>
@@ -183,7 +217,7 @@ export default function TeamDetailsScreen() {
             </ThemedText>
           </View>
 
-          {isCoach && (
+          {canManageRoster && (
             <Button
               title={t('teams.addPlayer')}
               onPress={handleManagePlayers}
@@ -204,7 +238,7 @@ export default function TeamDetailsScreen() {
                       member.position,
                     ]
                       .filter(Boolean)
-                      .join(' • ') || member.player.email
+                      .join(' - ') || member.player.email
                   }
                   onPress={() => router.push(`/teams/${id}/players/${member.playerId}`)}
                   rightElement={
@@ -218,7 +252,7 @@ export default function TeamDetailsScreen() {
               <ThemedText variant="body" color="textTertiary" style={styles.emptyText}>
                 No players added yet
               </ThemedText>
-              {isCoach && (
+              {canManageRoster && (
                 <Button
                   title={t('teams.addPlayer')}
                   onPress={handleManagePlayers}
@@ -273,6 +307,9 @@ const styles = StyleSheet.create({
   },
   infoContent: {
     flex: 1,
+  },
+  staffMember: {
+    marginTop: spacing.xs,
   },
   section: {
     marginTop: spacing.lg,

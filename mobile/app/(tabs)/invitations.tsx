@@ -131,7 +131,7 @@ export default function InvitationsScreen() {
           <View style={styles.invitationInfo}>
             <ThemedText variant="h4">{item.team.name}</ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              {item.team.league.name} • {item.team.league.season} {item.team.league.year}
+              {item.team.season.league.name} - {item.team.season.name}
             </ThemedText>
           </View>
           <View
@@ -203,6 +203,12 @@ export default function InvitationsScreen() {
             <ThemedText variant="caption" color="textTertiary" selectable>
               expiresAt: {item.expiresAt}
             </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" selectable>
+              deviceNow: {new Date().toISOString()}
+            </ThemedText>
+            <ThemedText variant="caption" color={isExpired ? 'error' : 'success'} selectable>
+              isExpired: {String(isExpired)} | canAccept: {String(canAccept)}
+            </ThemedText>
           </View>
         )}
 
@@ -257,7 +263,7 @@ export default function InvitationsScreen() {
     const deviceTime = new Date().toISOString();
 
     return (
-      <Card variant="outline" style={styles.debugCard}>
+      <Card variant="default" style={styles.debugCard}>
         <ThemedText variant="captionBold" color="textSecondary" selectable>
           Debug
         </ThemedText>

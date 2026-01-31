@@ -25,11 +25,14 @@ export interface TeamInvitation {
   team: {
     id: string;
     name: string;
-    league: {
+    season: {
       id: string;
       name: string;
-      season: string;
-      year: number;
+      isActive: boolean;
+      league: {
+        id: string;
+        name: string;
+      };
     };
   };
   player: {

@@ -2,7 +2,7 @@
  * Create Team screen
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ListItem } from '../../components';
 import { useCreateTeam } from '../../hooks/useTeams';
 import { useLeagues } from '../../hooks/useLeagues';
+import { useSeasons } from '../../hooks/useSeasons';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
@@ -34,13 +35,38 @@ export default function CreateTeamScreen() {
 
   const [name, setName] = useState('');
   const [leagueId, setLeagueId] = useState('');
-  const [errors, setErrors] = useState<{ name?: string; leagueId?: string }>({});
+  const [seasonId, setSeasonId] = useState('');
+  const [errors, setErrors] = useState<{ name?: string; leagueId?: string; seasonId?: string }>({});
 
   const { data: leagues, isLoading: leaguesLoading } = useLeagues();
+  const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(
+    leagueId ? { leagueId, isActive: true } : undefined
+  );
   const createTeam = useCreateTeam();
 
+  // Get seasons for the selected league
+  const seasons = useMemo(() => {
+    return seasonsData?.seasons ?? [];
+  }, [seasonsData]);
+
+  // Get selected league info
+  const selectedLeague = useMemo(() => {
+    return leagues?.find((l) => l.id === leagueId);
+  }, [leagues, leagueId]);
+
+  // Get selected season info
+  const selectedSeason = useMemo(() => {
+    return seasons.find((s) => s.id === seasonId);
+  }, [seasons, seasonId]);
+
+  // Reset season when league changes
+  const handleLeagueSelect = (id: string) => {
+    setLeagueId(id);
+    setSeasonId(''); // Reset season when league changes
+  };
+
   const validate = (): boolean => {
-    const newErrors: { name?: string; leagueId?: string } = {};
+    const newErrors: { name?: string; leagueId?: string; seasonId?: string } = {};
 
     if (!name.trim()) {
       newErrors.name = 'Team name is required';
@@ -48,6 +74,10 @@ export default function CreateTeamScreen() {
 
     if (!leagueId) {
       newErrors.leagueId = 'League is required';
+    }
+
+    if (!seasonId) {
+      newErrors.seasonId = 'Season is required';
     }
 
     setErrors(newErrors);
@@ -60,8 +90,7 @@ export default function CreateTeamScreen() {
     try {
       const team = await createTeam.mutateAsync({
         name: name.trim(),
-        leagueId,
-        // coachId will be set automatically to current user
+        seasonId,
       });
 
       Alert.alert(
@@ -135,12 +164,13 @@ export default function CreateTeamScreen() {
             autoFocus
           />
 
-          <View style={styles.leagueSection}>
+          {/* League Selection */}
+          <View style={styles.selectionSection}>
             <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
               {t('teams.league')}
             </ThemedText>
             {leagues && leagues.length > 0 ? (
-              <View style={[styles.leagueList, { borderColor: colors.border }]}>
+              <View style={[styles.selectionList, { borderColor: colors.border }]}>
                 {leagues.map((league, index) => {
                   const isSelected = leagueId === league.id;
                   const isLast = index === leagues.length - 1;
@@ -148,8 +178,12 @@ export default function CreateTeamScreen() {
                     <ListItem
                       key={league.id}
                       title={league.name}
-                      subtitle={`${league.season} ${league.year}`}
-                      onPress={() => setLeagueId(league.id)}
+                      subtitle={
+                        league._count?.seasons
+                          ? `${league._count.seasons} season${league._count.seasons === 1 ? '' : 's'}`
+                          : 'No seasons'
+                      }
+                      onPress={() => handleLeagueSelect(league.id)}
                       rightElement={
                         isSelected ? (
                           <Ionicons
@@ -166,7 +200,7 @@ export default function CreateTeamScreen() {
                         )
                       }
                       style={[
-                        styles.leagueItem,
+                        styles.selectionItem,
                         isSelected && { backgroundColor: colors.backgroundSecondary },
                         isLast && styles.lastItem,
                       ]}
@@ -175,7 +209,7 @@ export default function CreateTeamScreen() {
                 })}
               </View>
             ) : (
-              <ThemedText variant="caption" color="textTertiary" style={styles.noLeagues}>
+              <ThemedText variant="caption" color="textTertiary" style={styles.noItems}>
                 No leagues available. Create a league first.
               </ThemedText>
             )}
@@ -186,12 +220,92 @@ export default function CreateTeamScreen() {
             )}
           </View>
 
+          {/* Season Selection - Only show when league is selected */}
+          {leagueId && (
+            <View style={styles.selectionSection}>
+              <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
+                Season
+              </ThemedText>
+              {seasonsLoading ? (
+                <View style={styles.loadingContainer}>
+                  <LoadingSpinner message="Loading seasons..." />
+                </View>
+              ) : seasons.length > 0 ? (
+                <View style={[styles.selectionList, { borderColor: colors.border }]}>
+                  {seasons.map((season, index) => {
+                    const isSelected = seasonId === season.id;
+                    const isLast = index === seasons.length - 1;
+                    return (
+                      <ListItem
+                        key={season.id}
+                        title={season.name}
+                        subtitle={
+                          season._count?.teams
+                            ? `${season._count.teams} team${season._count.teams === 1 ? '' : 's'}`
+                            : 'No teams yet'
+                        }
+                        onPress={() => setSeasonId(season.id)}
+                        rightElement={
+                          isSelected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={24}
+                              color={colors.primary}
+                            />
+                          ) : (
+                            <Ionicons
+                              name="ellipse-outline"
+                              size={24}
+                              color={colors.textTertiary}
+                            />
+                          )
+                        }
+                        style={[
+                          styles.selectionItem,
+                          isSelected && { backgroundColor: colors.backgroundSecondary },
+                          isLast && styles.lastItem,
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              ) : (
+                <View style={[styles.noSeasonsContainer, { backgroundColor: colors.backgroundSecondary }]}>
+                  <Ionicons name="calendar-outline" size={32} color={colors.textTertiary} />
+                  <ThemedText variant="body" color="textTertiary" style={styles.noSeasonsText}>
+                    No active seasons in {selectedLeague?.name}
+                  </ThemedText>
+                  <ThemedText variant="caption" color="textTertiary">
+                    Ask a league admin to create a season first.
+                  </ThemedText>
+                </View>
+              )}
+              {errors.seasonId && (
+                <ThemedText variant="footnote" color="error" style={styles.errorText}>
+                  {errors.seasonId}
+                </ThemedText>
+              )}
+            </View>
+          )}
+
+          {/* Summary when both are selected */}
+          {leagueId && seasonId && selectedLeague && selectedSeason && (
+            <View style={[styles.summaryCard, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}>
+              <ThemedText variant="caption" color="textSecondary">
+                Creating team in:
+              </ThemedText>
+              <ThemedText variant="bodyBold">
+                {selectedLeague.name} - {selectedSeason.name}
+              </ThemedText>
+            </View>
+          )}
+
           <View style={styles.buttonContainer}>
             <Button
               title={t('common.create')}
               onPress={handleSubmit}
               loading={createTeam.isPending}
-              disabled={!name.trim() || !leagueId}
+              disabled={!name.trim() || !leagueId || !seasonId}
               fullWidth
             />
             <Button
@@ -233,28 +347,49 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: spacing.lg,
   },
-  leagueSection: {
+  selectionSection: {
     marginBottom: spacing.lg,
   },
   label: {
     marginBottom: spacing.sm,
   },
-  leagueList: {
+  selectionList: {
     marginTop: spacing.sm,
     borderRadius: 8,
     borderWidth: 1,
     overflow: 'hidden',
   },
-  leagueItem: {
+  selectionItem: {
     marginBottom: 0,
     borderBottomWidth: 0,
   },
   lastItem: {
     borderBottomWidth: 0,
   },
-  noLeagues: {
+  noItems: {
     marginTop: spacing.sm,
     fontStyle: 'italic',
+  },
+  loadingContainer: {
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+  noSeasonsContainer: {
+    marginTop: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: 8,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  noSeasonsText: {
+    textAlign: 'center',
+  },
+  summaryCard: {
+    padding: spacing.md,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+    gap: spacing.xs,
   },
   errorText: {
     marginTop: spacing.xs,

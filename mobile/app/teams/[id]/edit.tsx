@@ -2,7 +2,7 @@
  * Edit Team screen
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ErrorState, ListItem } from '../../../components';
 import { useTeam, useUpdateTeam } from '../../../hooks/useTeams';
 import { useLeagues } from '../../../hooks/useLeagues';
+import { useSeasons } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
@@ -33,29 +34,57 @@ export default function EditTeamScreen() {
 
   const [name, setName] = useState('');
   const [leagueId, setLeagueId] = useState('');
-  const [errors, setErrors] = useState<{ name?: string; leagueId?: string }>({});
+  const [seasonId, setSeasonId] = useState('');
+  const [errors, setErrors] = useState<{ name?: string; seasonId?: string }>({});
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const { data: leagues, isLoading: leaguesLoading } = useLeagues();
+  const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(
+    leagueId ? { leagueId, isActive: true } : undefined
+  );
   const updateTeam = useUpdateTeam();
+
+  // Get seasons for the selected league
+  const seasons = useMemo(() => {
+    return seasonsData?.seasons ?? [];
+  }, [seasonsData]);
+
+  // Get selected league info
+  const selectedLeague = useMemo(() => {
+    return leagues?.find((l) => l.id === leagueId);
+  }, [leagues, leagueId]);
 
   // Populate form when team loads
   useEffect(() => {
     if (team) {
       setName(team.name);
-      setLeagueId(team.leagueId);
+      setSeasonId(team.seasonId);
+      if (team.season?.league) {
+        setLeagueId(team.season.league.id);
+      }
     }
   }, [team]);
 
+  // Reset season when league changes (but not on initial load)
+  const handleLeagueSelect = (id: string) => {
+    if (id !== leagueId) {
+      setLeagueId(id);
+      // Only reset seasonId if we're changing to a different league
+      if (team?.season?.league?.id !== id) {
+        setSeasonId('');
+      }
+    }
+  };
+
   const validate = (): boolean => {
-    const newErrors: { name?: string; leagueId?: string } = {};
+    const newErrors: { name?: string; seasonId?: string } = {};
 
     if (!name.trim()) {
       newErrors.name = 'Team name is required';
     }
 
-    if (!leagueId) {
-      newErrors.leagueId = 'League is required';
+    if (!seasonId) {
+      newErrors.seasonId = 'Season is required';
     }
 
     setErrors(newErrors);
@@ -70,7 +99,7 @@ export default function EditTeamScreen() {
         teamId: id,
         data: {
           name: name.trim(),
-          leagueId,
+          seasonId,
         },
       });
 
@@ -146,12 +175,13 @@ export default function EditTeamScreen() {
             autoCapitalize="words"
           />
 
-          <View style={styles.leagueSection}>
+          {/* League Selection */}
+          <View style={styles.selectionSection}>
             <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
               {t('teams.league')}
             </ThemedText>
             {leagues && leagues.length > 0 ? (
-              <View style={[styles.leagueList, { borderColor: colors.border }]}>
+              <View style={[styles.selectionList, { borderColor: colors.border }]}>
                 {leagues.map((league, index) => {
                   const isSelected = leagueId === league.id;
                   const isLast = index === leagues.length - 1;
@@ -159,8 +189,12 @@ export default function EditTeamScreen() {
                     <ListItem
                       key={league.id}
                       title={league.name}
-                      subtitle={`${league.season} ${league.year}`}
-                      onPress={() => setLeagueId(league.id)}
+                      subtitle={
+                        league._count?.seasons
+                          ? `${league._count.seasons} season${league._count.seasons === 1 ? '' : 's'}`
+                          : 'No seasons'
+                      }
+                      onPress={() => handleLeagueSelect(league.id)}
                       rightElement={
                         isSelected ? (
                           <Ionicons
@@ -177,7 +211,7 @@ export default function EditTeamScreen() {
                         )
                       }
                       style={[
-                        styles.leagueItem,
+                        styles.selectionItem,
                         isSelected && { backgroundColor: colors.backgroundSecondary },
                         isLast && styles.lastItem,
                       ]}
@@ -186,23 +220,83 @@ export default function EditTeamScreen() {
                 })}
               </View>
             ) : (
-              <ThemedText variant="caption" color="textTertiary" style={styles.noLeagues}>
+              <ThemedText variant="caption" color="textTertiary" style={styles.noItems}>
                 No leagues available
               </ThemedText>
             )}
-            {errors.leagueId && (
-              <ThemedText variant="footnote" color="error" style={styles.errorText}>
-                {errors.leagueId}
-              </ThemedText>
-            )}
           </View>
+
+          {/* Season Selection - Only show when league is selected */}
+          {leagueId && (
+            <View style={styles.selectionSection}>
+              <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
+                Season
+              </ThemedText>
+              {seasonsLoading ? (
+                <View style={styles.loadingContainer}>
+                  <LoadingSpinner message="Loading seasons..." />
+                </View>
+              ) : seasons.length > 0 ? (
+                <View style={[styles.selectionList, { borderColor: colors.border }]}>
+                  {seasons.map((season, index) => {
+                    const isSelected = seasonId === season.id;
+                    const isLast = index === seasons.length - 1;
+                    return (
+                      <ListItem
+                        key={season.id}
+                        title={season.name}
+                        subtitle={
+                          season._count?.teams
+                            ? `${season._count.teams} team${season._count.teams === 1 ? '' : 's'}`
+                            : 'No teams yet'
+                        }
+                        onPress={() => setSeasonId(season.id)}
+                        rightElement={
+                          isSelected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={24}
+                              color={colors.primary}
+                            />
+                          ) : (
+                            <Ionicons
+                              name="ellipse-outline"
+                              size={24}
+                              color={colors.textTertiary}
+                            />
+                          )
+                        }
+                        style={[
+                          styles.selectionItem,
+                          isSelected && { backgroundColor: colors.backgroundSecondary },
+                          isLast && styles.lastItem,
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              ) : (
+                <View style={[styles.noSeasonsContainer, { backgroundColor: colors.backgroundSecondary }]}>
+                  <Ionicons name="calendar-outline" size={32} color={colors.textTertiary} />
+                  <ThemedText variant="body" color="textTertiary" style={styles.noSeasonsText}>
+                    No active seasons in {selectedLeague?.name}
+                  </ThemedText>
+                </View>
+              )}
+              {errors.seasonId && (
+                <ThemedText variant="footnote" color="error" style={styles.errorText}>
+                  {errors.seasonId}
+                </ThemedText>
+              )}
+            </View>
+          )}
 
           <View style={styles.buttonContainer}>
             <Button
               title={t('common.save')}
               onPress={handleSubmit}
               loading={updateTeam.isPending}
-              disabled={!name.trim() || !leagueId}
+              disabled={!name.trim() || !seasonId}
               fullWidth
             />
             <Button
@@ -244,28 +338,42 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: spacing.lg,
   },
-  leagueSection: {
+  selectionSection: {
     marginBottom: spacing.lg,
   },
   label: {
     marginBottom: spacing.sm,
   },
-  leagueList: {
+  selectionList: {
     marginTop: spacing.sm,
     borderRadius: 8,
     borderWidth: 1,
     overflow: 'hidden',
   },
-  leagueItem: {
+  selectionItem: {
     marginBottom: 0,
     borderBottomWidth: 0,
   },
   lastItem: {
     borderBottomWidth: 0,
   },
-  noLeagues: {
+  noItems: {
     marginTop: spacing.sm,
     fontStyle: 'italic',
+  },
+  loadingContainer: {
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+  noSeasonsContainer: {
+    marginTop: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: 8,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  noSeasonsText: {
+    textAlign: 'center',
   },
   errorText: {
     marginTop: spacing.xs,
