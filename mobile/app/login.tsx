@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
+
+interface DevUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+}
 
 /**
  * Login screen - handles WorkOS authentication flow
@@ -12,6 +19,8 @@ export default function Login() {
   const router = useRouter();
   const { setAuthToken, setUser } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
+  const [showDevLogin, setShowDevLogin] = useState(false);
+  const [devUsers, setDevUsers] = useState<DevUser[]>([]);
 
   // Handle deep link callback from OAuth redirect
   useEffect(() => {
@@ -78,7 +87,7 @@ export default function Login() {
       // Use mobile redirect URI that deep links back to app
       const mobileRedirectUri = Linking.createURL('auth/callback', {});
       const response = await apiClient.get('/auth/login', {
-        params: { 
+        params: {
           format: 'json',
           redirect_uri: mobileRedirectUri,
         },
@@ -100,6 +109,52 @@ export default function Login() {
     }
   };
 
+  // Dev login functions (development only)
+  const handleOpenDevLogin = async () => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.get('/auth/dev-users');
+      setDevUsers(response.data.users);
+      setShowDevLogin(true);
+    } catch (error) {
+      console.error('Error fetching dev users:', error);
+      Alert.alert('Error', 'Failed to load test users. Is the backend running?');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDevLogin = async (email: string) => {
+    try {
+      setIsLoading(true);
+      setShowDevLogin(false);
+
+      const response = await apiClient.post('/auth/dev-login', { email });
+      const { accessToken, user } = response.data;
+
+      setAuthToken(accessToken);
+      setUser(user);
+
+      router.replace('/(tabs)/home');
+    } catch (error) {
+      console.error('Dev login error:', error);
+      Alert.alert('Error', 'Dev login failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const renderDevUser = ({ item }: { item: DevUser }) => (
+    <TouchableOpacity
+      style={styles.devUserItem}
+      onPress={() => handleDevLogin(item.email)}
+    >
+      <Text style={styles.devUserName}>{item.name}</Text>
+      <Text style={styles.devUserEmail}>{item.email}</Text>
+      <Text style={styles.devUserRole}>{item.role}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Basketball Tracker</Text>
@@ -114,6 +169,40 @@ export default function Login() {
           {isLoading ? 'Loading...' : 'Sign In'}
         </Text>
       </TouchableOpacity>
+
+      {/* Dev login button - only in development */}
+      {__DEV__ && (
+        <TouchableOpacity
+          style={[styles.devButton, isLoading && styles.buttonDisabled]}
+          onPress={handleOpenDevLogin}
+          disabled={isLoading}
+        >
+          <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Dev user selection modal */}
+      <Modal
+        visible={showDevLogin}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowDevLogin(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Test User</Text>
+            <TouchableOpacity onPress={() => setShowDevLogin(false)}>
+              <Text style={styles.modalClose}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={devUsers}
+            renderItem={renderDevUser}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.devUserList}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -152,5 +241,67 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  devButton: {
+    marginTop: 20,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 200,
+    borderWidth: 1,
+    borderColor: '#FF9500',
+    backgroundColor: '#FFF9F0',
+  },
+  devButtonText: {
+    color: '#FF9500',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000',
+  },
+  modalClose: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  devUserList: {
+    padding: 16,
+  },
+  devUserItem: {
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    marginBottom: 12,
+  },
+  devUserName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  devUserEmail: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  devUserRole: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
   },
 });
