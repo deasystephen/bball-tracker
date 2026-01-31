@@ -3,7 +3,7 @@
  * Provides consistent, typed test data for all entities
  */
 
-import { UserRole, GameStatus, InvitationStatus, GameEventType } from '@prisma/client';
+import { UserRole, GameStatus, InvitationStatus, GameEventType, TeamRoleType } from '@prisma/client';
 
 // Counter for generating unique IDs
 let idCounter = 0;
@@ -84,8 +84,6 @@ export function createAdmin(options: Omit<CreateUserOptions, 'role'> = {}): User
 export interface LeagueData {
   id: string;
   name: string;
-  season: string;
-  year: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -93,8 +91,6 @@ export interface LeagueData {
 export interface CreateLeagueOptions {
   id?: string;
   name?: string;
-  season?: string;
-  year?: number;
 }
 
 export function createLeague(options: CreateLeagueOptions = {}): LeagueData {
@@ -104,8 +100,46 @@ export function createLeague(options: CreateLeagueOptions = {}): LeagueData {
   return {
     id,
     name: options.name || `Test League ${id}`,
-    season: options.season || 'Spring',
-    year: options.year || new Date().getFullYear(),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// ============================================
+// Season Factory
+// ============================================
+
+export interface SeasonData {
+  id: string;
+  leagueId: string;
+  name: string;
+  startDate: Date | null;
+  endDate: Date | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateSeasonOptions {
+  id?: string;
+  leagueId?: string;
+  name?: string;
+  startDate?: Date | null;
+  endDate?: Date | null;
+  isActive?: boolean;
+}
+
+export function createSeason(options: CreateSeasonOptions = {}): SeasonData {
+  const id = options.id || generateId('season');
+  const now = new Date();
+
+  return {
+    id,
+    leagueId: options.leagueId || generateId('league'),
+    name: options.name || `Spring ${new Date().getFullYear()}`,
+    startDate: options.startDate ?? null,
+    endDate: options.endDate ?? null,
+    isActive: options.isActive ?? true,
     createdAt: now,
     updatedAt: now,
   };
@@ -118,8 +152,7 @@ export function createLeague(options: CreateLeagueOptions = {}): LeagueData {
 export interface TeamData {
   id: string;
   name: string;
-  leagueId: string;
-  coachId: string;
+  seasonId: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -127,8 +160,7 @@ export interface TeamData {
 export interface CreateTeamOptions {
   id?: string;
   name?: string;
-  leagueId?: string;
-  coachId?: string;
+  seasonId?: string;
 }
 
 export function createTeam(options: CreateTeamOptions = {}): TeamData {
@@ -138,8 +170,94 @@ export function createTeam(options: CreateTeamOptions = {}): TeamData {
   return {
     id,
     name: options.name || `Test Team ${id}`,
-    leagueId: options.leagueId || generateId('league'),
-    coachId: options.coachId || generateId('coach'),
+    seasonId: options.seasonId || generateId('season'),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// ============================================
+// Team Role Factory
+// ============================================
+
+export interface TeamRoleData {
+  id: string;
+  teamId: string;
+  type: TeamRoleType;
+  name: string;
+  description: string | null;
+  canManageTeam: boolean;
+  canManageRoster: boolean;
+  canTrackStats: boolean;
+  canViewStats: boolean;
+  canShareStats: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateTeamRoleOptions {
+  id?: string;
+  teamId?: string;
+  type?: TeamRoleType;
+  name?: string;
+  description?: string | null;
+  canManageTeam?: boolean;
+  canManageRoster?: boolean;
+  canTrackStats?: boolean;
+  canViewStats?: boolean;
+  canShareStats?: boolean;
+}
+
+export function createTeamRole(options: CreateTeamRoleOptions = {}): TeamRoleData {
+  const id = options.id || generateId('role');
+  const now = new Date();
+  const type = options.type || 'HEAD_COACH';
+
+  return {
+    id,
+    teamId: options.teamId || generateId('team'),
+    type,
+    name: options.name || (type === 'HEAD_COACH' ? 'Head Coach' : type === 'ASSISTANT_COACH' ? 'Assistant Coach' : 'Team Manager'),
+    description: options.description ?? null,
+    canManageTeam: options.canManageTeam ?? (type === 'HEAD_COACH' || type === 'ASSISTANT_COACH'),
+    canManageRoster: options.canManageRoster ?? (type === 'HEAD_COACH' || type === 'ASSISTANT_COACH'),
+    canTrackStats: options.canTrackStats ?? true,
+    canViewStats: options.canViewStats ?? true,
+    canShareStats: options.canShareStats ?? (type === 'HEAD_COACH' || type === 'ASSISTANT_COACH'),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// ============================================
+// Team Staff Factory
+// ============================================
+
+export interface TeamStaffData {
+  id: string;
+  teamId: string;
+  userId: string;
+  roleId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateTeamStaffOptions {
+  id?: string;
+  teamId?: string;
+  userId?: string;
+  roleId?: string;
+}
+
+export function createTeamStaff(options: CreateTeamStaffOptions = {}): TeamStaffData {
+  const id = options.id || generateId('staff');
+  const now = new Date();
+
+  return {
+    id,
+    teamId: options.teamId || generateId('team'),
+    userId: options.userId || generateId('user'),
+    roleId: options.roleId || generateId('role'),
     createdAt: now,
     updatedAt: now,
   };
@@ -327,18 +445,22 @@ export function createGameEvent(options: CreateGameEventOptions = {}): GameEvent
 // ============================================
 
 /**
- * Create a team with its coach, league, and optional members
+ * Create a team with its coach (via staff), season, league, and optional members
  */
 export interface FullTeamData {
   team: TeamData;
   coach: UserData;
+  season: SeasonData;
   league: LeagueData;
+  headCoachRole: TeamRoleData;
+  coachStaff: TeamStaffData;
   members: Array<{ member: TeamMemberData; player: UserData }>;
 }
 
 export interface CreateFullTeamOptions {
   teamName?: string;
   coachOptions?: CreateUserOptions;
+  seasonOptions?: CreateSeasonOptions;
   leagueOptions?: CreateLeagueOptions;
   memberCount?: number;
 }
@@ -346,10 +468,20 @@ export interface CreateFullTeamOptions {
 export function createFullTeam(options: CreateFullTeamOptions = {}): FullTeamData {
   const coach = createCoach(options.coachOptions);
   const league = createLeague(options.leagueOptions);
+  const season = createSeason({ ...options.seasonOptions, leagueId: league.id });
   const team = createTeam({
     name: options.teamName,
-    coachId: coach.id,
-    leagueId: league.id,
+    seasonId: season.id,
+  });
+  const headCoachRole = createTeamRole({
+    teamId: team.id,
+    type: 'HEAD_COACH',
+    name: 'Head Coach',
+  });
+  const coachStaff = createTeamStaff({
+    teamId: team.id,
+    userId: coach.id,
+    roleId: headCoachRole.id,
   });
 
   const members: Array<{ member: TeamMemberData; player: UserData }> = [];
@@ -365,7 +497,7 @@ export function createFullTeam(options: CreateFullTeamOptions = {}): FullTeamDat
     members.push({ member, player });
   }
 
-  return { team, coach, league, members };
+  return { team, coach, season, league, headCoachRole, coachStaff, members };
 }
 
 /**
@@ -376,6 +508,7 @@ export interface FullInvitationData {
   team: TeamData;
   coach: UserData;
   player: UserData;
+  season: SeasonData;
   league: LeagueData;
 }
 
@@ -383,9 +516,9 @@ export function createFullInvitation(): FullInvitationData {
   const coach = createCoach();
   const player = createPlayer();
   const league = createLeague();
+  const season = createSeason({ leagueId: league.id });
   const team = createTeam({
-    coachId: coach.id,
-    leagueId: league.id,
+    seasonId: season.id,
   });
   const invitation = createInvitation({
     teamId: team.id,
@@ -393,5 +526,5 @@ export function createFullInvitation(): FullInvitationData {
     invitedById: coach.id,
   });
 
-  return { invitation, team, coach, player, league };
+  return { invitation, team, coach, player, season, league };
 }
