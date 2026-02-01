@@ -528,3 +528,125 @@ export function createFullInvitation(): FullInvitationData {
 
   return { invitation, team, coach, player, season, league };
 }
+
+// ============================================
+// Player Stats Factory
+// ============================================
+
+export interface PlayerStatsData {
+  id: string;
+  playerId: string;
+  gameId: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+  blocks: number;
+  turnovers: number;
+  fouls: number;
+  fieldGoalsMade: number;
+  fieldGoalsAttempted: number;
+  threePointersMade: number;
+  threePointersAttempted: number;
+  freeThrowsMade: number;
+  freeThrowsAttempted: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreatePlayerStatsOptions {
+  id?: string;
+  playerId?: string;
+  gameId?: string;
+  points?: number;
+  rebounds?: number;
+  assists?: number;
+  steals?: number;
+  blocks?: number;
+  turnovers?: number;
+  fouls?: number;
+  fieldGoalsMade?: number;
+  fieldGoalsAttempted?: number;
+  threePointersMade?: number;
+  threePointersAttempted?: number;
+  freeThrowsMade?: number;
+  freeThrowsAttempted?: number;
+}
+
+export function createPlayerStats(options: CreatePlayerStatsOptions = {}): PlayerStatsData {
+  const id = options.id || generateId('playerStats');
+  const now = new Date();
+
+  return {
+    id,
+    playerId: options.playerId || generateId('player'),
+    gameId: options.gameId || generateId('game'),
+    points: options.points ?? 10,
+    rebounds: options.rebounds ?? 5,
+    assists: options.assists ?? 3,
+    steals: options.steals ?? 1,
+    blocks: options.blocks ?? 0,
+    turnovers: options.turnovers ?? 2,
+    fouls: options.fouls ?? 2,
+    fieldGoalsMade: options.fieldGoalsMade ?? 4,
+    fieldGoalsAttempted: options.fieldGoalsAttempted ?? 10,
+    threePointersMade: options.threePointersMade ?? 1,
+    threePointersAttempted: options.threePointersAttempted ?? 3,
+    freeThrowsMade: options.freeThrowsMade ?? 1,
+    freeThrowsAttempted: options.freeThrowsAttempted ?? 2,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// ============================================
+// Team Stats Factory
+// ============================================
+
+export interface TeamStatsData {
+  id: string;
+  teamId: string;
+  gameId: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  turnovers: number;
+  fieldGoalPercentage: number;
+  threePointPercentage: number;
+  freeThrowPercentage: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateTeamStatsOptions {
+  id?: string;
+  teamId?: string;
+  gameId?: string;
+  points?: number;
+  rebounds?: number;
+  assists?: number;
+  turnovers?: number;
+  fieldGoalPercentage?: number;
+  threePointPercentage?: number;
+  freeThrowPercentage?: number;
+}
+
+export function createTeamStats(options: CreateTeamStatsOptions = {}): TeamStatsData {
+  const id = options.id || generateId('teamStats');
+  const now = new Date();
+
+  return {
+    id,
+    teamId: options.teamId || generateId('team'),
+    gameId: options.gameId || generateId('game'),
+    points: options.points ?? 75,
+    rebounds: options.rebounds ?? 40,
+    assists: options.assists ?? 20,
+    turnovers: options.turnovers ?? 12,
+    fieldGoalPercentage: options.fieldGoalPercentage ?? 45.5,
+    threePointPercentage: options.threePointPercentage ?? 35.0,
+    freeThrowPercentage: options.freeThrowPercentage ?? 75.0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
