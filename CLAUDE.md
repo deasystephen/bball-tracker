@@ -82,6 +82,35 @@ Backend API (Node.js/Express)
 - Use async/await over raw promises
 - Validate inputs with Zod schemas
 
+## Testing Requirements
+
+When adding new features or fixing bugs, always write tests that verify behavior as it runs in the actual app:
+
+### API Endpoints
+- **Always add API integration tests** (in `tests/api/`) that test the full request/response cycle through Express routes
+- API tests catch validation issues, middleware problems, and response format errors that service-only tests miss
+- Test with realistic data formats (e.g., both UUID and custom string IDs if the database allows both)
+
+### Validation Schemas
+- **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
+- Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields
+- Ensure schema validation matches what the database actually accepts
+
+### Service Layer
+- Service tests (`tests/services/`) are valuable but not sufficient alone
+- Service tests mock the database, so they don't catch mismatches between API validation and database constraints
+
+### Test Coverage Principle
+> Tests should exercise code paths as they run in production. If a request goes through validation → route → service → database, tests should cover that full path, not just the service layer with mocks.
+
+### Example: What We Learned
+A bug where the API rejected valid league IDs (`downtown-youth-league`) wasn't caught because:
+1. Service tests bypassed API validation (called services directly)
+2. No API tests existed for the seasons endpoint
+3. Test factories used different ID formats than the seed data
+
+The fix: Add API integration tests AND schema validation tests for every endpoint.
+
 ## Git Workflow
 
 - Main branches: `main` and `develop`
