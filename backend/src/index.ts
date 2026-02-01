@@ -11,9 +11,12 @@ import apiRouter from './api';
 
 const app = express();
 const httpServer = createServer(app);
+// Support multiple origins for mobile (Expo) and web
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(',').map(o => o.trim());
+
 const io = new SocketServer(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:19006',
+    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
@@ -23,7 +26,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:19006',
+  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   credentials: true,
 }));
 app.use(express.json());

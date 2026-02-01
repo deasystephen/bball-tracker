@@ -6,6 +6,7 @@ import leagueRoutes from './leagues/routes';
 import seasonRoutes from './seasons/routes';
 import playerRoutes from './players/routes';
 import invitationRoutes from './invitations/routes';
+import statsRoutes from './stats/routes';
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.use('/leagues', leagueRoutes);
 router.use('/seasons', seasonRoutes);
 router.use('/players', playerRoutes);
 router.use('/invitations', invitationRoutes);
+router.use('/stats', statsRoutes);
 
 router.get('/', (_req, res) => {
   res.json({ message: 'API v1' });

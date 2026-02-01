@@ -6,6 +6,7 @@ import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
+import { StatsService } from './stats-service';
 
 export class GameService {
   /**
@@ -349,6 +350,16 @@ export class GameService {
         },
       },
     });
+
+    // Finalize stats when game is marked as FINISHED
+    if (updateData.status === 'FINISHED') {
+      try {
+        await StatsService.finalizeGameStats(gameId);
+      } catch (error) {
+        console.error('Error finalizing game stats:', error);
+        // Don't fail the update if stats calculation fails
+      }
+    }
 
     return updatedGame;
   }
