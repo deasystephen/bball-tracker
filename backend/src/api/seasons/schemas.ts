@@ -8,7 +8,7 @@ import { z } from 'zod';
  * Schema for creating a new season
  */
 export const createSeasonSchema = z.object({
-  leagueId: z.string().uuid('Invalid league ID format'),
+  leagueId: z.string().min(1, 'League ID is required'),
   name: z.string().min(1, 'Season name is required').max(100, 'Season name too long'),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
@@ -28,7 +28,7 @@ export const updateSeasonSchema = z.object({
  * Schema for season query parameters
  */
 export const seasonQuerySchema = z.object({
-  leagueId: z.string().uuid().optional(),
+  leagueId: z.string().min(1).optional(),
   isActive: z
     .string()
     .transform((val) => val === 'true')

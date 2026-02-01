@@ -71,7 +71,7 @@ export const createRoleSchema = z.object({
  */
 export const teamQuerySchema = z.object({
   seasonId: z.string().uuid().optional(),
-  leagueId: z.string().uuid().optional(),
+  leagueId: z.string().min(1).optional(),
   playerId: z.string().uuid().optional(), // Teams where this player is a member
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
