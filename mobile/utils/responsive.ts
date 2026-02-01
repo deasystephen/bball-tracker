@@ -18,6 +18,9 @@ export const isTablet = width >= BREAKPOINTS.tablet;
 export const isPhone = width < BREAKPOINTS.tablet;
 export const isIOS = Platform.OS === 'ios';
 export const isAndroid = Platform.OS === 'android';
+export const isWeb = Platform.OS === 'web';
+export const isDesktop = isWeb && width >= BREAKPOINTS.desktop;
+export const isMobileWeb = isWeb && width < BREAKPOINTS.tablet;
 
 // Responsive dimensions
 export const getResponsiveValue = <T>(

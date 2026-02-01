@@ -21,7 +21,9 @@ import {
   LoadingSpinner,
   ErrorState,
 } from '../../../components';
+import { BoxScoreTable } from '../../../components/stats';
 import { useGame, useUpdateGame, useDeleteGame } from '../../../hooks/useGames';
+import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
@@ -88,6 +90,12 @@ export default function GameDetailScreen() {
   const { data: game, isLoading, error, refetch } = useGame(id);
   const updateGame = useUpdateGame();
   const deleteGame = useDeleteGame();
+
+  // Fetch box score for finished games
+  const isFinishedGame = game?.status === 'FINISHED';
+  const { data: boxScore, isLoading: boxScoreLoading } = useBoxScore(
+    isFinishedGame ? id : ''
+  );
 
   const handleStartGame = async () => {
     try {
@@ -341,22 +349,60 @@ export default function GameDetailScreen() {
           )}
 
           {isFinished && (
-            <Card
-              variant="default"
-              style={[
-                styles.finishedCard,
-                { backgroundColor: colors.backgroundSecondary },
-              ]}
-            >
-              <Ionicons
-                name="checkmark-circle"
-                size={32}
-                color={colors.success}
-              />
-              <ThemedText variant="body" style={styles.finishedText}>
-                Game completed
-              </ThemedText>
-            </Card>
+            <>
+              <Card
+                variant="default"
+                style={[
+                  styles.finishedCard,
+                  { backgroundColor: colors.backgroundSecondary },
+                ]}
+              >
+                <Ionicons
+                  name="checkmark-circle"
+                  size={32}
+                  color={colors.success}
+                />
+                <ThemedText variant="body" style={styles.finishedText}>
+                  Game completed
+                </ThemedText>
+              </Card>
+
+              {/* Box Score Section */}
+              <View style={styles.boxScoreSection}>
+                <View style={styles.sectionHeader}>
+                  <ThemedText variant="h3">Box Score</ThemedText>
+                  <TouchableOpacity
+                    onPress={() => router.push(`/games/${id}/stats`)}
+                    style={styles.viewAllButton}
+                  >
+                    <ThemedText variant="caption" color="primary">
+                      View Full Stats
+                    </ThemedText>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color={colors.primary}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {boxScoreLoading ? (
+                  <LoadingSpinner message="Loading stats..." />
+                ) : boxScore ? (
+                  <BoxScoreTable
+                    players={boxScore.team.players}
+                    teamStats={boxScore.team.stats}
+                    showExtendedStats={false}
+                  />
+                ) : (
+                  <Card variant="default">
+                    <ThemedText variant="body" color="textSecondary">
+                      No statistics recorded for this game.
+                    </ThemedText>
+                  </Card>
+                )}
+              </View>
+            </>
           )}
         </View>
       </ScrollView>
@@ -459,5 +505,19 @@ const styles = StyleSheet.create({
   },
   finishedText: {
     fontWeight: '600',
+  },
+  boxScoreSection: {
+    marginTop: spacing.xl,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
 });

@@ -83,6 +83,10 @@ export default function TeamDetailsScreen() {
     router.push(`/teams/${id}/players`);
   };
 
+  const handleViewStats = () => {
+    router.push(`/teams/${id}/stats`);
+  };
+
   if (isLoading) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
@@ -163,6 +167,14 @@ export default function TeamDetailsScreen() {
             </View>
           </Card>
         )}
+
+        {/* Team Stats Button */}
+        <Button
+          title="View Team Stats"
+          onPress={handleViewStats}
+          variant="outline"
+          style={styles.statsButton}
+        />
 
         {/* Head Coach Info */}
         {headCoaches.length > 0 && (
@@ -336,5 +348,8 @@ const styles = StyleSheet.create({
   },
   emptyButton: {
     marginTop: spacing.sm,
+  },
+  statsButton: {
+    marginBottom: spacing.md,
   },
 });
