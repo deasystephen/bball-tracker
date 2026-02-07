@@ -7,6 +7,18 @@ import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventTy
 
 const prisma = new PrismaClient();
 
+// Deterministic UUIDs for seed data (reproducible across runs)
+const SEED_IDS = {
+  LEAGUE: '10000000-0000-4000-a000-000000000001',
+  WARRIORS_TEAM: '20000000-0000-4000-a000-000000000001',
+  LAKERS_TEAM: '20000000-0000-4000-a000-000000000002',
+  WARRIORS_VS_LAKERS_GAME: '30000000-0000-4000-a000-000000000001',
+  WARRIORS_VS_CELTICS_GAME: '30000000-0000-4000-a000-000000000002',
+  WARRIORS_VS_HEAT_GAME: '30000000-0000-4000-a000-000000000003',
+  LAKERS_VS_WARRIORS_GAME: '30000000-0000-4000-a000-000000000004',
+  LAKERS_VS_SUNS_GAME: '30000000-0000-4000-a000-000000000005',
+};
+
 // Helper to create default team roles
 async function createDefaultTeamRoles(teamId: string) {
   const roles = await prisma.teamRole.createMany({
@@ -222,10 +234,10 @@ async function main() {
   console.log('\nCreating league and season...');
 
   const league = await prisma.league.upsert({
-    where: { id: 'downtown-youth-league' },
+    where: { id: SEED_IDS.LEAGUE },
     update: {},
     create: {
-      id: 'downtown-youth-league',
+      id: SEED_IDS.LEAGUE,
       name: 'Downtown Youth Basketball League',
     },
   });
@@ -262,10 +274,10 @@ async function main() {
 
   // Warriors
   const warriors = await prisma.team.upsert({
-    where: { id: 'warriors-spring-2024' },
+    where: { id: SEED_IDS.WARRIORS_TEAM },
     update: {},
     create: {
-      id: 'warriors-spring-2024',
+      id: SEED_IDS.WARRIORS_TEAM,
       name: 'Warriors',
       seasonId: season.id,
     },
@@ -353,10 +365,10 @@ async function main() {
 
   // Lakers
   const lakers = await prisma.team.upsert({
-    where: { id: 'lakers-spring-2024' },
+    where: { id: SEED_IDS.LAKERS_TEAM },
     update: {},
     create: {
-      id: 'lakers-spring-2024',
+      id: SEED_IDS.LAKERS_TEAM,
       name: 'Lakers',
       seasonId: season.id,
     },
@@ -419,10 +431,10 @@ async function main() {
 
   // Warriors games
   await prisma.game.upsert({
-    where: { id: 'warriors-vs-lakers-1' },
+    where: { id: SEED_IDS.WARRIORS_VS_LAKERS_GAME },
     update: {},
     create: {
-      id: 'warriors-vs-lakers-1',
+      id: SEED_IDS.WARRIORS_VS_LAKERS_GAME,
       teamId: warriors.id,
       opponent: 'Lakers',
       date: tomorrow,
@@ -432,10 +444,10 @@ async function main() {
   console.log(`  Created game: Warriors vs Lakers (Scheduled - tomorrow)`);
 
   await prisma.game.upsert({
-    where: { id: 'warriors-vs-celtics-1' },
+    where: { id: SEED_IDS.WARRIORS_VS_CELTICS_GAME },
     update: {},
     create: {
-      id: 'warriors-vs-celtics-1',
+      id: SEED_IDS.WARRIORS_VS_CELTICS_GAME,
       teamId: warriors.id,
       opponent: 'Celtics',
       date: nextWeek,
@@ -445,10 +457,10 @@ async function main() {
   console.log(`  Created game: Warriors vs Celtics (Scheduled - next week)`);
 
   await prisma.game.upsert({
-    where: { id: 'warriors-vs-heat-1' },
+    where: { id: SEED_IDS.WARRIORS_VS_HEAT_GAME },
     update: {},
     create: {
-      id: 'warriors-vs-heat-1',
+      id: SEED_IDS.WARRIORS_VS_HEAT_GAME,
       teamId: warriors.id,
       opponent: 'Heat',
       date: lastWeek,
@@ -461,10 +473,10 @@ async function main() {
 
   // Lakers games
   await prisma.game.upsert({
-    where: { id: 'lakers-vs-warriors-1' },
+    where: { id: SEED_IDS.LAKERS_VS_WARRIORS_GAME },
     update: {},
     create: {
-      id: 'lakers-vs-warriors-1',
+      id: SEED_IDS.LAKERS_VS_WARRIORS_GAME,
       teamId: lakers.id,
       opponent: 'Warriors',
       date: tomorrow,
@@ -474,10 +486,10 @@ async function main() {
   console.log(`  Created game: Lakers vs Warriors (Scheduled - tomorrow)`);
 
   await prisma.game.upsert({
-    where: { id: 'lakers-vs-suns-1' },
+    where: { id: SEED_IDS.LAKERS_VS_SUNS_GAME },
     update: {},
     create: {
-      id: 'lakers-vs-suns-1',
+      id: SEED_IDS.LAKERS_VS_SUNS_GAME,
       teamId: lakers.id,
       opponent: 'Suns',
       date: lastWeek,
@@ -520,7 +532,7 @@ async function main() {
 
   // Clear existing events for these games first
   await prisma.gameEvent.deleteMany({
-    where: { gameId: { in: ['warriors-vs-heat-1', 'lakers-vs-suns-1'] } },
+    where: { gameId: { in: [SEED_IDS.WARRIORS_VS_HEAT_GAME, SEED_IDS.LAKERS_VS_SUNS_GAME] } },
   });
 
   // -------------------------------------------------------------------------
@@ -533,7 +545,7 @@ async function main() {
   // Jordan Poole: 21 pts (7-15 FG, 3-8 3PT, 4-4 FT), 3 reb, 4 ast, 0 stl, 0 blk, 2 TO, 3 fouls
   // Total: 112 pts
 
-  const warriorsGameId = 'warriors-vs-heat-1';
+  const warriorsGameId = SEED_IDS.WARRIORS_VS_HEAT_GAME;
   const stephId = players['steph.curry@example.com'].id;
   const klayId = players['klay.thompson@example.com'].id;
   const draymondId = players['draymond.green@example.com'].id;
@@ -785,7 +797,7 @@ async function main() {
   // D'Angelo Russell: 13 pts (4-12 FG, 3-7 3PT, 2-2 FT), 2 reb, 5 ast, 0 stl, 0 blk, 2 TO, 1 foul
   // Total: 98 pts
 
-  const lakersGameId = 'lakers-vs-suns-1';
+  const lakersGameId = SEED_IDS.LAKERS_VS_SUNS_GAME;
   const lebronId = players['lebron.james@example.com'].id;
   const adId = players['anthony.davis@example.com'].id;
   const russId = players['russell.westbrook@example.com'].id;
@@ -1020,14 +1032,14 @@ async function main() {
   const { StatsService } = await import('../src/services/stats-service');
 
   try {
-    await StatsService.finalizeGameStats('warriors-vs-heat-1');
+    await StatsService.finalizeGameStats(SEED_IDS.WARRIORS_VS_HEAT_GAME);
     console.log('  Calculated stats for Warriors vs Heat');
   } catch (error) {
     console.error('  Error calculating Warriors stats:', error);
   }
 
   try {
-    await StatsService.finalizeGameStats('lakers-vs-suns-1');
+    await StatsService.finalizeGameStats(SEED_IDS.LAKERS_VS_SUNS_GAME);
     console.log('  Calculated stats for Lakers vs Suns');
   } catch (error) {
     console.error('  Error calculating Lakers stats:', error);

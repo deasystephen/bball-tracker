@@ -3,8 +3,14 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
@@ -26,24 +32,25 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [countdown, setCountdown] = useState(duration);
-  const [fadeAnim] = useState(new Animated.Value(0));
+
+  // Reanimated shared values
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(50);
+  const progressWidth = useSharedValue(1);
 
   useEffect(() => {
     if (visible) {
       setCountdown(duration);
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+      opacity.value = withTiming(1, { duration: 200 });
+      translateY.value = withTiming(0, { duration: 200 });
+      // Progress bar shrinks from 100% to 0% over the duration
+      progressWidth.value = 1;
+      progressWidth.value = withTiming(0, { duration: duration * 1000 });
     } else {
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+      opacity.value = withTiming(0, { duration: 200 });
+      translateY.value = withTiming(50, { duration: 200 });
     }
-  }, [visible, duration, fadeAnim]);
+  }, [visible, duration]);
 
   useEffect(() => {
     if (!visible || countdown <= 0) return;
@@ -55,6 +62,15 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
     return () => clearInterval(timer);
   }, [visible, countdown]);
 
+  const containerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  const progressAnimatedStyle = useAnimatedStyle(() => ({
+    width: `${progressWidth.value * 100}%`,
+  }));
+
   if (!visible) {
     return null;
   }
@@ -65,16 +81,8 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
         styles.container,
         {
           bottom: insets.bottom + spacing.md,
-          opacity: fadeAnim,
-          transform: [
-            {
-              translateY: fadeAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              }),
-            },
-          ],
         },
+        containerAnimatedStyle,
       ]}
     >
       <View
@@ -104,6 +112,16 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
             UNDO ({countdown}s)
           </ThemedText>
         </TouchableOpacity>
+        {/* Countdown progress bar */}
+        <View style={styles.progressTrack}>
+          <Animated.View
+            style={[
+              styles.progressBar,
+              { backgroundColor: colors.primary },
+              progressAnimatedStyle,
+            ]}
+          />
+        </View>
       </View>
     </Animated.View>
   );
@@ -129,6 +147,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 8,
+    overflow: 'hidden',
+    flexWrap: 'wrap',
   },
   content: {
     flexDirection: 'row',
@@ -147,5 +167,17 @@ const styles = StyleSheet.create({
   },
   undoText: {
     color: '#FFFFFF',
+  },
+  progressTrack: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: 'transparent',
+  },
+  progressBar: {
+    height: 2,
+    borderRadius: 1,
   },
 });

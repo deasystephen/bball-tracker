@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ThemedView,
@@ -25,7 +26,7 @@ import { BoxScoreTable } from '../../../components/stats';
 import { useGame, useUpdateGame, useDeleteGame } from '../../../hooks/useGames';
 import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing } from '../../../theme';
+import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import type { GameStatus } from '../../../types/game';
 
@@ -83,7 +84,7 @@ const formatTime = (dateString: string): string => {
 export default function GameDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors } = useTheme();
+  const { colors, colorScheme } = useTheme();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -96,6 +97,10 @@ export default function GameDetailScreen() {
   const { data: boxScore, isLoading: boxScoreLoading } = useBoxScore(
     isFinishedGame ? id : ''
   );
+
+  const gradientColors = colorScheme === 'dark'
+    ? ['#0D1117', '#161B22'] as const
+    : ['#1A3A5C', '#0F2540'] as const;
 
   const handleStartGame = async () => {
     try {
@@ -184,54 +189,47 @@ export default function GameDetailScreen() {
 
   return (
     <ThemedView variant="background" style={styles.container}>
-      {/* Header with back button */}
-      <View
+      {/* Immersive dark scoreboard header */}
+      <LinearGradient
+        colors={gradientColors}
         style={[
-          styles.topHeader,
-          {
-            paddingTop: insets.top + spacing.md,
-            paddingHorizontal: padding,
-            paddingBottom: spacing.md,
-            borderBottomColor: colors.border,
-          },
+          styles.immersiveHeader,
+          { paddingTop: insets.top + spacing.sm },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>
-            Game Details
-          </ThemedText>
-        </View>
-        {isScheduled && (
+        <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
           <TouchableOpacity
-            onPress={handleDelete}
+            onPress={() => router.back()}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <View style={styles.headerSpacer} />
+          {isScheduled && (
+            <TouchableOpacity
+              onPress={handleDelete}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Delete game"
+            >
+              <Ionicons name="trash-outline" size={24} color="#FFFFFF80" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
             style={styles.iconButton}
             accessibilityRole="button"
-            accessibilityLabel="Delete game"
+            accessibilityLabel="Share game"
           >
-            <Ionicons name="trash-outline" size={24} color={colors.error} />
+            <Ionicons name="share-outline" size={24} color="#FFFFFF80" />
           </TouchableOpacity>
-        )}
-      </View>
+        </View>
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { padding, paddingBottom: insets.bottom + spacing.xl },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Status Badge */}
+        {/* Status */}
         <View style={styles.statusContainer}>
           <View
-            style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}
+            style={[styles.statusBadge, { backgroundColor: statusColor + '30' }]}
           >
             {isInProgress && (
               <View style={[styles.liveDot, { backgroundColor: statusColor }]} />
@@ -245,33 +243,37 @@ export default function GameDetailScreen() {
           </View>
         </View>
 
-        {/* Score Card */}
-        <Card variant="elevated" style={styles.scoreCard}>
-          <View style={styles.scoreContainer}>
-            <View style={styles.teamScore}>
-              <ThemedText variant="caption" color="textSecondary">
-                {game.team?.name || 'Your Team'}
-              </ThemedText>
-              <ThemedText variant="h1" style={styles.score}>
-                {game.homeScore}
-              </ThemedText>
-            </View>
-            <View style={styles.scoreDivider}>
-              <ThemedText variant="h3" color="textTertiary">
-                -
-              </ThemedText>
-            </View>
-            <View style={[styles.teamScore, styles.awayTeamScore]}>
-              <ThemedText variant="caption" color="textSecondary">
-                {game.opponent}
-              </ThemedText>
-              <ThemedText variant="h1" style={styles.score}>
-                {game.awayScore}
-              </ThemedText>
-            </View>
+        {/* Score in header */}
+        <View style={styles.scoreContainer}>
+          <View style={styles.teamScore}>
+            <ThemedText variant="caption" style={styles.headerTeamName}>
+              {game.team?.name || 'Your Team'}
+            </ThemedText>
+            <ThemedText variant="body" style={styles.headerScore}>
+              {game.homeScore}
+            </ThemedText>
           </View>
-        </Card>
+          <View style={styles.scoreDivider}>
+            <View style={styles.verticalLine} />
+          </View>
+          <View style={[styles.teamScore, styles.awayTeamScore]}>
+            <ThemedText variant="caption" style={styles.headerTeamName}>
+              {game.opponent}
+            </ThemedText>
+            <ThemedText variant="body" style={styles.headerScore}>
+              {game.awayScore}
+            </ThemedText>
+          </View>
+        </View>
+      </LinearGradient>
 
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { padding, paddingBottom: insets.bottom + spacing.xl },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Game Info */}
         <Card variant="default" style={styles.infoCard}>
           <View style={styles.infoRow}>
@@ -421,28 +423,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  topHeader: {
+  immersiveHeader: {
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: spacing.sm,
   },
   backButton: {
     padding: spacing.sm,
-    marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },
-  headerContent: {
+  headerSpacer: {
     flex: 1,
   },
   iconButton: {
-    padding: spacing.xs,
-  },
-  scrollContent: {
-    paddingTop: spacing.lg,
+    padding: spacing.sm,
   },
   statusContainer: {
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -457,14 +460,11 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  scoreCard: {
-    marginBottom: spacing.lg,
-  },
   scoreContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
   },
   teamScore: {
     flex: 1,
@@ -473,14 +473,29 @@ const styles = StyleSheet.create({
   awayTeamScore: {
     alignItems: 'center',
   },
-  score: {
-    fontSize: 56,
-    fontWeight: '700',
+  headerTeamName: {
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: spacing.xs,
+  },
+  headerScore: {
+    ...typography.displaySmall,
+    color: '#FFFFFF',
     lineHeight: 64,
-    marginTop: spacing.xs,
   },
   scoreDivider: {
     paddingHorizontal: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verticalLine: {
+    width: 1,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  scrollContent: {
+    paddingTop: spacing.lg,
   },
   infoCard: {
     marginBottom: spacing.lg,

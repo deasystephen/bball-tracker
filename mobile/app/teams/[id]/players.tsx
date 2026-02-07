@@ -36,6 +36,7 @@ import {
   usePlayer,
   type Player,
 } from '../../../hooks/usePlayers';
+import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
@@ -64,6 +65,7 @@ export default function ManagePlayersScreen() {
   const removePlayer = useRemovePlayerFromTeam();
   const createPlayer = useCreatePlayer();
   const createInvitation = useCreateInvitation();
+  const toast = useToast();
 
   // Search for players
   const { data: playersData, isLoading: searchingPlayers } = usePlayers({
@@ -105,11 +107,11 @@ export default function ManagePlayersScreen() {
       setShowCreateForm(false);
       setSearchQuery('');
       setSelectedPlayer(null);
-      Alert.alert('Success', 'Player created and invitation sent');
+      toast.showToast('Player created and invitation sent', 'success');
     } catch (error) {
-      Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to create player and send invitation'
+      toast.showToast(
+        error instanceof Error ? error.message : 'Failed to create player and send invitation',
+        'error'
       );
     }
   };
@@ -134,11 +136,11 @@ export default function ManagePlayersScreen() {
       setPosition('');
       setSelectedPlayer(null);
       setSearchQuery('');
-      Alert.alert('Success', 'Invitation sent to player');
+      toast.showToast('Invitation sent to player', 'success');
     } catch (error) {
-      Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to send invitation'
+      toast.showToast(
+        error instanceof Error ? error.message : 'Failed to send invitation',
+        'error'
       );
     }
   };
@@ -155,11 +157,11 @@ export default function ManagePlayersScreen() {
           onPress: async () => {
             try {
               await removePlayer.mutateAsync({ teamId: id, playerId });
-              Alert.alert('Success', 'Player removed from team');
+              toast.showToast('Player removed from team', 'success');
             } catch (error) {
-              Alert.alert(
-                'Error',
-                error instanceof Error ? error.message : 'Failed to remove player'
+              toast.showToast(
+                error instanceof Error ? error.message : 'Failed to remove player',
+                'error'
               );
             }
           },

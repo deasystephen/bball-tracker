@@ -13,6 +13,8 @@ import { ThemedText } from './ThemedText';
 import { ThemedView } from './ThemedView';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
+import { shadows } from '../theme/shadows';
+import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
 
 interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
@@ -47,6 +49,10 @@ export const ListItem: React.FC<ListItemProps> = ({
       backgroundColor: variant === 'card' ? colors.card : 'transparent',
       borderBottomWidth: variant === 'default' ? StyleSheet.hairlineWidth : 0,
       borderBottomColor: colors.border,
+      ...(variant === 'card' && {
+        borderRadius: borderRadius.md,
+        ...shadows.sm,
+      }),
     },
     style,
   ];

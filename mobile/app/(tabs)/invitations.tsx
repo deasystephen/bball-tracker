@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedView, ThemedText, Card, LoadingSpinner, EmptyState, ErrorState, Button } from '../../components';
+import { useToast } from '../../components/Toast';
 import { usePlayerInvitations, useAcceptInvitation, useRejectInvitation, type TeamInvitation } from '../../hooks/useInvitations';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
@@ -38,27 +39,18 @@ export default function InvitationsScreen() {
 
   const acceptInvitation = useAcceptInvitation();
   const rejectInvitation = useRejectInvitation();
+  const toast = useToast();
 
   const invitations = invitationsData?.invitations || [];
 
   const handleAccept = async (invitation: TeamInvitation) => {
     try {
       await acceptInvitation.mutateAsync(invitation.id);
-      Alert.alert(
-        'Success',
-        `You've been added to ${invitation.team.name}!`,
-        [
-          {
-            text: 'View Team',
-            onPress: () => router.push(`/teams/${invitation.teamId}`),
-          },
-          { text: 'OK' },
-        ]
-      );
+      toast.showToast(`You've been added to ${invitation.team.name}!`, 'success');
     } catch (error) {
-      Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to accept invitation'
+      toast.showToast(
+        error instanceof Error ? error.message : 'Failed to accept invitation',
+        'error'
       );
     }
   };
@@ -75,11 +67,11 @@ export default function InvitationsScreen() {
           onPress: async () => {
             try {
               await rejectInvitation.mutateAsync(invitation.id);
-              Alert.alert('Success', 'Invitation rejected');
+              toast.showToast('Invitation rejected', 'success');
             } catch (error) {
-              Alert.alert(
-                'Error',
-                error instanceof Error ? error.message : 'Failed to reject invitation'
+              toast.showToast(
+                error instanceof Error ? error.message : 'Failed to reject invitation',
+                'error'
               );
             }
           },

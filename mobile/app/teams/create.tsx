@@ -15,12 +15,13 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ListItem } from '../../components';
+import { useToast } from '../../components/Toast';
 import { useCreateTeam } from '../../hooks/useTeams';
 import { useLeagues } from '../../hooks/useLeagues';
 import { useSeasons } from '../../hooks/useSeasons';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
-import { spacing } from '../../theme';
+import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { useAuthStore } from '../../store/auth-store';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,6 +44,7 @@ export default function CreateTeamScreen() {
     leagueId ? { leagueId, isActive: true } : undefined
   );
   const createTeam = useCreateTeam();
+  const toast = useToast();
 
   // Get seasons for the selected league
   const seasons = useMemo(() => {
@@ -93,16 +95,8 @@ export default function CreateTeamScreen() {
         seasonId,
       });
 
-      Alert.alert(
-        t('common.success'),
-        'Team created successfully',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace(`/teams/${team.id}`),
-          },
-        ]
-      );
+      toast.showToast('Team created successfully', 'success');
+      router.replace(`/teams/${team.id}`);
     } catch (error) {
       Alert.alert(
         t('common.error'),
@@ -358,7 +352,7 @@ const styles = StyleSheet.create({
   },
   selectionList: {
     marginTop: spacing.sm,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     overflow: 'hidden',
   },
@@ -380,7 +374,7 @@ const styles = StyleSheet.create({
   noSeasonsContainer: {
     marginTop: spacing.sm,
     padding: spacing.lg,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     alignItems: 'center',
     gap: spacing.sm,
   },
@@ -389,7 +383,7 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     padding: spacing.md,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     marginBottom: spacing.lg,
     gap: spacing.xs,

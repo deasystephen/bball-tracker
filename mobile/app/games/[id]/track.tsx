@@ -2,10 +2,12 @@
  * Live stat tracking screen
  */
 
-import React, { useEffect, useCallback, useMemo, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import ConfettiCannon from 'react-native-confetti-cannon';
 import { ThemedView, LoadingSpinner, ErrorState } from '../../../components';
 import {
   ScoreDisplay,
@@ -20,6 +22,7 @@ import type { StatType } from '../../../components/game/StatButtons';
 import { useGame, useUpdateGame } from '../../../hooks/useGames';
 import { useGameEvents, useCreateGameEvent, useDeleteGameEvent } from '../../../hooks/useGameEvents';
 import { useGameTrackingStore } from '../../../store/game-tracking-store';
+import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import type { GameEvent, ShotMetadata } from '../../../types/game';
@@ -32,6 +35,10 @@ export default function TrackGameScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
+  // Confetti ref
+  const confettiRef = useRef<ConfettiCannon>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+
   // Game data
   const { data: game, isLoading: gameLoading, error: gameError, refetch: refetchGame } = useGame(id);
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useGameEvents(id, { limit: 100 });
@@ -39,11 +46,15 @@ export default function TrackGameScreen() {
   const deleteEvent = useDeleteGameEvent();
   const updateGame = useUpdateGame();
 
+  const toast = useToast();
+
   // Store
   const {
     selectedPlayerId,
     selectedPlayerName,
     lastEvent,
+    hotPlayers,
+    lastMilestone,
     selectPlayer,
     recordEvent,
     clearLastEvent,
@@ -51,6 +62,14 @@ export default function TrackGameScreen() {
     setUndoTimer,
     clearSession,
   } = useGameTrackingStore();
+
+  // Show milestone toasts
+  useEffect(() => {
+    if (lastMilestone) {
+      toast.showToast(lastMilestone, 'success', 4000);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [lastMilestone]);
 
   // Local opponent score (initialized from game data)
   const [opponentScore, setOpponentScore] = useState<number>(0);
@@ -339,8 +358,19 @@ export default function TrackGameScreen() {
                 awayScore: opponentScore,
               },
             });
-            clearSession();
-            router.replace(`/games/${id}`);
+
+            // Confetti on win
+            if (homeScore > opponentScore) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              setShowConfetti(true);
+              setTimeout(() => {
+                clearSession();
+                router.replace(`/games/${id}`);
+              }, 2000);
+            } else {
+              clearSession();
+              router.replace(`/games/${id}`);
+            }
           } catch (error) {
             Alert.alert(
               'Error',
@@ -451,6 +481,7 @@ export default function TrackGameScreen() {
           players={players}
           selectedPlayerId={selectedPlayerId}
           onSelectPlayer={selectPlayer}
+          hotPlayers={hotPlayers}
         />
 
         {/* Shot Buttons */}
@@ -482,6 +513,17 @@ export default function TrackGameScreen() {
         onUndo={handleUndo}
         duration={UNDO_DURATION}
       />
+
+      {/* Confetti on win */}
+      {showConfetti && (
+        <ConfettiCannon
+          ref={confettiRef}
+          count={200}
+          origin={{ x: -10, y: 0 }}
+          autoStart
+          fadeOut
+        />
+      )}
     </ThemedView>
   );
 }

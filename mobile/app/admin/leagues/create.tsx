@@ -21,6 +21,7 @@ import {
   Input,
   Button,
 } from '../../../components';
+import { useToast } from '../../../components/Toast';
 import { useCreateLeague } from '../../../hooks/useLeagues';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
@@ -36,6 +37,7 @@ export default function CreateLeagueScreen() {
   const [errors, setErrors] = useState<{ name?: string }>({});
 
   const createLeague = useCreateLeague();
+  const toast = useToast();
 
   const validate = (): boolean => {
     const newErrors: { name?: string } = {};
@@ -56,16 +58,8 @@ export default function CreateLeagueScreen() {
         name: name.trim(),
       });
 
-      Alert.alert('Success', 'League created successfully', [
-        {
-          text: 'Add Season',
-          onPress: () => router.replace(`/admin/leagues/${league.id}`),
-        },
-        {
-          text: 'Done',
-          onPress: () => router.back(),
-        },
-      ]);
+      toast.showToast('League created successfully', 'success');
+      router.replace(`/admin/leagues/${league.id}`);
     } catch (error) {
       Alert.alert(
         'Error',

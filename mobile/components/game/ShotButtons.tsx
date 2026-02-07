@@ -3,7 +3,14 @@
  */
 
 import React, { useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
@@ -13,7 +20,73 @@ interface ShotButtonsProps {
   disabled?: boolean;
 }
 
-const BUTTON_HEIGHT = 50;
+const BUTTON_HEIGHT = 60;
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+interface ShotButtonProps {
+  points: 2 | 3;
+  made: boolean;
+  color: string;
+  disabled: boolean;
+  width: number;
+  onPress: (points: 2 | 3, made: boolean) => void;
+}
+
+const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, width, onPress }) => {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withTiming(0.95, { duration: 50 });
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15, stiffness: 300 });
+  };
+
+  const handlePress = () => {
+    if (disabled) return;
+    Haptics.impactAsync(
+      made ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light
+    );
+    onPress(points, made);
+  };
+
+  const label = made ? 'MADE' : 'MISS';
+  const accessibilityLabel = `${points}-point shot ${made ? 'made' : 'missed'}`;
+
+  return (
+    <AnimatedPressable
+      style={[
+        animatedStyle,
+        styles.button,
+        {
+          backgroundColor: disabled ? 'rgba(128,128,128,0.3)' : color,
+          width,
+          height: BUTTON_HEIGHT,
+        },
+      ]}
+      onPress={handlePress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
+    >
+      <ThemedText variant="body" style={styles.pointsText}>
+        {points}PT
+      </ThemedText>
+      <ThemedText variant="caption" style={styles.madeText}>
+        {label}
+      </ThemedText>
+    </AnimatedPressable>
+  );
+};
 
 /**
  * Memoized to prevent re-renders when parent state changes (e.g., score updates).
@@ -35,103 +108,41 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(({
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        {/* 2PT Made */}
-        <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              backgroundColor: disabled
-                ? colors.backgroundSecondary
-                : colors.success,
-              width: buttonWidth,
-              height: BUTTON_HEIGHT,
-            },
-          ]}
-          onPress={() => handlePress(2, true)}
+        <ShotButton
+          points={2}
+          made={true}
+          color={colors.success}
           disabled={disabled}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="2-point shot made"
-          accessibilityState={{ disabled }}
-        >
-          <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
-            2PT MADE
-          </ThemedText>
-        </TouchableOpacity>
-
-        {/* 2PT Miss */}
-        <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              backgroundColor: disabled
-                ? colors.backgroundSecondary
-                : colors.error,
-              width: buttonWidth,
-              height: BUTTON_HEIGHT,
-            },
-          ]}
-          onPress={() => handlePress(2, false)}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+        <ShotButton
+          points={2}
+          made={false}
+          color={colors.error}
           disabled={disabled}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="2-point shot missed"
-          accessibilityState={{ disabled }}
-        >
-          <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
-            2PT MISS
-          </ThemedText>
-        </TouchableOpacity>
+          width={buttonWidth}
+          onPress={handlePress}
+        />
       </View>
 
       <View style={styles.row}>
-        {/* 3PT Made */}
-        <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              backgroundColor: disabled
-                ? colors.backgroundSecondary
-                : colors.success,
-              width: buttonWidth,
-              height: BUTTON_HEIGHT,
-            },
-          ]}
-          onPress={() => handlePress(3, true)}
+        <ShotButton
+          points={3}
+          made={true}
+          color={colors.success}
           disabled={disabled}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="3-point shot made"
-          accessibilityState={{ disabled }}
-        >
-          <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
-            3PT MADE
-          </ThemedText>
-        </TouchableOpacity>
-
-        {/* 3PT Miss */}
-        <TouchableOpacity
-          style={[
-            styles.button,
-            {
-              backgroundColor: disabled
-                ? colors.backgroundSecondary
-                : colors.error,
-              width: buttonWidth,
-              height: BUTTON_HEIGHT,
-            },
-          ]}
-          onPress={() => handlePress(3, false)}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+        <ShotButton
+          points={3}
+          made={false}
+          color={colors.error}
           disabled={disabled}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="3-point shot missed"
-          accessibilityState={{ disabled }}
-        >
-          <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
-            3PT MISS
-          </ThemedText>
-        </TouchableOpacity>
+          width={buttonWidth}
+          onPress={handlePress}
+        />
       </View>
 
       {disabled && (
@@ -157,14 +168,22 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   button: {
-    borderRadius: 12,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonTextWhite: {
+  pointsText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  madeText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.85,
   },
   disabledOverlay: {
     position: 'absolute',
@@ -175,7 +194,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 12,
+    borderRadius: 14,
     margin: spacing.md,
   },
 });

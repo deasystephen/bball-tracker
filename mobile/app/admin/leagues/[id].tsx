@@ -26,7 +26,7 @@ import {
 import { useLeague, useDeleteLeague } from '../../../hooks/useLeagues';
 import { useSeasons, Season } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
 export default function LeagueDetailScreen() {
@@ -260,7 +260,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
-    borderRadius: 20,
+    borderRadius: borderRadius.full,
   },
   listContent: {
     paddingBottom: spacing.xl,
@@ -287,6 +287,6 @@ const styles = StyleSheet.create({
   activeBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: borderRadius.full,
   },
 });

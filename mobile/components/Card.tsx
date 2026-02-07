@@ -7,10 +7,12 @@ import { View, ViewProps, StyleSheet, TouchableOpacity, TouchableOpacityProps } 
 import { ThemedView } from './ThemedView';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
+import { shadows, glow } from '../theme/shadows';
+import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
 
 interface CardProps extends ViewProps {
-  variant?: 'default' | 'elevated';
+  variant?: 'default' | 'elevated' | 'highlighted';
   onPress?: () => void;
   children: React.ReactNode;
 }
@@ -24,23 +26,28 @@ export const Card: React.FC<CardProps> = ({
 }) => {
   const { colors } = useTheme();
   const padding = getResponsiveValue(spacing.md, spacing.lg);
-  const borderRadius = getResponsiveValue(12, 16);
+
+  const getShadow = () => {
+    switch (variant) {
+      case 'elevated':
+        return shadows.lg;
+      case 'highlighted':
+        return glow(colors.live, 0.3);
+      default:
+        return shadows.md;
+    }
+  };
 
   const cardStyle = [
     styles.card,
     {
       backgroundColor: colors.card,
       padding,
-      borderRadius,
-      borderWidth: variant === 'elevated' ? 0 : 1,
-      borderColor: colors.border,
-      // Shadow for elevated variant (iOS)
-      ...(variant === 'elevated' && {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4, // Android
+      borderRadius: borderRadius.lg,
+      ...getShadow(),
+      ...(variant === 'highlighted' && {
+        borderWidth: 2,
+        borderColor: colors.live,
       }),
     },
     style,

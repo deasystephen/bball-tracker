@@ -1,5 +1,5 @@
 /**
- * Team details screen
+ * Team details screen with hero header
  */
 
 import React from 'react';
@@ -24,10 +24,11 @@ import {
 import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
-import { spacing } from '../../theme';
+import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
+import { getTeamColor } from '../../utils/team-colors';
 
 export default function TeamDetailsScreen() {
   const router = useRouter();
@@ -44,9 +45,7 @@ export default function TeamDetailsScreen() {
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam');
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster');
 
-  // Get head coach(es) for display
   const headCoaches = team?.staff?.filter((s) => s.role.type === 'HEAD_COACH') ?? [];
-  const otherStaff = team?.staff?.filter((s) => s.role.type !== 'HEAD_COACH') ?? [];
 
   const handleDelete = () => {
     Alert.alert(
@@ -63,28 +62,16 @@ export default function TeamDetailsScreen() {
               Alert.alert('Success', 'Team deleted successfully', [
                 { text: 'OK', onPress: () => router.replace('/(tabs)/teams') },
               ]);
-            } catch (error) {
+            } catch (err) {
               Alert.alert(
                 'Error',
-                error instanceof Error ? error.message : 'Failed to delete team'
+                err instanceof Error ? err.message : 'Failed to delete team'
               );
             }
           },
         },
       ]
     );
-  };
-
-  const handleEdit = () => {
-    router.push(`/teams/${id}/edit`);
-  };
-
-  const handleManagePlayers = () => {
-    router.push(`/teams/${id}/players`);
-  };
-
-  const handleViewStats = () => {
-    router.push(`/teams/${id}/stats`);
   };
 
   if (isLoading) {
@@ -101,63 +88,84 @@ export default function TeamDetailsScreen() {
   }
 
   const memberCount = team.members?.length || 0;
+  const teamColor = getTeamColor(team.name);
 
   return (
     <ThemedView variant="background" style={styles.container}>
-      {/* Header with back button */}
-      <View
-        style={[
-          styles.topHeader,
-          {
-            paddingTop: insets.top + spacing.md,
-            paddingHorizontal: padding,
-            paddingBottom: spacing.md,
-            borderBottomColor: colors.border,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1} style={styles.headerTitle}>
+      {/* Team Hero Header */}
+      <View style={[styles.heroHeader, { backgroundColor: teamColor, paddingTop: insets.top }]}>
+        <View style={[styles.heroNav, { paddingHorizontal: padding }]}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.heroBackButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          {canManageTeam && (
+            <View style={styles.heroActions}>
+              <TouchableOpacity
+                onPress={() => router.push(`/teams/${id}/edit`)}
+                style={styles.heroIconButton}
+                accessibilityLabel="Edit team"
+              >
+                <Ionicons name="create-outline" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDelete}
+                style={styles.heroIconButton}
+                accessibilityLabel="Delete team"
+              >
+                <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+        <View style={styles.heroContent}>
+          <ThemedText variant="h1" style={styles.heroTeamName}>
             {team.name}
           </ThemedText>
+          {headCoaches.length > 0 && (
+            <ThemedText variant="caption" style={styles.heroCoach}>
+              Coach {headCoaches[0].user.name}
+            </ThemedText>
+          )}
         </View>
-        {canManageTeam && (
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              onPress={handleEdit}
-              style={styles.iconButton}
-              accessibilityRole="button"
-              accessibilityLabel="Edit team"
-            >
-              <Ionicons name="create-outline" size={24} color={colors.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleDelete}
-              style={styles.iconButton}
-              accessibilityRole="button"
-              accessibilityLabel="Delete team"
-            >
-              <Ionicons name="trash-outline" size={24} color={colors.error} />
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
 
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { padding, paddingBottom: insets.bottom + spacing.xl },
+          { paddingHorizontal: padding, paddingBottom: insets.bottom + spacing.xl },
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Stats Quick View Row */}
+        <View style={styles.statsQuickRow}>
+          <TouchableOpacity
+            style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}
+            onPress={() => router.push(`/teams/${id}/stats`)}
+          >
+            <ThemedText variant="h3">{memberCount}</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">Players</ThemedText>
+          </TouchableOpacity>
+          <View style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}>
+            <ThemedText variant="h3" color="primary">--</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">PPG</ThemedText>
+          </View>
+          <View style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}>
+            <ThemedText variant="h3" color="primary">--</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">RPG</ThemedText>
+          </View>
+        </View>
+
+        <Button
+          title="View Team Stats"
+          onPress={() => router.push(`/teams/${id}/stats`)}
+          variant="outline"
+          style={styles.statsButton}
+        />
 
         {/* Season/League Info */}
         {team.season && (
@@ -180,59 +188,7 @@ export default function TeamDetailsScreen() {
           </Card>
         )}
 
-        {/* Team Stats Button */}
-        <Button
-          title="View Team Stats"
-          onPress={handleViewStats}
-          variant="outline"
-          style={styles.statsButton}
-        />
-
-        {/* Head Coach Info */}
-        {headCoaches.length > 0 && (
-          <Card variant="elevated" style={styles.card}>
-            <View style={styles.infoRow}>
-              <Ionicons name="person-outline" size={20} color={colors.primary} />
-              <View style={styles.infoContent}>
-                <ThemedText variant="caption" color="textSecondary">
-                  {headCoaches.length === 1 ? 'Head Coach' : 'Head Coaches'}
-                </ThemedText>
-                {headCoaches.map((coach) => (
-                  <View key={coach.id} style={styles.staffMember}>
-                    <ThemedText variant="bodyBold">{coach.user.name}</ThemedText>
-                    <ThemedText variant="caption" color="textTertiary">
-                      {coach.user.email}
-                    </ThemedText>
-                  </View>
-                ))}
-              </View>
-            </View>
-          </Card>
-        )}
-
-        {/* Other Staff */}
-        {otherStaff.length > 0 && (
-          <Card variant="elevated" style={styles.card}>
-            <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={20} color={colors.primary} />
-              <View style={styles.infoContent}>
-                <ThemedText variant="caption" color="textSecondary">
-                  Staff
-                </ThemedText>
-                {otherStaff.map((staff) => (
-                  <View key={staff.id} style={styles.staffMember}>
-                    <ThemedText variant="bodyBold">{staff.user.name}</ThemedText>
-                    <ThemedText variant="caption" color="textTertiary">
-                      {staff.role.name}
-                    </ThemedText>
-                  </View>
-                ))}
-              </View>
-            </View>
-          </Card>
-        )}
-
-        {/* Players Section */}
+        {/* Roster - 2 column grid */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <ThemedText variant="h3">{t('teams.players')}</ThemedText>
@@ -244,33 +200,36 @@ export default function TeamDetailsScreen() {
           {canManageRoster && (
             <Button
               title={t('teams.addPlayer')}
-              onPress={handleManagePlayers}
+              onPress={() => router.push(`/teams/${id}/players`)}
               variant="primary"
               style={styles.addButton}
             />
           )}
 
           {team.members && team.members.length > 0 ? (
-            <Card variant="default" style={styles.playersCard}>
+            <View style={styles.rosterGrid}>
               {team.members.map((member) => (
-                <ListItem
+                <TouchableOpacity
                   key={member.id}
-                  title={member.player.name}
-                  subtitle={
-                    [
-                      member.jerseyNumber && `#${member.jerseyNumber}`,
-                      member.position,
-                    ]
-                      .filter(Boolean)
-                      .join(' - ') || member.player.email
-                  }
+                  style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
                   onPress={() => router.push(`/teams/${id}/players/${member.playerId}`)}
-                  rightElement={
-                    <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
-                  }
-                />
+                >
+                  <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>
+                    <ThemedText variant="h3" style={{ color: teamColor }}>
+                      {member.jerseyNumber || '-'}
+                    </ThemedText>
+                  </View>
+                  <ThemedText variant="captionBold" numberOfLines={1}>
+                    {member.player.name}
+                  </ThemedText>
+                  {member.position && (
+                    <ThemedText variant="footnote" color="textSecondary">
+                      {member.position}
+                    </ThemedText>
+                  )}
+                </TouchableOpacity>
               ))}
-            </Card>
+            </View>
           ) : (
             <Card variant="default" style={styles.emptyCard}>
               <ThemedText variant="body" color="textTertiary" style={styles.emptyText}>
@@ -279,7 +238,7 @@ export default function TeamDetailsScreen() {
               {canManageRoster && (
                 <Button
                   title={t('teams.addPlayer')}
-                  onPress={handleManagePlayers}
+                  onPress={() => router.push(`/teams/${id}/players`)}
                   variant="outline"
                   size="small"
                   style={styles.emptyButton}
@@ -294,75 +253,61 @@ export default function TeamDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  topHeader: {
+  container: { flex: 1 },
+  heroHeader: { height: 200, justifyContent: 'space-between' },
+  heroNav: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.sm,
   },
-  backButton: {
-    padding: spacing.sm,
-    marginRight: spacing.sm,
-    marginLeft: -spacing.xs,
-  },
-  headerContent: {
+  heroBackButton: { padding: spacing.sm },
+  heroActions: { flexDirection: 'row', gap: spacing.md },
+  heroIconButton: { padding: spacing.xs },
+  heroContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
+  heroTeamName: { color: '#FFFFFF', fontSize: 28 },
+  heroCoach: { color: 'rgba(255,255,255,0.8)', marginTop: spacing.xxs },
+  scrollContent: { paddingTop: spacing.lg },
+  statsQuickRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  quickStatCard: {
     flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
   },
-  headerTitle: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingTop: spacing.lg,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  iconButton: {
-    padding: spacing.xs,
-  },
-  card: {
-    marginBottom: spacing.md,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  staffMember: {
-    marginTop: spacing.xs,
-  },
-  section: {
-    marginTop: spacing.lg,
-  },
+  statsButton: { marginBottom: spacing.md },
+  card: { marginBottom: spacing.md },
+  infoRow: { flexDirection: 'row', gap: spacing.md },
+  infoContent: { flex: 1 },
+  section: { marginTop: spacing.lg },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  addButton: {
-    marginBottom: spacing.md,
+  addButton: { marginBottom: spacing.md },
+  rosterGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
-  playersCard: {
-    marginTop: spacing.sm,
-  },
-  emptyCard: {
-    padding: spacing.xl,
+  rosterCard: {
+    width: '48%',
     alignItems: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    gap: spacing.xxs,
   },
-  emptyText: {
-    marginBottom: spacing.md,
-    textAlign: 'center',
+  jerseyBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
   },
-  emptyButton: {
-    marginTop: spacing.sm,
-  },
-  statsButton: {
-    marginBottom: spacing.md,
-  },
+  emptyCard: { padding: spacing.xl, alignItems: 'center' },
+  emptyText: { marginBottom: spacing.md, textAlign: 'center' },
+  emptyButton: { marginTop: spacing.sm },
 });

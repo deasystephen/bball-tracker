@@ -2,12 +2,21 @@
  * Live score display header for game tracking
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withRepeat,
+} from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
-import { spacing } from '../../theme';
+import { spacing, typography } from '../../theme';
+import type { ColorScheme } from '../../theme/colors';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -28,10 +37,56 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
   onEndGame,
   showEndButton = true,
 }) => {
-  const { colors } = useTheme();
+  const { colors, colorScheme } = useTheme();
+
+  const gradientColors = colorScheme === 'dark'
+    ? ['#0D1117', '#161B22'] as const
+    : ['#1A3A5C', '#0F2540'] as const;
+
+  // Score pop animation
+  const homeScoreScale = useSharedValue(1);
+  const awayScoreScale = useSharedValue(1);
+
+  useEffect(() => {
+    homeScoreScale.value = withTiming(1.15, { duration: 120 }, () => {
+      homeScoreScale.value = withSpring(1, { damping: 12, stiffness: 200 });
+    });
+  }, [homeScore]);
+
+  useEffect(() => {
+    awayScoreScale.value = withTiming(1.15, { duration: 120 }, () => {
+      awayScoreScale.value = withSpring(1, { damping: 12, stiffness: 200 });
+    });
+  }, [awayScore]);
+
+  // Live dot pulse
+  const liveDotOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    liveDotOpacity.value = withRepeat(
+      withTiming(0.3, { duration: 1500 }),
+      -1,
+      true
+    );
+  }, []);
+
+  const homeScoreAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: homeScoreScale.value }],
+  }));
+
+  const awayScoreAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: awayScoreScale.value }],
+  }));
+
+  const liveDotAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: liveDotOpacity.value,
+  }));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.card }]}>
+    <LinearGradient
+      colors={gradientColors}
+      style={styles.container}
+    >
       <View style={styles.topRow}>
         {onBack && (
           <TouchableOpacity
@@ -40,12 +95,12 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         )}
         <View style={styles.titleContainer}>
           <View style={[styles.liveBadge, { backgroundColor: colors.success }]}>
-            <View style={styles.liveDot} />
+            <Animated.View style={[styles.liveDot, liveDotAnimatedStyle]} />
             <ThemedText variant="caption" style={styles.liveText}>
               LIVE
             </ThemedText>
@@ -77,38 +132,38 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
         <View style={styles.teamScore}>
           <ThemedText
             variant="caption"
-            color="textSecondary"
             numberOfLines={1}
             style={styles.teamName}
           >
             {homeTeamName}
           </ThemedText>
-          <ThemedText variant="h1" style={styles.score}>
-            {homeScore}
-          </ThemedText>
+          <Animated.View style={homeScoreAnimatedStyle}>
+            <ThemedText variant="body" style={styles.score}>
+              {homeScore}
+            </ThemedText>
+          </Animated.View>
         </View>
 
         <View style={styles.divider}>
-          <ThemedText variant="h3" color="textTertiary">
-            -
-          </ThemedText>
+          <View style={styles.verticalLine} />
         </View>
 
         <View style={[styles.teamScore, styles.awayTeam]}>
           <ThemedText
             variant="caption"
-            color="textSecondary"
             numberOfLines={1}
             style={styles.teamName}
           >
             {awayTeamName}
           </ThemedText>
-          <ThemedText variant="h1" style={styles.score}>
-            {awayScore}
-          </ThemedText>
+          <Animated.View style={awayScoreAnimatedStyle}>
+            <ThemedText variant="body" style={styles.score}>
+              {awayScore}
+            </ThemedText>
+          </Animated.View>
         </View>
       </View>
-    </View>
+    </LinearGradient>
   );
 };
 
@@ -178,13 +233,23 @@ const styles = StyleSheet.create({
   teamName: {
     textAlign: 'center',
     marginBottom: spacing.xs,
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
   },
   score: {
-    fontSize: 48,
-    fontWeight: '700',
+    ...typography.displaySmall,
+    color: '#FFFFFF',
     lineHeight: 56,
   },
   divider: {
     paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verticalLine: {
+    width: 1,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
 });

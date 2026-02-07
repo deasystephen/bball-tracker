@@ -14,6 +14,7 @@ import { useTheme } from '../hooks/useTheme';
 
 interface EmptyStateProps {
   icon?: keyof typeof Ionicons.glyphMap;
+  illustration?: React.ReactNode;
   title: string;
   message?: string;
   actionLabel?: string;
@@ -22,6 +23,7 @@ interface EmptyStateProps {
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
   icon = 'document-outline',
+  illustration,
   title,
   message,
   actionLabel,
@@ -36,7 +38,11 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       style={styles.container}
       accessibilityLabel={`${title}${message ? `. ${message}` : ''}`}
     >
-      <Ionicons name={icon} size={iconSize} color={colors.textTertiary} />
+      {illustration ? (
+        <View style={styles.illustration}>{illustration}</View>
+      ) : (
+        <Ionicons name={icon} size={iconSize} color={colors.textTertiary} />
+      )}
       <ThemedText variant="h3" color="textSecondary" style={styles.title}>
         {title}
       </ThemedText>
@@ -67,7 +73,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.xl,
-    minHeight: 300, // Ensure it has enough space even when not full screen
+    minHeight: 300,
+  },
+  illustration: {
+    marginBottom: spacing.xs,
   },
   title: {
     marginTop: spacing.lg,

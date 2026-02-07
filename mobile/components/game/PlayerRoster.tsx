@@ -2,8 +2,16 @@
  * Wrapping player selector grid for stat tracking
  */
 
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, StyleSheet, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  useAnimatedStyle,
+  withTiming,
+  interpolateColor,
+  useDerivedValue,
+} from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
@@ -23,6 +31,7 @@ interface PlayerRosterProps {
   players: Player[];
   selectedPlayerId: string | null;
   onSelectPlayer: (playerId: string, playerName: string) => void;
+  hotPlayers?: Record<string, number>;
 }
 
 const getInitials = (name: string): string => {
@@ -34,6 +43,93 @@ const getInitials = (name: string): string => {
     .slice(0, 2);
 };
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+interface PlayerChipProps {
+  member: Player;
+  isSelected: boolean;
+  isHot: boolean;
+  colors: ReturnType<typeof useTheme>['colors'];
+  onPress: () => void;
+}
+
+const PlayerChip: React.FC<PlayerChipProps> = ({
+  member,
+  isSelected,
+  isHot,
+  colors,
+  onPress,
+}) => {
+  const selectionProgress = useDerivedValue(() => {
+    return withTiming(isSelected ? 1 : 0, { duration: 200 });
+  }, [isSelected]);
+
+  const animatedChipStyle = useAnimatedStyle(() => {
+    const backgroundColor = interpolateColor(
+      selectionProgress.value,
+      [0, 1],
+      [colors.backgroundSecondary, colors.primary]
+    );
+    const borderColor = interpolateColor(
+      selectionProgress.value,
+      [0, 1],
+      [colors.border, colors.primary]
+    );
+    return { backgroundColor, borderColor };
+  });
+
+  const handlePress = () => {
+    Haptics.selectionAsync();
+    onPress();
+  };
+
+  return (
+    <AnimatedPressable
+      onPress={handlePress}
+      style={[styles.playerChip, animatedChipStyle]}
+      accessibilityRole="button"
+      accessibilityLabel={`${member.player.name}${member.jerseyNumber ? `, number ${member.jerseyNumber}` : ''}`}
+      accessibilityState={{ selected: isSelected }}
+    >
+      <View
+        style={[
+          styles.avatar,
+          {
+            backgroundColor: isSelected
+              ? 'rgba(255,255,255,0.2)'
+              : colors.primary + '20',
+          },
+        ]}
+      >
+        <ThemedText
+          variant="caption"
+          style={[
+            styles.initials,
+            { color: isSelected ? '#FFFFFF' : colors.primary },
+          ]}
+        >
+          {member.jerseyNumber
+            ? `#${member.jerseyNumber}`
+            : getInitials(member.player.name)}
+        </ThemedText>
+      </View>
+      <ThemedText
+        variant="caption"
+        numberOfLines={1}
+        style={[
+          styles.playerName,
+          { color: isSelected ? '#FFFFFF' : colors.text },
+        ]}
+      >
+        {member.player.name.split(' ')[0]}
+      </ThemedText>
+      {isHot && (
+        <Ionicons name="flame" size={14} color="#FF6B35" />
+      )}
+    </AnimatedPressable>
+  );
+};
+
 /**
  * Memoized to prevent unnecessary re-renders when parent re-renders
  * (e.g., during score updates on the tracking screen).
@@ -42,6 +138,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(({
   players,
   selectedPlayerId,
   onSelectPlayer,
+  hotPlayers = {},
 }) => {
   const { colors } = useTheme();
 
@@ -72,59 +169,16 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(({
       <View style={styles.grid}>
         {players.map((member) => {
           const isSelected = selectedPlayerId === member.playerId;
+          const isHot = (hotPlayers[member.playerId] || 0) >= 3;
           return (
-            <TouchableOpacity
+            <PlayerChip
               key={member.id}
-              onPress={() =>
-                onSelectPlayer(member.playerId, member.player.name)
-              }
-              style={[
-                styles.playerChip,
-                {
-                  backgroundColor: isSelected
-                    ? colors.primary
-                    : colors.backgroundSecondary,
-                  borderColor: isSelected ? colors.primary : colors.border,
-                },
-              ]}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`${member.player.name}${member.jerseyNumber ? `, number ${member.jerseyNumber}` : ''}`}
-              accessibilityState={{ selected: isSelected }}
-            >
-              <View
-                style={[
-                  styles.avatar,
-                  {
-                    backgroundColor: isSelected
-                      ? 'rgba(255,255,255,0.2)'
-                      : colors.primary + '20',
-                  },
-                ]}
-              >
-                <ThemedText
-                  variant="caption"
-                  style={[
-                    styles.initials,
-                    { color: isSelected ? '#FFFFFF' : colors.primary },
-                  ]}
-                >
-                  {member.jerseyNumber
-                    ? `#${member.jerseyNumber}`
-                    : getInitials(member.player.name)}
-                </ThemedText>
-              </View>
-              <ThemedText
-                variant="caption"
-                numberOfLines={1}
-                style={[
-                  styles.playerName,
-                  { color: isSelected ? '#FFFFFF' : colors.text },
-                ]}
-              >
-                {member.player.name.split(' ')[0]}
-              </ThemedText>
-            </TouchableOpacity>
+              member={member}
+              isSelected={isSelected}
+              isHot={isHot}
+              colors={colors}
+              onPress={() => onSelectPlayer(member.playerId, member.player.name)}
+            />
           );
         })}
       </View>

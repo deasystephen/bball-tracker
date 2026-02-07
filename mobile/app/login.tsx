@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
 import { useTheme } from '../hooks/useTheme';
+import { spacing } from '../theme';
+import { borderRadius } from '../theme/border-radius';
+import { typography } from '../theme/typography';
 
 interface DevUser {
   id: string;
@@ -28,7 +32,7 @@ export default function Login() {
     const handleDeepLink = async (event: { url: string }) => {
       const { url } = event;
       const parsed = Linking.parse(url);
-      
+
       // Check if this is an auth callback
       if (parsed.path === 'auth/callback' || parsed.queryParams?.code) {
         const code = parsed.queryParams?.code as string;
@@ -49,11 +53,11 @@ export default function Login() {
             });
 
             const { accessToken, user } = response.data;
-            
+
             // Store token and user
             setAuthToken(accessToken);
             setUser(user);
-            
+
             // Navigate to home
             router.replace('/(tabs)/home');
           } catch (error) {
@@ -145,50 +149,64 @@ export default function Login() {
     }
   };
 
+  const { colors } = useTheme();
+
   const renderDevUser = ({ item }: { item: DevUser }) => (
     <TouchableOpacity
-      style={styles.devUserItem}
+      style={[styles.devUserItem, { backgroundColor: colors.backgroundTertiary }]}
       onPress={() => handleDevLogin(item.email)}
     >
-      <Text style={styles.devUserName}>{item.name}</Text>
-      <Text style={styles.devUserEmail}>{item.email}</Text>
-      <Text style={styles.devUserRole}>{item.role}</Text>
+      <Text style={[styles.devUserName, { color: colors.text }]}>{item.name}</Text>
+      <Text style={[styles.devUserEmail, { color: colors.textSecondary }]}>{item.email}</Text>
+      <Text style={[styles.devUserRole, { color: colors.accent }]}>{item.role}</Text>
     </TouchableOpacity>
   );
 
-  const { colors } = useTheme();
-
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.title, { color: colors.text }]}>Basketball Tracker</Text>
-      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in to continue</Text>
+    <LinearGradient
+      colors={[colors.primary, colors.primaryDark]}
+      style={styles.container}
+    >
+      <Text style={styles.title}>Basketball Tracker</Text>
+      <Text style={styles.subtitle}>Sign in to continue</Text>
 
-      <TouchableOpacity
-        style={[styles.button, { backgroundColor: colors.primary }, isLoading && styles.buttonDisabled]}
-        onPress={handleLogin}
-        disabled={isLoading}
-        accessibilityRole="button"
-        accessibilityLabel="Sign in"
-        accessibilityState={{ disabled: isLoading }}
-      >
-        {isLoading ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
-        ) : (
-          <Text style={styles.buttonText}>Sign In</Text>
-        )}
-      </TouchableOpacity>
+      {isLoading ? (
+        <ActivityIndicator color="#FFFFFF" size="large" style={styles.loader} />
+      ) : (
+        <>
+          <TouchableOpacity
+            onPress={handleLogin}
+            disabled={isLoading}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
+            accessibilityState={{ disabled: isLoading }}
+            style={styles.signInTouchable}
+          >
+            <LinearGradient
+              colors={[colors.accent, colors.accentDark]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.signInButton}
+            >
+              <Text style={styles.signInButtonText}>Sign In</Text>
+            </LinearGradient>
+          </TouchableOpacity>
 
-      {/* Dev login button - only in development */}
-      {__DEV__ && (
-        <TouchableOpacity
-          style={[styles.devButton, isLoading && styles.buttonDisabled]}
-          onPress={handleOpenDevLogin}
-          disabled={isLoading}
-          accessibilityRole="button"
-          accessibilityLabel="Developer login with test users"
-        >
-          <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
-        </TouchableOpacity>
+          {/* Dev login button - only in development */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={styles.devButton}
+              onPress={handleOpenDevLogin}
+              disabled={isLoading}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Developer login with test users"
+            >
+              <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
       {/* Dev user selection modal */}
@@ -217,7 +235,7 @@ export default function Login() {
           />
         </View>
       </Modal>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -226,53 +244,58 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: spacing.xl,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    ...typography.display,
+    color: '#FFFFFF',
+    marginBottom: spacing.sm,
+    textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
-    marginBottom: 40,
+    ...typography.body,
+    color: 'rgba(255,255,255,0.6)',
+    marginBottom: spacing.xxl,
+    textAlign: 'center',
   },
-  button: {
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 8,
-    minWidth: 200,
-    minHeight: 48,
+  loader: {
+    marginTop: spacing.lg,
+  },
+  signInTouchable: {
+    width: '100%',
+  },
+  signInButton: {
+    paddingVertical: 16,
+    paddingHorizontal: spacing.xl,
+    borderRadius: 14,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
+  signInButtonText: {
+    ...typography.bodyBold,
+    color: '#FFFFFF',
+    fontSize: 17,
+    letterSpacing: 0.3,
   },
   devButton: {
-    marginTop: 20,
-    paddingHorizontal: 32,
+    marginTop: spacing.lg,
     paddingVertical: 14,
-    borderRadius: 8,
+    paddingHorizontal: spacing.xl,
+    borderRadius: borderRadius.md,
     minWidth: 200,
     minHeight: 48,
     borderWidth: 1,
-    borderColor: '#FF9500',
-    backgroundColor: '#FFF9F0',
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
   },
   devButtonText: {
-    color: '#FF9500',
+    ...typography.captionBold,
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   modalContainer: {
     flex: 1,
@@ -281,41 +304,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: spacing.md,
     borderBottomWidth: 1,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h3,
   },
   modalClose: {
-    fontSize: 16,
-    padding: 8,
+    ...typography.body,
+    padding: spacing.sm,
   },
   devUserList: {
-    padding: 16,
+    padding: spacing.md,
   },
   devUserItem: {
-    padding: 16,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
-    marginBottom: 12,
+    padding: spacing.md,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.sm,
     minHeight: 48,
   },
   devUserName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 4,
+    ...typography.bodyBold,
+    marginBottom: spacing.xxs,
   },
   devUserEmail: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
+    ...typography.caption,
+    marginBottom: spacing.xxs,
   },
   devUserRole: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '500',
+    ...typography.footnoteBold,
   },
 });

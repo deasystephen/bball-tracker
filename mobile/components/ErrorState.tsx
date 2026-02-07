@@ -8,6 +8,8 @@ import { ThemedText } from './ThemedText';
 import { ThemedView } from './ThemedView';
 import { Button } from './Button';
 import { spacing } from '../theme';
+import { shadows } from '../theme/shadows';
+import { borderRadius } from '../theme/border-radius';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { getResponsiveValue } from '../utils/responsive';
@@ -35,7 +37,9 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
       accessibilityRole="alert"
       accessibilityLabel={`Error: ${title}. ${message}`}
     >
-      <Ionicons name="alert-circle-outline" size={iconSize} color={colors.error} />
+      <View style={[styles.iconContainer, { backgroundColor: colors.liveBackground, ...shadows.sm }]}>
+        <Ionicons name="alert-circle-outline" size={iconSize} color={colors.error} />
+      </View>
       <ThemedText variant="h3" color="error" style={styles.title}>
         {title}
       </ThemedText>
@@ -62,6 +66,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.xl,
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     marginTop: spacing.md,

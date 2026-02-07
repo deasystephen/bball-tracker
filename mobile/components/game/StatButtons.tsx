@@ -2,9 +2,16 @@
  * Additional stat buttons for rebounds, steals, blocks, assists
  */
 
-import React, { useMemo } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useMemo, useCallback } from 'react';
+import { View, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSequence,
+} from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
@@ -23,6 +30,91 @@ interface StatButtonConfig {
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
 }
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+interface StatButtonItemProps {
+  stat: StatButtonConfig;
+  disabled: boolean;
+  bgColor: string;
+  borderColor: string;
+  textColor: string;
+  onPress: () => void;
+}
+
+const StatButtonItem: React.FC<StatButtonItemProps> = ({
+  stat,
+  disabled,
+  bgColor,
+  borderColor,
+  textColor,
+  onPress,
+}) => {
+  const bgOpacity = useSharedValue(0);
+  const iconScale = useSharedValue(1);
+
+  const animatedBgStyle = useAnimatedStyle(() => ({
+    backgroundColor: bgColor,
+    opacity: 1 - bgOpacity.value * 0.7,
+  }));
+
+  const iconAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: iconScale.value }],
+  }));
+
+  const handlePress = () => {
+    if (disabled) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Color pulse: briefly fill then fade
+    bgOpacity.value = withSequence(
+      withTiming(1, { duration: 100 }),
+      withTiming(0, { duration: 300 })
+    );
+
+    // Icon scale pulse
+    iconScale.value = withSequence(
+      withTiming(1.2, { duration: 100 }),
+      withTiming(1, { duration: 200 })
+    );
+
+    onPress();
+  };
+
+  return (
+    <AnimatedPressable
+      style={[
+        styles.button,
+        {
+          borderColor,
+        },
+        animatedBgStyle,
+      ]}
+      onPress={handlePress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`Record ${stat.label}`}
+      accessibilityState={{ disabled }}
+    >
+      <Animated.View style={iconAnimatedStyle}>
+        <Ionicons
+          name={stat.icon}
+          size={20}
+          color={textColor}
+        />
+      </Animated.View>
+      <ThemedText
+        variant="captionBold"
+        style={[
+          styles.buttonText,
+          { color: textColor },
+        ]}
+      >
+        {stat.shortLabel}
+      </ThemedText>
+    </AnimatedPressable>
+  );
+};
 
 /**
  * Memoized to prevent re-renders during score updates on tracking screen.
@@ -48,37 +140,15 @@ export const StatButtons: React.FC<StatButtonsProps> = React.memo(({
       </ThemedText>
       <View style={styles.buttonGrid}>
         {stats.map((stat) => (
-          <TouchableOpacity
+          <StatButtonItem
             key={stat.type}
-            style={[
-              styles.button,
-              {
-                backgroundColor: disabled ? colors.backgroundSecondary : stat.color + '15',
-                borderColor: disabled ? colors.border : stat.color,
-              },
-            ]}
-            onPress={() => onStat(stat.type)}
+            stat={stat}
             disabled={disabled}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={`Record ${stat.label}`}
-            accessibilityState={{ disabled }}
-          >
-            <Ionicons
-              name={stat.icon}
-              size={20}
-              color={disabled ? colors.textTertiary : stat.color}
-            />
-            <ThemedText
-              variant="captionBold"
-              style={[
-                styles.buttonText,
-                { color: disabled ? colors.textTertiary : stat.color },
-              ]}
-            >
-              {stat.shortLabel}
-            </ThemedText>
-          </TouchableOpacity>
+            bgColor={disabled ? colors.backgroundSecondary : stat.color + '15'}
+            borderColor={disabled ? colors.border : stat.color}
+            textColor={disabled ? colors.textTertiary : stat.color}
+            onPress={() => onStat(stat.type)}
+          />
         ))}
       </View>
       {disabled && (

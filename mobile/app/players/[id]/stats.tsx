@@ -23,7 +23,7 @@ import { SeasonAverages, PlayerStatsCard } from '../../../components/stats';
 import { PrintButton } from '../../../components/PrintButton';
 import { usePlayerOverallStats } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 
 export default function PlayerStatsScreen() {
@@ -89,11 +89,11 @@ export default function PlayerStatsScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Player Header */}
-        <Card variant="elevated" style={styles.playerHeader}>
-          <View style={styles.avatarContainer}>
-            <View style={[styles.avatar, { backgroundColor: colors.primary + '20' }]}>
-              <ThemedText variant="h1" color="primary">
+        {/* Player Hero Header */}
+        <View style={[styles.playerHero, { backgroundColor: colors.primary }]}>
+          <View style={styles.avatarRing}>
+            <View style={styles.avatar}>
+              <ThemedText variant="h1" style={styles.avatarText}>
                 {player.name.charAt(0).toUpperCase()}
               </ThemedText>
             </View>
@@ -101,10 +101,21 @@ export default function PlayerStatsScreen() {
           <ThemedText variant="h2" style={styles.playerName}>
             {player.name}
           </ThemedText>
-          <ThemedText variant="caption" color="textSecondary">
-            {teams.length} team{teams.length !== 1 ? 's' : ''} | {careerTotals.gamesPlayed} games
-          </ThemedText>
-        </Card>
+          <View style={styles.heroChips}>
+            <View style={styles.heroChip}>
+              <Ionicons name="people-outline" size={12} color="rgba(255,255,255,0.9)" />
+              <ThemedText variant="caption" style={styles.heroChipText}>
+                {teams.length} team{teams.length !== 1 ? 's' : ''}
+              </ThemedText>
+            </View>
+            <View style={styles.heroChip}>
+              <Ionicons name="basketball-outline" size={12} color="rgba(255,255,255,0.9)" />
+              <ThemedText variant="caption" style={styles.heroChipText}>
+                {careerTotals.gamesPlayed} games
+              </ThemedText>
+            </View>
+          </View>
+        </View>
 
         {/* Career Totals */}
         {careerTotals.gamesPlayed > 0 && (
@@ -253,23 +264,54 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: spacing.lg,
   },
-  playerHeader: {
+  playerHero: {
     alignItems: 'center',
+    paddingVertical: spacing.xl,
+    borderRadius: borderRadius.lg,
     marginBottom: spacing.lg,
   },
-  avatarContainer: {
+  avatarRing: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.md,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
   playerName: {
-    marginBottom: spacing.xs,
+    color: '#FFFFFF',
+    marginBottom: spacing.sm,
     textAlign: 'center',
+  },
+  heroChips: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  heroChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+  },
+  heroChipText: {
+    color: 'rgba(255,255,255,0.9)',
   },
   section: {
     marginBottom: spacing.xl,

@@ -37,6 +37,102 @@ const formatDate = (dateString: string): string => {
   });
 };
 
+interface ComparisonBarProps {
+  label: string;
+  homeValue: number;
+  awayValue: number;
+  colors: ReturnType<typeof useTheme>['colors'];
+  isPercentage?: boolean;
+}
+
+const ComparisonBar: React.FC<ComparisonBarProps> = ({
+  label,
+  homeValue,
+  awayValue,
+  colors,
+  isPercentage = false,
+}) => {
+  const total = homeValue + awayValue;
+  const homePct = total > 0 ? homeValue / total : 0.5;
+  const awayPct = total > 0 ? awayValue / total : 0.5;
+  const displayHome = isPercentage ? `${homeValue.toFixed(1)}%` : String(homeValue);
+  const displayAway = isPercentage ? `${awayValue.toFixed(1)}%` : String(awayValue);
+
+  return (
+    <View style={compStyles.row}>
+      <ThemedText variant="captionBold" style={compStyles.value}>
+        {displayHome}
+      </ThemedText>
+      <View style={compStyles.barContainer}>
+        <View
+          style={[
+            compStyles.barLeft,
+            {
+              flex: homePct,
+              backgroundColor: colors.primary,
+            },
+          ]}
+        />
+        <View style={compStyles.barGap} />
+        <View
+          style={[
+            compStyles.barRight,
+            {
+              flex: awayPct,
+              backgroundColor: colors.error,
+            },
+          ]}
+        />
+      </View>
+      <ThemedText variant="captionBold" style={compStyles.value}>
+        {displayAway}
+      </ThemedText>
+      <ThemedText
+        variant="caption"
+        color="textSecondary"
+        style={compStyles.label}
+      >
+        {label}
+      </ThemedText>
+    </View>
+  );
+};
+
+const compStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  value: {
+    width: 44,
+    textAlign: 'center',
+  },
+  barContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  barLeft: {
+    borderTopLeftRadius: 4,
+    borderBottomLeftRadius: 4,
+  },
+  barGap: {
+    width: 2,
+  },
+  barRight: {
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
+  },
+  label: {
+    width: 36,
+    textAlign: 'center',
+  },
+});
+
 export default function GameStatsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -144,6 +240,61 @@ export default function GameStatsScreen() {
           </ThemedText>
         </Card>
 
+        {/* Team Comparison Bars */}
+        <View style={styles.section}>
+          <ThemedText variant="h3" style={styles.sectionTitle}>
+            Team Comparison
+          </ThemedText>
+          <Card variant="default" style={styles.comparisonCard}>
+            <View style={styles.comparisonLegend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
+                <ThemedText variant="caption" color="textSecondary">
+                  {boxScore.team.name}
+                </ThemedText>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.error }]} />
+                <ThemedText variant="caption" color="textSecondary">
+                  {boxScore.game.opponent}
+                </ThemedText>
+              </View>
+            </View>
+            <ComparisonBar
+              label="PTS"
+              homeValue={boxScore.team.stats.points}
+              awayValue={boxScore.game.awayScore}
+              colors={colors}
+            />
+            <ComparisonBar
+              label="REB"
+              homeValue={boxScore.team.stats.rebounds}
+              awayValue={0}
+              colors={colors}
+            />
+            <ComparisonBar
+              label="AST"
+              homeValue={boxScore.team.stats.assists}
+              awayValue={0}
+              colors={colors}
+            />
+            <ComparisonBar
+              label="FG%"
+              homeValue={boxScore.team.stats.fieldGoalPercentage}
+              awayValue={0}
+              colors={colors}
+              isPercentage
+            />
+            <ComparisonBar
+              label="3P%"
+              homeValue={boxScore.team.stats.threePointPercentage}
+              awayValue={0}
+              colors={colors}
+              isPercentage
+            />
+          </Card>
+        </View>
+
         {/* Team Stats Summary */}
         <View style={styles.section}>
           <ThemedText variant="h3" style={styles.sectionTitle}>
@@ -164,7 +315,7 @@ export default function GameStatsScreen() {
                 <ThemedText variant="caption" color="textSecondary">Assists</ThemedText>
               </View>
             </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.teamStatsRow}>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="bodyBold">
@@ -293,6 +444,25 @@ const styles = StyleSheet.create({
   sectionTitle: {
     marginBottom: spacing.md,
   },
+  comparisonCard: {
+    padding: spacing.lg,
+  },
+  comparisonLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   teamStatsCard: {
     padding: spacing.lg,
   },
@@ -304,7 +474,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  divider: {
+  statDivider: {
     height: StyleSheet.hairlineWidth,
     marginVertical: spacing.md,
   },

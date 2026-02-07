@@ -23,7 +23,7 @@ import {
 } from '../../components';
 import { useLeagues, League } from '../../hooks/useLeagues';
 import { useTheme } from '../../hooks/useTheme';
-import { spacing } from '../../theme';
+import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 
 export default function AdminDashboard() {
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
   addButton: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -226,6 +226,6 @@ const styles = StyleSheet.create({
   seasonChip: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    borderRadius: 12,
+    borderRadius: borderRadius.full,
   },
 });

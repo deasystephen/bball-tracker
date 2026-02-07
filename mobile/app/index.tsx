@@ -1,7 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/auth-store';
+
+const ONBOARDED_KEY = 'hasOnboarded';
 
 /**
  * Root index screen - handles initial routing based on auth state
@@ -11,10 +14,20 @@ export default function Index() {
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuthStore();
   const hasNavigated = useRef(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [hasOnboarded, setHasOnboarded] = useState(false);
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDED_KEY).then((value) => {
+      setHasOnboarded(value === 'true');
+      setOnboardingChecked(true);
+    });
+  }, []);
 
   useEffect(() => {
-    // Prevent multiple navigations
-    if (hasNavigated.current || isLoading) {
+    // Prevent multiple navigations; wait for onboarding check
+    if (hasNavigated.current || isLoading || !onboardingChecked) {
       return;
     }
 
@@ -23,14 +36,16 @@ export default function Index() {
     const navigate = async () => {
       // Wait for next event loop cycle
       await new Promise(resolve => setTimeout(resolve, 150));
-      
+
       if (hasNavigated.current) {
         return;
       }
 
       try {
         hasNavigated.current = true;
-        if (isAuthenticated) {
+        if (!hasOnboarded) {
+          router.replace('/onboarding');
+        } else if (isAuthenticated) {
           router.replace('/(tabs)/home');
         } else {
           router.replace('/login');
@@ -43,7 +58,7 @@ export default function Index() {
     };
 
     navigate();
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, onboardingChecked, hasOnboarded, router]);
 
   // Show loading screen while determining route
   return (

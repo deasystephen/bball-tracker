@@ -23,10 +23,11 @@ import {
   Button,
   LoadingSpinner,
 } from '../../../components';
+import { useToast } from '../../../components/Toast';
 import { useLeague } from '../../../hooks/useLeagues';
 import { useCreateSeason } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
 export default function CreateSeasonScreen() {
@@ -45,6 +46,7 @@ export default function CreateSeasonScreen() {
 
   const { data: league, isLoading: leagueLoading } = useLeague(leagueId || '');
   const createSeason = useCreateSeason();
+  const toast = useToast();
 
   const validate = (): boolean => {
     const newErrors: { name?: string; leagueId?: string } = {};
@@ -72,12 +74,8 @@ export default function CreateSeasonScreen() {
         endDate: endDate?.toISOString(),
       });
 
-      Alert.alert('Success', 'Season created successfully', [
-        {
-          text: 'OK',
-          onPress: () => router.back(),
-        },
-      ]);
+      toast.showToast('Season created successfully', 'success');
+      router.back();
     } catch (error) {
       Alert.alert(
         'Error',
@@ -325,7 +323,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     marginTop: spacing.sm,
   },

@@ -15,12 +15,13 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ErrorState, ListItem } from '../../../components';
+import { useToast } from '../../../components/Toast';
 import { useTeam, useUpdateTeam } from '../../../hooks/useTeams';
 import { useLeagues } from '../../../hooks/useLeagues';
 import { useSeasons } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -43,6 +44,7 @@ export default function EditTeamScreen() {
     leagueId ? { leagueId, isActive: true } : undefined
   );
   const updateTeam = useUpdateTeam();
+  const toast = useToast();
 
   // Get seasons for the selected league
   const seasons = useMemo(() => {
@@ -103,9 +105,8 @@ export default function EditTeamScreen() {
         },
       });
 
-      Alert.alert(t('common.success'), 'Team updated successfully', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      toast.showToast('Team updated successfully', 'success');
+      router.back();
     } catch (error) {
       Alert.alert(
         t('common.error'),
@@ -349,7 +350,7 @@ const styles = StyleSheet.create({
   },
   selectionList: {
     marginTop: spacing.sm,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     overflow: 'hidden',
   },
@@ -371,7 +372,7 @@ const styles = StyleSheet.create({
   noSeasonsContainer: {
     marginTop: spacing.sm,
     padding: spacing.lg,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     alignItems: 'center',
     gap: spacing.sm,
   },

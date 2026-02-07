@@ -5,6 +5,7 @@
 import React from 'react';
 import { View, StyleSheet, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeInLeft } from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { ThemedView } from '../ThemedView';
 import { useTheme } from '../../hooks/useTheme';
@@ -122,7 +123,8 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
     const isFirst = index === 0;
 
     return (
-      <View
+      <Animated.View
+        entering={FadeInLeft.duration(250)}
         style={[
           styles.eventRow,
           isFirst && styles.eventRowFirst,
@@ -150,7 +152,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
             {getEventDescription(item)}
           </ThemedText>
         </View>
-      </View>
+      </Animated.View>
     );
   };
 

@@ -25,7 +25,7 @@ import { PrintButton } from '../../../components/PrintButton';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../../hooks/useStats';
 import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import type { AggregatedPlayerStats } from '../../../types/stats';
 
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
   sortButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: 12,
+    borderRadius: borderRadius.full,
     borderWidth: 1,
     minHeight: 36,
     justifyContent: 'center',

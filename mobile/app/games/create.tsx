@@ -23,11 +23,14 @@ import {
   Button,
   LoadingSpinner,
   ListItem,
+  Card,
 } from '../../components';
+import { useToast } from '../../components/Toast';
 import { useCreateGame } from '../../hooks/useGames';
 import { useTeams } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
+import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
 
 export default function CreateGameScreen() {
@@ -47,6 +50,7 @@ export default function CreateGameScreen() {
 
   const { data: teams, isLoading: teamsLoading } = useTeams();
   const createGame = useCreateGame();
+  const toast = useToast();
 
   const validate = (): boolean => {
     const newErrors: { opponent?: string; teamId?: string } = {};
@@ -73,12 +77,8 @@ export default function CreateGameScreen() {
         date: date.toISOString(),
       });
 
-      Alert.alert('Success', 'Game created successfully', [
-        {
-          text: 'OK',
-          onPress: () => router.replace(`/games/${game.id}`),
-        },
-      ]);
+      toast.showToast('Game created successfully', 'success');
+      router.replace(`/games/${game.id}`);
     } catch (error) {
       Alert.alert(
         'Error',
@@ -127,13 +127,29 @@ export default function CreateGameScreen() {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <Ionicons name="close" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h3" numberOfLines={1}>
             New Game
           </ThemedText>
         </View>
+        <TouchableOpacity
+          onPress={handleSubmit}
+          disabled={!opponent.trim() || !teamId || createGame.isPending}
+          style={styles.headerAction}
+          accessibilityRole="button"
+          accessibilityLabel="Create game"
+        >
+          <ThemedText
+            variant="bodyBold"
+            style={{
+              color: (!opponent.trim() || !teamId) ? colors.textTertiary : colors.primary,
+            }}
+          >
+            Create
+          </ThemedText>
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
@@ -147,25 +163,32 @@ export default function CreateGameScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Input
-            label="Opponent"
-            placeholder="Enter opponent team name"
-            value={opponent}
-            onChangeText={setOpponent}
-            error={errors.opponent}
-            autoCapitalize="words"
-            autoFocus
-          />
+          {/* Opponent Section */}
+          <Card variant="default" style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="basketball-outline" size={20} color={colors.primary} />
+              <ThemedText variant="captionBold" color="textSecondary">
+                Opponent
+              </ThemedText>
+            </View>
+            <Input
+              placeholder="Enter opponent team name"
+              value={opponent}
+              onChangeText={setOpponent}
+              error={errors.opponent}
+              autoCapitalize="words"
+              autoFocus
+            />
+          </Card>
 
           {/* Team Selection */}
-          <View style={styles.section}>
-            <ThemedText
-              variant="captionBold"
-              color="textSecondary"
-              style={styles.label}
-            >
-              Your Team
-            </ThemedText>
+          <Card variant="default" style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="people-outline" size={20} color={colors.primary} />
+              <ThemedText variant="captionBold" color="textSecondary">
+                Your Team
+              </ThemedText>
+            </View>
             {teams && teams.length > 0 ? (
               <View style={[styles.teamList, { borderColor: colors.border }]}>
                 {teams.map((team, index) => {
@@ -195,7 +218,7 @@ export default function CreateGameScreen() {
                       style={[
                         styles.teamItem,
                         isSelected && {
-                          backgroundColor: colors.backgroundSecondary,
+                          backgroundColor: colors.primary + '10',
                         },
                         isLast && styles.lastItem,
                       ]}
@@ -221,17 +244,16 @@ export default function CreateGameScreen() {
                 {errors.teamId}
               </ThemedText>
             )}
-          </View>
+          </Card>
 
           {/* Date Selection */}
-          <View style={styles.section}>
-            <ThemedText
-              variant="captionBold"
-              color="textSecondary"
-              style={styles.label}
-            >
-              Game Date & Time
-            </ThemedText>
+          <Card variant="default" style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+              <ThemedText variant="captionBold" color="textSecondary">
+                Game Date & Time
+              </ThemedText>
+            </View>
             <TouchableOpacity
               style={[
                 styles.dateButton,
@@ -243,7 +265,7 @@ export default function CreateGameScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Ionicons
-                name="calendar-outline"
+                name="calendar"
                 size={20}
                 color={colors.primary}
               />
@@ -260,10 +282,10 @@ export default function CreateGameScreen() {
               ]}
               onPress={() => setShowTimePicker(true)}
             >
-              <Ionicons name="time-outline" size={20} color={colors.primary} />
+              <Ionicons name="time" size={20} color={colors.primary} />
               <ThemedText variant="body">{formatTime(date)}</ThemedText>
             </TouchableOpacity>
-          </View>
+          </Card>
 
           {showDatePicker && (
             <DateTimePicker
@@ -300,12 +322,12 @@ export default function CreateGameScreen() {
               loading={createGame.isPending}
               disabled={!opponent.trim() || !teamId}
               fullWidth
+              size="large"
             />
             <Button
               title="Cancel"
               variant="outline"
               onPress={() => router.back()}
-              style={styles.cancelButton}
               fullWidth
             />
           </View>
@@ -326,14 +348,14 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: spacing.sm,
-    marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,
+    alignItems: 'center',
   },
-  headerTitle: {
-    flex: 1,
+  headerAction: {
+    padding: spacing.sm,
   },
   keyboardView: {
     flex: 1,
@@ -341,15 +363,17 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingTop: spacing.lg,
   },
-  section: {
-    marginBottom: spacing.lg,
+  sectionCard: {
+    marginBottom: spacing.md,
   },
-  label: {
-    marginBottom: spacing.sm,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
   },
   teamList: {
-    marginTop: spacing.sm,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     overflow: 'hidden',
   },
@@ -372,15 +396,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     marginTop: spacing.sm,
   },
   buttonContainer: {
     marginTop: spacing.xl,
     gap: spacing.md,
-  },
-  cancelButton: {
-    marginTop: spacing.sm,
   },
 });
