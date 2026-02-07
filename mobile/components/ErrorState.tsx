@@ -20,22 +20,25 @@ interface ErrorStateProps {
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({
-  title,
+  title = 'Something went wrong',
   message,
   onRetry,
-  retryLabel = 'Retry',
+  retryLabel = 'Try Again',
 }) => {
   const { colors } = useTheme();
   const iconSize = getResponsiveValue(48, 64);
 
   return (
-    <ThemedView variant="background" style={styles.container}>
+    <ThemedView
+      variant="background"
+      style={styles.container}
+      accessibilityRole="alert"
+      accessibilityLabel={`Error: ${title}. ${message}`}
+    >
       <Ionicons name="alert-circle-outline" size={iconSize} color={colors.error} />
-      {title && (
-        <ThemedText variant="h3" color="error" style={styles.title}>
-          {title}
-        </ThemedText>
-      )}
+      <ThemedText variant="h3" color="error" style={styles.title}>
+        {title}
+      </ThemedText>
       <ThemedText variant="body" color="textSecondary" style={styles.message}>
         {message}
       </ThemedText>
@@ -45,6 +48,8 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
           onPress={onRetry}
           variant="primary"
           style={styles.button}
+          accessibilityLabel={retryLabel}
+          accessibilityRole="button"
         />
       )}
     </ThemedView>

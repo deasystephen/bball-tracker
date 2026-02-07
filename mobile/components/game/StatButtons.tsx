@@ -2,7 +2,7 @@
  * Additional stat buttons for rebounds, steals, blocks, assists
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '../ThemedText';
@@ -24,19 +24,22 @@ interface StatButtonConfig {
   color: string;
 }
 
-export const StatButtons: React.FC<StatButtonsProps> = ({
+/**
+ * Memoized to prevent re-renders during score updates on tracking screen.
+ */
+export const StatButtons: React.FC<StatButtonsProps> = React.memo(({
   onStat,
   disabled = false,
 }) => {
   const { colors } = useTheme();
 
-  const stats: StatButtonConfig[] = [
+  const stats: StatButtonConfig[] = useMemo(() => [
     { type: 'OREB', label: 'Off Reb', shortLabel: 'OREB', icon: 'arrow-up-circle', color: colors.success },
     { type: 'DREB', label: 'Def Reb', shortLabel: 'DREB', icon: 'arrow-down-circle', color: colors.info },
     { type: 'AST', label: 'Assist', shortLabel: 'AST', icon: 'people', color: colors.primary },
     { type: 'STL', label: 'Steal', shortLabel: 'STL', icon: 'hand-left', color: colors.warning },
     { type: 'BLK', label: 'Block', shortLabel: 'BLK', icon: 'stop-circle', color: colors.error },
-  ];
+  ], [colors]);
 
   return (
     <View style={styles.container}>
@@ -57,6 +60,9 @@ export const StatButtons: React.FC<StatButtonsProps> = ({
             onPress={() => onStat(stat.type)}
             disabled={disabled}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Record ${stat.label}`}
+            accessibilityState={{ disabled }}
           >
             <Ionicons
               name={stat.icon}
@@ -82,7 +88,7 @@ export const StatButtons: React.FC<StatButtonsProps> = ({
       )}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -107,6 +113,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     minWidth: 80,
+    minHeight: 44,
   },
   buttonText: {
     fontWeight: '600',

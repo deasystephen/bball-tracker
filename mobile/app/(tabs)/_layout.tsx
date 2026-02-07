@@ -1,12 +1,24 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../../hooks/useTheme';
+import { useInvitations } from '../../hooks/useInvitations';
 
 /**
  * Tab navigation layout for authenticated users
  */
 export default function TabsLayout() {
+  const { colors } = useTheme();
+  const { data: invitationsData } = useInvitations({ status: 'PENDING' });
+  const pendingCount = invitationsData?.invitations?.length ?? 0;
+
   return (
-    <Tabs>
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: colors.tabBarActive,
+        tabBarInactiveTintColor: colors.tabBarInactive,
+        tabBarStyle: { backgroundColor: colors.tabBarBackground },
+      }}
+    >
       <Tabs.Screen
         name="home"
         options={{
@@ -14,8 +26,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
+          tabBarAccessibilityLabel: 'Home tab',
         }}
       />
       <Tabs.Screen
@@ -25,8 +36,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="people" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
+          tabBarAccessibilityLabel: 'Teams tab',
         }}
       />
       <Tabs.Screen
@@ -36,8 +46,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="basketball" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
+          tabBarAccessibilityLabel: 'Games tab',
         }}
       />
       <Tabs.Screen
@@ -47,8 +56,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="stats-chart" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
+          tabBarAccessibilityLabel: 'Statistics tab',
         }}
       />
       <Tabs.Screen
@@ -58,9 +66,10 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="mail" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
-          tabBarBadge: undefined, // Can be set dynamically based on pending count
+          tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
+          tabBarAccessibilityLabel: pendingCount > 0
+            ? `Invitations tab, ${pendingCount} pending`
+            : 'Invitations tab',
         }}
       />
       <Tabs.Screen
@@ -70,8 +79,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#999',
+          tabBarAccessibilityLabel: 'Profile tab',
         }}
       />
     </Tabs>

@@ -166,7 +166,7 @@ describe('Teams API', () => {
     it('should return 404 for non-existent team', async () => {
       mockTeamService.getTeamById.mockRejectedValue(new NotFoundError('Team not found'));
 
-      const response = await request(app).get('/api/v1/teams/invalid-id');
+      const response = await request(app).get('/api/v1/teams/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Team not found');
@@ -208,7 +208,7 @@ describe('Teams API', () => {
       mockTeamService.updateTeam.mockRejectedValue(new NotFoundError('Team not found'));
 
       const response = await request(app)
-        .patch('/api/v1/teams/invalid-id')
+        .patch('/api/v1/teams/00000000-0000-0000-0000-000000000000')
         .send({ name: 'New Name' });
 
       expect(response.status).toBe(404);
@@ -239,7 +239,7 @@ describe('Teams API', () => {
     it('should return 404 for non-existent team', async () => {
       mockTeamService.deleteTeam.mockRejectedValue(new NotFoundError('Team not found'));
 
-      const response = await request(app).delete('/api/v1/teams/invalid-id');
+      const response = await request(app).delete('/api/v1/teams/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });
@@ -326,7 +326,7 @@ describe('Teams API', () => {
       mockTeamService.removePlayer.mockRejectedValue(new NotFoundError('Not found'));
 
       const response = await request(app)
-        .delete(`/api/v1/teams/${TEST_TEAM_ID}/players/invalid-player`);
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/players/00000000-0000-0000-0000-000000000000`);
 
       expect(response.status).toBe(404);
     });
@@ -359,7 +359,7 @@ describe('Teams API', () => {
       mockTeamService.updateTeamMember.mockRejectedValue(new NotFoundError('Not found'));
 
       const response = await request(app)
-        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/invalid-player`)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/00000000-0000-0000-0000-000000000000`)
         .send({ jerseyNumber: 23 });
 
       expect(response.status).toBe(404);

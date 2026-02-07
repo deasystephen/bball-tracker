@@ -66,7 +66,7 @@ const formatTime = (dateString: string): string => {
   });
 };
 
-export const GameCard: React.FC<GameCardProps> = ({ game, onPress }) => {
+const GameCardInner: React.FC<GameCardProps> = ({ game, onPress }) => {
   const { colors } = useTheme();
   const statusColor = getStatusColor(game.status, colors);
   const isLive = game.status === 'IN_PROGRESS';
@@ -149,6 +149,12 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onPress }) => {
     </Card>
   );
 };
+
+/**
+ * Memoized GameCard to prevent unnecessary re-renders in FlatList.
+ * Only re-renders when the game data or onPress handler changes.
+ */
+export const GameCard = React.memo(GameCardInner);
 
 const styles = StyleSheet.create({
   card: {

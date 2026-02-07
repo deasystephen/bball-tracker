@@ -54,6 +54,16 @@ export default function Home() {
     return <LoadingSpinner fullScreen message="Loading dashboard..." />;
   }
 
+  if (!teamsLoading && !invitationsLoading && (teams === undefined || invitationsData === undefined)) {
+    return (
+      <ErrorState
+        title="Something went wrong"
+        message="We couldn't load your dashboard. Please check your connection and try again."
+        onRetry={handleRefresh}
+      />
+    );
+  }
+
   return (
     <ThemedView variant="background" style={styles.container}>
       <ScrollView
@@ -86,6 +96,8 @@ export default function Home() {
             <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: colors.primary }]}
               onPress={() => router.push('/teams')}
+              accessibilityRole="button"
+              accessibilityLabel="View Teams"
             >
               <Ionicons name="people" size={24} color={colors.textInverse} />
               <ThemedText variant="body" style={[styles.actionText, { color: colors.textInverse }]}>
@@ -96,6 +108,8 @@ export default function Home() {
             <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, borderWidth: 1 }]}
               onPress={() => router.push('/invitations')}
+              accessibilityRole="button"
+              accessibilityLabel={pendingInvitations.length > 0 ? `Invitations, ${pendingInvitations.length} pending` : 'Invitations'}
             >
               <View style={styles.actionWithBadge}>
                 <Ionicons name="mail" size={24} color={colors.primary} />

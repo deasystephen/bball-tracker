@@ -171,7 +171,7 @@ describe('Players API', () => {
         new NotFoundError('Player not found')
       );
 
-      const response = await request(app).get('/api/v1/players/invalid-id');
+      const response = await request(app).get('/api/v1/players/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Player not found');
@@ -206,7 +206,7 @@ describe('Players API', () => {
       );
 
       const response = await request(app)
-        .patch('/api/v1/players/invalid-id')
+        .patch('/api/v1/players/00000000-0000-0000-0000-000000000000')
         .send({ name: 'Updated Name' });
 
       expect(response.status).toBe(404);
@@ -241,7 +241,7 @@ describe('Players API', () => {
         new NotFoundError('Player not found')
       );
 
-      const response = await request(app).delete('/api/v1/players/invalid-id');
+      const response = await request(app).delete('/api/v1/players/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });

@@ -11,6 +11,7 @@ import {
 import {
   NotFoundError,
   BadRequestError,
+  ForbiddenError,
 } from '../utils/errors';
 
 export class PlayerService {
@@ -126,31 +127,31 @@ export class PlayerService {
       ];
     }
 
-    // Get total count for pagination
-    const total = await prisma.user.count({ where });
-
-    // Get players
-    const players = await prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        profilePictureUrl: true,
-        emailVerified: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: {
-          select: {
-            teamMembers: true, // Count of teams this player is on
+    // Get total count and players in parallel
+    const [total, players] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          profilePictureUrl: true,
+          emailVerified: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: {
+            select: {
+              teamMembers: true,
+            },
           },
         },
-      },
-      orderBy: { name: 'asc' },
-      take: limit,
-      skip: offset,
-    });
+        orderBy: { name: 'asc' },
+        take: limit,
+        skip: offset,
+      }),
+    ]);
 
     return {
       players,
@@ -188,9 +189,7 @@ export class PlayerService {
       throw new NotFoundError('Player not found');
     }
 
-    // Check permissions
-    // For now, only allow admins or the player themselves to update
-    // TODO: Add admin role check
+    // Check permissions - only allow admins or the player themselves to update
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
@@ -199,11 +198,9 @@ export class PlayerService {
       throw new NotFoundError('User not found');
     }
 
-    // Allow player to update themselves, or admin to update any player
-    // For now, we'll allow any authenticated user (can be refined later)
-    // if (playerId !== userId && currentUser.role !== 'ADMIN') {
-    //   throw new ForbiddenError('You can only update your own profile');
-    // }
+    if (playerId !== userId && currentUser.role !== 'ADMIN') {
+      throw new ForbiddenError('You can only update your own profile');
+    }
 
     // Check if email is being changed and if it's already taken
     if (data.email && data.email !== player.email) {
@@ -244,9 +241,22 @@ export class PlayerService {
   /**
    * Delete a player
    * @param playerId Player ID
-   * @param _userId User ID (for authorization - reserved for future use)
+   * @param userId User ID (for authorization)
    */
-  static async deletePlayer(playerId: string, _userId: string) {
+  static async deletePlayer(playerId: string, userId: string) {
+    // Check permissions - only admins can delete players
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      throw new NotFoundError('User not found');
+    }
+
+    if (currentUser.role !== 'ADMIN') {
+      throw new ForbiddenError('Only administrators can delete players');
+    }
+
     // Get player
     const player = await prisma.user.findUnique({
       where: { id: playerId },
@@ -264,10 +274,6 @@ export class PlayerService {
     if (player.role !== 'PLAYER') {
       throw new NotFoundError('Player not found');
     }
-
-    // Check permissions
-    // TODO: Add admin role check
-    // For now, we'll allow deletion (can be restricted later)
 
     // Check if player is on any teams
     if (player.teamMembers.length > 0) {

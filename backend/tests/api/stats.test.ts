@@ -190,7 +190,7 @@ describe('Stats API', () => {
     it('should return 404 for non-existent game', async () => {
       mockStatsService.getBoxScore.mockRejectedValue(new NotFoundError('Game not found'));
 
-      const response = await request(app).get('/api/v1/stats/games/non-existent');
+      const response = await request(app).get('/api/v1/stats/games/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Game not found');
@@ -232,7 +232,7 @@ describe('Stats API', () => {
       );
 
       const response = await request(app).get(
-        `/api/v1/stats/games/${TEST_GAME_ID}/players/non-existent`
+        `/api/v1/stats/games/${TEST_GAME_ID}/players/00000000-0000-0000-0000-000000000000`
       );
 
       expect(response.status).toBe(404);
@@ -262,7 +262,7 @@ describe('Stats API', () => {
         new NotFoundError('Player not found')
       );
 
-      const response = await request(app).get('/api/v1/stats/players/non-existent');
+      const response = await request(app).get('/api/v1/stats/players/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });
@@ -332,7 +332,7 @@ describe('Stats API', () => {
     it('should return 404 for non-existent team', async () => {
       mockStatsService.getTeamSeasonStats.mockRejectedValue(new NotFoundError('Team not found'));
 
-      const response = await request(app).get('/api/v1/stats/teams/non-existent');
+      const response = await request(app).get('/api/v1/stats/teams/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });

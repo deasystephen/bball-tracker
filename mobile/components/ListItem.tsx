@@ -79,6 +79,8 @@ export const ListItem: React.FC<ListItemProps> = ({
         style={containerStyle}
         onPress={onPress}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
         {...props}
       >
         {content}

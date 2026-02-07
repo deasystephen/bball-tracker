@@ -34,6 +34,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     <ThemedView
       variant="background"
       style={styles.container}
+      accessibilityLabel={`${title}${message ? `. ${message}` : ''}`}
     >
       <Ionicons name={icon} size={iconSize} color={colors.textTertiary} />
       <ThemedText variant="h3" color="textSecondary" style={styles.title}>
@@ -53,6 +54,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           title={actionLabel}
           onPress={onAction}
           style={styles.button}
+          accessibilityRole="button"
         />
       )}
     </ThemedView>

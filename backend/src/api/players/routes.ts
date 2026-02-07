@@ -15,6 +15,7 @@ import {
   NotFoundError,
   ForbiddenError,
 } from '../../utils/errors';
+import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
 
@@ -92,7 +93,7 @@ router.get('/', async (req, res) => {
  * GET /api/v1/players/:id
  * Get a player by ID
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const player = await PlayerService.getPlayerById(req.params.id);
 
@@ -114,7 +115,7 @@ router.get('/:id', async (req, res) => {
  * PATCH /api/v1/players/:id
  * Update a player
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = updatePlayerSchema.safeParse(req.body);
@@ -152,7 +153,7 @@ router.patch('/:id', async (req, res) => {
  * DELETE /api/v1/players/:id
  * Delete a player
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     await PlayerService.deletePlayer(req.params.id, req.user!.id);
 

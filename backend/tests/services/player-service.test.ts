@@ -7,6 +7,7 @@ import { mockPrisma } from '../setup';
 import {
   createPlayer,
   createCoach,
+  createAdmin,
   createTeamMember,
   createTeam,
   createSeason,
@@ -233,13 +234,13 @@ describe('PlayerService', () => {
   });
 
   describe('updatePlayer', () => {
-    it('should update player name', async () => {
+    it('should update player name (admin updating another player)', async () => {
       const player = createPlayer({ name: 'Old Name' });
-      const currentUser = createCoach();
+      const adminUser = createAdmin();
 
       (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(player) // First call for player
-        .mockResolvedValueOnce(currentUser); // Second call for current user
+        .mockResolvedValueOnce(player)    // First call for player
+        .mockResolvedValueOnce(adminUser); // Second call for current user (admin)
       (mockPrisma.user.update as jest.Mock).mockResolvedValue({
         ...player,
         name: 'New Name',
@@ -248,7 +249,7 @@ describe('PlayerService', () => {
       const result = await PlayerService.updatePlayer(
         player.id,
         { name: 'New Name' },
-        currentUser.id
+        adminUser.id
       );
 
       expect(result).toHaveProperty('name', 'New Name');
@@ -260,13 +261,33 @@ describe('PlayerService', () => {
       );
     });
 
+    it('should allow player to update themselves', async () => {
+      const player = createPlayer({ name: 'Old Name' });
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player) // First call for player
+        .mockResolvedValueOnce(player); // Second call for current user (same player)
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({
+        ...player,
+        name: 'New Name',
+      });
+
+      const result = await PlayerService.updatePlayer(
+        player.id,
+        { name: 'New Name' },
+        player.id
+      );
+
+      expect(result).toHaveProperty('name', 'New Name');
+    });
+
     it('should update player email', async () => {
       const player = createPlayer({ email: 'old@test.com' });
-      const currentUser = createCoach();
+      const adminUser = createAdmin();
 
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(player)
-        .mockResolvedValueOnce(currentUser)
+        .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce(null); // Check for existing email
       (mockPrisma.user.update as jest.Mock).mockResolvedValue({
         ...player,
@@ -276,7 +297,7 @@ describe('PlayerService', () => {
       const result = await PlayerService.updatePlayer(
         player.id,
         { email: 'new@test.com' },
-        currentUser.id
+        adminUser.id
       );
 
       expect(result).toHaveProperty('email', 'new@test.com');
@@ -304,21 +325,43 @@ describe('PlayerService', () => {
       }
     });
 
-    it('should throw BadRequestError if email is already taken', async () => {
-      const player = createPlayer({ email: 'old@test.com' });
-      const existingPlayer = createPlayer({ email: 'existing@test.com' });
-      const currentUser = createCoach();
+    it('should throw ForbiddenError when non-admin updates another player', async () => {
+      const player = createPlayer({ email: 'player@test.com' });
+      const coach = createCoach();
 
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(player)
-        .mockResolvedValueOnce(currentUser)
+        .mockResolvedValueOnce(coach); // non-admin, different user
+
+      try {
+        await PlayerService.updatePlayer(
+          player.id,
+          { name: 'Hacked Name' },
+          coach.id
+        );
+        fail('Expected ForbiddenError');
+      } catch (error) {
+        const err = error as Error & { statusCode?: number };
+        expect(err.statusCode).toBe(403);
+        expect(err.message).toBe('You can only update your own profile');
+      }
+    });
+
+    it('should throw BadRequestError if email is already taken', async () => {
+      const player = createPlayer({ email: 'old@test.com' });
+      const existingPlayer = createPlayer({ email: 'existing@test.com' });
+      const adminUser = createAdmin();
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce(existingPlayer); // Existing user with email
 
       try {
         await PlayerService.updatePlayer(
           player.id,
           { email: 'existing@test.com' },
-          currentUser.id
+          adminUser.id
         );
       } catch (error) {
         expectBadRequestError(error, 'A user with this email already exists');
@@ -327,14 +370,18 @@ describe('PlayerService', () => {
   });
 
   describe('deletePlayer', () => {
+    const adminUser = { id: 'admin-id', role: 'ADMIN', email: 'admin@test.com', name: 'Admin' };
+
     it('should delete player successfully', async () => {
       const player = createPlayer();
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
-        ...player,
-        teamMembers: [],
-        gameEvents: [],
-      });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser) // admin check
+        .mockResolvedValueOnce({          // player lookup
+          ...player,
+          teamMembers: [],
+          gameEvents: [],
+        });
       (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
 
       const result = await PlayerService.deletePlayer(player.id, 'admin-id');
@@ -347,8 +394,20 @@ describe('PlayerService', () => {
       );
     });
 
+    it('should throw NotFoundError if admin user does not exist', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      try {
+        await PlayerService.deletePlayer('non-existent', 'admin-id');
+      } catch (error) {
+        expectNotFoundError(error, 'User not found');
+      }
+    });
+
     it('should throw NotFoundError if player does not exist', async () => {
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)  // admin check
+        .mockResolvedValueOnce(null);       // player not found
 
       try {
         await PlayerService.deletePlayer('non-existent', 'admin-id');
@@ -360,11 +419,13 @@ describe('PlayerService', () => {
     it('should throw NotFoundError if user is not a player', async () => {
       const coach = createCoach();
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
-        ...coach,
-        teamMembers: [],
-        gameEvents: [],
-      });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)  // admin check
+        .mockResolvedValueOnce({           // coach (not player role)
+          ...coach,
+          teamMembers: [],
+          gameEvents: [],
+        });
 
       try {
         await PlayerService.deletePlayer(coach.id, 'admin-id');
@@ -378,11 +439,13 @@ describe('PlayerService', () => {
       const team = createTeam();
       const member = createTeamMember({ teamId: team.id, playerId: player.id });
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
-        ...player,
-        teamMembers: [member],
-        gameEvents: [],
-      });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)  // admin check
+        .mockResolvedValueOnce({           // player with teams
+          ...player,
+          teamMembers: [member],
+          gameEvents: [],
+        });
 
       try {
         await PlayerService.deletePlayer(player.id, 'admin-id');
@@ -398,11 +461,13 @@ describe('PlayerService', () => {
       const player = createPlayer();
       const event = createGameEvent({ playerId: player.id });
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
-        ...player,
-        teamMembers: [],
-        gameEvents: [event],
-      });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)  // admin check
+        .mockResolvedValueOnce({           // player with events
+          ...player,
+          teamMembers: [],
+          gameEvents: [event],
+        });
 
       try {
         await PlayerService.deletePlayer(player.id, 'admin-id');
@@ -411,6 +476,23 @@ describe('PlayerService', () => {
           error,
           'Cannot delete player with game history. Player data must be preserved for statistics.'
         );
+      }
+    });
+
+    it('should throw ForbiddenError for non-admin users', async () => {
+      const player = createPlayer();
+      const coach = createCoach();
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(coach);  // non-admin user
+
+      try {
+        await PlayerService.deletePlayer(player.id, coach.id);
+        fail('Expected ForbiddenError');
+      } catch (error) {
+        const err = error as Error & { statusCode?: number };
+        expect(err.statusCode).toBe(403);
+        expect(err.message).toBe('Only administrators can delete players');
       }
     });
   });

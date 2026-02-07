@@ -156,7 +156,12 @@ export default function LeagueDetailScreen() {
           },
         ]}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
@@ -165,7 +170,12 @@ export default function LeagueDetailScreen() {
             {seasons.length} {seasons.length === 1 ? 'season' : 'seasons'}
           </ThemedText>
         </View>
-        <TouchableOpacity onPress={handleDeleteLeague} style={styles.deleteButton}>
+        <TouchableOpacity
+          onPress={handleDeleteLeague}
+          style={styles.deleteButton}
+          accessibilityRole="button"
+          accessibilityLabel="Delete league"
+        >
           <Ionicons name="trash-outline" size={22} color={colors.error} />
         </TouchableOpacity>
       </View>
@@ -228,13 +238,14 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   backButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,
   },
   deleteButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
   },
   sectionHeader: {
     flexDirection: 'row',

@@ -160,7 +160,13 @@ export default function Profile() {
             Settings
           </ThemedText>
           <Card variant="default" style={styles.settingsCard}>
-            <TouchableOpacity style={styles.settingRow} onPress={toggleColorScheme}>
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={toggleColorScheme}
+              accessibilityRole="switch"
+              accessibilityLabel="Toggle dark mode"
+              accessibilityState={{ checked: colorScheme === 'dark' }}
+            >
               <View style={styles.settingLeft}>
                 <View style={[styles.settingIcon, { backgroundColor: colors.warning + '20' }]}>
                   <Ionicons
@@ -235,6 +241,8 @@ export default function Profile() {
           <TouchableOpacity
             style={[styles.logoutButton, { backgroundColor: colors.error + '15' }]}
             onPress={handleLogout}
+            accessibilityRole="button"
+            accessibilityLabel="Logout"
           >
             <Ionicons name="log-out-outline" size={20} color={colors.error} />
             <ThemedText variant="body" style={[styles.logoutText, { color: colors.error }]}>

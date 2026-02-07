@@ -2,7 +2,7 @@
  * Games screen - list of games and ability to track new games
  */
 
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -26,6 +26,8 @@ import { spacing } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import type { Game } from '../../types/game';
 
+const keyExtractor = (item: Game): string => item.id;
+
 export default function Games() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -39,17 +41,17 @@ export default function Games() {
     isRefetching,
   } = useGames();
 
-  const handleGamePress = (game: Game) => {
+  const handleGamePress = useCallback((game: Game) => {
     router.push(`/games/${game.id}`);
-  };
+  }, [router]);
 
-  const handleCreateGame = () => {
+  const handleCreateGame = useCallback(() => {
     router.push('/games/create');
-  };
+  }, [router]);
 
-  const renderGame = ({ item }: { item: Game }) => (
+  const renderGame = useCallback(({ item }: { item: Game }) => (
     <GameCard game={item} onPress={() => handleGamePress(item)} />
-  );
+  ), [handleGamePress]);
 
   if (isLoading) {
     return <LoadingSpinner message="Loading games..." fullScreen />;
@@ -74,12 +76,15 @@ export default function Games() {
         <FlatList
           data={games}
           renderItem={renderGame}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           contentContainerStyle={[
             styles.listContent,
             { paddingHorizontal: padding },
           ]}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -101,6 +106,8 @@ export default function Games() {
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={handleCreateGame}
         activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Create new game"
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>

@@ -73,6 +73,8 @@ export const Input: React.FC<InputProps> = ({
             },
           ]}
           placeholderTextColor={colors.inputPlaceholder}
+          accessibilityLabel={label}
+          accessibilityHint={error || helperText}
           {...props}
         />
         {rightIcon && <View style={styles.rightIcon}>{rightIcon}</View>}

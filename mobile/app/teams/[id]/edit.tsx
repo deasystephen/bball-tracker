@@ -144,6 +144,8 @@ export default function EditTeamScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -323,8 +325,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
     marginRight: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,

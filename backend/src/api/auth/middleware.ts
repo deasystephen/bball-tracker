@@ -4,7 +4,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { UnauthorizedError } from '../../utils/errors';
+import { UnauthorizedError, ForbiddenError } from '../../utils/errors';
 import prisma from '../../models';
 
 /**
@@ -113,7 +113,7 @@ export function requireRole(...allowedRoles: string[]) {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return next(new UnauthorizedError('Insufficient permissions'));
+      return next(new ForbiddenError('Insufficient permissions'));
     }
 
     next();

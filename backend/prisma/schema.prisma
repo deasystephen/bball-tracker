@@ -87,6 +87,7 @@ model User {
   leagueAdmins        LeagueAdmin[]
   guardiansAsParent   Guardian[]        @relation("GuardianParent")
   guardiansAsChild    Guardian[]        @relation("GuardianChild")
+  playerStats         PlayerStats[]
 
   @@index([email])
   @@index([role])
@@ -193,9 +194,11 @@ model Team {
   roles       TeamRole[]
   games       Game[]
   invitations TeamInvitation[]
+  teamStats   TeamStats[]
 
   @@index([seasonId])
   @@index([name])
+  @@index([createdAt])
 }
 
 model TeamRole {
@@ -284,6 +287,7 @@ model TeamInvitation {
   @@index([status])
   @@index([token])
   @@index([expiresAt])
+  @@index([status, expiresAt])
 }
 
 // =============================================================================
@@ -301,12 +305,16 @@ model Game {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  team   Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  events GameEvent[]
+  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  events      GameEvent[]
+  playerStats PlayerStats[]
+  teamStats   TeamStats[]
 
   @@index([teamId])
   @@index([date])
   @@index([status])
+  @@index([teamId, status])
+  @@index([teamId, date])
 }
 
 model GameEvent {
@@ -325,6 +333,8 @@ model GameEvent {
   @@index([playerId])
   @@index([eventType])
   @@index([timestamp])
+  @@index([gameId, playerId])
+  @@index([gameId, eventType])
 }
 
 // =============================================================================
@@ -351,6 +361,9 @@ model PlayerStats {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
+  player User @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
   @@unique([playerId, gameId])
   @@index([playerId])
   @@index([gameId])
@@ -369,6 +382,9 @@ model TeamStats {
   freeThrowPercentage  Float    @default(0)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
   @@unique([teamId, gameId])
   @@index([teamId])

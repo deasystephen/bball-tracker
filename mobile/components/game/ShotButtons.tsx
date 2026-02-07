@@ -2,8 +2,8 @@
  * 2x2 grid of shot buttons for stat tracking
  */
 
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
@@ -13,21 +13,24 @@ interface ShotButtonsProps {
   disabled?: boolean;
 }
 
-const { width: screenWidth } = Dimensions.get('window');
-const buttonWidth = (screenWidth - spacing.md * 3) / 2;
-const buttonHeight = 50; // Fixed smaller height
+const BUTTON_HEIGHT = 50;
 
-export const ShotButtons: React.FC<ShotButtonsProps> = ({
+/**
+ * Memoized to prevent re-renders when parent state changes (e.g., score updates).
+ */
+export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(({
   onShot,
   disabled = false,
 }) => {
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const buttonWidth = (windowWidth - spacing.md * 3) / 2;
 
-  const handlePress = (points: 2 | 3, made: boolean) => {
+  const handlePress = useCallback((points: 2 | 3, made: boolean) => {
     if (!disabled) {
       onShot(points, made);
     }
-  };
+  }, [disabled, onShot]);
 
   return (
     <View style={styles.container}>
@@ -41,12 +44,15 @@ export const ShotButtons: React.FC<ShotButtonsProps> = ({
                 ? colors.backgroundSecondary
                 : colors.success,
               width: buttonWidth,
-              height: buttonHeight,
+              height: BUTTON_HEIGHT,
             },
           ]}
           onPress={() => handlePress(2, true)}
           disabled={disabled}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="2-point shot made"
+          accessibilityState={{ disabled }}
         >
           <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
             2PT MADE
@@ -62,12 +68,15 @@ export const ShotButtons: React.FC<ShotButtonsProps> = ({
                 ? colors.backgroundSecondary
                 : colors.error,
               width: buttonWidth,
-              height: buttonHeight,
+              height: BUTTON_HEIGHT,
             },
           ]}
           onPress={() => handlePress(2, false)}
           disabled={disabled}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="2-point shot missed"
+          accessibilityState={{ disabled }}
         >
           <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
             2PT MISS
@@ -85,12 +94,15 @@ export const ShotButtons: React.FC<ShotButtonsProps> = ({
                 ? colors.backgroundSecondary
                 : colors.success,
               width: buttonWidth,
-              height: buttonHeight,
+              height: BUTTON_HEIGHT,
             },
           ]}
           onPress={() => handlePress(3, true)}
           disabled={disabled}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="3-point shot made"
+          accessibilityState={{ disabled }}
         >
           <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
             3PT MADE
@@ -106,12 +118,15 @@ export const ShotButtons: React.FC<ShotButtonsProps> = ({
                 ? colors.backgroundSecondary
                 : colors.error,
               width: buttonWidth,
-              height: buttonHeight,
+              height: BUTTON_HEIGHT,
             },
           ]}
           onPress={() => handlePress(3, false)}
           disabled={disabled}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="3-point shot missed"
+          accessibilityState={{ disabled }}
         >
           <ThemedText variant="bodyBold" style={styles.buttonTextWhite}>
             3PT MISS
@@ -128,7 +143,7 @@ export const ShotButtons: React.FC<ShotButtonsProps> = ({
       )}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

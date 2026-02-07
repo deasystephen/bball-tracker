@@ -109,6 +109,8 @@ export default function TeamStatsScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -239,6 +241,9 @@ export default function TeamStatsScreen() {
                             : colors.border,
                       },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Sort by ${option.label}`}
+                    accessibilityState={{ selected: sortBy === option.key }}
                   >
                     <ThemedText
                       variant="caption"
@@ -287,8 +292,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
     marginRight: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,
@@ -346,10 +352,12 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   sortButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderRadius: 12,
     borderWidth: 1,
+    minHeight: 36,
+    justifyContent: 'center',
   },
   emptyCard: {
     alignItems: 'center',

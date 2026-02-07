@@ -64,6 +64,8 @@ export default function TeamsScreen() {
           <TouchableOpacity
             onPress={handleCreateTeam}
             style={[styles.createButton, { backgroundColor: colors.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Create new team"
           >
             <Ionicons name="add" size={24} color={colors.textInverse} />
           </TouchableOpacity>

@@ -126,7 +126,12 @@ export default function AdminDashboard() {
           },
         ]}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
@@ -184,7 +189,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   backButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,

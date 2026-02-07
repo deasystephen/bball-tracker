@@ -27,6 +27,9 @@ export const statsKeys = {
   teamRoster: (teamId: string) => [...statsKeys.all, 'teamRoster', teamId] as const,
 };
 
+// Longer stale time for stats since they only change when games end
+const STATS_STALE_TIME = 10 * 60 * 1000; // 10 minutes
+
 /**
  * Hook to fetch box score for a game
  */
@@ -38,6 +41,7 @@ export function useBoxScore(gameId: string) {
       return response.data.boxScore as BoxScore;
     },
     enabled: !!gameId,
+    staleTime: STATS_STALE_TIME,
   });
 }
 
@@ -52,6 +56,7 @@ export function usePlayerGameStats(gameId: string, playerId: string) {
       return response.data.stats as PlayerGameStats;
     },
     enabled: !!gameId && !!playerId,
+    staleTime: STATS_STALE_TIME,
   });
 }
 
@@ -70,6 +75,7 @@ export function usePlayerOverallStats(playerId: string) {
       } as PlayerOverallStats;
     },
     enabled: !!playerId,
+    staleTime: STATS_STALE_TIME,
   });
 }
 
@@ -84,6 +90,7 @@ export function usePlayerSeasonStats(playerId: string, teamId: string) {
       return response.data.stats as AggregatedPlayerStats;
     },
     enabled: !!playerId && !!teamId,
+    staleTime: STATS_STALE_TIME,
   });
 }
 
@@ -98,6 +105,7 @@ export function useTeamSeasonStats(teamId: string) {
       return response.data.stats as TeamSeasonStats;
     },
     enabled: !!teamId,
+    staleTime: STATS_STALE_TIME,
   });
 }
 
@@ -112,5 +120,6 @@ export function useTeamRosterStats(teamId: string) {
       return response.data.players as AggregatedPlayerStats[];
     },
     enabled: !!teamId,
+    staleTime: STATS_STALE_TIME,
   });
 }

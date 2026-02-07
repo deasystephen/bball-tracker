@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
+import { useTheme } from '../hooks/useTheme';
 
 interface DevUser {
   id: string;
@@ -155,19 +156,26 @@ export default function Login() {
     </TouchableOpacity>
   );
 
+  const { colors } = useTheme();
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Basketball Tracker</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Basketball Tracker</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in to continue</Text>
 
       <TouchableOpacity
-        style={[styles.button, isLoading && styles.buttonDisabled]}
+        style={[styles.button, { backgroundColor: colors.primary }, isLoading && styles.buttonDisabled]}
         onPress={handleLogin}
         disabled={isLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Sign in"
+        accessibilityState={{ disabled: isLoading }}
       >
-        <Text style={styles.buttonText}>
-          {isLoading ? 'Loading...' : 'Sign In'}
-        </Text>
+        {isLoading ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <Text style={styles.buttonText}>Sign In</Text>
+        )}
       </TouchableOpacity>
 
       {/* Dev login button - only in development */}
@@ -176,6 +184,8 @@ export default function Login() {
           style={[styles.devButton, isLoading && styles.buttonDisabled]}
           onPress={handleOpenDevLogin}
           disabled={isLoading}
+          accessibilityRole="button"
+          accessibilityLabel="Developer login with test users"
         >
           <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
         </TouchableOpacity>
@@ -188,11 +198,15 @@ export default function Login() {
         presentationStyle="pageSheet"
         onRequestClose={() => setShowDevLogin(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Select Test User</Text>
-            <TouchableOpacity onPress={() => setShowDevLogin(false)}>
-              <Text style={styles.modalClose}>Cancel</Text>
+        <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Test User</Text>
+            <TouchableOpacity
+              onPress={() => setShowDevLogin(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+            >
+              <Text style={[styles.modalClose, { color: colors.primary }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
           <FlatList
@@ -213,25 +227,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#fff',
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     marginBottom: 8,
-    color: '#000',
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 40,
   },
   button: {
-    backgroundColor: '#007AFF',
     paddingHorizontal: 32,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 8,
     minWidth: 200,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -245,12 +258,15 @@ const styles = StyleSheet.create({
   devButton: {
     marginTop: 20,
     paddingHorizontal: 32,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 8,
     minWidth: 200,
+    minHeight: 48,
     borderWidth: 1,
     borderColor: '#FF9500',
     backgroundColor: '#FFF9F0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   devButtonText: {
     color: '#FF9500',
@@ -260,7 +276,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -268,16 +283,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#000',
   },
   modalClose: {
     fontSize: 16,
-    color: '#007AFF',
+    padding: 8,
   },
   devUserList: {
     padding: 16,
@@ -287,6 +300,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#f5f5f5',
     marginBottom: 12,
+    minHeight: 48,
   },
   devUserName: {
     fontSize: 16,

@@ -217,41 +217,38 @@ export class GameService {
       }
     }
 
-    // Get total count
-    const total = await prisma.game.count({ where });
-
-    // Get games
-    const games = await prisma.game.findMany({
-      where,
-      include: {
-        team: {
-          include: {
-            season: {
-              include: {
-                league: true,
-              },
-            },
-            staff: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
+    // Get total count and games in parallel
+    const [total, games] = await Promise.all([
+      prisma.game.count({ where }),
+      prisma.game.findMany({
+        where,
+        include: {
+          team: {
+            select: {
+              id: true,
+              name: true,
+              season: {
+                select: {
+                  id: true,
+                  name: true,
+                  league: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
                   },
                 },
-                role: true,
               },
             },
           },
         },
-      },
-      orderBy: {
-        date: 'desc',
-      },
-      take: query.limit,
-      skip: query.offset,
-    });
+        orderBy: {
+          date: 'desc',
+        },
+        take: query.limit,
+        skip: query.offset,
+      }),
+    ]);
 
     return {
       games,

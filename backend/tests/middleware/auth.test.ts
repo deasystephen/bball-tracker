@@ -200,7 +200,7 @@ describe('Auth Middleware', () => {
       expect(nextFn).toHaveBeenCalledWith(
         expect.objectContaining({
           message: 'Insufficient permissions',
-          statusCode: 401,
+          statusCode: 403,
         })
       );
     });

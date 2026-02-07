@@ -7,11 +7,18 @@ import { app, httpServer } from '../../src/index';
 import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
 
+// Test UUIDs
+const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+const TEST_INVITATION_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+const TEST_TEAM_ID = 'c3d4e5f6-a7b8-9012-3456-7890abcdef01';
+const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-0123-4567-890abcdef012';
+const TEST_COACH_ID = 'e5f6a7b8-c9d0-1234-5678-90abcdef0123';
+
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'test-user-id',
+      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'PLAYER',
@@ -28,10 +35,10 @@ const mockInvitationService = InvitationService as jest.Mocked<typeof Invitation
 
 describe('Invitations API', () => {
   const mockInvitation = {
-    id: 'inv-1',
-    teamId: 'team-1',
-    playerId: 'player-1',
-    invitedById: 'coach-1',
+    id: TEST_INVITATION_ID,
+    teamId: TEST_TEAM_ID,
+    playerId: TEST_PLAYER_ID,
+    invitedById: TEST_COACH_ID,
     status: 'PENDING',
     token: 'abc123',
     message: 'Join our team!',
@@ -41,18 +48,18 @@ describe('Invitations API', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     team: {
-      id: 'team-1',
+      id: TEST_TEAM_ID,
       name: 'Lakers',
-      league: { id: 'league-1', name: 'Spring League', season: 'Spring', year: 2024 },
+      league: { id: 'f6a7b8c9-d0e1-2345-6789-0abcdef01234', name: 'Spring League', season: 'Spring', year: 2024 },
     },
-    player: { id: 'player-1', name: 'John Player', email: 'john@example.com' },
-    invitedBy: { id: 'coach-1', name: 'Coach Smith', email: 'coach@example.com' },
+    player: { id: TEST_PLAYER_ID, name: 'John Player', email: 'john@example.com' },
+    invitedBy: { id: TEST_COACH_ID, name: 'Coach Smith', email: 'coach@example.com' },
   };
 
   const mockTeamMember = {
-    id: 'tm-1',
-    teamId: 'team-1',
-    playerId: 'player-1',
+    id: 'f6a7b8c9-d0e1-2345-6789-0abcdef01234',
+    teamId: TEST_TEAM_ID,
+    playerId: TEST_PLAYER_ID,
     jerseyNumber: 23,
     position: 'Guard',
     createdAt: new Date(),
@@ -91,7 +98,7 @@ describe('Invitations API', () => {
       expect(response.status).toBe(200);
       expect(mockInvitationService.listInvitations).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'PENDING' }),
-        'test-user-id'
+        TEST_USER_ID
       );
     });
 
@@ -109,7 +116,7 @@ describe('Invitations API', () => {
       expect(response.status).toBe(200);
       expect(mockInvitationService.listInvitations).toHaveBeenCalledWith(
         expect.objectContaining({ teamId: teamUuid }),
-        'test-user-id'
+        TEST_USER_ID
       );
     });
 
@@ -132,11 +139,11 @@ describe('Invitations API', () => {
     it('should get an invitation by ID', async () => {
       mockInvitationService.getInvitationById.mockResolvedValue(mockInvitation as any);
 
-      const response = await request(app).get('/api/v1/invitations/inv-1');
+      const response = await request(app).get(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.invitation.id).toBe('inv-1');
+      expect(response.body.invitation.id).toBe(TEST_INVITATION_ID);
     });
 
     it('should return 404 for non-existent invitation', async () => {
@@ -144,7 +151,7 @@ describe('Invitations API', () => {
         new NotFoundError('Invitation not found')
       );
 
-      const response = await request(app).get('/api/v1/invitations/invalid-id');
+      const response = await request(app).get('/api/v1/invitations/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Invitation not found');
@@ -155,7 +162,7 @@ describe('Invitations API', () => {
         new ForbiddenError('Access denied')
       );
 
-      const response = await request(app).get('/api/v1/invitations/inv-1');
+      const response = await request(app).get(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 
       expect(response.status).toBe(403);
       expect(response.body.error).toBe('Access denied');
@@ -170,7 +177,7 @@ describe('Invitations API', () => {
         teamMember: mockTeamMember,
       } as any);
 
-      const response = await request(app).post('/api/v1/invitations/inv-1/accept');
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -184,7 +191,7 @@ describe('Invitations API', () => {
         new NotFoundError('Invitation not found')
       );
 
-      const response = await request(app).post('/api/v1/invitations/invalid-id/accept');
+      const response = await request(app).post('/api/v1/invitations/00000000-0000-0000-0000-000000000000/accept');
 
       expect(response.status).toBe(404);
     });
@@ -194,7 +201,7 @@ describe('Invitations API', () => {
         new BadRequestError('Invitation already accepted')
       );
 
-      const response = await request(app).post('/api/v1/invitations/inv-1/accept');
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
 
       expect(response.status).toBe(400);
     });
@@ -204,7 +211,7 @@ describe('Invitations API', () => {
         new ForbiddenError('Only the invited player can accept')
       );
 
-      const response = await request(app).post('/api/v1/invitations/inv-1/accept');
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
 
       expect(response.status).toBe(403);
     });
@@ -215,7 +222,7 @@ describe('Invitations API', () => {
       const rejectedInvitation = { ...mockInvitation, status: 'REJECTED' };
       mockInvitationService.rejectInvitation.mockResolvedValue(rejectedInvitation as any);
 
-      const response = await request(app).post('/api/v1/invitations/inv-1/reject');
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/reject`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -228,7 +235,7 @@ describe('Invitations API', () => {
         new NotFoundError('Invitation not found')
       );
 
-      const response = await request(app).post('/api/v1/invitations/invalid-id/reject');
+      const response = await request(app).post('/api/v1/invitations/00000000-0000-0000-0000-000000000000/reject');
 
       expect(response.status).toBe(404);
     });
@@ -238,7 +245,7 @@ describe('Invitations API', () => {
         new BadRequestError('Invitation already rejected')
       );
 
-      const response = await request(app).post('/api/v1/invitations/inv-1/reject');
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/reject`);
 
       expect(response.status).toBe(400);
     });
@@ -249,7 +256,7 @@ describe('Invitations API', () => {
       const cancelledInvitation = { ...mockInvitation, status: 'CANCELLED' };
       mockInvitationService.cancelInvitation.mockResolvedValue(cancelledInvitation as any);
 
-      const response = await request(app).delete('/api/v1/invitations/inv-1');
+      const response = await request(app).delete(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -261,7 +268,7 @@ describe('Invitations API', () => {
         new NotFoundError('Invitation not found')
       );
 
-      const response = await request(app).delete('/api/v1/invitations/invalid-id');
+      const response = await request(app).delete('/api/v1/invitations/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });
@@ -271,7 +278,7 @@ describe('Invitations API', () => {
         new ForbiddenError('Only the inviting coach can cancel')
       );
 
-      const response = await request(app).delete('/api/v1/invitations/inv-1');
+      const response = await request(app).delete(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 
       expect(response.status).toBe(403);
     });

@@ -59,7 +59,7 @@ export const createGameEventSchema = z.object({
     errorMap: () => ({ message: 'Invalid event type' }),
   }),
   timestamp: z.string().datetime('Invalid timestamp format').or(z.date()).optional(),
-  metadata: z.record(z.unknown()).optional().default({}),
+  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().default({}),
 });
 
 /**

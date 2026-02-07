@@ -13,6 +13,7 @@ import {
   NotFoundError,
   ForbiddenError,
 } from '../../utils/errors';
+import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.get('/', async (req, res) => {
  * GET /api/v1/invitations/:id
  * Get an invitation by ID
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.getInvitationById(
       req.params.id,
@@ -88,7 +89,7 @@ router.get('/:id', async (req, res) => {
  * POST /api/v1/invitations/:id/accept
  * Accept an invitation (player only)
  */
-router.post('/:id/accept', async (req, res) => {
+router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
   try {
     const result = await InvitationService.acceptInvitation(
       req.params.id,
@@ -119,7 +120,7 @@ router.post('/:id/accept', async (req, res) => {
  * POST /api/v1/invitations/:id/reject
  * Reject an invitation (player only)
  */
-router.post('/:id/reject', async (req, res) => {
+router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.rejectInvitation(
       req.params.id,
@@ -149,7 +150,7 @@ router.post('/:id/reject', async (req, res) => {
  * DELETE /api/v1/invitations/:id
  * Cancel an invitation (coach only)
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.cancelInvitation(
       req.params.id,

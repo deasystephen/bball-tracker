@@ -93,18 +93,27 @@ describe('Auth API', () => {
       expect(response.body.url).toBeDefined();
     });
 
-    it('should pass custom redirect_uri to WorkOS', async () => {
+    it('should reject custom redirect_uri with non-allowed host', async () => {
+      const response = await request(app)
+        .get('/api/v1/auth/login')
+        .query({ redirect_uri: 'myapp://callback', format: 'json' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('redirect_uri');
+    });
+
+    it('should pass valid custom redirect_uri to WorkOS', async () => {
       mockWorkOSService.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize?...'
       );
 
       await request(app)
         .get('/api/v1/auth/login')
-        .query({ redirect_uri: 'myapp://callback', format: 'json' });
+        .query({ redirect_uri: 'http://localhost:3000/callback', format: 'json' });
 
       expect(mockWorkOSService.getAuthorizationUrl).toHaveBeenCalledWith(
         undefined,
-        'myapp://callback'
+        'http://localhost:3000/callback'
       );
     });
 

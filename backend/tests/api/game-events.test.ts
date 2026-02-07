@@ -266,7 +266,7 @@ describe('Game Events API', () => {
       );
 
       const response = await request(app).get(
-        `/api/v1/games/${TEST_GAME_ID}/events/non-existent-id`
+        `/api/v1/games/${TEST_GAME_ID}/events/00000000-0000-0000-0000-000000000000`
       );
 
       expect(response.status).toBe(404);
@@ -310,7 +310,7 @@ describe('Game Events API', () => {
       );
 
       const response = await request(app).delete(
-        `/api/v1/games/${TEST_GAME_ID}/events/non-existent-id`
+        `/api/v1/games/${TEST_GAME_ID}/events/00000000-0000-0000-0000-000000000000`
       );
 
       expect(response.status).toBe(404);

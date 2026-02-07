@@ -34,7 +34,11 @@ const getInitials = (name: string): string => {
     .slice(0, 2);
 };
 
-export const PlayerRoster: React.FC<PlayerRosterProps> = ({
+/**
+ * Memoized to prevent unnecessary re-renders when parent re-renders
+ * (e.g., during score updates on the tracking screen).
+ */
+export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(({
   players,
   selectedPlayerId,
   onSelectPlayer,
@@ -84,6 +88,9 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = ({
                 },
               ]}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${member.player.name}${member.jerseyNumber ? `, number ${member.jerseyNumber}` : ''}`}
+              accessibilityState={{ selected: isSelected }}
             >
               <View
                 style={[
@@ -123,7 +130,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = ({
       </View>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -141,11 +148,12 @@ const styles = StyleSheet.create({
   playerChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     borderRadius: 20,
     borderWidth: 1,
     gap: spacing.xs,
+    minHeight: 44,
   },
   avatar: {
     width: 24,

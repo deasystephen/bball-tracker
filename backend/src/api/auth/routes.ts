@@ -6,8 +6,12 @@ import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
 import { UnauthorizedError, BadRequestError } from '../../utils/errors';
 import prisma from '../../models';
+import { authRateLimit } from '../middleware/rate-limit';
 
 const router = Router();
+
+// Apply stricter rate limiting to all auth endpoints
+router.use(authRateLimit);
 
 /**
  * Development-only endpoints
@@ -20,14 +24,12 @@ if (process.env.NODE_ENV === 'development') {
   router.get('/debug', (_req, res) => {
     res.json({
       hasApiKey: !!process.env.WORKOS_API_KEY,
-      apiKeyPrefix: process.env.WORKOS_API_KEY?.substring(0, 7) || 'NOT SET',
       hasClientId: !!process.env.WORKOS_CLIENT_ID,
-      clientIdPrefix: process.env.WORKOS_CLIENT_ID?.substring(0, 10) || 'NOT SET',
-      redirectUri: process.env.WORKOS_REDIRECT_URI || 'NOT SET',
+      hasRedirectUri: !!process.env.WORKOS_REDIRECT_URI,
       environment: process.env.WORKOS_ENVIRONMENT || 'NOT SET',
-      connectionId: process.env.WORKOS_CONNECTION_ID || 'NOT SET',
-      organizationId: process.env.WORKOS_ORGANIZATION_ID || 'NOT SET',
-      provider: process.env.WORKOS_PROVIDER || 'NOT SET',
+      hasConnectionId: !!process.env.WORKOS_CONNECTION_ID,
+      hasOrganizationId: !!process.env.WORKOS_ORGANIZATION_ID,
+      hasProvider: !!process.env.WORKOS_PROVIDER,
       authMethod: process.env.WORKOS_CONNECTION_ID
         ? 'connectionId (SSO/OAuth)'
         : process.env.WORKOS_ORGANIZATION_ID
@@ -118,16 +120,30 @@ if (process.env.NODE_ENV === 'development') {
  * - For mobile apps: returns JSON with the URL (when ?format=json or Accept: application/json)
  * - Accepts optional redirect_uri query parameter for mobile deep linking
  */
-router.get('/login', async (req, res) => {
+router.get('/login', async (req, res): Promise<void> => {
   try {
     // Allow mobile apps to specify custom redirect URI for deep linking
+    // Validate redirect_uri to prevent open redirect attacks
     const customRedirectUri = req.query.redirect_uri as string | undefined;
+    if (customRedirectUri) {
+      const allowedRedirectHosts = (process.env.ALLOWED_REDIRECT_HOSTS || 'localhost').split(',').map(h => h.trim());
+      try {
+        const redirectUrl = new URL(customRedirectUri);
+        if (!allowedRedirectHosts.includes(redirectUrl.hostname)) {
+          res.status(400).json({ error: 'Invalid redirect_uri: host not allowed' });
+          return;
+        }
+      } catch {
+        res.status(400).json({ error: 'Invalid redirect_uri: malformed URL' });
+        return;
+      }
+    }
     const authorizationUrl = await WorkOSService.getAuthorizationUrl(undefined, customRedirectUri);
-    
+
     // Check if client wants JSON (mobile app) or redirect (web browser)
-    const wantsJson = req.query.format === 'json' || 
+    const wantsJson = req.query.format === 'json' ||
                      req.get('Accept')?.includes('application/json');
-    
+
     if (wantsJson) {
       // Return JSON for mobile apps
       res.json({ url: authorizationUrl });
@@ -138,7 +154,7 @@ router.get('/login', async (req, res) => {
   } catch (error) {
     console.error('Error generating authorization URL:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to generate authorization URL',
       details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
     });

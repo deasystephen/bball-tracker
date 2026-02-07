@@ -99,12 +99,15 @@ export const Button: React.FC<ButtonProps> = ({
       ]}
       disabled={disabled || loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={loading ? `${title}, loading` : title}
+      accessibilityState={{ disabled: disabled || loading }}
       {...props}
     >
       {loading ? (
         <ActivityIndicator
           color={getTextColor()}
-          size={size === 'small' ? 'small' : 'small'}
+          size="small"
         />
       ) : (
         <ThemedText

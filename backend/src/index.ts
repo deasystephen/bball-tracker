@@ -29,13 +29,17 @@ app.use(cors({
   origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   credentials: true,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Health check endpoint
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Rate limiting
+import { apiRateLimit } from './api/middleware/rate-limit';
+app.use('/api/v1', apiRateLimit);
 
 // API routes
 app.use('/api/v1', apiRouter);
@@ -47,8 +51,13 @@ setupWebSocketHandlers(io);
 import { AppError } from './utils/errors';
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
-  console.error('Error:', err);
-  
+  // Log full error for debugging, but only in development
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Error:', err);
+  } else {
+    console.error('Error:', err.message);
+  }
+
   // If it's an AppError, use its status code
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
@@ -56,11 +65,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     });
     return;
   }
-  
-  // Otherwise, return 500
+
+  // Otherwise, return generic 500 - never leak internal error details in production
   res.status(500).json({
     error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    ...(process.env.NODE_ENV === 'development' && { message: err.message }),
   });
 });
 

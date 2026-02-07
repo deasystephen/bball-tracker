@@ -188,50 +188,50 @@ export class InvitationService {
       where.playerId = userId;
     }
 
-    // Get total count for pagination
-    const total = await prisma.teamInvitation.count({ where });
-
-    // Get invitations
-    const invitations = await prisma.teamInvitation.findMany({
-      where,
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-            season: {
-              select: {
-                id: true,
-                name: true,
-                league: {
-                  select: {
-                    id: true,
-                    name: true,
+    // Get total count and invitations in parallel
+    const [total, invitations] = await Promise.all([
+      prisma.teamInvitation.count({ where }),
+      prisma.teamInvitation.findMany({
+        where,
+        include: {
+          team: {
+            select: {
+              id: true,
+              name: true,
+              season: {
+                select: {
+                  id: true,
+                  name: true,
+                  league: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
                   },
                 },
               },
             },
           },
-        },
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+          player: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          invitedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
           },
         },
-        invitedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
-    });
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+    ]);
 
     return {
       invitations,

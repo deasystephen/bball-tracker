@@ -175,7 +175,7 @@ describe('Games API', () => {
     it('should return 404 for non-existent game', async () => {
       mockGameService.getGameById.mockRejectedValue(new NotFoundError('Game not found'));
 
-      const response = await request(app).get('/api/v1/games/invalid-id');
+      const response = await request(app).get('/api/v1/games/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Game not found');
@@ -242,7 +242,7 @@ describe('Games API', () => {
       mockGameService.updateGame.mockRejectedValue(new NotFoundError('Game not found'));
 
       const response = await request(app)
-        .patch('/api/v1/games/invalid-id')
+        .patch('/api/v1/games/00000000-0000-0000-0000-000000000000')
         .send({ opponent: 'Bulls' });
 
       expect(response.status).toBe(404);
@@ -275,7 +275,7 @@ describe('Games API', () => {
     it('should return 404 for non-existent game', async () => {
       mockGameService.deleteGame.mockRejectedValue(new NotFoundError('Game not found'));
 
-      const response = await request(app).delete('/api/v1/games/invalid-id');
+      const response = await request(app).delete('/api/v1/games/00000000-0000-0000-0000-000000000000');
 
       expect(response.status).toBe(404);
     });

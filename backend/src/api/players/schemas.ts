@@ -7,11 +7,16 @@ import { z } from 'zod';
 /**
  * Schema for creating a player
  */
+const safeUrlSchema = z.string().url('Invalid URL format').refine(
+  (url) => /^https?:\/\//i.test(url),
+  { message: 'URL must use http or https protocol' }
+);
+
 export const createPlayerSchema = z.object({
   email: z.string().email('Invalid email format'),
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
   // Optional fields
-  profilePictureUrl: z.string().url('Invalid URL format').optional().or(z.literal('')),
+  profilePictureUrl: safeUrlSchema.optional().or(z.literal('')),
 });
 
 /**
@@ -20,7 +25,7 @@ export const createPlayerSchema = z.object({
 export const updatePlayerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name too long').optional(),
   email: z.string().email('Invalid email format').optional(),
-  profilePictureUrl: z.string().url('Invalid URL format').optional().or(z.literal('')),
+  profilePictureUrl: safeUrlSchema.optional().or(z.literal('')),
 });
 
 /**

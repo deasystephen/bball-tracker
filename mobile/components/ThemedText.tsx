@@ -3,14 +3,26 @@
  */
 
 import React from 'react';
-import { Text, TextProps, StyleSheet } from 'react-native';
+import { Text, TextProps } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 import { typography, TypographyVariant } from '../theme/typography';
+import type { Colors } from '../theme/colors';
+
+type ThemeColorKey = 'text' | 'textSecondary' | 'textTertiary' | 'primary' | 'error' | 'success';
 
 interface ThemedTextProps extends TextProps {
   variant?: TypographyVariant;
-  color?: 'text' | 'textSecondary' | 'textTertiary' | 'primary' | 'error' | 'success';
+  color?: ThemeColorKey;
 }
+
+const colorMap: Record<ThemeColorKey, keyof Colors> = {
+  text: 'text',
+  textSecondary: 'textSecondary',
+  textTertiary: 'textTertiary',
+  primary: 'primary',
+  error: 'error',
+  success: 'success',
+};
 
 export const ThemedText: React.FC<ThemedTextProps> = ({
   style,
@@ -19,19 +31,7 @@ export const ThemedText: React.FC<ThemedTextProps> = ({
   ...props
 }) => {
   const { colors } = useTheme();
-
-  const textColor =
-    color === 'text'
-      ? colors.text
-      : color === 'textSecondary'
-      ? colors.textSecondary
-      : color === 'textTertiary'
-      ? colors.textTertiary
-      : color === 'primary'
-      ? colors.primary
-      : color === 'error'
-      ? colors.error
-      : colors.success;
+  const textColor = colors[colorMap[color]];
 
   return (
     <Text
@@ -44,5 +44,3 @@ export const ThemedText: React.FC<ThemedTextProps> = ({
     />
   );
 };
-
-const styles = StyleSheet.create({});

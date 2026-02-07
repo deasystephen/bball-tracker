@@ -34,7 +34,12 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
     <View style={[styles.container, { backgroundColor: colors.card }]}>
       <View style={styles.topRow}>
         {onBack && (
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={onBack}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         )}
@@ -50,6 +55,8 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
           <TouchableOpacity
             onPress={onEndGame}
             style={[styles.endButton, { backgroundColor: colors.error + '20' }]}
+            accessibilityRole="button"
+            accessibilityLabel="End game"
           >
             <ThemedText
               variant="captionBold"
@@ -63,7 +70,10 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
         )}
       </View>
 
-      <View style={styles.scoreRow}>
+      <View
+        style={styles.scoreRow}
+        accessibilityLabel={`Score: ${homeTeamName} ${homeScore}, ${awayTeamName} ${awayScore}`}
+      >
         <View style={styles.teamScore}>
           <ThemedText
             variant="caption"
@@ -121,7 +131,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backButton: {
-    padding: spacing.xs,
+    padding: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   titleContainer: {
     alignItems: 'center',

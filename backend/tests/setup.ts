@@ -150,8 +150,13 @@ export const mockPrisma = {
   $disconnect: jest.fn(),
 };
 
-// Set up $transaction to use mockPrisma after it's defined
-mockPrisma.$transaction.mockImplementation((callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
+// Set up $transaction to support both batch (array) and interactive (callback) patterns
+mockPrisma.$transaction.mockImplementation((input: unknown) => {
+  if (Array.isArray(input)) {
+    return Promise.all(input);
+  }
+  return (input as (tx: typeof mockPrisma) => unknown)(mockPrisma);
+});
 
 // Mock Prisma client
 jest.mock('../src/models', () => {

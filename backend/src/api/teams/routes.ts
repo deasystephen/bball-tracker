@@ -14,6 +14,7 @@ import {
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
+import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
 
@@ -88,7 +89,7 @@ router.get('/', async (req, res) => {
  * GET /api/v1/teams/:id
  * Get a team by ID
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const team = await TeamService.getTeamById(req.params.id, req.user!.id);
 
@@ -114,7 +115,7 @@ router.get('/:id', async (req, res) => {
  * PATCH /api/v1/teams/:id
  * Update a team
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = updateTeamSchema.safeParse(req.body);
@@ -152,7 +153,7 @@ router.patch('/:id', async (req, res) => {
  * DELETE /api/v1/teams/:id
  * Delete a team
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     await TeamService.deleteTeam(req.params.id, req.user!.id);
 
@@ -190,7 +191,7 @@ router.post('/:id/players', async (_req, res) => {
  * POST /api/v1/teams/:teamId/invitations
  * Create a new team invitation (coach only)
  */
-router.post('/:teamId/invitations', async (req, res) => {
+router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = createInvitationSchema.safeParse(req.body);
@@ -228,7 +229,7 @@ router.post('/:teamId/invitations', async (req, res) => {
  * DELETE /api/v1/teams/:id/players/:playerId
  * Remove a player from a team
  */
-router.delete('/:id/players/:playerId', async (req, res) => {
+router.delete('/:id/players/:playerId', validateUuidParams('id', 'playerId'), async (req, res) => {
   try {
     await TeamService.removePlayer(
       req.params.id,
@@ -258,7 +259,7 @@ router.delete('/:id/players/:playerId', async (req, res) => {
  * PATCH /api/v1/teams/:id/players/:playerId
  * Update a team member (jersey number, position)
  */
-router.patch('/:id/players/:playerId', async (req, res) => {
+router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = updateTeamMemberSchema.safeParse(req.body);

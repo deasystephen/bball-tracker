@@ -59,3 +59,16 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+/**
+ * Granular selectors to prevent unnecessary re-renders.
+ * Components that only need the user don't re-render when accessToken changes.
+ */
+export const useAuthUser = () => useAuthStore((state) => state.user);
+export const useIsAuthenticated = () => useAuthStore((state) => state.isAuthenticated);
+export const useAuthActions = () =>
+  useAuthStore((state) => ({
+    setAuthToken: state.setAuthToken,
+    setUser: state.setUser,
+    logout: state.logout,
+  }));

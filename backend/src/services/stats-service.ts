@@ -119,33 +119,36 @@ export class StatsService {
    * Calculate player stats from game events for a specific game
    */
   static async calculatePlayerStats(gameId: string): Promise<PlayerGameStats[]> {
-    const events = await prisma.gameEvent.findMany({
-      where: { gameId },
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
+    // Fetch events and game with members in parallel
+    const [events, game] = await Promise.all([
+      prisma.gameEvent.findMany({
+        where: { gameId },
+        include: {
+          player: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
-    });
-
-    // Get team members for jersey numbers and positions
-    const game = await prisma.game.findUnique({
-      where: { id: gameId },
-      include: {
-        team: {
-          include: {
-            members: {
-              include: {
-                player: true,
+      }),
+      prisma.game.findUnique({
+        where: { id: gameId },
+        include: {
+          team: {
+            include: {
+              members: {
+                select: {
+                  playerId: true,
+                  jerseyNumber: true,
+                  position: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+    ]);
 
     if (!game) {
       throw new NotFoundError('Game not found');
@@ -335,7 +338,8 @@ export class StatsService {
 
   /**
    * Finalize game stats when game status changes to FINISHED
-   * This persists calculated stats to PlayerStats and TeamStats tables
+   * This persists calculated stats to PlayerStats and TeamStats tables.
+   * Uses a transaction to batch all upserts together.
    */
   static async finalizeGameStats(gameId: string): Promise<void> {
     const game = await prisma.game.findUnique({
@@ -352,79 +356,81 @@ export class StatsService {
     const playerStats = await this.calculatePlayerStats(gameId);
     const teamStats = this.calculateTeamTotals(game.teamId, game.team.name, playerStats);
 
-    // Upsert player stats
-    for (const stats of playerStats) {
-      await prisma.playerStats.upsert({
-        where: {
-          playerId_gameId: {
+    // Batch all upserts in a single transaction
+    await prisma.$transaction([
+      // Upsert player stats
+      ...playerStats.map((stats) =>
+        prisma.playerStats.upsert({
+          where: {
+            playerId_gameId: {
+              playerId: stats.playerId,
+              gameId,
+            },
+          },
+          create: {
             playerId: stats.playerId,
+            gameId,
+            points: stats.points,
+            rebounds: stats.rebounds,
+            assists: stats.assists,
+            steals: stats.steals,
+            blocks: stats.blocks,
+            turnovers: stats.turnovers,
+            fouls: stats.fouls,
+            fieldGoalsMade: stats.fieldGoalsMade,
+            fieldGoalsAttempted: stats.fieldGoalsAttempted,
+            threePointersMade: stats.threePointersMade,
+            threePointersAttempted: stats.threePointersAttempted,
+            freeThrowsMade: stats.freeThrowsMade,
+            freeThrowsAttempted: stats.freeThrowsAttempted,
+          },
+          update: {
+            points: stats.points,
+            rebounds: stats.rebounds,
+            assists: stats.assists,
+            steals: stats.steals,
+            blocks: stats.blocks,
+            turnovers: stats.turnovers,
+            fouls: stats.fouls,
+            fieldGoalsMade: stats.fieldGoalsMade,
+            fieldGoalsAttempted: stats.fieldGoalsAttempted,
+            threePointersMade: stats.threePointersMade,
+            threePointersAttempted: stats.threePointersAttempted,
+            freeThrowsMade: stats.freeThrowsMade,
+            freeThrowsAttempted: stats.freeThrowsAttempted,
+          },
+        })
+      ),
+      // Upsert team stats
+      prisma.teamStats.upsert({
+        where: {
+          teamId_gameId: {
+            teamId: game.teamId,
             gameId,
           },
         },
         create: {
-          playerId: stats.playerId,
-          gameId,
-          points: stats.points,
-          rebounds: stats.rebounds,
-          assists: stats.assists,
-          steals: stats.steals,
-          blocks: stats.blocks,
-          turnovers: stats.turnovers,
-          fouls: stats.fouls,
-          fieldGoalsMade: stats.fieldGoalsMade,
-          fieldGoalsAttempted: stats.fieldGoalsAttempted,
-          threePointersMade: stats.threePointersMade,
-          threePointersAttempted: stats.threePointersAttempted,
-          freeThrowsMade: stats.freeThrowsMade,
-          freeThrowsAttempted: stats.freeThrowsAttempted,
-        },
-        update: {
-          points: stats.points,
-          rebounds: stats.rebounds,
-          assists: stats.assists,
-          steals: stats.steals,
-          blocks: stats.blocks,
-          turnovers: stats.turnovers,
-          fouls: stats.fouls,
-          fieldGoalsMade: stats.fieldGoalsMade,
-          fieldGoalsAttempted: stats.fieldGoalsAttempted,
-          threePointersMade: stats.threePointersMade,
-          threePointersAttempted: stats.threePointersAttempted,
-          freeThrowsMade: stats.freeThrowsMade,
-          freeThrowsAttempted: stats.freeThrowsAttempted,
-        },
-      });
-    }
-
-    // Upsert team stats
-    await prisma.teamStats.upsert({
-      where: {
-        teamId_gameId: {
           teamId: game.teamId,
           gameId,
+          points: teamStats.points,
+          rebounds: teamStats.rebounds,
+          assists: teamStats.assists,
+          turnovers: teamStats.turnovers,
+          fieldGoalPercentage: teamStats.fieldGoalPercentage,
+          threePointPercentage: teamStats.threePointPercentage,
+          freeThrowPercentage: teamStats.freeThrowPercentage,
         },
-      },
-      create: {
-        teamId: game.teamId,
-        gameId,
-        points: teamStats.points,
-        rebounds: teamStats.rebounds,
-        assists: teamStats.assists,
-        turnovers: teamStats.turnovers,
-        fieldGoalPercentage: teamStats.fieldGoalPercentage,
-        threePointPercentage: teamStats.threePointPercentage,
-        freeThrowPercentage: teamStats.freeThrowPercentage,
-      },
-      update: {
-        points: teamStats.points,
-        rebounds: teamStats.rebounds,
-        assists: teamStats.assists,
-        turnovers: teamStats.turnovers,
-        fieldGoalPercentage: teamStats.fieldGoalPercentage,
-        threePointPercentage: teamStats.threePointPercentage,
-        freeThrowPercentage: teamStats.freeThrowPercentage,
-      },
-    });
+        update: {
+          points: teamStats.points,
+          rebounds: teamStats.rebounds,
+          assists: teamStats.assists,
+          turnovers: teamStats.turnovers,
+          fieldGoalPercentage: teamStats.fieldGoalPercentage,
+          threePointPercentage: teamStats.threePointPercentage,
+          freeThrowPercentage: teamStats.freeThrowPercentage,
+        },
+      }),
+    ]);
   }
 
   /**
@@ -648,30 +654,33 @@ export class StatsService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-    });
+    // Get team and finished games in parallel
+    const [team, games] = await Promise.all([
+      prisma.team.findUnique({
+        where: { id: teamId },
+      }),
+      prisma.game.findMany({
+        where: {
+          teamId,
+          status: 'FINISHED',
+        },
+        orderBy: { date: 'desc' },
+      }),
+    ]);
 
     if (!team) {
       throw new NotFoundError('Team not found');
     }
 
-    // Get finished games
-    const games = await prisma.game.findMany({
-      where: {
-        teamId,
-        status: 'FINISHED',
-      },
-      orderBy: { date: 'desc' },
-    });
-
     // Get team stats for all games
-    const teamStats = await prisma.teamStats.findMany({
-      where: {
-        teamId,
-        gameId: { in: games.map((g) => g.id) },
-      },
-    });
+    const teamStats = games.length > 0
+      ? await prisma.teamStats.findMany({
+          where: {
+            teamId,
+            gameId: { in: games.map((g) => g.id) },
+          },
+        })
+      : [];
 
     const gamesPlayed = games.length;
     let wins = 0;
@@ -744,6 +753,7 @@ export class StatsService {
 
   /**
    * Get roster with season stats for all players on a team
+   * Optimized to batch-load stats instead of N+1 queries per player
    */
   static async getTeamRosterStats(
     teamId: string,
@@ -754,66 +764,123 @@ export class StatsService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    // Get team members
-    const members = await prisma.teamMember.findMany({
-      where: { teamId },
-      include: {
-        player: {
-          select: { id: true, name: true },
+    // Get team members and finished game IDs in parallel
+    const [members, finishedGames] = await Promise.all([
+      prisma.teamMember.findMany({
+        where: { teamId },
+        include: {
+          player: {
+            select: { id: true, name: true },
+          },
         },
-      },
-    });
+      }),
+      prisma.game.findMany({
+        where: { teamId, status: 'FINISHED' },
+        select: { id: true },
+      }),
+    ]);
 
-    // Get all player stats for team players
-    const playerStats: AggregatedPlayerStats[] = [];
+    const gameIds = finishedGames.map((g) => g.id);
+    const playerIds = members.map((m) => m.playerId);
 
-    for (const member of members) {
-      try {
-        const stats = await this.getPlayerSeasonStats(member.playerId, teamId, userId);
-        playerStats.push(stats);
-      } catch {
-        // Player may not have any stats yet
-        playerStats.push({
-          playerId: member.playerId,
-          playerName: member.player.name,
-          jerseyNumber: member.jerseyNumber ?? undefined,
-          position: member.position ?? undefined,
-          points: 0,
-          rebounds: 0,
-          offensiveRebounds: 0,
-          defensiveRebounds: 0,
-          assists: 0,
-          steals: 0,
-          blocks: 0,
-          turnovers: 0,
-          fouls: 0,
-          fieldGoalsMade: 0,
-          fieldGoalsAttempted: 0,
-          fieldGoalPercentage: 0,
-          threePointersMade: 0,
-          threePointersAttempted: 0,
-          threePointPercentage: 0,
-          freeThrowsMade: 0,
-          freeThrowsAttempted: 0,
-          freeThrowPercentage: 0,
-          gamesPlayed: 0,
-          pointsPerGame: 0,
-          reboundsPerGame: 0,
-          assistsPerGame: 0,
-          stealsPerGame: 0,
-          blocksPerGame: 0,
-          turnoversPerGame: 0,
-          efficiency: 0,
-        });
-      }
+    // Batch-load all player stats for all team members at once
+    const allStats = gameIds.length > 0 && playerIds.length > 0
+      ? await prisma.playerStats.findMany({
+          where: {
+            playerId: { in: playerIds },
+            gameId: { in: gameIds },
+          },
+        })
+      : [];
+
+    // Group stats by player
+    const statsByPlayer = new Map<string, typeof allStats>();
+    for (const stat of allStats) {
+      const existing = statsByPlayer.get(stat.playerId) || [];
+      existing.push(stat);
+      statsByPlayer.set(stat.playerId, existing);
     }
 
+    // Build aggregated stats for each member
+    const playerStatsResult: AggregatedPlayerStats[] = members.map((member) => {
+      const stats = statsByPlayer.get(member.playerId) || [];
+      const gamesPlayed = stats.length;
+
+      const totals = {
+        points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0,
+        turnovers: 0, fouls: 0, fieldGoalsMade: 0, fieldGoalsAttempted: 0,
+        threePointersMade: 0, threePointersAttempted: 0,
+        freeThrowsMade: 0, freeThrowsAttempted: 0,
+      };
+
+      for (const stat of stats) {
+        totals.points += stat.points;
+        totals.rebounds += stat.rebounds;
+        totals.assists += stat.assists;
+        totals.steals += stat.steals;
+        totals.blocks += stat.blocks;
+        totals.turnovers += stat.turnovers;
+        totals.fouls += stat.fouls;
+        totals.fieldGoalsMade += stat.fieldGoalsMade;
+        totals.fieldGoalsAttempted += stat.fieldGoalsAttempted;
+        totals.threePointersMade += stat.threePointersMade;
+        totals.threePointersAttempted += stat.threePointersAttempted;
+        totals.freeThrowsMade += stat.freeThrowsMade;
+        totals.freeThrowsAttempted += stat.freeThrowsAttempted;
+      }
+
+      const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
+        ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10 : 0;
+      const threePointPercentage = totals.threePointersAttempted > 0
+        ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10 : 0;
+      const freeThrowPercentage = totals.freeThrowsAttempted > 0
+        ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10 : 0;
+
+      const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
+      const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
+      const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
+      const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
+      const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
+      const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
+
+      const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
+      const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
+      const efficiency = gamesPlayed > 0
+        ? Math.round(
+            ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
+              missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
+          ) / 10
+        : 0;
+
+      return {
+        playerId: member.playerId,
+        playerName: member.player.name,
+        jerseyNumber: member.jerseyNumber ?? undefined,
+        position: member.position ?? undefined,
+        ...totals,
+        offensiveRebounds: 0,
+        defensiveRebounds: 0,
+        fieldGoalPercentage,
+        threePointPercentage,
+        freeThrowPercentage,
+        gamesPlayed,
+        pointsPerGame: ppg,
+        reboundsPerGame: rpg,
+        assistsPerGame: apg,
+        stealsPerGame: spg,
+        blocksPerGame: bpg,
+        turnoversPerGame: tpg,
+        efficiency,
+      };
+    });
+
     // Sort by points per game
-    return playerStats.sort((a, b) => b.pointsPerGame - a.pointsPerGame);
+    return playerStatsResult.sort((a, b) => b.pointsPerGame - a.pointsPerGame);
   }
 
   /**
    * Get overall player stats across all teams
+   * Optimized to batch-check access and batch-load stats
    */
   static async getPlayerOverallStats(
     playerId: string,
@@ -828,76 +895,234 @@ export class StatsService {
     }>;
     careerTotals: AggregatedPlayerStats;
   }> {
-    // Get player's teams
-    const memberships = await prisma.teamMember.findMany({
-      where: { playerId },
-      include: {
-        team: {
-          include: {
-            season: {
-              include: {
-                league: true,
+    // Get player info and memberships in parallel
+    const [player, memberships] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: playerId },
+        select: { id: true, name: true },
+      }),
+      prisma.teamMember.findMany({
+        where: { playerId },
+        include: {
+          team: {
+            include: {
+              season: {
+                include: {
+                  league: true,
+                },
               },
             },
           },
         },
-      },
-    });
-
-    if (memberships.length === 0) {
-      throw new NotFoundError('Player not found or has no team memberships');
-    }
-
-    // Check access to at least one team
-    let hasAnyAccess = false;
-    for (const membership of memberships) {
-      if (await canAccessTeam(userId, membership.teamId)) {
-        hasAnyAccess = true;
-        break;
-      }
-    }
-
-    if (!hasAnyAccess) {
-      throw new ForbiddenError('You do not have access to this player\'s teams');
-    }
-
-    const player = await prisma.user.findUnique({
-      where: { id: playerId },
-      select: { id: true, name: true },
-    });
+      }),
+    ]);
 
     if (!player) {
       throw new NotFoundError('Player not found');
     }
 
-    const teamStats: Array<{
+    if (memberships.length === 0) {
+      throw new NotFoundError('Player not found or has no team memberships');
+    }
+
+    // Check access to teams - batch check by finding user's accessible teams
+    const teamIds = memberships.map((m) => m.teamId);
+    const accessibleTeamIds = await this.getAccessibleTeamIds(userId, teamIds);
+
+    if (accessibleTeamIds.size === 0) {
+      throw new ForbiddenError('You do not have access to this player\'s teams');
+    }
+
+    // Get all finished games for accessible teams
+    const finishedGames = await prisma.game.findMany({
+      where: {
+        teamId: { in: Array.from(accessibleTeamIds) },
+        status: 'FINISHED',
+      },
+      select: { id: true, teamId: true },
+    });
+
+    // Group game IDs by team
+    const gameIdsByTeam = new Map<string, string[]>();
+    for (const game of finishedGames) {
+      const existing = gameIdsByTeam.get(game.teamId) || [];
+      existing.push(game.id);
+      gameIdsByTeam.set(game.teamId, existing);
+    }
+
+    // Batch-load all player stats at once
+    const allGameIds = finishedGames.map((g) => g.id);
+    const allPlayerStats = allGameIds.length > 0
+      ? await prisma.playerStats.findMany({
+          where: {
+            playerId,
+            gameId: { in: allGameIds },
+          },
+        })
+      : [];
+
+    // Group stats by gameId for quick lookup
+    const statsByGameId = new Map<string, typeof allPlayerStats[0]>();
+    for (const stat of allPlayerStats) {
+      statsByGameId.set(stat.gameId, stat);
+    }
+
+    const teamStatsResult: Array<{
       teamId: string;
       teamName: string;
       seasonName: string;
       stats: AggregatedPlayerStats;
     }> = [];
 
-    // Get stats for each team the user has access to
+    // Build stats per accessible team
     for (const membership of memberships) {
-      if (await canAccessTeam(userId, membership.teamId)) {
-        const stats = await this.getPlayerSeasonStats(playerId, membership.teamId, userId);
-        teamStats.push({
-          teamId: membership.teamId,
-          teamName: membership.team.name,
-          seasonName: `${membership.team.season.league.name} - ${membership.team.season.name}`,
-          stats,
-        });
+      if (!accessibleTeamIds.has(membership.teamId)) continue;
+
+      const teamGameIds = gameIdsByTeam.get(membership.teamId) || [];
+      const stats = teamGameIds
+        .map((gid) => statsByGameId.get(gid))
+        .filter((s): s is NonNullable<typeof s> => s != null);
+
+      const gamesPlayed = stats.length;
+      const totals = {
+        points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0,
+        turnovers: 0, fouls: 0, fieldGoalsMade: 0, fieldGoalsAttempted: 0,
+        threePointersMade: 0, threePointersAttempted: 0,
+        freeThrowsMade: 0, freeThrowsAttempted: 0,
+      };
+
+      for (const stat of stats) {
+        totals.points += stat.points;
+        totals.rebounds += stat.rebounds;
+        totals.assists += stat.assists;
+        totals.steals += stat.steals;
+        totals.blocks += stat.blocks;
+        totals.turnovers += stat.turnovers;
+        totals.fouls += stat.fouls;
+        totals.fieldGoalsMade += stat.fieldGoalsMade;
+        totals.fieldGoalsAttempted += stat.fieldGoalsAttempted;
+        totals.threePointersMade += stat.threePointersMade;
+        totals.threePointersAttempted += stat.threePointersAttempted;
+        totals.freeThrowsMade += stat.freeThrowsMade;
+        totals.freeThrowsAttempted += stat.freeThrowsAttempted;
       }
+
+      const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
+        ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10 : 0;
+      const threePointPercentage = totals.threePointersAttempted > 0
+        ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10 : 0;
+      const freeThrowPercentage = totals.freeThrowsAttempted > 0
+        ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10 : 0;
+
+      const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
+      const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
+      const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
+      const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
+      const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
+      const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
+
+      const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
+      const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
+      const efficiency = gamesPlayed > 0
+        ? Math.round(
+            ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
+              missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
+          ) / 10
+        : 0;
+
+      teamStatsResult.push({
+        teamId: membership.teamId,
+        teamName: membership.team.name,
+        seasonName: `${membership.team.season.league.name} - ${membership.team.season.name}`,
+        stats: {
+          playerId: player.id,
+          playerName: player.name,
+          jerseyNumber: membership.jerseyNumber ?? undefined,
+          position: membership.position ?? undefined,
+          ...totals,
+          offensiveRebounds: 0,
+          defensiveRebounds: 0,
+          fieldGoalPercentage,
+          threePointPercentage,
+          freeThrowPercentage,
+          gamesPlayed,
+          pointsPerGame: ppg,
+          reboundsPerGame: rpg,
+          assistsPerGame: apg,
+          stealsPerGame: spg,
+          blocksPerGame: bpg,
+          turnoversPerGame: tpg,
+          efficiency,
+        },
+      });
     }
 
     // Calculate career totals
-    const careerTotals = this.aggregatePlayerStats(player, teamStats.map((t) => t.stats));
+    const careerTotals = this.aggregatePlayerStats(player, teamStatsResult.map((t) => t.stats));
 
     return {
       player,
-      teams: teamStats,
+      teams: teamStatsResult,
       careerTotals,
     };
+  }
+
+  /**
+   * Batch-check which team IDs a user can access.
+   * Returns a Set of accessible teamIds.
+   */
+  private static async getAccessibleTeamIds(
+    userId: string,
+    teamIds: string[]
+  ): Promise<Set<string>> {
+    // Check if system admin (can access all)
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    if (user?.role === 'ADMIN') {
+      return new Set(teamIds);
+    }
+
+    // Check league admin access, staff membership, and player membership in parallel
+    const [leagueAdminTeams, staffTeams, memberTeams] = await Promise.all([
+      // Teams where user is a league admin
+      prisma.team.findMany({
+        where: {
+          id: { in: teamIds },
+          season: {
+            league: {
+              admins: { some: { userId } },
+            },
+          },
+        },
+        select: { id: true },
+      }),
+      // Teams where user is staff
+      prisma.teamStaff.findMany({
+        where: {
+          teamId: { in: teamIds },
+          userId,
+        },
+        select: { teamId: true },
+      }),
+      // Teams where user is a player member
+      prisma.teamMember.findMany({
+        where: {
+          teamId: { in: teamIds },
+          playerId: userId,
+        },
+        select: { teamId: true },
+      }),
+    ]);
+
+    const accessible = new Set<string>();
+    for (const t of leagueAdminTeams) accessible.add(t.id);
+    for (const t of staffTeams) accessible.add(t.teamId);
+    for (const t of memberTeams) accessible.add(t.teamId);
+
+    return accessible;
   }
 
   /**

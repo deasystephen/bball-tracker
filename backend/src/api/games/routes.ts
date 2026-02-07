@@ -14,6 +14,7 @@ import {
   gameEventQuerySchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
 
@@ -84,7 +85,7 @@ router.get('/', async (req, res) => {
  * GET /api/v1/games/:id
  * Get a game by ID
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const game = await GameService.getGameById(req.params.id, req.user!.id);
 
@@ -110,7 +111,7 @@ router.get('/:id', async (req, res) => {
  * PATCH /api/v1/games/:id
  * Update a game
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = updateGameSchema.safeParse(req.body);
@@ -148,7 +149,7 @@ router.patch('/:id', async (req, res) => {
  * DELETE /api/v1/games/:id
  * Delete a game
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     await GameService.deleteGame(req.params.id, req.user!.id);
 
@@ -178,7 +179,7 @@ router.delete('/:id', async (req, res) => {
  * POST /api/v1/games/:gameId/events
  * Create a game event
  */
-router.post('/:gameId/events', async (req, res) => {
+router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = createGameEventSchema.safeParse(req.body);
@@ -216,7 +217,7 @@ router.post('/:gameId/events', async (req, res) => {
  * GET /api/v1/games/:gameId/events
  * List events for a game
  */
-router.get('/:gameId/events', async (req, res) => {
+router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => {
   try {
     // Validate query parameters
     const validationResult = gameEventQuerySchema.safeParse(req.query);
@@ -254,7 +255,7 @@ router.get('/:gameId/events', async (req, res) => {
  * GET /api/v1/games/:gameId/events/:eventId
  * Get a single game event
  */
-router.get('/:gameId/events/:eventId', async (req, res) => {
+router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), async (req, res) => {
   try {
     const event = await GameEventService.getEventById(
       req.params.gameId,
@@ -284,7 +285,7 @@ router.get('/:gameId/events/:eventId', async (req, res) => {
  * DELETE /api/v1/games/:gameId/events/:eventId
  * Delete a game event
  */
-router.delete('/:gameId/events/:eventId', async (req, res) => {
+router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), async (req, res) => {
   try {
     await GameEventService.deleteEvent(
       req.params.gameId,

@@ -141,45 +141,35 @@ export class LeagueService {
       };
     }
 
-    // Get total count
-    const total = await prisma.league.count({ where });
-
-    // Get leagues
-    const leagues = await prisma.league.findMany({
-      where,
-      include: {
-        seasons: {
-          select: {
-            id: true,
-            name: true,
-            isActive: true,
+    // Get total count and leagues in parallel
+    const [total, leagues] = await Promise.all([
+      prisma.league.count({ where }),
+      prisma.league.findMany({
+        where,
+        include: {
+          seasons: {
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+            },
+            orderBy: {
+              startDate: 'desc',
+            },
           },
-          orderBy: {
-            startDate: 'desc',
-          },
-        },
-        admins: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-              },
+          _count: {
+            select: {
+              seasons: true,
             },
           },
         },
-        _count: {
-          select: {
-            seasons: true,
-          },
+        orderBy: {
+          name: 'asc',
         },
-      },
-      orderBy: {
-        name: 'asc',
-      },
-      take: query.limit,
-      skip: query.offset,
-    });
+        take: query.limit,
+        skip: query.offset,
+      }),
+    ]);
 
     return {
       leagues,

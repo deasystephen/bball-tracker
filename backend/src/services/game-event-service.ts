@@ -116,26 +116,26 @@ export class GameEventService {
       where.playerId = query.playerId;
     }
 
-    // Get total count
-    const total = await prisma.gameEvent.count({ where });
-
-    // Get events
-    const events = await prisma.gameEvent.findMany({
-      where,
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
+    // Get total count and events in parallel
+    const [total, events] = await Promise.all([
+      prisma.gameEvent.count({ where }),
+      prisma.gameEvent.findMany({
+        where,
+        include: {
+          player: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
-      orderBy: {
-        timestamp: 'desc', // Most recent first
-      },
-      take: query.limit,
-      skip: query.offset,
-    });
+        orderBy: {
+          timestamp: 'desc',
+        },
+        take: query.limit,
+        skip: query.offset,
+      }),
+    ]);
 
     return {
       events,

@@ -30,8 +30,8 @@ jest.mock('../../utils/responsive', () => ({
 describe('ErrorState', () => {
   describe('rendering', () => {
     it('should render error message', () => {
-      const { getByText } = render(<ErrorState message="Something went wrong" />);
-      expect(getByText('Something went wrong')).toBeTruthy();
+      const { getByText } = render(<ErrorState message="Network request failed" />);
+      expect(getByText('Network request failed')).toBeTruthy();
     });
 
     it('should render error icon', () => {
@@ -48,12 +48,12 @@ describe('ErrorState', () => {
       expect(getByText('Something went wrong')).toBeTruthy();
     });
 
-    it('should not render title when not provided', () => {
-      const { queryByText, getByText } = render(
-        <ErrorState message="Something went wrong" />
+    it('should render default title when not explicitly provided', () => {
+      const { getByText } = render(
+        <ErrorState message="Please try again later" />
       );
       expect(getByText('Something went wrong')).toBeTruthy();
-      expect(queryByText('Error')).toBeNull();
+      expect(getByText('Please try again later')).toBeTruthy();
     });
   });
 
@@ -63,14 +63,14 @@ describe('ErrorState', () => {
       const { getByText } = render(
         <ErrorState message="Something went wrong" onRetry={onRetryMock} />
       );
-      expect(getByText('Retry')).toBeTruthy();
+      expect(getByText('Try Again')).toBeTruthy();
     });
 
     it('should not render retry button when onRetry is not provided', () => {
       const { queryByText } = render(
         <ErrorState message="Something went wrong" />
       );
-      expect(queryByText('Retry')).toBeNull();
+      expect(queryByText('Try Again')).toBeNull();
     });
 
     it('should use custom retry label', () => {
@@ -79,10 +79,10 @@ describe('ErrorState', () => {
         <ErrorState
           message="Something went wrong"
           onRetry={onRetryMock}
-          retryLabel="Try Again"
+          retryLabel="Reconnect"
         />
       );
-      expect(getByText('Try Again')).toBeTruthy();
+      expect(getByText('Reconnect')).toBeTruthy();
     });
 
     it('should call onRetry when retry button is pressed', () => {
@@ -91,7 +91,7 @@ describe('ErrorState', () => {
         <ErrorState message="Something went wrong" onRetry={onRetryMock} />
       );
 
-      fireEvent.press(getByText('Retry'));
+      fireEvent.press(getByText('Try Again'));
       expect(onRetryMock).toHaveBeenCalledTimes(1);
     });
   });
