@@ -4,6 +4,7 @@
 
 import { mockPrisma } from '../setup';
 import { authenticate, requireRole } from '../../src/api/auth/middleware';
+import { PlayerService } from '../../src/services/player-service';
 import { Request, Response, NextFunction } from 'express';
 
 // Mock WorkOS verifyToken
@@ -138,8 +139,6 @@ describe('Player Service Authorization', () => {
         name: 'Another User',
       });
 
-    const { PlayerService } = require('../../src/services/player-service');
-
     await expect(
       PlayerService.updatePlayer(
         'player-id',
@@ -157,8 +156,6 @@ describe('Player Service Authorization', () => {
       email: 'coach@test.com',
       name: 'Coach',
     });
-
-    const { PlayerService } = require('../../src/services/player-service');
 
     await expect(
       PlayerService.deletePlayer('player-id', 'regular-user-id')
