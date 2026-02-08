@@ -1,33 +1,15 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import { useAuthStore } from '../store/auth-store';
 
 /**
  * API client configuration
- * Base URL is determined from environment or defaults to localhost
- * 
- * Note: iOS Simulator requires 127.0.0.1 instead of localhost
+ * Base URL comes from app.config.js which sets it per build profile:
+ *   development: http://127.0.0.1:3000
+ *   preview/production: https://api.bball-tracker.com (or API_URL env var)
  */
 const getBaseURL = (): string => {
-  // In development, use localhost
-  // In production, this would come from environment variables
-  const apiUrl = Constants.expoConfig?.extra?.apiUrl;
-  if (apiUrl) {
-    return apiUrl;
-  }
-  
-  // Default to localhost for development
-  if (__DEV__) {
-    // iOS Simulator needs 127.0.0.1 instead of localhost
-    // Android Emulator can use localhost or 10.0.2.2
-    if (Platform.OS === 'ios') {
-      return 'http://127.0.0.1:3000';
-    }
-    return 'http://localhost:3000';
-  }
-  
-  return 'https://api.bball-tracker.com';
+  return Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:3000';
 };
 
 /**
