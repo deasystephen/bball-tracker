@@ -150,7 +150,7 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
-          service: ${{ vars.ECS_SERVICE_NAME || 'bball-tracker-staging-api' }}
-          cluster: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-staging-cluster' }}
+          service: ${{ vars.ECS_SERVICE_NAME || 'bball-tracker-production-api' }}
+          cluster: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-production-cluster' }}
           wait-for-service-stability: true
 

@@ -1,11 +1,11 @@
 {
-  "family": "bball-tracker-api",
+  "family": "bball-tracker-production-api",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/bball-tracker-staging-ecs-execution",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/bball-tracker-staging-ecs-task",
+  "executionRoleArn": "arn:aws:iam::982343512143:role/bball-tracker-production-ecs-execution",
+  "taskRoleArn": "arn:aws:iam::982343512143:role/bball-tracker-production-ecs-task",
   "containerDefinitions": [
     {
       "name": "api",
@@ -19,18 +19,19 @@
       ],
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
-        { "name": "PORT", "value": "3000" }
+        { "name": "PORT", "value": "3000" },
+        { "name": "REDIS_URL", "value": "redis://bball-tracker-production-redis.xykxqz.0001.use1.cache.amazonaws.com:6379" }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:bball-tracker-staging/database-url" },
-        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:bball-tracker-staging/jwt-secret" },
-        { "name": "WORKOS_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:bball-tracker-staging/workos-api-key" },
-        { "name": "WORKOS_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:bball-tracker-staging/workos-client-id" }
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/database-url-1QlcXz" },
+        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/jwt-secret-kbvWdL" },
+        { "name": "WORKOS_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-api-key-AObTBz" },
+        { "name": "WORKOS_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-client-id-LdHfAM" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/bball-tracker-staging",
+          "awslogs-group": "/ecs/bball-tracker-production",
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "api"
         }
