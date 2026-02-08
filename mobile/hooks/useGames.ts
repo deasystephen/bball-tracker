@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import type {
   Game,
   GameFilters,
@@ -67,6 +68,7 @@ export function useCreateGame() {
       return response.data.game as Game;
     },
     onSuccess: () => {
+      trackEvent(AnalyticsEvents.GAME_CREATED);
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
     },
   });
@@ -84,6 +86,7 @@ export function useUpdateGame() {
       return response.data.game as Game;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.GAME_UPDATED);
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
       queryClient.invalidateQueries({ queryKey: gameKeys.detail(variables.gameId) });
     },
@@ -101,6 +104,7 @@ export function useDeleteGame() {
       await apiClient.delete(`/games/${gameId}`);
     },
     onSuccess: () => {
+      trackEvent(AnalyticsEvents.GAME_DELETED);
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
     },
   });

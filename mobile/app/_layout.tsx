@@ -7,6 +7,7 @@ import { ToastProvider } from '../components/Toast';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
+import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
 import '../i18n/config'; // Initialize i18n
 
 SplashScreen.preventAutoHideAsync();
@@ -37,6 +38,12 @@ export default function RootLayout() {
     Inter_700Bold,
     Oswald_700Bold,
   });
+
+  useEffect(() => {
+    initAnalytics().then(() => {
+      trackEvent(AnalyticsEvents.APP_OPENED);
+    });
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded) {

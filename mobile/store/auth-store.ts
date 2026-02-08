@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, UserRole } from '../../shared/types';
+import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
 
 interface AuthState {
   accessToken: string | null;
@@ -30,10 +31,14 @@ export const useAuthStore = create<AuthState>()(
       },
 
       setUser: (user: User) => {
+        identifyUser(user.id);
+        trackEvent(AnalyticsEvents.USER_LOGGED_IN);
         set({ user, isAuthenticated: true, isLoading: false });
       },
 
       logout: () => {
+        trackEvent(AnalyticsEvents.USER_LOGGED_OUT);
+        resetUser();
         set({
           accessToken: null,
           user: null,
@@ -51,8 +56,13 @@ export const useAuthStore = create<AuthState>()(
         isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state) => {
-        // Set isLoading to false after rehydration
         if (state) {
+          // In dev mode, always start logged out to avoid stale auth state
+          if (__DEV__) {
+            state.accessToken = null;
+            state.user = null;
+            state.isAuthenticated = false;
+          }
           state.isLoading = false;
         }
       },

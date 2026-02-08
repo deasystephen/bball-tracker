@@ -8,6 +8,13 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "scheme": "bball-tracker",
+    "owner": "bball-tracker",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": ""
+    },
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -31,6 +38,13 @@
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "apiUrl": "http://127.0.0.1:3000",
+      "amplitudeApiKey": "",
+      "eas": {
+        "projectId": ""
+      }
+    }
   }
 }

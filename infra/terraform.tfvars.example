@@ -1,0 +1,20 @@
+# Copy this file to terraform.tfvars and fill in your values
+# Do NOT commit terraform.tfvars to version control
+
+aws_region  = "us-east-1"
+environment = "staging"
+
+# ECR image URI - updated by CI/CD pipeline
+container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/bball-tracker-backend:latest"
+
+# Database credentials
+db_username = "bball_admin"
+db_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"
+
+# Application secrets
+jwt_secret     = "CHANGE_ME_TO_A_RANDOM_SECRET"
+workos_api_key = ""
+workos_client_id = ""
+
+# Optional: ACM certificate ARN for HTTPS
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc-123"

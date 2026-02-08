@@ -31,6 +31,14 @@ npm run lint    # ESLint check
 npm run type-check # Type check
 ```
 
+### Mobile Builds (EAS)
+```bash
+eas build --platform android --profile preview   # Android APK for testing
+eas build --platform ios --profile preview        # iOS (requires Apple Developer account)
+eas build --platform all --profile production     # Production builds for stores
+eas update --branch preview --message "description" # OTA update to preview builds
+```
+
 ### Infrastructure
 ```bash
 docker-compose up -d   # Start local services (PostgreSQL, Redis, Kafka, Zookeeper)
@@ -116,6 +124,10 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - Main branches: `main` and `develop`
 - Feature branches from `main`: `feature/your-feature-name`
 - Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
+- **Tagging**: When pushing major changes to GitHub (new features, design overhauls, large refactors), create an annotated tag with `git tag -a vX.Y.Z -m "description"` and push it with `git push origin vX.Y.Z`. Use semantic versioning:
+  - **Major** (vX.0.0): Breaking changes or architectural rewrites
+  - **Minor** (v0.X.0): New features, design overhauls, significant improvements
+  - **Patch** (v0.0.X): Bug fixes, small tweaks
 
 ## Local Development Setup
 
