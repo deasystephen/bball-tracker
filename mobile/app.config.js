@@ -22,7 +22,7 @@ export default {
     userInterfaceStyle: 'light',
     newArchEnabled: true,
     scheme: 'bball-tracker',
-    owner: 'bball-tracker',
+    owner: 'deasystephen',
     runtimeVersion: {
       policy: 'appVersion',
     },
@@ -57,7 +57,7 @@ export default {
       apiUrl: getApiUrl(),
       amplitudeApiKey: getAmplitudeApiKey(),
       eas: {
-        projectId: process.env.EAS_PROJECT_ID || '',
+        projectId: '7b941e92-79aa-4a61-8e79-f2ee9ef67f2f',
       },
     },
   },
