@@ -29,7 +29,7 @@ logs/
 *.log
 
 # Prisma
-prisma/migrations/
+# Migrations should be tracked in git for CI/CD
 
 # OS
 .DS_Store

@@ -37,7 +37,7 @@ dist/
 web-build/
 
 # Prisma
-backend/prisma/migrations/
+# Migrations should be tracked in git for CI/CD
 
 # Logs
 logs/
