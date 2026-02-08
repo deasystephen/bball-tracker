@@ -13,14 +13,13 @@ terraform {
     }
   }
 
-  # Remote state storage - configure before first apply
-  # backend "s3" {
-  #   bucket         = "bball-tracker-terraform-state"
-  #   key            = "infra/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "terraform-locks"
-  #   encrypt        = true
-  # }
+  backend "s3" {
+    bucket         = "bball-tracker-terraform-state"
+    key            = "infra/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

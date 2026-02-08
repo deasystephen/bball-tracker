@@ -110,6 +110,7 @@ resource "aws_secretsmanager_secret" "workos_api_key" {
 }
 
 resource "aws_secretsmanager_secret_version" "workos_api_key" {
+  count         = var.workos_api_key != "" ? 1 : 0
   secret_id     = aws_secretsmanager_secret.workos_api_key.id
   secret_string = var.workos_api_key
 }
@@ -120,6 +121,7 @@ resource "aws_secretsmanager_secret" "workos_client_id" {
 }
 
 resource "aws_secretsmanager_secret_version" "workos_client_id" {
+  count         = var.workos_client_id != "" ? 1 : 0
   secret_id     = aws_secretsmanager_secret.workos_client_id.id
   secret_string = var.workos_client_id
 }
@@ -311,10 +313,8 @@ resource "aws_ecs_service" "app" {
   }
 
   # Allow ECS to manage task placement during deployments
-  deployment_configuration {
-    maximum_percent         = 200
-    minimum_healthy_percent = 50
-  }
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 50
 
   # Ignore changes to desired_count since auto-scaling manages it
   lifecycle {
