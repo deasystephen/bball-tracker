@@ -27,7 +27,7 @@ export default {
       policy: 'appVersion',
     },
     updates: {
-      url: process.env.EAS_UPDATE_URL || '',
+      url: 'https://u.expo.dev/7b941e92-79aa-4a61-8e79-f2ee9ef67f2f',
     },
     splash: {
       image: './assets/splash-icon.png',
