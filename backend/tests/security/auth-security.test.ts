@@ -150,12 +150,23 @@ describe('Player Service Authorization', () => {
 
   it('should prevent non-admin users from deleting players', async () => {
     // Mock the requesting user as non-admin
-    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({
-      id: 'regular-user-id',
-      role: 'COACH',
-      email: 'coach@test.com',
-      name: 'Coach',
-    });
+    (mockPrisma.user.findUnique as jest.Mock)
+      .mockResolvedValueOnce({
+        id: 'regular-user-id',
+        role: 'COACH',
+        email: 'coach@test.com',
+        name: 'Coach',
+      })
+      .mockResolvedValueOnce({
+        id: 'player-id',
+        role: 'PLAYER',
+        email: 'player@test.com',
+        name: 'Player',
+        isManaged: false,
+        managedById: null,
+        teamMembers: [],
+        gameEvents: [],
+      });
 
     await expect(
       PlayerService.deletePlayer('player-id', 'regular-user-id')

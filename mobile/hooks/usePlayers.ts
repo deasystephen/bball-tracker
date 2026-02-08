@@ -4,14 +4,16 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { teamKeys } from './useTeams';
 
 export interface Player {
   id: string;
-  email: string;
+  email?: string | null;
   name: string;
   role: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN';
   profilePictureUrl?: string | null;
   emailVerified: boolean;
+  isManaged?: boolean;
   createdAt: string;
   updatedAt: string;
   teamMembers?: Array<{
@@ -52,6 +54,12 @@ export interface CreatePlayerInput {
   email: string;
   name: string;
   profilePictureUrl?: string;
+}
+
+export interface CreateManagedPlayerInput {
+  name: string;
+  jerseyNumber?: number;
+  position?: string;
 }
 
 export interface UpdatePlayerInput {
@@ -169,6 +177,30 @@ export function useDeletePlayer() {
     onSuccess: () => {
       // Invalidate all player queries
       queryClient.invalidateQueries({ queryKey: playerKeys.all });
+    },
+  });
+}
+
+/**
+ * Hook to create a managed player (roster-only, no account/email needed)
+ */
+export function useCreateManagedPlayer() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { success: boolean; teamMember: { id: string; playerId: string } },
+    Error,
+    { teamId: string; data: CreateManagedPlayerInput }
+  >({
+    mutationFn: async ({ teamId, data }) => {
+      const response = await apiClient.post(
+        `/teams/${teamId}/managed-players`,
+        data
+      );
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
     },
   });
 }

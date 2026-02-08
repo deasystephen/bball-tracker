@@ -68,6 +68,8 @@ export class PlayerService {
         role: true,
         profilePictureUrl: true,
         emailVerified: true,
+        isManaged: true,
+        managedById: true,
         createdAt: true,
         updatedAt: true,
         teamMembers: {
@@ -112,12 +114,19 @@ export class PlayerService {
    * @param params Query parameters
    */
   static async listPlayers(params: PlayerQueryParams) {
-    const { search, role, limit, offset } = params;
+    const { search, role, isManaged, limit, offset } = params;
 
     // Build where clause
     const where: any = {
       role: role || 'PLAYER', // Default to PLAYER role
     };
+
+    // Filter by managed status (exclude managed players by default)
+    if (isManaged !== undefined) {
+      where.isManaged = isManaged;
+    } else {
+      where.isManaged = false;
+    }
 
     // Add search filter if provided
     if (search) {
@@ -189,7 +198,7 @@ export class PlayerService {
       throw new NotFoundError('Player not found');
     }
 
-    // Check permissions - only allow admins or the player themselves to update
+    // Check permissions - allow admins, the player themselves, or the managing coach
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
@@ -198,7 +207,8 @@ export class PlayerService {
       throw new NotFoundError('User not found');
     }
 
-    if (playerId !== userId && currentUser.role !== 'ADMIN') {
+    const isManagedByUser = player.isManaged && player.managedById === userId;
+    if (playerId !== userId && currentUser.role !== 'ADMIN' && !isManagedByUser) {
       throw new ForbiddenError('You can only update your own profile');
     }
 
@@ -244,17 +254,13 @@ export class PlayerService {
    * @param userId User ID (for authorization)
    */
   static async deletePlayer(playerId: string, userId: string) {
-    // Check permissions - only admins can delete players
+    // Check permissions - admins can delete any player, coaches can delete their managed players
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
 
     if (!currentUser) {
       throw new NotFoundError('User not found');
-    }
-
-    if (currentUser.role !== 'ADMIN') {
-      throw new ForbiddenError('Only administrators can delete players');
     }
 
     // Get player
@@ -273,6 +279,12 @@ export class PlayerService {
     // Verify it's actually a player
     if (player.role !== 'PLAYER') {
       throw new NotFoundError('Player not found');
+    }
+
+    // Check permissions: admin or managing coach
+    const isManagedByUser = player.isManaged && player.managedById === userId;
+    if (currentUser.role !== 'ADMIN' && !isManagedByUser) {
+      throw new ForbiddenError('Only administrators can delete players');
     }
 
     // Check if player is on any teams

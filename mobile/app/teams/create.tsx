@@ -96,7 +96,7 @@ export default function CreateTeamScreen() {
       });
 
       toast.showToast('Team created successfully', 'success');
-      router.replace(`/teams/${team.id}`);
+      router.push(`/teams/${team.id}`);
     } catch (error) {
       Alert.alert(
         t('common.error'),

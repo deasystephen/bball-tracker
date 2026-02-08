@@ -10,6 +10,7 @@ import {
   updateTeamSchema,
   updateTeamMemberSchema,
   teamQuerySchema,
+  createManagedPlayerSchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { createInvitationSchema } from '../invitations/schemas';
@@ -185,6 +186,44 @@ router.post('/:id/players', async (_req, res) => {
     error: 'This endpoint has been removed. Please use the invitation system: POST /api/v1/teams/:id/invitations',
     deprecated: true,
   });
+});
+
+/**
+ * POST /api/v1/teams/:teamId/managed-players
+ * Create a managed player on a team (COPPA compliant - no email required)
+ */
+router.post('/:teamId/managed-players', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    // Validate request body
+    const validationResult = createManagedPlayerSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.errors.map((e) => e.message).join(', ')
+      );
+    }
+
+    const teamMember = await TeamService.addManagedPlayer(
+      req.params.teamId,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(201).json({
+      success: true,
+      teamMember,
+    });
+  } catch (error) {
+    console.error('Error creating managed player:', error);
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to create managed player' });
+    }
+  }
 });
 
 /**

@@ -308,7 +308,7 @@ export default function Home() {
                       {team.name}
                     </ThemedText>
                     <ThemedText variant="footnote" color="textSecondary">
-                      {team.members?.length || 0} players
+                      {team._count?.members ?? team.members?.length ?? 0} players
                     </ThemedText>
                   </TouchableOpacity>
                 );

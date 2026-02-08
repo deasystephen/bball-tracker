@@ -9,6 +9,7 @@ import {
   AddPlayerInput,
   UpdateTeamMemberInput,
   TeamQueryParams,
+  CreateManagedPlayerInput,
 } from '../api/teams/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import {
@@ -836,5 +837,72 @@ export class TeamService {
     });
 
     return roles;
+  }
+
+  /**
+   * Add a managed player to a team (no email/account required - COPPA compliant)
+   * @param teamId Team ID
+   * @param data Managed player data
+   * @param userId User ID of the coach creating the managed player
+   */
+  static async addManagedPlayer(
+    teamId: string,
+    data: CreateManagedPlayerInput,
+    userId: string
+  ) {
+    // Verify team exists
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+    });
+
+    if (!team) {
+      throw new NotFoundError('Team not found');
+    }
+
+    // Check permission
+    const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
+    if (!canManageRoster) {
+      throw new ForbiddenError('You do not have permission to manage this team\'s roster');
+    }
+
+    // Create managed user (no email, no account)
+    const managedUser = await prisma.user.create({
+      data: {
+        name: data.name,
+        role: 'PLAYER',
+        isManaged: true,
+        managedById: userId,
+        email: null,
+      },
+    });
+
+    // Create team member linking managed user to team
+    const teamMember = await prisma.teamMember.create({
+      data: {
+        teamId,
+        playerId: managedUser.id,
+        jerseyNumber: data.jerseyNumber,
+        position: data.position,
+      },
+      include: {
+        player: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            isManaged: true,
+            managedById: true,
+          },
+        },
+        team: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return teamMember;
   }
 }

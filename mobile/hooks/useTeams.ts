@@ -34,7 +34,8 @@ export interface TeamMember {
   player: {
     id: string;
     name: string;
-    email: string;
+    email?: string | null;
+    isManaged?: boolean;
   };
 }
 
@@ -55,6 +56,11 @@ export interface Team {
   };
   staff?: TeamStaff[];
   members?: TeamMember[];
+  _count?: {
+    members: number;
+    staff: number;
+    games: number;
+  };
   roles?: Array<{
     id: string;
     name: string;

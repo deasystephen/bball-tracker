@@ -108,7 +108,7 @@ export default function TeamsScreen() {
     }
 
     const teamColor = getTeamColor(item.name);
-    const memberCount = item.members?.length || 0;
+    const memberCount = item._count?.members ?? item.members?.length ?? 0;
     const leagueName = item.season?.league?.name || 'No League';
 
     return (

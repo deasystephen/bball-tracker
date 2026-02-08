@@ -69,15 +69,19 @@ enum InvitationStatus {
 model User {
   id                String    @id @default(uuid())
   workosUserId      String?   @unique
-  email             String    @unique
+  email             String?   @unique
   name              String
   emailVerified     Boolean   @default(false)
   profilePictureUrl String?
   role              UserRole  @default(PLAYER)
+  isManaged         Boolean   @default(false)
+  managedById       String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
   // Relations
+  managedBy           User?             @relation("ManagedPlayers", fields: [managedById], references: [id])
+  managedPlayers      User[]            @relation("ManagedPlayers")
   teamMembers         TeamMember[]
   teamStaff           TeamStaff[]
   gameEvents          GameEvent[]
@@ -92,6 +96,7 @@ model User {
   @@index([email])
   @@index([role])
   @@index([workosUserId])
+  @@index([managedById])
 }
 
 model RefreshToken {

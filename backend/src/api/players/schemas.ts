@@ -34,6 +34,10 @@ export const updatePlayerSchema = z.object({
 export const playerQuerySchema = z.object({
   search: z.string().optional(), // Search by name or email
   role: z.enum(['PLAYER', 'COACH', 'PARENT', 'ADMIN']).optional(),
+  isManaged: z.preprocess(
+    (val) => val === 'true' ? true : val === 'false' ? false : val,
+    z.boolean().optional()
+  ),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });

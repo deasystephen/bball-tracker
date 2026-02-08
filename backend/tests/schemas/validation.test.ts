@@ -7,7 +7,8 @@
  */
 
 import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../../src/api/seasons/schemas';
-import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema } from '../../src/api/teams/schemas';
+import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema } from '../../src/api/teams/schemas';
+import { playerQuerySchema } from '../../src/api/players/schemas';
 import { createGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
 import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
@@ -497,6 +498,125 @@ describe('Schema Validation', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.date).toBeInstanceOf(Date);
+      }
+    });
+  });
+
+  describe('Managed Player Schema', () => {
+    describe('createManagedPlayerSchema', () => {
+      it('should accept valid managed player with all fields', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Young Player',
+          jerseyNumber: 5,
+          position: 'PG',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept name only (jersey and position optional)', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Young Player',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject empty name', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: '',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject missing name', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          jerseyNumber: 5,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject name longer than 100 characters', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'A'.repeat(101),
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should accept jersey number 0', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          jerseyNumber: 0,
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept jersey number 99', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          jerseyNumber: 99,
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject jersey number 100', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          jerseyNumber: 100,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject negative jersey number', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          jerseyNumber: -1,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject non-integer jersey number', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          jerseyNumber: 5.5,
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject position longer than 50 characters', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          position: 'A'.repeat(51),
+        });
+        expect(result.success).toBe(false);
+      });
+    });
+  });
+
+  describe('Player Query Schema (isManaged filter)', () => {
+    it('should accept isManaged=true as string', () => {
+      const result = playerQuerySchema.safeParse({
+        isManaged: 'true',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.isManaged).toBe(true);
+      }
+    });
+
+    it('should accept isManaged=false as string', () => {
+      const result = playerQuerySchema.safeParse({
+        isManaged: 'false',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.isManaged).toBe(false);
+      }
+    });
+
+    it('should accept omitted isManaged', () => {
+      const result = playerQuerySchema.safeParse({});
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.isManaged).toBeUndefined();
       }
     });
   });

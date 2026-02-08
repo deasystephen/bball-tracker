@@ -484,7 +484,14 @@ describe('PlayerService', () => {
       const coach = createCoach();
 
       (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(coach);  // non-admin user
+        .mockResolvedValueOnce(coach)  // current user (non-admin)
+        .mockResolvedValueOnce({       // player lookup
+          ...player,
+          isManaged: false,
+          managedById: null,
+          teamMembers: [],
+          gameEvents: [],
+        });
 
       try {
         await PlayerService.deletePlayer(player.id, coach.id);

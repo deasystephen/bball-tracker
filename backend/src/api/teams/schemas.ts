@@ -77,6 +77,15 @@ export const teamQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
+/**
+ * Schema for creating a managed player (no email/account required)
+ */
+export const createManagedPlayerSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
+  jerseyNumber: z.number().int().min(0).max(99).optional(),
+  position: z.string().max(50).optional(),
+});
+
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
@@ -85,3 +94,4 @@ export type AddStaffInput = z.infer<typeof addStaffSchema>;
 export type RemoveStaffInput = z.infer<typeof removeStaffSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;
+export type CreateManagedPlayerInput = z.infer<typeof createManagedPlayerSchema>;

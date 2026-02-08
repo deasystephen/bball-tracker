@@ -33,6 +33,7 @@ import {
 import {
   usePlayers,
   useCreatePlayer,
+  useCreateManagedPlayer,
   usePlayer,
   type Player,
 } from '../../../hooks/usePlayers';
@@ -56,15 +57,20 @@ export default function ManagePlayersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showRosterForm, setShowRosterForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [position, setPosition] = useState('');
+  const [rosterPlayerName, setRosterPlayerName] = useState('');
+  const [rosterJerseyNumber, setRosterJerseyNumber] = useState('');
+  const [rosterPosition, setRosterPosition] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
   const createPlayer = useCreatePlayer();
   const createInvitation = useCreateInvitation();
+  const createManagedPlayer = useCreateManagedPlayer();
   const toast = useToast();
 
   // Search for players
@@ -111,6 +117,35 @@ export default function ManagePlayersScreen() {
     } catch (error) {
       toast.showToast(
         error instanceof Error ? error.message : 'Failed to create player and send invitation',
+        'error'
+      );
+    }
+  };
+
+  const handleCreateRosterPlayer = async () => {
+    if (!rosterPlayerName.trim()) {
+      Alert.alert('Error', 'Player name is required');
+      return;
+    }
+
+    try {
+      await createManagedPlayer.mutateAsync({
+        teamId: id,
+        data: {
+          name: rosterPlayerName.trim(),
+          jerseyNumber: rosterJerseyNumber ? parseInt(rosterJerseyNumber, 10) : undefined,
+          position: rosterPosition.trim() || undefined,
+        },
+      });
+
+      setRosterPlayerName('');
+      setRosterJerseyNumber('');
+      setRosterPosition('');
+      setShowRosterForm(false);
+      toast.showToast('Player added to roster', 'success');
+    } catch (err) {
+      toast.showToast(
+        err instanceof Error ? err.message : 'Failed to add roster player',
         'error'
       );
     }
@@ -223,10 +258,59 @@ export default function ManagePlayersScreen() {
         {/* Invite Player Form */}
         <Card variant="elevated" style={styles.formCard}>
           <ThemedText variant="h4" style={styles.formTitle}>
-            Invite Player
+            {showRosterForm ? 'Add Roster Player' : 'Invite Player'}
           </ThemedText>
 
-          {!showCreateForm ? (
+          {showRosterForm ? (
+            <>
+              {/* Add Roster Player form - no email needed */}
+              <Input
+                label="Player Name"
+                placeholder="Enter player name"
+                value={rosterPlayerName}
+                onChangeText={setRosterPlayerName}
+                autoCapitalize="words"
+              />
+
+              <Input
+                label={t('players.jerseyNumber')}
+                placeholder="e.g., 23"
+                value={rosterJerseyNumber}
+                onChangeText={setRosterJerseyNumber}
+                keyboardType="number-pad"
+              />
+
+              <Input
+                label={t('players.position')}
+                placeholder="e.g., Forward, Guard"
+                value={rosterPosition}
+                onChangeText={setRosterPosition}
+                autoCapitalize="words"
+              />
+
+              <View style={styles.actionButtons}>
+                <Button
+                  title="Add to Roster"
+                  onPress={handleCreateRosterPlayer}
+                  loading={createManagedPlayer.isPending}
+                  disabled={!rosterPlayerName.trim()}
+                  fullWidth
+                />
+                <Button
+                  title="Cancel"
+                  variant="outline"
+                  onPress={() => {
+                    setShowRosterForm(false);
+                    setRosterPlayerName('');
+                    setRosterJerseyNumber('');
+                    setRosterPosition('');
+                  }}
+                  style={styles.cancelButton}
+                  fullWidth
+                />
+              </View>
+            </>
+          ) : !showCreateForm ? (
             <>
               {/* Search for existing player */}
               <Input
@@ -255,7 +339,7 @@ export default function ManagePlayersScreen() {
                         <ListItem
                           key={player.id}
                           title={player.name}
-                          subtitle={player.email}
+                          subtitle={player.email || undefined}
                           onPress={() => {
                             setSelectedPlayer(player);
                             setSearchQuery('');
@@ -291,7 +375,7 @@ export default function ManagePlayersScreen() {
                     <View style={styles.selectedPlayerDetails}>
                       <ThemedText variant="bodyBold">{selectedPlayer.name}</ThemedText>
                       <ThemedText variant="caption" color="textSecondary">
-                        {selectedPlayer.email}
+                        {selectedPlayer.email || 'Roster player'}
                       </ThemedText>
                     </View>
                     <TouchableOpacity
@@ -335,12 +419,20 @@ export default function ManagePlayersScreen() {
                     fullWidth
                   />
                 ) : (
-                  <Button
-                    title="Create New Player"
-                    variant="outline"
-                    onPress={() => setShowCreateForm(true)}
-                    fullWidth
-                  />
+                  <>
+                    <Button
+                      title="Create New Player"
+                      variant="outline"
+                      onPress={() => setShowCreateForm(true)}
+                      fullWidth
+                    />
+                    <Button
+                      title="Add Roster Player"
+                      variant="outline"
+                      onPress={() => setShowRosterForm(true)}
+                      fullWidth
+                    />
+                  </>
                 )}
               </View>
             </>
@@ -420,29 +512,38 @@ export default function ManagePlayersScreen() {
             </Card>
           ) : (
             <Card variant="default" style={styles.playersCard}>
-              {members.map((member) => (
-                <ListItem
-                  key={member.id}
-                  title={member.player.name}
-                  subtitle={
-                    [
-                      member.jerseyNumber && `#${member.jerseyNumber}`,
-                      member.position,
-                    ]
-                      .filter(Boolean)
-                      .join(' • ') || member.player.email
-                  }
-                  rightElement={
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleRemovePlayer(member.playerId, member.player.name)
-                      }
-                    >
-                      <Ionicons name="close-circle" size={24} color={colors.error} />
-                    </TouchableOpacity>
-                  }
-                />
-              ))}
+              {members.map((member) => {
+                const details = [
+                  member.jerseyNumber && `#${member.jerseyNumber}`,
+                  member.position,
+                ].filter(Boolean).join(' • ');
+
+                const subtitle = member.player.isManaged
+                  ? details ? `${details} • Roster player` : 'Roster player'
+                  : details || member.player.email || undefined;
+
+                return (
+                  <ListItem
+                    key={member.id}
+                    title={member.player.name}
+                    subtitle={subtitle}
+                    leftElement={
+                      member.player.isManaged ? (
+                        <Ionicons name="person-outline" size={20} color={colors.textTertiary} />
+                      ) : undefined
+                    }
+                    rightElement={
+                      <TouchableOpacity
+                        onPress={() =>
+                          handleRemovePlayer(member.playerId, member.player.name)
+                        }
+                      >
+                        <Ionicons name="close-circle" size={24} color={colors.error} />
+                      </TouchableOpacity>
+                    }
+                  />
+                );
+              })}
             </Card>
           )}
         </View>

@@ -420,6 +420,78 @@ async function main() {
   }
 
   // =========================================================================
+  // MANAGED PLAYERS (COPPA-compliant, no email required)
+  // =========================================================================
+  console.log('\nCreating managed players...');
+
+  // Warriors managed players (managed by Coach Steve Kerr)
+  const managedWarriorsPlayers = [
+    { name: 'Tommy Wilson', jersey: 5, position: 'PG' },
+    { name: 'Jake Martinez', jersey: 12, position: 'SF' },
+    { name: 'Ryan Chen', jersey: 8, position: 'C' },
+  ];
+
+  for (const mp of managedWarriorsPlayers) {
+    const managedPlayer = await prisma.user.upsert({
+      where: { id: `managed-warriors-${mp.jersey}` },
+      update: {},
+      create: {
+        id: `managed-warriors-${mp.jersey}`,
+        name: mp.name,
+        role: UserRole.PLAYER,
+        isManaged: true,
+        managedById: coachSteve.id,
+        email: null,
+      },
+    });
+
+    await prisma.teamMember.upsert({
+      where: { teamId_playerId: { teamId: warriors.id, playerId: managedPlayer.id } },
+      update: {},
+      create: {
+        teamId: warriors.id,
+        playerId: managedPlayer.id,
+        jerseyNumber: mp.jersey,
+        position: mp.position,
+      },
+    });
+    console.log(`    Added managed player: ${mp.name} (#${mp.jersey}) to Warriors`);
+  }
+
+  // Lakers managed players (managed by Coach Frank Vogel)
+  const managedLakersPlayers = [
+    { name: 'Marcus Johnson', jersey: 7, position: 'SG' },
+    { name: 'Ethan Williams', jersey: 14, position: 'PF' },
+  ];
+
+  for (const mp of managedLakersPlayers) {
+    const managedPlayer = await prisma.user.upsert({
+      where: { id: `managed-lakers-${mp.jersey}` },
+      update: {},
+      create: {
+        id: `managed-lakers-${mp.jersey}`,
+        name: mp.name,
+        role: UserRole.PLAYER,
+        isManaged: true,
+        managedById: coachFrank.id,
+        email: null,
+      },
+    });
+
+    await prisma.teamMember.upsert({
+      where: { teamId_playerId: { teamId: lakers.id, playerId: managedPlayer.id } },
+      update: {},
+      create: {
+        teamId: lakers.id,
+        playerId: managedPlayer.id,
+        jerseyNumber: mp.jersey,
+        position: mp.position,
+      },
+    });
+    console.log(`    Added managed player: ${mp.name} (#${mp.jersey}) to Lakers`);
+  }
+
+  // =========================================================================
   // GAMES
   // =========================================================================
   console.log('\nCreating games...');

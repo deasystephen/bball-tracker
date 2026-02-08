@@ -227,6 +227,11 @@ export default function TeamDetailsScreen() {
                       {member.position}
                     </ThemedText>
                   )}
+                  {member.player.isManaged ? (
+                    <ThemedText variant="footnote" color="textTertiary">
+                      Roster player
+                    </ThemedText>
+                  ) : null}
                 </TouchableOpacity>
               ))}
             </View>
