@@ -1,5 +1,6 @@
 # Backend Dockerfile
 FROM node:20-alpine AS base
+RUN apk add --no-cache openssl
 
 # Install dependencies only when needed
 FROM base AS deps
