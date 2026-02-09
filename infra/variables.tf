@@ -126,11 +126,11 @@ variable "workos_client_id" {
   default     = ""
 }
 
-# SSL/TLS
-variable "certificate_arn" {
-  description = "ARN of the ACM certificate for HTTPS (optional, HTTP-only if not provided)"
+# Domain
+variable "domain_name" {
+  description = "Root domain name (e.g., capyhoops.com). The API will be served at api.<domain_name>."
   type        = string
-  default     = ""
+  default     = "capyhoops.com"
 }
 
 # Tags

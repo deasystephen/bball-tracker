@@ -16,5 +16,5 @@ jwt_secret     = "CHANGE_ME_TO_A_RANDOM_SECRET"
 workos_api_key = ""
 workos_client_id = ""
 
-# Optional: ACM certificate ARN for HTTPS
-# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc-123"
+# Domain (ACM certificate is managed automatically via dns.tf)
+domain_name = "capyhoops.com"

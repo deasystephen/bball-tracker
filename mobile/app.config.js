@@ -2,8 +2,8 @@ const IS_PRODUCTION = process.env.APP_ENV === 'production';
 const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
 const getApiUrl = () => {
-  if (IS_PRODUCTION) return process.env.API_URL || 'https://api.bball-tracker.com';
-  if (IS_PREVIEW) return process.env.API_URL || 'https://api.bball-tracker.com';
+  if (IS_PRODUCTION) return process.env.API_URL || 'https://api.capyhoops.com';
+  if (IS_PREVIEW) return process.env.API_URL || 'https://api.capyhoops.com';
   return 'http://127.0.0.1:3000';
 };
 

@@ -6,7 +6,7 @@ import { useAuthStore } from '../store/auth-store';
  * API client configuration
  * Base URL comes from app.config.js which sets it per build profile:
  *   development: http://127.0.0.1:3000
- *   preview/production: https://api.bball-tracker.com (or API_URL env var)
+ *   preview/production: https://api.capyhoops.com (or API_URL env var)
  */
 const getBaseURL = (): string => {
   return Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:3000';

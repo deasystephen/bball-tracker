@@ -37,8 +37,23 @@ output "alb_arn" {
 }
 
 output "api_url" {
-  description = "Full API URL (HTTP or HTTPS depending on certificate)"
-  value       = var.certificate_arn != "" ? "https://${aws_lb.main.dns_name}" : "http://${aws_lb.main.dns_name}"
+  description = "API URL using the custom domain"
+  value       = "https://api.${var.domain_name}"
+}
+
+output "domain_name" {
+  description = "Root domain name"
+  value       = var.domain_name
+}
+
+output "name_servers" {
+  description = "Route53 name servers — update these at your domain registrar"
+  value       = aws_route53_zone.main.name_servers
+}
+
+output "certificate_arn" {
+  description = "ACM certificate ARN"
+  value       = aws_acm_certificate.main.arn
 }
 
 # =============================================================================

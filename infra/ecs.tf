@@ -168,6 +168,8 @@ resource "aws_ecs_task_definition" "app" {
       { name = "NODE_ENV", value = "production" },
       { name = "PORT", value = tostring(var.container_port) },
       { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:${aws_elasticache_cluster.main.cache_nodes[0].port}" },
+      { name = "WORKOS_REDIRECT_URI", value = "https://api.${var.domain_name}/api/v1/auth/callback" },
+      { name = "CORS_ORIGIN", value = "https://api.${var.domain_name}" },
     ]
 
     secrets = [
@@ -242,46 +244,30 @@ resource "aws_lb_target_group" "app" {
   }
 }
 
-# HTTP listener - redirects to HTTPS if certificate is provided, otherwise serves directly
+# HTTP listener - always redirects to HTTPS
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+    type = "redirect"
 
-    # Forward to target group when no certificate
-    dynamic "forward" {
-      for_each = var.certificate_arn == "" ? [1] : []
-      content {
-        target_group {
-          arn = aws_lb_target_group.app.arn
-        }
-      }
-    }
-
-    # Redirect to HTTPS when certificate is available
-    dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
   }
 }
 
-# HTTPS listener - only created when a certificate ARN is provided
+# HTTPS listener - uses ACM-managed certificate
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
-
   load_balancer_arn = aws_lb.main.arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.main.certificate_arn
 
   default_action {
     type             = "forward"
