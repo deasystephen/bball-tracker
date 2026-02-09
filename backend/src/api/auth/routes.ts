@@ -127,9 +127,12 @@ router.get('/login', async (req, res): Promise<void> => {
     const customRedirectUri = req.query.redirect_uri as string | undefined;
     if (customRedirectUri) {
       const allowedRedirectHosts = (process.env.ALLOWED_REDIRECT_HOSTS || 'localhost').split(',').map(h => h.trim());
+      const allowedSchemes = (process.env.ALLOWED_REDIRECT_SCHEMES || 'bball-tracker').split(',').map(s => s.trim());
       try {
         const redirectUrl = new URL(customRedirectUri);
-        if (!allowedRedirectHosts.includes(redirectUrl.hostname)) {
+        const scheme = redirectUrl.protocol.replace(':', '');
+        // Allow app deep link schemes (e.g., bball-tracker://) or whitelisted hosts
+        if (!allowedSchemes.includes(scheme) && !allowedRedirectHosts.includes(redirectUrl.hostname)) {
           res.status(400).json({ error: 'Invalid redirect_uri: host not allowed' });
           return;
         }
