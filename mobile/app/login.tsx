@@ -109,9 +109,7 @@ export default function Login() {
       }
     } catch (error) {
       console.error('Login error:', error);
-      const baseURL = apiClient.defaults.baseURL || 'unknown';
-      const errMsg = error instanceof Error ? error.message : String(error);
-      Alert.alert('Login Error', `URL: ${baseURL}\n\n${errMsg}`);
+      Alert.alert('Error', 'Failed to initiate login. Please try again.');
       setIsLoading(false);
     }
   };
