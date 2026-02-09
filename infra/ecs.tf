@@ -170,6 +170,7 @@ resource "aws_ecs_task_definition" "app" {
       { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:${aws_elasticache_cluster.main.cache_nodes[0].port}" },
       { name = "WORKOS_REDIRECT_URI", value = "https://api.${var.domain_name}/api/v1/auth/callback" },
       { name = "CORS_ORIGIN", value = "https://api.${var.domain_name}" },
+      { name = "ADMIN_EMAIL", value = var.admin_email },
     ]
 
     secrets = [

@@ -128,7 +128,7 @@ export class WorkOSService {
         workosUserId: workosUser.id,
         email: workosUser.email,
         name: fullName,
-        role: 'PLAYER', // Default role
+        role: process.env.ADMIN_EMAIL === workosUser.email ? 'ADMIN' : 'PLAYER',
         emailVerified: workosUser.emailVerified || false,
         profilePictureUrl: workosUser.profilePictureUrl || null,
       },

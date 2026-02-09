@@ -22,7 +22,8 @@
         { "name": "PORT", "value": "3000" },
         { "name": "REDIS_URL", "value": "redis://bball-tracker-production-redis.xykxqz.0001.use1.cache.amazonaws.com:6379" },
         { "name": "WORKOS_REDIRECT_URI", "value": "https://api.capyhoops.com/api/v1/auth/callback" },
-        { "name": "CORS_ORIGIN", "value": "https://api.capyhoops.com" }
+        { "name": "CORS_ORIGIN", "value": "https://api.capyhoops.com" },
+        { "name": "ADMIN_EMAIL", "value": "deasystephen@gmail.com" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/database-url-1QlcXz" },

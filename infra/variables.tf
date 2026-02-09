@@ -133,6 +133,13 @@ variable "domain_name" {
   default     = "capyhoops.com"
 }
 
+# Admin
+variable "admin_email" {
+  description = "Email address that gets ADMIN role on first sign-up"
+  type        = string
+  default     = ""
+}
+
 # Tags
 variable "tags" {
   description = "Common tags applied to all resources"
