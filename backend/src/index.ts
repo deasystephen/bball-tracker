@@ -23,6 +23,9 @@ const io = new SocketServer(httpServer, {
 
 const PORT = process.env.PORT || 3000;
 
+// Trust the ALB proxy so express-rate-limit reads the real client IP
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(helmet());
 app.use(cors({
