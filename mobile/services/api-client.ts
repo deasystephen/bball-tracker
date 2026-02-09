@@ -9,7 +9,7 @@ import { useAuthStore } from '../store/auth-store';
  *   preview/production: https://api.capyhoops.com (or API_URL env var)
  */
 const getBaseURL = (): string => {
-  return Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:3000';
+  return Constants.expoConfig?.extra?.apiUrl || (__DEV__ ? 'http://127.0.0.1:3000' : 'https://api.capyhoops.com');
 };
 
 /**
