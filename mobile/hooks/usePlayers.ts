@@ -60,6 +60,7 @@ export interface CreateManagedPlayerInput {
   name: string;
   jerseyNumber?: number;
   position?: string;
+  profilePictureUrl?: string;
 }
 
 export interface UpdatePlayerInput {

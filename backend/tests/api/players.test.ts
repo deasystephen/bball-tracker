@@ -223,6 +223,51 @@ describe('Players API', () => {
 
       expect(response.status).toBe(403);
     });
+
+    it('should update player with valid profilePictureUrl', async () => {
+      const updatedPlayer = {
+        ...mockPlayer,
+        profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/user/photo.jpg',
+      };
+      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
+        .send({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/user/photo.jpg' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.player.profilePictureUrl).toBe(
+        'https://bucket.s3.amazonaws.com/avatars/user/photo.jpg'
+      );
+    });
+
+    it('should accept empty string profilePictureUrl to clear avatar', async () => {
+      const updatedPlayer = { ...mockPlayer, profilePictureUrl: '' };
+      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
+        .send({ profilePictureUrl: '' });
+
+      expect(response.status).toBe(200);
+    });
+
+    it('should reject javascript: URI for profilePictureUrl', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
+        .send({ profilePictureUrl: 'javascript:alert(1)' });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject invalid URL for profilePictureUrl', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
+        .send({ profilePictureUrl: 'not-a-valid-url' });
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe('DELETE /api/v1/players/:id', () => {

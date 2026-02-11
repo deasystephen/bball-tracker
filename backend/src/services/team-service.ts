@@ -873,6 +873,7 @@ export class TeamService {
         isManaged: true,
         managedById: userId,
         email: null,
+        profilePictureUrl: data.profilePictureUrl,
       },
     });
 

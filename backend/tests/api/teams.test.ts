@@ -364,6 +364,54 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(404);
     });
+
+    it('should accept jersey number 0 (boundary)', async () => {
+      const memberWithZero = { ...mockTeamMember, jerseyNumber: 0 };
+      mockTeamService.updateTeamMember.mockResolvedValue(memberWithZero as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: 0 });
+
+      expect(response.status).toBe(200);
+      expect(response.body.teamMember.jerseyNumber).toBe(0);
+    });
+
+    it('should accept jersey number 99 (boundary)', async () => {
+      const memberWith99 = { ...mockTeamMember, jerseyNumber: 99 };
+      mockTeamService.updateTeamMember.mockResolvedValue(memberWith99 as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: 99 });
+
+      expect(response.status).toBe(200);
+      expect(response.body.teamMember.jerseyNumber).toBe(99);
+    });
+
+    it('should reject jersey number 100 (out of range)', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: 100 });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject negative jersey number', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: -1 });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject non-integer jersey number', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: 23.5 });
+
+      expect(response.status).toBe(400);
+    });
   });
 });
 

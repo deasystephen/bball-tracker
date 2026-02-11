@@ -22,6 +22,7 @@ import {
   LoadingSpinner,
   ErrorState,
   Card,
+  AvatarPicker,
 } from '../../../components';
 import {
   useTeam,
@@ -44,6 +45,7 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../../store/auth-store';
+import { uploadAvatar } from '../../../services/upload-service';
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
@@ -65,6 +67,9 @@ export default function ManagePlayersScreen() {
   const [rosterPlayerName, setRosterPlayerName] = useState('');
   const [rosterJerseyNumber, setRosterJerseyNumber] = useState('');
   const [rosterPosition, setRosterPosition] = useState('');
+  const [rosterAvatarUri, setRosterAvatarUri] = useState<string | null>(null);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
@@ -89,10 +94,18 @@ export default function ManagePlayersScreen() {
     }
 
     try {
+      let profilePictureUrl: string | undefined;
+      if (avatarUri) {
+        setUploadingAvatar(true);
+        profilePictureUrl = await uploadAvatar(avatarUri);
+        setUploadingAvatar(false);
+      }
+
       // Create the player first
       const newPlayerResult = await createPlayer.mutateAsync({
         name: newPlayerName.trim(),
         email: newPlayerEmail.trim(),
+        profilePictureUrl,
       });
 
       // Then send invitation
@@ -110,11 +123,13 @@ export default function ManagePlayersScreen() {
       setNewPlayerEmail('');
       setJerseyNumber('');
       setPosition('');
+      setAvatarUri(null);
       setShowCreateForm(false);
       setSearchQuery('');
       setSelectedPlayer(null);
       toast.showToast('Player created and invitation sent', 'success');
     } catch (error) {
+      setUploadingAvatar(false);
       toast.showToast(
         error instanceof Error ? error.message : 'Failed to create player and send invitation',
         'error'
@@ -129,21 +144,31 @@ export default function ManagePlayersScreen() {
     }
 
     try {
+      let profilePictureUrl: string | undefined;
+      if (rosterAvatarUri) {
+        setUploadingAvatar(true);
+        profilePictureUrl = await uploadAvatar(rosterAvatarUri);
+        setUploadingAvatar(false);
+      }
+
       await createManagedPlayer.mutateAsync({
         teamId: id,
         data: {
           name: rosterPlayerName.trim(),
           jerseyNumber: rosterJerseyNumber ? parseInt(rosterJerseyNumber, 10) : undefined,
           position: rosterPosition.trim() || undefined,
+          profilePictureUrl,
         },
       });
 
       setRosterPlayerName('');
       setRosterJerseyNumber('');
       setRosterPosition('');
+      setRosterAvatarUri(null);
       setShowRosterForm(false);
       toast.showToast('Player added to roster', 'success');
     } catch (err) {
+      setUploadingAvatar(false);
       toast.showToast(
         err instanceof Error ? err.message : 'Failed to add roster player',
         'error'
@@ -264,6 +289,14 @@ export default function ManagePlayersScreen() {
           {showRosterForm ? (
             <>
               {/* Add Roster Player form - no email needed */}
+              <View style={styles.avatarRow}>
+                <AvatarPicker
+                  uri={rosterAvatarUri}
+                  name={rosterPlayerName}
+                  onImageSelected={setRosterAvatarUri}
+                />
+              </View>
+
               <Input
                 label="Player Name"
                 placeholder="Enter player name"
@@ -276,8 +309,9 @@ export default function ManagePlayersScreen() {
                 label={t('players.jerseyNumber')}
                 placeholder="e.g., 23"
                 value={rosterJerseyNumber}
-                onChangeText={setRosterJerseyNumber}
+                onChangeText={(text) => setRosterJerseyNumber(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
+                maxLength={2}
               />
 
               <Input
@@ -290,9 +324,9 @@ export default function ManagePlayersScreen() {
 
               <View style={styles.actionButtons}>
                 <Button
-                  title="Add to Roster"
+                  title={uploadingAvatar ? 'Uploading photo...' : 'Add to Roster'}
                   onPress={handleCreateRosterPlayer}
-                  loading={createManagedPlayer.isPending}
+                  loading={createManagedPlayer.isPending || uploadingAvatar}
                   disabled={!rosterPlayerName.trim()}
                   fullWidth
                 />
@@ -304,6 +338,7 @@ export default function ManagePlayersScreen() {
                     setRosterPlayerName('');
                     setRosterJerseyNumber('');
                     setRosterPosition('');
+                    setRosterAvatarUri(null);
                   }}
                   style={styles.cancelButton}
                   fullWidth
@@ -395,8 +430,9 @@ export default function ManagePlayersScreen() {
                     label={t('players.jerseyNumber')}
                     placeholder="e.g., 23"
                     value={jerseyNumber}
-                    onChangeText={setJerseyNumber}
+                    onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
                     keyboardType="number-pad"
+                    maxLength={2}
                   />
 
                   <Input
@@ -439,6 +475,14 @@ export default function ManagePlayersScreen() {
           ) : (
             <>
               {/* Create new player form */}
+              <View style={styles.avatarRow}>
+                <AvatarPicker
+                  uri={avatarUri}
+                  name={newPlayerName}
+                  onImageSelected={setAvatarUri}
+                />
+              </View>
+
               <Input
                 label="Player Name"
                 placeholder="Enter player name"
@@ -460,8 +504,9 @@ export default function ManagePlayersScreen() {
                 label={t('players.jerseyNumber')}
                 placeholder="e.g., 23"
                 value={jerseyNumber}
-                onChangeText={setJerseyNumber}
+                onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
+                maxLength={2}
               />
 
               <Input
@@ -474,9 +519,9 @@ export default function ManagePlayersScreen() {
 
               <View style={styles.actionButtons}>
                 <Button
-                  title="Create & Send Invitation"
+                  title={uploadingAvatar ? 'Uploading photo...' : 'Create & Send Invitation'}
                   onPress={handleCreateAndInvitePlayer}
-                  loading={createPlayer.isPending || createInvitation.isPending}
+                  loading={createPlayer.isPending || createInvitation.isPending || uploadingAvatar}
                   disabled={!newPlayerName.trim() || !newPlayerEmail.trim()}
                   fullWidth
                 />
@@ -489,6 +534,7 @@ export default function ManagePlayersScreen() {
                     setNewPlayerEmail('');
                     setJerseyNumber('');
                     setPosition('');
+                    setAvatarUri(null);
                   }}
                   style={styles.cancelButton}
                   fullWidth
@@ -632,5 +678,9 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     marginTop: spacing.sm,
+  },
+  avatarRow: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
 });

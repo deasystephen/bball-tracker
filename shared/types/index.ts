@@ -33,6 +33,7 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  profilePictureUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }

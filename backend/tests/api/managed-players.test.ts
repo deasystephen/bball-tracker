@@ -181,6 +181,61 @@ describe('Managed Players API', () => {
       expect(response.status).toBe(500);
       expect(response.body.error).toBe('Failed to create managed player');
     });
+
+    it('should create a managed player with profilePictureUrl', async () => {
+      const memberWithAvatar = {
+        ...mockTeamMember,
+        player: {
+          ...mockTeamMember.player,
+          profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/photo.jpg',
+        },
+      };
+      mockTeamService.addManagedPlayer.mockResolvedValue(memberWithAvatar as any);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
+        .send({
+          name: 'Young Player',
+          jerseyNumber: 5,
+          position: 'PG',
+          profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/photo.jpg',
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(mockTeamService.addManagedPlayer).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        {
+          name: 'Young Player',
+          jerseyNumber: 5,
+          position: 'PG',
+          profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/photo.jpg',
+        },
+        TEST_USER_ID
+      );
+    });
+
+    it('should return 400 for profilePictureUrl with invalid protocol', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
+        .send({
+          name: 'Player',
+          profilePictureUrl: 'javascript:alert(1)',
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 for profilePictureUrl that is not a valid URL', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
+        .send({
+          name: 'Player',
+          profilePictureUrl: 'not-a-url',
+        });
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe('GET /api/v1/players (isManaged filter)', () => {

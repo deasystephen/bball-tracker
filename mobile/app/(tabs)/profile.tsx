@@ -2,7 +2,7 @@
  * Profile screen - user profile and settings
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,9 +11,11 @@ import { useAuthStore } from '../../store/auth-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams } from '../../hooks/useTeams';
-import { ThemedView, ThemedText, Card } from '../../components';
+import { useUpdatePlayer } from '../../hooks/usePlayers';
+import { ThemedView, ThemedText, Card, AvatarPicker } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { uploadAvatar } from '../../services/upload-service';
 
 export default function Profile() {
   const router = useRouter();
@@ -23,6 +25,40 @@ export default function Profile() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const { data: teams } = useTeams();
+  const updatePlayer = useUpdatePlayer();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const handleAvatarSelected = async (uri: string | null) => {
+    if (!user?.id) return;
+
+    if (!uri) {
+      // Remove photo
+      try {
+        await updatePlayer.mutateAsync({
+          playerId: user.id,
+          data: { profilePictureUrl: '' },
+        });
+        useAuthStore.getState().setUser({ ...user, profilePictureUrl: undefined });
+      } catch {
+        Alert.alert('Error', 'Failed to remove photo');
+      }
+      return;
+    }
+
+    try {
+      setUploadingAvatar(true);
+      const imageUrl = await uploadAvatar(uri);
+      await updatePlayer.mutateAsync({
+        playerId: user.id,
+        data: { profilePictureUrl: imageUrl },
+      });
+      useAuthStore.getState().setUser({ ...user, profilePictureUrl: imageUrl });
+    } catch {
+      Alert.alert('Error', 'Failed to upload photo');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -36,15 +72,6 @@ export default function Profile() {
         },
       },
     ]);
-  };
-
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
   };
 
   const getRoleIcon = (role: string): keyof typeof Ionicons.glyphMap => {
@@ -71,12 +98,18 @@ export default function Profile() {
       >
         {/* Profile Header with ring */}
         <View style={styles.header}>
-          <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
-            <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-              <ThemedText variant="h1" style={styles.avatarText}>
-                {user?.name ? getInitials(user.name) : '?'}
+          <View style={styles.avatarContainer}>
+            <AvatarPicker
+              uri={user?.profilePictureUrl}
+              name={user?.name || ''}
+              size="large"
+              onImageSelected={handleAvatarSelected}
+            />
+            {uploadingAvatar && (
+              <ThemedText variant="caption" color="textSecondary" style={styles.uploadingText}>
+                Uploading...
               </ThemedText>
-            </View>
+            )}
           </View>
           <ThemedText variant="h2" style={styles.userName}>
             {user?.name || 'User'}
@@ -265,23 +298,13 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingBottom: spacing.xl * 2 },
   header: { alignItems: 'center', marginBottom: spacing.xl },
-  avatarRing: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    borderWidth: 3,
+  avatarContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: spacing.md,
   },
-  avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+  uploadingText: {
+    marginTop: spacing.xs,
   },
-  avatarText: { color: '#FFFFFF', fontWeight: '700' },
   userName: { marginBottom: spacing.xs },
   roleChip: {
     flexDirection: 'row',

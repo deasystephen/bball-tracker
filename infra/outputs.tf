@@ -132,3 +132,17 @@ output "redis_security_group_id" {
   description = "Redis security group ID"
   value       = aws_security_group.redis.id
 }
+
+# =============================================================================
+# S3
+# =============================================================================
+
+output "s3_avatars_bucket_name" {
+  description = "Name of the S3 bucket for avatar uploads"
+  value       = aws_s3_bucket.avatars.id
+}
+
+output "s3_avatars_bucket_domain" {
+  description = "Regional domain name of the avatars S3 bucket"
+  value       = aws_s3_bucket.avatars.bucket_regional_domain_name
+}

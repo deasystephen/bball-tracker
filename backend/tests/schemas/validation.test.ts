@@ -7,11 +7,12 @@
  */
 
 import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../../src/api/seasons/schemas';
-import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema } from '../../src/api/teams/schemas';
-import { playerQuerySchema } from '../../src/api/players/schemas';
+import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema, updateTeamMemberSchema } from '../../src/api/teams/schemas';
+import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
 import { createGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
 import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
+import { avatarUploadUrlSchema } from '../../src/api/uploads/schemas';
 
 // Test ID formats
 const UUID_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
@@ -618,6 +619,188 @@ describe('Schema Validation', () => {
       if (result.success) {
         expect(result.data.isManaged).toBeUndefined();
       }
+    });
+  });
+
+  describe('Avatar Upload URL Schema', () => {
+    it('should accept image/jpeg content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'image/jpeg' });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept image/png content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'image/png' });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject image/gif content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'image/gif' });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject image/webp content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'image/webp' });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject application/pdf content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'application/pdf' });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject empty string content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: '' });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject missing content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject arbitrary string content type', () => {
+      const result = avatarUploadUrlSchema.safeParse({ contentType: 'text/html' });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('Profile Picture URL Validation', () => {
+    describe('createManagedPlayerSchema profilePictureUrl', () => {
+      it('should accept valid https URL', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/user/image.jpg',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept valid http URL', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          profilePictureUrl: 'http://localhost:3000/avatars/test.jpg',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject javascript: URI', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          profilePictureUrl: 'javascript:alert(1)',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject data: URI', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          profilePictureUrl: 'data:image/png;base64,abc123',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject non-URL string', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+          profilePictureUrl: 'not-a-url',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should accept omitted profilePictureUrl', () => {
+        const result = createManagedPlayerSchema.safeParse({
+          name: 'Player',
+        });
+        expect(result.success).toBe(true);
+      });
+    });
+
+    describe('updatePlayerSchema profilePictureUrl', () => {
+      it('should accept valid https URL', () => {
+        const result = updatePlayerSchema.safeParse({
+          profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/image.jpg',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept empty string to clear avatar', () => {
+        const result = updatePlayerSchema.safeParse({
+          profilePictureUrl: '',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject javascript: URI', () => {
+        const result = updatePlayerSchema.safeParse({
+          profilePictureUrl: 'javascript:alert(1)',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should reject ftp: URI', () => {
+        const result = updatePlayerSchema.safeParse({
+          profilePictureUrl: 'ftp://server.com/file.jpg',
+        });
+        expect(result.success).toBe(false);
+      });
+
+      it('should accept omitted profilePictureUrl', () => {
+        const result = updatePlayerSchema.safeParse({
+          name: 'Updated Name',
+        });
+        expect(result.success).toBe(true);
+      });
+    });
+  });
+
+  describe('Update Team Member Schema (jersey number boundaries)', () => {
+    it('should accept jersey number 0', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: 0 });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept jersey number 99', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: 99 });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept jersey number 50', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: 50 });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject jersey number 100', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: 100 });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject negative jersey number', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: -1 });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject non-integer jersey number', () => {
+      const result = updateTeamMemberSchema.safeParse({ jerseyNumber: 23.5 });
+      expect(result.success).toBe(false);
+    });
+
+    it('should accept omitted jersey number', () => {
+      const result = updateTeamMemberSchema.safeParse({});
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept position with jersey number', () => {
+      const result = updateTeamMemberSchema.safeParse({
+        jerseyNumber: 23,
+        position: 'Guard',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject position longer than 50 characters', () => {
+      const result = updateTeamMemberSchema.safeParse({
+        position: 'A'.repeat(51),
+      });
+      expect(result.success).toBe(false);
     });
   });
 });

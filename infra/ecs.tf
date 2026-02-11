@@ -142,6 +142,26 @@ resource "aws_iam_role" "ecs_task" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
+  name = "${local.name_prefix}-s3-avatars"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.avatars.arn}/*"
+      }
+    ]
+  })
+}
+
 # =============================================================================
 # ECS Task Definition
 # =============================================================================
@@ -171,6 +191,8 @@ resource "aws_ecs_task_definition" "app" {
       { name = "WORKOS_REDIRECT_URI", value = "https://api.${var.domain_name}/api/v1/auth/callback" },
       { name = "CORS_ORIGIN", value = "https://api.${var.domain_name}" },
       { name = "ADMIN_EMAIL", value = var.admin_email },
+      { name = "S3_AVATARS_BUCKET", value = aws_s3_bucket.avatars.id },
+      { name = "AWS_REGION", value = var.aws_region },
     ]
 
     secrets = [

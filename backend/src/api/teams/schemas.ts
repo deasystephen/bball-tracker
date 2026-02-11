@@ -84,6 +84,10 @@ export const createManagedPlayerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
   jerseyNumber: z.number().int().min(0).max(99).optional(),
   position: z.string().max(50).optional(),
+  profilePictureUrl: z.string().url().refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    { message: 'URL must use http or https protocol' }
+  ).optional(),
 });
 
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
