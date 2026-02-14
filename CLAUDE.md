@@ -119,6 +119,15 @@ A bug where the API rejected valid league IDs (`downtown-youth-league`) wasn't c
 
 The fix: Add API integration tests AND schema validation tests for every endpoint.
 
+### Maestro E2E Tests
+- **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
+- Flows test full user journeys: login → navigate → perform action → assert result
+- All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
+- Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
+- When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
+- For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
+- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
+
 ## Git Workflow
 
 - Main branches: `main` and `develop`

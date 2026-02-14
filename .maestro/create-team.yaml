@@ -1,0 +1,17 @@
+appId: com.bballtracker.mobile
+---
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- tapOn: "Create new team"
+- inputText:
+    id: "team-name-input"
+    text: "Test Team"
+- tapOn: "Create"
+- assertVisible: "Test Team"

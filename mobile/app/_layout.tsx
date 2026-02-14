@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { LogBox } from 'react-native';
 import { Stack } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,6 +11,10 @@ import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_7
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
 import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
 import '../i18n/config'; // Initialize i18n
+
+if (__DEV__) {
+  LogBox.ignoreAllLogs();
+}
 
 SplashScreen.preventAutoHideAsync();
 

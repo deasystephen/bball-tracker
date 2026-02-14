@@ -1,0 +1,17 @@
+appId: com.bballtracker.mobile
+---
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+- tapOn: "Profile tab"
+- assertVisible: "Account"
+- assertVisible: "Settings"
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- assertVisible: "Toggle dark mode"

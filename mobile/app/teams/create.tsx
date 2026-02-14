@@ -158,6 +158,7 @@ export default function CreateTeamScreen() {
             error={errors.name}
             autoCapitalize="words"
             autoFocus
+            testID="team-name-input"
           />
 
           {/* League Selection */}
