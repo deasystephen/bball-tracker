@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -22,12 +22,13 @@ const TAB_CONFIGS = [
   { name: 'profile', icon: 'person', label: 'Profile' },
 ] as const;
 
-const TAB_WIDTH = 75;
 const TRACK_INDEX = 2;
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { colors, colorScheme } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const tabWidth = screenWidth / TAB_CONFIGS.length;
   const pillPosition = useSharedValue(0);
   const scale0 = useSharedValue(1);
   const scale1 = useSharedValue(1);
@@ -55,7 +56,8 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
   const pillStyle = useAnimatedStyle(() => {
     return {
-      transform: [{ translateX: pillPosition.value * TAB_WIDTH }],
+      width: tabWidth,
+      transform: [{ translateX: pillPosition.value * tabWidth }],
     };
   });
 
@@ -223,7 +225,6 @@ const styles = StyleSheet.create({
   tabBarInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     height: 60,
     borderTopWidth: StyleSheet.hairlineWidth,
     position: 'relative',
@@ -231,13 +232,12 @@ const styles = StyleSheet.create({
   pill: {
     position: 'absolute',
     left: 0,
-    width: TAB_WIDTH,
     height: 40,
     borderRadius: borderRadius.xl,
     top: 10,
   },
   tabItem: {
-    width: TAB_WIDTH,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     height: 60,
