@@ -16,6 +16,7 @@ import {
   ForbiddenError,
 } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -46,7 +47,7 @@ router.post('/', async (req, res) => {
       player,
     });
   } catch (error) {
-    console.error('Error creating player:', error);
+    logger.error('Error creating player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -80,7 +81,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    console.error('Error listing players:', error);
+    logger.error('Error listing players', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -102,7 +103,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    console.error('Error getting player:', error);
+    logger.error('Error getting player', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof NotFoundError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -136,7 +137,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    console.error('Error updating player:', error);
+    logger.error('Error updating player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -162,7 +163,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Player deleted successfully',
     });
   } catch (error) {
-    console.error('Error deleting player:', error);
+    logger.error('Error deleting player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||

@@ -11,6 +11,7 @@ import {
   leagueQuerySchema,
 } from './schemas';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -38,7 +39,7 @@ router.post('/', async (req, res) => {
       league,
     });
   } catch (error) {
-    console.error('Error creating league:', error);
+    logger.error('Error creating league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError || error instanceof NotFoundError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -68,7 +69,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    console.error('Error listing leagues:', error);
+    logger.error('Error listing leagues', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -90,7 +91,7 @@ router.get('/:id', async (req, res) => {
       league,
     });
   } catch (error) {
-    console.error('Error getting league:', error);
+    logger.error('Error getting league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof NotFoundError || error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -124,7 +125,7 @@ router.patch('/:id', async (req, res) => {
       league,
     });
   } catch (error) {
-    console.error('Error updating league:', error);
+    logger.error('Error updating league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof NotFoundError || error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -146,7 +147,7 @@ router.delete('/:id', async (req, res) => {
       message: 'League deleted successfully',
     });
   } catch (error) {
-    console.error('Error deleting league:', error);
+    logger.error('Error deleting league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof NotFoundError || error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {

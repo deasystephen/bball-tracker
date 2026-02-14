@@ -14,6 +14,7 @@ import {
   ForbiddenError,
 } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -44,7 +45,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    console.error('Error listing invitations:', error);
+    logger.error('Error listing invitations', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -73,7 +74,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       invitation,
     });
   } catch (error) {
-    console.error('Error getting invitation:', error);
+    logger.error('Error getting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -103,7 +104,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation accepted. You have been added to the team.',
     });
   } catch (error) {
-    console.error('Error accepting invitation:', error);
+    logger.error('Error accepting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -133,7 +134,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation rejected.',
     });
   } catch (error) {
-    console.error('Error rejecting invitation:', error);
+    logger.error('Error rejecting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -163,7 +164,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation cancelled.',
     });
   } catch (error) {
-    console.error('Error cancelling invitation:', error);
+    logger.error('Error cancelling invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||

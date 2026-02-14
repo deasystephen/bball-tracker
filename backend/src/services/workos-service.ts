@@ -4,6 +4,7 @@
 
 import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI } from '../utils/workos-client';
 import prisma from '../models';
+import { logger } from '../utils/logger';
 
 export class WorkOSService {
   /**
@@ -186,7 +187,7 @@ export class WorkOSService {
       const user = await workos.userManagement.getUser(userId);
       return user;
     } catch (error) {
-      console.error('Error verifying WorkOS token:', error instanceof Error ? error.message : error);
+      logger.error('Error verifying WorkOS token', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

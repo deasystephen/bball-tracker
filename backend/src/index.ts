@@ -8,6 +8,9 @@ import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
+import { requestContext } from './api/middleware/request-context';
+import { requestLogger } from './api/middleware/request-logger';
+import { logger } from './utils/logger';
 
 const app = express();
 const httpServer = createServer(app);
@@ -35,6 +38,10 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+// Request context and logging
+app.use(requestContext);
+app.use(requestLogger);
+
 // Health check endpoint
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -54,12 +61,12 @@ setupWebSocketHandlers(io);
 import { AppError } from './utils/errors';
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
-  // Log full error for debugging, but only in development
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Error:', err);
-  } else {
-    console.error('Error:', err.message);
-  }
+  logger.error(err.message, {
+    requestId: _req.requestId,
+    method: _req.method,
+    path: _req.originalUrl,
+    error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+  });
 
   // If it's an AppError, use its status code
   if (err instanceof AppError) {
@@ -84,8 +91,7 @@ app.use((_req, res) => {
 // Only start server if this file is run directly (not when imported)
 if (require.main === module) {
   httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
   });
 }
 

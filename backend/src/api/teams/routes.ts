@@ -16,6 +16,7 @@ import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/erro
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { validateUuidParams } from '../middleware/validate-params';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -43,7 +44,7 @@ router.post('/', async (req, res) => {
       team,
     });
   } catch (error) {
-    console.error('Error creating team:', error);
+    logger.error('Error creating team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -77,7 +78,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    console.error('Error listing teams:', error);
+    logger.error('Error listing teams', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -99,7 +100,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       team,
     });
   } catch (error) {
-    console.error('Error getting team:', error);
+    logger.error('Error getting team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -137,7 +138,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       team,
     });
   } catch (error) {
-    console.error('Error updating team:', error);
+    logger.error('Error updating team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -163,7 +164,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Team deleted successfully',
     });
   } catch (error) {
-    console.error('Error deleting team:', error);
+    logger.error('Error deleting team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -213,7 +214,7 @@ router.post('/:teamId/managed-players', validateUuidParams('teamId'), async (req
       teamMember,
     });
   } catch (error) {
-    console.error('Error creating managed player:', error);
+    logger.error('Error creating managed player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -251,7 +252,7 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
       invitation,
     });
   } catch (error) {
-    console.error('Error creating invitation:', error);
+    logger.error('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -281,7 +282,7 @@ router.delete('/:id/players/:playerId', validateUuidParams('id', 'playerId'), as
       message: 'Player removed from team successfully',
     });
   } catch (error) {
-    console.error('Error removing player from team:', error);
+    logger.error('Error removing player from team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -320,7 +321,7 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
       teamMember,
     });
   } catch (error) {
-    console.error('Error updating team member:', error);
+    logger.error('Error updating team member', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||

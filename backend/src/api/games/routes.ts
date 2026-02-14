@@ -15,6 +15,7 @@ import {
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -42,7 +43,7 @@ router.post('/', async (req, res) => {
       game,
     });
   } catch (error) {
-    console.error('Error creating game:', error);
+    logger.error('Error creating game', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError || error instanceof ForbiddenError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -72,7 +73,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    console.error('Error listing games:', error);
+    logger.error('Error listing games', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: error.message });
     } else {
@@ -94,7 +95,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    console.error('Error getting game:', error);
+    logger.error('Error getting game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -132,7 +133,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    console.error('Error updating game:', error);
+    logger.error('Error updating game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -158,7 +159,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Game deleted successfully',
     });
   } catch (error) {
-    console.error('Error deleting game:', error);
+    logger.error('Error deleting game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -200,7 +201,7 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
       event,
     });
   } catch (error) {
-    console.error('Error creating game event:', error);
+    logger.error('Error creating game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -238,7 +239,7 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
       ...result,
     });
   } catch (error) {
-    console.error('Error listing game events:', error);
+    logger.error('Error listing game events', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -268,7 +269,7 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
       event,
     });
   } catch (error) {
-    console.error('Error getting game event:', error);
+    logger.error('Error getting game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -298,7 +299,7 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
       message: 'Game event deleted successfully',
     });
   } catch (error) {
-    console.error('Error deleting game event:', error);
+    logger.error('Error deleting game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||

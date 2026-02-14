@@ -7,6 +7,7 @@ import { WorkOSService } from '../../services/workos-service';
 import { UnauthorizedError, BadRequestError } from '../../utils/errors';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -84,7 +85,7 @@ if (process.env.NODE_ENV === 'development') {
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
-      console.error('Dev login error:', error);
+      logger.error('Dev login error', { error: error instanceof Error ? error.message : String(error) });
       return res.status(500).json({ error: 'Dev login failed' });
     }
   });
@@ -107,7 +108,7 @@ if (process.env.NODE_ENV === 'development') {
 
       res.json({ users });
     } catch (error) {
-      console.error('Error listing dev users:', error);
+      logger.error('Error listing dev users', { error: error instanceof Error ? error.message : String(error) });
       res.status(500).json({ error: 'Failed to list users' });
     }
   });
@@ -155,7 +156,7 @@ router.get('/login', async (req, res): Promise<void> => {
       res.redirect(authorizationUrl);
     }
   } catch (error) {
-    console.error('Error generating authorization URL:', error);
+    logger.error('Error generating authorization URL', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({
       error: 'Failed to generate authorization URL',
@@ -206,7 +207,7 @@ router.get('/callback', async (req, res) => {
       accessToken, // Mobile app will store this securely
     });
   } catch (error) {
-    console.error('Error in auth callback:', error);
+    logger.error('Error in auth callback', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: error.message });
     } else {
@@ -255,7 +256,7 @@ router.get('/me', async (req, res) => {
       user,
     });
   } catch (error) {
-    console.error('Error getting user:', error);
+    logger.error('Error getting user', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof UnauthorizedError) {
       res.status(401).json({ error: error.message });
     } else {

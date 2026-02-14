@@ -7,6 +7,7 @@ import { StatsService } from '../../services/stats-service';
 import { authenticate } from '../auth/middleware';
 import { NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -26,7 +27,7 @@ router.get('/games/:gameId', validateUuidParams('gameId'), async (req, res) => {
       boxScore,
     });
   } catch (error) {
-    console.error('Error getting box score:', error);
+    logger.error('Error getting box score', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -55,7 +56,7 @@ router.get('/games/:gameId/players/:playerId', validateUuidParams('gameId', 'pla
       stats,
     });
   } catch (error) {
-    console.error('Error getting player game stats:', error);
+    logger.error('Error getting player game stats', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -83,7 +84,7 @@ router.get('/players/:playerId', validateUuidParams('playerId'), async (req, res
       ...stats,
     });
   } catch (error) {
-    console.error('Error getting player overall stats:', error);
+    logger.error('Error getting player overall stats', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -112,7 +113,7 @@ router.get('/players/:playerId/teams/:teamId', validateUuidParams('playerId', 't
       stats,
     });
   } catch (error) {
-    console.error('Error getting player season stats:', error);
+    logger.error('Error getting player season stats', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -140,7 +141,7 @@ router.get('/teams/:teamId', validateUuidParams('teamId'), async (req, res) => {
       stats,
     });
   } catch (error) {
-    console.error('Error getting team season stats:', error);
+    logger.error('Error getting team season stats', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -168,7 +169,7 @@ router.get('/teams/:teamId/players', validateUuidParams('teamId'), async (req, r
       players,
     });
   } catch (error) {
-    console.error('Error getting team roster stats:', error);
+    logger.error('Error getting team roster stats', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError

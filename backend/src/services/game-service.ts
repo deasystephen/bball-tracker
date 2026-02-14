@@ -7,6 +7,7 @@ import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 import { StatsService } from './stats-service';
+import { logger } from '../utils/logger';
 
 export class GameService {
   /**
@@ -353,7 +354,7 @@ export class GameService {
       try {
         await StatsService.finalizeGameStats(gameId);
       } catch (error) {
-        console.error('Error finalizing game stats:', error);
+        logger.error('Error finalizing game stats', { error: error instanceof Error ? error.message : String(error) });
         // Don't fail the update if stats calculation fails
       }
     }
