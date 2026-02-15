@@ -90,6 +90,13 @@ Backend API (Node.js/Express)
 - Use async/await over raw promises
 - Validate inputs with Zod schemas
 
+### Lint & Warning Policy
+- **Never suppress lint errors** with `eslint-disable` comments — fix the underlying issue instead
+- **Never ignore warnings** — treat them as problems to solve, not noise to silence
+- If a lint rule flags something, find the correct fix (e.g., use ES module `import` instead of `require()`, add proper types instead of `any`)
+- The only acceptable exception is `declare global { namespace Express }` for extending Express types, which requires `@typescript-eslint/no-namespace` disable (see `src/api/auth/middleware.ts` for the pattern)
+- CI must pass clean — do not merge code with lint errors or test failures
+
 ## Testing Requirements
 
 When adding new features or fixing bugs, always write tests that verify behavior as it runs in the actual app:
