@@ -141,6 +141,7 @@ describe('Uploads API', () => {
   describe('Authentication', () => {
     it('should require authentication', async () => {
       // Override the mock to simulate no auth
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { authenticate } = require('../../src/api/auth/middleware');
       (authenticate as jest.Mock).mockImplementationOnce((_req: any, res: any) => {
         res.status(401).json({ error: 'Authorization token required' });
