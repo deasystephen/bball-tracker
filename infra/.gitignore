@@ -6,6 +6,7 @@
 
 # Variable files with secrets
 terraform.tfvars
+*.tfvars.json
 *.auto.tfvars
 
 # Crash logs
