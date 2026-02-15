@@ -1,0 +1,37 @@
+appId: com.bballtracker.mobile
+---
+# Logout: Profile → Logout → Confirm → Verify login screen → Re-login
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to Profile tab
+- tapOn: "Profile tab"
+- assertVisible: "Account"
+
+# Scroll down to find logout button
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+
+# Tap logout
+- tapOn: "Logout"
+
+# Confirm the logout alert
+- tapOn:
+    text: "Logout"
+    index: 1
+
+# Verify we're back on the login screen
+- assertVisible: "Basketball Tracker"
+
+# Re-login to verify session was properly cleared
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"

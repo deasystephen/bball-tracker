@@ -1,0 +1,50 @@
+appId: com.bballtracker.mobile
+---
+# Game Lifecycle: Create game → Start → Track screen loads → End → Verify finished
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to Games tab and create a game
+- tapOn: "Track game tab"
+- tapOn: "Create new game"
+- assertVisible: "New Game"
+- inputText:
+    id: "opponent-name-input"
+    text: "Test Rival"
+# Select the Lakers team from the list
+- tapOn: "Lakers.*"
+- tapOn: "Create Game"
+
+# Verify game detail page
+- assertVisible: "Test Rival"
+- assertVisible: "Scheduled"
+
+# Start the game
+- tapOn: "Start Game"
+
+# Verify tracking screen loaded
+- assertVisible: "End game"
+
+# Go back to game detail to end from there (more reliable alert handling)
+- tapOn: "Go back"
+- tapOn: "Leave"
+
+# Now on game detail with IN_PROGRESS status
+- assertVisible: "Continue Tracking"
+
+# End game from detail screen
+- tapOn: "End Game"
+# Tap alert button (index 1 skips the on-screen button behind the alert)
+- tapOn:
+    text: "End Game"
+    index: 1
+
+# Verify game is finished
+- extendedWaitUntil:
+    visible: "Game completed"
+    timeout: 10000

@@ -213,6 +213,7 @@ export default function TeamDetailsScreen() {
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
                   onPress={() => router.push(`/teams/${id}/players/${member.playerId}`)}
+                  accessibilityLabel={member.player.name}
                 >
                   <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>
                     <ThemedText variant="h3" style={{ color: teamColor }}>

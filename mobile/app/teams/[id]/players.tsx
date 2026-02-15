@@ -303,6 +303,7 @@ export default function ManagePlayersScreen() {
                 value={rosterPlayerName}
                 onChangeText={setRosterPlayerName}
                 autoCapitalize="words"
+                testID="roster-player-name-input"
               />
 
               <Input
@@ -312,6 +313,7 @@ export default function ManagePlayersScreen() {
                 onChangeText={(text) => setRosterJerseyNumber(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
                 maxLength={2}
+                testID="roster-jersey-input"
               />
 
               <Input

@@ -1,0 +1,58 @@
+appId: com.bballtracker.mobile
+---
+# Roster Management: Navigate to team → Add roster player → Verify in roster
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+# Wait for test user list to load
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers team (wait for API load)
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+# Scroll down to see Add Player button
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+
+# Navigate to roster management
+- tapOn: "Add Player"
+- assertVisible: "Roster"
+- assertVisible: "Invite Player"
+
+# Switch to Add Roster Player mode
+- tapOn: "Add Roster Player"
+- assertVisible: "Add Roster Player"
+
+# Fill in roster player details - tap to focus each input first
+- tapOn:
+    id: "roster-player-name-input"
+- inputText: "E2E Test Player"
+- tapOn:
+    id: "roster-jersey-input"
+- inputText: "99"
+
+# Dismiss keyboard so the Add to Roster button is tappable
+- hideKeyboard
+
+# Submit the roster player
+- tapOn: "Add to Roster"
+
+# Scroll down to see the player in the Current Players list
+- scrollUntilVisible:
+    element:
+      text: "E2E Test Player"
+    direction: DOWN
+    timeout: 10000

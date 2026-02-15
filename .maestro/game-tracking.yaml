@@ -1,0 +1,59 @@
+appId: com.bballtracker.mobile
+---
+# Game Tracking: Create game with existing team → Start → Record stats → End
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Create a game with the Lakers
+- tapOn: "Track game tab"
+- tapOn: "Create new game"
+- inputText:
+    id: "opponent-name-input"
+    text: "Tracking Rival"
+- tapOn: "Lakers.*"
+- tapOn: "Create Game"
+
+# Start the game
+- assertVisible: "Tracking Rival"
+- tapOn: "Start Game"
+
+# On tracking screen, select a player from the roster
+- assertVisible: "End game"
+- tapOn: "LeBron James.*"
+
+# Record a 2-point made shot
+- tapOn: "2-point shot made"
+
+# Player gets deselected after shot, re-select for next stat
+- tapOn: "LeBron James.*"
+
+# Record a rebound (label is "Off Reb")
+- tapOn: "Record Off Reb"
+
+# Re-select player
+- tapOn: "LeBron James.*"
+
+# Record an assist
+- tapOn: "Record Assist"
+
+# Go back to game detail to end from there
+- tapOn: "Go back"
+- tapOn: "Leave"
+
+# End game from detail screen
+- assertVisible: "Continue Tracking"
+- tapOn: "End Game"
+# Tap alert button (index 1 skips the on-screen button)
+- tapOn:
+    text: "End Game"
+    index: 1
+
+# Verify game is finished
+- extendedWaitUntil:
+    visible: "Game completed"
+    timeout: 10000

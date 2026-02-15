@@ -178,6 +178,7 @@ export default function CreateGameScreen() {
               error={errors.opponent}
               autoCapitalize="words"
               autoFocus
+              testID="opponent-name-input"
             />
           </Card>
 

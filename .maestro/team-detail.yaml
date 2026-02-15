@@ -1,0 +1,40 @@
+appId: com.bballtracker.mobile
+---
+# Team Detail: Navigate to existing team → Verify hero header and content
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers team (wait for teams to load from API)
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+# Verify team detail page content
+- assertVisible: "Lakers"
+
+# Scroll until players are visible (hero header + stats push them far down)
+- scrollUntilVisible:
+    element:
+      text: "LeBron James"
+    direction: DOWN
+    timeout: 10000
+
+# Scroll back up to find and tap View Team Stats
+- scrollUntilVisible:
+    element:
+      text: "View Team Stats"
+    direction: UP
+    timeout: 10000
+- tapOn: "View Team Stats"
+
+# Verify team stats page loads
+- assertVisible: "Lakers Stats"
+- assertVisible: "Go back"

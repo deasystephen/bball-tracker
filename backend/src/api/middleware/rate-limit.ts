@@ -6,11 +6,11 @@ import rateLimit from 'express-rate-limit';
 
 /**
  * Strict rate limit for authentication endpoints (login, callback, dev-login)
- * 20 requests per 15 minutes per IP
+ * 20 requests per 15 minutes per IP in production, relaxed in development for E2E testing
  */
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'development' ? 100 : 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts, please try again later' },

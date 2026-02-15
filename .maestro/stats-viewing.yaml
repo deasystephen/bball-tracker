@@ -1,0 +1,14 @@
+appId: com.bballtracker.mobile
+---
+# Stats Viewing: Navigate to stats tab and verify content
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to Stats tab
+- tapOn: "Stats tab"
+- assertVisible: "Statistics"
