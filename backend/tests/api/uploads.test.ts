@@ -4,6 +4,7 @@
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
+import { authenticate } from '../../src/api/auth/middleware';
 import { generateAvatarUploadUrl } from '../../src/services/upload-service';
 
 // Test UUIDs
@@ -141,8 +142,6 @@ describe('Uploads API', () => {
   describe('Authentication', () => {
     it('should require authentication', async () => {
       // Override the mock to simulate no auth
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { authenticate } = require('../../src/api/auth/middleware');
       (authenticate as jest.Mock).mockImplementationOnce((_req: any, res: any) => {
         res.status(401).json({ error: 'Authorization token required' });
       });
