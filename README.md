@@ -11,7 +11,9 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **League & Season Management** — Organize teams into leagues with seasonal schedules
 - **Statistics & Analytics** — Per-player and per-team stats with real-time aggregation
 - **Invitation System** — Invite players and staff to teams with in-app notifications
+- **Profile Pictures** — S3 presigned URL uploads with avatar picker
 - **Dark Mode** — Full light/dark theme support throughout the app
+- **E2E Testing** — Maestro test flows for core user journeys
 
 ## Tech Stack
 
@@ -36,7 +38,10 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Cache**: AWS ElastiCache Redis
 - **Streaming**: Confluent Cloud Kafka + Apache Flink
 - **CI/CD**: GitHub Actions → Docker → ECR → ECS
+- **Domain**: `api.capyhoops.com` with HTTPS (ACM cert)
+- **Observability**: Datadog (via CloudWatch Forwarder)
 - **Mobile Builds**: Expo Application Services (EAS)
+- **E2E Testing**: Maestro
 - **Analytics**: Amplitude
 
 ## Getting Started
@@ -98,6 +103,7 @@ bball-tracker/
 │   ├── src/websocket/   #   Socket.io handlers
 │   ├── prisma/          #   Schema, migrations, seed data
 │   └── tests/           #   Jest test suites
+├── .maestro/            # Maestro E2E test flows
 ├── infra/               # Terraform (ECS, RDS, ElastiCache)
 ├── docker/              # Dockerfile and entrypoint
 ├── streaming/           # Kafka/Flink configurations
@@ -110,7 +116,7 @@ bball-tracker/
 ### Backend
 ```bash
 npm run dev                # Start dev server with hot reload
-npm test                   # Run all tests (479 tests across 27 suites)
+npm test                   # Run all tests (543 tests across 29 suites)
 npm run type-check         # TypeScript type checking
 npx prisma migrate dev     # Run database migrations
 npx prisma studio          # Open database GUI
@@ -120,6 +126,12 @@ npx prisma studio          # Open database GUI
 ```bash
 npx expo run:ios           # Build and run on iOS simulator
 npm run type-check         # TypeScript type checking
+```
+
+### E2E Tests
+```bash
+maestro test .maestro/             # Run all Maestro flows
+maestro test .maestro/login.yaml   # Run a single flow
 ```
 
 ### Deployment
@@ -152,6 +164,7 @@ The backend deploys via GitHub Actions CI/CD:
 2. Docker image is built and pushed to AWS ECR
 3. ECS Fargate service pulls the new image
 4. `prisma migrate deploy` runs automatically on container start
+5. Logs forward to Datadog via CloudWatch Forwarder
 
 Mobile builds use Expo Application Services (EAS):
 - **OTA updates** push JavaScript bundle changes without a full rebuild
