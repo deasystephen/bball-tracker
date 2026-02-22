@@ -29,6 +29,8 @@ describe('Auth API', () => {
     emailVerified: true,
     profilePictureUrl: null,
     role: 'PLAYER' as const,
+    subscriptionTier: 'FREE' as const,
+    subscriptionExpiresAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -245,6 +247,75 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(500);
       expect(response.body.error).toBe('Failed to get user information');
+    });
+  });
+
+  describe('GET /api/v1/auth/entitlements', () => {
+    it('should return FREE tier entitlements for free user', async () => {
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+
+      const response = await request(app)
+        .get('/api/v1/auth/entitlements')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.tier).toBe('FREE');
+      expect(response.body.features.STATS_EXPORT).toBe(false);
+      expect(response.body.features.AD_FREE).toBe(false);
+      expect(response.body.limits.maxTeams).toBe(3);
+      expect(response.body.limits.maxSeasons).toBe(1);
+      expect(response.body.expiresAt).toBeNull();
+    });
+
+    it('should return PREMIUM tier entitlements for active premium user', async () => {
+      const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const premiumUser = {
+        ...mockUser,
+        subscriptionTier: 'PREMIUM' as const,
+        subscriptionExpiresAt: future,
+      };
+
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(premiumUser);
+
+      const response = await request(app)
+        .get('/api/v1/auth/entitlements')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.tier).toBe('PREMIUM');
+      expect(response.body.features.STATS_EXPORT).toBe(true);
+      expect(response.body.features.AD_FREE).toBe(true);
+      expect(response.body.features.TOURNAMENT_BRACKETS).toBe(false);
+      expect(response.body.limits.maxTeams).toBe(null); // Infinity serializes to null in JSON
+    });
+
+    it('should return FREE tier for expired premium user', async () => {
+      const expiredUser = {
+        ...mockUser,
+        subscriptionTier: 'PREMIUM' as const,
+        subscriptionExpiresAt: new Date('2020-01-01'),
+      };
+
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(expiredUser);
+
+      const response = await request(app)
+        .get('/api/v1/auth/entitlements')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.tier).toBe('FREE');
+      expect(response.body.features.STATS_EXPORT).toBe(false);
+      expect(response.body.limits.maxTeams).toBe(3);
+    });
+
+    it('should return 401 without authorization', async () => {
+      const response = await request(app)
+        .get('/api/v1/auth/entitlements');
+
+      expect(response.status).toBe(401);
     });
   });
 });

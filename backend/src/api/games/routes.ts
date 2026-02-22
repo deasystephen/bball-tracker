@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { GameService } from '../../services/game-service';
 import { GameEventService } from '../../services/game-event-service';
+import { RsvpService } from '../../services/rsvp-service';
 import { authenticate } from '../auth/middleware';
 import {
   createGameSchema,
@@ -12,6 +13,7 @@ import {
   gameQuerySchema,
   createGameEventSchema,
   gameEventQuerySchema,
+  upsertRsvpSchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
@@ -308,6 +310,75 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete game event' });
+    }
+  }
+});
+
+// ============================================
+// RSVP Routes
+// ============================================
+
+/**
+ * POST /api/v1/games/:gameId/rsvp
+ * Create or update an RSVP for a game
+ */
+router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
+  try {
+    const validationResult = upsertRsvpSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.errors.map((e) => e.message).join(', ')
+      );
+    }
+
+    const rsvp = await RsvpService.upsertRsvp(
+      req.params.gameId,
+      req.user!.id,
+      validationResult.data.status
+    );
+
+    res.json({
+      success: true,
+      rsvp,
+    });
+  } catch (error) {
+    logger.error('Error upserting RSVP', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to update RSVP' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/games/:gameId/rsvps
+ * Get all RSVPs for a game with summary counts
+ */
+router.get('/:gameId/rsvps', validateUuidParams('gameId'), async (req, res) => {
+  try {
+    const result = await RsvpService.getGameRsvps(
+      req.params.gameId,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    logger.error('Error getting RSVPs', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to get RSVPs' });
     }
   }
 });

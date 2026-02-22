@@ -9,6 +9,37 @@ export enum UserRole {
   ADMIN = 'ADMIN',
 }
 
+export enum SubscriptionTier {
+  FREE = 'FREE',
+  PREMIUM = 'PREMIUM',
+  LEAGUE = 'LEAGUE',
+}
+
+export enum Feature {
+  UNLIMITED_TEAMS = 'UNLIMITED_TEAMS',
+  FULL_SEASON_HISTORY = 'FULL_SEASON_HISTORY',
+  CALENDAR_SYNC = 'CALENDAR_SYNC',
+  STATS_EXPORT = 'STATS_EXPORT',
+  ADVANCED_STATS = 'ADVANCED_STATS',
+  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
+  AD_FREE = 'AD_FREE',
+  REGISTRATION_PAYMENTS = 'REGISTRATION_PAYMENTS',
+  TOURNAMENT_BRACKETS = 'TOURNAMENT_BRACKETS',
+  ORG_MESSAGING = 'ORG_MESSAGING',
+  FINANCIAL_REPORTING = 'FINANCIAL_REPORTING',
+  MASTER_CALENDAR = 'MASTER_CALENDAR',
+}
+
+export interface Entitlements {
+  tier: SubscriptionTier;
+  features: Record<Feature, boolean>;
+  limits: {
+    maxTeams: number;
+    maxSeasons: number;
+  };
+  expiresAt: string | null;
+}
+
 export enum GameEventType {
   SHOT = 'SHOT',
   REBOUND = 'REBOUND',
@@ -116,5 +147,29 @@ export interface TeamStats {
   fieldGoalPercentage: number;
   threePointPercentage: number;
   freeThrowPercentage: number;
+}
+
+export enum RsvpStatus {
+  YES = 'YES',
+  NO = 'NO',
+  MAYBE = 'MAYBE',
+}
+
+export interface GameRsvp {
+  id: string;
+  gameId: string;
+  userId: string;
+  status: RsvpStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Announcement {
+  id: string;
+  teamId: string;
+  authorId: string;
+  title: string;
+  body: string;
+  createdAt: Date;
 }
 

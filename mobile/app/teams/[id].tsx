@@ -9,6 +9,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -163,6 +164,24 @@ export default function TeamDetailsScreen() {
         <Button
           title="View Team Stats"
           onPress={() => router.push(`/teams/${id}/stats`)}
+          variant="outline"
+          style={styles.statsButton}
+        />
+
+        {/* Team Chat Link */}
+        {team.chatLink && (
+          <Button
+            title="Team Chat"
+            onPress={() => Linking.openURL(team.chatLink!)}
+            variant="outline"
+            style={styles.statsButton}
+          />
+        )}
+
+        {/* Announcements */}
+        <Button
+          title="Announcements"
+          onPress={() => router.push(`/teams/${id}/announcements`)}
           variant="outline"
           style={styles.statsButton}
         />

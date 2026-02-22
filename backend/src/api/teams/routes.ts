@@ -11,10 +11,12 @@ import {
   updateTeamMemberSchema,
   teamQuerySchema,
   createManagedPlayerSchema,
+  createAnnouncementSchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
+import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
 
@@ -330,6 +332,79 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to update team member' });
+    }
+  }
+});
+
+// ============================================
+// Announcement Routes
+// ============================================
+
+/**
+ * POST /api/v1/teams/:teamId/announcements
+ * Create a new team announcement (coach only)
+ */
+router.post('/:teamId/announcements', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const validationResult = createAnnouncementSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.errors.map((e) => e.message).join(', ')
+      );
+    }
+
+    const announcement = await AnnouncementService.createAnnouncement(
+      req.params.teamId,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(201).json({
+      success: true,
+      announcement,
+    });
+  } catch (error) {
+    logger.error('Error creating announcement', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to create announcement' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/teams/:teamId/announcements
+ * List announcements for a team
+ */
+router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+
+    const result = await AnnouncementService.listAnnouncements(
+      req.params.teamId,
+      req.user!.id,
+      { limit, offset }
+    );
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    logger.error('Error listing announcements', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to list announcements' });
     }
   }
 });

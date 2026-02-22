@@ -48,7 +48,7 @@ export type GameQueryParams = z.infer<typeof gameQuerySchema>;
 // Game Event Schemas
 // ============================================
 
-import { GameEventType } from '@prisma/client';
+import { GameEventType, RsvpStatus } from '@prisma/client';
 
 /**
  * Schema for creating a game event
@@ -74,3 +74,18 @@ export const gameEventQuerySchema = z.object({
 
 export type CreateGameEventInput = z.infer<typeof createGameEventSchema>;
 export type GameEventQueryParams = z.infer<typeof gameEventQuerySchema>;
+
+// ============================================
+// RSVP Schemas
+// ============================================
+
+/**
+ * Schema for creating/updating an RSVP
+ */
+export const upsertRsvpSchema = z.object({
+  status: z.nativeEnum(RsvpStatus, {
+    errorMap: () => ({ message: 'Status must be YES, NO, or MAYBE' }),
+  }),
+});
+
+export type UpsertRsvpInput = z.infer<typeof upsertRsvpSchema>;

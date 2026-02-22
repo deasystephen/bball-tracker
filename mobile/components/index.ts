@@ -16,3 +16,5 @@ export * from './Toast';
 export * from './SkeletonLoader';
 export * from './AvatarPicker';
 export * from './BadgeGrid';
+export * from './FeatureGate';
+export * from './UpgradePrompt';

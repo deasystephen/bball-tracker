@@ -43,6 +43,7 @@ export interface Team {
   id: string;
   name: string;
   seasonId: string;
+  chatLink?: string | null;
   createdAt: string;
   updatedAt: string;
   season?: {
@@ -77,11 +78,13 @@ export interface Team {
 export interface CreateTeamInput {
   name: string;
   seasonId: string;
+  chatLink?: string;
 }
 
 export interface UpdateTeamInput {
   name?: string;
   seasonId?: string;
+  chatLink?: string | null;
 }
 
 export interface AddPlayerInput {

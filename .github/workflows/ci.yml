@@ -118,6 +118,10 @@ jobs:
         working-directory: mobile
         run: npm test
 
+      - name: Verify Metro bundle resolves
+        working-directory: mobile
+        run: npx expo export --platform ios
+
   build-and-deploy:
     name: Build & Deploy to ECS
     runs-on: ubuntu-latest

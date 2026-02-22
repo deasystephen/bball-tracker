@@ -56,6 +56,7 @@ export class TeamService {
       data: {
         name: data.name,
         seasonId: data.seasonId,
+        chatLink: data.chatLink,
       },
     });
 
@@ -314,6 +315,10 @@ export class TeamService {
 
     if (data.seasonId !== undefined) {
       updateData.seasonId = data.seasonId;
+    }
+
+    if (data.chatLink !== undefined) {
+      updateData.chatLink = data.chatLink;
     }
 
     // Update the team

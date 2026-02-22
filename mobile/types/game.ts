@@ -104,3 +104,26 @@ export interface GameEventFilters {
   limit?: number;
   offset?: number;
 }
+
+// RSVP types
+export type RsvpStatus = 'YES' | 'NO' | 'MAYBE';
+
+export interface GameRsvp {
+  id: string;
+  gameId: string;
+  userId: string;
+  status: RsvpStatus;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    name: string;
+    email?: string;
+  };
+}
+
+export interface RsvpSummary {
+  yes: number;
+  no: number;
+  maybe: number;
+}

@@ -23,12 +23,13 @@ import {
   ErrorState,
 } from '../../../components';
 import { BoxScoreTable } from '../../../components/stats';
-import { useGame, useUpdateGame, useDeleteGame } from '../../../hooks/useGames';
+import { useGame, useUpdateGame, useDeleteGame, useGameRsvps, useSubmitRsvp } from '../../../hooks/useGames';
 import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
+import { useAuthStore } from '../../../store/auth-store';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
-import type { GameStatus } from '../../../types/game';
+import type { GameStatus, RsvpStatus } from '../../../types/game';
 
 const getStatusColor = (
   status: GameStatus,
@@ -88,9 +89,12 @@ export default function GameDetailScreen() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
+  const { user } = useAuthStore();
   const { data: game, isLoading, error, refetch } = useGame(id);
   const updateGame = useUpdateGame();
   const deleteGame = useDeleteGame();
+  const { data: rsvpData } = useGameRsvps(id);
+  const submitRsvp = useSubmitRsvp();
 
   // Fetch box score for finished games
   const isFinishedGame = game?.status === 'FINISHED';
@@ -326,6 +330,51 @@ export default function GameDetailScreen() {
           )}
         </Card>
 
+        {/* RSVP Section - only for scheduled/upcoming games */}
+        {(isScheduled || isInProgress) && (
+          <Card variant="default" style={styles.rsvpCard}>
+            <ThemedText variant="h3" style={styles.rsvpTitle}>RSVP</ThemedText>
+
+            {/* RSVP Buttons */}
+            <View style={styles.rsvpButtons}>
+              {(['YES', 'NO', 'MAYBE'] as RsvpStatus[]).map((status) => {
+                const myRsvp = rsvpData?.rsvps?.find(r => r.userId === user?.id);
+                const isSelected = myRsvp?.status === status;
+                const label = status === 'YES' ? 'Going' : status === 'NO' ? 'Not Going' : 'Maybe';
+                return (
+                  <TouchableOpacity
+                    key={status}
+                    style={[
+                      styles.rsvpButton,
+                      { borderColor: colors.border },
+                      isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                    ]}
+                    onPress={() => submitRsvp.mutate({ gameId: id, status })}
+                  >
+                    <ThemedText
+                      variant="captionBold"
+                      style={isSelected ? { color: '#FFFFFF' } : undefined}
+                    >
+                      {label}
+                    </ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* RSVP Summary */}
+            {rsvpData?.summary && (
+              <View style={styles.rsvpSummary}>
+                <ThemedText variant="caption" color="textSecondary">
+                  {rsvpData.summary.yes} going
+                  {rsvpData.summary.maybe > 0 && ` \u00B7 ${rsvpData.summary.maybe} maybe`}
+                  {rsvpData.summary.no > 0 && ` \u00B7 ${rsvpData.summary.no} not going`}
+                </ThemedText>
+              </View>
+            )}
+          </Card>
+        )}
+
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
           {isScheduled && (
@@ -512,6 +561,27 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginVertical: spacing.xs,
+  },
+  rsvpCard: {
+    marginBottom: spacing.lg,
+  },
+  rsvpTitle: {
+    marginBottom: spacing.md,
+  },
+  rsvpButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  rsvpButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  rsvpSummary: {
+    marginTop: spacing.md,
+    alignItems: 'center',
   },
   actionButtons: {
     marginTop: spacing.lg,

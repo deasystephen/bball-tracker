@@ -3,7 +3,7 @@
  * Run with: npm run db:seed
  */
 
-import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType } from '@prisma/client';
+import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType, SubscriptionTier } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -22,6 +22,7 @@ const SEED_IDS = {
 // Helper to create default team roles
 async function createDefaultTeamRoles(teamId: string) {
   const roles = await prisma.teamRole.createMany({
+    skipDuplicates: true,
     data: [
       {
         teamId,
@@ -86,12 +87,17 @@ async function main() {
   // Coaches
   const coachSteve = await prisma.user.upsert({
     where: { email: 'steve.kerr@example.com' },
-    update: {},
+    update: {
+      subscriptionTier: SubscriptionTier.PREMIUM,
+      subscriptionExpiresAt: new Date('2027-12-31'),
+    },
     create: {
       email: 'steve.kerr@example.com',
       name: 'Steve Kerr',
       role: UserRole.COACH,
       emailVerified: true,
+      subscriptionTier: SubscriptionTier.PREMIUM,
+      subscriptionExpiresAt: new Date('2027-12-31'),
     },
   });
   console.log(`  Created coach: ${coachSteve.email}`);
@@ -280,6 +286,7 @@ async function main() {
       id: SEED_IDS.WARRIORS_TEAM,
       name: 'Warriors',
       seasonId: season.id,
+      chatLink: 'https://chat.whatsapp.com/warriors-team-chat',
     },
   });
   console.log(`  Created team: ${warriors.name}`);
