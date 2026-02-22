@@ -126,6 +126,8 @@ describe('Auth Middleware', () => {
         email: dbUser.email,
         name: dbUser.name,
         role: dbUser.role,
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       });
 
       await authenticate(
@@ -139,6 +141,8 @@ describe('Auth Middleware', () => {
         email: dbUser.email,
         name: dbUser.name,
         role: dbUser.role,
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       });
       expect(nextFn).toHaveBeenCalledWith();
     });
@@ -187,6 +191,8 @@ describe('Auth Middleware', () => {
         email: player.email,
         name: player.name,
         role: 'PLAYER',
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       };
 
       const middleware = requireRole('COACH');
@@ -212,6 +218,8 @@ describe('Auth Middleware', () => {
         email: coach.email,
         name: coach.name,
         role: 'COACH',
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       };
 
       const middleware = requireRole('COACH');
@@ -232,6 +240,8 @@ describe('Auth Middleware', () => {
         email: player.email,
         name: player.name,
         role: 'PLAYER',
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       };
 
       const middleware = requireRole('COACH', 'PLAYER', 'ADMIN');
@@ -252,6 +262,8 @@ describe('Auth Middleware', () => {
         email: admin.email,
         name: admin.name,
         role: 'ADMIN',
+        subscriptionTier: 'FREE',
+        subscriptionExpiresAt: null,
       };
 
       const middleware = requireRole('ADMIN');

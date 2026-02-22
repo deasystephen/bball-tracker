@@ -3,8 +3,10 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { SubscriptionTier } from '@prisma/client';
 import { WorkOSService } from '../../services/workos-service';
 import { UnauthorizedError, ForbiddenError } from '../../utils/errors';
+import { Feature, hasFeature, getEffectiveTier, getRequiredTier, getUsageLimits } from '../../utils/entitlements';
 import prisma from '../../models';
 
 /**
@@ -19,6 +21,8 @@ declare global {
         email: string | null;
         name: string;
         role: string;
+        subscriptionTier: SubscriptionTier;
+        subscriptionExpiresAt: Date | null;
       };
     }
   }
@@ -60,6 +64,8 @@ export async function authenticate(
             email: true,
             name: true,
             role: true,
+            subscriptionTier: true,
+            subscriptionExpiresAt: true,
           },
         });
 
@@ -89,6 +95,8 @@ export async function authenticate(
         email: true,
         name: true,
         role: true,
+        subscriptionTier: true,
+        subscriptionExpiresAt: true,
       },
     });
 
@@ -115,6 +123,75 @@ export function requireRole(...allowedRoles: string[]) {
 
     if (!allowedRoles.includes(req.user.role)) {
       return next(new ForbiddenError('Insufficient permissions'));
+    }
+
+    next();
+  };
+}
+
+/**
+ * Middleware to check if user's subscription tier grants access to a feature.
+ * System admins bypass all entitlement checks.
+ */
+export function requireFeature(feature: Feature) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      return next(new UnauthorizedError('Authentication required'));
+    }
+
+    // System admins bypass entitlement checks
+    if (req.user.role === 'ADMIN') {
+      return next();
+    }
+
+    const tier = getEffectiveTier(req.user);
+    if (!hasFeature(tier, feature)) {
+      const requiredTier = getRequiredTier(feature);
+      res.status(403).json({
+        error: 'upgrade_required',
+        message: `This feature requires a ${requiredTier} subscription`,
+        requiredTier,
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Middleware to enforce usage limits (e.g., max teams for Free tier).
+ * System admins bypass usage limit checks.
+ */
+export function requireUsageLimit(resource: 'teams') {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      return next(new UnauthorizedError('Authentication required'));
+    }
+
+    // System admins bypass usage limits
+    if (req.user.role === 'ADMIN') {
+      return next();
+    }
+
+    const tier = getEffectiveTier(req.user);
+    const limits = getUsageLimits(tier);
+
+    if (resource === 'teams' && limits.maxTeams !== Infinity) {
+      const teamCount = await prisma.teamStaff.count({
+        where: { userId: req.user.id },
+      });
+
+      if (teamCount >= limits.maxTeams) {
+        res.status(403).json({
+          error: 'usage_limit_reached',
+          message: `Free plan is limited to ${limits.maxTeams} teams. Upgrade to Premium for unlimited teams.`,
+          limit: limits.maxTeams,
+          current: teamCount,
+          requiredTier: 'PREMIUM',
+        });
+        return;
+      }
     }
 
     next();

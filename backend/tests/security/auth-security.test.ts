@@ -93,7 +93,7 @@ describe('Authentication Security', () => {
     });
 
     it('should reject insufficient role with 403 (not 401)', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'PLAYER' };
+      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'PLAYER', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
       const middleware = requireRole('ADMIN');
       middleware(mockReq as Request, mockRes as Response, mockNext);
       expect(mockNext).toHaveBeenCalled();
@@ -103,14 +103,14 @@ describe('Authentication Security', () => {
     });
 
     it('should allow authorized role', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'ADMIN' };
+      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'ADMIN', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
       const middleware = requireRole('ADMIN');
       middleware(mockReq as Request, mockRes as Response, mockNext);
       expect(mockNext).toHaveBeenCalledWith();
     });
 
     it('should allow multiple roles', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'COACH' };
+      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'COACH', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
       const middleware = requireRole('ADMIN', 'COACH');
       middleware(mockReq as Request, mockRes as Response, mockNext);
       expect(mockNext).toHaveBeenCalledWith();

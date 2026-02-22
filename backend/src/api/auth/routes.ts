@@ -8,6 +8,10 @@ import { UnauthorizedError, BadRequestError } from '../../utils/errors';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
+import { authenticate } from './middleware';
+import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
+import { NotificationService } from '../../services/notification-service';
+import { z } from 'zod';
 
 const router = Router();
 
@@ -262,6 +266,76 @@ router.get('/me', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to get user information' });
     }
+  }
+});
+
+/**
+ * GET /api/v1/auth/entitlements
+ * Returns the current user's subscription tier, feature access, and usage limits
+ */
+router.get('/entitlements', authenticate, (req, res) => {
+  const user = req.user!;
+  const tier = getEffectiveTier(user);
+
+  res.json({
+    tier,
+    features: getAllFeatures(tier),
+    limits: getUsageLimits(tier),
+    expiresAt: user.subscriptionExpiresAt,
+  });
+});
+
+/**
+ * POST /api/v1/auth/push-token
+ * Register a push notification token for the current user
+ */
+const pushTokenSchema = z.object({
+  token: z.string().min(1, 'Token is required'),
+  platform: z.enum(['ios', 'android']),
+});
+
+router.post('/push-token', authenticate, async (req, res) => {
+  try {
+    const validationResult = pushTokenSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: validationResult.error.errors.map((e) => e.message).join(', '),
+      });
+    }
+
+    const { token, platform } = validationResult.data;
+    const pushToken = await NotificationService.registerToken(req.user!.id, token, platform);
+
+    return res.json({
+      success: true,
+      pushToken: { id: pushToken.id, platform: pushToken.platform },
+    });
+  } catch (error) {
+    logger.error('Error registering push token', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof Error && error.message === 'Invalid Expo push token') {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'Failed to register push token' });
+  }
+});
+
+/**
+ * DELETE /api/v1/auth/push-token
+ * Remove a push notification token
+ */
+router.delete('/push-token', authenticate, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    await NotificationService.removeToken(token);
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('Error removing push token', { error: error instanceof Error ? error.message : String(error) });
+    return res.status(500).json({ error: 'Failed to remove push token' });
   }
 });
 
