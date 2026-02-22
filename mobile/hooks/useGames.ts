@@ -10,6 +10,9 @@ import type {
   GameFilters,
   CreateGameInput,
   UpdateGameInput,
+  GameRsvp,
+  RsvpStatus,
+  RsvpSummary,
 } from '../types/game';
 
 // Query keys
@@ -106,6 +109,53 @@ export function useDeleteGame() {
     onSuccess: () => {
       trackEvent(AnalyticsEvents.GAME_DELETED);
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+    },
+  });
+}
+
+// ============================================
+// RSVP Hooks
+// ============================================
+
+export const rsvpKeys = {
+  all: ['rsvps'] as const,
+  game: (gameId: string) => [...rsvpKeys.all, gameId] as const,
+};
+
+/**
+ * Hook to fetch RSVPs for a game
+ */
+export function useGameRsvps(gameId: string) {
+  return useQuery({
+    queryKey: rsvpKeys.game(gameId),
+    queryFn: async () => {
+      const response = await apiClient.get<{
+        success: boolean;
+        rsvps: GameRsvp[];
+        summary: RsvpSummary;
+      }>(`/games/${gameId}/rsvps`);
+      return response.data;
+    },
+    enabled: !!gameId,
+  });
+}
+
+/**
+ * Hook to submit an RSVP
+ */
+export function useSubmitRsvp() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ gameId, status }: { gameId: string; status: RsvpStatus }) => {
+      const response = await apiClient.post<{ success: boolean; rsvp: GameRsvp }>(
+        `/games/${gameId}/rsvp`,
+        { status }
+      );
+      return response.data.rsvp;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: rsvpKeys.game(variables.gameId) });
     },
   });
 }

@@ -90,6 +90,29 @@ describe('Teams API', () => {
       expect(response.status).toBe(400);
     });
 
+    it('should create a team with chatLink', async () => {
+      const teamWithChat = { ...mockTeam, chatLink: 'https://chat.whatsapp.com/abc123' };
+      mockTeamService.createTeam.mockResolvedValue(teamWithChat as any);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID, chatLink: 'https://chat.whatsapp.com/abc123' });
+
+      expect(response.status).toBe(201);
+      expect(mockTeamService.createTeam).toHaveBeenCalledWith(
+        expect.objectContaining({ chatLink: 'https://chat.whatsapp.com/abc123' }),
+        TEST_USER_ID
+      );
+    });
+
+    it('should reject chatLink with non-http protocol', async () => {
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID, chatLink: 'javascript:alert(1)' });
+
+      expect(response.status).toBe(400);
+    });
+
     it('should handle service errors', async () => {
       mockTeamService.createTeam.mockRejectedValue(new NotFoundError('Season not found'));
 
@@ -222,6 +245,38 @@ describe('Teams API', () => {
         .send({ name: 'New Name' });
 
       expect(response.status).toBe(403);
+    });
+
+    it('should update chatLink', async () => {
+      const updatedTeam = { ...mockTeam, chatLink: 'https://t.me/team_chat' };
+      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ chatLink: 'https://t.me/team_chat' });
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.updateTeam).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ chatLink: 'https://t.me/team_chat' }),
+        TEST_USER_ID
+      );
+    });
+
+    it('should clear chatLink with null', async () => {
+      const updatedTeam = { ...mockTeam, chatLink: null };
+      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as any);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ chatLink: null });
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.updateTeam).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ chatLink: null }),
+        TEST_USER_ID
+      );
     });
   });
 

@@ -135,6 +135,10 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
 
+## Work Hygiene
+
+- **Before starting new work, ensure prior work is committed.** If there are uncommitted changes from a previous feature, test them (`npm test`, `npx tsc --noEmit`), commit them on an appropriate branch, and verify a clean `git status` before beginning a new task. Mixing unrelated features in the same uncommitted diff makes testing and rollback difficult.
+
 ## Git Workflow
 
 - Main branches: `main` and `develop`

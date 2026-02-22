@@ -10,6 +10,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
 import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
+import { useNotificationSetup } from '../hooks/useNotifications';
 import '../i18n/config'; // Initialize i18n
 
 if (__DEV__) {
@@ -36,6 +37,11 @@ const queryClient = new QueryClient({
  * Root layout - navigation is handled by index.tsx after mount
  * Includes i18n initialization and theme support
  */
+function NotificationHandler() {
+  useNotificationSetup();
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -67,6 +73,7 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <ToastProvider>
+              <NotificationHandler />
               <Stack
                 screenOptions={{
                   headerShown: false,

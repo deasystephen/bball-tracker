@@ -10,6 +10,10 @@ import { z } from 'zod';
 export const createTeamSchema = z.object({
   name: z.string().min(1, 'Team name is required').max(100, 'Team name too long'),
   seasonId: z.string().uuid('Invalid season ID format'),
+  chatLink: z.string().url().refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    { message: 'Chat link must use http or https protocol' }
+  ).optional(),
 });
 
 /**
@@ -18,6 +22,10 @@ export const createTeamSchema = z.object({
 export const updateTeamSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   seasonId: z.string().uuid().optional(),
+  chatLink: z.string().url().refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    { message: 'Chat link must use http or https protocol' }
+  ).nullable().optional(),
 });
 
 /**
@@ -99,3 +107,13 @@ export type RemoveStaffInput = z.infer<typeof removeStaffSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;
 export type CreateManagedPlayerInput = z.infer<typeof createManagedPlayerSchema>;
+
+/**
+ * Schema for creating an announcement
+ */
+export const createAnnouncementSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
+  body: z.string().min(1, 'Body is required').max(5000, 'Body too long'),
+});
+
+export type CreateAnnouncementInput = z.infer<typeof createAnnouncementSchema>;

@@ -36,6 +36,7 @@ export default function EditTeamScreen() {
   const [name, setName] = useState('');
   const [leagueId, setLeagueId] = useState('');
   const [seasonId, setSeasonId] = useState('');
+  const [chatLink, setChatLink] = useState('');
   const [errors, setErrors] = useState<{ name?: string; seasonId?: string }>({});
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
@@ -61,6 +62,7 @@ export default function EditTeamScreen() {
     if (team) {
       setName(team.name);
       setSeasonId(team.seasonId);
+      setChatLink(team.chatLink || '');
       if (team.season?.league) {
         setLeagueId(team.season.league.id);
       }
@@ -102,6 +104,7 @@ export default function EditTeamScreen() {
         data: {
           name: name.trim(),
           seasonId,
+          chatLink: chatLink.trim() || null,
         },
       });
 
@@ -176,6 +179,15 @@ export default function EditTeamScreen() {
             onChangeText={setName}
             error={errors.name}
             autoCapitalize="words"
+          />
+
+          <Input
+            label="Team Chat Link"
+            placeholder="https://chat.whatsapp.com/..."
+            value={chatLink}
+            onChangeText={setChatLink}
+            autoCapitalize="none"
+            keyboardType="url"
           />
 
           {/* League Selection */}
