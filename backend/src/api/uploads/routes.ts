@@ -18,7 +18,7 @@ router.post('/avatar-url', async (req, res) => {
     const validationResult = avatarUploadUrlSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 

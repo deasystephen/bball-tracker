@@ -15,7 +15,7 @@ import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
 import { avatarUploadUrlSchema } from '../../src/api/uploads/schemas';
 
 // Test ID formats
-const UUID_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+const UUID_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const CUSTOM_STRING_ID = 'downtown-youth-league';
 const CUSTOM_STRING_ID_WITH_NUMBERS = 'warriors-spring-2024';
 const EMPTY_STRING = '';
@@ -54,7 +54,7 @@ describe('Schema Validation', () => {
         });
         expect(result.success).toBe(false);
         if (!result.success) {
-          expect(result.error.errors[0].message).toContain('League ID is required');
+          expect(result.error.issues[0].message).toContain('League ID is required');
         }
       });
 

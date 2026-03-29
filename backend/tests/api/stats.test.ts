@@ -8,16 +8,16 @@ import { StatsService } from '../../src/services/stats-service';
 import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
 
 // Test UUIDs
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_TEAM_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
-const TEST_GAME_ID = 'c3d4e5f6-a7b8-9012-3456-7890abcdef01';
-const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-0123-4567-890abcdef012';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
+const TEST_GAME_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
+const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'COACH',

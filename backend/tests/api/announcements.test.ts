@@ -6,8 +6,8 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { AnnouncementService } from '../../src/services/announcement-service';
 
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_TEAM_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 
 // Mock auth middleware
 jest.mock('../../src/api/auth/middleware', () => ({
@@ -29,7 +29,7 @@ const mockAnnouncementService = AnnouncementService as jest.Mocked<typeof Announ
 
 describe('Announcements API', () => {
   const mockAnnouncement = {
-    id: 'c3d4e5f6-a7b8-9012-3456-7890abcdef01',
+    id: 'c3d4e5f6-a7b8-4012-a456-7890abcdef01',
     teamId: TEST_TEAM_ID,
     authorId: TEST_USER_ID,
     title: 'Practice moved',

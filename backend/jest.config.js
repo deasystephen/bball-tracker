@@ -34,6 +34,7 @@ module.exports = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^expo-server-sdk$': '<rootDir>/tests/__mocks__/expo-server-sdk.js',
   },
   // Force Jest to exit after tests complete
   forceExit: true,

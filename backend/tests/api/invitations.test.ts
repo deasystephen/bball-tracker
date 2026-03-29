@@ -8,17 +8,17 @@ import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
 
 // Test UUIDs
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_INVITATION_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
-const TEST_TEAM_ID = 'c3d4e5f6-a7b8-9012-3456-7890abcdef01';
-const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-0123-4567-890abcdef012';
-const TEST_COACH_ID = 'e5f6a7b8-c9d0-1234-5678-90abcdef0123';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_INVITATION_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
+const TEST_TEAM_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
+const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+const TEST_COACH_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'PLAYER',
@@ -50,14 +50,14 @@ describe('Invitations API', () => {
     team: {
       id: TEST_TEAM_ID,
       name: 'Lakers',
-      league: { id: 'f6a7b8c9-d0e1-2345-6789-0abcdef01234', name: 'Spring League', season: 'Spring', year: 2024 },
+      league: { id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234', name: 'Spring League', season: 'Spring', year: 2024 },
     },
     player: { id: TEST_PLAYER_ID, name: 'John Player', email: 'john@example.com' },
     invitedBy: { id: TEST_COACH_ID, name: 'Coach Smith', email: 'coach@example.com' },
   };
 
   const mockTeamMember = {
-    id: 'f6a7b8c9-d0e1-2345-6789-0abcdef01234',
+    id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234',
     teamId: TEST_TEAM_ID,
     playerId: TEST_PLAYER_ID,
     jerseyNumber: 23,
@@ -103,7 +103,7 @@ describe('Invitations API', () => {
     });
 
     it('should filter invitations by teamId', async () => {
-      const teamUuid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+      const teamUuid = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },

@@ -8,13 +8,13 @@ import { PlayerService } from '../../src/services/player-service';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
 
 // Test UUIDs
-const TEST_PLAYER_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+const TEST_PLAYER_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'COACH',

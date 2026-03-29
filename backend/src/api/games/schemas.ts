@@ -56,10 +56,10 @@ import { GameEventType, RsvpStatus } from '@prisma/client';
 export const createGameEventSchema = z.object({
   playerId: z.string().uuid('Invalid player ID format').optional(),
   eventType: z.nativeEnum(GameEventType, {
-    errorMap: () => ({ message: 'Invalid event type' }),
+    error: 'Invalid event type',
   }),
   timestamp: z.string().datetime('Invalid timestamp format').or(z.date()).optional(),
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().default({}),
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().default({}),
 });
 
 /**
@@ -84,7 +84,7 @@ export type GameEventQueryParams = z.infer<typeof gameEventQuerySchema>;
  */
 export const upsertRsvpSchema = z.object({
   status: z.nativeEnum(RsvpStatus, {
-    errorMap: () => ({ message: 'Status must be YES, NO, or MAYBE' }),
+    error: 'Status must be YES, NO, or MAYBE',
   }),
 });
 

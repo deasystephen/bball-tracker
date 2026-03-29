@@ -8,13 +8,13 @@ import { authenticate } from '../../src/api/auth/middleware';
 import { generateAvatarUploadUrl } from '../../src/services/upload-service';
 
 // Test UUIDs
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'COACH',
@@ -38,8 +38,8 @@ describe('Uploads API', () => {
 
   describe('POST /api/v1/uploads/avatar-url', () => {
     const mockUploadResult = {
-      uploadUrl: 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/avatars/a1b2c3d4-e5f6-7890-1234-567890abcdef/test-uuid.jpg?X-Amz-Signature=abc123',
-      imageUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/a1b2c3d4-e5f6-7890-1234-567890abcdef/test-uuid.jpg',
+      uploadUrl: 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/avatars/a1b2c3d4-e5f6-4890-a234-567890abcdef/test-uuid.jpg?X-Amz-Signature=abc123',
+      imageUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/a1b2c3d4-e5f6-4890-a234-567890abcdef/test-uuid.jpg',
     };
 
     it('should generate upload URL for image/jpeg', async () => {

@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
     const validationResult = invitationQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -65,7 +65,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.getInvitationById(
-      req.params.id,
+      req.params.id as string,
       req.user!.id
     );
 
@@ -93,7 +93,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
 router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
   try {
     const result = await InvitationService.acceptInvitation(
-      req.params.id,
+      req.params.id as string,
       req.user!.id
     );
 
@@ -124,7 +124,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
 router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.rejectInvitation(
-      req.params.id,
+      req.params.id as string,
       req.user!.id
     );
 
@@ -154,7 +154,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     const invitation = await InvitationService.cancelInvitation(
-      req.params.id,
+      req.params.id as string,
       req.user!.id
     );
 

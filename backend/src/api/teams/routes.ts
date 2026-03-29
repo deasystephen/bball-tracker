@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
     const validationResult = createTeamSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -69,7 +69,7 @@ router.get('/', async (req, res) => {
     const validationResult = teamQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -95,7 +95,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    const team = await TeamService.getTeamById(req.params.id, req.user!.id);
+    const team = await TeamService.getTeamById(req.params.id as string, req.user!.id);
 
     res.json({
       success: true,
@@ -125,12 +125,12 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     const validationResult = updateTeamSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const team = await TeamService.updateTeam(
-      req.params.id,
+      req.params.id as string,
       validationResult.data,
       req.user!.id
     );
@@ -159,7 +159,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    await TeamService.deleteTeam(req.params.id, req.user!.id);
+    await TeamService.deleteTeam(req.params.id as string, req.user!.id);
 
     res.json({
       success: true,
@@ -201,12 +201,12 @@ router.post('/:teamId/managed-players', validateUuidParams('teamId'), async (req
     const validationResult = createManagedPlayerSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const teamMember = await TeamService.addManagedPlayer(
-      req.params.teamId,
+      req.params.teamId as string,
       validationResult.data,
       req.user!.id
     );
@@ -239,12 +239,12 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
     const validationResult = createInvitationSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const invitation = await InvitationService.createInvitation(
-      req.params.teamId,
+      req.params.teamId as string,
       validationResult.data,
       req.user!.id
     );
@@ -274,8 +274,8 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
 router.delete('/:id/players/:playerId', validateUuidParams('id', 'playerId'), async (req, res) => {
   try {
     await TeamService.removePlayer(
-      req.params.id,
-      req.params.playerId,
+      req.params.id as string,
+      req.params.playerId as string,
       req.user!.id
     );
 
@@ -307,13 +307,13 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
     const validationResult = updateTeamMemberSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const teamMember = await TeamService.updateTeamMember(
-      req.params.id,
-      req.params.playerId,
+      req.params.id as string,
+      req.params.playerId as string,
       validationResult.data,
       req.user!.id
     );
@@ -349,12 +349,12 @@ router.post('/:teamId/announcements', validateUuidParams('teamId'), async (req, 
     const validationResult = createAnnouncementSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const announcement = await AnnouncementService.createAnnouncement(
-      req.params.teamId,
+      req.params.teamId as string,
       validationResult.data,
       req.user!.id
     );
@@ -387,7 +387,7 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
     const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
     const result = await AnnouncementService.listAnnouncements(
-      req.params.teamId,
+      req.params.teamId as string,
       req.user!.id,
       { limit, offset }
     );

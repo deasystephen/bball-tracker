@@ -44,7 +44,7 @@ describe('Upload Service', () => {
   });
 
   describe('generateAvatarUploadUrl', () => {
-    const userId = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
     it('should generate presigned URL for image/jpeg', async () => {
       const result = await generateAvatarUploadUrl(userId, 'image/jpeg');

@@ -75,7 +75,7 @@ export async function authenticate(
 
         req.user = user;
         return next();
-      } catch (e) {
+      } catch (_e) {
         throw new UnauthorizedError('Invalid dev token');
       }
     }

@@ -9,15 +9,15 @@ import { PlayerService } from '../../src/services/player-service';
 import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
 
 // Test UUIDs
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_TEAM_ID = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
-const TEST_MANAGED_PLAYER_ID = 'e5f6a7b8-c9d0-1234-5678-90abcdef0123';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
+const TEST_MANAGED_PLAYER_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'coach@example.com',
       name: 'Test Coach',
       role: 'COACH',
@@ -41,7 +41,7 @@ describe('Managed Players API', () => {
 
   describe('POST /api/v1/teams/:teamId/managed-players', () => {
     const mockTeamMember = {
-      id: 'f6a7b8c9-d0e1-2345-6789-0abcdef01234',
+      id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234',
       teamId: TEST_TEAM_ID,
       playerId: TEST_MANAGED_PLAYER_ID,
       jerseyNumber: 5,

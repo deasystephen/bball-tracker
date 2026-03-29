@@ -27,7 +27,7 @@ i18n
     interpolation: {
       escapeValue: false, // React already escapes
     },
-    compatibilityJSON: 'v3', // For React Native compatibility
+    compatibilityJSON: 'v4', // For React Native compatibility
   });
 
 export default i18n;

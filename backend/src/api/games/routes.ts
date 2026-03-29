@@ -34,7 +34,7 @@ router.post('/', async (req, res) => {
     const validationResult = createGameSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -64,7 +64,7 @@ router.get('/', async (req, res) => {
     const validationResult = gameQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -90,7 +90,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    const game = await GameService.getGameById(req.params.id, req.user!.id);
+    const game = await GameService.getGameById(req.params.id as string, req.user!.id);
 
     res.json({
       success: true,
@@ -120,12 +120,12 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     const validationResult = updateGameSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const game = await GameService.updateGame(
-      req.params.id,
+      req.params.id as string,
       validationResult.data,
       req.user!.id
     );
@@ -154,7 +154,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    await GameService.deleteGame(req.params.id, req.user!.id);
+    await GameService.deleteGame(req.params.id as string, req.user!.id);
 
     res.json({
       success: true,
@@ -188,12 +188,12 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
     const validationResult = createGameEventSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const event = await GameEventService.createEvent(
-      req.params.gameId,
+      req.params.gameId as string,
       validationResult.data,
       req.user!.id
     );
@@ -226,12 +226,12 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
     const validationResult = gameEventQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const result = await GameEventService.listEvents(
-      req.params.gameId,
+      req.params.gameId as string,
       validationResult.data,
       req.user!.id
     );
@@ -261,8 +261,8 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
 router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), async (req, res) => {
   try {
     const event = await GameEventService.getEventById(
-      req.params.gameId,
-      req.params.eventId,
+      req.params.gameId as string,
+      req.params.eventId as string,
       req.user!.id
     );
 
@@ -291,8 +291,8 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
 router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), async (req, res) => {
   try {
     await GameEventService.deleteEvent(
-      req.params.gameId,
-      req.params.eventId,
+      req.params.gameId as string,
+      req.params.eventId as string,
       req.user!.id
     );
 
@@ -327,12 +327,12 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
     const validationResult = upsertRsvpSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const rsvp = await RsvpService.upsertRsvp(
-      req.params.gameId,
+      req.params.gameId as string,
       req.user!.id,
       validationResult.data.status
     );
@@ -362,7 +362,7 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
 router.get('/:gameId/rsvps', validateUuidParams('gameId'), async (req, res) => {
   try {
     const result = await RsvpService.getGameRsvps(
-      req.params.gameId,
+      req.params.gameId as string,
       req.user!.id
     );
 

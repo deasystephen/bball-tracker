@@ -8,16 +8,16 @@ import { SeasonService } from '../../src/services/season-service';
 import { NotFoundError, BadRequestError } from '../../src/utils/errors';
 
 // Test IDs - mix of UUIDs and custom strings to test both formats
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_SEASON_ID = 'f6a7b8c9-d0e1-2345-6789-0abcdef01234';
-const TEST_LEAGUE_ID_UUID = 'c3d4e5f6-a7b8-9012-3456-7890abcdef01';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
+const TEST_LEAGUE_ID_UUID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 const TEST_LEAGUE_ID_CUSTOM = 'downtown-youth-league'; // Custom string ID like in seed
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'ADMIN',

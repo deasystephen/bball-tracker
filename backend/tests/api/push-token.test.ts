@@ -6,7 +6,7 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { NotificationService } from '../../src/services/notification-service';
 
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
 // Mock auth middleware
 jest.mock('../../src/api/auth/middleware', () => ({

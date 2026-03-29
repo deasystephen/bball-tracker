@@ -299,7 +299,7 @@ router.post('/push-token', authenticate, async (req, res) => {
     const validationResult = pushTokenSchema.safeParse(req.body);
     if (!validationResult.success) {
       return res.status(400).json({
-        error: validationResult.error.errors.map((e) => e.message).join(', '),
+        error: validationResult.error.issues.map((e: { message: string }) => e.message).join(', '),
       });
     }
 

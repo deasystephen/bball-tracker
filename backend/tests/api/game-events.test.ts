@@ -8,16 +8,16 @@ import { GameEventService } from '../../src/services/game-event-service';
 import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
 
 // Test UUIDs
-const TEST_USER_ID = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
-const TEST_GAME_ID = 'c3d4e5f6-a7b8-9012-3456-7890abcdef01';
-const TEST_EVENT_ID = 'd4e5f6a7-b8c9-0123-4567-890abcdef012';
-const TEST_PLAYER_ID = 'e5f6a7b8-c9d0-1234-5678-90abcdef0123';
+const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const TEST_GAME_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
+const TEST_EVENT_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+const TEST_PLAYER_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
     req.user = {
-      id: 'a1b2c3d4-e5f6-7890-1234-567890abcdef',
+      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
       email: 'test@example.com',
       name: 'Test User',
       role: 'COACH',

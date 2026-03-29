@@ -28,7 +28,7 @@ router.post('/', async (req, res) => {
     const validationResult = createLeagueSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -58,7 +58,7 @@ router.get('/', async (req, res) => {
     const validationResult = leagueQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -110,7 +110,7 @@ router.patch('/:id', async (req, res) => {
     const validationResult = updateLeagueSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 

@@ -33,7 +33,7 @@ router.post('/', async (req, res) => {
     const validationResult = createPlayerSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
     const validationResult = playerQuerySchema.safeParse(req.query);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
@@ -96,7 +96,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    const player = await PlayerService.getPlayerById(req.params.id);
+    const player = await PlayerService.getPlayerById(req.params.id as string);
 
     res.json({
       success: true,
@@ -122,12 +122,12 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     const validationResult = updatePlayerSchema.safeParse(req.body);
     if (!validationResult.success) {
       throw new BadRequestError(
-        validationResult.error.errors.map((e) => e.message).join(', ')
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
       );
     }
 
     const player = await PlayerService.updatePlayer(
-      req.params.id,
+      req.params.id as string,
       validationResult.data,
       req.user!.id
     );
@@ -156,7 +156,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    await PlayerService.deletePlayer(req.params.id, req.user!.id);
+    await PlayerService.deletePlayer(req.params.id as string, req.user!.id);
 
     res.json({
       success: true,
