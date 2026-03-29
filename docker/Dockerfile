@@ -5,13 +5,13 @@ RUN apk add --no-cache openssl
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app
-COPY backend/package*.json ./
+COPY backend/package*.json backend/.npmrc ./
 RUN npm ci --omit=dev
 
 # Install all deps (including dev) for building
 FROM base AS builder
 WORKDIR /app
-COPY backend/package*.json ./
+COPY backend/package*.json backend/.npmrc ./
 RUN npm ci
 COPY backend/ ./
 RUN npx prisma generate
