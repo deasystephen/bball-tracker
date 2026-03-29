@@ -3,7 +3,7 @@
  * Sets up mocks for native modules and common dependencies
  */
 
-import '@testing-library/react-native/extend-expect';
+import '@testing-library/react-native';
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () =>
