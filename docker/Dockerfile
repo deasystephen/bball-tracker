@@ -1,5 +1,5 @@
 # Backend Dockerfile
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN apk add --no-cache openssl
 
 # Install dependencies only when needed
@@ -34,9 +34,11 @@ COPY --from=builder /app/package.json ./package.json
 # Copy Prisma schema, config, and migrations for runtime migrate deploy
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-# Copy generated Prisma client
+# Copy Prisma packages (client + CLI for migrate deploy)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 # Copy entrypoint
 COPY docker/entrypoint.sh ./entrypoint.sh
 
