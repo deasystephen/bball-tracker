@@ -172,4 +172,5 @@ jobs:
           service: ${{ vars.ECS_SERVICE_NAME || 'bball-tracker-production-api' }}
           cluster: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-production-cluster' }}
           wait-for-service-stability: true
+          wait-for-minutes: 10
 
