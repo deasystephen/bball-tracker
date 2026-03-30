@@ -34,11 +34,8 @@ COPY --from=builder /app/package.json ./package.json
 # Copy Prisma schema, config, and migrations for runtime migrate deploy
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-# Copy Prisma packages (client + CLI for migrate deploy)
+# Copy generated Prisma client from builder (includes query engine)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 # Copy entrypoint
 COPY docker/entrypoint.sh ./entrypoint.sh
 
