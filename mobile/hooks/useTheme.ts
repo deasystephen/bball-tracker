@@ -13,13 +13,16 @@ import { useEffect, useState } from 'react';
  */
 export function useTheme(): { colors: Colors; colorScheme: ColorScheme } {
   const userColorScheme = useThemeStore((state) => state.colorScheme);
+  const toColorScheme = (scheme: string | null | undefined): ColorScheme =>
+    scheme === 'dark' ? 'dark' : 'light';
+
   const [systemColorScheme, setSystemColorScheme] = useState<ColorScheme>(
-    Appearance.getColorScheme() || 'light'
+    toColorScheme(Appearance.getColorScheme())
   );
 
   useEffect(() => {
     const subscription = Appearance.addChangeListener(({ colorScheme }) => {
-      setSystemColorScheme(colorScheme || 'light');
+      setSystemColorScheme(toColorScheme(colorScheme));
     });
 
     return () => subscription.remove();

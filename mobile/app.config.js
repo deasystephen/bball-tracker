@@ -20,7 +20,6 @@ export default {
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
-    newArchEnabled: true,
     scheme: 'bball-tracker',
     owner: 'deasystephen',
     runtimeVersion: {
@@ -52,6 +51,8 @@ export default {
     },
     plugins: [
       'expo-router',
+      'expo-localization',
+      'expo-font',
     ],
     extra: {
       apiUrl: getApiUrl(),

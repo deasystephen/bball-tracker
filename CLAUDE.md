@@ -36,7 +36,7 @@ npm run type-check # Type check
 eas build --platform android --profile preview   # Android APK for testing
 eas build --platform ios --profile preview        # iOS (requires Apple Developer account)
 eas build --platform all --profile production     # Production builds for stores
-eas update --branch preview --message "description" # OTA update to preview builds
+eas update --environment preview --message "description" # OTA update to preview builds
 ```
 
 ### Infrastructure

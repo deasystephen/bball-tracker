@@ -75,7 +75,7 @@ export function useNotificationSetup() {
     // Handle notification taps (deep-link to relevant screen)
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data = response.notification.request.content.data;
+        const data = response.notification.request.content.data ?? {};
 
         if (data.gameId) {
           router.push(`/games/${data.gameId}`);

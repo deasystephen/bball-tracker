@@ -138,7 +138,7 @@ maestro test .maestro/login.yaml   # Run a single flow
 ```bash
 # Backend deploys automatically via CI/CD on push to main
 # Mobile OTA update:
-npx eas-cli update --branch preview --platform ios --message "description"
+npx eas-cli update --environment preview --platform ios --message "description"
 # Mobile production build:
 npx eas-cli build --platform ios --profile production --non-interactive
 ```
