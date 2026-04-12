@@ -6,7 +6,7 @@
  */
 
 import { mockPrisma } from '../setup';
-import { StatsExportService, slugify, formatDateForFilename } from '../../src/services/stats-export-service';
+import { StatsExportService, slugify, formatDateForFilename, escapeCsvCell } from '../../src/services/stats-export-service';
 import { StatsService } from '../../src/services/stats-service';
 import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
 
@@ -86,6 +86,31 @@ describe('StatsExportService', () => {
     });
   });
 
+  describe('escapeCsvCell', () => {
+    it('prefixes CSV formula-trigger characters with a single quote', () => {
+      expect(escapeCsvCell('=1+1')).toBe("'=1+1");
+      expect(escapeCsvCell("+cmd|'/c calc'!A0")).toBe("'+cmd|'/c calc'!A0");
+      expect(escapeCsvCell('-2+3')).toBe("'-2+3");
+      expect(escapeCsvCell('@SUM(A1)')).toBe("'@SUM(A1)");
+    });
+
+    it('also guards leading-whitespace + trigger char', () => {
+      expect(escapeCsvCell('  =evil()')).toBe("'  =evil()");
+    });
+
+    it('leaves safe strings untouched', () => {
+      expect(escapeCsvCell('Lakers')).toBe('Lakers');
+      expect(escapeCsvCell('123')).toBe('123');
+      expect(escapeCsvCell('')).toBe('');
+    });
+
+    it('passes through non-strings unchanged', () => {
+      expect(escapeCsvCell(42)).toBe(42);
+      expect(escapeCsvCell(null)).toBe(null);
+      expect(escapeCsvCell(undefined)).toBe(undefined);
+    });
+  });
+
   describe('formatDateForFilename', () => {
     it('formats as YYYY-MM-DD', () => {
       expect(formatDateForFilename(new Date('2024-03-15T18:00:00Z'))).toBe('2024-03-15');
@@ -151,6 +176,69 @@ describe('StatsExportService', () => {
       expect(lines[2]).toContain('offensive');
       // FOUL row with null player has empty player columns
       expect(lines[4]).toMatch(/FOUL,,,/);
+    });
+
+    it('escapes CSV formula-injection payloads in user-controlled cells', async () => {
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(
+        makeGame({ opponent: '=1+1', team: { id: TEAM_ID, name: '+cmd|\'/c calc\'!A0' } })
+      );
+      const events = [
+        makeEvent('e-1', {
+          eventType: 'SHOT',
+          player: { id: 'p-1', name: '-2+3' },
+          metadata: { made: true, points: 2, type: '@SUM(A1)' },
+        }),
+      ];
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue(events);
+
+      const file = await StatsExportService.exportGameEventsCsv(GAME_ID, USER_ID);
+      const csv = await streamToString(file.stream);
+
+      // Each user-controlled cell that starts with =, +, -, @ must be
+      // prefixed with a single quote so spreadsheets treat it as text.
+      expect(csv).toContain("'=1+1");
+      expect(csv).toContain("'+cmd");
+      expect(csv).toContain("'-2+3");
+      // metadata.type (rebound_type column) is also user-controlled
+      expect(csv).toContain("'@SUM(A1)");
+    });
+
+    it('streams large event sets via cursor pagination (1200 rows)', async () => {
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(makeGame());
+
+      // 1200 events, chronologically ordered. Service pages at 500/call so we
+      // expect 3 findMany calls (500, 500, 200). Mock returns the right slice
+      // based on the cursor argument so the service sees a real stream.
+      const all = Array.from({ length: 1200 }, (_, i) =>
+        makeEvent(`e-${String(i).padStart(4, '0')}`, {
+          eventType: 'SHOT',
+          timestamp: new Date(Date.parse('2024-03-15T18:00:00Z') + i * 1000),
+          metadata: { made: true, points: 2 },
+        })
+      );
+
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockImplementation(
+        (args: { take: number; cursor?: { id: string }; skip?: number }) => {
+          let startIdx = 0;
+          if (args.cursor) {
+            const idx = all.findIndex((e) => e.id === args.cursor!.id);
+            startIdx = idx + (args.skip ?? 0);
+          }
+          return Promise.resolve(all.slice(startIdx, startIdx + args.take));
+        }
+      );
+
+      const file = await StatsExportService.exportGameEventsCsv(GAME_ID, USER_ID);
+      const csv = await streamToString(file.stream);
+      const lines = csv.trim().split('\n');
+
+      // header + 1200 rows
+      expect(lines).toHaveLength(1201);
+      // Ordering preserved — first data row is e-0000, last is e-1199
+      expect(lines[1]).toContain('e-0000');
+      expect(lines[1200]).toContain('e-1199');
+      // Paginated into 3 calls
+      expect((mockPrisma.gameEvent.findMany as jest.Mock).mock.calls.length).toBe(3);
     });
 
     it('handles a large number of events without throwing', async () => {

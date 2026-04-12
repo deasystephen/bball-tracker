@@ -19,6 +19,7 @@ import {
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
+import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
 
@@ -193,10 +194,7 @@ router.get('/:id/export.csv', validateUuidParams('id'), async (req, res) => {
     );
 
     res.setHeader('Content-Type', exportFile.contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${exportFile.filename}"`
-    );
+    res.setHeader('Content-Disposition', buildContentDisposition(exportFile.filename));
 
     exportFile.stream.on('error', (err) => {
       logger.error('Stream error in game CSV export', { error: err.message });
@@ -225,6 +223,11 @@ router.get('/:id/export.csv', validateUuidParams('id'), async (req, res) => {
  * GET /api/v1/games/:id/boxscore.pdf
  * Export box score as PDF
  * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ *
+ * PERFORMANCE NOTE: PDFKit is synchronous/CPU-bound and will block the Node
+ * event loop while rendering. At GA scale (many concurrent exports) this must
+ * be moved off the main thread via worker_threads or a background job.
+ * Tracked in issue #50.
  */
 router.get('/:id/boxscore.pdf', validateUuidParams('id'), async (req, res) => {
   try {
@@ -234,10 +237,7 @@ router.get('/:id/boxscore.pdf', validateUuidParams('id'), async (req, res) => {
     );
 
     res.setHeader('Content-Type', exportFile.contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${exportFile.filename}"`
-    );
+    res.setHeader('Content-Disposition', buildContentDisposition(exportFile.filename));
 
     exportFile.stream.on('error', (err) => {
       logger.error('Stream error in game PDF export', { error: err.message });

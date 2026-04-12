@@ -44,6 +44,32 @@ export interface ExportFile {
   contentType: string;
 }
 
+/**
+ * CSV formula-injection guard.
+ *
+ * Spreadsheet apps (Excel, Google Sheets, Numbers) treat cells whose value
+ * starts with `=`, `+`, `-`, or `@` as formulas, which can exfiltrate data or
+ * execute DDE commands. Prefix any user-controlled string whose first char
+ * matches with a single apostrophe so it renders as literal text.
+ *
+ * We also guard against leading whitespace + trigger char (e.g. ` =1+1`).
+ * Non-string values are passed through unchanged.
+ *
+ * See OWASP "CSV Injection".
+ */
+export function escapeCsvCell(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'string') return value;
+  // Match optional leading whitespace then a trigger character.
+  if (/^[\s]*[=+\-@]/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+// Page size for cursor-based streaming of game events.
+const EVENT_PAGE_SIZE = 500;
+
 export class StatsExportService {
   /**
    * Verify the user can access a game's team.
@@ -89,14 +115,6 @@ export class StatsExportService {
   static async exportGameEventsCsv(gameId: string, userId: string): Promise<ExportFile> {
     const game = await this.verifyGameAccess(gameId, userId);
 
-    const events = await prisma.gameEvent.findMany({
-      where: { gameId },
-      orderBy: { timestamp: 'asc' },
-      include: {
-        player: { select: { id: true, name: true } },
-      },
-    });
-
     const header = [
       'event_id',
       'game_id',
@@ -115,30 +133,59 @@ export class StatsExportService {
 
     const stringifier = csvStringify({ header: true, columns: header });
 
-    for (const event of events) {
-      const metadata = (event.metadata ?? {}) as Record<string, unknown>;
-      const points = typeof metadata.points === 'number' ? metadata.points : '';
-      const made = typeof metadata.made === 'boolean' ? String(metadata.made) : '';
-      const reboundType = typeof metadata.type === 'string' ? metadata.type : '';
+    // Cache user-controlled strings that are the same across rows.
+    const teamName = escapeCsvCell(game.team.name);
+    const opponent = escapeCsvCell(game.opponent);
 
-      stringifier.write([
-        event.id,
-        event.gameId,
-        game.team.name,
-        game.opponent,
-        game.date.toISOString(),
-        event.timestamp.toISOString(),
-        event.eventType,
-        event.playerId ?? '',
-        event.player?.name ?? '',
-        points,
-        made,
-        reboundType,
-        JSON.stringify(metadata),
-      ]);
-    }
+    // Stream rows into the CSV as we paginate via Prisma cursors so we never
+    // hold more than EVENT_PAGE_SIZE rows in memory at once. See PR #46 review.
+    (async (): Promise<void> => {
+      try {
+        let cursor: { id: string } | undefined;
+        // Deterministic order: timestamp asc, then id asc as a tiebreaker so
+        // the cursor advances correctly even when many events share a ts.
+        for (;;) {
+          const page = await prisma.gameEvent.findMany({
+            where: { gameId },
+            orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
+            include: { player: { select: { id: true, name: true } } },
+            take: EVENT_PAGE_SIZE,
+            ...(cursor ? { cursor, skip: 1 } : {}),
+          });
 
-    stringifier.end();
+          if (page.length === 0) break;
+
+          for (const event of page) {
+            const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+            const points = typeof metadata.points === 'number' ? metadata.points : '';
+            const made = typeof metadata.made === 'boolean' ? String(metadata.made) : '';
+            const reboundType = typeof metadata.type === 'string' ? metadata.type : '';
+
+            stringifier.write([
+              event.id,
+              event.gameId,
+              teamName,
+              opponent,
+              game.date.toISOString(),
+              event.timestamp.toISOString(),
+              event.eventType,
+              event.playerId ?? '',
+              escapeCsvCell(event.player?.name ?? ''),
+              points,
+              made,
+              escapeCsvCell(reboundType),
+              JSON.stringify(metadata),
+            ]);
+          }
+
+          if (page.length < EVENT_PAGE_SIZE) break;
+          cursor = { id: page[page.length - 1].id };
+        }
+        stringifier.end();
+      } catch (err) {
+        stringifier.destroy(err instanceof Error ? err : new Error(String(err)));
+      }
+    })();
 
     const filename = `${slugify(game.team.name)}-${formatDateForFilename(game.date)}-${slugify(game.opponent)}-events.csv`;
 
@@ -309,9 +356,9 @@ export class StatsExportService {
     for (const p of roster) {
       stringifier.write([
         p.playerId,
-        p.playerName,
+        escapeCsvCell(p.playerName),
         p.jerseyNumber ?? '',
-        p.position ?? '',
+        escapeCsvCell(p.position ?? ''),
         p.gamesPlayed,
         p.points,
         p.rebounds,

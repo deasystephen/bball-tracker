@@ -53,7 +53,7 @@ describe('Stats Export API', () => {
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/csv');
       expect(res.headers['content-disposition']).toBe(
-        'attachment; filename="lakers-2024-03-15-celtics-events.csv"'
+        "attachment; filename=\"lakers-2024-03-15-celtics-events.csv\"; filename*=UTF-8''lakers-2024-03-15-celtics-events.csv"
       );
       expect(res.text).toBe(csv);
     });
@@ -103,7 +103,7 @@ describe('Stats Export API', () => {
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('application/pdf');
       expect(res.headers['content-disposition']).toBe(
-        'attachment; filename="lakers-2024-03-15-celtics-boxscore.pdf"'
+        "attachment; filename=\"lakers-2024-03-15-celtics-boxscore.pdf\"; filename*=UTF-8''lakers-2024-03-15-celtics-boxscore.pdf"
       );
       expect((res.body as Buffer).subarray(0, 4).toString('ascii')).toBe('%PDF');
     });
@@ -131,7 +131,7 @@ describe('Stats Export API', () => {
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/csv');
       expect(res.headers['content-disposition']).toBe(
-        'attachment; filename="lakers-season-stats.csv"'
+        "attachment; filename=\"lakers-season-stats.csv\"; filename*=UTF-8''lakers-season-stats.csv"
       );
       expect(res.text).toBe(csv);
     });

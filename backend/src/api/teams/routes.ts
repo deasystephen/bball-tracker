@@ -20,6 +20,7 @@ import { InvitationService } from '../../services/invitation-service';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
+import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
 
@@ -427,10 +428,7 @@ router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) =
     );
 
     res.setHeader('Content-Type', exportFile.contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${exportFile.filename}"`
-    );
+    res.setHeader('Content-Disposition', buildContentDisposition(exportFile.filename));
 
     exportFile.stream.on('error', (err) => {
       logger.error('Stream error in team season CSV export', { error: err.message });
