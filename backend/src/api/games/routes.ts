@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { GameService } from '../../services/game-service';
 import { GameEventService } from '../../services/game-event-service';
 import { RsvpService } from '../../services/rsvp-service';
+import { StatsExportService } from '../../services/stats-export-service';
 import { authenticate } from '../auth/middleware';
 import {
   createGameSchema,
@@ -18,6 +19,7 @@ import {
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
+import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
 
@@ -170,6 +172,92 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete game' });
+    }
+  }
+});
+
+
+// ============================================
+// Stats Export Routes
+// ============================================
+
+/**
+ * GET /api/v1/games/:id/export.csv
+ * Export full event log as CSV
+ * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ */
+router.get('/:id/export.csv', validateUuidParams('id'), async (req, res) => {
+  try {
+    const exportFile = await StatsExportService.exportGameEventsCsv(
+      req.params.id as string,
+      req.user!.id
+    );
+
+    res.setHeader('Content-Type', exportFile.contentType);
+    res.setHeader('Content-Disposition', buildContentDisposition(exportFile.filename));
+
+    exportFile.stream.on('error', (err) => {
+      logger.error('Stream error in game CSV export', { error: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to export game CSV' });
+      } else {
+        res.end();
+      }
+    });
+    exportFile.stream.pipe(res);
+  } catch (error) {
+    logger.error('Error exporting game CSV', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to export game CSV' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/games/:id/boxscore.pdf
+ * Export box score as PDF
+ * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ *
+ * PERFORMANCE NOTE: PDFKit is synchronous/CPU-bound and will block the Node
+ * event loop while rendering. At GA scale (many concurrent exports) this must
+ * be moved off the main thread via worker_threads or a background job.
+ * Tracked in issue #50.
+ */
+router.get('/:id/boxscore.pdf', validateUuidParams('id'), async (req, res) => {
+  try {
+    const exportFile = await StatsExportService.exportGameBoxScorePdf(
+      req.params.id as string,
+      req.user!.id
+    );
+
+    res.setHeader('Content-Type', exportFile.contentType);
+    res.setHeader('Content-Disposition', buildContentDisposition(exportFile.filename));
+
+    exportFile.stream.on('error', (err) => {
+      logger.error('Stream error in game PDF export', { error: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to export box score PDF' });
+      } else {
+        res.end();
+      }
+    });
+    exportFile.stream.pipe(res);
+  } catch (error) {
+    logger.error('Error exporting box score PDF', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to export box score PDF' });
     }
   }
 });
