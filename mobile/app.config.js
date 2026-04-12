@@ -57,6 +57,12 @@ export default {
     extra: {
       apiUrl: getApiUrl(),
       amplitudeApiKey: getAmplitudeApiKey(),
+      appEnv: process.env.APP_ENV || 'development',
+      // Sentry config — DSN left undefined in local dev so no events ship.
+      sentryDsn: process.env.SENTRY_DSN || '',
+      sentryEnvironment:
+        process.env.SENTRY_ENVIRONMENT || process.env.APP_ENV || 'development',
+      sentryRelease: process.env.SENTRY_RELEASE || '',
       eas: {
         projectId: '7b941e92-79aa-4a61-8e79-f2ee9ef67f2f',
       },

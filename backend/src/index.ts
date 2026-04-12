@@ -1,6 +1,10 @@
 // Load environment variables FIRST, before any other imports
 import './config/env';
 
+// Initialize Sentry BEFORE importing Express so instrumentation hooks attach.
+import { initSentry, sentryErrorHandler } from './utils/sentry';
+initSentry();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -59,6 +63,9 @@ setupWebSocketHandlers(io);
 
 // Error handling middleware
 import { AppError } from './utils/errors';
+
+// Forward exceptions to Sentry before the app's own error handler renders a response.
+app.use(sentryErrorHandler);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
   logger.error(err.message, {

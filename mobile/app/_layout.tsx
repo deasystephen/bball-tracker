@@ -10,8 +10,12 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
 import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
+import { initSentry } from '../services/sentry';
 import { useNotificationSetup } from '../hooks/useNotifications';
 import '../i18n/config'; // Initialize i18n
+
+// Initialize Sentry as early as possible so crashes during startup are captured.
+initSentry();
 
 if (__DEV__) {
   LogBox.ignoreAllLogs();
