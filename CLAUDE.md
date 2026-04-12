@@ -73,6 +73,26 @@ Backend API (Node.js/Express)
 - **hooks/**: Custom React hooks
 - **i18n/**: Internationalization
 
+### Socket.io (Live Game Broadcast)
+
+Real-time game updates use Socket.io with an in-memory adapter. Single-replica
+only — see `backend/src/index.ts` for the multi-replica startup guard and
+issue #26 for the Redis adapter follow-up.
+
+| Direction       | Event                | Payload                                |
+| --------------- | -------------------- | -------------------------------------- |
+| client → server | `join-game`          | `{ gameId }` (ack with success/error)  |
+| client → server | `leave-game`         | `{ gameId }`                           |
+| server → client | `game-snapshot`      | `{ game, events }` (on join / rejoin)  |
+| server → client | `game-event`         | `GameEvent` (on persist)               |
+| server → client | `game-status-change` | `{ gameId, status }` (on transition)   |
+
+- Handshake auth: bearer token via `socket.handshake.auth.token` (or
+  `Authorization` header). Checked once at connect; see `authenticateSocket`.
+- Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
+- Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
+  join, in chronological order.
+
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
 - Event-driven: Kafka for game events, Flink for real-time aggregation

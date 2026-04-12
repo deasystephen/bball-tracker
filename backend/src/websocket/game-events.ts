@@ -112,6 +112,13 @@ export async function resolveSocketUser(
 /**
  * Socket.io connection authentication middleware. Runs once per socket during
  * the handshake.
+ *
+ * JWT TTL expectation: authentication is checked ONLY at handshake time. If
+ * the bearer token expires mid-session, the socket remains connected and
+ * authorized until the client disconnects (network drop, tab close, explicit
+ * `disconnect()`). For spectator sessions (<2hr games) this is acceptable —
+ * WorkOS access tokens live long enough to cover a game. Periodic re-auth on
+ * long-lived sockets is deferred; tracked in issue #49.
  */
 export async function authenticateSocket(
   socket: GameSocket,
@@ -222,6 +229,10 @@ export async function handleJoinGame(
     return { ok: false, code: 'not_found', message: 'Game not found' };
   }
 
+  // All games are currently team-private: only members of the game's team can
+  // spectate via Socket.io. The Game model has no `isPublic`/`visibility`
+  // field yet. Public spectator mode (open join for any authenticated user)
+  // is tracked in issue #48.
   const user = socket.data.user;
   const hasAccess = await canAccessTeam(user.id, game.teamId);
   if (!hasAccess) {
