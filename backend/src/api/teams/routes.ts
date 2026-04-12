@@ -4,6 +4,7 @@
 
 import { Router } from 'express';
 import { TeamService } from '../../services/team-service';
+import { StatsExportService } from '../../services/stats-export-service';
 import { authenticate } from '../auth/middleware';
 import {
   createTeamSchema,
@@ -405,6 +406,51 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list announcements' });
+    }
+  }
+});
+
+// ============================================
+// Stats Export Routes
+// ============================================
+
+/**
+ * GET /api/v1/teams/:id/season-stats.csv
+ * Export per-player season aggregates as CSV
+ * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ */
+router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) => {
+  try {
+    const exportFile = await StatsExportService.exportTeamSeasonStatsCsv(
+      req.params.id as string,
+      req.user!.id
+    );
+
+    res.setHeader('Content-Type', exportFile.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${exportFile.filename}"`
+    );
+
+    exportFile.stream.on('error', (err) => {
+      logger.error('Stream error in team season CSV export', { error: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to export team season CSV' });
+      } else {
+        res.end();
+      }
+    });
+    exportFile.stream.pipe(res);
+  } catch (error) {
+    logger.error('Error exporting team season CSV', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to export team season CSV' });
     }
   }
 });
