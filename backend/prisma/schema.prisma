@@ -108,6 +108,7 @@ model User {
   gameRsvps           GameRsvp[]
   pushTokens          PushToken[]
   announcements       Announcement[]
+  calendarFeedTokens  CalendarFeedToken[]
 
   @@index([email])
   @@index([role])
@@ -218,6 +219,7 @@ model Team {
   invitations   TeamInvitation[]
   teamStats     TeamStats[]
   announcements Announcement[]
+  calendarFeedTokens CalendarFeedToken[]
 
   @@index([seasonId])
   @@index([name])
@@ -449,6 +451,27 @@ model PushToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// =============================================================================
+// CALENDAR FEED TOKENS
+// =============================================================================
+
+model CalendarFeedToken {
+  id        String    @id @default(uuid())
+  userId    String
+  teamId    String
+  token     String    @unique
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([teamId])
+  @@index([userId, teamId])
+  @@index([token])
 }
 
 // =============================================================================
