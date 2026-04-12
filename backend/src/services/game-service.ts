@@ -8,6 +8,7 @@ import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
+import { emitGameStatusChange } from '../websocket/emit';
 
 export class GameService {
   /**
@@ -357,6 +358,21 @@ export class GameService {
         logger.error('Error finalizing game stats', { error: error instanceof Error ? error.message : String(error) });
         // Don't fail the update if stats calculation fails
       }
+    }
+
+    // Broadcast status transition to live spectators. No-ops when Socket.io
+    // isn't initialized. Scores are included so clients can stay in sync even
+    // if they missed the triggering event.
+    if (updateData.status !== undefined && updateData.status !== game.status) {
+      emitGameStatusChange(gameId, {
+        gameId,
+        previousStatus: game.status,
+        status: updatedGame.status,
+        score: {
+          homeScore: updatedGame.homeScore,
+          awayScore: updatedGame.awayScore,
+        },
+      });
     }
 
     return updatedGame;

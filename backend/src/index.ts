@@ -17,12 +17,30 @@ const httpServer = createServer(app);
 // Support multiple origins for mobile (Expo) and web
 const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(',').map(o => o.trim());
 
+// Socket.io currently uses the in-memory adapter. Rooms are local to a single
+// process, so broadcasts do NOT fan out across replicas. The GA target is a
+// single ECS task; horizontal scale requires `@socket.io/redis-adapter`
+// (tracked in issue #26). The startup guard below logs loudly if we boot in
+// production without a Redis adapter URL configured.
 const io = new SocketServer(httpServer, {
   cors: {
     origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
+
+if (
+  process.env.NODE_ENV === 'production' &&
+  !process.env.REDIS_SOCKET_ADAPTER_URL
+) {
+  logger.error(
+    'FATAL-WARN: Socket.io running without Redis adapter in production. ' +
+      'Live game broadcasts will only reach clients connected to the SAME ' +
+      'backend replica. This is safe only when running a SINGLE ECS task. ' +
+      'Set REDIS_SOCKET_ADAPTER_URL and wire up @socket.io/redis-adapter ' +
+      'before scaling >1 replica. (issue #26)'
+  );
+}
 
 const PORT = process.env.PORT || 3000;
 
