@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { CalendarService } from '../../services/calendar-service';
 import { authenticate } from '../auth/middleware';
 import { validateUuidParams } from '../middleware/validate-params';
+import { calendarFeedRateLimit } from '../middleware/rate-limit';
 import {
   BadRequestError,
   NotFoundError,
@@ -26,7 +27,11 @@ const router = Router({ mergeParams: true });
  * Public: calendar clients can't send Authorization headers, so auth is
  * via an opaque `token` query parameter bound to a specific (user, team).
  */
-router.get('/:id/calendar.ics', validateUuidParams('id'), async (req, res) => {
+router.get(
+  '/:id/calendar.ics',
+  calendarFeedRateLimit,
+  validateUuidParams('id'),
+  async (req, res) => {
   try {
     const teamId = req.params.id as string;
     const token = typeof req.query.token === 'string' ? req.query.token : '';
@@ -55,7 +60,8 @@ router.get('/:id/calendar.ics', validateUuidParams('id'), async (req, res) => {
       res.status(500).json({ error: 'Failed to generate calendar feed' });
     }
   }
-});
+  }
+);
 
 // All management endpoints require authentication.
 router.use(authenticate);

@@ -122,6 +122,68 @@ describe('CalendarService', () => {
         expectNotFoundError(error);
       }
     });
+
+    it('resubscribing after revoke issues a NEW token and the old token no longer resolves', async () => {
+      const team = createTeam();
+      const user = createUser();
+
+      // --- Step 1: initial subscribe → token A ---
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (canAccessTeam as jest.Mock).mockResolvedValue(true);
+      (mockPrisma.calendarFeedToken.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.calendarFeedToken.create as jest.Mock).mockImplementation(
+        ({ data }: { data: { userId: string; teamId: string; token: string } }) => ({
+          id: 'token-a-id',
+          ...data,
+          revokedAt: null,
+          createdAt: new Date(),
+        })
+      );
+
+      const firstSub = await CalendarService.subscribe(team.id, user.id);
+      const tokenA = firstSub.token;
+      expect(tokenA).toBeTruthy();
+
+      // --- Step 2: revoke ---
+      (mockPrisma.calendarFeedToken.updateMany as jest.Mock).mockResolvedValue({
+        count: 1,
+      });
+      const revokeResult = await CalendarService.revoke(team.id, user.id);
+      expect(revokeResult.revoked).toBe(1);
+
+      // --- Step 3: subscribe again → findFirst now returns null (no active
+      // tokens remain after revoke), so a NEW token B is created ---
+      (mockPrisma.calendarFeedToken.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.calendarFeedToken.create as jest.Mock).mockImplementation(
+        ({ data }: { data: { userId: string; teamId: string; token: string } }) => ({
+          id: 'token-b-id',
+          ...data,
+          revokedAt: null,
+          createdAt: new Date(),
+        })
+      );
+
+      const secondSub = await CalendarService.subscribe(team.id, user.id);
+      const tokenB = secondSub.token;
+
+      expect(tokenB).toBeTruthy();
+      expect(tokenB).not.toEqual(tokenA);
+      // create() was called again (not reused)
+      expect(mockPrisma.calendarFeedToken.create).toHaveBeenCalledTimes(2);
+
+      // --- Step 4: resolving the old revoked token A must fail ---
+      (mockPrisma.calendarFeedToken.findUnique as jest.Mock).mockResolvedValue({
+        id: 'token-a-id',
+        userId: user.id,
+        teamId: team.id,
+        token: tokenA,
+        revokedAt: new Date(),
+        createdAt: new Date(),
+      });
+      await expect(
+        CalendarService.resolveToken(team.id, tokenA)
+      ).rejects.toThrow(/revoked/);
+    });
   });
 
   describe('resolveToken', () => {
@@ -226,6 +288,11 @@ describe('CalendarService', () => {
       expect(ics).toContain('STATUS:CANCELLED');
       expect(ics).toContain('STATUS:TENTATIVE'); // SCHEDULED
       expect(ics).toContain('Final score: 95-90');
+
+      // RFC 5545 requires DTSTAMP on every VEVENT. The `ics` library emits
+      // this automatically — this assertion guards against regressions.
+      const dtstampMatches = ics.match(/DTSTAMP:/g) || [];
+      expect(dtstampMatches.length).toBe(eventMatches.length);
     });
 
     it('returns an empty-but-valid calendar when team has no games', async () => {

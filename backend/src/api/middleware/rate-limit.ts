@@ -39,3 +39,19 @@ export const writeRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many write requests, please try again later' },
 });
+
+/**
+ * Rate limit for the public iCalendar feed endpoint.
+ *
+ * The feed is token-authenticated via query param (calendar clients can't
+ * send Authorization headers), so requests are rate-limited by IP to
+ * discourage abuse and token-guessing. Calendar clients typically poll every
+ * 15-60 minutes, so 60 requests per hour per IP is generous for legitimate use.
+ */
+export const calendarFeedRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many calendar feed requests, please try again later' },
+});
