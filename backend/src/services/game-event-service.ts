@@ -7,6 +7,7 @@ import { GameEventType, Prisma } from '@prisma/client';
 import { CreateGameEventInput, GameEventQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
+import { emitGameEvent } from '../websocket/emit';
 
 export class GameEventService {
   /**
@@ -91,6 +92,13 @@ export class GameEventService {
           },
         },
       },
+    });
+
+    // Broadcast to spectators in the game room. `emitGameEvent` no-ops if
+    // Socket.io isn't initialized (e.g., in tests or CLI scripts).
+    emitGameEvent(gameId, {
+      event,
+      score: { homeScore: game.homeScore, awayScore: game.awayScore },
     });
 
     return event;
