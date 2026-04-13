@@ -182,7 +182,7 @@ jobs:
           npx prisma generate
           npm run build
           npx @sentry/cli releases new "$SENTRY_RELEASE"
-          npx @sentry/cli releases files "$SENTRY_RELEASE" upload-sourcemaps ./dist --rewrite
+          npx @sentry/cli sourcemaps upload --release "$SENTRY_RELEASE" ./dist
           npx @sentry/cli releases finalize "$SENTRY_RELEASE"
 
       - name: Deploy to Amazon ECS
