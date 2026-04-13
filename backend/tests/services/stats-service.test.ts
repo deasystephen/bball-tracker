@@ -5,6 +5,7 @@
 import { StatsService } from '../../src/services/stats-service';
 import { mockPrisma } from '../setup';
 import {
+  createAdmin,
   createGame,
   createTeam,
   createCoach,
@@ -468,6 +469,302 @@ describe('StatsService', () => {
       } catch (error) {
         expectForbiddenError(error, 'You do not have access to this team');
       }
+    });
+  });
+
+  describe('getPlayerOverallStats', () => {
+    it('should return per-team and career totals when caller is system admin', async () => {
+      const admin = createAdmin();
+      const player = createPlayer({ id: 'player-1', name: 'Jane Doe' });
+      const leagueA = createLeague({ name: 'League A' });
+      const seasonA = createSeason({ leagueId: leagueA.id, name: 'Spring' });
+      const teamA = createTeam({ id: 'team-a', name: 'Alphas', seasonId: seasonA.id });
+      const leagueB = createLeague({ name: 'League B' });
+      const seasonB = createSeason({ leagueId: leagueB.id, name: 'Fall' });
+      const teamB = createTeam({ id: 'team-b', name: 'Bravos', seasonId: seasonB.id });
+
+      const memberA = createTeamMember({ teamId: teamA.id, playerId: player.id, jerseyNumber: 7, position: 'PG' });
+      const memberB = createTeamMember({ teamId: teamB.id, playerId: player.id, jerseyNumber: 11, position: 'SG' });
+
+      const gameA1 = createGame({ id: 'game-a1', teamId: teamA.id, status: 'FINISHED' });
+      const gameA2 = createGame({ id: 'game-a2', teamId: teamA.id, status: 'FINISHED' });
+      const gameB1 = createGame({ id: 'game-b1', teamId: teamB.id, status: 'FINISHED' });
+
+      const statsA1 = createPlayerStats({
+        playerId: player.id, gameId: gameA1.id,
+        points: 20, rebounds: 6, assists: 4, steals: 2, blocks: 1, turnovers: 3, fouls: 2,
+        fieldGoalsMade: 8, fieldGoalsAttempted: 16,
+        threePointersMade: 2, threePointersAttempted: 5,
+        freeThrowsMade: 2, freeThrowsAttempted: 3,
+      });
+      const statsA2 = createPlayerStats({
+        playerId: player.id, gameId: gameA2.id,
+        points: 10, rebounds: 4, assists: 2, steals: 1, blocks: 0, turnovers: 1, fouls: 1,
+        fieldGoalsMade: 4, fieldGoalsAttempted: 10,
+        threePointersMade: 1, threePointersAttempted: 3,
+        freeThrowsMade: 1, freeThrowsAttempted: 2,
+      });
+      const statsB1 = createPlayerStats({
+        playerId: player.id, gameId: gameB1.id,
+        points: 15, rebounds: 5, assists: 3, steals: 0, blocks: 2, turnovers: 2, fouls: 3,
+        fieldGoalsMade: 6, fieldGoalsAttempted: 12,
+        threePointersMade: 1, threePointersAttempted: 4,
+        freeThrowsMade: 1, freeThrowsAttempted: 1,
+      });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        if (args.where.id === admin.id) return Promise.resolve(admin);
+        return Promise.resolve(null);
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+        { ...memberA, team: { ...teamA, season: { ...seasonA, league: leagueA } } },
+        { ...memberB, team: { ...teamB, season: { ...seasonB, league: leagueB } } },
+      ]);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([
+        { id: gameA1.id, teamId: teamA.id },
+        { id: gameA2.id, teamId: teamA.id },
+        { id: gameB1.id, teamId: teamB.id },
+      ]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([statsA1, statsA2, statsB1]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, admin.id);
+
+      expect(result.player).toEqual(player);
+      expect(result.teams).toHaveLength(2);
+
+      const aResult = result.teams.find((t) => t.teamId === teamA.id);
+      expect(aResult).toBeDefined();
+      expect(aResult!.teamName).toBe('Alphas');
+      expect(aResult!.seasonName).toBe('League A - Spring');
+      expect(aResult!.stats.gamesPlayed).toBe(2);
+      expect(aResult!.stats.points).toBe(30);
+      expect(aResult!.stats.pointsPerGame).toBe(15);
+      expect(aResult!.stats.jerseyNumber).toBe(7);
+      expect(aResult!.stats.position).toBe('PG');
+      // FG%: (8+4)/(16+10) = 12/26 = 46.2
+      expect(aResult!.stats.fieldGoalPercentage).toBeCloseTo(46.2, 1);
+
+      const bResult = result.teams.find((t) => t.teamId === teamB.id);
+      expect(bResult!.stats.gamesPlayed).toBe(1);
+      expect(bResult!.stats.points).toBe(15);
+
+      // Career totals: 3 games, 45 points total
+      expect(result.careerTotals.gamesPlayed).toBe(3);
+      expect(result.careerTotals.points).toBe(45);
+      expect(result.careerTotals.pointsPerGame).toBe(15);
+      expect(result.careerTotals.playerId).toBe(player.id);
+      expect(result.careerTotals.playerName).toBe('Jane Doe');
+    });
+
+    it('should return player own stats when caller is the player (team member access)', async () => {
+      const player = createPlayer({ id: 'player-self', name: 'Self' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-self', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+      const game = createGame({ id: 'game-self', teamId: team.id, status: 'FINISHED' });
+      const stats = createPlayerStats({ playerId: player.id, gameId: game.id, points: 12 });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        return Promise.resolve(null);
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockImplementation((args: { where: { playerId?: string; teamId?: unknown } }) => {
+        // First call: memberships-by-playerId (include.team included)
+        if (args.where.playerId === player.id && !args.where.teamId) {
+          return Promise.resolve([{
+            ...member,
+            team: { ...team, season: { ...season, league } },
+          }]);
+        }
+        // Second call inside getAccessibleTeamIds: by teamIds + playerId
+        if (args.where.teamId && args.where.playerId === player.id) {
+          return Promise.resolve([{ teamId: team.id }]);
+        }
+        return Promise.resolve([]);
+      });
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]); // no league admin access
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]); // no staff access
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: game.id, teamId: team.id }]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([stats]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, player.id);
+
+      expect(result.teams).toHaveLength(1);
+      expect(result.teams[0].teamId).toBe(team.id);
+      expect(result.teams[0].stats.points).toBe(12);
+      expect(result.careerTotals.gamesPlayed).toBe(1);
+    });
+
+    it('should grant access to league admin via getAccessibleTeamIds', async () => {
+      const leagueAdmin = createCoach({ id: 'league-admin' });
+      const player = createPlayer({ id: 'player-la', name: 'Player LA' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-la', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+      const stats = createPlayerStats({ playerId: player.id, gameId: game.id, points: 8 });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        if (args.where.id === leagueAdmin.id) return Promise.resolve({ role: 'COACH' });
+        return Promise.resolve(null);
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockImplementation((args: { where: { playerId?: string; teamId?: unknown } }) => {
+        if (args.where.playerId === player.id && !args.where.teamId) {
+          return Promise.resolve([{
+            ...member,
+            team: { ...team, season: { ...season, league } },
+          }]);
+        }
+        return Promise.resolve([]); // caller is not a team member
+      });
+      // League admin returns the team
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: team.id }]);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: game.id, teamId: team.id }]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([stats]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, leagueAdmin.id);
+
+      expect(result.teams).toHaveLength(1);
+      expect(result.careerTotals.points).toBe(8);
+    });
+
+    it('should grant access to team staff via getAccessibleTeamIds', async () => {
+      const staffUser = createCoach({ id: 'staff-user' });
+      const player = createPlayer({ id: 'player-staff', name: 'P' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-staff', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        return Promise.resolve({ role: 'COACH' });
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockImplementation((args: { where: { playerId?: string; teamId?: unknown } }) => {
+        if (args.where.playerId === player.id && !args.where.teamId) {
+          return Promise.resolve([{
+            ...member,
+            team: { ...team, season: { ...season, league } },
+          }]);
+        }
+        return Promise.resolve([]);
+      });
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ teamId: team.id }]); // staff
+      // No finished games
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, staffUser.id);
+
+      expect(result.teams).toHaveLength(1);
+      // No finished games => gamesPlayed is 0
+      expect(result.teams[0].stats.gamesPlayed).toBe(0);
+      expect(result.teams[0].stats.points).toBe(0);
+      expect(result.teams[0].stats.fieldGoalPercentage).toBe(0);
+      expect(result.careerTotals.gamesPlayed).toBe(0);
+      expect(result.careerTotals.efficiency).toBe(0);
+    });
+
+    it('should throw NotFoundError if player does not exist', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+
+      try {
+        await StatsService.getPlayerOverallStats('missing-player', 'any-user');
+        fail('Expected NotFoundError');
+      } catch (error) {
+        expectNotFoundError(error, 'Player not found');
+      }
+    });
+
+    it('should throw NotFoundError if player has no memberships', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+
+      try {
+        await StatsService.getPlayerOverallStats(player.id, 'any-user');
+        fail('Expected NotFoundError');
+      } catch (error) {
+        expectNotFoundError(error, 'Player not found or has no team memberships');
+      }
+    });
+
+    it('should throw ForbiddenError if caller has no access to any team', async () => {
+      const outsider = createPlayer({ id: 'outsider' });
+      const player = createPlayer({ id: 'player-forbid', name: 'P' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-forbid', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        return Promise.resolve({ role: 'PLAYER' });
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockImplementation((args: { where: { playerId?: string; teamId?: unknown } }) => {
+        if (args.where.playerId === player.id && !args.where.teamId) {
+          return Promise.resolve([{
+            ...member,
+            team: { ...team, season: { ...season, league } },
+          }]);
+        }
+        return Promise.resolve([]);
+      });
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+
+      try {
+        await StatsService.getPlayerOverallStats(player.id, outsider.id);
+        fail('Expected ForbiddenError');
+      } catch (error) {
+        expectForbiddenError(error, "You do not have access to this player's teams");
+      }
+    });
+
+    it('should skip teams the caller cannot access', async () => {
+      // Caller is a staff member on teamA only; player is on teamA and teamB.
+      const staffUser = createCoach({ id: 'staff-partial' });
+      const player = createPlayer({ id: 'player-partial', name: 'P' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const teamA = createTeam({ id: 'team-partial-a', name: 'A', seasonId: season.id });
+      const teamB = createTeam({ id: 'team-partial-b', name: 'B', seasonId: season.id });
+      const memberA = createTeamMember({ teamId: teamA.id, playerId: player.id });
+      const memberB = createTeamMember({ teamId: teamB.id, playerId: player.id });
+      const gameA = createGame({ id: 'game-pa', teamId: teamA.id, status: 'FINISHED' });
+      const statsA = createPlayerStats({ playerId: player.id, gameId: gameA.id, points: 10 });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        return Promise.resolve({ role: 'COACH' });
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockImplementation((args: { where: { playerId?: string; teamId?: unknown } }) => {
+        if (args.where.playerId === player.id && !args.where.teamId) {
+          return Promise.resolve([
+            { ...memberA, team: { ...teamA, season: { ...season, league } } },
+            { ...memberB, team: { ...teamB, season: { ...season, league } } },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ teamId: teamA.id }]); // access only to A
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: gameA.id, teamId: teamA.id }]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([statsA]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, staffUser.id);
+
+      expect(result.teams).toHaveLength(1);
+      expect(result.teams[0].teamId).toBe(teamA.id);
+      expect(result.careerTotals.gamesPlayed).toBe(1);
+      expect(result.careerTotals.points).toBe(10);
     });
   });
 });
