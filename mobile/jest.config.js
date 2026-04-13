@@ -18,16 +18,17 @@ module.exports = {
     '!**/index.ts',
   ],
   // Coverage thresholds — floors, not aspirations. CI enforces via
-  // `npm test -- --coverage`. Current mobile coverage is very low
-  // (stmts 10.42 / branches 18.75 / lines 10.88 / functions 9.26 as of
-  // 2026-04-12); thresholds set ~1pt below. These should ratchet up
-  // aggressively before GA — see issue #51.
+  // `npm test -- --coverage`. Target before GA is 70/60/70/70 per #51.
+  // Current mobile coverage as of 2026-04-12 (after store + services +
+  // useTeams helper tests): stmts 27.36 / branches 34.48 / funcs 21.21 /
+  // lines 27.83. Thresholds set ~1pt below actuals to tolerate trivial
+  // churn. These must only ratchet upward — see issue #51.
   coverageThreshold: {
     global: {
-      branches: 17,
-      functions: 8,
-      lines: 9,
-      statements: 9,
+      branches: 33,
+      functions: 20,
+      lines: 26,
+      statements: 26,
     },
   },
   moduleNameMapper: {
