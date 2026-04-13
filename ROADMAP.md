@@ -31,6 +31,14 @@ day-to-day (email notifications, live spectator view, observability, legal).
 
 Milestone: [`v2.0 GA`](../../milestone/1)
 
+Shipped so far:
+- Socket.io handlers for live game event broadcast (#26) — backend rooms,
+  snapshot on join, `game-event` + `game-status-change` broadcasts.
+  Single-replica only; see follow-ups #48 (public spectator mode) and #49
+  (mid-session JWT reauth).
+- Sentry error tracking for backend + mobile (#28), with PII scrubbing and
+  release-tagged events.
+
 ### v2.1 — Parity
 
 Reach feature parity with TeamSnap on the team-management surface so we don't
@@ -39,6 +47,13 @@ lose deals on "does it have an iCal feed?" or "can I export stats?"
 Focus: calendar sync, recurring events, photo gallery, stats export, SMS.
 
 Milestone: [`v2.1 Parity`](../../milestone/2)
+
+Shipped so far:
+- iCal feed per team (#32) — `GET /teams/:id/calendar.ics?token=...` with
+  token-auth, rate-limited, revocable.
+- Stats export endpoints (#36) — streaming CSV (game events, season stats)
+  and PDF box score, with RFC 5987 filenames and CSV-injection escaping.
+  See follow-up #50 (move PDF off the event loop).
 
 ### v2.2 — Monetization
 

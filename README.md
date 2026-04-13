@@ -5,24 +5,29 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 ## Features
 
 - **Real-time Game Tracking** — Play-by-play event recording with live WebSocket updates
+- **Live Spectator Broadcast** — Socket.io rooms push game events and score changes to subscribed clients as they happen
 - **Team & Roster Management** — Create teams, invite players, manage rosters
 - **Managed Players (COPPA Compliant)** — Coaches can add minors to rosters without requiring email accounts or signups
 - **Multi-role Access** — Coaches, Players, Parents, and Admins with role-based permissions
 - **League & Season Management** — Organize teams into leagues with seasonal schedules
 - **Statistics & Analytics** — Per-player and per-team stats with real-time aggregation
+- **Stats Export** — Streaming CSV (game events, season stats) and PDF box score endpoints
+- **Calendar Feed** — Per-team iCal (`.ics`) subscription URLs for Google/Apple/Outlook calendars
 - **Invitation System** — Invite players and staff to teams with in-app notifications
 - **Profile Pictures** — S3 presigned URL uploads with avatar picker
 - **Dark Mode** — Full light/dark theme support throughout the app
+- **Error Tracking** — Sentry on backend and mobile with PII scrubbing
 - **E2E Testing** — Maestro test flows for core user journeys
 
 ## Tech Stack
 
 ### Mobile (iOS)
-- React Native with Expo (SDK 52)
+- React Native 0.83 with Expo SDK 55 (React 19.2)
 - Expo Router (file-based navigation)
 - TanStack Query (server state)
 - Zustand (client state)
 - i18n (internationalization)
+- Sentry (@sentry/react-native) for crash + error reporting
 
 ### Backend
 - Node.js with TypeScript
@@ -37,9 +42,9 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Database**: AWS RDS PostgreSQL
 - **Cache**: AWS ElastiCache Redis
 - **Streaming**: Confluent Cloud Kafka + Apache Flink
-- **CI/CD**: GitHub Actions → Docker → ECR → ECS
+- **CI/CD**: GitHub Actions → Docker → ECR → ECS (Node 22 image)
 - **Domain**: `api.capyhoops.com` with HTTPS (ACM cert)
-- **Observability**: Datadog (via CloudWatch Forwarder)
+- **Observability**: Datadog (logs/metrics via CloudWatch Forwarder) + Sentry (errors)
 - **Mobile Builds**: Expo Application Services (EAS)
 - **E2E Testing**: Maestro
 - **Analytics**: Amplitude
@@ -48,7 +53,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+ (Prisma 7 requires it; production Docker image is Node 22)
 - Docker and Docker Compose
 - iOS Simulator (Xcode) for mobile development
 
@@ -116,7 +121,7 @@ bball-tracker/
 ### Backend
 ```bash
 npm run dev                # Start dev server with hot reload
-npm test                   # Run all tests (543 tests across 29 suites)
+npm test                   # Run all tests (692 tests across 37 suites)
 npm run type-check         # TypeScript type checking
 npx prisma migrate dev     # Run database migrations
 npx prisma studio          # Open database GUI
@@ -169,6 +174,8 @@ The backend deploys via GitHub Actions CI/CD:
 Mobile builds use Expo Application Services (EAS):
 - **OTA updates** push JavaScript bundle changes without a full rebuild
 - **Production builds** create IPA files for TestFlight/App Store submission
+- Native module changes (e.g., adding `@sentry/react-native`) require a new
+  production build — OTA cannot ship native code
 
 ## License
 
