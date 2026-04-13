@@ -23,13 +23,16 @@
         { "name": "REDIS_URL", "value": "redis://bball-tracker-production-redis.xykxqz.0001.use1.cache.amazonaws.com:6379" },
         { "name": "WORKOS_REDIRECT_URI", "value": "https://api.capyhoops.com/api/v1/auth/callback" },
         { "name": "CORS_ORIGIN", "value": "https://api.capyhoops.com" },
-        { "name": "ADMIN_EMAIL", "value": "deasystephen@gmail.com" }
+        { "name": "ADMIN_EMAIL", "value": "deasystephen@gmail.com" },
+        { "name": "SENTRY_ENVIRONMENT", "value": "production" },
+        { "name": "SENTRY_RELEASE", "value": "SENTRY_RELEASE_PLACEHOLDER" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/database-url-1QlcXz" },
         { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/jwt-secret-kbvWdL" },
         { "name": "WORKOS_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-api-key-AObTBz" },
-        { "name": "WORKOS_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-client-id-LdHfAM" }
+        { "name": "WORKOS_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-client-id-LdHfAM" },
+        { "name": "SENTRY_DSN", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/sentry-dsn" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

@@ -157,6 +157,10 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+      - name: Inject SENTRY_RELEASE into task definition
+        run: |
+          sed -i "s/SENTRY_RELEASE_PLACEHOLDER/${{ github.sha }}/g" infra/task-definition.json
+
       - name: Render ECS task definition
         id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -164,6 +168,22 @@ jobs:
           task-definition: infra/task-definition.json
           container-name: api
           image: ${{ steps.build-image.outputs.image }}
+
+      - name: Upload backend sourcemaps to Sentry
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        working-directory: backend
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_BACKEND }}
+          SENTRY_RELEASE: ${{ github.sha }}
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+          npx @sentry/cli releases new "$SENTRY_RELEASE"
+          npx @sentry/cli releases files "$SENTRY_RELEASE" upload-sourcemaps ./dist --rewrite
+          npx @sentry/cli releases finalize "$SENTRY_RELEASE"
 
       - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
