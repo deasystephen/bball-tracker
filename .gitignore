@@ -22,6 +22,15 @@ build/
 .env.test.local
 .env.production.local
 
+# Terraform
+infra/terraform.tfvars
+infra/*.auto.tfvars
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/.terraform.tfstate.lock.info
+
 # IDE
 .vscode/
 .idea/
