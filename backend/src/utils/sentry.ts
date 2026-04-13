@@ -104,12 +104,15 @@ export function beforeSend(event: Event, _hint?: EventHint): Event {
 
 /**
  * Initialize Sentry. Safe to call multiple times — subsequent calls are no-ops.
- * No-op when `SENTRY_DSN` is unset (dev, tests).
+ * No-op when `SENTRY_DSN` is unset (dev, tests) or set to the literal
+ * sentinel `"disabled"` (production before a real DSN is provisioned).
+ * The sentinel exists because AWS Secrets Manager rejects empty strings,
+ * so the Terraform-managed secret holds "disabled" until the var is set.
  */
 export function initSentry(): void {
   if (initialized) return;
   const dsn = process.env.SENTRY_DSN;
-  if (!dsn) return;
+  if (!dsn || dsn === 'disabled') return;
 
   Sentry.init({
     dsn,

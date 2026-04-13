@@ -75,6 +75,11 @@ output "ecs_task_definition_family" {
   value       = aws_ecs_task_definition.app.family
 }
 
+output "sentry_dsn_secret_arn" {
+  description = "Full ARN of the Sentry DSN secret (used in infra/task-definition.json)"
+  value       = aws_secretsmanager_secret.sentry_dsn.arn
+}
+
 # =============================================================================
 # Database
 # =============================================================================
