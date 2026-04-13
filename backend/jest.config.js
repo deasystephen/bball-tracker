@@ -19,24 +19,24 @@ module.exports = {
   ],
   // Coverage thresholds — floors, not aspirations. CI enforces these via
   // `npm test -- --coverage`. Ratchet upward over time; never lower.
-  // Current snapshot (2026-04-13): global stmts 79.70 / branches 59.49 /
-  // lines 79.99 / functions 83.09; services stmts 75.34 / branches 61.78 /
-  // lines 75.82 / functions 78.57. Thresholds set ~1pt below for cushion.
-  // Note: Jest's threshold-global branches computes to ~57.19 on CI (differs
-  // from the istanbul "All files" summary — known quirk). Branches floor is
-  // calibrated to CI's computed value, not the summary. Ratchet tracking: #51.
+  // Current snapshot (2026-04-13, pass 2): global stmts 82.82 / branches 62.20 /
+  // lines 83.05 / functions 87.41; services stmts 81.36 / branches 67.19 /
+  // lines 81.76 / functions 88.09. Thresholds set ~1-2pt below for cushion.
+  // Note: Jest's threshold-global branches computes lower than the istanbul
+  // "All files" summary on CI (known quirk). Branches floor is calibrated
+  // conservatively against the summary. Ratchet tracking: #51.
   coverageThreshold: {
     global: {
-      branches: 56,
-      functions: 82,
-      lines: 79,
-      statements: 79,
+      branches: 57,
+      functions: 86,
+      lines: 82,
+      statements: 82,
     },
     './src/services/': {
-      branches: 60,
-      functions: 77,
-      lines: 74,
-      statements: 74,
+      branches: 65,
+      functions: 86,
+      lines: 80,
+      statements: 80,
     },
   },
   moduleNameMapper: {
