@@ -29,10 +29,27 @@ function run(cmd, args, opts = {}) {
 }
 
 function main() {
-  if (!process.env.SENTRY_AUTH_TOKEN) {
+  const rawToken = process.env.SENTRY_AUTH_TOKEN;
+  if (!rawToken) {
     console.log('[sentry] SENTRY_AUTH_TOKEN not set; skipping sourcemap upload.');
     return;
   }
+
+  // Strip whitespace — common paste error when setting EAS env vars.
+  // Sentry API rejects tokens containing spaces/newlines with
+  // "Invalid token header" (HTTP 401).
+  const token = rawToken.trim();
+  if (token !== rawToken) {
+    console.warn(
+      '[sentry] SENTRY_AUTH_TOKEN had leading/trailing whitespace; stripped. ' +
+        'Re-set the env var with a clean value to silence this warning.'
+    );
+  }
+  if (!token) {
+    console.error('[sentry] SENTRY_AUTH_TOKEN is whitespace-only; cannot upload.');
+    process.exit(1);
+  }
+  process.env.SENTRY_AUTH_TOKEN = token;
 
   const release =
     process.env.SENTRY_RELEASE ||
@@ -51,15 +68,9 @@ function main() {
 
   console.log(`[sentry] Uploading sourcemaps for release ${release}`);
   run('npx', ['@sentry/cli', 'releases', 'new', release]);
-  run('npx', [
-    '@sentry/cli',
-    'releases',
-    'files',
-    release,
-    'upload-sourcemaps',
-    distDir,
-    '--rewrite',
-  ]);
+  // @sentry/cli v2 replaced "releases files <rel> upload-sourcemaps <dir>"
+  // with "sourcemaps upload --release <rel> <dir>".
+  run('npx', ['@sentry/cli', 'sourcemaps', 'upload', '--release', release, distDir]);
   run('npx', ['@sentry/cli', 'releases', 'finalize', release]);
   console.log('[sentry] Sourcemap upload complete.');
 }
