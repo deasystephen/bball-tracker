@@ -75,6 +75,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
         aws_secretsmanager_secret.jwt_secret.arn,
         aws_secretsmanager_secret.workos_api_key.arn,
         aws_secretsmanager_secret.workos_client_id.arn,
+        aws_secretsmanager_secret.sentry_dsn.arn,
       ]
     }]
   })
@@ -124,6 +125,21 @@ resource "aws_secretsmanager_secret_version" "workos_client_id" {
   count         = var.workos_client_id != "" ? 1 : 0
   secret_id     = aws_secretsmanager_secret.workos_client_id.id
   secret_string = var.workos_client_id
+}
+
+resource "aws_secretsmanager_secret" "sentry_dsn" {
+  name = "${local.name_prefix}/sentry-dsn"
+  tags = { Name = "${local.name_prefix}-sentry-dsn" }
+}
+
+# Always write a version so ECS GetSecretValue always succeeds. When no DSN
+# is provided, use a literal "disabled" sentinel — Sentry's init is tolerant
+# of non-URL strings (logs a warning, sends no events). Flip var.sentry_dsn
+# to a real DSN later and terraform apply rotates the value with no downtime.
+# (AWS Secrets Manager rejects empty strings, so we can't store "" directly.)
+resource "aws_secretsmanager_secret_version" "sentry_dsn" {
+  secret_id     = aws_secretsmanager_secret.sentry_dsn.id
+  secret_string = var.sentry_dsn != "" ? var.sentry_dsn : "disabled"
 }
 
 # Task role - used by the application container itself

@@ -32,7 +32,7 @@
         { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/jwt-secret-kbvWdL" },
         { "name": "WORKOS_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-api-key-AObTBz" },
         { "name": "WORKOS_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/workos-client-id-LdHfAM" },
-        { "name": "SENTRY_DSN", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/sentry-dsn" }
+        { "name": "SENTRY_DSN", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/sentry-dsn-mC51Yd" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

@@ -126,6 +126,13 @@ variable "workos_client_id" {
   default     = ""
 }
 
+variable "sentry_dsn" {
+  description = "Sentry DSN for backend error tracking. Leave empty to disable Sentry (init no-ops)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Domain
 variable "domain_name" {
   description = "Root domain name (e.g., capyhoops.com). The API will be served at api.<domain_name>."
