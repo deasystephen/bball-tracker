@@ -3,6 +3,18 @@
  * Sets up mocks for native modules and common dependencies
  */
 
+// Polyfill TextEncoder/TextDecoder for jsdom. Expo's winter runtime lazily
+// loads whatwg-url on first `URLSearchParams`/`URL` access, which requires
+// these globals. Without them, hooks that touch URLSearchParams (useGames,
+// useGameEvents, useSeasons, etc.) throw ReferenceError inside the query fn.
+import { TextEncoder, TextDecoder } from 'util';
+if (typeof global.TextEncoder === 'undefined') {
+  global.TextEncoder = TextEncoder;
+}
+if (typeof global.TextDecoder === 'undefined') {
+  global.TextDecoder = TextDecoder;
+}
+
 import '@testing-library/react-native';
 
 // Mock AsyncStorage

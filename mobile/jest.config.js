@@ -19,16 +19,19 @@ module.exports = {
   ],
   // Coverage thresholds — floors, not aspirations. CI enforces via
   // `npm test -- --coverage`. Target before GA is 70/60/70/70 per #51.
-  // Current mobile coverage as of 2026-04-12 (after store + services +
-  // useTeams helper tests): stmts 27.36 / branches 34.48 / funcs 21.21 /
-  // lines 27.83. Thresholds set ~1pt below actuals to tolerate trivial
-  // churn. These must only ratchet upward — see issue #51.
+  // Pass 2 (2026-04-12): added React-Query runtime tests for useGames,
+  // useGameEvents, useSeasons, useStats, useInvitations via a new
+  // QueryClient test wrapper; covered services/sentry.ts; added StatRow
+  // + SeasonAverages component tests. Observed: stmts 48.94 /
+  // branches 49.24 / funcs 47.56 / lines 48.81. Thresholds set ~1pt below
+  // actuals to tolerate trivial churn. These must only ratchet upward —
+  // see issue #51.
   coverageThreshold: {
     global: {
-      branches: 33,
-      functions: 20,
-      lines: 26,
-      statements: 26,
+      branches: 48,
+      functions: 46,
+      lines: 47,
+      statements: 47,
     },
   },
   moduleNameMapper: {
