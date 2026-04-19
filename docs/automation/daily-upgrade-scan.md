@@ -5,7 +5,7 @@ An autonomous Claude Code [routine](https://code.claude.com/docs/en/routines) th
 ## Schedule
 
 - **Cron**: `0 15 * * *` (1500 UTC daily)
-- **Local time**: 07:00 PT in summer (PDT), 08:00 PT in winter (PST)
+- **Local time**: 08:00 PT in summer (PDT, UTC−7), 07:00 PT in winter (PST, UTC−8)
 
 ## What it does
 
@@ -38,7 +38,7 @@ This is the exact prompt configured in `/schedule`. To modify the routine, edit 
 ```text
 # Daily Upgrade Scan — bball-tracker
 
-You run once daily at 1500 UTC (07:00 PT summer / 08:00 PT winter). Repo
+You run once daily at 1500 UTC (08:00 PT summer / 07:00 PT winter). Repo
 deasystephen/bball-tracker is pre-cloned at the working directory; default
 branch is `main`. Backend lives in ./backend, mobile in ./mobile. Read
 CLAUDE.md for project conventions.
