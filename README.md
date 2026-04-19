@@ -14,10 +14,15 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Stats Export** — Streaming CSV (game events, season stats) and PDF box score endpoints
 - **Calendar Feed** — Per-team iCal (`.ics`) subscription URLs for Google/Apple/Outlook calendars
 - **Invitation System** — Invite players and staff to teams with in-app notifications
+- **Announcements** — Coach-to-team announcements with threaded discussion
+- **Game RSVPs** — Players and parents can RSVP to scheduled games
+- **Push Notifications** — Expo push notifications for invitations, announcements, and RSVPs
+- **Tier-based Entitlements** — FREE / PREMIUM / LEAGUE / ADMIN roles gated via API middleware
 - **Profile Pictures** — S3 presigned URL uploads with avatar picker
 - **Dark Mode** — Full light/dark theme support throughout the app
 - **Error Tracking** — Sentry on backend and mobile with PII scrubbing
 - **E2E Testing** — Maestro test flows for core user journeys
+- **Autonomous Dependency Upgrades** — Daily Claude routine triages alerts and opens PRs (see [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md))
 
 ## Tech Stack
 
@@ -114,6 +119,7 @@ bball-tracker/
 ├── streaming/           # Kafka/Flink configurations
 ├── shared/              # Shared types
 └── docs/                # Documentation
+    └── automation/      #   Routine prompts (Daily Upgrade Scan, etc.)
 ```
 
 ## Common Commands
@@ -121,7 +127,8 @@ bball-tracker/
 ### Backend
 ```bash
 npm run dev                # Start dev server with hot reload
-npm test                   # Run all tests (692 tests across 37 suites)
+npm test                   # Run all tests (790 tests across 47 suites)
+npm test -- --coverage     # Run with coverage (thresholds enforced in CI)
 npm run type-check         # TypeScript type checking
 npx prisma migrate dev     # Run database migrations
 npx prisma studio          # Open database GUI
@@ -129,8 +136,10 @@ npx prisma studio          # Open database GUI
 
 ### Mobile
 ```bash
-npx expo run:ios           # Build and run on iOS simulator
-npm run type-check         # TypeScript type checking
+npx expo run:ios                       # Build and run on iOS simulator
+npm test                               # Run all tests (311 tests across 28 suites)
+npm run type-check                     # TypeScript type checking
+npx expo export --platform ios         # Verify Metro bundle (also run in CI)
 ```
 
 ### E2E Tests
@@ -176,6 +185,17 @@ Mobile builds use Expo Application Services (EAS):
 - **Production builds** create IPA files for TestFlight/App Store submission
 - Native module changes (e.g., adding `@sentry/react-native`) require a new
   production build — OTA cannot ship native code
+- **Sentry source maps** upload automatically on EAS build via the post-build hook
+  (`mobile/scripts/sentry-upload-sourcemaps.js`)
+
+## Automation
+
+A Claude Code routine runs daily at 1500 UTC to triage Dependabot alerts and
+`npm outdated` results, opens batched PRs for safe upgrades (with auto-merge
+enabled for the narrowest categories — high/critical CVE overrides and
+caret-range patch bumps), and posts a daily summary on a rolling GitHub issue.
+See [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md)
+for the full prompt, deferral list, and operating procedure.
 
 ## License
 
