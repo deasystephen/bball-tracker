@@ -24,6 +24,10 @@ Feature suggestions are welcome! Please open an issue with:
 - Use cases and benefits
 - Any design considerations
 
+### Dependency Updates
+
+Routine dependency and security updates are handled by the [Daily Upgrade Scan](docs/automation/daily-upgrade-scan.md) automation. Patch-level bumps and high-severity Dependabot fixes auto-merge once CI passes; minor bumps open PRs labeled `needs-human` for manual review. If you're adding or removing a deferred package, update both the routine prompt (via `/schedule`) and the inline list in `docs/automation/daily-upgrade-scan.md` in the same PR.
+
 ### Pull Requests
 
 1. **Fork the repository** and create a branch from `main`
