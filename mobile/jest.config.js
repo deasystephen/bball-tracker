@@ -23,15 +23,21 @@ module.exports = {
   // useGameEvents, useSeasons, useStats, useInvitations via a new
   // QueryClient test wrapper; covered services/sentry.ts; added StatRow
   // + SeasonAverages component tests. Observed: stmts 48.94 /
-  // branches 49.24 / funcs 47.56 / lines 48.81. Thresholds set ~1pt below
-  // actuals to tolerate trivial churn. These must only ratchet upward —
-  // see issue #51.
+  // branches 49.24 / funcs 47.56 / lines 48.81.
+  // Pass 3 (2026-04-19): added React-Query runtime tests for
+  // useAnnouncements + useNotifications (full effect path: device gating,
+  // permission flow, push-token registration, deep-link routing on tap),
+  // and component tests for game/OpponentScoreButtons, ShotButtons,
+  // StatButtons, UndoBanner, ScoreDisplay, PlayerRoster. Observed:
+  // stmts 62.94 / branches 59.72 / funcs 60.48 / lines 62.77.
+  // Thresholds set ~1pt below actuals to tolerate trivial churn. These
+  // must only ratchet upward — see issue #51.
   coverageThreshold: {
     global: {
-      branches: 48,
-      functions: 46,
-      lines: 47,
-      statements: 47,
+      branches: 58,
+      functions: 59,
+      lines: 61,
+      statements: 61,
     },
   },
   moduleNameMapper: {
