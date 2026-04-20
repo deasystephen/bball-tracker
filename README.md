@@ -197,6 +197,15 @@ caret-range patch bumps), and posts a daily summary on a rolling GitHub issue.
 See [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md)
 for the full prompt, deferral list, and operating procedure.
 
+## Operations
+
+Runbooks for production incidents and recurring ops tasks live in
+[`docs/runbooks/`](docs/runbooks/):
+
+- [RDS backup & restore](docs/runbooks/rds-backup-restore.md) — verify
+  backups, restore from snapshot, repoint the app via Secrets Manager,
+  rollback procedure, user-facing comms template.
+
 ## License
 
 This project is licensed under the Apache License 2.0 — see [LICENSE](LICENSE) for details.
