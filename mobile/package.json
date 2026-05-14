@@ -15,7 +15,7 @@
     "eas-build-on-success": "node scripts/sentry-upload-sourcemaps.js"
   },
   "dependencies": {
-    "@amplitude/analytics-react-native": "^1.5.37",
+    "@amplitude/analytics-react-native": "^1.5.53",
     "@amplitude/analytics-types": "^2.11.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/oswald": "^0.4.2",
@@ -24,7 +24,7 @@
     "@react-native-community/datetimepicker": "^8.6.0",
     "@sentry/react-native": "^8.11.1",
     "@tanstack/react-query": "^5.100.10",
-    "axios": "^1.16.0",
+    "axios": "^1.16.1",
     "babel-preset-expo": "^55.0.21",
     "expo": "^55.0.24",
     "expo-blur": "~55.0.14",
