@@ -1,0 +1,36 @@
+appId: com.bballtracker.mobile
+---
+# Live Spectator: Create game → Start → Open live view → Verify screen renders + connects
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Create a game with the Lakers
+- tapOn: "Track game tab"
+- tapOn: "Create new game"
+- inputText:
+    id: "opponent-name-input"
+    text: "Spectator Rival"
+- tapOn: "Lakers.*"
+- tapOn: "Create Game"
+
+# Start the game so we have an IN_PROGRESS one to spectate
+- assertVisible: "Spectator Rival"
+- tapOn: "Start Game"
+
+# We start on the tracking screen — back out to the detail to find Watch Live.
+- assertVisible: "End game"
+- tapOn: "Go back"
+- tapOn: "Leave"
+
+- assertVisible: "Continue Tracking"
+- tapOn: "Watch Live"
+
+# Spectator screen renders: LIVE badge + opponent + initial score
+- assertVisible: "LIVE"
+- assertVisible: "Spectator Rival"
+- assertVisible: "0"
