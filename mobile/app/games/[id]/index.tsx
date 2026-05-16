@@ -390,10 +390,18 @@ export default function GameDetailScreen() {
           {isInProgress && (
             <>
               <Button
+                title="Watch Live"
+                variant="secondary"
+                onPress={() => router.push(`/games/${id}/live`)}
+                fullWidth
+                size="large"
+              />
+              <Button
                 title="Continue Tracking"
                 onPress={handleContinueTracking}
                 fullWidth
                 size="large"
+                style={styles.endButton}
               />
               <Button
                 title="End Game"
