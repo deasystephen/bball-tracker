@@ -3,7 +3,7 @@
     "apps": [],
     "details": [
       {
-        "appIDs": ["XXXXXXXXXX.com.bballtracker.mobile"],
+        "appIDs": ["2JV3V89598.com.bballtracker.mobile"],
         "components": [
           {
             "/": "/invite/*",
