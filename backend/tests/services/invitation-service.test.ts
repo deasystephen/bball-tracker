@@ -601,6 +601,151 @@ describe('InvitationService', () => {
     });
   });
 
+  describe('getInvitationByToken', () => {
+    it('should return public invitation details by token', async () => {
+      const { invitation, team, coach } = createFullInvitation();
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
+        ...invitation,
+        team: { name: team.name },
+        invitedBy: { name: coach.name },
+      });
+
+      const result = await InvitationService.getInvitationByToken(invitation.token);
+
+      expect(result).toHaveProperty('id', invitation.id);
+      expect(result).toHaveProperty('teamName', team.name);
+      expect(result).toHaveProperty('inviterName', coach.name);
+      expect(result).toHaveProperty('status', 'PENDING');
+      expect(result).not.toHaveProperty('player');
+    });
+
+    it('should throw NotFoundError if token does not match any invitation', async () => {
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(null);
+
+      try {
+        await InvitationService.getInvitationByToken('no-such-token');
+      } catch (error) {
+        expectNotFoundError(error, 'Invitation not found');
+      }
+    });
+  });
+
+  describe('acceptInvitationByToken', () => {
+    it('should accept invitation by token', async () => {
+      const { invitation, team, player } = createFullInvitation();
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
+        const mockTx = {
+          teamInvitation: {
+            update: jest.fn().mockResolvedValue({
+              ...invitation,
+              status: 'ACCEPTED',
+              acceptedAt: new Date(),
+            }),
+          },
+          teamMember: {
+            create: jest.fn().mockResolvedValue({
+              teamId: team.id,
+              playerId: player.id,
+            }),
+          },
+        };
+        return callback(mockTx);
+      });
+
+      const result = await InvitationService.acceptInvitationByToken(invitation.token);
+
+      expect(result.invitation).toHaveProperty('status', 'ACCEPTED');
+      expect(result.teamMember).toHaveProperty('playerId', player.id);
+    });
+
+    it('should throw NotFoundError if token does not match', async () => {
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(null);
+
+      try {
+        await InvitationService.acceptInvitationByToken('no-such-token');
+      } catch (error) {
+        expectNotFoundError(error, 'Invitation not found');
+      }
+    });
+
+    it('should throw BadRequestError if invitation is already accepted', async () => {
+      const { invitation } = createFullInvitation();
+      const accepted = { ...invitation, status: 'ACCEPTED' };
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(accepted);
+
+      try {
+        await InvitationService.acceptInvitationByToken(invitation.token);
+      } catch (error) {
+        expectBadRequestError(error, 'This invitation has already been accepted');
+      }
+    });
+
+    it('should throw BadRequestError if invitation is rejected', async () => {
+      const { invitation } = createFullInvitation();
+      const rejected = { ...invitation, status: 'REJECTED' };
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(rejected);
+
+      try {
+        await InvitationService.acceptInvitationByToken(invitation.token);
+      } catch (error) {
+        expectBadRequestError(error, 'This invitation has been rejected');
+      }
+    });
+
+    it('should throw BadRequestError if invitation is cancelled', async () => {
+      const { invitation } = createFullInvitation();
+      const cancelled = { ...invitation, status: 'CANCELLED' };
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(cancelled);
+
+      try {
+        await InvitationService.acceptInvitationByToken(invitation.token);
+      } catch (error) {
+        expectBadRequestError(error, 'This invitation has been cancelled');
+      }
+    });
+
+    it('should throw BadRequestError if invitation is expired', async () => {
+      const { invitation } = createFullInvitation();
+      const expired = {
+        ...invitation,
+        expiresAt: new Date(Date.now() - 86400000),
+      };
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(expired);
+      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({
+        ...expired,
+        status: 'EXPIRED',
+      });
+
+      try {
+        await InvitationService.acceptInvitationByToken(invitation.token);
+      } catch (error) {
+        expectBadRequestError(error, 'This invitation has expired');
+      }
+    });
+
+    it('should throw BadRequestError if player is already on team', async () => {
+      const { invitation, team, player } = createFullInvitation();
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(member);
+
+      try {
+        await InvitationService.acceptInvitationByToken(invitation.token);
+      } catch (error) {
+        expectBadRequestError(error, 'You are already on this team');
+      }
+    });
+  });
+
   describe('expireOldInvitations', () => {
     it('should expire old pending invitations', async () => {
       (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 5 });
