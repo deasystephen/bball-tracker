@@ -51,6 +51,10 @@ android/
 .env.local
 .env.*.local
 
+# EAS credentials (downloaded by `eas credentials`) — never commit
+credentials.json
+credentials/
+
 # TypeScript
 *.tsbuildinfo
 
