@@ -4,6 +4,12 @@
 
 import { InvitationService } from '../../src/services/invitation-service';
 import { mockPrisma } from '../setup';
+
+jest.mock('../../src/services/mailer', () => ({
+  mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
+}));
+
+const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }).mailer.send;
 import {
   createInvitation,
   createTeam,
@@ -86,6 +92,36 @@ describe('InvitationService', () => {
       expect(result).toHaveProperty('playerId', player.id);
       expect(result).toHaveProperty('status', 'PENDING');
       expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
+    });
+
+    it('does not surface email send failures to the caller', async () => {
+      const coach = createCoach();
+      const player = createPlayer();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const invitation = createInvitation({ teamId: team.id, playerId: player.id, invitedById: coach.id });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
+        ...invitation,
+        team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+        player: { id: player.id, name: player.name, email: player.email },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+      });
+      mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
+
+      await expect(
+        InvitationService.createInvitation(team.id, { playerId: player.id, expiresInDays: 7 }, coach.id)
+      ).resolves.toHaveProperty('id', invitation.id);
+
+      await Promise.resolve();
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
