@@ -1,4 +1,5 @@
 import { EmailTemplate } from '../index';
+import { escapeHtml as e } from '../escape';
 
 export const rsvpConfirmationTemplate: EmailTemplate = {
   name: 'rsvp-confirmation',
@@ -23,13 +24,13 @@ export const rsvpConfirmationTemplate: EmailTemplate = {
 <head><meta charset="UTF-8"></head>
 <body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;">
   <h2>RSVP Confirmation</h2>
-  <p>Hi ${vars.playerName},</p>
+  <p>Hi ${e(vars.playerName)},</p>
   <p>Your RSVP for the following game has been recorded:</p>
   <table style="border-collapse:collapse;width:100%;">
-    <tr><td style="padding:8px;font-weight:bold;">Team</td><td style="padding:8px;">${vars.teamName}</td></tr>
-    <tr><td style="padding:8px;font-weight:bold;">Opponent</td><td style="padding:8px;">${vars.opponent}</td></tr>
-    <tr><td style="padding:8px;font-weight:bold;">Date</td><td style="padding:8px;">${vars.gameDate}</td></tr>
-    <tr><td style="padding:8px;font-weight:bold;">Your RSVP</td><td style="padding:8px;">${label}</td></tr>
+    <tr><td style="padding:8px;font-weight:bold;">Team</td><td style="padding:8px;">${e(vars.teamName)}</td></tr>
+    <tr><td style="padding:8px;font-weight:bold;">Opponent</td><td style="padding:8px;">${e(vars.opponent)}</td></tr>
+    <tr><td style="padding:8px;font-weight:bold;">Date</td><td style="padding:8px;">${e(vars.gameDate)}</td></tr>
+    <tr><td style="padding:8px;font-weight:bold;">Your RSVP</td><td style="padding:8px;">${e(label)}</td></tr>
   </table>
   <p>You can update your RSVP at any time in the CapyHoops app.</p>
   <hr>

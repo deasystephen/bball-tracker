@@ -241,3 +241,55 @@ describe('announcementTemplate', () => {
     expect(text).toContain('Coach Phil');
   });
 });
+
+describe('HTML escaping (template injection defense)', () => {
+  const ATTACK = '<a href="https://phish.example">click</a>';
+  const ESCAPED = '&lt;a href=&quot;https://phish.example&quot;&gt;click&lt;/a&gt;';
+
+  it('invitationTemplate escapes user-controlled fields in HTML', () => {
+    const html = invitationTemplate.html({
+      playerName: ATTACK,
+      teamName: ATTACK,
+      inviterName: ATTACK,
+      message: ATTACK,
+      expiresAt: '2026-07-01',
+    });
+    expect(html).not.toContain(ATTACK);
+    expect(html).toContain(ESCAPED);
+  });
+
+  it('rsvpConfirmationTemplate escapes user-controlled fields in HTML', () => {
+    const html = rsvpConfirmationTemplate.html({
+      playerName: ATTACK,
+      teamName: ATTACK,
+      opponent: ATTACK,
+      gameDate: '2026-06-15',
+      rsvpStatus: 'YES',
+    });
+    expect(html).not.toContain(ATTACK);
+    expect(html).toContain(ESCAPED);
+  });
+
+  it('announcementTemplate escapes user-controlled fields in HTML', () => {
+    const html = announcementTemplate.html({
+      recipientName: ATTACK,
+      teamName: ATTACK,
+      title: ATTACK,
+      body: ATTACK,
+      authorName: ATTACK,
+    });
+    expect(html).not.toContain(ATTACK);
+    expect(html).toContain(ESCAPED);
+  });
+
+  it('invitationTemplate omits message block entirely when message is empty (no orphan quotes)', () => {
+    const html = invitationTemplate.html({
+      playerName: 'Jordan',
+      teamName: 'Bulls',
+      inviterName: 'Phil',
+      message: '',
+      expiresAt: '2026-07-01',
+    });
+    expect(html).not.toContain('font-style:italic');
+  });
+});
