@@ -36,6 +36,9 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.bballtracker.mobile',
+      config: {
+        usesNonExemptEncryption: false,
+      },
     },
     android: {
       adaptiveIcon: {
