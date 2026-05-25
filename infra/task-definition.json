@@ -27,7 +27,8 @@
         { "name": "SENTRY_ENVIRONMENT", "value": "production" },
         { "name": "SENTRY_RELEASE", "value": "SENTRY_RELEASE_PLACEHOLDER" },
         { "name": "AWS_SES_REGION", "value": "us-east-1" },
-        { "name": "SES_FROM_ADDRESS", "value": "noreply@mail.capyhoops.com" }
+        { "name": "SES_FROM_ADDRESS", "value": "noreply@mail.capyhoops.com" },
+        { "name": "PUBLIC_APP_URL", "value": "https://capyhoops.com" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/database-url-1QlcXz" },
