@@ -25,11 +25,12 @@ The routine batches all eligible items per side (backend, mobile) into one PR pe
 
 ## Prerequisites
 
-These are one-time setup items. All are already in place as of this routine going live:
+These are one-time setup items. All are already in place as of 2026-05-03:
 
 1. ✅ Repo settings: `allow_auto_merge: true`, `delete_branch_on_merge: true`
-2. ✅ Repo Watch with at least "Issues" notifications enabled (for the daily-log email)
-3. ✅ Claude GitHub App installed on `deasystephen/bball-tracker` with write access to contents, issues, and pull requests
+2. ✅ Branch protection on `main` requiring CI status checks (`Lint and Type Check (backend)`, `Lint and Type Check (mobile)`, `Test Backend`, `Test Mobile`, `Analyze (javascript-typescript)`). **Required** for `gh pr merge --auto` to work — without it, GitHub returns `Protected branch rules not configured for this branch` and auto-merge silently fails. Verify with `gh api repos/deasystephen/bball-tracker/branches/main/protection`.
+3. ✅ Repo Watch with at least "Issues" notifications enabled, AND user-level **"Include your own updates"** enabled at github.com/settings/notifications. The latter is required because the routine commits/comments under the repo owner's identity, and GitHub by default suppresses email notifications for activity attributed to you.
+4. ✅ Claude GitHub App installed on `deasystephen/bball-tracker` with write access to contents, issues, and pull requests
 
 ## Routine prompt
 
