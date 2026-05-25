@@ -130,7 +130,7 @@ bball-tracker/
 ### Backend
 ```bash
 npm run dev                # Start dev server with hot reload
-npm test                   # Run all tests (790 tests across 47 suites)
+npm test                   # Run all Jest tests
 npm test -- --coverage     # Run with coverage (thresholds enforced in CI)
 npm run type-check         # TypeScript type checking
 npx prisma migrate dev     # Run database migrations
@@ -140,7 +140,7 @@ npx prisma studio          # Open database GUI
 ### Mobile
 ```bash
 npx expo run:ios                       # Build and run on iOS simulator
-npm test                               # Run all tests (311 tests across 28 suites)
+npm test                               # Run all Jest tests
 npm run type-check                     # TypeScript type checking
 npx expo export --platform ios         # Verify Metro bundle (also run in CI)
 ```

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Basketball Tracker is a monorepo with a React Native/Expo mobile app and Node.js/TypeScript backend. It uses event-driven architecture with Kafka and Flink for real-time game tracking and statistics.
+Basketball Tracker is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). It uses event-driven architecture with Kafka and Flink for real-time game tracking and statistics.
 
 ## Common Commands
 
@@ -21,14 +21,23 @@ npm run prisma:generate  # Generate Prisma client after schema changes
 npm run prisma:migrate   # Run database migrations
 npm run prisma:studio    # Open Prisma Studio GUI
 ```
+**After pulling main**, run `npm install` in `backend/` if you see TS2307 errors on `@aws-sdk/client-sesv2` or similar — the SES mailer landing in #131 added new deps that the daemon won't notice without a fresh install.
 
 ### Mobile (`/mobile`)
 ```bash
-npm start       # Start Expo dev server
-npm run ios     # Run on iOS simulator
-npm run android # Run on Android emulator
+npx expo run:ios            # Build + run on iOS simulator (preferred — native modules need this)
+npx expo run:android        # Build + run on Android emulator
+npm run lint                # ESLint check
+npm run type-check          # Type check
+```
+**Do not use** `npm start` / `npx expo start` with this project — several native modules (Sentry, Reanimated, etc.) require a custom dev client built via `expo run:*`, not Expo Go.
+
+### Web (`/web` — Next.js)
+```bash
+npm install     # First-time setup
+npm run dev     # Local dev server on http://localhost:3000
 npm run lint    # ESLint check
-npm run type-check # Type check
+npm run build   # Production build
 ```
 
 ### Mobile Builds (EAS)
@@ -58,8 +67,8 @@ Backend API (Node.js/Express)
 ```
 
 ### Backend Structure (`/backend/src/`)
-- **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations)
-- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.)
+- **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, middleware). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
+- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131
 - **kafka/**: Kafka producers/consumers for event streaming
 - **websocket/**: Socket.io handlers for real-time updates
 - **models/**: Prisma ORM models
@@ -98,7 +107,7 @@ issue #26 for the Redis adapter follow-up.
 - Event-driven: Kafka for game events, Flink for real-time aggregation
 - Real-time: Socket.io WebSocket for live game updates
 - State management: Zustand (client) + TanStack Query (server state) in mobile
-- Authentication: JWT + WorkOS
+- Authentication: WorkOS (AuthKit). JWT is the session token format — WorkOS is the identity provider.
 
 ## Code Style
 
