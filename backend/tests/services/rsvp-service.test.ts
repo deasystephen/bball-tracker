@@ -61,6 +61,9 @@ describe('RsvpService', () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
         id: game.id,
         teamId: game.teamId,
+        opponent: game.opponent,
+        date: game.date,
+        team: { name: 'Test Team' },
       });
       setAdminAccess();
       const rsvpRow = {

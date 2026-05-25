@@ -66,6 +66,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setNoAccess();
 
@@ -91,6 +92,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       // permissions helper: system admin short-circuits
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
@@ -143,6 +145,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setSystemAdmin();
 
@@ -175,6 +178,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setSystemAdmin();
       (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({

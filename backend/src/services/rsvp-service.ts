@@ -6,6 +6,9 @@ import prisma from '../models';
 import { RsvpStatus } from '@prisma/client';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
+import { mailer } from './mailer';
+import { rsvpConfirmationTemplate } from './mailer/templates';
+import { logger } from '../utils/logger';
 
 export class RsvpService {
   /**
@@ -15,7 +18,13 @@ export class RsvpService {
     // Verify game exists and get team info
     const game = await prisma.game.findUnique({
       where: { id: gameId },
-      select: { id: true, teamId: true },
+      select: {
+        id: true,
+        teamId: true,
+        opponent: true,
+        date: true,
+        team: { select: { name: true } },
+      },
     });
 
     if (!game) {
@@ -50,6 +59,35 @@ export class RsvpService {
         },
       },
     });
+
+    // Send RSVP confirmation email (fire-and-forget; never block the response)
+    if (rsvp.user.email) {
+      mailer
+        .send({
+          template: rsvpConfirmationTemplate,
+          to: rsvp.user.email,
+          variables: {
+            playerName: rsvp.user.name ?? rsvp.user.email,
+            teamName: game.team.name,
+            opponent: game.opponent,
+            gameDate: game.date.toLocaleDateString(),
+            rsvpStatus: status,
+          },
+          metadata: {
+            userId,
+            event_type: 'rsvp.upserted',
+            gameId,
+            rsvpStatus: status,
+          },
+        })
+        .catch((err: unknown) => {
+          logger.error('Failed to send RSVP confirmation email', {
+            error: err instanceof Error ? err.message : String(err),
+            gameId,
+            userId,
+          });
+        });
+    }
 
     return rsvp;
   }
