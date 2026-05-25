@@ -92,6 +92,58 @@ describe('InvitationService', () => {
       expect(result).toHaveProperty('playerId', player.id);
       expect(result).toHaveProperty('status', 'PENDING');
       expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
+
+      // Flush microtasks so the fire-and-forget mailer.send call resolves
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(mockedMailerSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: player.email,
+          variables: expect.objectContaining({
+            acceptUrl: `https://capyhoops.com/invite/${invitation.token}`,
+          }),
+        })
+      );
+    });
+
+    it('uses PUBLIC_APP_URL env var for invite link when set', async () => {
+      const previous = process.env.PUBLIC_APP_URL;
+      process.env.PUBLIC_APP_URL = 'https://staging.capyhoops.com';
+      try {
+        const coach = createCoach();
+        const player = createPlayer();
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id });
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+        const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+        const invitation = createInvitation({ teamId: team.id, playerId: player.id, invitedById: coach.id });
+
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
+          ...invitation,
+          team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+          player: { id: player.id, name: player.name, email: player.email },
+          invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+        });
+
+        await InvitationService.createInvitation(team.id, { playerId: player.id, expiresInDays: 7 }, coach.id);
+
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(mockedMailerSend).toHaveBeenCalledWith(
+          expect.objectContaining({
+            variables: expect.objectContaining({
+              acceptUrl: `https://staging.capyhoops.com/invite/${invitation.token}`,
+            }),
+          })
+        );
+      } finally {
+        if (previous === undefined) delete process.env.PUBLIC_APP_URL;
+        else process.env.PUBLIC_APP_URL = previous;
+      }
     });
 
     it('does not surface email send failures to the caller', async () => {
