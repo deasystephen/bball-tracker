@@ -12,6 +12,12 @@ import {
   expectNotFoundError,
 } from '../helpers';
 
+jest.mock('../../src/services/mailer', () => ({
+  mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
+}));
+
+const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }).mailer.send;
+
 function setNoAccess(): void {
   // canAccessTeam: user not admin, no league admin, no staff, no member
   (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createCoach());
@@ -61,6 +67,9 @@ describe('RsvpService', () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
         id: game.id,
         teamId: game.teamId,
+        opponent: game.opponent,
+        date: game.date,
+        team: { name: 'Test Team' },
       });
       setAdminAccess();
       const rsvpRow = {
@@ -84,6 +93,32 @@ describe('RsvpService', () => {
           update: { status: 'MAYBE' },
         })
       );
+    });
+
+    it('does not surface email send failures to the caller', async () => {
+      const game = createGame();
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        id: game.id,
+        teamId: game.teamId,
+        opponent: game.opponent,
+        date: game.date,
+        team: { name: 'Test Team' },
+      });
+      setAdminAccess();
+      const rsvpRow = {
+        id: 'rsvp-2',
+        gameId: game.id,
+        userId: 'user-1',
+        status: 'YES',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: { id: 'user-1', name: 'U', email: 'u@test.com' },
+      };
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue(rsvpRow);
+      mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
+
+      await expect(RsvpService.upsertRsvp(game.id, 'user-1', 'YES')).resolves.toEqual(rsvpRow);
+      await Promise.resolve();
     });
   });
 

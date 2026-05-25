@@ -14,6 +14,9 @@ import {
 } from '../utils/errors';
 import { randomBytes } from 'crypto';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
+import { mailer } from './mailer';
+import { invitationTemplate } from './mailer/templates';
+import { logger } from '../utils/logger';
 
 export class InvitationService {
   /**
@@ -141,6 +144,34 @@ export class InvitationService {
         },
       },
     });
+
+    // Send invitation email (fire-and-forget; never block the response)
+    if (invitation.player.email) {
+      mailer
+        .send({
+          template: invitationTemplate,
+          to: invitation.player.email,
+          variables: {
+            playerName: invitation.player.name ?? invitation.player.email,
+            teamName: invitation.team.name,
+            inviterName: invitation.invitedBy.name ?? invitation.invitedBy.email ?? '',
+            message: invitation.message ?? '',
+            expiresAt: invitation.expiresAt.toLocaleDateString(),
+          },
+          metadata: {
+            userId: invitation.playerId,
+            event_type: 'invitation.created',
+            teamId: invitation.teamId,
+            invitationId: invitation.id,
+          },
+        })
+        .catch((err: unknown) => {
+          logger.error('Failed to send invitation email', {
+            error: err instanceof Error ? err.message : String(err),
+            invitationId: invitation.id,
+          });
+        });
+    }
 
     return invitation;
   }

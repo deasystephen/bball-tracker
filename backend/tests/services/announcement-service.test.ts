@@ -22,7 +22,12 @@ jest.mock('../../src/services/notification-service', () => ({
   },
 }));
 
+jest.mock('../../src/services/mailer', () => ({
+  mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
+}));
+
 const mockedSendToTeam = NotificationService.sendToTeam as jest.Mock;
+const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }).mailer.send;
 
 function setSystemAdmin(): void {
   (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createAdmin());
@@ -66,6 +71,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setNoAccess();
 
@@ -91,6 +97,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       // permissions helper: system admin short-circuits
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
@@ -143,6 +150,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setSystemAdmin();
 
@@ -175,6 +183,7 @@ describe('AnnouncementService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
         id: team.id,
         name: team.name,
+        members: [],
       });
       setSystemAdmin();
       (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
@@ -196,6 +205,33 @@ describe('AnnouncementService', () => {
       ).resolves.toMatchObject({ id: 'a3' });
 
       // let the microtask drain so the .catch runs
+      await Promise.resolve();
+    });
+
+    it('does not surface email send failures to the caller', async () => {
+      const team = createTeam();
+      const admin = createAdmin();
+      const player = { id: 'p1', name: 'Player', email: 'player@test.com' };
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: team.id,
+        name: team.name,
+        members: [{ player }],
+      });
+      setSystemAdmin();
+      (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
+        id: 'a4',
+        teamId: team.id,
+        authorId: admin.id,
+        title: 't',
+        body: 'b',
+        author: { id: admin.id, name: admin.name, email: admin.email },
+      });
+      mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
+
+      await expect(
+        AnnouncementService.createAnnouncement(team.id, { title: 't', body: 'b' }, admin.id)
+      ).resolves.toMatchObject({ id: 'a4' });
+
       await Promise.resolve();
     });
   });
