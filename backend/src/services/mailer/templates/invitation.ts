@@ -10,6 +10,12 @@ export const invitationTemplate: EmailTemplate = {
     const messageBlock = vars.message
       ? `<p style="color:#555;font-style:italic;">"${e(vars.message)}"</p>`
       : '';
+    const ctaBlock = vars.acceptUrl
+      ? `<p style="margin:24px 0;">
+    <a href="${e(vars.acceptUrl)}" style="display:inline-block;background:#1A3A5C;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Accept Invitation</a>
+  </p>
+  <p style="color:#999;font-size:12px;">Or open this link: <a href="${e(vars.acceptUrl)}">${e(vars.acceptUrl)}</a></p>`
+      : '<p>Open the CapyHoops app to accept or decline your invitation.</p>';
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -19,7 +25,7 @@ export const invitationTemplate: EmailTemplate = {
   <p>${e(vars.inviterName)} has invited you to join <strong>${e(vars.teamName)}</strong>.</p>
   ${messageBlock}
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
-  <p>Open the CapyHoops app to accept or decline your invitation.</p>
+  ${ctaBlock}
   <hr>
   <p style="color:#999;font-size:12px;">CapyHoops — Basketball Tracker</p>
 </body>
@@ -27,6 +33,9 @@ export const invitationTemplate: EmailTemplate = {
   },
   text(vars) {
     const messageBlock = vars.message ? `\n"${vars.message}"\n` : '';
+    const ctaBlock = vars.acceptUrl
+      ? `Accept your invitation: ${vars.acceptUrl}`
+      : 'Open the CapyHoops app to accept or decline your invitation.';
     return `You've been invited to join ${vars.teamName}!
 
 Hi ${vars.playerName},
@@ -35,7 +44,7 @@ ${vars.inviterName} has invited you to join ${vars.teamName}.
 ${messageBlock}
 This invitation expires on ${vars.expiresAt}.
 
-Open the CapyHoops app to accept or decline your invitation.
+${ctaBlock}
 
 CapyHoops — Basketball Tracker`;
   },

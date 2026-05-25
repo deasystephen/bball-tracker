@@ -147,6 +147,8 @@ export class InvitationService {
 
     // Send invitation email (fire-and-forget; never block the response)
     if (invitation.player.email) {
+      const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
+      const acceptUrl = `${baseUrl}/invite/${invitation.token}`;
       mailer
         .send({
           template: invitationTemplate,
@@ -157,6 +159,7 @@ export class InvitationService {
             inviterName: invitation.invitedBy.name ?? invitation.invitedBy.email ?? '',
             message: invitation.message ?? '',
             expiresAt: invitation.expiresAt.toLocaleDateString(),
+            acceptUrl,
           },
           metadata: {
             userId: invitation.playerId,

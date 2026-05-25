@@ -144,6 +144,7 @@ describe('invitationTemplate', () => {
     inviterName: 'Phil',
     message: 'Welcome aboard!',
     expiresAt: '2026-07-01',
+    acceptUrl: 'https://capyhoops.com/invite/abc123',
   };
 
   it('subject includes team name', () => {
@@ -161,6 +162,18 @@ describe('invitationTemplate', () => {
     expect(html).not.toContain('italic');
   });
 
+  it('html includes acceptUrl as CTA button and plaintext fallback', () => {
+    const html = invitationTemplate.html(vars);
+    expect(html).toContain('https://capyhoops.com/invite/abc123');
+    expect(html).toContain('Accept Invitation');
+  });
+
+  it('html falls back to generic copy when acceptUrl is missing', () => {
+    const html = invitationTemplate.html({ ...vars, acceptUrl: '' });
+    expect(html).not.toContain('Accept Invitation');
+    expect(html).toContain('Open the CapyHoops app');
+  });
+
   it('text includes all key fields', () => {
     const text = invitationTemplate.text(vars);
     expect(text).toContain('Bulls');
@@ -171,6 +184,17 @@ describe('invitationTemplate', () => {
   it('text omits message block when message is empty', () => {
     const text = invitationTemplate.text({ ...vars, message: '' });
     expect(text).not.toContain('"');
+  });
+
+  it('text includes acceptUrl when provided', () => {
+    const text = invitationTemplate.text(vars);
+    expect(text).toContain('https://capyhoops.com/invite/abc123');
+  });
+
+  it('text falls back to generic copy when acceptUrl is missing', () => {
+    const text = invitationTemplate.text({ ...vars, acceptUrl: '' });
+    expect(text).not.toContain('https://');
+    expect(text).toContain('Open the CapyHoops app');
   });
 });
 
