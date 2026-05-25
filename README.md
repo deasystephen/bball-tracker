@@ -14,9 +14,10 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Stats Export** — Streaming CSV (game events, season stats) and PDF box score endpoints
 - **Calendar Feed** — Per-team iCal (`.ics`) subscription URLs for Google/Apple/Outlook calendars
 - **Invitation System** — Invite players and staff to teams with in-app notifications
+- **Web-Based Invite Accept** — `capyhoops.com/invite/<token>` landing page with deep-link fallback to App Store / Play Store
 - **Announcements** — Coach-to-team announcements with threaded discussion
 - **Game RSVPs** — Players and parents can RSVP to scheduled games
-- **Push Notifications** — Expo push notifications for invitations, announcements, and RSVPs
+- **Push + Email Notifications** — Expo push and AWS SES email for invitations, RSVPs, and announcements (behind a `Mailer` interface so the provider can be swapped)
 - **Tier-based Entitlements** — FREE / PREMIUM / LEAGUE / ADMIN roles gated via API middleware
 - **Profile Pictures** — S3 presigned URL uploads with avatar picker
 - **Dark Mode** — Full light/dark theme support throughout the app
@@ -50,6 +51,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **CI/CD**: GitHub Actions → Docker → ECR → ECS (Node 22 image)
 - **Domain**: `api.capyhoops.com` with HTTPS (ACM cert)
 - **Observability**: Datadog (logs/metrics via CloudWatch Forwarder) + Sentry (errors)
+- **Email**: AWS SES (`@aws-sdk/client-sesv2`) behind a `Mailer` interface
 - **Mobile Builds**: Expo Application Services (EAS)
 - **E2E Testing**: Maestro
 - **Analytics**: Amplitude
@@ -108,11 +110,12 @@ bball-tracker/
 │   └── i18n/            #   Internationalization
 ├── backend/             # Node.js API server
 │   ├── src/api/         #   Route handlers (auth, games, teams, players, etc.)
-│   ├── src/services/    #   Business logic layer
+│   ├── src/services/    #   Business logic layer (includes mailer/ for SES)
 │   ├── src/kafka/       #   Kafka producers/consumers
 │   ├── src/websocket/   #   Socket.io handlers
 │   ├── prisma/          #   Schema, migrations, seed data
 │   └── tests/           #   Jest test suites
+├── web/                 # Next.js landing site (public invite accept flow)
 ├── .maestro/            # Maestro E2E test flows
 ├── infra/               # Terraform (ECS, RDS, ElastiCache)
 ├── docker/              # Dockerfile and entrypoint
