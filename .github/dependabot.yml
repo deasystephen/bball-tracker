@@ -1,0 +1,114 @@
+# Dependabot configuration
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# This config complements the Daily Upgrade Scan routine
+# (docs/automation/daily-upgrade-scan.md). Dependabot opens security
+# advisories + version-update PRs; the routine triages and merges them.
+# Without this file, only security alerts fire — version updates don't.
+
+version: 2
+
+updates:
+  # ----------------------------------------------------------------------
+  # Backend (Node.js / Express / Prisma)
+  # ----------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "backend"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      backend-patch:
+        update-types: ["patch"]
+      backend-minor:
+        update-types: ["minor"]
+    ignore:
+      # Major bumps are reviewed manually per the deferral list in
+      # docs/automation/daily-upgrade-scan.md
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ----------------------------------------------------------------------
+  # Mobile (React Native / Expo)
+  # ----------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/mobile"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "mobile"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      mobile-patch:
+        update-types: ["patch"]
+      mobile-minor:
+        update-types: ["minor"]
+    ignore:
+      # RN / Expo major bumps + Jest 30 are deferred; see
+      # docs/automation/daily-upgrade-scan.md for the full deferral list.
+      - dependency-name: "react-native"
+      - dependency-name: "expo"
+      - dependency-name: "jest"
+        versions: [">=30"]
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ----------------------------------------------------------------------
+  # Web (Next.js)
+  # ----------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "web"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      web-patch:
+        update-types: ["patch"]
+      web-minor:
+        update-types: ["minor"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ----------------------------------------------------------------------
+  # GitHub Actions
+  # ----------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    labels:
+      - "ci"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
