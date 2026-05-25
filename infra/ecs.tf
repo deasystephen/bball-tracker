@@ -341,9 +341,13 @@ resource "aws_ecs_service" "app" {
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 50
 
-  # Ignore changes to desired_count since auto-scaling manages it
+  # desired_count is managed by ECS auto-scaling.
+  # task_definition is managed by the CI/CD deploy job (Build & Deploy to ECS),
+  # which registers a new revision and updates the service out-of-band from Terraform.
+  # Without ignoring it here, `terraform plan` reads the stale revision from state
+  # and would roll the service back to that revision on apply. See #53.
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [desired_count, task_definition]
   }
 
   depends_on = [aws_lb_listener.http]
