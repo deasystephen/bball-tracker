@@ -4,7 +4,7 @@ Node.js/TypeScript backend API for the Basketball Tracker application.
 
 ## Tech Stack
 
-- **Runtime**: Node.js 18+
+- **Runtime**: Node.js 22+
 - **Framework**: Express
 - **Language**: TypeScript
 - **Database**: PostgreSQL (via Prisma ORM)
@@ -12,13 +12,14 @@ Node.js/TypeScript backend API for the Basketball Tracker application.
 - **Event Streaming**: Kafka (kafkajs)
 - **Real-time**: Socket.io
 - **Validation**: Zod
-- **Authentication**: JWT
+- **Authentication**: WorkOS (AuthKit) — JWT is the session token format only
+- **Email**: AWS SES via the `Mailer` interface (FakeMailer in dev/test)
 
 ## Setup
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 22+ and npm
 - PostgreSQL database (local or Docker)
 - Redis (local or Docker)
 
@@ -95,7 +96,7 @@ To modify the database:
 
 ## API Documentation
 
-API documentation will be available at `/api/docs` (to be implemented).
+API routes are organized by resource under `src/api/<resource>/`. See [`docs/automation/daily-upgrade-scan.md`](../docs/automation/daily-upgrade-scan.md) and the per-resource test suites under `tests/api/` for working examples of every endpoint.
 
 ## Testing
 

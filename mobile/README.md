@@ -16,10 +16,9 @@ React Native mobile application built with Expo for iOS and Android.
 
 ### Prerequisites
 
-- Node.js 18+
-- Expo CLI (`npm install -g expo-cli`)
-- iOS Simulator (for macOS) or Android Emulator
-- Physical device with Expo Go app (optional)
+- Node.js 22+
+- Xcode (for iOS Simulator) on macOS, or Android Studio for the Android Emulator
+- EAS CLI (`npx eas` works via the local dev dep — no global install needed)
 
 ### Installation
 
@@ -28,20 +27,17 @@ React Native mobile application built with Expo for iOS and Android.
 npm install
 ```
 
-2. Start the development server:
+2. Run on iOS (builds the dev client — needed for native modules like Sentry):
 ```bash
-npm start
+npx expo run:ios
 ```
 
-3. Run on iOS:
+3. Run on Android:
 ```bash
-npm run ios
+npx expo run:android
 ```
 
-4. Run on Android:
-```bash
-npm run android
-```
+**Do not use** `npm start` / `npx expo start` with this project. Several native modules (Sentry, Reanimated, etc.) require a custom dev client; the legacy Expo Go flow does not work here. See `npx expo run:ios --help` for device-selection flags.
 
 ## Project Structure
 
