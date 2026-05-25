@@ -10,6 +10,10 @@ import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
+import {
+  calendarFeedRateLimit,
+  writeRateLimit,
+} from '../middleware/rate-limit';
 
 const router = Router();
 
@@ -24,7 +28,7 @@ function validateToken(token: string): boolean {
  * Returns invitation details for display on the web landing page.
  * Intentionally returns a limited view (no player PII).
  */
-router.get('/by-token/:token', async (req, res) => {
+router.get('/by-token/:token', calendarFeedRateLimit, async (req, res) => {
   const { token } = req.params;
 
   if (!validateToken(token as string)) {
@@ -52,7 +56,7 @@ router.get('/by-token/:token', async (req, res) => {
  * Accepts the invitation on behalf of the invited player.
  * Token acts as authentication (one-time secret, like a password-reset link).
  */
-router.post('/by-token/:token/accept', async (req, res) => {
+router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
   const { token } = req.params;
 
   if (!validateToken(token as string)) {
