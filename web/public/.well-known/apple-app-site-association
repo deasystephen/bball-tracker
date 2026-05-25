@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["XXXXXXXXXX.com.bballtracker.mobile"],
+        "components": [
+          {
+            "/": "/invite/*",
+            "comment": "Deep-link all invitation tokens to the app"
+          }
+        ]
+      }
+    ]
+  }
+}

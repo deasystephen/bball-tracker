@@ -480,6 +480,116 @@ export class InvitationService {
   }
 
   /**
+   * Get an invitation by token (public, no user context required).
+   * Returns a limited view safe to expose without authentication.
+   */
+  static async getInvitationByToken(token: string) {
+    const invitation = await prisma.teamInvitation.findUnique({
+      where: { token },
+      select: {
+        id: true,
+        status: true,
+        position: true,
+        jerseyNumber: true,
+        message: true,
+        expiresAt: true,
+        team: {
+          select: { name: true },
+        },
+        invitedBy: {
+          select: { name: true },
+        },
+      },
+    });
+
+    if (!invitation) {
+      throw new NotFoundError('Invitation not found');
+    }
+
+    return {
+      id: invitation.id,
+      status: invitation.status,
+      teamName: invitation.team.name,
+      inviterName: invitation.invitedBy.name,
+      position: invitation.position,
+      jerseyNumber: invitation.jerseyNumber,
+      message: invitation.message,
+      expiresAt: invitation.expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * Accept an invitation using its token as authentication.
+   * The token functions as a one-time secret (analogous to a password-reset link).
+   */
+  static async acceptInvitationByToken(token: string) {
+    const invitation = await prisma.teamInvitation.findUnique({
+      where: { token },
+    });
+
+    if (!invitation) {
+      throw new NotFoundError('Invitation not found');
+    }
+
+    if (invitation.status === 'ACCEPTED') {
+      throw new BadRequestError('This invitation has already been accepted');
+    }
+
+    if (invitation.status === 'REJECTED') {
+      throw new BadRequestError('This invitation has been rejected');
+    }
+
+    if (invitation.status === 'CANCELLED') {
+      throw new BadRequestError('This invitation has been cancelled');
+    }
+
+    if (invitation.status !== 'PENDING') {
+      throw new BadRequestError(`Cannot accept invitation with status: ${invitation.status}`);
+    }
+
+    if (new Date() > invitation.expiresAt) {
+      await prisma.teamInvitation.update({
+        where: { token },
+        data: { status: 'EXPIRED' },
+      });
+      throw new BadRequestError('This invitation has expired');
+    }
+
+    const existingMember = await prisma.teamMember.findUnique({
+      where: {
+        teamId_playerId: {
+          teamId: invitation.teamId,
+          playerId: invitation.playerId,
+        },
+      },
+    });
+
+    if (existingMember) {
+      throw new BadRequestError('You are already on this team');
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedInvitation = await tx.teamInvitation.update({
+        where: { token },
+        data: { status: 'ACCEPTED', acceptedAt: new Date() },
+      });
+
+      const teamMember = await tx.teamMember.create({
+        data: {
+          teamId: invitation.teamId,
+          playerId: invitation.playerId,
+          jerseyNumber: invitation.jerseyNumber,
+          position: invitation.position,
+        },
+      });
+
+      return { invitation: updatedInvitation, teamMember };
+    });
+
+    return result;
+  }
+
+  /**
    * Expire old invitations (background job)
    * Should be run periodically to mark expired invitations
    */

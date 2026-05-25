@@ -6,6 +6,7 @@ import teamCalendarRoutes from './teams/calendar';
 import leagueRoutes from './leagues/routes';
 import seasonRoutes from './seasons/routes';
 import playerRoutes from './players/routes';
+import invitationPublicRoutes from './invitations/public-routes';
 import invitationRoutes from './invitations/routes';
 import statsRoutes from './stats/routes';
 import uploadRoutes from './uploads/routes';
@@ -23,6 +24,9 @@ router.use('/teams', teamRoutes);
 router.use('/leagues', leagueRoutes);
 router.use('/seasons', seasonRoutes);
 router.use('/players', playerRoutes);
+// Public by-token routes must be mounted before the auth-protected invitation
+// router so token-based lookups bypass the authenticate middleware.
+router.use('/invitations', invitationPublicRoutes);
 router.use('/invitations', invitationRoutes);
 router.use('/stats', statsRoutes);
 router.use('/uploads', uploadRoutes);
