@@ -649,7 +649,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Steps:** Game detail → Export Box Score (PDF). OR `curl ...api/v1/games/:gameId/boxscore.pdf`.
 - **Expected:** PDF downloads with both teams' stats lines. Filename has Content-Disposition with proper encoding.
-- **Notes:** Per #46 + memory.
+- **Notes:** Per #46 + memory. **As of #172 the underlying `pdfkit` is 0.19.0 (was 0.18.0)** — eyeball text layout, column alignment, and any custom fonts for rendering regressions.
 
 ### M.3 — Team season stats CSV
 - [ ] Pass / Fail / Skipped
