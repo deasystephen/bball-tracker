@@ -122,11 +122,41 @@ jobs:
         working-directory: mobile
         run: npx expo export --platform ios
 
+  detect-changes:
+    name: Detect backend changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Only these paths produce a new backend container image. Mobile-only
+          # changes (e.g. nightly mobile dep bumps) must NOT trigger an ECS
+          # deploy — that just adds noise and needless deploys.
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'infra/**'
+              - 'docker/**'
+              - '.github/workflows/ci.yml'
+
   build-and-deploy:
     name: Build & Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test-backend, test-mobile]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint-and-typecheck, test-backend, test-mobile, detect-changes]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-changes.outputs.backend == 'true'
+    # Serialize deploys to the shared ECS service. When the nightly upgrade scan
+    # merges several PRs within minutes, concurrent deploy jobs would otherwise
+    # race and the superseded one fails with a misleading "deployment not found /
+    # circuit breaker" error. cancel-in-progress: false so an in-flight
+    # production deploy always runs to completion rather than being cancelled
+    # mid-rollout.
+    concurrency:
+      group: ecs-deploy-production
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v6
