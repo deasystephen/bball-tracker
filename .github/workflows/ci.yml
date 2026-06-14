@@ -133,15 +133,18 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # Only these paths produce a new backend container image. Mobile-only
-          # changes (e.g. nightly mobile dep bumps) must NOT trigger an ECS
-          # deploy — that just adds noise and needless deploys.
+          # Only non-markdown changes under these paths produce a new backend
+          # container image. Mobile/web-only changes (e.g. nightly dep bumps) and
+          # docs-only edits (e.g. a README under backend/ or infra/) must NOT
+          # trigger an ECS deploy. `predicate-quantifier: every` makes a file
+          # count only if it matches the path brace AND is not a .md file
+          # (verified against picomatch, dorny's matcher — a plain `!**/*.md`
+          # under the default `some` quantifier would NOT exclude). See #184/#188.
+          predicate-quantifier: 'every'
           filters: |
             backend:
-              - 'backend/**'
-              - 'infra/**'
-              - 'docker/**'
-              - '.github/workflows/ci.yml'
+              - '{backend/**,infra/**,docker/**,.github/workflows/ci.yml}'
+              - '!**/*.md'
 
   build-and-deploy:
     name: Build & Deploy to ECS
