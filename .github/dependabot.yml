@@ -66,6 +66,21 @@ updates:
       - dependency-name: "expo"
       - dependency-name: "jest"
         versions: [">=30"]
+      # Expo-managed native modules: versions are pinned by the Expo SDK
+      # (expo/bundledNativeModules.json), not by npm. Letting dependabot bump
+      # these ahead of the current SDK breaks the native build (see #175, where
+      # it proposed reanimated 4.4.1 / worklets 0.9.2 against an SDK-55 project
+      # that pins reanimated 4.2.1 / worklets 0.7.4). They move only via an
+      # `expo install` / SDK upgrade. This enforces, at the dependabot level,
+      # the RN-ecosystem deferral already documented as authoritative in
+      # docs/automation/daily-upgrade-scan.md — re-evaluate at each SDK bump.
+      - dependency-name: "@react-native-async-storage/async-storage"
+      - dependency-name: "@react-native-community/datetimepicker"
+      - dependency-name: "react-native-gesture-handler"
+      - dependency-name: "react-native-reanimated"
+      - dependency-name: "react-native-safe-area-context"
+      - dependency-name: "react-native-screens"
+      - dependency-name: "react-native-worklets"
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
