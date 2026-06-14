@@ -18,7 +18,7 @@ React Native mobile application built with Expo for iOS and Android.
 
 - Node.js 22+
 - Xcode (for iOS Simulator) on macOS, or Android Studio for the Android Emulator
-- EAS CLI (`npx eas` works via the local dev dep — no global install needed)
+- EAS CLI (`npx eas-cli` works via the local dev dep — no global install needed)
 
 ### Installation
 
@@ -50,8 +50,10 @@ mobile/
 │   └── (tabs)/       # Tab navigation group
 │       ├── _layout.tsx
 │       ├── home.tsx
+│       ├── teams.tsx
 │       ├── games.tsx
 │       ├── stats.tsx
+│       ├── invitations.tsx
 │       └── profile.tsx
 ├── components/       # Reusable UI components
 ├── hooks/            # Custom React hooks
@@ -65,7 +67,7 @@ mobile/
 
 ## Environment Variables
 
-Create an `app.config.js` or update `app.json` to include environment-specific configuration:
+Configure environment-specific settings in the existing `app.config.js` (it already defines the EAS Update URL and an `extra` block):
 
 ```javascript
 export default {

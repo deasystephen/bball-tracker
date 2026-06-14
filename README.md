@@ -81,7 +81,7 @@ docker-compose up -d
 ```bash
 cd backend
 npm install
-cp .env.example .env   # Edit with your config
+cp env.example .env   # Edit with your config
 npx prisma generate
 npx prisma migrate dev
 npm run dev

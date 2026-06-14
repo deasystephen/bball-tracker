@@ -39,7 +39,8 @@ Transactional email is sent from `noreply@mail.capyhoops.com` via AWS SES v2.
    mail.capyhoops.com  TXT  "v=spf1 include:amazonses.com ~all"
    ```
 4. **MX record** routes bounces and complaints back to the SES feedback
-   endpoint (required for bounce/complaint handling):
+   endpoint (required for bounce/complaint handling; the region in the host
+   below is derived from `var.aws_region` in `ses.tf`):
    ```
    mail.capyhoops.com  MX  10 feedback-smtp.us-east-1.amazonses.com
    ```
@@ -73,6 +74,6 @@ addresses.  To request production access:
 | `AWS_SES_REGION` | ECS task definition env | `us-east-1` |
 | `SES_FROM_ADDRESS` | ECS task definition env | `noreply@mail.capyhoops.com` |
 
-Both variables are left blank in `env.example` and in the test environment,
-which causes the backend to fall back to the in-memory `FakeMailer`
-(no real emails sent in dev/test).
+Both variables are pre-filled in `env.example` (with a comment to leave them
+blank in dev/test); leaving them blank causes the backend to fall back to the
+in-memory `FakeMailer` (no real emails sent in dev/test).
