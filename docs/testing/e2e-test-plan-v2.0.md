@@ -649,7 +649,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Steps:** Game detail → Export Box Score (PDF). OR `curl ...api/v1/games/:gameId/boxscore.pdf`.
 - **Expected:** PDF downloads with both teams' stats lines. Filename has Content-Disposition with proper encoding.
-- **Notes:** Per #46 + memory. **As of #172 the underlying `pdfkit` is 0.19.0 (was 0.18.0)** — eyeball text layout, column alignment, and any custom fonts for rendering regressions.
+- **Notes:** Per #46 + memory. **As of #172 the underlying `pdfkit` is 0.19.1 (was 0.18.0)** — eyeball text layout, column alignment, and any custom fonts for rendering regressions.
 
 ### M.3 — Team season stats CSV
 - [ ] Pass / Fail / Skipped
@@ -716,7 +716,7 @@ Cross-cuts E, I, J — but worth aggregating here.
 - [ ] Pass / Fail / Skipped
 - **Steps:** (Synthetic) — temporarily break SES creds OR send to an obviously-bounced address.
 - **Expected:** `POST /invitations` still returns 201. Backend logs an error. No 500.
-- **Notes:** Per `invitation-service.ts:168` catch block.
+- **Notes:** Per `invitation-service.ts:171` catch block.
 
 ### O.4 — Per `vars.acceptUrl`: link uses `https://capyhoops.com` not localhost
 - [ ] Pass / Fail / Skipped
@@ -954,3 +954,5 @@ After B3-prod-access lands and production access is granted, this step is no lon
 
 ### D. Plan revision history
 - 2026-05-25: v1 — created post-v2.0-batch (PRs #131, #130, #137, #138, #150). Built #17 on TestFlight.
+- 2026-06-08: M.2 — noted pdfkit version bump (#173).
+- 2026-06-14: accuracy pass — pdfkit note → 0.19.1, invitation-service catch line → :171.

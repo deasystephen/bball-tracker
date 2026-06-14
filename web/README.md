@@ -7,7 +7,7 @@ Next.js web app served at `https://capyhoops.com`. Hosts the public invitation a
 - **Framework**: Next.js 15 (App Router)
 - **React**: 19
 - **Language**: TypeScript
-- **Hosting**: TBD (Vercel/CloudFront — not yet deployed as of 2026-05-25)
+- **Hosting**: TBD (Vercel/CloudFront — not yet deployed as of 2026-06-14)
 
 ## Setup
 

@@ -83,7 +83,7 @@ backend/
 
 ## Environment Variables
 
-See `.env.example` for required environment variables.
+See `env.example` for required environment variables.
 
 ## Database
 
@@ -96,7 +96,7 @@ To modify the database:
 
 ## API Documentation
 
-API routes are organized by resource under `src/api/<resource>/`. See [`docs/automation/daily-upgrade-scan.md`](../docs/automation/daily-upgrade-scan.md) and the per-resource test suites under `tests/api/` for working examples of every endpoint.
+API routes are organized by resource under `src/api/<resource>/`. See the per-resource test suites under `tests/api/` for working examples of every endpoint.
 
 ## Testing
 
