@@ -19,6 +19,8 @@ import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
+import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitlements';
+import { Feature } from '../../services/entitlements';
 import { logger } from '../../utils/logger';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
@@ -30,8 +32,12 @@ router.use(authenticate);
 /**
  * POST /api/v1/teams
  * Create a new team
+ *
+ * FREE-tier users are capped at FREE_TEAM_LIMIT teams (grandfathered -- see
+ * src/services/entitlements). `requireTeamCreateLimit` returns 402 when the cap
+ * is reached.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireTeamCreateLimit(), async (req, res) => {
   try {
     // Validate request body
     const validationResult = createTeamSchema.safeParse(req.body);
@@ -418,9 +424,13 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
 /**
  * GET /api/v1/teams/:id/season-stats.csv
  * Export per-player season aggregates as CSV
- * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ * Gated behind the STATS_EXPORT feature (PREMIUM+).
  */
-router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) => {
+router.get(
+  '/:id/season-stats.csv',
+  validateUuidParams('id'),
+  requireEntitlement(Feature.STATS_EXPORT),
+  async (req, res) => {
   try {
     const exportFile = await StatsExportService.exportTeamSeasonStatsCsv(
       req.params.id as string,
@@ -451,6 +461,7 @@ router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) =
       res.status(500).json({ error: 'Failed to export team season CSV' });
     }
   }
-});
+  }
+);
 
 export default router;

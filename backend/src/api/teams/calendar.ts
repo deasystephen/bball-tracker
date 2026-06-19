@@ -11,6 +11,8 @@ import { CalendarService } from '../../services/calendar-service';
 import { authenticate } from '../auth/middleware';
 import { validateUuidParams } from '../middleware/validate-params';
 import { calendarFeedRateLimit } from '../middleware/rate-limit';
+import { requireEntitlement } from '../middleware/entitlements';
+import { Feature } from '../../services/entitlements';
 import {
   BadRequestError,
   NotFoundError,
@@ -73,6 +75,7 @@ router.use(authenticate);
 router.post(
   '/:id/calendar/subscribe',
   validateUuidParams('id'),
+  requireEntitlement(Feature.CALENDAR_SYNC),
   async (req, res) => {
     try {
       const result = await CalendarService.subscribe(
