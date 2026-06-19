@@ -120,6 +120,65 @@ describe('RsvpService', () => {
       await expect(RsvpService.upsertRsvp(game.id, 'user-1', 'YES')).resolves.toEqual(rsvpRow);
       await Promise.resolve();
     });
+
+    it('falls back to the email as playerName when the user has no name', async () => {
+      const game = createGame();
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        id: game.id,
+        teamId: game.teamId,
+        opponent: game.opponent,
+        date: game.date,
+        team: { name: 'Test Team' },
+      });
+      setAdminAccess();
+      const rsvpRow = {
+        id: 'rsvp-3',
+        gameId: game.id,
+        userId: 'user-1',
+        status: 'YES',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: { id: 'user-1', name: null, email: 'noname@test.com' },
+      };
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue(rsvpRow);
+
+      await RsvpService.upsertRsvp(game.id, 'user-1', 'YES');
+      await Promise.resolve();
+
+      expect(mockedMailerSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'noname@test.com',
+          variables: expect.objectContaining({ playerName: 'noname@test.com' }),
+        })
+      );
+    });
+
+    it('skips sending email when the user has no email address', async () => {
+      const game = createGame();
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        id: game.id,
+        teamId: game.teamId,
+        opponent: game.opponent,
+        date: game.date,
+        team: { name: 'Test Team' },
+      });
+      setAdminAccess();
+      const rsvpRow = {
+        id: 'rsvp-4',
+        gameId: game.id,
+        userId: 'user-1',
+        status: 'NO',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: { id: 'user-1', name: 'NoEmail', email: null },
+      };
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue(rsvpRow);
+
+      await RsvpService.upsertRsvp(game.id, 'user-1', 'NO');
+      await Promise.resolve();
+
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
   });
 
   describe('getGameRsvps', () => {
