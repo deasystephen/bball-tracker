@@ -592,6 +592,85 @@ describe('InvitationService', () => {
 
       expect(result.invitations).toHaveLength(1);
     });
+
+    it('should filter by teamId when the user has team access', async () => {
+      const { team, coach, season, league } = createFullInvitation();
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+
+      // canAccessTeam: coach is staff on the team
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations(
+        { teamId: team.id, limit: 10, offset: 0 },
+        coach.id
+      );
+
+      const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where.teamId).toBe(team.id);
+    });
+
+    it('should throw ForbiddenError when filtering by a team the user cannot access', async () => {
+      const team = createTeam();
+      const outsider = createPlayer();
+
+      // canAccessTeam: not admin, not staff, not member → false
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(outsider);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        InvitationService.listInvitations(
+          { teamId: team.id, limit: 10, offset: 0 },
+          outsider.id
+        )
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: "You do not have access to this team's invitations",
+      });
+    });
+
+    it("allows a coach to list another player's invitations", async () => {
+      const coach = createCoach();
+      const otherPlayer = createPlayer();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations(
+        { playerId: otherPlayer.id, limit: 10, offset: 0 },
+        coach.id
+      );
+
+      const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where.playerId).toBe(otherPlayer.id);
+    });
+
+    it("throws ForbiddenError when a non-coach lists another player's invitations", async () => {
+      const requester = createPlayer();
+      const otherPlayer = createPlayer();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(requester);
+
+      await expect(
+        InvitationService.listInvitations(
+          { playerId: otherPlayer.id, limit: 10, offset: 0 },
+          requester.id
+        )
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'You can only view your own invitations',
+      });
+    });
   });
 
   describe('getInvitationById', () => {
