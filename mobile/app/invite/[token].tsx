@@ -98,7 +98,7 @@ export default function InviteDeepLinkScreen() {
           <Ionicons name="checkmark-circle-outline" size={64} color={colors.success} />
           <ThemedText variant="h2" style={styles.title}>Already Accepted</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            You've already accepted the invitation to {invitation.teamName}.
+            You&apos;ve already accepted the invitation to {invitation.teamName}.
           </ThemedText>
           <Button
             title="View Invitations"
@@ -165,7 +165,7 @@ export default function InviteDeepLinkScreen() {
         <Ionicons name="mail-open-outline" size={64} color={colors.primary} />
         <ThemedText variant="h1" style={styles.title}>Team Invitation</ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-          You've been invited to join a team!
+          You&apos;ve been invited to join a team!
         </ThemedText>
 
         <Card variant="elevated" style={styles.detailCard}>
