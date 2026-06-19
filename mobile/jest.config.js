@@ -30,14 +30,19 @@ module.exports = {
   // and component tests for game/OpponentScoreButtons, ShotButtons,
   // StatButtons, UndoBanner, ScoreDisplay, PlayerRoster. Observed:
   // stmts 62.94 / branches 59.72 / funcs 60.48 / lines 62.77.
+  // Pass 4 (2026-06-19): added a useTeams runtime test (queries, mutations,
+  // permission helpers) and component tests for game/GameCard,
+  // stats/PlayerStatsCard, stats/BoxScoreTable, UpgradePrompt, FeatureGate.
+  // Observed: stmts 75.37 / branches 73.02 / funcs 74.36 / lines 75.57 —
+  // the 70/60/70/70 GA target is now met on all four metrics.
   // Thresholds set ~1pt below actuals to tolerate trivial churn. These
   // must only ratchet upward — see issue #51.
   coverageThreshold: {
     global: {
-      branches: 58,
-      functions: 59,
-      lines: 61,
-      statements: 61,
+      branches: 72,
+      functions: 73,
+      lines: 74,
+      statements: 74,
     },
   },
   moduleNameMapper: {
