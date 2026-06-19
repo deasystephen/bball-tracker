@@ -33,6 +33,13 @@ jest.mock('../../src/api/auth/middleware', () => ({
 jest.mock('../../src/services/team-service');
 jest.mock('../../src/services/invitation-service');
 
+// Mock the usage service: these tests focus on team CRUD, not tier limits, so
+// allow creation by default. Tier-limit enforcement is covered in usage.test.ts.
+jest.mock('../../src/services/usage-service', () => ({
+  canCreateTeam: jest.fn().mockResolvedValue(true),
+  invalidateUsage: jest.fn().mockResolvedValue(undefined),
+}));
+
 const mockTeamService = TeamService as jest.Mocked<typeof TeamService>;
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
 

@@ -14,7 +14,8 @@ import {
   createManagedPlayerSchema,
   createAnnouncementSchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
+import { canCreateTeam, invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { AnnouncementService } from '../../services/announcement-service';
@@ -29,7 +30,13 @@ router.use(authenticate);
 
 /**
  * POST /api/v1/teams
- * Create a new team
+ * Create a new team.
+ *
+ * FREE-tier users are capped at their tier's team limit (see
+ * utils/entitlements). When at/over the cap, creation is blocked with a 402
+ * Payment Required so the client can surface an upgrade CTA. Users already over
+ * the cap when enforcement shipped keep their existing teams but cannot create
+ * new ones (grandfather rule — see usage-service). System admins bypass the cap.
  */
 router.post('/', async (req, res) => {
   try {
@@ -41,7 +48,17 @@ router.post('/', async (req, res) => {
       );
     }
 
+    // Enforce the tier team limit (admins bypass).
+    if (req.user!.role !== 'ADMIN' && !(await canCreateTeam(req.user!.id))) {
+      throw new PaymentRequiredError(
+        "You have reached your plan's team limit. Upgrade to create more teams."
+      );
+    }
+
     const team = await TeamService.createTeam(validationResult.data, req.user!.id);
+
+    // A new team changes the user's metered counts — invalidate cached usage.
+    await invalidateUsage(req.user!.id);
 
     res.status(201).json({
       success: true,
@@ -52,7 +69,8 @@ router.post('/', async (req, res) => {
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
-      error instanceof ForbiddenError
+      error instanceof ForbiddenError ||
+      error instanceof PaymentRequiredError
     ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -162,6 +180,9 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     await TeamService.deleteTeam(req.params.id as string, req.user!.id);
+
+    // Deleting a team changes the user's metered counts — invalidate cache.
+    await invalidateUsage(req.user!.id);
 
     res.json({
       success: true,

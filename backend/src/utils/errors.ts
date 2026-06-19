@@ -42,6 +42,17 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/**
+ * 402 Payment Required — used when a usage/tier limit is reached and the
+ * user must upgrade their subscription to proceed (e.g. FREE-tier team cap).
+ */
+export class PaymentRequiredError extends AppError {
+  constructor(message: string = 'Payment required') {
+    super(message, 402);
+    Object.setPrototypeOf(this, PaymentRequiredError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
