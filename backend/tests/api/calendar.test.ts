@@ -19,14 +19,29 @@ import {
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 
+// Mutable mock auth user so individual tests can vary the subscription tier.
+// Calendar subscribe is gated behind CALENDAR_SYNC (PREMIUM), so the default
+// user here is an active PREMIUM coach.
+const mockFutureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+const mockAuthUser: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  subscriptionTier: 'FREE' | 'PREMIUM' | 'LEAGUE';
+  subscriptionExpiresAt: Date | null;
+} = {
+  id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'COACH',
+  subscriptionTier: 'PREMIUM',
+  subscriptionExpiresAt: mockFutureDate,
+};
+
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
-    req.user = {
-      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
-      email: 'test@example.com',
-      name: 'Test User',
-      role: 'COACH',
-    };
+    req.user = { ...mockAuthUser };
     next();
   }),
   requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
@@ -39,6 +54,8 @@ const mockCalendarService = CalendarService as jest.Mocked<typeof CalendarServic
 describe('Calendar Feed API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthUser.subscriptionTier = 'PREMIUM';
+    mockAuthUser.subscriptionExpiresAt = mockFutureDate;
   });
 
   describe('POST /api/v1/teams/:id/calendar/subscribe', () => {
@@ -87,6 +104,40 @@ describe('Calendar Feed API', () => {
     it('returns 400 for an invalid team id (non-UUID)', async () => {
       const res = await request(app).post('/api/v1/teams/not-a-uuid/calendar/subscribe');
       expect(res.status).toBe(400);
+    });
+
+    it('returns 402 upgrade_required for a FREE user (calendar sync gated)', async () => {
+      mockAuthUser.subscriptionTier = 'FREE';
+      mockAuthUser.subscriptionExpiresAt = null;
+
+      const res = await request(app).post(
+        `/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`
+      );
+
+      expect(res.status).toBe(402);
+      expect(res.body).toEqual({
+        code: 'upgrade_required',
+        feature: 'calendar_sync',
+        currentTier: 'FREE',
+        requiredTier: 'PREMIUM',
+      });
+      expect(mockCalendarService.subscribe).not.toHaveBeenCalled();
+    });
+
+    it('allows a LEAGUE user (calendar sync included in LEAGUE)', async () => {
+      mockAuthUser.subscriptionTier = 'LEAGUE';
+      mockCalendarService.subscribe.mockResolvedValue({
+        token: 'abc123',
+        feedUrl: `http://localhost:3000/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+        webcalUrl: `webcal://localhost:3000/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+      });
+
+      const res = await request(app).post(
+        `/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockCalendarService.subscribe).toHaveBeenCalled();
     });
   });
 
