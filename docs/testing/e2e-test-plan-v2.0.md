@@ -889,10 +889,9 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 - **Issue:** #49 deferred.
 - **Expected fail mode:** Long sessions (>2hr typical JWT TTL) stay connected with stale auth.
 
-### S.9 — ⚠ Mobile ESLint
-- [ ] Verified-broken / Notes
-- **Issue:** #132 — ESLint not installed in mobile/, CI skips on `matrix.project == 'backend'`.
-- **Expected fail mode:** Doesn't affect user testing. `npm run lint` in mobile/ silently no-ops.
+### S.9 — ✓ Mobile ESLint
+- [x] Resolved in #132 — ESLint + eslint-config-expo wired up in mobile/ (`mobile/eslint.config.mjs`), and the CI `Run linter` step no longer skips mobile (`matrix.project == 'backend'` gate removed).
+- **Status:** `npm run lint` in mobile/ now runs the flat config and exits 0 (warnings backlog tracked separately).
 
 ### S.10 — ⚠ Web/ test framework absent
 - [ ] Verified-broken / Notes

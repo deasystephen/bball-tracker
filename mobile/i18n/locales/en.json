@@ -60,5 +60,11 @@
     "inProgress": "In Progress",
     "finished": "Finished",
     "cancelled": "Cancelled"
+  },
+  "usage": {
+    "title": "Plan Usage",
+    "teams": "Teams",
+    "seasons": "Seasons",
+    "upgradeForUnlimited": "Upgrade for unlimited"
   }
 }

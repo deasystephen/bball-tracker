@@ -12,10 +12,12 @@ import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams } from '../../hooks/useTeams';
 import { useUpdatePlayer } from '../../hooks/usePlayers';
-import { ThemedView, ThemedText, Card, AvatarPicker } from '../../components';
+import { useUsage } from '../../hooks/useUsage';
+import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
+import { useTranslation } from '../../i18n';
 
 export default function Profile() {
   const router = useRouter();
@@ -25,7 +27,9 @@ export default function Profile() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const { data: teams } = useTeams();
+  const { data: usage } = useUsage();
   const updatePlayer = useUpdatePlayer();
+  const { t } = useTranslation();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const handleAvatarSelected = async (uri: string | null) => {
@@ -180,6 +184,28 @@ export default function Profile() {
             </View>
           </Card>
         </View>
+
+        {/* Plan Usage Meter */}
+        {usage && (
+          <View style={styles.section}>
+            <ThemedText variant="h4" style={styles.sectionTitle}>
+              {t('usage.title')}
+            </ThemedText>
+            <Card variant="default" style={styles.infoCard}>
+              <UsageMeter
+                label={t('usage.teams')}
+                metric={usage.teams}
+                upgradeHint={t('usage.upgradeForUnlimited')}
+              />
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+              <UsageMeter
+                label={t('usage.seasons')}
+                metric={usage.seasons}
+                upgradeHint={t('usage.upgradeForUnlimited')}
+              />
+            </Card>
+          </View>
+        )}
 
         {/* Admin Section */}
         {(user?.role === 'ADMIN' || user?.role === 'COACH') && (
