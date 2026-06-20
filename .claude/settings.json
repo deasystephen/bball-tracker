@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/check-docs-updated.sh",
+            "timeout": 10,
+            "statusMessage": "Checking docs are up to date with code changes..."
+          }
+        ]
+      }
+    ]
+  }
+}
