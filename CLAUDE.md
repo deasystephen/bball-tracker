@@ -197,6 +197,12 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 - **Before starting new work, ensure prior work is committed.** If there are uncommitted changes from a previous feature, test them (`npm test`, `npx tsc --noEmit`), commit them on an appropriate branch, and verify a clean `git status` before beginning a new task. Mixing unrelated features in the same uncommitted diff makes testing and rollback difficult.
 
+## Documentation Hygiene
+
+- **Keep docs in sync with code.** When a change alters behavior, APIs, schema, env vars, commands, architecture, or operational steps, update the affected documentation in the **same change** — `CLAUDE.md`, `docs/` (architecture, runbooks, testing plans, automation), and any relevant `README`.
+- **Forward-references go stale.** When you reference an unmerged PR or "incoming" work in docs, revisit it once that work lands and reword to past tense (e.g. "merged in #202", not "incoming"). Distinguish "merged to `main`" from "deployed to production" where it matters.
+- A committed **Stop hook** (`.claude/hooks/check-docs-updated.sh`) prints a reminder when code files changed in the working tree without any `docs/` or `CLAUDE.md` update. It is advisory only — treat it as a prompt to confirm docs are current, not a blocker.
+
 ## Git Workflow
 
 - Main branches: `main` and `develop`

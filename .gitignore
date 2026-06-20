@@ -68,3 +68,6 @@ docker-compose.override.yml
 Thumbs.db
 
 .gstack/
+
+# Claude Code personal overrides (committed config lives in .claude/settings.json)
+.claude/settings.local.json
