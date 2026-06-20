@@ -69,15 +69,109 @@ describe('GameEventService', () => {
     it('should throw NotFoundError if game does not exist', async () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(null);
 
-      try {
-        await GameEventService.createEvent(
+      await expect(
+        GameEventService.createEvent(
           'non-existent',
           { eventType: 'SHOT', metadata: { made: true, points: 2 } },
           'coach-id'
-        );
-      } catch (error) {
-        expectNotFoundError(error, 'Game not found');
-      }
+        )
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Game not found' });
+    });
+
+    it('should throw ForbiddenError if user has no access to the game', async () => {
+      const outsider = createPlayer();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(outsider);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      // Not staff, not a member → canAccessTeam returns false
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        GameEventService.createEvent(
+          game.id,
+          { eventType: 'SHOT', metadata: { made: true, points: 2 } },
+          outsider.id
+        )
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'You do not have access to this game',
+      });
+    });
+
+    it('should create an event with no playerId and a string timestamp', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+      const event = createGameEvent({ gameId: game.id, eventType: 'TIMEOUT' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({ ...event, player: null });
+
+      const result = await GameEventService.createEvent(
+        game.id,
+        { eventType: 'TIMEOUT', timestamp: '2026-01-02T10:00:00.000Z', metadata: {} },
+        coach.id
+      );
+
+      expect(result).toHaveProperty('id', event.id);
+      const createArgs = (mockPrisma.gameEvent.create as jest.Mock).mock.calls[0][0];
+      expect(createArgs.data.playerId).toBeNull();
+      expect(createArgs.data.timestamp).toBeInstanceOf(Date);
+    });
+
+    it('should default timestamp to now when omitted', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+      const event = createGameEvent({ gameId: game.id, eventType: 'TIMEOUT' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({ ...event, player: null });
+
+      await GameEventService.createEvent(game.id, { eventType: 'TIMEOUT', metadata: {} }, coach.id);
+
+      const createArgs = (mockPrisma.gameEvent.create as jest.Mock).mock.calls[0][0];
+      expect(createArgs.data.timestamp).toBeInstanceOf(Date);
     });
 
     it('should throw ForbiddenError if user does not have canTrackStats permission', async () => {
@@ -202,6 +296,43 @@ describe('GameEventService', () => {
       expect(result.events).toHaveLength(2);
       expect(result.total).toBe(2);
     });
+
+    it('should apply eventType and playerId filters to the where clause', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const player = createPlayer();
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.gameEvent.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
+
+      await GameEventService.listEvents(
+        game.id,
+        { limit: 5, offset: 0, eventType: 'SHOT', playerId: player.id },
+        coach.id
+      );
+
+      const findArgs = (mockPrisma.gameEvent.findMany as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where).toMatchObject({
+        gameId: game.id,
+        eventType: 'SHOT',
+        playerId: player.id,
+      });
+    });
   });
 
   describe('getEventById', () => {
@@ -268,6 +399,36 @@ describe('GameEventService', () => {
       } catch (error) {
         expectNotFoundError(error, 'Game event not found');
       }
+    });
+
+    it('should throw NotFoundError if event belongs to a different game', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id });
+      const event = createGameEvent({ gameId: 'some-other-game', eventType: 'SHOT' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue({
+        ...event,
+        player: null,
+      });
+
+      await expect(
+        GameEventService.getEventById(game.id, event.id, coach.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Game event not found' });
     });
   });
 
@@ -369,6 +530,34 @@ describe('GameEventService', () => {
       } catch (error) {
         expectForbiddenError(error, 'You do not have permission to delete game events');
       }
+    });
+
+    it('should throw NotFoundError if the event belongs to a different game', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id });
+      const event = createGameEvent({ gameId: 'another-game' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+
+      await expect(
+        GameEventService.deleteEvent(game.id, event.id, coach.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Game event not found' });
+      expect(mockPrisma.gameEvent.delete).not.toHaveBeenCalled();
     });
   });
 });

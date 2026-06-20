@@ -117,6 +117,79 @@ describe('StatsService', () => {
     });
   });
 
+  describe('getPlayerGameStats', () => {
+    it('returns a single player\'s stats for the game', async () => {
+      const admin = createAdmin();
+      const team = createTeam();
+      const player = createPlayer({ id: 'player-1', name: 'John Doe' });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id, jerseyNumber: 7, position: 'Guard' });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      const events = [
+        { ...createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } }), player: { id: player.id, name: player.name } },
+        { ...createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'REBOUND', metadata: { type: 'defensive' } }), player: { id: player.id, name: player.name } },
+      ];
+
+      // canAccessTeam short-circuits for system admins
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue(events);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [member] },
+      });
+
+      const result = await StatsService.getPlayerGameStats(game.id, player.id, admin.id);
+
+      expect(result.playerId).toBe(player.id);
+      expect(result.points).toBe(2);
+      expect(result.rebounds).toBe(1);
+    });
+
+    it('throws NotFoundError when the game does not exist', async () => {
+      const admin = createAdmin();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        StatsService.getPlayerGameStats('missing-game', 'player-1', admin.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Game not found' });
+    });
+
+    it('throws ForbiddenError when the user cannot access the game', async () => {
+      const outsider = createPlayer();
+      const team = createTeam();
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(outsider);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      // canAccessTeam: not staff, not member
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        StatsService.getPlayerGameStats(game.id, 'player-1', outsider.id)
+      ).rejects.toMatchObject({ statusCode: 403, message: 'You do not have access to this game' });
+    });
+
+    it('throws NotFoundError when the player has no stats in the game', async () => {
+      const admin = createAdmin();
+      const team = createTeam();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+
+      await expect(
+        StatsService.getPlayerGameStats(game.id, 'ghost-player', admin.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Player stats not found for this game' });
+    });
+  });
+
   describe('calculateTeamTotals', () => {
     it('should aggregate player stats into team totals', () => {
       const playerStats = [

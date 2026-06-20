@@ -7,6 +7,7 @@ import { app, httpServer } from '../../src/index';
 import { TeamService } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
+import { prismaMock } from '../setup';
 
 // Test UUIDs
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
@@ -15,15 +16,31 @@ const TEST_LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
 const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
 
+// Mutable mock auth user. Team creation is behind the FREE-tier team-count cap
+// (`requireTeamCreateLimit`). PREMIUM short-circuits that check (unlimited), so
+// the default user is an active PREMIUM coach to keep the create/validation
+// tests focused on their own concerns. The dedicated 'FREE-tier team limit'
+// block below flips this to FREE to exercise the cap + grandfather rule.
+const mockAuthUser: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  subscriptionTier: 'FREE' | 'PREMIUM' | 'LEAGUE';
+  subscriptionExpiresAt: Date | null;
+} = {
+  id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'COACH',
+  subscriptionTier: 'PREMIUM',
+  subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+};
+
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
-    req.user = {
-      id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
-      email: 'test@example.com',
-      name: 'Test User',
-      role: 'COACH',
-    };
+    req.user = { ...mockAuthUser };
     next();
   }),
   requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
@@ -32,6 +49,13 @@ jest.mock('../../src/api/auth/middleware', () => ({
 // Mock the services
 jest.mock('../../src/services/team-service');
 jest.mock('../../src/services/invitation-service');
+
+// Mock the usage service: these tests focus on team CRUD, not tier limits, so
+// allow creation by default. Tier-limit enforcement is covered in usage.test.ts.
+jest.mock('../../src/services/usage-service', () => ({
+  canCreateTeam: jest.fn().mockResolvedValue(true),
+  invalidateUsage: jest.fn().mockResolvedValue(undefined),
+}));
 
 const mockTeamService = TeamService as jest.Mocked<typeof TeamService>;
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
@@ -54,6 +78,8 @@ describe('Teams API', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthUser.subscriptionTier = 'PREMIUM';
+    mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   });
 
   describe('POST /api/v1/teams', () => {
@@ -122,6 +148,85 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(404);
       expect(response.body.error).toBe('Season not found');
+    });
+  });
+
+  // Issue #40: FREE-tier team cap is enforced on create (grandfathered).
+  describe('POST /api/v1/teams - FREE-tier team limit (grandfathering)', () => {
+    beforeEach(() => {
+      mockAuthUser.subscriptionTier = 'FREE';
+      mockAuthUser.subscriptionExpiresAt = null;
+    });
+
+    it('allows a FREE user under the limit to create a team', async () => {
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+      expect(mockTeamService.createTeam).toHaveBeenCalled();
+    });
+
+    it('blocks a FREE user at the limit with 402 upgrade_required', async () => {
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(3);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(402);
+      expect(response.body).toEqual({
+        code: 'upgrade_required',
+        feature: 'unlimited_teams',
+        currentTier: 'FREE',
+        requiredTier: 'PREMIUM',
+      });
+      expect(mockTeamService.createTeam).not.toHaveBeenCalled();
+    });
+
+    it('GRANDFATHERS over-limit FREE users: existing teams remain, new create blocked', async () => {
+      // A user already over the cap (e.g. downgraded from PREMIUM with 5 teams)
+      // keeps those teams (no deletion happens here) but cannot create more.
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(5);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Sixth Team', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(402);
+      expect(response.body.code).toBe('upgrade_required');
+      // The create is blocked but nothing about the existing teams is mutated.
+      expect(mockTeamService.createTeam).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.delete).not.toHaveBeenCalled();
+    });
+
+    it('allows a PREMIUM user unlimited team creation without a count query', async () => {
+      mockAuthUser.subscriptionTier = 'PREMIUM';
+      mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
+    });
+
+    it('allows a LEAGUE user unlimited team creation', async () => {
+      mockAuthUser.subscriptionTier = 'LEAGUE';
+      mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
     });
   });
 

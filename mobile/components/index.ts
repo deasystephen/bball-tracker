@@ -18,3 +18,4 @@ export * from './AvatarPicker';
 export * from './BadgeGrid';
 export * from './FeatureGate';
 export * from './UpgradePrompt';
+export * from './UsageMeter';

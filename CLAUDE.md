@@ -68,11 +68,19 @@ Backend API (Node.js/Express)
 
 ### Backend Structure (`/backend/src/`)
 - **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, middleware). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
-- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131
+- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131 and `usage-service.ts` (usage metering, #43)
 - **kafka/**: Kafka producers/consumers for event streaming
 - **websocket/**: Socket.io handlers for real-time updates
 - **models/**: Prisma ORM models
-- **utils/**: Helpers (logger, errors, workos-client)
+- **utils/**: Helpers (logger, errors, workos-client, redis caching helpers)
+
+### Usage Metering & Tier Limits (#43)
+- `services/usage-service.ts` exposes `getUsage(userId)` → per-feature `{ count, limit, limitReached }`. Counts are derived from live data at read time (no counter table) and cached in Redis for 60s (`utils/redis.ts` JSON helpers), invalidated on team create/delete.
+- **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `utils/entitlements.ts` (`getUsageLimits`) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited (paid tiers).
+- **Endpoint**: `GET /api/v1/auth/me/usage` returns all metered metrics for the current user's effective tier.
+- **Enforcement**: team create (`POST /api/v1/teams`) blocks FREE-tier users at/over the cap with a **402** (`PaymentRequiredError`); admins bypass.
+- **Grandfather rule**: enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over the cap when enforcement shipped keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or upgraded. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
+- **Out of scope** (#43): per-day/per-hour rate limits, usage-based pricing, admin usage dashboards.
 
 ### Mobile Structure (`/mobile/`)
 - **app/**: Expo Router screens (file-based routing)
@@ -101,6 +109,27 @@ issue #26 for the Redis adapter follow-up.
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.
+
+### Entitlements / Feature Gating
+
+Subscription feature gating has a **single source of truth**:
+`backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
+feature->tier map (FREE / PREMIUM / LEAGUE), usage limits, and the
+`FREE_TEAM_LIMIT` constant (3). Do not redefine tier rules elsewhere — import
+from there (issue #43's usage metering reuses these constants).
+
+Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
+
+- `requireEntitlement(feature)` — gates a route behind a feature. On denial it
+  returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
+  Applied to team season-stats CSV export (`STATS_EXPORT`) and calendar
+  subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
+  subscriptions resolve to an effective FREE tier.
+- `requireTeamCreateLimit()` — enforces the FREE-tier team cap on `POST /teams`.
+  **Grandfather rule:** the cap is checked only at create time. Users already
+  over the limit KEEP their existing teams (nothing is deleted); they just
+  cannot create new ones until under the cap or upgraded. PREMIUM/LEAGUE are
+  unlimited and skip the count query.
 
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)

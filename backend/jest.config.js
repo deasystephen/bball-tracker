@@ -19,27 +19,38 @@ module.exports = {
   ],
   // Coverage thresholds — floors, not aspirations. CI enforces these via
   // `npm test -- --coverage`. Ratchet upward over time; never lower.
-  // Current snapshot (2026-04-13, pass 3):
-  //   Istanbul summary — global stmts 89.52 / branches 69.55 / lines 89.48 /
-  //   functions 92.08; services stmts 94.30 / branches 81.84 / lines 94.21 /
-  //   functions 98.41.
+  // Current snapshot (2026-06-19, pass 4):
+  //   Istanbul summary — global stmts 90.91 / branches 71.55 / lines 91.01 /
+  //   functions 93.46; services stmts 96.29 / branches 84.53 / lines 96.43 /
+  //   functions 100.
   //   Jest threshold-global computes lower than the summary (known quirk):
-  //   stmts 84.39 / branches 57.19 / lines 84.43 / functions 86.84. Global
-  //   thresholds are calibrated against that, 1–2pt below for cushion.
-  // GA targets (per summary): global 80/70/80/80, services 85/75/85/85 — met.
-  // Ratchet tracking: #51.
+  //   global stmts 84.71 / branches 57.60 / lines 84.75 / functions 87.09;
+  //   services stmts 96.38 / branches 84.55 / lines 96.58 / functions 100.
+  //   Pass 4 added error-path/role-check branch tests for game-event,
+  //   rsvp, announcement, invitation (listInvitations auth) and
+  //   stats (getPlayerGameStats) services.
+  //   Thresholds are calibrated against the Jest threshold-global numbers,
+  //   rounded down for cushion. Never lower.
+  // GA targets (per summary): global 80/70/80/80, services 85/75/85/85.
+  //   Summary-level GA targets are met; services branches (84.53) is just
+  //   under the 85 aspiration. Ratchet tracking: #51.
   coverageThreshold: {
     global: {
       branches: 57,
+      // 86 (not #51's originally proposed 87): merging the #40 entitlement
+      // middleware and #43 usage-metering code into this branch added functions
+      // whose coverage lands the merged-tree global at 86.41%. Ratcheted to the
+      // achieved floor so the gate stays deterministic; this still matches
+      // develop's existing function gate (no regression below it).
       functions: 86,
-      lines: 83,
-      statements: 83,
+      lines: 84,
+      statements: 84,
     },
     './src/services/': {
-      branches: 80,
-      functions: 97,
-      lines: 93,
-      statements: 93,
+      branches: 84,
+      functions: 100,
+      lines: 96,
+      statements: 96,
     },
   },
   moduleNameMapper: {
