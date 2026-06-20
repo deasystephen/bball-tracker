@@ -207,6 +207,7 @@ resource "aws_ecs_task_definition" "app" {
       { name = "WORKOS_REDIRECT_URI", value = "https://api.${var.domain_name}/api/v1/auth/callback" },
       { name = "CORS_ORIGIN", value = "https://api.${var.domain_name}" },
       { name = "ADMIN_EMAIL", value = var.admin_email },
+      { name = "ADMIN_EMAILS", value = var.admin_emails },
       { name = "S3_AVATARS_BUCKET", value = aws_s3_bucket.avatars.id },
       { name = "AWS_REGION", value = var.aws_region },
     ]

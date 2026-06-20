@@ -9,7 +9,7 @@ account to the role the plan needs.
 
 All personas use `+alias` addresses on the verified inbox so they (a) sign in as distinct
 WorkOS identities, (b) all deliver to one Gmail inbox, and (c) never collide with the ADMIN
-auto-assignment (which is an exact match on `ADMIN_EMAIL`, see `workos-service.ts`).
+auto-assignment (the allowlist match in `workos-service.ts` — see "Adding an admin tester" below).
 
 | Persona | Sign-in email | System `User.role` | Team linkage | Receives email? |
 |---|---|---|---|---|
@@ -107,6 +107,28 @@ are, three things to know:
   is the simplest way to exercise the export paths.
 
 See `backend/src/services/entitlements/` and `backend/src/api/middleware/entitlements.ts`.
+
+## Adding an admin tester
+
+ADMIN is granted **only at first sign-up**, to emails on an allowlist read from env
+(`ADMIN_EMAILS`, comma-separated; legacy single `ADMIN_EMAIL` still honored), case-insensitive —
+see `backend/src/utils/admin-emails.ts`. There is no in-app "make admin" action, and re-login
+never changes an existing user's role.
+
+To add a tester (e.g. a second admin):
+
+1. **If they have NOT signed up yet** — add their email to the `ADMIN_EMAILS` allowlist and deploy
+   *before* they sign up. Set it in `infra/task-definition.json` (and `admin_emails` in your
+   Terraform vars / `infra/ecs.tf`), then roll the ECS service. They get ADMIN automatically on
+   first sign-up.
+2. **If they have ALREADY signed up** — the allowlist won't retroactively promote them. Update the
+   DB directly:
+
+   ```sql
+   UPDATE "User" SET role = 'ADMIN' WHERE email = 'their-email@example.com';
+   ```
+
+   (Point at the production DB from `bball-tracker-production/database-url` in Secrets Manager.)
 
 ## Gotchas
 

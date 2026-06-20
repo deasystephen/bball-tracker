@@ -18,3 +18,6 @@ workos_client_id = ""
 
 # Domain (ACM certificate is managed automatically via dns.tf)
 domain_name = "capyhoops.com"
+
+# Admin allowlist — comma-separated emails granted ADMIN role on first sign-up
+admin_emails = "owner@example.com,helper@example.com"

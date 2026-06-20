@@ -5,6 +5,7 @@
 import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI } from '../utils/workos-client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
+import { isAdminEmail } from '../utils/admin-emails';
 
 export class WorkOSService {
   /**
@@ -129,7 +130,7 @@ export class WorkOSService {
         workosUserId: workosUser.id,
         email: workosUser.email,
         name: fullName,
-        role: process.env.ADMIN_EMAIL === workosUser.email ? 'ADMIN' : 'PLAYER',
+        role: isAdminEmail(workosUser.email) ? 'ADMIN' : 'PLAYER',
         emailVerified: workosUser.emailVerified || false,
         profilePictureUrl: workosUser.profilePictureUrl || null,
       },
