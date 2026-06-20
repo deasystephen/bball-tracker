@@ -15,6 +15,7 @@ import {
   createAnnouncementSchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { AnnouncementService } from '../../services/announcement-service';
@@ -31,11 +32,14 @@ router.use(authenticate);
 
 /**
  * POST /api/v1/teams
- * Create a new team
+ * Create a new team.
  *
- * FREE-tier users are capped at FREE_TEAM_LIMIT teams (grandfathered -- see
- * src/services/entitlements). `requireTeamCreateLimit` returns 402 when the cap
- * is reached.
+ * FREE-tier users are capped at FREE_TEAM_LIMIT teams (see
+ * src/services/entitlements). `requireTeamCreateLimit` returns a 402 Payment
+ * Required when the cap is reached so the client can surface an upgrade CTA.
+ * Users already over the cap when enforcement shipped keep their existing teams
+ * but cannot create new ones (grandfather rule — see usage-service). System
+ * admins bypass the cap.
  */
 router.post('/', requireTeamCreateLimit(), async (req, res) => {
   try {
@@ -47,7 +51,12 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
       );
     }
 
+    // The tier team cap is enforced ahead of this handler by the
+    // `requireTeamCreateLimit()` middleware (402 on denial; admins bypass).
     const team = await TeamService.createTeam(validationResult.data, req.user!.id);
+
+    // A new team changes the user's metered counts — invalidate cached usage.
+    await invalidateUsage(req.user!.id);
 
     res.status(201).json({
       success: true,
@@ -168,6 +177,9 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
     await TeamService.deleteTeam(req.params.id as string, req.user!.id);
+
+    // Deleting a team changes the user's metered counts — invalidate cache.
+    await invalidateUsage(req.user!.id);
 
     res.json({
       success: true,

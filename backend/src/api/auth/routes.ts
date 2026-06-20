@@ -11,6 +11,7 @@ import { logger } from '../../utils/logger';
 import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
+import { getUsage } from '../../services/usage-service';
 import { z } from 'zod';
 
 const router = Router();
@@ -283,6 +284,24 @@ router.get('/entitlements', authenticate, (req, res) => {
     limits: getUsageLimits(tier),
     expiresAt: user.subscriptionExpiresAt,
   });
+});
+
+/**
+ * GET /api/v1/auth/me/usage
+ * Returns the current user's usage vs limits for every metered feature
+ * (teams, seasons). Counts are derived from live data and cached in Redis for
+ * 60s. Used to drive client-side usage meters and upgrade CTAs.
+ */
+router.get('/me/usage', authenticate, async (req, res) => {
+  try {
+    const usage = await getUsage(req.user!.id);
+    res.json({ success: true, usage });
+  } catch (error) {
+    logger.error('Error getting usage', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(500).json({ error: 'Failed to get usage' });
+  }
 });
 
 /**

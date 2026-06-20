@@ -68,11 +68,19 @@ Backend API (Node.js/Express)
 
 ### Backend Structure (`/backend/src/`)
 - **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, middleware). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
-- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131
+- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131 and `usage-service.ts` (usage metering, #43)
 - **kafka/**: Kafka producers/consumers for event streaming
 - **websocket/**: Socket.io handlers for real-time updates
 - **models/**: Prisma ORM models
-- **utils/**: Helpers (logger, errors, workos-client)
+- **utils/**: Helpers (logger, errors, workos-client, redis caching helpers)
+
+### Usage Metering & Tier Limits (#43)
+- `services/usage-service.ts` exposes `getUsage(userId)` → per-feature `{ count, limit, limitReached }`. Counts are derived from live data at read time (no counter table) and cached in Redis for 60s (`utils/redis.ts` JSON helpers), invalidated on team create/delete.
+- **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `utils/entitlements.ts` (`getUsageLimits`) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited (paid tiers).
+- **Endpoint**: `GET /api/v1/auth/me/usage` returns all metered metrics for the current user's effective tier.
+- **Enforcement**: team create (`POST /api/v1/teams`) blocks FREE-tier users at/over the cap with a **402** (`PaymentRequiredError`); admins bypass.
+- **Grandfather rule**: enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over the cap when enforcement shipped keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or upgraded. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
+- **Out of scope** (#43): per-day/per-hour rate limits, usage-based pricing, admin usage dashboards.
 
 ### Mobile Structure (`/mobile/`)
 - **app/**: Expo Router screens (file-based routing)
