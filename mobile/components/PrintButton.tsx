@@ -64,11 +64,6 @@ export const PrintButton: React.FC<PrintButtonProps> = ({
 }) => {
   const { colors } = useTheme();
 
-  // Only render on web
-  if (Platform.OS !== 'web') {
-    return null;
-  }
-
   // Inject print styles on mount
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -87,6 +82,11 @@ export const PrintButton: React.FC<PrintButtonProps> = ({
       };
     }
   }, []);
+
+  // Only render on web (after hooks, to keep hook call order stable)
+  if (Platform.OS !== 'web') {
+    return null;
+  }
 
   const handlePrint = () => {
     if (Platform.OS === 'web') {

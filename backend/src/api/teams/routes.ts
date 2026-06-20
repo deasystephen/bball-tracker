@@ -14,12 +14,14 @@ import {
   createManagedPlayerSchema,
   createAnnouncementSchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
-import { canCreateTeam, invalidateUsage } from '../../services/usage-service';
+import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
+import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitlements';
+import { Feature } from '../../services/entitlements';
 import { logger } from '../../utils/logger';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
@@ -32,13 +34,14 @@ router.use(authenticate);
  * POST /api/v1/teams
  * Create a new team.
  *
- * FREE-tier users are capped at their tier's team limit (see
- * utils/entitlements). When at/over the cap, creation is blocked with a 402
- * Payment Required so the client can surface an upgrade CTA. Users already over
- * the cap when enforcement shipped keep their existing teams but cannot create
- * new ones (grandfather rule — see usage-service). System admins bypass the cap.
+ * FREE-tier users are capped at FREE_TEAM_LIMIT teams (see
+ * src/services/entitlements). `requireTeamCreateLimit` returns a 402 Payment
+ * Required when the cap is reached so the client can surface an upgrade CTA.
+ * Users already over the cap when enforcement shipped keep their existing teams
+ * but cannot create new ones (grandfather rule — see usage-service). System
+ * admins bypass the cap.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireTeamCreateLimit(), async (req, res) => {
   try {
     // Validate request body
     const validationResult = createTeamSchema.safeParse(req.body);
@@ -48,13 +51,8 @@ router.post('/', async (req, res) => {
       );
     }
 
-    // Enforce the tier team limit (admins bypass).
-    if (req.user!.role !== 'ADMIN' && !(await canCreateTeam(req.user!.id))) {
-      throw new PaymentRequiredError(
-        "You have reached your plan's team limit. Upgrade to create more teams."
-      );
-    }
-
+    // The tier team cap is enforced ahead of this handler by the
+    // `requireTeamCreateLimit()` middleware (402 on denial; admins bypass).
     const team = await TeamService.createTeam(validationResult.data, req.user!.id);
 
     // A new team changes the user's metered counts — invalidate cached usage.
@@ -69,8 +67,7 @@ router.post('/', async (req, res) => {
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof PaymentRequiredError
+      error instanceof ForbiddenError
     ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -439,9 +436,13 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
 /**
  * GET /api/v1/teams/:id/season-stats.csv
  * Export per-player season aggregates as CSV
- * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ * Gated behind the STATS_EXPORT feature (PREMIUM+).
  */
-router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) => {
+router.get(
+  '/:id/season-stats.csv',
+  validateUuidParams('id'),
+  requireEntitlement(Feature.STATS_EXPORT),
+  async (req, res) => {
   try {
     const exportFile = await StatsExportService.exportTeamSeasonStatsCsv(
       req.params.id as string,
@@ -472,6 +473,7 @@ router.get('/:id/season-stats.csv', validateUuidParams('id'), async (req, res) =
       res.status(500).json({ error: 'Failed to export team season CSV' });
     }
   }
-});
+  }
+);
 
 export default router;

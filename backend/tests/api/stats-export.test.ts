@@ -12,15 +12,29 @@ const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const TEST_GAME_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 
+// Mutable mock auth user so individual tests can vary the subscription tier.
+// The team season-stats CSV export is gated behind STATS_EXPORT (PREMIUM), so
+// the default user is an active PREMIUM coach.
+const mockAuthUser: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  subscriptionTier: 'FREE' | 'PREMIUM' | 'LEAGUE';
+  subscriptionExpiresAt: Date | null;
+} = {
+  id: TEST_USER_ID,
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'COACH',
+  subscriptionTier: 'PREMIUM',
+  subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+};
+
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
-    req.user = {
-      id: TEST_USER_ID,
-      email: 'test@example.com',
-      name: 'Test User',
-      role: 'COACH',
-    };
+    req.user = { ...mockAuthUser };
     next();
   }),
   requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
@@ -37,6 +51,8 @@ afterAll((done) => {
 describe('Stats Export API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthUser.subscriptionTier = 'PREMIUM';
+    mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   });
 
   describe('GET /api/v1/games/:id/export.csv', () => {
@@ -144,6 +160,22 @@ describe('Stats Export API', () => {
       const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/season-stats.csv`);
 
       expect(res.status).toBe(403);
+    });
+
+    it('returns 402 upgrade_required for a FREE user (stats export gated)', async () => {
+      mockAuthUser.subscriptionTier = 'FREE';
+      mockAuthUser.subscriptionExpiresAt = null;
+
+      const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/season-stats.csv`);
+
+      expect(res.status).toBe(402);
+      expect(res.body).toEqual({
+        code: 'upgrade_required',
+        feature: 'stats_export',
+        currentTier: 'FREE',
+        requiredTier: 'PREMIUM',
+      });
+      expect(mockExport.exportTeamSeasonStatsCsv).not.toHaveBeenCalled();
     });
   });
 });

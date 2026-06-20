@@ -39,7 +39,6 @@ jobs:
         run: npx prisma generate
 
       - name: Run linter
-        if: matrix.project == 'backend'
         working-directory: ${{ matrix.project }}
         run: npm run lint
 

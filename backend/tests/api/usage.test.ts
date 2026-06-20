@@ -13,6 +13,7 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import * as usageService from '../../src/services/usage-service';
 import { TeamService } from '../../src/services/team-service';
+import { prismaMock } from '../setup';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
@@ -99,8 +100,14 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
   const validBody = { name: 'Lakers', seasonId: TEST_SEASON_ID };
   const createdTeam = { id: TEST_TEAM_ID, name: 'Lakers', seasonId: TEST_SEASON_ID };
 
-  it('creates the team when the user is under the cap', async () => {
-    mockUsageService.canCreateTeam.mockResolvedValue(true);
+  // Team-create is gated by the `requireTeamCreateLimit()` middleware, which
+  // counts the user's staff teams via prisma and blocks FREE-tier users at/over
+  // the cap with a 402 `upgrade_required`. These tests exercise that gate end to
+  // end plus the handler's usage-cache invalidation on a successful create.
+  // (The exhaustive PREMIUM/LEAGUE/grandfather matrix lives in teams.test.ts.)
+
+  it('creates the team and invalidates cached usage when under the cap', async () => {
+    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(1);
     mockTeamService.createTeam.mockResolvedValue(createdTeam as any);
 
     const response = await request(app)
@@ -111,12 +118,12 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
     expect(mockTeamService.createTeam).toHaveBeenCalled();
-    // Cache invalidated after a successful create.
+    // A new team changes metered counts — cache must be invalidated.
     expect(mockUsageService.invalidateUsage).toHaveBeenCalledWith(TEST_USER_ID);
   });
 
-  it('blocks with 402 when the FREE-tier user is at/over the cap', async () => {
-    mockUsageService.canCreateTeam.mockResolvedValue(false);
+  it('blocks with 402 upgrade_required when the FREE-tier user is at/over the cap', async () => {
+    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(3);
 
     const response = await request(app)
       .post('/api/v1/teams')
@@ -124,26 +131,13 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
       .send(validBody);
 
     expect(response.status).toBe(402);
-    expect(response.body.error).toMatch(/team limit/i);
-    // The team must NOT have been created.
+    expect(response.body.code).toBe('upgrade_required');
+    // The team must NOT have been created and the cache must NOT be touched.
     expect(mockTeamService.createTeam).not.toHaveBeenCalled();
     expect(mockUsageService.invalidateUsage).not.toHaveBeenCalled();
   });
 
-  it('grandfather: an already-over-limit user is blocked from creating, with a 402', async () => {
-    // canCreateTeam returns false for a user already over the cap (5 of 3).
-    mockUsageService.canCreateTeam.mockResolvedValue(false);
-
-    const response = await request(app)
-      .post('/api/v1/teams')
-      .set('Authorization', 'Bearer valid-token')
-      .send(validBody);
-
-    expect(response.status).toBe(402);
-    expect(mockTeamService.createTeam).not.toHaveBeenCalled();
-  });
-
-  it('admins bypass the cap entirely (limit not even checked)', async () => {
+  it('admins bypass the cap entirely (count not even queried)', async () => {
     currentUser.role = 'ADMIN';
     mockTeamService.createTeam.mockResolvedValue(createdTeam as any);
 
@@ -153,18 +147,20 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
       .send(validBody);
 
     expect(response.status).toBe(201);
-    expect(mockUsageService.canCreateTeam).not.toHaveBeenCalled();
+    expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
     expect(mockTeamService.createTeam).toHaveBeenCalled();
   });
 
-  it('still validates the body before checking the limit (400 on bad input)', async () => {
+  it('still validates the body (400) for an under-cap user with bad input', async () => {
+    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(0);
+
     const response = await request(app)
       .post('/api/v1/teams')
       .set('Authorization', 'Bearer valid-token')
       .send({ name: '' });
 
     expect(response.status).toBe(400);
-    expect(mockUsageService.canCreateTeam).not.toHaveBeenCalled();
+    expect(mockTeamService.createTeam).not.toHaveBeenCalled();
   });
 });
 

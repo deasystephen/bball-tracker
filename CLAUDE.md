@@ -110,6 +110,27 @@ issue #26 for the Redis adapter follow-up.
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.
 
+### Entitlements / Feature Gating
+
+Subscription feature gating has a **single source of truth**:
+`backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
+feature->tier map (FREE / PREMIUM / LEAGUE), usage limits, and the
+`FREE_TEAM_LIMIT` constant (3). Do not redefine tier rules elsewhere — import
+from there (issue #43's usage metering reuses these constants).
+
+Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
+
+- `requireEntitlement(feature)` — gates a route behind a feature. On denial it
+  returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
+  Applied to team season-stats CSV export (`STATS_EXPORT`) and calendar
+  subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
+  subscriptions resolve to an effective FREE tier.
+- `requireTeamCreateLimit()` — enforces the FREE-tier team cap on `POST /teams`.
+  **Grandfather rule:** the cap is checked only at create time. Users already
+  over the limit KEEP their existing teams (nothing is deleted); they just
+  cannot create new ones until under the cap or upgraded. PREMIUM/LEAGUE are
+  unlimited and skip the count query.
+
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
 - Event-driven: Kafka for game events, Flink for real-time aggregation
