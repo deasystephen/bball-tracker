@@ -142,7 +142,13 @@ variable "domain_name" {
 
 # Admin
 variable "admin_email" {
-  description = "Email address that gets ADMIN role on first sign-up"
+  description = "Single email that gets ADMIN role on first sign-up (legacy; prefer admin_emails)"
+  type        = string
+  default     = ""
+}
+
+variable "admin_emails" {
+  description = "Comma-separated allowlist of emails that get ADMIN role on first sign-up"
   type        = string
   default     = ""
 }
