@@ -234,6 +234,57 @@ describe('AnnouncementService', () => {
 
       await Promise.resolve();
     });
+
+    it('emails members (excluding the author and emailless members) with name fallbacks', async () => {
+      const team = createTeam({ name: 'Hoops' });
+      const admin = createAdmin();
+      const namedPlayer = { id: 'p1', name: 'Alice', email: 'alice@test.com' };
+      const namelessPlayer = { id: 'p2', name: null, email: 'p2@test.com' };
+      const authorAsMember = { id: admin.id, name: admin.name, email: admin.email };
+      const emaillessPlayer = { id: 'p3', name: 'NoEmail', email: null };
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: team.id,
+        name: team.name,
+        members: [
+          { player: namedPlayer },
+          { player: namelessPlayer },
+          { player: authorAsMember },
+          { player: emaillessPlayer },
+        ],
+      });
+      setSystemAdmin();
+      // Author with no name and no email exercises the `?? ''` fallback
+      (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
+        id: 'a5',
+        teamId: team.id,
+        authorId: admin.id,
+        title: 'Practice',
+        body: 'See you there',
+        author: { id: admin.id, name: null, email: null },
+      });
+
+      await AnnouncementService.createAnnouncement(
+        team.id,
+        { title: 'Practice', body: 'See you there' },
+        admin.id
+      );
+      await Promise.resolve();
+
+      // Only the two emailable non-author members get an email
+      expect(mockedMailerSend).toHaveBeenCalledTimes(2);
+      const recipientEmails = mockedMailerSend.mock.calls.map((c) => c[0].to);
+      expect(recipientEmails).toEqual(
+        expect.arrayContaining(['alice@test.com', 'p2@test.com'])
+      );
+      expect(recipientEmails).not.toContain(admin.email);
+
+      const namelessCall = mockedMailerSend.mock.calls.find((c) => c[0].to === 'p2@test.com');
+      expect(namelessCall?.[0].variables).toMatchObject({
+        recipientName: 'p2@test.com',
+        authorName: '',
+      });
+    });
   });
 
   describe('listAnnouncements', () => {
