@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile TestFlight #17, Backend ECS task-def revision 133, SES `mail.capyhoops.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build (v1.0.0), Backend ECS task-def revision 133, SES `mail.capyhoops.com`, Web — not deployed
 **Owner:** sdeasy
 
 Run-through guide for verifying v2.0 functionality end-to-end before declaring the release ready for general access. Check the `- [ ]` box for each pass, note Fail + reason in the Notes line. Tests are grouped by feature area; later sections often depend on test data created earlier (e.g., Games require a Team from D).
@@ -23,7 +23,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 ### P.1 — Build & environment verification
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  1. On iPhone, confirm TestFlight build #17 (v1.0.0) is installed
+  1. On iPhone, confirm the **latest** TestFlight build (v1.0.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.)
   2. From terminal: `curl -s https://api.capyhoops.com/health` → expect 200
   3. From terminal: `aws sesv2 get-email-identity --email-identity mail.capyhoops.com --region us-east-1 | jq '.VerifiedForSendingStatus'` → expect `true`
 - **Notes:** ___________
@@ -41,7 +41,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Steps:**
   1. Open app, tap login
-  2. Verify "Developer login with test users" option is present (only available in non-prod builds — confirm whether build #17 exposes it)
+  2. Verify "Developer login with test users" option is present (only available in non-prod builds — confirm whether the current build exposes it)
 - **Expected:** If hidden in production builds, all subsequent tests must use real WorkOS sign-in instead — flag this and substitute personal accounts for each role.
 - **Notes:** ___________
 
@@ -279,7 +279,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** invited user (signed in)
 - **Steps:**
-  1. On iPhone with TestFlight build #17, tap the "Accept Invitation" button in Gmail
+  1. On iPhone with the latest TestFlight build, tap the "Accept Invitation" button in Gmail
 - **Expected:** Safari/Mail does NOT open. Instead the app opens to `mobile/app/invite/[token].tsx` and shows "Team Invitation" with team name, inviter, accept/decline buttons.
 - **Notes:** If it opens in Safari instead, AASA isn't being served correctly — but note that AASA is served from `capyhoops.com` which has no web deploy yet (see S.2). The fallback this triggers is the expected-broken path.
 
@@ -955,3 +955,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-05-25: v1 — created post-v2.0-batch (PRs #131, #130, #137, #138, #150). Built #17 on TestFlight.
 - 2026-06-08: M.2 — noted pdfkit version bump (#173).
 - 2026-06-14: accuracy pass — pdfkit note → 0.19.1, invitation-service catch line → :171.
+- 2026-06-20: de-pinned the Mobile build reference — was "TestFlight #17", now "latest TestFlight build" (iOS build numbers are auto-incremented remotely by EAS and not tracked in-repo, so the `#17` pin went stale as newer builds shipped). Marketing version is still v1.0.0.
