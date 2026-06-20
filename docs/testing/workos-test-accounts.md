@@ -47,6 +47,13 @@ done
 
 (`+invitee2` is the second invitee used in test E.6.)
 
+Both steps above are wrapped by [`backend/scripts/verify-ses-test-recipients.sh`](../../backend/scripts/verify-ses-test-recipients.sh):
+
+```bash
+backend/scripts/verify-ses-test-recipients.sh create   # request verification for each alias
+backend/scripts/verify-ses-test-recipients.sh status   # show verified/pending per alias
+```
+
 ## Step 2 — Role promotion sequence
 
 Only **ADMIN** (auto via `ADMIN_EMAIL`) and **Head Coach** (after a role bump + creating a team
