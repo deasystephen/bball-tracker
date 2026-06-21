@@ -16,7 +16,7 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Basketball Tracker' : `Basketball Tracker (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    version: '1.0.0',
+    version: '1.1.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
