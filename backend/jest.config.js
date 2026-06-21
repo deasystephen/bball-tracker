@@ -41,7 +41,7 @@ module.exports = {
       // middleware and #43 usage-metering code into this branch added functions
       // whose coverage lands the merged-tree global at 86.41%. Ratcheted to the
       // achieved floor so the gate stays deterministic; this still matches
-      // develop's existing function gate (no regression below it).
+      // the prior function gate (no regression below it).
       functions: 86,
       lines: 84,
       statements: 84,

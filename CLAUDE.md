@@ -205,7 +205,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 ## Git Workflow
 
-- Main branches: `main` and `develop`
+- Single long-lived branch: `main`. All work happens on short-lived feature branches that merge back into `main` via PR.
 - Feature branches from `main`: `feature/your-feature-name`
 - Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
 - **Tagging**: When pushing major changes to GitHub (new features, design overhauls, large refactors), create an annotated tag with `git tag -a vX.Y.Z -m "description"` and push it with `git push origin vX.Y.Z`. Use semantic versioning:

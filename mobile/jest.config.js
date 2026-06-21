@@ -42,7 +42,7 @@ module.exports = {
       // 71 (not the originally proposed 72): merging #43's usage-metering
       // mobile UI (UsageMeter, useUsage, Profile card) into this branch lands
       // the merged-tree branch coverage at 71.61%. Ratcheted to the achieved
-      // floor; still a large increase over develop's baseline (58).
+      // floor; still a large increase over the prior baseline (58).
       branches: 71,
       functions: 73,
       lines: 74,
