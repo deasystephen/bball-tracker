@@ -1,0 +1,21 @@
+appId: com.bballtracker.mobile
+---
+# Regression guard for the WorkOS OAuth callback deep link.
+#
+# The redirect bball-tracker://auth/callback?code=… must resolve to the
+# app/auth/callback.tsx route. Before that route existed, the deep link fell
+# through to Expo Router's "Unmatched Route" screen (see the fix in
+# app/auth/callback.tsx). A full success run needs a live WorkOS code exchange,
+# so this flow exercises the deterministic error branch instead: an error in
+# the callback params must render the recoverable "Sign In Failed" screen —
+# proving the route resolves — and never the "Unmatched Route" fallback.
+- launchApp:
+    clearState: true
+# Deep-link straight into the callback route with an OAuth error param.
+- openLink: "bball-tracker://auth/callback?error=access_denied"
+# The route resolved and rendered our error UI (not Expo Router's fallback).
+- assertVisible: "Sign In Failed"
+- assertNotVisible: "Unmatched Route"
+# The recovery action returns the user to the sign-in screen.
+- tapOn: "Back to Sign In"
+- assertVisible: "Basketball Tracker"
