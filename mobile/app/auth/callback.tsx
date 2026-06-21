@@ -19,6 +19,17 @@ import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { spacing } from '../../theme';
 
+/**
+ * Errors that are knowable from the deep link itself (WorkOS returned an error,
+ * or no code came back) are derived during render — no effect/state needed.
+ * Only the async token-exchange failure has to live in state.
+ */
+function getParamError(oauthError?: string, code?: string): string | null {
+  if (oauthError) return oauthError;
+  if (!code) return 'No authorization code was returned. Please try signing in again.';
+  return null;
+}
+
 export default function AuthCallbackScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -28,23 +39,15 @@ export default function AuthCallbackScreen() {
     error?: string;
   }>();
 
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const paramError = getParamError(oauthError, code);
+  const [exchangeError, setExchangeError] = useState<string | null>(null);
   // Guard so the code is only exchanged once, even if the effect re-runs.
   const exchangedRef = useRef(false);
 
   useEffect(() => {
+    if (paramError || !code) return;
     if (exchangedRef.current) return;
     exchangedRef.current = true;
-
-    if (oauthError) {
-      setErrorMessage(oauthError);
-      return;
-    }
-
-    if (!code) {
-      setErrorMessage('No authorization code was returned. Please try signing in again.');
-      return;
-    }
 
     (async () => {
       try {
@@ -58,10 +61,12 @@ export default function AuthCallbackScreen() {
       } catch (err) {
         captureException(err, { flow: 'auth-callback' });
         console.error('Token exchange error:', err);
-        setErrorMessage('Failed to complete sign in. Please try again.');
+        setExchangeError('Failed to complete sign in. Please try again.');
       }
     })();
-  }, [code, oauthError, router, setAuthToken, setUser]);
+  }, [code, paramError, router, setAuthToken, setUser]);
+
+  const errorMessage = paramError ?? exchangeError;
 
   if (errorMessage) {
     return (

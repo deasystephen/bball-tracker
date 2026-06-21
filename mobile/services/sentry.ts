@@ -86,7 +86,6 @@ export function initSentry(): void {
   const dsn = (extra?.sentryDsn as string | undefined) || process.env.SENTRY_DSN;
   if (!dsn) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.log('[Sentry] No DSN configured, skipping initialization');
     }
     return;
@@ -117,7 +116,6 @@ export function initSentry(): void {
     initialized = true;
   } catch (error) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.warn('[Sentry] Failed to initialize:', error);
     }
   }
