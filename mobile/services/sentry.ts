@@ -86,7 +86,6 @@ export function initSentry(): void {
   const dsn = (extra?.sentryDsn as string | undefined) || process.env.SENTRY_DSN;
   if (!dsn) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.log('[Sentry] No DSN configured, skipping initialization');
     }
     return;
@@ -117,7 +116,6 @@ export function initSentry(): void {
     initialized = true;
   } catch (error) {
     if (__DEV__) {
-      // eslint-disable-next-line no-console
       console.warn('[Sentry] Failed to initialize:', error);
     }
   }
@@ -145,6 +143,28 @@ export function setSentryUser(userId: string | null): void {
     }
   } catch {
     // swallow
+  }
+}
+
+/**
+ * Report a caught exception to Sentry.
+ *
+ * No-op until init has run (dev, or production without a DSN wired), so callers
+ * can wire it into catch blocks unconditionally. Optional `context` is attached
+ * as event contexts and runs through `beforeSend` scrubbing like any other event.
+ */
+export function captureException(
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
+  if (!initialized) return;
+  try {
+    Sentry.captureException(
+      error,
+      context ? { contexts: { app: context } } : undefined
+    );
+  } catch {
+    // swallow — error reporting must never throw into the caller's catch block
   }
 }
 

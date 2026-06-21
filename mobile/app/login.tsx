@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
+import { captureException } from '../services/sentry';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { borderRadius } from '../theme/border-radius';
@@ -27,63 +28,9 @@ export default function Login() {
   const [showDevLogin, setShowDevLogin] = useState(false);
   const [devUsers, setDevUsers] = useState<DevUser[]>([]);
 
-  // Handle deep link callback from OAuth redirect
-  useEffect(() => {
-    const handleDeepLink = async (event: { url: string }) => {
-      const { url } = event;
-      const parsed = Linking.parse(url);
-
-      // Check if this is an auth callback
-      if (parsed.path === 'auth/callback' || parsed.queryParams?.code) {
-        const code = parsed.queryParams?.code as string;
-        const error = parsed.queryParams?.error as string | undefined;
-
-        if (error) {
-          Alert.alert('Authentication Error', error);
-          setIsLoading(false);
-          return;
-        }
-
-        if (code) {
-          try {
-            setIsLoading(true);
-            // Exchange code for token via backend
-            const response = await apiClient.get('/auth/callback', {
-              params: { code },
-            });
-
-            const { accessToken, user } = response.data;
-
-            // Store token and user
-            setAuthToken(accessToken);
-            setUser(user);
-
-            // Navigate to home
-            router.replace('/(tabs)/home');
-          } catch (error) {
-            console.error('Token exchange error:', error);
-            Alert.alert('Error', 'Failed to complete authentication. Please try again.');
-          } finally {
-            setIsLoading(false);
-          }
-        }
-      }
-    };
-
-    // Listen for deep links
-    const subscription = Linking.addEventListener('url', handleDeepLink);
-
-    // Check if app was opened via deep link
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        handleDeepLink({ url });
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [router, setAuthToken, setUser]);
+  // The OAuth redirect (bball-tracker://auth/callback?code=…) is handled by the
+  // dedicated `app/auth/callback.tsx` route, which Expo Router matches on the
+  // incoming deep link and which exchanges the code for a session token.
 
   const handleLogin = async () => {
     try {
@@ -108,6 +55,7 @@ export default function Login() {
         setIsLoading(false);
       }
     } catch (error) {
+      captureException(error, { flow: 'login-initiate' });
       console.error('Login error:', error);
       Alert.alert('Error', 'Failed to initiate login. Please try again.');
       setIsLoading(false);
