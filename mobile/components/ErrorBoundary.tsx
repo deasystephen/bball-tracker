@@ -6,6 +6,7 @@
 import React, { Component, ErrorInfo } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { captureException } from '../services/sentry';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -28,6 +29,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    captureException(error, { componentStack: errorInfo.componentStack });
     if (__DEV__) {
       console.error('ErrorBoundary caught an error:', error, errorInfo);
     }

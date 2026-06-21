@@ -11,6 +11,7 @@
 jest.mock('@sentry/react-native', () => ({
   init: jest.fn(),
   setUser: jest.fn(),
+  captureException: jest.fn(),
 }));
 
 jest.mock('expo-constants', () => ({
@@ -28,6 +29,7 @@ import Constants from 'expo-constants';
 
 const sentryInit = Sentry.init as jest.Mock;
 const sentrySetUser = Sentry.setUser as jest.Mock;
+const sentryCaptureException = Sentry.captureException as jest.Mock;
 
 // Each test re-imports the module so the `initialized` module-level flag
 // starts fresh.
@@ -248,6 +250,44 @@ describe('services/sentry', () => {
       const { initSentry, setSentryUser } = loadSentryModule();
       initSentry();
       expect(() => setSentryUser('u1')).not.toThrow();
+    });
+  });
+
+  describe('captureException', () => {
+    it('no-ops when Sentry is not initialized', () => {
+      const { captureException } = loadSentryModule();
+      captureException(new Error('boom'));
+      expect(sentryCaptureException).not.toHaveBeenCalled();
+    });
+
+    it('forwards the error to Sentry after init', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, captureException } = loadSentryModule();
+      initSentry();
+      const err = new Error('boom');
+      captureException(err);
+      expect(sentryCaptureException).toHaveBeenCalledWith(err, undefined);
+    });
+
+    it('attaches context under the app namespace when provided', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, captureException } = loadSentryModule();
+      initSentry();
+      const err = new Error('boom');
+      captureException(err, { flow: 'auth-callback' });
+      expect(sentryCaptureException).toHaveBeenCalledWith(err, {
+        contexts: { app: { flow: 'auth-callback' } },
+      });
+    });
+
+    it('swallows errors from Sentry.captureException', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      sentryCaptureException.mockImplementationOnce(() => {
+        throw new Error('nope');
+      });
+      const { initSentry, captureException } = loadSentryModule();
+      initSentry();
+      expect(() => captureException(new Error('boom'))).not.toThrow();
     });
   });
 });
