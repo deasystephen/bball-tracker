@@ -27,6 +27,27 @@ instance. Required reading before any data-loss incident response.
 All of the above is enforced by Terraform in `infra/rds.tf` and `infra/ecs.tf`.
 Do not hand-edit the instance in the AWS console.
 
+## TLS / CA bundle
+
+RDS requires TLS (`rds.force_ssl = 1`, the Postgres 15 default). The backend
+connects via the `@prisma/adapter-pg` (node-postgres) driver, which only
+negotiates TLS when explicitly configured — see `backend/src/models/index.ts`.
+The server certificate is verified against the **pinned Amazon RDS global CA
+bundle** committed at `backend/certs/rds-global-bundle.pem` (copied into the
+image by `docker/Dockerfile`, overridable at runtime via `RDS_CA_BUNDLE_PATH`).
+
+> **Refresh expectation:** the global bundle rotates (Amazon publishes new
+> regional CAs ahead of old-CA expiry). Re-download it periodically and before
+> any RDS CA-rotation deadline:
+> ```bash
+> curl -fsSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+>   -o backend/certs/rds-global-bundle.pem
+> ```
+> A stale or missing bundle makes the backend fail its `/health` DB ping (503),
+> so a bad CA update is caught at deploy time rather than silently. History: a
+> non-TLS adapter connection caused the 2026-06-21 sign-in outage (surfaced as a
+> misleading Prisma "P1010 denied access"); CA pinning landed in #216.
+
 ## Verifying backups (do this monthly)
 
 ```bash
