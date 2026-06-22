@@ -64,9 +64,26 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(requestContext);
 app.use(requestLogger);
 
-// Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check endpoint.
+// This backs the ECS container health check, so it pings the database: a
+// healthy process that cannot reach the DB is useless (every request 500s), and
+// a static 200 here previously let a total DB outage masquerade as "healthy"
+// while all sign-ins failed. A failed ping returns 503 (marking the task
+// unhealthy so ECS recycles it) and reports to Sentry.
+import prisma from './models';
+import { captureException } from './utils/sentry';
+
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('Health check DB ping failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    captureException(err, { flow: 'health-check' });
+    res.status(503).json({ status: 'degraded', db: 'down', timestamp: new Date().toISOString() });
+  }
 });
 
 // Rate limiting

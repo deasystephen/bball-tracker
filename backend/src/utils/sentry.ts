@@ -131,6 +131,23 @@ export function isSentryEnabled(): boolean {
 }
 
 /**
+ * Report an error to Sentry from inside a route handler that catches and
+ * swallows the error (responding with its own status) instead of delegating to
+ * the central `sentryErrorHandler` middleware. No-ops when Sentry is disabled.
+ * `tags` attach context (e.g. `{ flow: 'auth-callback' }`) to aid triage.
+ */
+export function captureException(
+  error: unknown,
+  tags?: Record<string, string>
+): void {
+  if (!initialized) return;
+  Sentry.withScope(scope => {
+    if (tags) scope.setTags(tags);
+    Sentry.captureException(error);
+  });
+}
+
+/**
  * Express error handler that forwards the error to Sentry (if enabled) before
  * calling `next(err)` so downstream handlers still run.
  */

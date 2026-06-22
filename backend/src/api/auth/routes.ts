@@ -8,6 +8,7 @@ import { UnauthorizedError, BadRequestError } from '../../utils/errors';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
+import { captureException } from '../../utils/sentry';
 import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
@@ -216,6 +217,9 @@ router.get('/callback', async (req, res) => {
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: error.message });
     } else {
+      // Unexpected failure (e.g. DB/WorkOS outage) — report to Sentry so we're
+      // alerted instead of only finding it in CloudWatch logs after a user hits it.
+      captureException(error, { flow: 'auth-callback' });
       res.status(500).json({ error: 'Authentication failed' });
     }
   }
@@ -265,6 +269,7 @@ router.get('/me', async (req, res) => {
     if (error instanceof UnauthorizedError) {
       res.status(401).json({ error: error.message });
     } else {
+      captureException(error, { flow: 'auth-me' });
       res.status(500).json({ error: 'Failed to get user information' });
     }
   }
@@ -300,6 +305,7 @@ router.get('/me/usage', authenticate, async (req, res) => {
     logger.error('Error getting usage', {
       error: error instanceof Error ? error.message : String(error),
     });
+    captureException(error, { flow: 'auth-usage' });
     res.status(500).json({ error: 'Failed to get usage' });
   }
 });

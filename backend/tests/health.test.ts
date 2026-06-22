@@ -1,12 +1,28 @@
 import request from 'supertest';
 import { app, httpServer } from '../src/index';
+import { mockPrisma } from './setup';
 
 describe('Health Check', () => {
-  it('should return 200 and status ok', async () => {
+  it('should return 200 and status ok when the DB ping succeeds', async () => {
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ '?column?': 1 }]);
+
     const response = await request(app).get('/health');
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('ok');
+    expect(response.body.db).toBe('ok');
     expect(response.body.timestamp).toBeDefined();
+    expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+  });
+
+  it('should return 503 degraded when the DB is unreachable', async () => {
+    (mockPrisma.$queryRaw as jest.Mock).mockRejectedValueOnce(
+      new Error('no pg_hba.conf entry ... no encryption')
+    );
+
+    const response = await request(app).get('/health');
+    expect(response.status).toBe(503);
+    expect(response.body.status).toBe('degraded');
+    expect(response.body.db).toBe('down');
   });
 });
 
