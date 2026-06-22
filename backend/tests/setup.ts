@@ -190,6 +190,7 @@ export const mockPrisma = {
     count: jest.fn(),
   },
   $transaction: jest.fn(),
+  $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   $disconnect: jest.fn(),
 };
 

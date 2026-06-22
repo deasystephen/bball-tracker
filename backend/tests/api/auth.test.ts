@@ -17,8 +17,17 @@ jest.mock('../../src/models', () => ({
   },
 }));
 
+// Spy on Sentry capture while keeping the rest of the util real (index.ts needs
+// initSentry / sentryErrorHandler at import time).
+jest.mock('../../src/utils/sentry', () => ({
+  ...jest.requireActual('../../src/utils/sentry'),
+  captureException: jest.fn(),
+}));
+import { captureException } from '../../src/utils/sentry';
+
 const mockWorkOSService = WorkOSService as jest.Mocked<typeof WorkOSService>;
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+const mockCaptureException = captureException as jest.Mock;
 
 describe('Auth API', () => {
   const mockUser = {
@@ -179,6 +188,11 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(500);
       expect(response.body.error).toBe('Authentication failed');
+      // Unexpected failures must be reported to Sentry (the prior gap: the
+      // callback only logged to CloudWatch, so a DB outage was invisible).
+      expect(mockCaptureException).toHaveBeenCalledWith(expect.any(Error), {
+        flow: 'auth-callback',
+      });
     });
   });
 
