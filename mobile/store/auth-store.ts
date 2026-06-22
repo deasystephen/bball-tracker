@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, UserRole } from '../../shared/types';
@@ -76,9 +77,16 @@ export const useAuthStore = create<AuthState>()(
  */
 export const useAuthUser = () => useAuthStore((state) => state.user);
 export const useIsAuthenticated = () => useAuthStore((state) => state.isAuthenticated);
+// Zustand v5 removed the `shallow` equality argument: a selector returning a
+// new object every render makes `useSyncExternalStore`'s snapshot look like it
+// changed on every render, causing an infinite re-render loop ("Maximum update
+// depth exceeded"). `useShallow` shallow-compares the result so the snapshot is
+// stable (the action fns are already stable store references).
 export const useAuthActions = () =>
-  useAuthStore((state) => ({
-    setAuthToken: state.setAuthToken,
-    setUser: state.setUser,
-    logout: state.logout,
-  }));
+  useAuthStore(
+    useShallow((state) => ({
+      setAuthToken: state.setAuthToken,
+      setUser: state.setUser,
+      logout: state.logout,
+    }))
+  );

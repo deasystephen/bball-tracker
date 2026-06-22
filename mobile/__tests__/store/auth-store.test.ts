@@ -16,7 +16,13 @@ jest.mock('../../services/analytics', () => ({
   },
 }));
 
-import { useAuthStore, useAuthUser, useIsAuthenticated } from '../../store/auth-store';
+import { renderHook } from '@testing-library/react-native';
+import {
+  useAuthStore,
+  useAuthUser,
+  useIsAuthenticated,
+  useAuthActions,
+} from '../../store/auth-store';
 import {
   trackEvent,
   identifyUser,
@@ -113,5 +119,21 @@ describe('auth-store', () => {
     // Smoke check the selector references exist and are functions.
     expect(typeof useAuthUser).toBe('function');
     expect(typeof useIsAuthenticated).toBe('function');
+  });
+
+  // Regression: useAuthActions must return a referentially-stable object across
+  // re-renders. Without `useShallow` (Zustand v5) it returned a new object every
+  // render, so useSyncExternalStore's snapshot looked changed each render and
+  // AuthCallbackScreen hit "Maximum update depth exceeded" (Sentry MOBILE-1).
+  it('useAuthActions returns a stable reference across re-renders', () => {
+    const { result, rerender } = renderHook(() => useAuthActions());
+    const first = result.current;
+
+    rerender({});
+
+    expect(result.current).toBe(first);
+    expect(typeof first.setAuthToken).toBe('function');
+    expect(typeof first.setUser).toBe('function');
+    expect(typeof first.logout).toBe('function');
   });
 });
