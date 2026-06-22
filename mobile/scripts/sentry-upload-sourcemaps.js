@@ -28,6 +28,15 @@ function run(cmd, args, opts = {}) {
   }
 }
 
+// Best-effort variant: warn but DON'T fail the build. Used for commit
+// association, which must never block a release if Sentry/the integration hiccups.
+function runSoft(cmd, args, opts = {}) {
+  const result = spawnSync(cmd, args, { stdio: 'inherit', ...opts });
+  if (result.status !== 0) {
+    console.warn(`[sentry] non-fatal: command failed: ${cmd} ${args.join(' ')}`);
+  }
+}
+
 function main() {
   const rawToken = process.env.SENTRY_AUTH_TOKEN;
   if (!rawToken) {
@@ -68,6 +77,12 @@ function main() {
 
   console.log(`[sentry] Uploading sourcemaps for release ${release}`);
   run('npx', ['@sentry/cli', 'releases', 'new', release]);
+  // Associate commits with the release so "Fixes <SENTRY-SHORT-ID>" in a commit
+  // auto-resolves the referenced mobile issue (parity with the backend deploy
+  // job). --auto resolves the repo + commit range via the Sentry GitHub
+  // integration; --ignore-missing tolerates EAS's shallow checkout. Best-effort:
+  // never fail a build over commit association.
+  runSoft('npx', ['@sentry/cli', 'releases', 'set-commits', release, '--auto', '--ignore-missing']);
   // @sentry/cli v2 replaced "releases files <rel> upload-sourcemaps <dir>"
   // with "sourcemaps upload --release <rel> <dir>".
   run('npx', ['@sentry/cli', 'sourcemaps', 'upload', '--release', release, distDir]);
