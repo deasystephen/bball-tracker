@@ -15,7 +15,7 @@
     "eas-build-on-success": "node scripts/sentry-upload-sourcemaps.js"
   },
   "dependencies": {
-    "@amplitude/analytics-react-native": "^1.6.0",
+    "@amplitude/analytics-react-native": "^1.6.1",
     "@amplitude/analytics-types": "^2.11.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/oswald": "^0.4.2",
@@ -41,7 +41,7 @@
     "expo-splash-screen": "^55.0.22",
     "expo-status-bar": "^55.0.6",
     "expo-updates": "^55.0.25",
-    "i18next": "^26.3.3",
+    "i18next": "^26.3.4",
     "lottie-react-native": "^7.3.8",
     "moti": "^0.30.0",
     "react": "^19.2.7",
@@ -72,7 +72,7 @@
     "jest-expo": "^55.0.19",
     "react-test-renderer": "^19.2.7",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.62.0"
+    "typescript-eslint": "^8.62.1"
   },
   "expo": {
     "install": {
