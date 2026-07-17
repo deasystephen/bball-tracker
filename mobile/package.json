@@ -15,7 +15,7 @@
     "eas-build-on-success": "node scripts/sentry-upload-sourcemaps.js"
   },
   "dependencies": {
-    "@amplitude/analytics-react-native": "^1.6.4",
+    "@amplitude/analytics-react-native": "^1.6.5",
     "@amplitude/analytics-types": "^2.11.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/oswald": "^0.4.2",
