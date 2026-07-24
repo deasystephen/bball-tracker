@@ -32,7 +32,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1094.0",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
-    "@sentry/node": "^10.66.0",
+    "@sentry/node": "^10.68.0",
     "@workos-inc/node": "^8.13.0",
     "cors": "^2.8.5",
     "csv-stringify": "^6.8.1",
