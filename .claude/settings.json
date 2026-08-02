@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-docs-updated.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-docs-updated.sh\"",
             "timeout": 10,
             "statusMessage": "Checking docs are up to date with code changes..."
           }
