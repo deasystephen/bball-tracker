@@ -72,7 +72,7 @@
     "jest-expo": "^55.0.20",
     "react-test-renderer": "^19.2.8",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.66.0"
+    "typescript-eslint": "^8.67.0"
   },
   "expo": {
     "install": {
