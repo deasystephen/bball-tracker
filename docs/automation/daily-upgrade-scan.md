@@ -51,7 +51,7 @@ would be readable by any workflow on any branch once merged.
 
 | Secret | What | Scope |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Claude API key | Dedicated key in its own Console workspace with a monthly spend limit, so a runaway run is capped and the key can be rotated without touching anything else |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | Generated with `claude setup-token` on a machine logged into the owner's **Claude Max** account; bills the subscription, not Console credits. ~1-year expiry — rotate by re-running `setup-token`. (Console pay-as-you-go alternative: `anthropic_api_key` input + `ANTHROPIC_API_KEY` secret in a spend-capped workspace.) |
 | `DEPENDABOT_ALERTS_TOKEN` | Fine-grained PAT | **This repo only**, permission *Dependabot alerts: Read-only* (and Metadata, implied), ≤90-day expiry. The default `GITHUB_TOKEN` has no dependabot-alerts scope, so a PAT is unavoidable. Exposed to **one** `gh api` step that writes a JSON snapshot to `$RUNNER_TEMP`; Claude's step never receives it and cannot dismiss alerts |
 
 GitHub writes (branches, PRs, comments) go through the **Claude GitHub App**
@@ -70,7 +70,7 @@ are pinned to commit SHAs.
 3. ✅ Claude GitHub App installed with contents / issues / pull-requests write.
 4. ✅ Repo Watch with Issues notifications + "Include your own updates".
 5. ✅ `upgrade-scan` Environment exists with branch rule `main` (created 2026-08-20 via API).
-6. ⬜ `ANTHROPIC_API_KEY` **environment** secret on `upgrade-scan`.
+6. ⬜ `CLAUDE_CODE_OAUTH_TOKEN` **environment** secret on `upgrade-scan`.
 7. ⬜ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan` (calendar reminder for expiry).
 8. ⬜ After a few green Actions runs: pause/delete the hosted routine via
    `/schedule` so the two don't race (both are idempotent against open PRs,

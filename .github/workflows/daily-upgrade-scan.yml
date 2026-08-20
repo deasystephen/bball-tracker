@@ -4,8 +4,10 @@
 #
 # Secrets required — add them to the `upgrade-scan` ENVIRONMENT (Settings →
 # Environments → upgrade-scan → Environment secrets), not as repo secrets:
-#   ANTHROPIC_API_KEY         Claude API key (a dedicated key in its own
-#                             Console workspace with a monthly spend limit).
+#   CLAUDE_CODE_OAUTH_TOKEN   Claude Code OAuth token from `claude setup-token`
+#                             (bills the Max subscription; ~1-year expiry).
+#                             Swap to `anthropic_api_key: ANTHROPIC_API_KEY` if
+#                             moving to Console pay-as-you-go credits.
 #   DEPENDABOT_ALERTS_TOKEN   Fine-grained PAT, this repo only, permission
 #                             "Dependabot alerts: Read-only", ≤90-day expiry.
 #                             GITHUB_TOKEN has no dependabot-alerts scope, so a
@@ -93,7 +95,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f # v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Read and follow `.github/prompts/daily-upgrade-scan.md` exactly.
 
