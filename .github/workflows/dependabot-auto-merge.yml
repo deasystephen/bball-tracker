@@ -1,0 +1,55 @@
+# Auto-merge Dependabot PRs that carry no judgment risk. Branch protection
+# still gates the actual merge on CI (required checks), so this only flips
+# the auto-merge bit. Anything not matched here is left for a human or for
+# the Daily Upgrade Scan to triage.
+#
+# Policy (see docs/automation/daily-upgrade-scan.md):
+#   backend, web : patch AND minor  → auto-merge
+#   mobile       : patch only       → auto-merge (minors can break RN peer
+#                                      deps — e.g. lottie 7.4 needed RN 0.84)
+#   anything else (majors, mobile minors, GitHub Actions) → no-op
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
+
+      - name: Decide
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DIRECTORY: ${{ steps.meta.outputs.directory }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          set -euo pipefail
+          ok=false
+          if [ "$ECOSYSTEM" = "npm" ]; then
+            case "$DIRECTORY:$UPDATE_TYPE" in
+              /backend:version-update:semver-patch|/backend:version-update:semver-minor) ok=true ;;
+              /web:version-update:semver-patch|/web:version-update:semver-minor)         ok=true ;;
+              /mobile:version-update:semver-patch)                                       ok=true ;;
+            esac
+          fi
+          echo "ecosystem=$ECOSYSTEM dir=$DIRECTORY type=$UPDATE_TYPE → auto-merge=$ok"
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge (squash)
+        if: steps.decide.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

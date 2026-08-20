@@ -1,0 +1,127 @@
+# Daily Upgrade Scan — GitHub Actions port of the Anthropic-hosted routine.
+# See docs/automation/daily-upgrade-scan.md for the full design and the
+# prompt at .github/prompts/daily-upgrade-scan.md (single source of truth).
+#
+# Secrets required — add them to the `upgrade-scan` ENVIRONMENT (Settings →
+# Environments → upgrade-scan → Environment secrets), not as repo secrets:
+#   ANTHROPIC_API_KEY         Claude API key (a dedicated key in its own
+#                             Console workspace with a monthly spend limit).
+#   DEPENDABOT_ALERTS_TOKEN   Fine-grained PAT, this repo only, permission
+#                             "Dependabot alerts: Read-only", ≤90-day expiry.
+#                             GITHUB_TOKEN has no dependabot-alerts scope, so a
+#                             PAT is the only way to read the alerts API.
+#
+# The Claude step authenticates to GitHub via the Claude GitHub App (OIDC
+# exchange — no github_token input), NOT GITHUB_TOKEN. This matters: PRs
+# pushed with GITHUB_TOKEN never trigger the CI workflow, so auto-merge
+# would wait forever on required checks. App tokens do trigger CI.
+name: Daily Upgrade Scan
+
+on:
+  schedule:
+    - cron: '0 15 * * *'   # 15:00 UTC — 08:00 PT summer / 07:00 PT winter
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Inventory + categorize only; open no PRs, post no comments'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # create branches (Claude step, via App token)
+  pull-requests: write   # open PRs, enable auto-merge
+  issues: write          # daily log + deferred-tracking issue; error fallback
+  id-token: write        # OIDC exchange for the Claude GitHub App token
+
+concurrency:
+  group: daily-upgrade-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-latest
+    # Secrets live on this Environment, whose deployment-branch rule allows
+    # only `main` — so no PR branch can reference them, even via
+    # workflow_dispatch against a feature branch.
+    environment: upgrade-scan
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # Claude creates branches off main
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      # The ONLY step that sees the alerts PAT. Writes a JSON snapshot outside
+      # the repo tree so the diff guard in the prompt is unaffected and the
+      # file can never be committed.
+      - name: Snapshot open Dependabot alerts
+        id: alerts
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/dependabot-alerts.json"
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo '::warning::DEPENDABOT_ALERTS_TOKEN not set — alert snapshot skipped'
+            echo '{"error":"DEPENDABOT_ALERTS_TOKEN secret not configured"}' > "$out"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/dependabot/alerts?state=open&per_page=100" \
+              --paginate \
+              --jq '[.[] | {
+                number, state,
+                severity: .security_advisory.severity,
+                ghsa_id: .security_advisory.ghsa_id,
+                summary: .security_advisory.summary,
+                package: .dependency.package.name,
+                ecosystem: .dependency.package.ecosystem,
+                manifest: .dependency.manifest_path,
+                scope: .dependency.scope,
+                vulnerable_range: .security_vulnerability.vulnerable_version_range,
+                first_patched: (.security_vulnerability.first_patched_version.identifier // null),
+                html_url, created_at
+              }]' > "$out"
+            echo "Snapshot: $(jq length "$out") open alert(s)"
+            jq -r '.[] | "\(.severity)\t\(.package)\t\(.manifest)\t\(.vulnerable_range) → \(.first_patched // "NO FIX")"' "$out" | sort
+          fi
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude scan
+        id: claude
+        uses: anthropics/claude-code-action@3f854a8fb5146b39d5cbf8b57f70d80810e1366f # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Read and follow `.github/prompts/daily-upgrade-scan.md` exactly.
+
+            Runtime context for this run:
+            - ALERTS_JSON=${{ steps.alerts.outputs.path }} (pre-fetched open
+              Dependabot alerts; read it with `cat`, do not call the alerts API).
+            - TODAY=${{ github.run_started_at }}
+            - DRY_RUN=${{ github.event.inputs.dry_run || 'false' }}
+            - RUN_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          claude_args: |
+            --allowedTools "Bash,Read,Glob,Grep,Edit,Write"
+            --max-turns 150
+
+      # Belt-and-braces: if the Claude step died before it could post the
+      # daily log, leave a ROUTINE ERROR comment so the silence is visible.
+      - name: Post routine-error comment on failure
+        if: failure() && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          num=$(gh issue list --state open --search 'in:title "Daily upgrade scan log"' \
+                --json number --jq '.[0].number // empty')
+          [ -n "$num" ] || { echo "::warning::No 'Daily upgrade scan log' issue found"; exit 0; }
+          day=$(date -u +%F)
+          gh issue comment "$num" --body "## ${day} scan — ⚠ ROUTINE ERROR
+
+          The GitHub Actions run failed before (or without) posting the daily log. See ${RUN_URL} for logs.
+
+          _Posted by the workflow's failure handler, not by Claude._"

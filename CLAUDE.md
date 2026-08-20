@@ -215,7 +215,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 ## Automation
 
-Dependency and security updates are handled by the **Daily Upgrade Scan** routine (Anthropic-hosted Claude Code routine, runs `0 15 * * *` UTC). It triages Dependabot alerts and `npm outdated` results into auto-fix / needs-review / defer buckets, opens batched PRs (auto-merge enabled for the narrowest categories), and posts a daily summary comment on the rolling **Daily upgrade scan log** issue. See [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md) for the full prompt, deferral list, and update procedure.
+Dependency and security updates are split between **Dependabot** (mechanical patch/minor bumps, auto-merged by `.github/workflows/dependabot-auto-merge.yml` once CI passes) and the **Daily Upgrade Scan** (`.github/workflows/daily-upgrade-scan.yml`, `0 15 * * *` UTC) — a scheduled GitHub Actions job that runs Claude Code to add `overrides` for vulnerable transitives, handle mobile lockfile-only bumps, refresh the deferral issue, and post a daily summary on the rolling **Daily upgrade scan log** issue. The Claude prompt is `.github/prompts/daily-upgrade-scan.md`; design, secrets, and the deferral procedure are in [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md).
 
 ## Operations / Runbooks
 
