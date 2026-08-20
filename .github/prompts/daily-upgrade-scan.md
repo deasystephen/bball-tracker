@@ -77,8 +77,9 @@ under ⏸ only):
      Exception: if the patched version's major differs from every installed
      copy AND the parent's peer range forbids it → ⚠ Needs attention.
   b. `first_patched` is null → **no upstream fix**. Do not touch. List under
-     ⚠ Needs attention with the `html_url` and the recommendation "dismiss as
-     *No fix available* or accept until upstream patches" — you cannot dismiss
+     ⚠ Needs attention with the `html_url` and the recommendation "dismiss with
+     reason *Risk is tolerable to this project* (GitHub has no 'no fix
+     available' reason) or accept until upstream patches" — you cannot dismiss
      alerts (read-only token); the human does that.
   c. Package is in the deferral list as a *direct* dep → DEFER, but still
      report it under ⚠ with the CVE.
