@@ -1,7 +1,15 @@
 # Team Practice Schedules — Feature Plan
 
-> Status: **Proposed (build-ready)** — awaiting approval to implement.
-> Branch: `claude/team-practice-schedules-2ouh3e`
+> Status: **Proposed** — product/architecture plan; not yet implemented.
+>
+> **Tracking issues.** Phase 1 (practice sessions, recurring series, per-session
+> availability, ICS) is scoped and buildable as **#33**. The three differentiators
+> are tracked separately so #33 stays `agent-ready` at its original scope:
+> **#331** recurring availability defaults (§5 "Availability defaults"),
+> **#332** minimum-attendance alerts + targeted nudges (§6),
+> **#333** carpool / ride coordination (§5 "Carpool"). Each depends on #33.
+>
+> Originally drafted on branch `claude/team-practice-schedules-2ouh3e` (June 2026).
 
 ## 1. Goal & Product Thesis
 
