@@ -92,8 +92,9 @@ under ⏸ only):
 
 ## Step 3 — Apply AUTO-FIX (one PR per side)
 
-If `DRY_RUN=true`: do everything up to the commit, print the planned diff and
-the would-be PR body to stdout, then `git checkout -- .` and stop. Post nothing.
+If `DRY_RUN=true`: do everything up to the commit, then `git checkout -- .`
+and stop — open no PRs, post no comments. The planned diff and would-be PR body
+go into the step summary (Step 7) instead.
 
 For each side with ≥1 auto-fix item:
   1. `git checkout -b claude/auto-deps-<side>-YYYY-MM-DD`
@@ -160,6 +161,17 @@ missing (label `automation`). Post ONE new comment. Skip when `DRY_RUN=true`.
 If you hit a fatal error, still post the comment with a
 "## YYYY-MM-DD scan — ⚠ ROUTINE ERROR" heading, the error, and partial state.
 
+## Step 7 — Step summary (ALWAYS, dry run or not)
+
+The action hides your conversation from the job log, so the job summary is the
+only place a human can see what you decided without opening GitHub issues.
+As your final action, append the full daily-log comment body (Step 6) to the
+file named by `$GITHUB_STEP_SUMMARY` — in a dry run, append what you *would*
+have posted, prefixed with `## DRY RUN — nothing was posted`, followed by a
+fenced block containing `git diff` for each side you would have changed.
+Write it with a heredoc (`cat >> "$GITHUB_STEP_SUMMARY" <<'EOF' ... EOF`).
+Do this even after a fatal error.
+
 ## Hard constraints
 
   - Never push to `main`.
@@ -171,4 +183,4 @@ If you hit a fatal error, still post the comment with a
   - Never bump anything in the deferral list.
   - Never open a PR that duplicates an open Dependabot PR.
   - Time budget ~30 min. Priority: security overrides > mobile patches >
-    tracking issue > daily log.
+    tracking issue > daily log > step summary (never skip the summary).
