@@ -1,206 +1,80 @@
-# Daily Upgrade Scan Routine
+# Daily Upgrade Scan
 
-An autonomous Claude Code [routine](https://code.claude.com/docs/en/routines) that runs daily, triages dependency and security updates, opens PRs for safe changes (with auto-merge enabled for the narrowest categories), and posts a daily summary as a comment on a rolling GitHub issue.
+A scheduled GitHub Actions workflow (`.github/workflows/daily-upgrade-scan.yml`)
+that runs Claude Code once a day to triage security alerts and dependency
+updates, open PRs for safe changes (auto-merge on the narrowest bucket), keep
+the deferral list current, and post a daily summary comment on the rolling
+**Daily upgrade scan log** issue (#276).
+
+> **History.** From 2026-04 to 2026-08 this ran as an Anthropic-hosted Claude
+> Code routine (`trig_01JNQaGi6W2wGKdKA961kUYT`). That sandbox could never call
+> the Dependabot alerts API (no `gh` on most runs; raw `api.github.com` blocked
+> by the egress proxy), so it fell back to `npm audit` and over-deferred
+> override-fixable transitives. Moved to GitHub Actions in PR #335 so the job
+> runs where `gh`, `GITHUB_TOKEN`, and a scoped PAT all work.
 
 ## Schedule
 
-- **Cron**: `0 15 * * *` (1500 UTC daily)
-- **Local time**: 08:00 PT in summer (PDT, UTC−7), 07:00 PT in winter (PST, UTC−8)
+- **Cron**: `0 15 * * *` (15:00 UTC; 08:00 PT summer / 07:00 PT winter). GitHub
+  may start scheduled runs up to ~30 min late under load.
+- **Manual**: Actions → *Daily Upgrade Scan* → *Run workflow*. Tick **dry_run**
+  to inventory + categorize without opening PRs or posting comments.
 
-## What it does
+## Division of labour
+
+| Who | Owns | Mechanism |
+| --- | --- | --- |
+| **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI |
+| **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list; daily log | `daily-upgrade-scan.yml` |
+| **Human** | Majors, mobile minors (RN peer deps), Expo SDK upgrades, dismissing alerts with no upstream fix | — |
+
+The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
+the single runtime source of truth — the workflow tells Claude to read that
+file. There is no second copy to keep in sync.
+
+## Buckets
 
 | Bucket | Examples | Action |
 | --- | --- | --- |
-| **Auto-fix** | High/critical Dependabot alerts (via `overrides`); caret-range patch bumps; Expo SDK same-major patch bumps | Branch + tests + PR + `gh pr merge --auto --squash` |
-| **Needs-review** | Backend minor bumps; mobile non-RN minor bumps | PR labeled `needs-human`; awaits manual merge |
-| **Defer** | Anything in the inline deferral list (Jest 30, RN ecosystem, RN majors, prisma generator migration) | Tracked in a single rolling issue; never auto-bumped |
+| **Auto-fix** | High/critical alert **with** a `first_patched` version → root `overrides` entry (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps; Expo SDK same-major patches | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
+| **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses/decides |
+| **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
 
-The routine batches all eligible items per side (backend, mobile) into one PR per category — never multiple PRs for the same package.
+## Secrets and permissions
 
-## Daily output
+| Secret | What | Scope |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | Claude API key | Dedicated key in its own Console workspace with a monthly spend limit, so a runaway run is capped and the key can be rotated without touching anything else |
+| `DEPENDABOT_ALERTS_TOKEN` | Fine-grained PAT | **This repo only**, permission *Dependabot alerts: Read-only* (and Metadata, implied), ≤90-day expiry. The default `GITHUB_TOKEN` has no dependabot-alerts scope, so a PAT is unavoidable. Exposed to **one** `gh api` step that writes a JSON snapshot to `$RUNNER_TEMP`; Claude's step never receives it and cannot dismiss alerts |
 
-- Zero or more PRs (`claude/auto-deps-*` or `claude/review-deps-*` branches)
-- One updated issue: **Deferred dependency upgrades** (rolling list, body replaced each run)
-- One new comment on the **Daily upgrade scan log** issue (rolling per-day log; you receive an email per comment via your repo Watch settings)
+GitHub writes (branches, PRs, comments) go through the **Claude GitHub App**
+already installed on the repo — the action exchanges the job's OIDC token for a
+short-lived App token. This is deliberate: PRs pushed with `GITHUB_TOKEN` do not
+trigger the CI workflow, so auto-merge would wait forever on required checks.
+Workflow `permissions:` are the minimum the action needs (`contents`,
+`pull-requests`, `issues`: write; `id-token`: write). Both third-party actions
+are pinned to commit SHAs.
 
-## Prerequisites
+## Prerequisites (all in place unless noted)
 
-These are one-time setup items. All are already in place as of 2026-05-03:
-
-1. ✅ Repo settings: `allow_auto_merge: true`, `delete_branch_on_merge: true`
-2. ✅ Branch protection on `main` requiring CI status checks (`Lint and Type Check (backend)`, `Lint and Type Check (mobile)`, `Test Backend`, `Test Mobile`, `Analyze (javascript-typescript)`). **Required** for `gh pr merge --auto` to work — without it, GitHub returns `Protected branch rules not configured for this branch` and auto-merge silently fails. Verify with `gh api repos/deasystephen/bball-tracker/branches/main/protection`.
-3. ✅ Repo Watch with at least "Issues" notifications enabled, AND user-level **"Include your own updates"** enabled at github.com/settings/notifications. The latter is required because the routine commits/comments under the repo owner's identity, and GitHub by default suppresses email notifications for activity attributed to you.
-4. ✅ Claude GitHub App installed on `deasystephen/bball-tracker` with write access to contents, issues, and pull requests
-
-## Routine prompt
-
-This is the exact prompt configured in `/schedule`. To modify the routine, edit it via `/schedule` and update this file in the same PR so they stay in sync.
-
-```text
-# Daily Upgrade Scan — bball-tracker
-
-You run once daily at 1500 UTC (08:00 PT summer / 07:00 PT winter). Repo
-deasystephen/bball-tracker is pre-cloned at the working directory; default
-branch is `main`. Backend lives in ./backend, mobile in ./mobile. Read
-CLAUDE.md for project conventions.
-
-## Inline deferral list (authoritative)
-
-NEVER bump these. Surface them in the deferred tracking issue + daily
-log only.
-
-  Backend:
-    - jest, @types/jest          (waiting for v30 perf regression fix)
-    - prisma-client generator    (migration from prisma-client-js;
-                                  needs import path changes)
-
-  Mobile (RN ecosystem — defer all until next Expo SDK upgrade):
-    - react-native, @react-native-async-storage/async-storage
-    - @react-native-community/datetimepicker
-    - react-native-gesture-handler, react-native-reanimated
-    - react-native-safe-area-context, react-native-screens
-    - react-native-svg, react-native-worklets
-    - jest, @types/jest
-
-If a candidate matches → DEFER.
-
-## Step 1 — Inventory (parallel)
-
-  - gh api repos/deasystephen/bball-tracker/dependabot/alerts \
-      --paginate --jq '.[] | select(.state=="open")'
-  - cd backend && npm install && npm outdated --json
-  - cd mobile  && npm install && npm outdated --json
-  - gh pr list --state open --search "in:title chore(deps)" \
-      --json number,title,headRefName
-  - gh issue list --state open \
-      --search "Deferred dependency upgrades" --json number,title
-  - gh issue list --state open \
-      --search "Daily upgrade scan log" --json number,title
-
-Skip any candidate that already has an open PR with a matching title
-prefix (idempotency).
-
-## Step 2 — Categorize
-
-AUTO-FIX (one batched PR per side; auto-merge enabled):
-  - Open Dependabot alerts severity high/critical → fix via
-    package.json `overrides` field
-  - npm outdated entries where `current ≠ wanted` AND `wanted` is
-    within the existing caret range (lockfile-only patch bumps)
-  - Expo SDK same-major patch bumps in mobile (55.0.X → 55.0.Y)
-
-NEEDS-REVIEW (one batched PR per side; label `needs-human`;
-no auto-merge):
-  - Backend minor bumps in same major not in DEFER list
-  - Mobile minor bumps in same major NOT in the RN-ecosystem
-    defer list
-
-DEFER:
-  - Anything in the deferral list above
-  - Any major bump
-  - When unsure
-
-## Step 3 — Apply each AUTO-FIX bucket (one PR per side)
-
-For each side with ≥1 auto-fix item:
-  1. git checkout -b claude/auto-deps-<side>-YYYY-MM-DD
-  2. Apply ALL items for that side in one branch:
-       overrides: edit package.json `overrides`, then npm install
-       caret patches: npm install <pkg>@<wanted> (chained args ok)
-  3. Quality gates:
-       backend: npm run type-check && npm test
-       mobile : npm run type-check && npm test \
-                && npx expo export --platform ios --output-dir /tmp/v
-  4. DIFF GUARD — git diff --name-only must contain ONLY:
-       <side>/package.json  and/or  <side>/package-lock.json
-     Anything else → abort whole batch → "needs-attention"
-  5. Any quality gate fails → abort whole batch → "needs-attention"
-  6. git commit -m "<conventional, with version table & CVE refs>"
-  7. git push -u origin <branch>
-  8. gh pr create --base main \
-       --title "chore(deps): bump <side> patch deps (YYYY-MM-DD)" \
-       --body "<table of versions, CVE refs, test results>"
-  9. gh pr comment <url> --body "@claude review once"
-  10. gh pr merge --auto --squash --delete-branch <url>
-
-## Step 4 — Apply each NEEDS-REVIEW bucket
-
-Same as Step 3, but:
-  - Branch: claude/review-deps-<side>-YYYY-MM-DD
-  - Skip step 10
-  - After step 9: gh pr edit <url> --add-label needs-human
-    (create the label first if missing)
-
-## Step 5 — Deferred tracking issue
-
-Find issue titled exactly "Deferred dependency upgrades" (state=open).
-Create if missing (label: automation); REPLACE body if exists.
-Body: bullet list of all DEFER items with current → latest versions
-and the unblock condition from the deferral list.
-
-## Step 6 — Expo SDK divergence sanity check (informational)
-
-  cd mobile && npx expo install --check 2>&1
-
-Capture any "should be updated" lines. Surface them in the daily log
-under "📐 Expo SDK divergence" — do NOT act on them.
-
-## Step 7 — Daily log as GitHub issue comment
-
-Find OPEN issue in deasystephen/bball-tracker titled exactly
-"Daily upgrade scan log".
-  - Found     → post a new comment on it
-  - Not found → create the issue (label: automation; body explains the
-                rolling-log purpose), then post the day's results as
-                the first comment
-
-Comment body:
-
-  ## YYYY-MM-DD scan — 🟢{X} 🟡{Y} ⏸{Z} ⚠{W}
-
-  🟢 Auto-merging — N
-    - <pkg> (X.Y → A.B): #<PR>
-
-  🟡 Awaiting your review — N
-    - <pkg> (X.Y → A.B): #<PR>
-
-  ⚠ Needs attention — N
-    - <pkg>: <failure reason>
-
-  📐 Expo SDK divergence — N (informational)
-    - <pkg> ahead of SDK 55 prescription
-
-  ⏸ Deferred — N (see <link to deferred tracking issue>)
-
-  ✅ All clean — only if all the above are empty/zero
-
-If the routine itself errors, still post a comment titled
-"## YYYY-MM-DD scan — ⚠ ROUTINE ERROR" with the error and partial state.
-
-## Hard constraints
-
-  - Never push to main
-  - Never modify any file outside <side>/package.json or
-    <side>/package-lock.json (enforced by diff guard)
-  - Never disable lint, tests, coverage thresholds, or the diff guard
-  - Never bypass --no-verify on commits
-  - Never enable --auto on a NEEDS-REVIEW or DEFERRED PR
-  - Never bump anything in the inline deferral list
-  - Time budget ~30 min — prioritize: CVE alerts > auto-fix >
-    needs-review > tracking issue > daily log
-  - On any fatal error, still post the daily-log comment with a
-    "⚠ ROUTINE ERROR" section so you know the routine ran
-```
+1. ✅ Repo settings: `allow_auto_merge`, `delete_branch_on_merge`.
+2. ✅ Branch protection on `main` requiring CI checks — required for
+   `gh pr merge --auto` to mean anything.
+3. ✅ Claude GitHub App installed with contents / issues / pull-requests write.
+4. ✅ Repo Watch with Issues notifications + "Include your own updates".
+5. ⬜ `ANTHROPIC_API_KEY` secret.
+6. ⬜ `DEPENDABOT_ALERTS_TOKEN` secret (calendar reminder for expiry).
+7. ⬜ After a few green Actions runs: pause/delete the hosted routine via
+   `/schedule` so the two don't race (both are idempotent against open PRs,
+   but you'd get two log comments a day).
 
 ## Updating the deferral list
 
-When a deferred dependency becomes safe to bump (e.g., Jest 30 perf regression is fixed), update **both** in the same PR:
+Edit the "Inline deferral list" in `.github/prompts/daily-upgrade-scan.md` and,
+if Dependabot should also stop proposing it, add a matching `ignore` in
+`.github/dependabot.yml`. Same PR.
 
-1. The "Inline deferral list" section in this file
-2. The corresponding section inside the routine's prompt via `/schedule`
+## Disabling
 
-The inline list inside the prompt is the source of truth at runtime — this file is the version-controlled mirror.
-
-## Disabling the routine
-
-`/schedule` → list routines → delete (or pause) the **Daily Upgrade Scan**. PRs the routine has already opened remain; auto-merge will still complete on any in-flight PRs.
+Actions → *Daily Upgrade Scan* → ⋯ → *Disable workflow*. In-flight PRs keep
+their auto-merge setting.
