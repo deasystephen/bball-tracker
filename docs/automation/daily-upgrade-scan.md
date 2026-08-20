@@ -37,7 +37,7 @@ file. There is no second copy to keep in sync.
 | Bucket | Examples | Action |
 | --- | --- | --- |
 | **Auto-fix** | High/critical alert **with** a `first_patched` version → root `overrides` entry (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps; Expo SDK same-major patches | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
-| **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses/decides |
+| **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses (reason: *Risk is tolerable to this project* — GitHub offers no "no fix" reason) or decides |
 | **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
 
 ## Secrets and permissions
