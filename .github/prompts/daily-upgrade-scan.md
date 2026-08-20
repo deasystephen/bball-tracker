@@ -165,12 +165,13 @@ If you hit a fatal error, still post the comment with a
 
 The action hides your conversation from the job log, so the job summary is the
 only place a human can see what you decided without opening GitHub issues.
-As your final action, append the full daily-log comment body (Step 6) to the
-file named by `$GITHUB_STEP_SUMMARY` — in a dry run, append what you *would*
-have posted, prefixed with `## DRY RUN — nothing was posted`, followed by a
-fenced block containing `git diff` for each side you would have changed.
-Write it with a heredoc (`cat >> "$GITHUB_STEP_SUMMARY" <<'EOF' ... EOF`).
-Do this even after a fatal error.
+As your final action, write the full daily-log comment body (Step 6) to
+`$SCAN_REPORT` (path provided in the prompt context) — in a dry run, write what
+you *would* have posted, prefixed with `## DRY RUN — nothing was posted`,
+followed by a fenced block containing `git diff` for each side you would have
+changed. Use a heredoc (`cat > "$SCAN_REPORT" <<'EOF' ... EOF`). The workflow
+appends that file to the job summary and uploads it as an artifact. Do this
+even after a fatal error.
 
 ## Hard constraints
 

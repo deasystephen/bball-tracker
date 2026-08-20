@@ -105,9 +105,25 @@ jobs:
             - TODAY=${{ github.run_started_at }}
             - DRY_RUN=${{ github.event.inputs.dry_run || 'false' }}
             - RUN_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - SCAN_REPORT=${{ runner.temp }}/scan-report.md (write your final report here)
           claude_args: |
             --allowedTools "Bash,Read,Glob,Grep,Edit,Write"
             --max-turns 150
+
+      - name: Publish scan report
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/scan-report.md"
+          if [ -s "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; else echo '::warning::No scan report written'; echo '_No scan report was written by the Claude step._' >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload scan report artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: scan-report
+          path: ${{ runner.temp }}/scan-report.md
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Belt-and-braces: if the Claude step died before it could post the
       # daily log, leave a ROUTINE ERROR comment so the silence is visible.
