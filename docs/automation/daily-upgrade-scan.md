@@ -42,6 +42,13 @@ file. There is no second copy to keep in sync.
 
 ## Secrets and permissions
 
+Both secrets are **Environment secrets** on the `upgrade-scan` environment
+(Settings → Environments → `upgrade-scan`), whose deployment-branch rule allows
+only `main`. The scan job declares `environment: upgrade-scan`, so a run from
+any other branch — including a manual `workflow_dispatch` against a feature
+branch — fails at job start with no access to the secrets. Repo-level secrets
+would be readable by any workflow on any branch once merged.
+
 | Secret | What | Scope |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude API key | Dedicated key in its own Console workspace with a monthly spend limit, so a runaway run is capped and the key can be rotated without touching anything else |
@@ -62,9 +69,10 @@ are pinned to commit SHAs.
    `gh pr merge --auto` to mean anything.
 3. ✅ Claude GitHub App installed with contents / issues / pull-requests write.
 4. ✅ Repo Watch with Issues notifications + "Include your own updates".
-5. ⬜ `ANTHROPIC_API_KEY` secret.
-6. ⬜ `DEPENDABOT_ALERTS_TOKEN` secret (calendar reminder for expiry).
-7. ⬜ After a few green Actions runs: pause/delete the hosted routine via
+5. ✅ `upgrade-scan` Environment exists with branch rule `main` (created 2026-08-20 via API).
+6. ⬜ `ANTHROPIC_API_KEY` **environment** secret on `upgrade-scan`.
+7. ⬜ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan` (calendar reminder for expiry).
+8. ⬜ After a few green Actions runs: pause/delete the hosted routine via
    `/schedule` so the two don't race (both are idempotent against open PRs,
    but you'd get two log comments a day).
 

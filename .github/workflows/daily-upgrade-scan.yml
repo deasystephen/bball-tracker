@@ -2,7 +2,8 @@
 # See docs/automation/daily-upgrade-scan.md for the full design and the
 # prompt at .github/prompts/daily-upgrade-scan.md (single source of truth).
 #
-# Secrets required (repo → Settings → Secrets and variables → Actions):
+# Secrets required — add them to the `upgrade-scan` ENVIRONMENT (Settings →
+# Environments → upgrade-scan → Environment secrets), not as repo secrets:
 #   ANTHROPIC_API_KEY         Claude API key (a dedicated key in its own
 #                             Console workspace with a monthly spend limit).
 #   DEPENDABOT_ALERTS_TOKEN   Fine-grained PAT, this repo only, permission
@@ -40,6 +41,10 @@ jobs:
   scan:
     name: Scan
     runs-on: ubuntu-latest
+    # Secrets live on this Environment, whose deployment-branch rule allows
+    # only `main` — so no PR branch can reference them, even via
+    # workflow_dispatch against a feature branch.
+    environment: upgrade-scan
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
