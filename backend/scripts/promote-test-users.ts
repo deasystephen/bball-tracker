@@ -65,14 +65,16 @@ export function parseAccounts(raw: string | undefined): string[] {
     .split(/[\s,;]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  for (const account of accounts) {
+  // Report by position rather than echoing the value: the list comes from the environment /
+  // CLI and gets printed by the top-level error handler.
+  accounts.forEach((account, i) => {
     if (!/^[^\s@+]+@[^\s@]+\.[^\s@]+$/.test(account)) {
       throw new Error(
-        `Invalid base account "${account}" — expected a plain address like name@example.com ` +
-          `(no "+alias"; personas are appended automatically).`,
+        `Invalid base account at position ${i + 1} of ${accounts.length} — expected a plain ` +
+          `address like name@example.com (no "+alias"; personas are appended automatically).`,
       );
     }
-  }
+  });
   return [...new Set(accounts)];
 }
 
