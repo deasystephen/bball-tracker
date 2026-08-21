@@ -23,10 +23,26 @@ auto-assignment (the allowlist match in `workos-service.ts` — see "Adding an a
 
 > The 3 "no email" boundary personas (asst coach, manager, outsider) don't need SES verification.
 
+### Adding more testers
+
+The same persona set works for any number of tester inboxes: each tester gets their own
+`<their-local>+headcoach@<their-domain>`, `+player`, `+asstcoach`, `+manager`, `+parent`
+(and `+invitee2`) aliases. Both helper scripts below take the list of **base** inboxes (no
+`+alias`) via the `TEST_ACCOUNTS` env var — comma- or space-separated — and default to
+`deasystephen@gmail.com`. Each tester's head coach creates their **own** `Test Team`; the
+promotion script resolves the team through that tester's head coach, so same-named teams from
+different testers don't collide.
+
+```bash
+export TEST_ACCOUNTS="deasystephen@gmail.com tester@example.com"
+```
+
 ## Step 1 — SES sandbox verification (email-receiving aliases only)
 
 SES sandbox verifies **exact** addresses; verifying the base inbox does **not** cover
-`+aliases`. Verify each receiver, then click the confirmation link (it lands in your inbox):
+`+aliases`. Verify each receiver, then click the confirmation link (it lands in that tester's
+inbox). The manual loops below show a single inbox — the helper script further down handles
+several at once:
 
 ```bash
 for alias in headcoach player parent invitee2; do
@@ -52,11 +68,13 @@ Both steps above are wrapped by [`backend/scripts/verify-ses-test-recipients.sh`
 ```bash
 backend/scripts/verify-ses-test-recipients.sh create   # request verification for each alias
 backend/scripts/verify-ses-test-recipients.sh status   # show verified/pending per alias
+# several testers at once (each clicks the confirmation links in their own inbox):
+TEST_ACCOUNTS="deasystephen@gmail.com tester@example.com" backend/scripts/verify-ses-test-recipients.sh create
 ```
 
 ## Step 2 — Role promotion sequence
 
-Only **ADMIN** (auto via `ADMIN_EMAIL`) and **Head Coach** (after a role bump + creating a team
+Only **ADMIN** (auto via `ADMIN_EMAILS`) and **Head Coach** (after a role bump + creating a team
 in-app) can be set through the app. Assistant Coach, Team Manager, and Parent have **no API
 endpoints** (the staff/guardian routes are unimplemented — only Zod schemas are stubbed in
 `backend/src/api/teams/schemas.ts`), so they require direct DB writes. The
@@ -64,7 +82,7 @@ endpoints** (the staff/guardian routes are unimplemented — only Zod schemas ar
 
 Order matters:
 
-1. **All 6 aliases sign in once** via WorkOS (creates the `User` rows; everyone starts `PLAYER`).
+1. **All 6 aliases sign in once** (per tester) via WorkOS (creates the `User` rows; everyone starts `PLAYER`).
 2. **`--phase=pre`** — bump `+headcoach` → `COACH` and `+parent` → `PARENT`.
    (Head coach *must* be `COACH` before step 4: `createTeam` 403s otherwise — `team-service.ts`.)
 3. **ADMIN** creates the League + Season in-app (tests C.1–C.2; admin-only).
@@ -86,9 +104,16 @@ cd backend
 DATABASE_URL="<prod-url>" npx tsx scripts/promote-test-users.ts --phase=pre   # before team creation
 # ... admin creates league+season, head coach creates "Test Team", player accepts invite ...
 DATABASE_URL="<prod-url>" npx tsx scripts/promote-test-users.ts --phase=post  # after team + player
+
+# several testers at once — --accounts= or TEST_ACCOUNTS (comma/space-separated base inboxes):
+DATABASE_URL="<prod-url>" npx tsx scripts/promote-test-users.ts \
+  --accounts=deasystephen@gmail.com,tester@example.com --phase=pre
 ```
 
-Edit the constants at the top of the script if your alias scheme or team name differs.
+Each account is processed independently: a tester whose aliases haven't signed in yet is
+reported and skipped (the rest still run), and the script exits non-zero so the gap isn't
+missed. Use `--team=<name>` (or `TEST_TEAM_NAME`) if the head coaches named their team
+something other than `Test Team`.
 
 ## Heads-up: v1.2.0 entitlement gating (merged in #202)
 
