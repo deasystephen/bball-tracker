@@ -21,7 +21,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/notification-service');
@@ -41,7 +41,7 @@ describe('Push Token API', () => {
         token: 'ExponentPushToken[abc123]',
         platform: 'ios',
         createdAt: new Date(),
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockNotificationService.registerToken>>);
 
       const response = await request(app)
         .post('/api/v1/auth/push-token')
@@ -89,7 +89,7 @@ describe('Push Token API', () => {
 
   describe('DELETE /api/v1/auth/push-token', () => {
     it('should remove a push token successfully', async () => {
-      mockNotificationService.removeToken.mockResolvedValue({ count: 1 } as any);
+      mockNotificationService.removeToken.mockResolvedValue({ count: 1 } as unknown as Awaited<ReturnType<typeof mockNotificationService.removeToken>>);
 
       const response = await request(app)
         .delete('/api/v1/auth/push-token')

@@ -20,7 +20,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/rsvp-service');
@@ -44,7 +44,7 @@ describe('RSVP API', () => {
 
   describe('POST /api/v1/games/:gameId/rsvp', () => {
     it('should create an RSVP with YES status', async () => {
-      mockRsvpService.upsertRsvp.mockResolvedValue(mockRsvp as any);
+      mockRsvpService.upsertRsvp.mockResolvedValue(mockRsvp as unknown as Awaited<ReturnType<typeof mockRsvpService.upsertRsvp>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
@@ -62,7 +62,7 @@ describe('RSVP API', () => {
 
     it('should accept NO status', async () => {
       const noRsvp = { ...mockRsvp, status: 'NO' };
-      mockRsvpService.upsertRsvp.mockResolvedValue(noRsvp as any);
+      mockRsvpService.upsertRsvp.mockResolvedValue(noRsvp as unknown as Awaited<ReturnType<typeof mockRsvpService.upsertRsvp>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
@@ -73,7 +73,7 @@ describe('RSVP API', () => {
 
     it('should accept MAYBE status', async () => {
       const maybeRsvp = { ...mockRsvp, status: 'MAYBE' };
-      mockRsvpService.upsertRsvp.mockResolvedValue(maybeRsvp as any);
+      mockRsvpService.upsertRsvp.mockResolvedValue(maybeRsvp as unknown as Awaited<ReturnType<typeof mockRsvpService.upsertRsvp>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
@@ -112,7 +112,7 @@ describe('RSVP API', () => {
       mockRsvpService.getGameRsvps.mockResolvedValue({
         rsvps: [mockRsvp],
         summary: { yes: 1, no: 0, maybe: 0 },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockRsvpService.getGameRsvps>>);
 
       const response = await request(app)
         .get(`/api/v1/games/${TEST_GAME_ID}/rsvps`);

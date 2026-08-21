@@ -3,6 +3,7 @@
  */
 
 import request from 'supertest';
+import type { Request, Response } from 'express';
 import { app, httpServer } from '../../src/index';
 import { authenticate } from '../../src/api/auth/middleware';
 import { generateAvatarUploadUrl } from '../../src/services/upload-service';
@@ -21,7 +22,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the upload service
@@ -142,7 +143,7 @@ describe('Uploads API', () => {
   describe('Authentication', () => {
     it('should require authentication', async () => {
       // Override the mock to simulate no auth
-      (authenticate as jest.Mock).mockImplementationOnce((_req: any, res: any) => {
+      (authenticate as jest.Mock).mockImplementationOnce((_req: Request, res: Response) => {
         res.status(401).json({ error: 'Authorization token required' });
       });
 

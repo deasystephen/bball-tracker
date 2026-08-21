@@ -20,7 +20,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/announcement-service');
@@ -44,7 +44,7 @@ describe('Announcements API', () => {
 
   describe('POST /api/v1/teams/:teamId/announcements', () => {
     it('should create an announcement successfully', async () => {
-      mockAnnouncementService.createAnnouncement.mockResolvedValue(mockAnnouncement as any);
+      mockAnnouncementService.createAnnouncement.mockResolvedValue(mockAnnouncement as unknown as Awaited<ReturnType<typeof mockAnnouncementService.createAnnouncement>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/announcements`)
@@ -100,7 +100,7 @@ describe('Announcements API', () => {
         total: 1,
         limit: 20,
         offset: 0,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockAnnouncementService.listAnnouncements>>);
 
       const response = await request(app)
         .get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`);
@@ -117,7 +117,7 @@ describe('Announcements API', () => {
         total: 0,
         limit: 5,
         offset: 10,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockAnnouncementService.listAnnouncements>>);
 
       const response = await request(app)
         .get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`)

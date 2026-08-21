@@ -2,6 +2,7 @@
  * Announcement service for team-wide coach messages
  */
 
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
@@ -9,6 +10,27 @@ import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
 import { mailer } from './mailer';
 import { announcementTemplate } from './mailer/templates';
+
+const ANNOUNCEMENT_INCLUDE = {
+  author: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+} satisfies Prisma.AnnouncementInclude;
+
+export type AnnouncementWithAuthor = Prisma.AnnouncementGetPayload<{
+  include: typeof ANNOUNCEMENT_INCLUDE;
+}>;
+
+export interface AnnouncementList {
+  announcements: AnnouncementWithAuthor[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 export class AnnouncementService {
   /**
@@ -18,7 +40,7 @@ export class AnnouncementService {
     teamId: string,
     data: { title: string; body: string },
     userId: string
-  ) {
+  ): Promise<AnnouncementWithAuthor> {
     // Verify team exists (also fetch members for email delivery)
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -52,15 +74,7 @@ export class AnnouncementService {
         title: data.title,
         body: data.body,
       },
-      include: {
-        author: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: ANNOUNCEMENT_INCLUDE,
     });
 
     // Send announcement emails to team members (fire-and-forget)
@@ -123,7 +137,7 @@ export class AnnouncementService {
     teamId: string,
     userId: string,
     options: { limit?: number; offset?: number } = {}
-  ) {
+  ): Promise<AnnouncementList> {
     const { limit = 20, offset = 0 } = options;
 
     // Verify team exists
@@ -146,15 +160,7 @@ export class AnnouncementService {
       prisma.announcement.count({ where: { teamId } }),
       prisma.announcement.findMany({
         where: { teamId },
-        include: {
-          author: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
+        include: ANNOUNCEMENT_INCLUDE,
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset,

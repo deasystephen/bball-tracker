@@ -2,10 +2,114 @@
  * League service layer for business logic
  */
 
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError } from '../utils/errors';
 import { isSystemAdmin, isLeagueAdmin } from '../utils/permissions';
+
+const LEAGUE_ADMIN_INCLUDE = {
+  user: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+} satisfies Prisma.LeagueAdminInclude;
+
+const LEAGUE_INCLUDE = {
+  seasons: {
+    include: {
+      teams: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
+  admins: {
+    include: LEAGUE_ADMIN_INCLUDE,
+  },
+} satisfies Prisma.LeagueInclude;
+
+const LEAGUE_DETAIL_INCLUDE = {
+  seasons: {
+    include: {
+      teams: {
+        include: {
+          staff: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+              role: true,
+            },
+          },
+          members: {
+            include: {
+              player: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      startDate: 'desc',
+    },
+  },
+  admins: {
+    include: LEAGUE_ADMIN_INCLUDE,
+  },
+} satisfies Prisma.LeagueInclude;
+
+const LEAGUE_LIST_INCLUDE = {
+  seasons: {
+    select: {
+      id: true,
+      name: true,
+      isActive: true,
+    },
+    orderBy: {
+      startDate: 'desc',
+    },
+  },
+  _count: {
+    select: {
+      seasons: true,
+    },
+  },
+} satisfies Prisma.LeagueInclude;
+
+const SEASON_INCLUDE = {
+  league: true,
+  teams: true,
+} satisfies Prisma.SeasonInclude;
+
+export type LeagueWithSeasons = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_INCLUDE }>;
+export type LeagueDetail = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_DETAIL_INCLUDE }>;
+export type LeagueListItem = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_LIST_INCLUDE }>;
+export type LeagueAdminWithUser = Prisma.LeagueAdminGetPayload<{
+  include: typeof LEAGUE_ADMIN_INCLUDE;
+}>;
+export type SeasonWithLeagueAndTeams = Prisma.SeasonGetPayload<{ include: typeof SEASON_INCLUDE }>;
+
+export interface LeagueList {
+  leagues: LeagueListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 export class LeagueService {
   /**
@@ -13,7 +117,7 @@ export class LeagueService {
    * @param data League creation data
    * @param userId User ID (must be system admin)
    */
-  static async createLeague(data: CreateLeagueInput, userId: string) {
+  static async createLeague(data: CreateLeagueInput, userId: string): Promise<LeagueWithSeasons> {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
@@ -36,29 +140,7 @@ export class LeagueService {
       data: {
         name: data.name,
       },
-      include: {
-        seasons: {
-          include: {
-            teams: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-        admins: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: LEAGUE_INCLUDE,
     });
 
     return league;
@@ -68,55 +150,10 @@ export class LeagueService {
    * Get a league by ID
    * @param leagueId League ID
    */
-  static async getLeagueById(leagueId: string) {
+  static async getLeagueById(leagueId: string): Promise<LeagueDetail> {
     const league = await prisma.league.findUnique({
       where: { id: leagueId },
-      include: {
-        seasons: {
-          include: {
-            teams: {
-              include: {
-                staff: {
-                  include: {
-                    user: {
-                      select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                      },
-                    },
-                    role: true,
-                  },
-                },
-                members: {
-                  include: {
-                    player: {
-                      select: {
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          orderBy: {
-            startDate: 'desc',
-          },
-        },
-        admins: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: LEAGUE_DETAIL_INCLUDE,
     });
 
     if (!league) {
@@ -130,9 +167,9 @@ export class LeagueService {
    * List leagues with filters
    * @param query Query parameters
    */
-  static async listLeagues(query: LeagueQueryParams) {
+  static async listLeagues(query: LeagueQueryParams): Promise<LeagueList> {
     // Build where clause
-    const where: any = {};
+    const where: Prisma.LeagueWhereInput = {};
 
     if (query.search) {
       where.name = {
@@ -146,23 +183,7 @@ export class LeagueService {
       prisma.league.count({ where }),
       prisma.league.findMany({
         where,
-        include: {
-          seasons: {
-            select: {
-              id: true,
-              name: true,
-              isActive: true,
-            },
-            orderBy: {
-              startDate: 'desc',
-            },
-          },
-          _count: {
-            select: {
-              seasons: true,
-            },
-          },
-        },
+        include: LEAGUE_LIST_INCLUDE,
         orderBy: {
           name: 'asc',
         },
@@ -185,7 +206,11 @@ export class LeagueService {
    * @param data Update data
    * @param userId User ID (must be league admin or system admin)
    */
-  static async updateLeague(leagueId: string, data: UpdateLeagueInput, userId: string) {
+  static async updateLeague(
+    leagueId: string,
+    data: UpdateLeagueInput,
+    userId: string
+  ): Promise<LeagueWithSeasons> {
     // Get league
     const league = await prisma.league.findUnique({
       where: { id: leagueId },
@@ -202,7 +227,7 @@ export class LeagueService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.LeagueUpdateInput = {};
 
     if (data.name !== undefined) {
       updateData.name = data.name;
@@ -212,29 +237,7 @@ export class LeagueService {
     const updatedLeague = await prisma.league.update({
       where: { id: leagueId },
       data: updateData,
-      include: {
-        seasons: {
-          include: {
-            teams: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-        admins: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: LEAGUE_INCLUDE,
     });
 
     return updatedLeague;
@@ -245,7 +248,7 @@ export class LeagueService {
    * @param leagueId League ID
    * @param userId User ID (must be system admin)
    */
-  static async deleteLeague(leagueId: string, userId: string) {
+  static async deleteLeague(leagueId: string, userId: string): Promise<{ success: true }> {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
@@ -288,7 +291,11 @@ export class LeagueService {
    * @param adminUserId User ID to add as admin
    * @param userId User ID making the request (must be system admin or existing league admin)
    */
-  static async addLeagueAdmin(leagueId: string, adminUserId: string, userId: string) {
+  static async addLeagueAdmin(
+    leagueId: string,
+    adminUserId: string,
+    userId: string
+  ): Promise<LeagueAdminWithUser> {
     // Check permission
     const canManage = await isLeagueAdmin(userId, leagueId);
     if (!canManage) {
@@ -324,15 +331,7 @@ export class LeagueService {
         leagueId,
         userId: adminUserId,
       },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: LEAGUE_ADMIN_INCLUDE,
     });
 
     return leagueAdmin;
@@ -344,7 +343,11 @@ export class LeagueService {
    * @param adminUserId User ID to remove as admin
    * @param userId User ID making the request (must be system admin)
    */
-  static async removeLeagueAdmin(leagueId: string, adminUserId: string, userId: string) {
+  static async removeLeagueAdmin(
+    leagueId: string,
+    adminUserId: string,
+    userId: string
+  ): Promise<{ success: true }> {
     // Only system admin can remove league admins
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
@@ -374,7 +377,7 @@ export class LeagueService {
     leagueId: string,
     data: { name: string; startDate?: Date; endDate?: Date },
     userId: string
-  ) {
+  ): Promise<SeasonWithLeagueAndTeams> {
     // Check permission
     const canManage = await isLeagueAdmin(userId, leagueId);
     if (!canManage) {
@@ -404,10 +407,7 @@ export class LeagueService {
         endDate: data.endDate,
         isActive: true,
       },
-      include: {
-        league: true,
-        teams: true,
-      },
+      include: SEASON_INCLUDE,
     });
 
     return season;

@@ -24,7 +24,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -50,7 +50,7 @@ describe('Game Events API', () => {
 
   describe('POST /api/v1/games/:gameId/events', () => {
     it('should create an event successfully', async () => {
-      mockGameEventService.createEvent.mockResolvedValue(mockEvent as any);
+      mockGameEventService.createEvent.mockResolvedValue(mockEvent as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -76,7 +76,7 @@ describe('Game Events API', () => {
 
     it('should create an event without playerId (timeout)', async () => {
       const timeoutEvent = { ...mockEvent, playerId: null, eventType: 'TIMEOUT', metadata: { type: 'full' } };
-      mockGameEventService.createEvent.mockResolvedValue(timeoutEvent as any);
+      mockGameEventService.createEvent.mockResolvedValue(timeoutEvent as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -158,7 +158,7 @@ describe('Game Events API', () => {
         total: 1,
         limit: 50,
         offset: 0,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.listEvents>>);
 
       const response = await request(app).get(`/api/v1/games/${TEST_GAME_ID}/events`);
 
@@ -174,7 +174,7 @@ describe('Game Events API', () => {
         total: 1,
         limit: 50,
         offset: 0,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.listEvents>>);
 
       const response = await request(app)
         .get(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -194,7 +194,7 @@ describe('Game Events API', () => {
         total: 1,
         limit: 50,
         offset: 0,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.listEvents>>);
 
       const response = await request(app)
         .get(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -214,7 +214,7 @@ describe('Game Events API', () => {
         total: 100,
         limit: 10,
         offset: 20,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.listEvents>>);
 
       const response = await request(app)
         .get(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -248,7 +248,7 @@ describe('Game Events API', () => {
 
   describe('GET /api/v1/games/:gameId/events/:eventId', () => {
     it('should get an event by ID', async () => {
-      mockGameEventService.getEventById.mockResolvedValue(mockEvent as any);
+      mockGameEventService.getEventById.mockResolvedValue(mockEvent as unknown as Awaited<ReturnType<typeof mockGameEventService.getEventById>>);
 
       const response = await request(app).get(
         `/api/v1/games/${TEST_GAME_ID}/events/${TEST_EVENT_ID}`

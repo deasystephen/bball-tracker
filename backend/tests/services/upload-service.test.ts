@@ -5,20 +5,22 @@
  * with mocked AWS SDK clients.
  */
 
+import type { PutObjectCommandInput, DeleteObjectCommandInput } from '@aws-sdk/client-s3';
+
 // Capture constructor args since jest.mock replaces classes
-const putObjectCalls: any[] = [];
-const deleteObjectCalls: any[] = [];
+const putObjectCalls: PutObjectCommandInput[] = [];
+const deleteObjectCalls: DeleteObjectCommandInput[] = [];
 
 jest.mock('@aws-sdk/client-s3', () => {
   return {
     S3Client: jest.fn().mockImplementation(() => ({
       send: jest.fn().mockResolvedValue({}),
     })),
-    PutObjectCommand: jest.fn().mockImplementation((input) => {
+    PutObjectCommand: jest.fn().mockImplementation((input: PutObjectCommandInput) => {
       putObjectCalls.push(input);
       return { input };
     }),
-    DeleteObjectCommand: jest.fn().mockImplementation((input) => {
+    DeleteObjectCommand: jest.fn().mockImplementation((input: DeleteObjectCommandInput) => {
       deleteObjectCalls.push(input);
       return { input };
     }),

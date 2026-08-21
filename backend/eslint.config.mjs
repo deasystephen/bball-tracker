@@ -29,10 +29,18 @@ export default tseslint.config(
       },
     },
     rules: {
-      '@typescript-eslint/explicit-function-return-type': 'warn',
+      // Every rule is an error: `npm run lint` runs with --max-warnings 0 so
+      // warnings would fail CI anyway, and keeping them as errors makes the
+      // intent explicit. Do not downgrade to 'warn' to get something merged.
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        // Inline callbacks (`arr.map((x) => ...)`, option-object handlers) are
+        // contextually typed; only declarations need an explicit annotation.
+        { allowExpressions: true },
+      ],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
-      'no-console': ['warn', { allow: ['warn', 'error', 'log'] }],
+      '@typescript-eslint/no-explicit-any': 'error',
+      'no-console': ['error', { allow: ['warn', 'error', 'log'] }],
     },
   },
 

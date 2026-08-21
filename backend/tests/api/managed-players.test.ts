@@ -24,7 +24,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the services
@@ -62,7 +62,7 @@ describe('Managed Players API', () => {
     };
 
     it('should create a managed player successfully', async () => {
-      mockTeamService.addManagedPlayer.mockResolvedValue(mockTeamMember as any);
+      mockTeamService.addManagedPlayer.mockResolvedValue(mockTeamMember as unknown as Awaited<ReturnType<typeof mockTeamService.addManagedPlayer>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
@@ -86,7 +86,7 @@ describe('Managed Players API', () => {
         jerseyNumber: null,
         position: null,
       };
-      mockTeamService.addManagedPlayer.mockResolvedValue(memberNoExtras as any);
+      mockTeamService.addManagedPlayer.mockResolvedValue(memberNoExtras as unknown as Awaited<ReturnType<typeof mockTeamService.addManagedPlayer>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
@@ -190,7 +190,7 @@ describe('Managed Players API', () => {
           profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/photo.jpg',
         },
       };
-      mockTeamService.addManagedPlayer.mockResolvedValue(memberWithAvatar as any);
+      mockTeamService.addManagedPlayer.mockResolvedValue(memberWithAvatar as unknown as Awaited<ReturnType<typeof mockTeamService.addManagedPlayer>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
@@ -243,7 +243,7 @@ describe('Managed Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [],
         pagination: { total: 0, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app).get('/api/v1/players');
 
@@ -257,7 +257,7 @@ describe('Managed Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [],
         pagination: { total: 0, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app)
         .get('/api/v1/players')
@@ -273,7 +273,7 @@ describe('Managed Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [],
         pagination: { total: 0, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app)
         .get('/api/v1/players')
@@ -302,7 +302,7 @@ describe('Managed Players API', () => {
         teamMembers: [],
       };
 
-      mockPlayerService.getPlayerById.mockResolvedValue(managedPlayer as any);
+      mockPlayerService.getPlayerById.mockResolvedValue(managedPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.getPlayerById>>);
 
       const response = await request(app)
         .get(`/api/v1/players/${TEST_MANAGED_PLAYER_ID}`);

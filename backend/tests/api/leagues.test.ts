@@ -18,7 +18,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -43,7 +43,7 @@ describe('Leagues API', () => {
 
   describe('POST /api/v1/leagues', () => {
     it('should create a league successfully', async () => {
-      mockLeagueService.createLeague.mockResolvedValue(mockLeague as any);
+      mockLeagueService.createLeague.mockResolvedValue(mockLeague as unknown as Awaited<ReturnType<typeof mockLeagueService.createLeague>>);
 
       const response = await request(app)
         .post('/api/v1/leagues')
@@ -89,7 +89,7 @@ describe('Leagues API', () => {
       mockLeagueService.listLeagues.mockResolvedValue({
         leagues: [mockLeague],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
 
       const response = await request(app).get('/api/v1/leagues');
 
@@ -102,7 +102,7 @@ describe('Leagues API', () => {
       mockLeagueService.listLeagues.mockResolvedValue({
         leagues: [mockLeague],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
 
       const response = await request(app)
         .get('/api/v1/leagues')
@@ -118,7 +118,7 @@ describe('Leagues API', () => {
       mockLeagueService.listLeagues.mockResolvedValue({
         leagues: [mockLeague],
         pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
 
       const response = await request(app)
         .get('/api/v1/leagues')
@@ -131,7 +131,7 @@ describe('Leagues API', () => {
 
   describe('GET /api/v1/leagues/:id', () => {
     it('should get a league by ID', async () => {
-      mockLeagueService.getLeagueById.mockResolvedValue(mockLeague as any);
+      mockLeagueService.getLeagueById.mockResolvedValue(mockLeague as unknown as Awaited<ReturnType<typeof mockLeagueService.getLeagueById>>);
 
       const response = await request(app).get('/api/v1/leagues/league-1');
 
@@ -153,7 +153,7 @@ describe('Leagues API', () => {
   describe('PATCH /api/v1/leagues/:id', () => {
     it('should update a league successfully', async () => {
       const updatedLeague = { ...mockLeague, name: 'Updated League' };
-      mockLeagueService.updateLeague.mockResolvedValue(updatedLeague as any);
+      mockLeagueService.updateLeague.mockResolvedValue(updatedLeague as unknown as Awaited<ReturnType<typeof mockLeagueService.updateLeague>>);
 
       const response = await request(app)
         .patch('/api/v1/leagues/league-1')
@@ -185,7 +185,7 @@ describe('Leagues API', () => {
 
   describe('DELETE /api/v1/leagues/:id', () => {
     it('should delete a league successfully', async () => {
-      mockLeagueService.deleteLeague.mockResolvedValue(undefined as any);
+      mockLeagueService.deleteLeague.mockResolvedValue({ success: true });
 
       const response = await request(app).delete('/api/v1/leagues/league-1');
 

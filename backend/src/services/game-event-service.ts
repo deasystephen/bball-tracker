@@ -9,25 +9,55 @@ import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 import { emitGameEvent } from '../websocket/emit';
 
+const GAME_ACCESS_INCLUDE = {
+  team: {
+    include: {
+      members: {
+        select: {
+          playerId: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.GameInclude;
+
+const GAME_EVENT_INCLUDE = {
+  player: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} satisfies Prisma.GameEventInclude;
+
+type GameForAccess = Prisma.GameGetPayload<{ include: typeof GAME_ACCESS_INCLUDE }>;
+
+export type GameEventWithPlayer = Prisma.GameEventGetPayload<{
+  include: typeof GAME_EVENT_INCLUDE;
+}>;
+
+export interface GameEventList {
+  events: GameEventWithPlayer[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+interface GameAccess {
+  game: GameForAccess;
+  canTrackStats: boolean;
+  canManageTeam: boolean;
+}
+
 export class GameEventService {
   /**
    * Verify user has access to a game and return permissions
    * Returns the game and user permissions
    */
-  private static async verifyGameAccess(gameId: string, userId: string) {
+  private static async verifyGameAccess(gameId: string, userId: string): Promise<GameAccess> {
     const game = await prisma.game.findUnique({
       where: { id: gameId },
-      include: {
-        team: {
-          include: {
-            members: {
-              select: {
-                playerId: true,
-              },
-            },
-          },
-        },
-      },
+      include: GAME_ACCESS_INCLUDE,
     });
 
     if (!game) {
@@ -51,7 +81,11 @@ export class GameEventService {
    * @param data Event creation data
    * @param userId ID of the user creating the event (must have canTrackStats permission)
    */
-  static async createEvent(gameId: string, data: CreateGameEventInput, userId: string) {
+  static async createEvent(
+    gameId: string,
+    data: CreateGameEventInput,
+    userId: string
+  ): Promise<GameEventWithPlayer> {
     const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to create events
@@ -84,14 +118,7 @@ export class GameEventService {
         timestamp,
         metadata: (data.metadata || {}) as Prisma.InputJsonValue,
       },
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: GAME_EVENT_INCLUDE,
     });
 
     // Broadcast to spectators in the game room. `emitGameEvent` no-ops if
@@ -110,7 +137,11 @@ export class GameEventService {
    * @param query Query parameters for filtering/pagination
    * @param userId User ID (for authorization)
    */
-  static async listEvents(gameId: string, query: GameEventQueryParams, userId: string) {
+  static async listEvents(
+    gameId: string,
+    query: GameEventQueryParams,
+    userId: string
+  ): Promise<GameEventList> {
     await this.verifyGameAccess(gameId, userId);
 
     // Build where clause
@@ -129,14 +160,7 @@ export class GameEventService {
       prisma.gameEvent.count({ where }),
       prisma.gameEvent.findMany({
         where,
-        include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
+        include: GAME_EVENT_INCLUDE,
         orderBy: {
           timestamp: 'desc',
         },
@@ -159,19 +183,16 @@ export class GameEventService {
    * @param eventId Event ID
    * @param userId User ID (for authorization)
    */
-  static async getEventById(gameId: string, eventId: string, userId: string) {
+  static async getEventById(
+    gameId: string,
+    eventId: string,
+    userId: string
+  ): Promise<GameEventWithPlayer> {
     await this.verifyGameAccess(gameId, userId);
 
     const event = await prisma.gameEvent.findUnique({
       where: { id: eventId },
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: GAME_EVENT_INCLUDE,
     });
 
     if (!event) {
@@ -191,7 +212,11 @@ export class GameEventService {
    * @param eventId Event ID
    * @param userId User ID (must have canTrackStats permission)
    */
-  static async deleteEvent(gameId: string, eventId: string, userId: string) {
+  static async deleteEvent(
+    gameId: string,
+    eventId: string,
+    userId: string
+  ): Promise<{ success: true }> {
     const { canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to delete events (for undo functionality)

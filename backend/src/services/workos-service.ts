@@ -3,9 +3,15 @@
  */
 
 import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI } from '../utils/workos-client';
+import { User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
+
+type UserManagement = typeof workos.userManagement;
+export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
+export type WorkOSUser = Awaited<ReturnType<UserManagement['getUser']>>;
+export type WorkOSUserList = Awaited<ReturnType<UserManagement['listUsers']>>;
 
 export class WorkOSService {
   /**
@@ -58,7 +64,7 @@ export class WorkOSService {
   /**
    * Exchange authorization code for user token
    */
-  static async exchangeCodeForToken(code: string) {
+  static async exchangeCodeForToken(code: string): Promise<WorkOSAuthentication> {
     return workos.userManagement.authenticateWithCode({
       clientId: WORKOS_CLIENT_ID,
       code,
@@ -68,7 +74,7 @@ export class WorkOSService {
   /**
    * Get user information from WorkOS
    */
-  static async getUser(userId: string) {
+  static async getUser(userId: string): Promise<WorkOSUser> {
     return workos.userManagement.getUser(userId);
   }
 
@@ -79,7 +85,7 @@ export class WorkOSService {
     email?: string;
     limit?: number;
     cursor?: string;
-  }) {
+  }): Promise<WorkOSUserList> {
     return workos.userManagement.listUsers(options);
   }
 
@@ -94,7 +100,7 @@ export class WorkOSService {
     lastName?: string;
     emailVerified: boolean;
     profilePictureUrl?: string;
-  }) {
+  }): Promise<User> {
     const fullName = [workosUser.firstName, workosUser.lastName]
       .filter(Boolean)
       .join(' ') || workosUser.email.split('@')[0];
@@ -144,7 +150,7 @@ export class WorkOSService {
    * if the token's user ID is invalid or doesn't correspond to a real user, the call fails.
    * For additional security, consider using WorkOS JWKS endpoint for local signature verification.
    */
-  static async verifyToken(accessToken: string) {
+  static async verifyToken(accessToken: string): Promise<WorkOSUser | null> {
     try {
       // Validate token structure (must be a valid JWT with 3 parts)
       const parts = accessToken.split('.');

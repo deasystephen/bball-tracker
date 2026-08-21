@@ -3,6 +3,7 @@
  */
 
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 
@@ -12,7 +13,7 @@ export class NotificationService {
   /**
    * Register a push token for a user
    */
-  static async registerToken(userId: string, token: string, platform: string) {
+  static async registerToken(userId: string, token: string, platform: string): Promise<PushToken> {
     if (!Expo.isExpoPushToken(token)) {
       throw new Error('Invalid Expo push token');
     }
@@ -34,7 +35,7 @@ export class NotificationService {
   /**
    * Remove a push token
    */
-  static async removeToken(token: string) {
+  static async removeToken(token: string): Promise<Prisma.BatchPayload> {
     return prisma.pushToken.deleteMany({
       where: { token },
     });
@@ -46,7 +47,7 @@ export class NotificationService {
   static async sendToUsers(
     userIds: string[],
     notification: { title: string; body: string; data?: Record<string, unknown> }
-  ) {
+  ): Promise<ExpoPushTicket[]> {
     const tokens = await prisma.pushToken.findMany({
       where: { userId: { in: userIds } },
       select: { token: true },
@@ -72,7 +73,7 @@ export class NotificationService {
     teamId: string,
     notification: { title: string; body: string; data?: Record<string, unknown> },
     excludeUserId?: string
-  ) {
+  ): Promise<ExpoPushTicket[]> {
     // Get all team member and staff user IDs
     const [members, staff] = await Promise.all([
       prisma.teamMember.findMany({

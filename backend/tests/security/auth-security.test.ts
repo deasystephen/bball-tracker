@@ -6,12 +6,14 @@ import { mockPrisma } from '../setup';
 import { authenticate, requireRole } from '../../src/api/auth/middleware';
 import { PlayerService } from '../../src/services/player-service';
 import { Request, Response, NextFunction } from 'express';
+import type { WorkOSService } from '../../src/services/workos-service';
 
 // Mock WorkOS verifyToken
-const mockVerifyToken = jest.fn();
+type VerifyToken = typeof WorkOSService.verifyToken;
+const mockVerifyToken = jest.fn<ReturnType<VerifyToken>, Parameters<VerifyToken>>();
 jest.mock('../../src/services/workos-service', () => ({
   WorkOSService: {
-    verifyToken: (...args: unknown[]) => mockVerifyToken(...args),
+    verifyToken: (...args: Parameters<VerifyToken>): ReturnType<VerifyToken> => mockVerifyToken(...args),
   },
 }));
 
@@ -72,7 +74,7 @@ describe('Authentication Security', () => {
 
     it('should reject tokens for non-existent users', async () => {
       mockReq.headers = { authorization: 'Bearer valid-token' };
-      mockVerifyToken.mockResolvedValue({ id: 'workos-user-id' });
+      mockVerifyToken.mockResolvedValue({ id: 'workos-user-id' } as unknown as Awaited<ReturnType<VerifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       await authenticate(mockReq as Request, mockRes as Response, mockNext);
       expect(mockNext).toHaveBeenCalled();

@@ -17,6 +17,7 @@ import {
   createTeamStaff,
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
+import type { CreateGameInput } from '../../src/api/games/schemas';
 
 // Helper to create valid game input
 const createGameInput = (overrides: {
@@ -26,7 +27,7 @@ const createGameInput = (overrides: {
   status?: 'SCHEDULED' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
   homeScore?: number;
   awayScore?: number;
-}) => ({
+}): CreateGameInput => ({
   teamId: overrides.teamId,
   opponent: overrides.opponent,
   date: overrides.date,

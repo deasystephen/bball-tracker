@@ -2,10 +2,95 @@
  * Season service layer for business logic
  */
 
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
 import { NotFoundError, BadRequestError } from '../utils/errors';
 import { isLeagueAdmin, isSystemAdmin } from '../utils/permissions';
+
+const LEAGUE_SUMMARY_SELECT = {
+  id: true,
+  name: true,
+} satisfies Prisma.LeagueSelect;
+
+const SEASON_INCLUDE = {
+  league: { select: LEAGUE_SUMMARY_SELECT },
+  teams: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  _count: {
+    select: {
+      teams: true,
+    },
+  },
+} satisfies Prisma.SeasonInclude;
+
+const SEASON_DETAIL_INCLUDE = {
+  league: { select: LEAGUE_SUMMARY_SELECT },
+  teams: {
+    include: {
+      staff: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          role: true,
+        },
+      },
+      members: {
+        include: {
+          player: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+      _count: {
+        select: {
+          members: true,
+          games: true,
+        },
+      },
+    },
+    orderBy: {
+      name: 'asc',
+    },
+  },
+  _count: {
+    select: {
+      teams: true,
+    },
+  },
+} satisfies Prisma.SeasonInclude;
+
+const SEASON_LIST_INCLUDE = {
+  league: { select: LEAGUE_SUMMARY_SELECT },
+  _count: {
+    select: {
+      teams: true,
+    },
+  },
+} satisfies Prisma.SeasonInclude;
+
+export type SeasonWithTeams = Prisma.SeasonGetPayload<{ include: typeof SEASON_INCLUDE }>;
+export type SeasonDetail = Prisma.SeasonGetPayload<{ include: typeof SEASON_DETAIL_INCLUDE }>;
+export type SeasonListItem = Prisma.SeasonGetPayload<{ include: typeof SEASON_LIST_INCLUDE }>;
+
+export interface SeasonList {
+  seasons: SeasonListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 export class SeasonService {
   /**
@@ -13,7 +98,7 @@ export class SeasonService {
    * @param data Season creation data
    * @param userId User ID (must be league admin or system admin)
    */
-  static async createSeason(data: CreateSeasonInput, userId: string) {
+  static async createSeason(data: CreateSeasonInput, userId: string): Promise<SeasonWithTeams> {
     // Verify league exists
     const league = await prisma.league.findUnique({
       where: { id: data.leagueId },
@@ -57,25 +142,7 @@ export class SeasonService {
         endDate: data.endDate,
         isActive: true,
       },
-      include: {
-        league: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        teams: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        _count: {
-          select: {
-            teams: true,
-          },
-        },
-      },
+      include: SEASON_INCLUDE,
     });
 
     return season;
@@ -85,57 +152,10 @@ export class SeasonService {
    * Get a season by ID
    * @param seasonId Season ID
    */
-  static async getSeasonById(seasonId: string) {
+  static async getSeasonById(seasonId: string): Promise<SeasonDetail> {
     const season = await prisma.season.findUnique({
       where: { id: seasonId },
-      include: {
-        league: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        teams: {
-          include: {
-            staff: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-                role: true,
-              },
-            },
-            members: {
-              include: {
-                player: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-            _count: {
-              select: {
-                members: true,
-                games: true,
-              },
-            },
-          },
-          orderBy: {
-            name: 'asc',
-          },
-        },
-        _count: {
-          select: {
-            teams: true,
-          },
-        },
-      },
+      include: SEASON_DETAIL_INCLUDE,
     });
 
     if (!season) {
@@ -149,9 +169,9 @@ export class SeasonService {
    * List seasons with filters
    * @param query Query parameters
    */
-  static async listSeasons(query: SeasonQueryParams) {
+  static async listSeasons(query: SeasonQueryParams): Promise<SeasonList> {
     // Build where clause
-    const where: any = {};
+    const where: Prisma.SeasonWhereInput = {};
 
     if (query.leagueId) {
       where.leagueId = query.leagueId;
@@ -173,19 +193,7 @@ export class SeasonService {
       prisma.season.count({ where }),
       prisma.season.findMany({
         where,
-        include: {
-          league: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          _count: {
-            select: {
-              teams: true,
-            },
-          },
-        },
+        include: SEASON_LIST_INCLUDE,
         orderBy: [
           { isActive: 'desc' },
           { startDate: 'desc' },
@@ -210,7 +218,11 @@ export class SeasonService {
    * @param data Update data
    * @param userId User ID (must be league admin or system admin)
    */
-  static async updateSeason(seasonId: string, data: UpdateSeasonInput, userId: string) {
+  static async updateSeason(
+    seasonId: string,
+    data: UpdateSeasonInput,
+    userId: string
+  ): Promise<SeasonWithTeams> {
     // Get season
     const season = await prisma.season.findUnique({
       where: { id: seasonId },
@@ -230,7 +242,7 @@ export class SeasonService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.SeasonUpdateInput = {};
 
     if (data.name !== undefined) {
       // Check for duplicate name
@@ -272,25 +284,7 @@ export class SeasonService {
     const updatedSeason = await prisma.season.update({
       where: { id: seasonId },
       data: updateData,
-      include: {
-        league: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        teams: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        _count: {
-          select: {
-            teams: true,
-          },
-        },
-      },
+      include: SEASON_INCLUDE,
     });
 
     return updatedSeason;
@@ -301,7 +295,7 @@ export class SeasonService {
    * @param seasonId Season ID
    * @param userId User ID (must be system admin)
    */
-  static async deleteSeason(seasonId: string, userId: string) {
+  static async deleteSeason(seasonId: string, userId: string): Promise<{ success: true }> {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {

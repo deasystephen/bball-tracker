@@ -44,7 +44,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     req.user = { ...mockAuthUser };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/calendar-service');

@@ -79,7 +79,7 @@ describe('Public Invitation Token API', () => {
         invitation: { id: mockInvitationDetails.id, status: 'ACCEPTED' },
         teamMember: { teamId: 'team-id', playerId: 'player-id' },
       };
-      mockInvitationService.acceptInvitationByToken.mockResolvedValue(acceptResult as any);
+      mockInvitationService.acceptInvitationByToken.mockResolvedValue(acceptResult as unknown as Awaited<ReturnType<typeof mockInvitationService.acceptInvitationByToken>>);
 
       const res = await request(app)
         .post(`/api/v1/invitations/by-token/${VALID_TOKEN}/accept`);
@@ -139,7 +139,7 @@ describe('Public Invitation Token API', () => {
         invitation: { id: mockInvitationDetails.id, status: 'ACCEPTED' },
         teamMember: { teamId: 'team-id', playerId: 'player-id' },
       };
-      mockInvitationService.acceptInvitationByToken.mockResolvedValue(acceptResult as any);
+      mockInvitationService.acceptInvitationByToken.mockResolvedValue(acceptResult as unknown as Awaited<ReturnType<typeof mockInvitationService.acceptInvitationByToken>>);
 
       const res = await request(app)
         .post(`/api/v1/invitations/by-token/${VALID_TOKEN}/accept`)

@@ -23,7 +23,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -55,7 +55,7 @@ describe('Games API', () => {
 
   describe('POST /api/v1/games', () => {
     it('should create a game successfully', async () => {
-      mockGameService.createGame.mockResolvedValue(mockGame as any);
+      mockGameService.createGame.mockResolvedValue(mockGame as unknown as Awaited<ReturnType<typeof mockGameService.createGame>>);
 
       const response = await request(app)
         .post('/api/v1/games')
@@ -102,7 +102,7 @@ describe('Games API', () => {
       mockGameService.listGames.mockResolvedValue({
         games: [mockGame],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
 
       const response = await request(app).get('/api/v1/games');
 
@@ -116,7 +116,7 @@ describe('Games API', () => {
       mockGameService.listGames.mockResolvedValue({
         games: [mockGame],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
 
       const response = await request(app)
         .get('/api/v1/games')
@@ -133,7 +133,7 @@ describe('Games API', () => {
       mockGameService.listGames.mockResolvedValue({
         games: [mockGame],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
 
       const response = await request(app)
         .get('/api/v1/games')
@@ -150,7 +150,7 @@ describe('Games API', () => {
       mockGameService.listGames.mockResolvedValue({
         games: [mockGame],
         pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
 
       const response = await request(app)
         .get('/api/v1/games')
@@ -163,7 +163,7 @@ describe('Games API', () => {
 
   describe('GET /api/v1/games/:id', () => {
     it('should get a game by ID', async () => {
-      mockGameService.getGameById.mockResolvedValue(mockGame as any);
+      mockGameService.getGameById.mockResolvedValue(mockGame as unknown as Awaited<ReturnType<typeof mockGameService.getGameById>>);
 
       const response = await request(app).get(`/api/v1/games/${TEST_GAME_ID}`);
 
@@ -194,7 +194,7 @@ describe('Games API', () => {
   describe('PATCH /api/v1/games/:id', () => {
     it('should update a game successfully', async () => {
       const updatedGame = { ...mockGame, opponent: 'Bulls' };
-      mockGameService.updateGame.mockResolvedValue(updatedGame as any);
+      mockGameService.updateGame.mockResolvedValue(updatedGame as unknown as Awaited<ReturnType<typeof mockGameService.updateGame>>);
 
       const response = await request(app)
         .patch(`/api/v1/games/${TEST_GAME_ID}`)
@@ -207,7 +207,7 @@ describe('Games API', () => {
 
     it('should update game status', async () => {
       const updatedGame = { ...mockGame, status: 'IN_PROGRESS' };
-      mockGameService.updateGame.mockResolvedValue(updatedGame as any);
+      mockGameService.updateGame.mockResolvedValue(updatedGame as unknown as Awaited<ReturnType<typeof mockGameService.updateGame>>);
 
       const response = await request(app)
         .patch(`/api/v1/games/${TEST_GAME_ID}`)
@@ -219,7 +219,7 @@ describe('Games API', () => {
 
     it('should update game scores', async () => {
       const updatedGame = { ...mockGame, homeScore: 45, awayScore: 42 };
-      mockGameService.updateGame.mockResolvedValue(updatedGame as any);
+      mockGameService.updateGame.mockResolvedValue(updatedGame as unknown as Awaited<ReturnType<typeof mockGameService.updateGame>>);
 
       const response = await request(app)
         .patch(`/api/v1/games/${TEST_GAME_ID}`)
@@ -263,7 +263,7 @@ describe('Games API', () => {
 
   describe('DELETE /api/v1/games/:id', () => {
     it('should delete a game successfully', async () => {
-      mockGameService.deleteGame.mockResolvedValue(undefined as any);
+      mockGameService.deleteGame.mockResolvedValue({ success: true });
 
       const response = await request(app).delete(`/api/v1/games/${TEST_GAME_ID}`);
 
