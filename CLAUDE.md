@@ -47,6 +47,8 @@ eas build --platform ios --profile preview        # iOS (requires Apple Develope
 eas build --platform all --profile production     # Production builds for stores
 eas update --environment preview --message "description" # OTA update to preview builds
 ```
+**eas-cli pinning:** `mobile/package.json` pins `eas-cli ^22` and `eas.json` enforces `cli.version >= 22.2.0`. The `overrides` block must keep `@oclif/core > minimatch ^10` scoped to **@oclif/core only** — eas-cli itself needs the v5 default export, and giving it v9+ makes every credentials step fail with a misleading "Provisioning Profile is malformed" (#343).
+```
 
 ### Infrastructure
 ```bash
