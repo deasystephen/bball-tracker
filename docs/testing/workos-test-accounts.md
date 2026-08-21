@@ -92,11 +92,11 @@ Edit the constants at the top of the script if your alias scheme or team name di
 
 ## Heads-up: v1.2.0 entitlement gating (merged in #202)
 
-The v1.2.0 release (#202, now on `main`) adds usage metering + entitlement gating. It does **not**
+The v1.2.0 release (#202) adds usage metering + entitlement gating. It does **not**
 change the role model or add the missing staff/guardian routes, so the promotion sequence above is
-unaffected. Being on `main` is not the same as being deployed — confirm the production ECS task you
-are testing against is running a v1.2.0+ revision before assuming these gates are live. Once they
-are, three things to know:
+unaffected. These gates **are live in production** — CI auto-deploys every backend-touching merge
+to ECS, and as of 2026-08-20 the service is on task-def revision 223 (commit `71ec39d`), well past
+#202. Three things to know:
 
 - **Team creation** is gated by `requireTeamCreateLimit()` — FREE-tier users get HTTP 402 once
   they are staff on `FREE_TEAM_LIMIT` (3) teams. The plan only creates one `Test Team`, so the
