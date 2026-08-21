@@ -19,13 +19,12 @@ import {
   EmptyState,
   ErrorState,
 } from '../../components';
-import { useTeams } from '../../hooks/useTeams';
+import { useTeams, type Team } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
-import { Team } from '../../hooks/useTeams';
 import { getTeamColor } from '../../utils/team-colors';
 
 export default function TeamsScreen() {

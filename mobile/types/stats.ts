@@ -89,14 +89,14 @@ export interface TeamSeasonStats {
   fieldGoalPercentage: number;
   threePointPercentage: number;
   freeThrowPercentage: number;
-  recentGames: Array<{
+  recentGames: {
     id: string;
     date: string;
     opponent: string;
     homeScore: number;
     awayScore: number;
     result: 'W' | 'L';
-  }>;
+  }[];
 }
 
 export interface PlayerOverallStats {
@@ -104,11 +104,11 @@ export interface PlayerOverallStats {
     id: string;
     name: string;
   };
-  teams: Array<{
+  teams: {
     teamId: string;
     teamName: string;
     seasonName: string;
     stats: AggregatedPlayerStats;
-  }>;
+  }[];
   careerTotals: AggregatedPlayerStats;
 }

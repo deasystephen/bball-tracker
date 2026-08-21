@@ -8,6 +8,9 @@
  *   - setSentryUser no-ops until init has run
  */
 
+import * as Sentry from '@sentry/react-native';
+import Constants from 'expo-constants';
+
 jest.mock('@sentry/react-native', () => ({
   init: jest.fn(),
   setUser: jest.fn(),
@@ -24,9 +27,6 @@ jest.mock('expo-constants', () => ({
   },
 }));
 
-import * as Sentry from '@sentry/react-native';
-import Constants from 'expo-constants';
-
 const sentryInit = Sentry.init as jest.Mock;
 const sentrySetUser = Sentry.setUser as jest.Mock;
 const sentryCaptureException = Sentry.captureException as jest.Mock;
@@ -36,7 +36,9 @@ const sentryCaptureException = Sentry.captureException as jest.Mock;
 function loadSentryModule() {
   let mod!: typeof import('../../services/sentry');
   jest.isolateModules(() => {
-    mod = require('../../services/sentry');
+    mod = jest.requireActual<typeof import('../../services/sentry')>(
+      '../../services/sentry'
+    );
   });
   return mod;
 }
@@ -212,7 +214,7 @@ describe('services/sentry', () => {
           items: [{ token: 't1' }, { safe: 'ok' }],
         },
       } as unknown as Parameters<typeof beforeSend>[0]);
-      const items = (out.extra as { items: Array<Record<string, unknown>> })
+      const items = (out.extra as { items: Record<string, unknown>[] })
         .items;
       expect(items[0].token).toBe('[scrubbed]');
       expect(items[1].safe).toBe('ok');

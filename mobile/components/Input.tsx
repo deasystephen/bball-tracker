@@ -80,6 +80,7 @@ export const Input: React.FC<InputProps> = ({
               paddingLeft: leftIcon ? spacing.sm : 0,
               paddingRight: rightIcon ? spacing.sm : 0,
             },
+            style,
           ]}
           placeholderTextColor={colors.inputPlaceholder}
           accessibilityLabel={label}

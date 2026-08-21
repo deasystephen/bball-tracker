@@ -2,8 +2,8 @@
  * Tests for api-client.
  *
  * jest.setup.js mocks the api-client module for all other tests, but here
- * we want to exercise the real module — so we jest.unmock() it and require
- * it dynamically. We mock axios at the network boundary and verify:
+ * we want to exercise the real module — so we jest.unmock() it and load
+ * it per-test via jest.requireActual after resetModules. We mock axios at the network boundary and verify:
  *   - baseURL is built correctly for both __DEV__ and configured apiUrl
  *   - the request interceptor attaches a Bearer token when present
  *   - the response interceptor calls logout on 401
@@ -108,7 +108,7 @@ describe('api-client', () => {
       __esModule: true,
       default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
     }));
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
 
     expect(captured.createConfig?.baseURL).toBe('https://example.test/api/v1');
     expect(captured.createConfig?.timeout).toBe(10000);
@@ -125,7 +125,7 @@ describe('api-client', () => {
       default: { expoConfig: { extra: {} } },
     }));
     // __DEV__ is true in jest-expo test env by default.
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
     expect(captured.createConfig?.baseURL).toBe('http://127.0.0.1:3000/api/v1');
   });
 
@@ -149,7 +149,7 @@ describe('api-client', () => {
         }),
       },
     }));
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
 
     const config = { headers: {} as Record<string, string> };
     const result = captured.request!(config) as typeof config;
@@ -168,7 +168,7 @@ describe('api-client', () => {
       __esModule: true,
       default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
     }));
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
     const err = new Error('boom');
     await expect(captured.requestError!(err)).rejects.toBe(err);
   });
@@ -179,7 +179,7 @@ describe('api-client', () => {
       __esModule: true,
       default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
     }));
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
     const resp = { data: { ok: true }, status: 200 };
     expect(captured.response!(resp)).toBe(resp);
   });
@@ -202,7 +202,7 @@ describe('api-client', () => {
         }),
       },
     }));
-    require('../../services/api-client');
+    jest.requireActual('../../services/api-client');
 
     const err401 = { response: { status: 401 }, message: '401' };
     await expect(captured.responseError!(err401)).rejects.toBe(err401);

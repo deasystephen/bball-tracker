@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import { create as createAxiosInstance, AxiosInstance, AxiosError } from 'axios';
 import Constants from 'expo-constants';
 import { useAuthStore } from '../store/auth-store';
 
@@ -16,7 +16,7 @@ const getBaseURL = (): string => {
  * Create axios instance with default configuration
  */
 const createApiClient = (): AxiosInstance => {
-  const client = axios.create({
+  const client = createAxiosInstance({
     baseURL: `${getBaseURL()}/api/v1`,
     timeout: 10000,
     headers: {

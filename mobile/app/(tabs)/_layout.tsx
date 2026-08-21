@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,18 +35,25 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const scale2 = useSharedValue(1);
   const scale3 = useSharedValue(1);
   const scale4 = useSharedValue(1);
-  const scales = [scale0, scale1, scale2, scale3, scale4];
+  const scales = useMemo(
+    () => [scale0, scale1, scale2, scale3, scale4],
+    [scale0, scale1, scale2, scale3, scale4]
+  );
 
   const handlePress = useCallback(
     (index: number, routeName: string, isFocused: boolean) => {
       if (!isFocused) {
-        pillPosition.value = withSpring(index, {
-          damping: 18,
-          stiffness: 200,
-        });
-        scales[index].value = withSequence(
-          withSpring(1.15, { damping: 6, stiffness: 300 }),
-          withSpring(1, { damping: 8, stiffness: 200 })
+        pillPosition.set(
+          withSpring(index, {
+            damping: 18,
+            stiffness: 200,
+          })
+        );
+        scales[index].set(
+          withSequence(
+            withSpring(1.15, { damping: 6, stiffness: 300 }),
+            withSpring(1, { damping: 8, stiffness: 200 })
+          )
         );
         navigation.navigate(routeName);
       }

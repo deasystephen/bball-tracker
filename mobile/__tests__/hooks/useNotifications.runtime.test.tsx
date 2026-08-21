@@ -17,9 +17,11 @@
 
 import { renderHook, waitFor, act } from '@testing-library/react-native';
 import { Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
 import { apiClient } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
+import { useNotificationSetup } from '../../hooks/useNotifications';
 
 const mockedPost = apiClient.post as jest.Mock;
 
@@ -78,9 +80,6 @@ jest.mock('expo-router', () => ({
     canGoBack: jest.fn(() => true),
   }),
 }));
-
-import * as Notifications from 'expo-notifications';
-import { useNotificationSetup } from '../../hooks/useNotifications';
 
 const mockedGetPermissions = Notifications.getPermissionsAsync as jest.Mock;
 const mockedRequestPermissions =

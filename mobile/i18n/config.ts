@@ -2,7 +2,7 @@
  * Internationalization configuration
  */
 
-import i18n from 'i18next';
+import { createInstance } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { getLocales } from 'expo-localization';
 
@@ -17,6 +17,8 @@ const resources = {
 
 // Get device locale
 const deviceLocale = getLocales()[0]?.languageCode || 'en';
+
+const i18n = createInstance();
 
 i18n
   .use(initReactI18next)

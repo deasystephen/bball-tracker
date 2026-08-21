@@ -4,6 +4,8 @@
 
 import { io } from 'socket.io-client';
 
+import { getSocket, resetSocket } from '../../services/socket';
+
 jest.mock('socket.io-client', () => ({
   io: jest.fn(),
 }));
@@ -18,8 +20,6 @@ jest.mock('../../store/auth-store', () => ({
     getState: jest.fn(() => ({ accessToken: 'tok_abc' })),
   },
 }));
-
-import { getSocket, resetSocket } from '../../services/socket';
 
 const mockedIo = io as jest.Mock;
 

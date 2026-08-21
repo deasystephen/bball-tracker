@@ -6,7 +6,6 @@ import React from 'react';
 import {
   Pressable,
   PressableProps,
-  StyleSheet,
   ActivityIndicator,
   ViewStyle,
   StyleProp,
@@ -19,7 +18,6 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
-import { spacing } from '../theme';
 import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
 
@@ -52,11 +50,11 @@ export const Button: React.FC<ButtonProps> = ({
   }));
 
   const handlePressIn = () => {
-    scale.value = withSpring(0.97, { damping: 15, stiffness: 400 });
+    scale.set(withSpring(0.97, { damping: 15, stiffness: 400 }));
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, { damping: 15, stiffness: 400 });
+    scale.set(withSpring(1, { damping: 15, stiffness: 400 }));
   };
 
   const getTextColor = () => {

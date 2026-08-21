@@ -23,7 +23,6 @@ import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { useAuthStore } from '../../store/auth-store';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function CreateTeamScreen() {
@@ -31,7 +30,6 @@ export default function CreateTeamScreen() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
-  const { user } = useAuthStore();
   const insets = useSafeAreaInsets();
 
   const [name, setName] = useState('');

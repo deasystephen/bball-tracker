@@ -21,7 +21,6 @@ import {
   LoadingSpinner,
   EmptyState,
   ErrorState,
-  Button,
 } from '../../../components';
 import { useLeague, useDeleteLeague } from '../../../hooks/useLeagues';
 import { useSeasons, Season } from '../../../hooks/useSeasons';
@@ -46,7 +45,7 @@ export default function LeagueDetailScreen() {
     router.push(`/admin/seasons/create?leagueId=${id}`);
   };
 
-  const handleSeasonPress = (seasonId: string) => {
+  const handleSeasonPress = () => {
     // Could navigate to season detail in the future
     Alert.alert('Season', 'Season detail view coming soon');
   };
@@ -100,7 +99,7 @@ export default function LeagueDetailScreen() {
     return (
       <Card
         variant="elevated"
-        onPress={() => handleSeasonPress(item.id)}
+        onPress={handleSeasonPress}
         style={styles.seasonCard}
       >
         <View style={styles.seasonHeader}>

@@ -23,13 +23,13 @@ import { borderRadius } from '../../theme/border-radius';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface OnboardingScreen {
+interface OnboardingSlide {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   description: string;
 }
 
-const SCREENS: OnboardingScreen[] = [
+const SCREENS: OnboardingSlide[] = [
   {
     icon: 'basketball-outline',
     title: 'Track Every Play',

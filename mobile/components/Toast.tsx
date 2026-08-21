@@ -13,7 +13,6 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withDelay,
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
@@ -89,19 +88,21 @@ function ToastItem({
     if (dismissTimeoutRef.current) {
       clearTimeout(dismissTimeoutRef.current);
     }
-    translateY.value = withTiming(-100, { duration: 250 });
-    opacity.value = withTiming(0, { duration: 250 }, () => {
-      runOnJS(onDismiss)(toast.id);
-    });
+    translateY.set(withTiming(-100, { duration: 250 }));
+    opacity.set(
+      withTiming(0, { duration: 250 }, () => {
+        runOnJS(onDismiss)(toast.id);
+      })
+    );
   }, [toast.id, onDismiss, translateY, opacity]);
 
   // Animate in on mount
   React.useEffect(() => {
-    translateY.value = withTiming(0, {
+    translateY.set(withTiming(0, {
       duration: 350,
       easing: Easing.out(Easing.back(1.2)),
-    });
-    opacity.value = withTiming(1, { duration: 300 });
+    }));
+    opacity.set(withTiming(1, { duration: 300 }));
 
     // Auto-dismiss
     dismissTimeoutRef.current = setTimeout(dismiss, toast.duration);
@@ -116,19 +117,21 @@ function ToastItem({
   const panGesture = Gesture.Pan()
     .onUpdate((event) => {
       if (event.translationY < 0) {
-        translateY.value = event.translationY;
+        translateY.set(event.translationY);
       }
-      translateX.value = event.translationX;
+      translateX.set(event.translationX);
     })
     .onEnd((event) => {
       if (event.translationY < -50 || Math.abs(event.translationX) > 100) {
-        translateY.value = withTiming(-200, { duration: 200 });
-        opacity.value = withTiming(0, { duration: 200 }, () => {
-          runOnJS(onDismiss)(toast.id);
-        });
+        translateY.set(withTiming(-200, { duration: 200 }));
+        opacity.set(
+          withTiming(0, { duration: 200 }, () => {
+            runOnJS(onDismiss)(toast.id);
+          })
+        );
       } else {
-        translateY.value = withTiming(0, { duration: 200 });
-        translateX.value = withTiming(0, { duration: 200 });
+        translateY.set(withTiming(0, { duration: 200 }));
+        translateX.set(withTiming(0, { duration: 200 }));
       }
     });
 

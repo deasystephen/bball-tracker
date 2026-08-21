@@ -41,11 +41,11 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
   }));
 
   const handlePressIn = () => {
-    scale.value = withTiming(0.95, { duration: 50 });
+    scale.set(withTiming(0.95, { duration: 50 }));
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, { damping: 15, stiffness: 300 });
+    scale.set(withSpring(1, { damping: 15, stiffness: 300 }));
   };
 
   const handlePress = () => {
@@ -91,10 +91,10 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
 /**
  * Memoized to prevent re-renders when parent state changes (e.g., score updates).
  */
-export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(({
+export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotButtons({
   onShot,
   disabled = false,
-}) => {
+}) {
   const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const buttonWidth = (windowWidth - spacing.md * 3) / 2;

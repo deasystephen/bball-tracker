@@ -23,16 +23,14 @@ import { useGame, useUpdateGame } from '../../../hooks/useGames';
 import { useGameEvents, useCreateGameEvent, useDeleteGameEvent } from '../../../hooks/useGameEvents';
 import { useGameTrackingStore } from '../../../store/game-tracking-store';
 import { useToast } from '../../../components/Toast';
-import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
-import type { GameEvent, ShotMetadata } from '../../../types/game';
+import type { ShotMetadata } from '../../../types/game';
 
 const UNDO_DURATION = 5; // seconds
 
 export default function TrackGameScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   // Confetti ref
@@ -46,7 +44,7 @@ export default function TrackGameScreen() {
   const deleteEvent = useDeleteGameEvent();
   const updateGame = useUpdateGame();
 
-  const toast = useToast();
+  const { showToast } = useToast();
 
   // Store
   const {
@@ -66,20 +64,15 @@ export default function TrackGameScreen() {
   // Show milestone toasts
   useEffect(() => {
     if (lastMilestone) {
-      toast.showToast(lastMilestone, 'success', 4000);
+      showToast(lastMilestone, 'success', 4000);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-  }, [lastMilestone]);
+  }, [lastMilestone, showToast]);
 
-  // Local opponent score (initialized from game data)
-  const [opponentScore, setOpponentScore] = useState<number>(0);
-
-  // Initialize opponent score from game data
-  useEffect(() => {
-    if (game?.awayScore !== undefined) {
-      setOpponentScore(game.awayScore);
-    }
-  }, [game?.awayScore]);
+  // Opponent score follows the server value until the user edits it locally
+  // (null = follow server). Local edits win over later server refreshes.
+  const [opponentScoreOverride, setOpponentScoreOverride] = useState<number | null>(null);
+  const opponentScore = opponentScoreOverride ?? game?.awayScore ?? 0;
 
   // Clear session when leaving
   useEffect(() => {
@@ -107,7 +100,7 @@ export default function TrackGameScreen() {
   const handleAddOpponentPoints = useCallback(
     async (points: number) => {
       const newScore = opponentScore + points;
-      setOpponentScore(newScore);
+      setOpponentScoreOverride(newScore);
 
       // Update on server
       try {
@@ -115,9 +108,9 @@ export default function TrackGameScreen() {
           gameId: id,
           data: { awayScore: newScore },
         });
-      } catch (error) {
+      } catch {
         // Revert on error
-        setOpponentScore(opponentScore);
+        setOpponentScoreOverride(opponentScore);
         Alert.alert('Error', 'Failed to update opponent score');
       }
     },
@@ -128,7 +121,7 @@ export default function TrackGameScreen() {
     if (opponentScore <= 0) return;
 
     const newScore = opponentScore - 1;
-    setOpponentScore(newScore);
+    setOpponentScoreOverride(newScore);
 
     // Update on server
     try {
@@ -136,9 +129,9 @@ export default function TrackGameScreen() {
         gameId: id,
         data: { awayScore: newScore },
       });
-    } catch (error) {
+    } catch {
       // Revert on error
-      setOpponentScore(opponentScore);
+      setOpponentScoreOverride(opponentScore);
       Alert.alert('Error', 'Failed to update opponent score');
     }
   }, [opponentScore, id, updateGame]);
@@ -158,7 +151,7 @@ export default function TrackGameScreen() {
       };
 
       // Record locally first (optimistic)
-      const localEvent = recordEvent(eventData, selectedPlayerName || undefined);
+      recordEvent(eventData, selectedPlayerName || undefined);
 
       try {
         // Create event on server

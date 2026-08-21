@@ -28,7 +28,7 @@ export interface Game {
   team?: {
     id: string;
     name: string;
-    members?: Array<{
+    members?: {
       id: string;
       playerId: string;
       jerseyNumber?: number;
@@ -38,7 +38,7 @@ export interface Game {
         name: string;
         email: string;
       };
-    }>;
+    }[];
   };
 }
 

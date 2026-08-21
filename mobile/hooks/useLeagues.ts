@@ -22,11 +22,11 @@ export interface League {
   name: string;
   createdAt: string;
   updatedAt: string;
-  seasons?: Array<{
+  seasons?: {
     id: string;
     name: string;
     isActive: boolean;
-  }>;
+  }[];
   admins?: LeagueAdmin[];
   _count?: {
     seasons: number;

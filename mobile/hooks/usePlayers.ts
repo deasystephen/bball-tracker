@@ -16,7 +16,7 @@ export interface Player {
   isManaged?: boolean;
   createdAt: string;
   updatedAt: string;
-  teamMembers?: Array<{
+  teamMembers?: {
     id: string;
     team: {
       id: string;
@@ -28,7 +28,7 @@ export interface Player {
         year: number;
       };
     };
-  }>;
+  }[];
   _count?: {
     teamMembers: number;
   };

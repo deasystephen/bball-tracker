@@ -16,7 +16,6 @@ import Animated, {
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, typography } from '../../theme';
-import type { ColorScheme } from '../../theme/colors';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -48,27 +47,31 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
   const awayScoreScale = useSharedValue(1);
 
   useEffect(() => {
-    homeScoreScale.value = withTiming(1.15, { duration: 120 }, () => {
-      homeScoreScale.value = withSpring(1, { damping: 12, stiffness: 200 });
-    });
-  }, [homeScore]);
+    homeScoreScale.set(
+      withTiming(1.15, { duration: 120 }, () => {
+        homeScoreScale.set(withSpring(1, { damping: 12, stiffness: 200 }));
+      })
+    );
+  }, [homeScore, homeScoreScale]);
 
   useEffect(() => {
-    awayScoreScale.value = withTiming(1.15, { duration: 120 }, () => {
-      awayScoreScale.value = withSpring(1, { damping: 12, stiffness: 200 });
-    });
-  }, [awayScore]);
+    awayScoreScale.set(
+      withTiming(1.15, { duration: 120 }, () => {
+        awayScoreScale.set(withSpring(1, { damping: 12, stiffness: 200 }));
+      })
+    );
+  }, [awayScore, awayScoreScale]);
 
   // Live dot pulse
   const liveDotOpacity = useSharedValue(1);
 
   useEffect(() => {
-    liveDotOpacity.value = withRepeat(
+    liveDotOpacity.set(withRepeat(
       withTiming(0.3, { duration: 1500 }),
       -1,
       true
-    );
-  }, []);
+    ));
+  }, [liveDotOpacity]);
 
   const homeScoreAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: homeScoreScale.value }],

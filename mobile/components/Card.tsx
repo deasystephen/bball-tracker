@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { View, ViewProps, StyleSheet, TouchableOpacity, TouchableOpacityProps } from 'react-native';
+import { ViewProps, StyleSheet, TouchableOpacity, TouchableOpacityProps } from 'react-native';
 import { ThemedView } from './ThemedView';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
