@@ -8,10 +8,8 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  TouchableOpacity,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { ThemedView, ThemedText, Card, LoadingSpinner, EmptyState, ErrorState, Button } from '../../components';
 import { useToast } from '../../components/Toast';
 import { usePlayerInvitations, useAcceptInvitation, useRejectInvitation, type TeamInvitation } from '../../hooks/useInvitations';
@@ -23,7 +21,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 
 export default function InvitationsScreen() {
-  const router = useRouter();
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
@@ -115,7 +112,6 @@ export default function InvitationsScreen() {
     const isExpired = new Date(item.expiresAt) < new Date();
     const isPending = item.status === 'PENDING';
     const canAccept = isPending && !isExpired;
-    const canReject = isPending; // Can always reject pending invitations
 
     return (
       <Card variant="elevated" style={styles.invitationCard}>

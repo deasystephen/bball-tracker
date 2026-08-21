@@ -9,7 +9,6 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  runOnJS,
 } from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
@@ -32,6 +31,15 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [countdown, setCountdown] = useState(duration);
+  const [wasVisible, setWasVisible] = useState(visible);
+
+  // Restart the countdown each time the banner becomes visible. Adjusting
+  // state during render (instead of in an effect) is the React-recommended
+  // pattern for "reset state when a prop changes".
+  if (visible !== wasVisible) {
+    setWasVisible(visible);
+    if (visible) setCountdown(duration);
+  }
 
   // Reanimated shared values
   const opacity = useSharedValue(0);
@@ -40,17 +48,16 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
 
   useEffect(() => {
     if (visible) {
-      setCountdown(duration);
-      opacity.value = withTiming(1, { duration: 200 });
-      translateY.value = withTiming(0, { duration: 200 });
+      opacity.set(withTiming(1, { duration: 200 }));
+      translateY.set(withTiming(0, { duration: 200 }));
       // Progress bar shrinks from 100% to 0% over the duration
-      progressWidth.value = 1;
-      progressWidth.value = withTiming(0, { duration: duration * 1000 });
+      progressWidth.set(1);
+      progressWidth.set(withTiming(0, { duration: duration * 1000 }));
     } else {
-      opacity.value = withTiming(0, { duration: 200 });
-      translateY.value = withTiming(50, { duration: 200 });
+      opacity.set(withTiming(0, { duration: 200 }));
+      translateY.set(withTiming(50, { duration: 200 }));
     }
-  }, [visible, duration]);
+  }, [visible, duration, opacity, translateY, progressWidth]);
 
   useEffect(() => {
     if (!visible || countdown <= 0) return;

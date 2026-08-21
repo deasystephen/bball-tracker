@@ -87,13 +87,13 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
 
   useEffect(() => {
     if (isLive) {
-      liveBorderOpacity.value = withRepeat(
+      liveBorderOpacity.set(withRepeat(
         withTiming(1, { duration: 1500 }),
         -1,
         true
-      );
+      ));
     }
-  }, [isLive]);
+  }, [isLive, liveBorderOpacity]);
 
   const pressAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -106,11 +106,11 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
   }));
 
   const handlePressIn = () => {
-    scale.value = withTiming(0.98, { duration: 100 });
+    scale.set(withTiming(0.98, { duration: 100 }));
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, { damping: 15, stiffness: 300 });
+    scale.set(withSpring(1, { damping: 15, stiffness: 300 }));
   };
 
   return (

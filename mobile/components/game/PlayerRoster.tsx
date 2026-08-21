@@ -2,7 +2,7 @@
  * Wrapping player selector grid for stat tracking
  */
 
-import React, { useCallback } from 'react';
+import React from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -134,12 +134,12 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
  * Memoized to prevent unnecessary re-renders when parent re-renders
  * (e.g., during score updates on the tracking screen).
  */
-export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(({
+export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(function PlayerRoster({
   players,
   selectedPlayerId,
   onSelectPlayer,
   hotPlayers = {},
-}) => {
+}) {
   const { colors } = useTheme();
 
   if (players.length === 0) {

@@ -38,7 +38,7 @@ describe('Button', () => {
     });
 
     it('should render loading state', () => {
-      const { getByTestId, queryByText } = render(
+      const { queryByText } = render(
         <Button title="Press Me" loading testID="button" />
       );
       // Loading state should hide the text

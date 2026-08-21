@@ -62,17 +62,17 @@ export interface Team {
     staff: number;
     games: number;
   };
-  roles?: Array<{
+  roles?: {
     id: string;
     name: string;
     type: string;
-  }>;
-  games?: Array<{
+  }[];
+  games?: {
     id: string;
     opponent: string;
     date: string;
     status: string;
-  }>;
+  }[];
 }
 
 export interface CreateTeamInput {

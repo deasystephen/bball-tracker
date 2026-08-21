@@ -9,7 +9,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  FlatList,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +34,6 @@ import {
   usePlayers,
   useCreatePlayer,
   useCreateManagedPlayer,
-  usePlayer,
   type Player,
 } from '../../../hooks/usePlayers';
 import { useToast } from '../../../components/Toast';
@@ -44,7 +42,6 @@ import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuthStore } from '../../../store/auth-store';
 import { uploadAvatar } from '../../../services/upload-service';
 
 export default function ManagePlayersScreen() {
@@ -53,7 +50,6 @@ export default function ManagePlayersScreen() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
-  const { user } = useAuthStore();
   const insets = useSafeAreaInsets();
 
   const [searchQuery, setSearchQuery] = useState('');

@@ -19,10 +19,10 @@ export interface Season {
     id: string;
     name: string;
   };
-  teams?: Array<{
+  teams?: {
     id: string;
     name: string;
-  }>;
+  }[];
   _count?: {
     teams: number;
   };

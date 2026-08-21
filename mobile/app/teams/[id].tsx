@@ -17,7 +17,6 @@ import {
   ThemedView,
   ThemedText,
   Card,
-  ListItem,
   LoadingSpinner,
   ErrorState,
   Button,

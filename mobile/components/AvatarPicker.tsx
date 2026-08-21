@@ -135,7 +135,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   };
 
   const handlePress = () => {
-    const options: Array<{ text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }> = [
+    const options: { text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }[] = [
       { text: 'Take Photo', onPress: () => pickImage('camera') },
       { text: 'Choose from Library', onPress: () => pickImage('library') },
     ];

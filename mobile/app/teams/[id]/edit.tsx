@@ -2,7 +2,7 @@
  * Edit Team screen
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -16,7 +16,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ErrorState, ListItem } from '../../../components';
 import { useToast } from '../../../components/Toast';
-import { useTeam, useUpdateTeam } from '../../../hooks/useTeams';
+import { useTeam, useUpdateTeam, type Team } from '../../../hooks/useTeams';
 import { useLeagues } from '../../../hooks/useLeagues';
 import { useSeasons } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
@@ -26,21 +26,47 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function EditTeamScreen() {
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { t } = useTranslation();
+  const { data: team, isLoading, error, refetch } = useTeam(id);
+  const { data: leagues, isLoading: leaguesLoading } = useLeagues();
+
+  if (isLoading || leaguesLoading) {
+    return <LoadingSpinner message={t('common.loading')} fullScreen />;
+  }
+
+  if (error || !team) {
+    return (
+      <ErrorState
+        message={error instanceof Error ? error.message : 'Team not found'}
+        onRetry={refetch}
+      />
+    );
+  }
+
+  // Keyed by team id so the form re-seeds its state if a different team loads
+  return <EditTeamForm key={team.id} team={team} leagues={leagues ?? []} />;
+}
+
+interface EditTeamFormProps {
+  team: Team;
+  leagues: NonNullable<ReturnType<typeof useLeagues>['data']>;
+}
+
+function EditTeamForm({ team, leagues }: EditTeamFormProps) {
+  const router = useRouter();
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
-  const [name, setName] = useState('');
-  const [leagueId, setLeagueId] = useState('');
-  const [seasonId, setSeasonId] = useState('');
-  const [chatLink, setChatLink] = useState('');
+  // Form state is seeded from the loaded team (see key={team.id} in the parent)
+  const [name, setName] = useState(team.name);
+  const [leagueId, setLeagueId] = useState(team.season?.league?.id ?? '');
+  const [seasonId, setSeasonId] = useState(team.seasonId);
+  const [chatLink, setChatLink] = useState(team.chatLink || '');
   const [errors, setErrors] = useState<{ name?: string; seasonId?: string }>({});
 
-  const { data: team, isLoading, error, refetch } = useTeam(id);
-  const { data: leagues, isLoading: leaguesLoading } = useLeagues();
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(
     leagueId ? { leagueId, isActive: true } : undefined
   );
@@ -54,27 +80,15 @@ export default function EditTeamScreen() {
 
   // Get selected league info
   const selectedLeague = useMemo(() => {
-    return leagues?.find((l) => l.id === leagueId);
+    return leagues.find((l) => l.id === leagueId);
   }, [leagues, leagueId]);
-
-  // Populate form when team loads
-  useEffect(() => {
-    if (team) {
-      setName(team.name);
-      setSeasonId(team.seasonId);
-      setChatLink(team.chatLink || '');
-      if (team.season?.league) {
-        setLeagueId(team.season.league.id);
-      }
-    }
-  }, [team]);
 
   // Reset season when league changes (but not on initial load)
   const handleLeagueSelect = (id: string) => {
     if (id !== leagueId) {
       setLeagueId(id);
       // Only reset seasonId if we're changing to a different league
-      if (team?.season?.league?.id !== id) {
+      if (team.season?.league?.id !== id) {
         setSeasonId('');
       }
     }
@@ -100,7 +114,7 @@ export default function EditTeamScreen() {
 
     try {
       await updateTeam.mutateAsync({
-        teamId: id,
+        teamId: team.id,
         data: {
           name: name.trim(),
           seasonId,
@@ -117,19 +131,6 @@ export default function EditTeamScreen() {
       );
     }
   };
-
-  if (isLoading || leaguesLoading) {
-    return <LoadingSpinner message={t('common.loading')} fullScreen />;
-  }
-
-  if (error || !team) {
-    return (
-      <ErrorState
-        message={error instanceof Error ? error.message : 'Team not found'}
-        onRetry={refetch}
-      />
-    );
-  }
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -195,7 +196,7 @@ export default function EditTeamScreen() {
             <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
               {t('teams.league')}
             </ThemedText>
-            {leagues && leagues.length > 0 ? (
+            {leagues.length > 0 ? (
               <View style={[styles.selectionList, { borderColor: colors.border }]}>
                 {leagues.map((league, index) => {
                   const isSelected = leagueId === league.id;

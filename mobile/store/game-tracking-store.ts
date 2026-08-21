@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import type { GameEvent, CreateGameEventInput, ShotMetadata } from '../types/game';
+import type { CreateGameEventInput, ShotMetadata } from '../types/game';
 
 interface LocalEvent extends CreateGameEventInput {
   localId: string;

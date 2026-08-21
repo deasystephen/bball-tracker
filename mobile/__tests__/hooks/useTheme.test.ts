@@ -5,7 +5,7 @@
  * we test the underlying theme data and color values directly
  */
 
-import { colors, ColorScheme, Colors } from '../../theme/colors';
+import { colors, ColorScheme } from '../../theme/colors';
 
 describe('Theme Colors', () => {
   describe('light theme', () => {

@@ -2,7 +2,7 @@
  * Additional stat buttons for rebounds, steals, blocks, assists
  */
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -67,16 +67,16 @@ const StatButtonItem: React.FC<StatButtonItemProps> = ({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     // Color pulse: briefly fill then fade
-    bgOpacity.value = withSequence(
+    bgOpacity.set(withSequence(
       withTiming(1, { duration: 100 }),
       withTiming(0, { duration: 300 })
-    );
+    ));
 
     // Icon scale pulse
-    iconScale.value = withSequence(
+    iconScale.set(withSequence(
       withTiming(1.2, { duration: 100 }),
       withTiming(1, { duration: 200 })
-    );
+    ));
 
     onPress();
   };
@@ -119,10 +119,10 @@ const StatButtonItem: React.FC<StatButtonItemProps> = ({
 /**
  * Memoized to prevent re-renders during score updates on tracking screen.
  */
-export const StatButtons: React.FC<StatButtonsProps> = React.memo(({
+export const StatButtons: React.FC<StatButtonsProps> = React.memo(function StatButtons({
   onStat,
   disabled = false,
-}) => {
+}) {
   const { colors } = useTheme();
 
   const stats: StatButtonConfig[] = useMemo(() => [

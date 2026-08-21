@@ -49,7 +49,9 @@ describe('analytics service', () => {
   });
 
   it('initAnalytics is a no-op when no API key is configured', async () => {
-    const { initAnalytics, trackEvent } = require('../../services/analytics');
+    const { initAnalytics, trackEvent } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
     expect(mockAmplitude.init).not.toHaveBeenCalled();
 
@@ -62,7 +64,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
 
-    const { initAnalytics, trackEvent } = require('../../services/analytics');
+    const { initAnalytics, trackEvent } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
 
     expect(mockAmplitude.init).toHaveBeenCalledWith('test-key');
@@ -76,7 +80,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) });
 
-    const { initAnalytics, trackEvent } = require('../../services/analytics');
+    const { initAnalytics, trackEvent } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await expect(initAnalytics()).resolves.toBeUndefined();
 
     // Since init failed, tracking should remain a no-op.
@@ -88,7 +94,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
 
-    const { initAnalytics, identifyUser } = require('../../services/analytics');
+    const { initAnalytics, identifyUser } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
 
     identifyUser('user-1', { plan: 'pro' });
@@ -101,7 +109,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
 
-    const { initAnalytics, identifyUser } = require('../../services/analytics');
+    const { initAnalytics, identifyUser } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
 
     identifyUser('user-2');
@@ -113,7 +123,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
 
-    const { initAnalytics, resetUser } = require('../../services/analytics');
+    const { initAnalytics, resetUser } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
 
     resetUser();
@@ -124,7 +136,9 @@ describe('analytics service', () => {
     mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
     mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
 
-    const { initAnalytics, trackEvent, identifyUser, resetUser } = require('../../services/analytics');
+    const { initAnalytics, trackEvent, identifyUser, resetUser } = jest.requireActual<typeof import('../../services/analytics')>(
+      '../../services/analytics'
+    );
     await initAnalytics();
 
     mockAmplitude.track.mockImplementationOnce(() => {

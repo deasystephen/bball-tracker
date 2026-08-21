@@ -33,32 +33,35 @@ export default tseslint.config(
   {
     files: ['**/*.ts', '**/*.tsx'],
     rules: {
+      // Every project rule is an error: `npm run lint` runs with
+      // --max-warnings 0 so warnings would fail CI anyway, and keeping them
+      // as errors makes the intent explicit. Do not downgrade a rule to
+      // 'warn' to get something merged — fix the code (see CLAUDE.md).
+
       // Mirror backend: ignore intentionally-unused names prefixed with `_`.
       '@typescript-eslint/no-unused-vars': [
-        'warn',
+        'error',
         { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
       ],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
 
-      // react-hooks@7 ships the React Compiler lint rules. The two below fire
-      // heavily on idiomatic Reanimated code (mutating `.value` of a shared
-      // value inside a worklet/effect) and on legitimate one-shot effect
-      // setState, where eliminating them would require a large, risky refactor
-      // of working animation/UI code. Downgraded to `warn` (not disabled) so the
-      // signal stays visible without blocking CI. See issue #132.
-      'react-hooks/immutability': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
+      // react-hooks@7 ships the React Compiler lint rules. Reanimated shared
+      // values must be written via `.set()` / read via `.get()` (not `.value`)
+      // so that `immutability` is satisfied, and derived/seeded state must be
+      // computed during render (or in a keyed child) rather than set in an
+      // effect. The codebase was brought into compliance in the 2026-08-20
+      // lint burn-down; keep it that way.
+      'react-hooks/immutability': 'error',
+      'react-hooks/set-state-in-effect': 'error',
 
-      // Stylistic; flags valid function components passed inline (e.g. as render
-      // props / list item renderers). Downgraded to `warn` to avoid a broad
-      // rename refactor across existing components. See issue #132.
-      'react/display-name': 'warn',
+      // Memoized / forwardRef components must be named function expressions
+      // so React DevTools and error stacks show a real name.
+      'react/display-name': 'error',
     },
   },
 
   // Test files and jest setup run under the Jest runtime; expose its globals so
-  // `jest`, `describe`, `expect`, etc. are not flagged as no-undef. These files
-  // also define throwaway inline mock components, so display-name is relaxed.
+  // `jest`, `describe`, `expect`, etc. are not flagged as no-undef.
   {
     files: ['**/__tests__/**', '**/*.test.ts', '**/*.test.tsx', '**/*.test.js', 'jest.setup.js'],
     languageOptions: {
@@ -66,9 +69,6 @@ export default tseslint.config(
         ...globals.jest,
         ...globals.node,
       },
-    },
-    rules: {
-      'react/display-name': 'warn',
     },
   },
 );

@@ -27,7 +27,6 @@ import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
-import type { AggregatedPlayerStats } from '../../../types/stats';
 
 type SortKey = 'ppg' | 'rpg' | 'apg' | 'efficiency';
 

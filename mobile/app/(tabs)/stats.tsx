@@ -28,13 +28,10 @@ export default function Stats() {
   const insets = useSafeAreaInsets();
 
   const { data: teams, isLoading: teamsLoading } = useTeams();
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (teams && teams.length > 0 && !selectedTeamId) {
-      setSelectedTeamId(teams[0].id);
-    }
-  }, [teams, selectedTeamId]);
+  // Only the user's explicit choice lives in state; default to the first team during render
+  const [chosenTeamId, setChosenTeamId] = useState<string | null>(null);
+  const selectedTeamId = chosenTeamId ?? teams?.[0]?.id ?? null;
+  const setSelectedTeamId = setChosenTeamId;
 
   const { data: seasonStats, isLoading: statsLoading } = useTeamSeasonStats(
     selectedTeamId || ''

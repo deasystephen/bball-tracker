@@ -4,6 +4,8 @@
 
 import { renderHook, act } from '@testing-library/react-native';
 
+import { useLiveGame } from '../../hooks/useLiveGame';
+
 interface AckFn {
   (response: { success: boolean; gameId?: string; error?: string; code?: string }): void;
 }
@@ -11,7 +13,7 @@ interface AckFn {
 interface FakeSocket {
   connected: boolean;
   handlers: Record<string, ((...args: unknown[]) => void)[]>;
-  emitCalls: Array<{ event: string; payload: unknown; ack?: AckFn }>;
+  emitCalls: { event: string; payload: unknown; ack?: AckFn }[];
   on: jest.Mock;
   off: jest.Mock;
   emit: jest.Mock;
@@ -55,8 +57,6 @@ let mockSocket: FakeSocket;
 jest.mock('../../services/socket', () => ({
   getSocket: jest.fn(() => mockSocket),
 }));
-
-import { useLiveGame } from '../../hooks/useLiveGame';
 
 const makeEvent = (id: string, gameId = 'g1') => ({
   id,

@@ -6,16 +6,6 @@
  * reset). Analytics is mocked to isolate the store's behavior.
  */
 
-jest.mock('../../services/analytics', () => ({
-  trackEvent: jest.fn(),
-  identifyUser: jest.fn(),
-  resetUser: jest.fn(),
-  AnalyticsEvents: {
-    USER_LOGGED_IN: 'user_logged_in',
-    USER_LOGGED_OUT: 'user_logged_out',
-  },
-}));
-
 import { renderHook } from '@testing-library/react-native';
 import {
   useAuthStore,
@@ -30,6 +20,16 @@ import {
   AnalyticsEvents,
 } from '../../services/analytics';
 import { UserRole, User } from '../../../shared/types';
+
+jest.mock('../../services/analytics', () => ({
+  trackEvent: jest.fn(),
+  identifyUser: jest.fn(),
+  resetUser: jest.fn(),
+  AnalyticsEvents: {
+    USER_LOGGED_IN: 'user_logged_in',
+    USER_LOGGED_OUT: 'user_logged_out',
+  },
+}));
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-1',

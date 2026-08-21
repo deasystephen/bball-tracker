@@ -8,14 +8,13 @@
 // these globals. Without them, hooks that touch URLSearchParams (useGames,
 // useGameEvents, useSeasons, etc.) throw ReferenceError inside the query fn.
 import { TextEncoder, TextDecoder } from 'util';
+import '@testing-library/react-native';
 if (typeof global.TextEncoder === 'undefined') {
   global.TextEncoder = TextEncoder;
 }
 if (typeof global.TextDecoder === 'undefined') {
   global.TextDecoder = TextDecoder;
 }
-
-import '@testing-library/react-native';
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -81,7 +80,6 @@ jest.mock('@expo/vector-icons', () => {
 
 // Mock react-native-reanimated
 jest.mock('react-native-reanimated', () => {
-  const React = require('react');
   const View = require('react-native').View;
   return {
     __esModule: true,
@@ -92,7 +90,14 @@ jest.mock('react-native-reanimated', () => {
       ScrollView: require('react-native').ScrollView,
       call: jest.fn(),
     },
-    useSharedValue: (init) => ({ value: init }),
+    useSharedValue: (init) => {
+      const sv = { value: init };
+      sv.get = () => sv.value;
+      sv.set = (next) => {
+        sv.value = typeof next === 'function' ? next(sv.value) : next;
+      };
+      return sv;
+    },
     useAnimatedStyle: (fn) => fn(),
     useDerivedValue: (fn) => ({ value: fn() }),
     useAnimatedRef: () => ({ current: null }),
@@ -155,7 +160,9 @@ jest.mock('expo-image-picker', () => ({
 // Mock react-native-confetti-cannon
 jest.mock('react-native-confetti-cannon', () => {
   const React = require('react');
-  return React.forwardRef((props, ref) => React.createElement('View', { ...props, ref }));
+  return React.forwardRef(function MockConfettiCannon(props, ref) {
+    return React.createElement('View', { ...props, ref });
+  });
 });
 
 // Mock moti

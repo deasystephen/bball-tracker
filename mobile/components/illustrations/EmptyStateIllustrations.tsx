@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import Svg, { Circle, Rect, Line, Path, G } from 'react-native-svg';
+import Svg, { Circle, Rect, Line, Path } from 'react-native-svg';
 import { useTheme } from '../../hooks/useTheme';
 
 const SIZE = 120;

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User, UserRole } from '../../shared/types';
+import { User } from '../../shared/types';
 import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
 
 interface AuthState {
