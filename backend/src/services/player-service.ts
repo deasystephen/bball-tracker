@@ -2,6 +2,7 @@
  * Player service layer for business logic
  */
 
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import {
   CreatePlayerInput,
@@ -14,13 +15,75 @@ import {
   ForbiddenError,
 } from '../utils/errors';
 
+const PLAYER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  profilePictureUrl: true,
+  emailVerified: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.UserSelect;
+
+const PLAYER_DETAIL_SELECT = {
+  ...PLAYER_SELECT,
+  isManaged: true,
+  managedById: true,
+  teamMembers: {
+    include: {
+      team: {
+        select: {
+          id: true,
+          name: true,
+          season: {
+            select: {
+              id: true,
+              name: true,
+              league: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.UserSelect;
+
+const PLAYER_LIST_SELECT = {
+  ...PLAYER_SELECT,
+  _count: {
+    select: {
+      teamMembers: true,
+    },
+  },
+} satisfies Prisma.UserSelect;
+
+export type Player = Prisma.UserGetPayload<{ select: typeof PLAYER_SELECT }>;
+export type PlayerDetail = Prisma.UserGetPayload<{ select: typeof PLAYER_DETAIL_SELECT }>;
+export type PlayerListItem = Prisma.UserGetPayload<{ select: typeof PLAYER_LIST_SELECT }>;
+
+export interface PlayerList {
+  players: PlayerListItem[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+}
+
 export class PlayerService {
   /**
    * Create a new player
    * @param data Player creation data
    * @param _userId ID of the user creating the player (for authorization - reserved for future use)
    */
-  static async createPlayer(data: CreatePlayerInput, _userId: string) {
+  static async createPlayer(data: CreatePlayerInput, _userId: string): Promise<Player> {
     // Check if user with this email already exists
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },
@@ -39,16 +102,7 @@ export class PlayerService {
         profilePictureUrl: data.profilePictureUrl || null,
         emailVerified: false, // Will be verified through WorkOS when they sign up
       },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        profilePictureUrl: true,
-        emailVerified: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: PLAYER_SELECT,
     });
 
     return player;
@@ -58,43 +112,10 @@ export class PlayerService {
    * Get a player by ID
    * @param playerId Player ID
    */
-  static async getPlayerById(playerId: string) {
+  static async getPlayerById(playerId: string): Promise<PlayerDetail> {
     const player = await prisma.user.findUnique({
       where: { id: playerId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        profilePictureUrl: true,
-        emailVerified: true,
-        isManaged: true,
-        managedById: true,
-        createdAt: true,
-        updatedAt: true,
-        teamMembers: {
-          include: {
-            team: {
-              select: {
-                id: true,
-                name: true,
-                season: {
-                  select: {
-                    id: true,
-                    name: true,
-                    league: {
-                      select: {
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      select: PLAYER_DETAIL_SELECT,
     });
 
     if (!player) {
@@ -113,11 +134,11 @@ export class PlayerService {
    * List players with optional filters
    * @param params Query parameters
    */
-  static async listPlayers(params: PlayerQueryParams) {
+  static async listPlayers(params: PlayerQueryParams): Promise<PlayerList> {
     const { search, role, isManaged, limit, offset } = params;
 
     // Build where clause
-    const where: any = {
+    const where: Prisma.UserWhereInput = {
       role: role || 'PLAYER', // Default to PLAYER role
     };
 
@@ -141,21 +162,7 @@ export class PlayerService {
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          profilePictureUrl: true,
-          emailVerified: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: {
-            select: {
-              teamMembers: true,
-            },
-          },
-        },
+        select: PLAYER_LIST_SELECT,
         orderBy: { name: 'asc' },
         take: limit,
         skip: offset,
@@ -183,7 +190,7 @@ export class PlayerService {
     playerId: string,
     data: UpdatePlayerInput,
     userId: string
-  ) {
+  ): Promise<Player> {
     // Get player
     const player = await prisma.user.findUnique({
       where: { id: playerId },
@@ -233,16 +240,7 @@ export class PlayerService {
           profilePictureUrl: data.profilePictureUrl || null,
         }),
       },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        profilePictureUrl: true,
-        emailVerified: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: PLAYER_SELECT,
     });
 
     return updatedPlayer;
@@ -253,7 +251,7 @@ export class PlayerService {
    * @param playerId Player ID
    * @param userId User ID (for authorization)
    */
-  static async deletePlayer(playerId: string, userId: string) {
+  static async deletePlayer(playerId: string, userId: string): Promise<{ success: true }> {
     // Check permissions - admins can delete any player, coaches can delete their managed players
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },

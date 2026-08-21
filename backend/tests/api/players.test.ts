@@ -21,7 +21,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -45,7 +45,7 @@ describe('Players API', () => {
 
   describe('POST /api/v1/players', () => {
     it('should create a player successfully', async () => {
-      mockPlayerService.createPlayer.mockResolvedValue(mockPlayer as any);
+      mockPlayerService.createPlayer.mockResolvedValue(mockPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.createPlayer>>);
 
       const response = await request(app)
         .post('/api/v1/players')
@@ -98,7 +98,7 @@ describe('Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [mockPlayer],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app).get('/api/v1/players');
 
@@ -112,7 +112,7 @@ describe('Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [mockPlayer],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app)
         .get('/api/v1/players')
@@ -128,7 +128,7 @@ describe('Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [mockPlayer],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app)
         .get('/api/v1/players')
@@ -144,7 +144,7 @@ describe('Players API', () => {
       mockPlayerService.listPlayers.mockResolvedValue({
         players: [mockPlayer],
         pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockPlayerService.listPlayers>>);
 
       const response = await request(app)
         .get('/api/v1/players')
@@ -157,7 +157,7 @@ describe('Players API', () => {
 
   describe('GET /api/v1/players/:id', () => {
     it('should get a player by ID', async () => {
-      mockPlayerService.getPlayerById.mockResolvedValue(mockPlayer as any);
+      mockPlayerService.getPlayerById.mockResolvedValue(mockPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.getPlayerById>>);
 
       const response = await request(app).get(`/api/v1/players/${TEST_PLAYER_ID}`);
 
@@ -181,7 +181,7 @@ describe('Players API', () => {
   describe('PATCH /api/v1/players/:id', () => {
     it('should update a player successfully', async () => {
       const updatedPlayer = { ...mockPlayer, name: 'Updated Name' };
-      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as any);
+      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.updatePlayer>>);
 
       const response = await request(app)
         .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
@@ -229,7 +229,7 @@ describe('Players API', () => {
         ...mockPlayer,
         profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/user/photo.jpg',
       };
-      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as any);
+      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.updatePlayer>>);
 
       const response = await request(app)
         .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
@@ -244,7 +244,7 @@ describe('Players API', () => {
 
     it('should accept empty string profilePictureUrl to clear avatar', async () => {
       const updatedPlayer = { ...mockPlayer, profilePictureUrl: '' };
-      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as any);
+      mockPlayerService.updatePlayer.mockResolvedValue(updatedPlayer as unknown as Awaited<ReturnType<typeof mockPlayerService.updatePlayer>>);
 
       const response = await request(app)
         .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
@@ -272,7 +272,7 @@ describe('Players API', () => {
 
   describe('DELETE /api/v1/players/:id', () => {
     it('should delete a player successfully', async () => {
-      mockPlayerService.deletePlayer.mockResolvedValue(undefined as any);
+      mockPlayerService.deletePlayer.mockResolvedValue({ success: true });
 
       const response = await request(app).delete(`/api/v1/players/${TEST_PLAYER_ID}`);
 

@@ -18,6 +18,14 @@ import {
   createTeamRole,
   createTeamStaff,
 } from '../factories';
+import type {
+  UserData,
+  LeagueData,
+  SeasonData,
+  TeamData,
+  TeamRoleData,
+  TeamStaffData,
+} from '../factories';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -58,7 +66,14 @@ afterAll(() => {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function setupCoachWithTeam() {
+function setupCoachWithTeam(): {
+  coach: UserData;
+  league: LeagueData;
+  season: SeasonData;
+  team: TeamData;
+  headCoachRole: TeamRoleData;
+  coachStaff: TeamStaffData;
+} {
   const coach = createCoach({ id: TEST_USER_ID, email: 'coach@example.com' });
   const league = createLeague();
   const season = createSeason({ leagueId: league.id });

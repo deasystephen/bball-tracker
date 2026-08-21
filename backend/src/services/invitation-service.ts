@@ -2,6 +2,7 @@
  * Invitation service layer for business logic
  */
 
+import { Prisma, TeamInvitation, TeamMember } from '@prisma/client';
 import prisma from '../models';
 import {
   CreateInvitationInput,
@@ -17,6 +18,96 @@ import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 import { mailer } from './mailer';
 import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
+
+const USER_SUMMARY_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+} satisfies Prisma.UserSelect;
+
+const INVITATION_INCLUDE = {
+  team: {
+    select: {
+      id: true,
+      name: true,
+      season: {
+        select: {
+          id: true,
+          name: true,
+          league: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  player: { select: USER_SUMMARY_SELECT },
+  invitedBy: { select: USER_SUMMARY_SELECT },
+} satisfies Prisma.TeamInvitationInclude;
+
+const INVITATION_TEAM_INCLUDE = {
+  team: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} satisfies Prisma.TeamInvitationInclude;
+
+const ACCEPTED_MEMBER_INCLUDE = {
+  player: { select: USER_SUMMARY_SELECT },
+  team: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} satisfies Prisma.TeamMemberInclude;
+
+export type InvitationWithRelations = Prisma.TeamInvitationGetPayload<{
+  include: typeof INVITATION_INCLUDE;
+}>;
+export type InvitationWithTeam = Prisma.TeamInvitationGetPayload<{
+  include: typeof INVITATION_TEAM_INCLUDE;
+}>;
+export type AcceptedTeamMember = Prisma.TeamMemberGetPayload<{
+  include: typeof ACCEPTED_MEMBER_INCLUDE;
+}>;
+
+export interface InvitationList {
+  invitations: InvitationWithRelations[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+}
+
+export interface AcceptInvitationResult {
+  invitation: TeamInvitation;
+  teamMember: AcceptedTeamMember;
+}
+
+export interface AcceptInvitationByTokenResult {
+  invitation: TeamInvitation;
+  teamMember: TeamMember;
+}
+
+/** Limited, unauthenticated view of an invitation (public token lookup). */
+export interface PublicInvitation {
+  id: string;
+  status: TeamInvitation['status'];
+  teamName: string;
+  inviterName: string;
+  position: string | null;
+  jerseyNumber: number | null;
+  message: string | null;
+  expiresAt: string;
+}
 
 export class InvitationService {
   /**
@@ -37,7 +128,7 @@ export class InvitationService {
     teamId: string,
     data: CreateInvitationInput,
     userId: string
-  ) {
+  ): Promise<InvitationWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -109,40 +200,7 @@ export class InvitationService {
         expiresAt,
         status: 'PENDING',
       },
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-            season: {
-              select: {
-                id: true,
-                name: true,
-                league: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        invitedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: INVITATION_INCLUDE,
     });
 
     // Send invitation email (fire-and-forget; never block the response)
@@ -184,11 +242,14 @@ export class InvitationService {
    * @param params Query parameters
    * @param userId User ID (for authorization)
    */
-  static async listInvitations(params: InvitationQueryParams, userId: string) {
+  static async listInvitations(
+    params: InvitationQueryParams,
+    userId: string
+  ): Promise<InvitationList> {
     const { status, teamId, playerId, limit, offset } = params;
 
     // Build where clause
-    const where: any = {};
+    const where: Prisma.TeamInvitationWhereInput = {};
 
     if (status) {
       where.status = status;
@@ -227,40 +288,7 @@ export class InvitationService {
       prisma.teamInvitation.count({ where }),
       prisma.teamInvitation.findMany({
         where,
-        include: {
-          team: {
-            select: {
-              id: true,
-              name: true,
-              season: {
-                select: {
-                  id: true,
-                  name: true,
-                  league: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          player: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-          invitedBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
+        include: INVITATION_INCLUDE,
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset,
@@ -283,43 +311,13 @@ export class InvitationService {
    * @param invitationId Invitation ID
    * @param userId User ID (for authorization)
    */
-  static async getInvitationById(invitationId: string, userId: string) {
+  static async getInvitationById(
+    invitationId: string,
+    userId: string
+  ): Promise<InvitationWithRelations> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-            season: {
-              select: {
-                id: true,
-                name: true,
-                league: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        invitedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: INVITATION_INCLUDE,
     });
 
     if (!invitation) {
@@ -342,7 +340,10 @@ export class InvitationService {
    * @param invitationId Invitation ID
    * @param userId User ID (must be the invited player)
    */
-  static async acceptInvitation(invitationId: string, userId: string) {
+  static async acceptInvitation(
+    invitationId: string,
+    userId: string
+  ): Promise<AcceptInvitationResult> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
     });
@@ -406,21 +407,7 @@ export class InvitationService {
           jerseyNumber: invitation.jerseyNumber,
           position: invitation.position,
         },
-        include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-          team: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
+        include: ACCEPTED_MEMBER_INCLUDE,
       });
 
       return { invitation: updatedInvitation, teamMember };
@@ -434,7 +421,7 @@ export class InvitationService {
    * @param invitationId Invitation ID
    * @param userId User ID (must be the invited player)
    */
-  static async rejectInvitation(invitationId: string, userId: string) {
+  static async rejectInvitation(invitationId: string, userId: string): Promise<InvitationWithTeam> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
     });
@@ -462,14 +449,7 @@ export class InvitationService {
         status: 'REJECTED',
         rejectedAt: new Date(),
       },
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: INVITATION_TEAM_INCLUDE,
     });
 
     return updatedInvitation;
@@ -480,7 +460,7 @@ export class InvitationService {
    * @param invitationId Invitation ID
    * @param userId User ID
    */
-  static async cancelInvitation(invitationId: string, userId: string) {
+  static async cancelInvitation(invitationId: string, userId: string): Promise<TeamInvitation> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
     });
@@ -517,7 +497,7 @@ export class InvitationService {
    * Get an invitation by token (public, no user context required).
    * Returns a limited view safe to expose without authentication.
    */
-  static async getInvitationByToken(token: string) {
+  static async getInvitationByToken(token: string): Promise<PublicInvitation> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { token },
       select: {
@@ -556,7 +536,7 @@ export class InvitationService {
    * Accept an invitation using its token as authentication.
    * The token functions as a one-time secret (analogous to a password-reset link).
    */
-  static async acceptInvitationByToken(token: string) {
+  static async acceptInvitationByToken(token: string): Promise<AcceptInvitationByTokenResult> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { token },
     });
@@ -627,7 +607,7 @@ export class InvitationService {
    * Expire old invitations (background job)
    * Should be run periodically to mark expired invitations
    */
-  static async expireOldInvitations() {
+  static async expireOldInvitations(): Promise<Prisma.BatchPayload> {
     const now = new Date();
 
     const result = await prisma.teamInvitation.updateMany({

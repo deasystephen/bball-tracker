@@ -2,6 +2,7 @@
  * Team service layer for business logic
  */
 
+import { Prisma, TeamRole } from '@prisma/client';
 import prisma from '../models';
 import {
   CreateTeamInput,
@@ -21,13 +22,124 @@ import {
   assignTeamRole,
 } from '../utils/permissions';
 
+const USER_SUMMARY_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+} satisfies Prisma.UserSelect;
+
+const TEAM_SUMMARY_SELECT = {
+  id: true,
+  name: true,
+} satisfies Prisma.TeamSelect;
+
+const TEAM_STAFF_INCLUDE = {
+  user: { select: USER_SUMMARY_SELECT },
+  role: true,
+} satisfies Prisma.TeamStaffInclude;
+
+const TEAM_INCLUDE = {
+  season: {
+    include: {
+      league: true,
+    },
+  },
+  staff: { include: TEAM_STAFF_INCLUDE },
+  members: {
+    include: {
+      player: { select: USER_SUMMARY_SELECT },
+    },
+  },
+} satisfies Prisma.TeamInclude;
+
+const TEAM_DETAIL_INCLUDE = {
+  ...TEAM_INCLUDE,
+  roles: true,
+  games: {
+    orderBy: {
+      date: 'desc',
+    },
+    take: 10, // Latest 10 games
+  },
+} satisfies Prisma.TeamInclude;
+
+const TEAM_LIST_INCLUDE = {
+  season: {
+    select: {
+      id: true,
+      name: true,
+      league: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  },
+  _count: {
+    select: {
+      members: true,
+      staff: true,
+      games: true,
+    },
+  },
+} satisfies Prisma.TeamInclude;
+
+const TEAM_MEMBER_INCLUDE = {
+  player: { select: USER_SUMMARY_SELECT },
+  team: { select: TEAM_SUMMARY_SELECT },
+} satisfies Prisma.TeamMemberInclude;
+
+const MANAGED_MEMBER_INCLUDE = {
+  player: {
+    select: {
+      ...USER_SUMMARY_SELECT,
+      isManaged: true,
+      managedById: true,
+    },
+  },
+  team: { select: TEAM_SUMMARY_SELECT },
+} satisfies Prisma.TeamMemberInclude;
+
+const TEAM_ROLE_INCLUDE = {
+  staff: {
+    include: {
+      user: { select: USER_SUMMARY_SELECT },
+    },
+  },
+} satisfies Prisma.TeamRoleInclude;
+
+export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>;
+export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
+export type TeamListItem = Prisma.TeamGetPayload<{ include: typeof TEAM_LIST_INCLUDE }>;
+export type TeamMemberWithRelations = Prisma.TeamMemberGetPayload<{
+  include: typeof TEAM_MEMBER_INCLUDE;
+}>;
+export type ManagedTeamMember = Prisma.TeamMemberGetPayload<{
+  include: typeof MANAGED_MEMBER_INCLUDE;
+}>;
+export type TeamStaffWithRelations = Prisma.TeamStaffGetPayload<{
+  include: typeof TEAM_STAFF_INCLUDE;
+}>;
+export type TeamRoleWithStaff = Prisma.TeamRoleGetPayload<{ include: typeof TEAM_ROLE_INCLUDE }>;
+
+export interface TeamList {
+  teams: TeamListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export class TeamService {
   /**
    * Create a new team
    * @param data Team creation data
    * @param userId ID of the user creating the team (will be assigned as Head Coach)
    */
-  static async createTeam(data: CreateTeamInput, userId: string) {
+  static async createTeam(
+    data: CreateTeamInput,
+    userId: string
+  ): Promise<TeamWithRelations | null> {
     // Verify season exists
     const season = await prisma.season.findUnique({
       where: { id: data.seasonId },
@@ -69,36 +181,7 @@ export class TeamService {
     // Return the full team with relations
     return prisma.team.findUnique({
       where: { id: team.id },
-      include: {
-        season: {
-          include: {
-            league: true,
-          },
-        },
-        staff: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-            role: true,
-          },
-        },
-        members: {
-          include: {
-            player: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: TEAM_INCLUDE,
     });
   }
 
@@ -107,46 +190,10 @@ export class TeamService {
    * @param teamId Team ID
    * @param userId User ID (for authorization)
    */
-  static async getTeamById(teamId: string, userId: string) {
+  static async getTeamById(teamId: string, userId: string): Promise<TeamDetail> {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
-      include: {
-        season: {
-          include: {
-            league: true,
-          },
-        },
-        staff: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-            role: true,
-          },
-        },
-        roles: true,
-        members: {
-          include: {
-            player: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-        games: {
-          orderBy: {
-            date: 'desc',
-          },
-          take: 10, // Latest 10 games
-        },
-      },
+      include: TEAM_DETAIL_INCLUDE,
     });
 
     if (!team) {
@@ -168,9 +215,9 @@ export class TeamService {
    * @param query Query parameters
    * @param userId User ID (for filtering by access)
    */
-  static async listTeams(query: TeamQueryParams, userId: string) {
+  static async listTeams(query: TeamQueryParams, userId: string): Promise<TeamList> {
     // Build where clause
-    const where: any = {};
+    const where: Prisma.TeamWhereInput = {};
 
     if (query.seasonId) {
       where.seasonId = query.seasonId;
@@ -236,27 +283,7 @@ export class TeamService {
       prisma.team.count({ where }),
       prisma.team.findMany({
         where,
-        include: {
-          season: {
-            select: {
-              id: true,
-              name: true,
-              league: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-          _count: {
-            select: {
-              members: true,
-              staff: true,
-              games: true,
-            },
-          },
-        },
+        include: TEAM_LIST_INCLUDE,
         orderBy: {
           createdAt: 'desc',
         },
@@ -279,7 +306,11 @@ export class TeamService {
    * @param data Update data
    * @param userId User ID (must have canManageTeam permission)
    */
-  static async updateTeam(teamId: string, data: UpdateTeamInput, userId: string) {
+  static async updateTeam(
+    teamId: string,
+    data: UpdateTeamInput,
+    userId: string
+  ): Promise<TeamWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -307,7 +338,7 @@ export class TeamService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.TeamUncheckedUpdateInput = {};
 
     if (data.name !== undefined) {
       updateData.name = data.name;
@@ -325,36 +356,7 @@ export class TeamService {
     const updatedTeam = await prisma.team.update({
       where: { id: teamId },
       data: updateData,
-      include: {
-        season: {
-          include: {
-            league: true,
-          },
-        },
-        staff: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-            role: true,
-          },
-        },
-        members: {
-          include: {
-            player: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: TEAM_INCLUDE,
     });
 
     return updatedTeam;
@@ -365,7 +367,7 @@ export class TeamService {
    * @param teamId Team ID
    * @param userId User ID (must have canManageTeam permission)
    */
-  static async deleteTeam(teamId: string, userId: string) {
+  static async deleteTeam(teamId: string, userId: string): Promise<{ success: true }> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -395,7 +397,11 @@ export class TeamService {
    * @param data Player data
    * @param userId User ID (must have canManageRoster permission)
    */
-  static async addPlayer(teamId: string, data: AddPlayerInput, userId: string) {
+  static async addPlayer(
+    teamId: string,
+    data: AddPlayerInput,
+    userId: string
+  ): Promise<TeamMemberWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -442,21 +448,7 @@ export class TeamService {
         jerseyNumber: data.jerseyNumber,
         position: data.position,
       },
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        team: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: TEAM_MEMBER_INCLUDE,
     });
 
     return teamMember;
@@ -468,7 +460,11 @@ export class TeamService {
    * @param playerId Player ID
    * @param userId User ID (must have canManageRoster permission)
    */
-  static async removePlayer(teamId: string, playerId: string, userId: string) {
+  static async removePlayer(
+    teamId: string,
+    playerId: string,
+    userId: string
+  ): Promise<{ success: true }> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -523,7 +519,7 @@ export class TeamService {
     playerId: string,
     data: UpdateTeamMemberInput,
     userId: string
-  ) {
+  ): Promise<TeamMemberWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -554,7 +550,7 @@ export class TeamService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.TeamMemberUpdateInput = {};
 
     if (data.jerseyNumber !== undefined) {
       updateData.jerseyNumber = data.jerseyNumber;
@@ -573,21 +569,7 @@ export class TeamService {
         },
       },
       data: updateData,
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        team: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: TEAM_MEMBER_INCLUDE,
     });
 
     return updatedMember;
@@ -605,7 +587,7 @@ export class TeamService {
     staffUserId: string,
     roleName: string,
     requestingUserId: string
-  ) {
+  ): Promise<TeamStaffWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -666,16 +648,7 @@ export class TeamService {
         userId: staffUserId,
         roleId: role.id,
       },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        role: true,
-      },
+      include: TEAM_STAFF_INCLUDE,
     });
 
     return teamStaff;
@@ -689,7 +662,7 @@ export class TeamService {
     staffUserId: string,
     roleName: string,
     requestingUserId: string
-  ) {
+  ): Promise<{ success: true }> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -762,7 +735,7 @@ export class TeamService {
       canShareStats?: boolean;
     },
     requestingUserId: string
-  ) {
+  ): Promise<TeamRole> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -813,7 +786,7 @@ export class TeamService {
   /**
    * Get all roles for a team
    */
-  static async getTeamRoles(teamId: string, userId: string) {
+  static async getTeamRoles(teamId: string, userId: string): Promise<TeamRoleWithStaff[]> {
     // Check access
     const hasAccess = await canAccessTeam(userId, teamId);
     if (!hasAccess) {
@@ -822,19 +795,7 @@ export class TeamService {
 
     const roles = await prisma.teamRole.findMany({
       where: { teamId },
-      include: {
-        staff: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
+      include: TEAM_ROLE_INCLUDE,
       orderBy: [
         { type: 'asc' },
         { name: 'asc' },
@@ -854,7 +815,7 @@ export class TeamService {
     teamId: string,
     data: CreateManagedPlayerInput,
     userId: string
-  ) {
+  ): Promise<ManagedTeamMember> {
     // Verify team exists
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -890,23 +851,7 @@ export class TeamService {
         jerseyNumber: data.jerseyNumber,
         position: data.position,
       },
-      include: {
-        player: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            isManaged: true,
-            managedById: true,
-          },
-        },
-        team: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
+      include: MANAGED_MEMBER_INCLUDE,
     });
 
     return teamMember;

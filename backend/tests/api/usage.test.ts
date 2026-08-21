@@ -35,7 +35,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     req.user = { ...currentUser };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/usage-service');
@@ -55,7 +55,7 @@ describe('GET /api/v1/auth/me/usage', () => {
       tier: 'FREE',
       teams: { count: 2, limit: 3, limitReached: false },
       seasons: { count: 1, limit: 1, limitReached: true },
-    } as any);
+    } as unknown as Awaited<ReturnType<typeof mockUsageService.getUsage>>);
 
     const response = await request(app)
       .get('/api/v1/auth/me/usage')
@@ -74,7 +74,7 @@ describe('GET /api/v1/auth/me/usage', () => {
       tier: 'PREMIUM',
       teams: { count: 9, limit: null, limitReached: false },
       seasons: { count: 4, limit: null, limitReached: false },
-    } as any);
+    } as unknown as Awaited<ReturnType<typeof mockUsageService.getUsage>>);
 
     const response = await request(app)
       .get('/api/v1/auth/me/usage')
@@ -108,7 +108,7 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
 
   it('creates the team and invalidates cached usage when under the cap', async () => {
     (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(1);
-    mockTeamService.createTeam.mockResolvedValue(createdTeam as any);
+    mockTeamService.createTeam.mockResolvedValue(createdTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
     const response = await request(app)
       .post('/api/v1/teams')
@@ -139,7 +139,7 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
 
   it('admins bypass the cap entirely (count not even queried)', async () => {
     currentUser.role = 'ADMIN';
-    mockTeamService.createTeam.mockResolvedValue(createdTeam as any);
+    mockTeamService.createTeam.mockResolvedValue(createdTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
     const response = await request(app)
       .post('/api/v1/teams')

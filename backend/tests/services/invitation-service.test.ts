@@ -27,6 +27,7 @@ import {
   expectBadRequestError,
   expectForbiddenError,
 } from '../helpers';
+import type { CreateInvitationInput } from '../../src/api/invitations/schemas';
 
 // Helper to create valid invitation input
 const createInvitationInput = (overrides: {
@@ -35,7 +36,7 @@ const createInvitationInput = (overrides: {
   message?: string;
   jerseyNumber?: number;
   position?: string;
-}) => ({
+}): CreateInvitationInput => ({
   playerId: overrides.playerId,
   expiresInDays: overrides.expiresInDays ?? 7,
   message: overrides.message,

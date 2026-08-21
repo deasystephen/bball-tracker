@@ -148,8 +148,8 @@ describe('Auth API', () => {
         user: mockWorkOSUser,
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
-      } as any);
-      mockWorkOSService.syncUser.mockResolvedValue(mockUser as any);
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
 
       const response = await request(app)
         .get('/api/v1/auth/callback')
@@ -198,7 +198,7 @@ describe('Auth API', () => {
 
   describe('GET /api/v1/auth/me', () => {
     it('should return current user information', async () => {
-      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
       const response = await request(app)
@@ -239,7 +239,7 @@ describe('Auth API', () => {
     });
 
     it('should return 401 for user not found in database', async () => {
-      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
       const response = await request(app)
@@ -266,7 +266,7 @@ describe('Auth API', () => {
 
   describe('GET /api/v1/auth/entitlements', () => {
     it('should return FREE tier entitlements for free user', async () => {
-      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
       const response = await request(app)
@@ -290,7 +290,7 @@ describe('Auth API', () => {
         subscriptionExpiresAt: future,
       };
 
-      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(premiumUser);
 
       const response = await request(app)
@@ -312,7 +312,7 @@ describe('Auth API', () => {
         subscriptionExpiresAt: new Date('2020-01-01'),
       };
 
-      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as any);
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(expiredUser);
 
       const response = await request(app)

@@ -155,6 +155,8 @@ Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
 - **Never ignore warnings** — treat them as problems to solve, not noise to silence
 - If a lint rule flags something, find the correct fix (e.g., use ES module `import` instead of `require()`, add proper types instead of `any`)
 - The only acceptable exception is `declare global { namespace Express }` for extending Express types, which requires `@typescript-eslint/no-namespace` disable (see `src/api/auth/middleware.ts` for the pattern)
+- **Warnings fail CI.** Each package's `npm run lint` runs `eslint . --max-warnings 0`, and the project rules in `eslint.config.mjs` are set to `error`, not `warn`. Do not downgrade a rule to `warn` or raise `--max-warnings` to get something merged — fix the code. (Backend hit 0 warnings in the lint burn-down of 2026-08-20; before that ~350 warnings had accumulated unnoticed because `eslint` exits 0 on warnings.)
+- Backend service methods have explicit return types built from named Prisma `include`/`select` constants (`const TEAM_INCLUDE = {...} satisfies Prisma.TeamInclude` + `export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>`). Reuse/extend those constants rather than inlining a new `include` and leaving the return type inferred.
 - CI must pass clean — do not merge code with lint errors or test failures
 
 ## Testing Requirements

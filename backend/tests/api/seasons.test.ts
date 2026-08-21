@@ -24,7 +24,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -63,7 +63,7 @@ describe('Seasons API', () => {
 
   describe('POST /api/v1/seasons', () => {
     it('should create a season with UUID league ID', async () => {
-      mockSeasonService.createSeason.mockResolvedValue(mockSeason as any);
+      mockSeasonService.createSeason.mockResolvedValue(mockSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.createSeason>>);
 
       const response = await request(app)
         .post('/api/v1/seasons')
@@ -87,7 +87,7 @@ describe('Seasons API', () => {
     });
 
     it('should create a season with custom string league ID', async () => {
-      mockSeasonService.createSeason.mockResolvedValue(mockSeasonWithCustomLeagueId as any);
+      mockSeasonService.createSeason.mockResolvedValue(mockSeasonWithCustomLeagueId as unknown as Awaited<ReturnType<typeof mockSeasonService.createSeason>>);
 
       const response = await request(app)
         .post('/api/v1/seasons')
@@ -193,7 +193,7 @@ describe('Seasons API', () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [mockSeason],
         pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
 
       const response = await request(app).get('/api/v1/seasons');
 
@@ -207,7 +207,7 @@ describe('Seasons API', () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [mockSeason],
         pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -223,7 +223,7 @@ describe('Seasons API', () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [mockSeasonWithCustomLeagueId],
         pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -239,7 +239,7 @@ describe('Seasons API', () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [mockSeason],
         pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -255,7 +255,7 @@ describe('Seasons API', () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [],
         pagination: { total: 50, limit: 10, offset: 20, hasMore: true },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -270,7 +270,7 @@ describe('Seasons API', () => {
 
   describe('GET /api/v1/seasons/:id', () => {
     it('should get a season by ID', async () => {
-      mockSeasonService.getSeasonById.mockResolvedValue(mockSeason as any);
+      mockSeasonService.getSeasonById.mockResolvedValue(mockSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.getSeasonById>>);
 
       const response = await request(app).get(`/api/v1/seasons/${TEST_SEASON_ID}`);
 
@@ -294,7 +294,7 @@ describe('Seasons API', () => {
   describe('PATCH /api/v1/seasons/:id', () => {
     it('should update a season successfully', async () => {
       const updatedSeason = { ...mockSeason, name: 'Fall 2024' };
-      mockSeasonService.updateSeason.mockResolvedValue(updatedSeason as any);
+      mockSeasonService.updateSeason.mockResolvedValue(updatedSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.updateSeason>>);
 
       const response = await request(app)
         .patch(`/api/v1/seasons/${TEST_SEASON_ID}`)
@@ -307,7 +307,7 @@ describe('Seasons API', () => {
 
     it('should update isActive status', async () => {
       const updatedSeason = { ...mockSeason, isActive: false };
-      mockSeasonService.updateSeason.mockResolvedValue(updatedSeason as any);
+      mockSeasonService.updateSeason.mockResolvedValue(updatedSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.updateSeason>>);
 
       const response = await request(app)
         .patch(`/api/v1/seasons/${TEST_SEASON_ID}`)
@@ -352,7 +352,7 @@ describe('Seasons API', () => {
 
   describe('DELETE /api/v1/seasons/:id', () => {
     it('should delete a season successfully', async () => {
-      mockSeasonService.deleteSeason.mockResolvedValue(undefined as any);
+      mockSeasonService.deleteSeason.mockResolvedValue({ success: true });
 
       const response = await request(app).delete(`/api/v1/seasons/${TEST_SEASON_ID}`);
 

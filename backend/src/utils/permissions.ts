@@ -3,7 +3,7 @@
  */
 
 import prisma from '../models';
-import { UserRole } from '@prisma/client';
+import { TeamStaff, UserRole } from '@prisma/client';
 
 export interface TeamPermissions {
   canManageTeam: boolean;
@@ -222,7 +222,7 @@ export async function isLeagueAdmin(userId: string, leagueId: string): Promise<b
 /**
  * Create default team roles when a new team is created
  */
-export async function createDefaultTeamRoles(teamId: string) {
+export async function createDefaultTeamRoles(teamId: string): Promise<void> {
   await prisma.teamRole.createMany({
     data: [
       {
@@ -269,7 +269,7 @@ export async function assignTeamRole(
   teamId: string,
   userId: string,
   roleName: string
-) {
+): Promise<TeamStaff> {
   const role = await prisma.teamRole.findUnique({
     where: {
       teamId_name: {

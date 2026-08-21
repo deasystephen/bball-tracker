@@ -2,6 +2,7 @@
  * Game service layer for business logic
  */
 
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
@@ -10,13 +11,101 @@ import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange } from '../websocket/emit';
 
+const GAME_INCLUDE = {
+  team: {
+    include: {
+      season: {
+        include: {
+          league: true,
+        },
+      },
+      staff: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          role: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.GameInclude;
+
+const GAME_DETAIL_INCLUDE = {
+  team: {
+    include: {
+      ...GAME_INCLUDE.team.include,
+      members: {
+        include: {
+          player: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  events: {
+    include: {
+      player: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: {
+      timestamp: 'asc',
+    },
+  },
+} satisfies Prisma.GameInclude;
+
+const GAME_LIST_INCLUDE = {
+  team: {
+    select: {
+      id: true,
+      name: true,
+      season: {
+        select: {
+          id: true,
+          name: true,
+          league: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.GameInclude;
+
+export type GameWithTeam = Prisma.GameGetPayload<{ include: typeof GAME_INCLUDE }>;
+export type GameDetail = Prisma.GameGetPayload<{ include: typeof GAME_DETAIL_INCLUDE }>;
+export type GameListItem = Prisma.GameGetPayload<{ include: typeof GAME_LIST_INCLUDE }>;
+
+export interface GameList {
+  games: GameListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export class GameService {
   /**
    * Create a new game
    * @param data Game creation data
    * @param userId ID of the user creating the game (must have canManageTeam permission)
    */
-  static async createGame(data: CreateGameInput, userId: string) {
+  static async createGame(data: CreateGameInput, userId: string): Promise<GameWithTeam> {
     // Verify team exists
     const team = await prisma.team.findUnique({
       where: { id: data.teamId },
@@ -45,29 +134,7 @@ export class GameService {
         homeScore: data.homeScore || 0,
         awayScore: data.awayScore || 0,
       },
-      include: {
-        team: {
-          include: {
-            season: {
-              include: {
-                league: true,
-              },
-            },
-            staff: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-                role: true,
-              },
-            },
-          },
-        },
-      },
+      include: GAME_INCLUDE,
     });
 
     return game;
@@ -78,56 +145,10 @@ export class GameService {
    * @param gameId Game ID
    * @param userId User ID (for authorization)
    */
-  static async getGameById(gameId: string, userId: string) {
+  static async getGameById(gameId: string, userId: string): Promise<GameDetail> {
     const game = await prisma.game.findUnique({
       where: { id: gameId },
-      include: {
-        team: {
-          include: {
-            season: {
-              include: {
-                league: true,
-              },
-            },
-            staff: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-                role: true,
-              },
-            },
-            members: {
-              include: {
-                player: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        events: {
-          include: {
-            player: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-          orderBy: {
-            timestamp: 'asc',
-          },
-        },
-      },
+      include: GAME_DETAIL_INCLUDE,
     });
 
     if (!game) {
@@ -149,9 +170,9 @@ export class GameService {
    * @param query Query parameters
    * @param userId User ID (for filtering by access)
    */
-  static async listGames(query: GameQueryParams, userId: string) {
+  static async listGames(query: GameQueryParams, userId: string): Promise<GameList> {
     // Build where clause
-    const where: any = {};
+    const where: Prisma.GameWhereInput = {};
 
     if (query.teamId) {
       where.teamId = query.teamId;
@@ -162,13 +183,14 @@ export class GameService {
     }
 
     if (query.startDate || query.endDate) {
-      where.date = {};
+      const date: Prisma.DateTimeFilter = {};
       if (query.startDate) {
-        where.date.gte = new Date(query.startDate);
+        date.gte = new Date(query.startDate);
       }
       if (query.endDate) {
-        where.date.lte = new Date(query.endDate);
+        date.lte = new Date(query.endDate);
       }
+      where.date = date;
     }
 
     // Check if user is system admin (can see all games)
@@ -201,8 +223,8 @@ export class GameService {
       const teamIds = userTeams.map((team) => team.id);
       if (teamIds.length > 0) {
         // If teamId was specified, verify user has access
-        if (where.teamId) {
-          if (!teamIds.includes(where.teamId)) {
+        if (query.teamId) {
+          if (!teamIds.includes(query.teamId)) {
             throw new ForbiddenError('You do not have access to this team');
           }
         } else {
@@ -224,26 +246,7 @@ export class GameService {
       prisma.game.count({ where }),
       prisma.game.findMany({
         where,
-        include: {
-          team: {
-            select: {
-              id: true,
-              name: true,
-              season: {
-                select: {
-                  id: true,
-                  name: true,
-                  league: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: GAME_LIST_INCLUDE,
         orderBy: {
           date: 'desc',
         },
@@ -266,7 +269,7 @@ export class GameService {
    * @param data Update data
    * @param userId User ID (must have canManageTeam or canTrackStats permission)
    */
-  static async updateGame(gameId: string, data: UpdateGameInput, userId: string) {
+  static async updateGame(gameId: string, data: UpdateGameInput, userId: string): Promise<GameWithTeam> {
     // Get game
     const game = await prisma.game.findUnique({
       where: { id: gameId },
@@ -299,7 +302,7 @@ export class GameService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.GameUpdateInput = {};
 
     if (data.opponent !== undefined) {
       updateData.opponent = data.opponent;
@@ -325,29 +328,7 @@ export class GameService {
     const updatedGame = await prisma.game.update({
       where: { id: gameId },
       data: updateData,
-      include: {
-        team: {
-          include: {
-            season: {
-              include: {
-                league: true,
-              },
-            },
-            staff: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                  },
-                },
-                role: true,
-              },
-            },
-          },
-        },
-      },
+      include: GAME_INCLUDE,
     });
 
     // Finalize stats when game is marked as FINISHED
@@ -383,7 +364,7 @@ export class GameService {
    * @param gameId Game ID
    * @param userId User ID (must have canManageTeam permission)
    */
-  static async deleteGame(gameId: string, userId: string) {
+  static async deleteGame(gameId: string, userId: string): Promise<{ success: true }> {
     // Get game
     const game = await prisma.game.findUnique({
       where: { id: gameId },

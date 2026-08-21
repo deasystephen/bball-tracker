@@ -3,18 +3,45 @@
  */
 
 import prisma from '../models';
-import { RsvpStatus } from '@prisma/client';
+import { GameRsvp, Prisma, RsvpStatus } from '@prisma/client';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
 import { mailer } from './mailer';
 import { rsvpConfirmationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
 
+const RSVP_INCLUDE = {
+  user: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+} satisfies Prisma.GameRsvpInclude;
+
+export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCLUDE }>;
+
+export interface RsvpSummary {
+  yes: number;
+  no: number;
+  maybe: number;
+}
+
+export interface GameRsvps {
+  rsvps: RsvpWithUser[];
+  summary: RsvpSummary;
+}
+
 export class RsvpService {
   /**
    * Upsert an RSVP for a game (one response per user per game)
    */
-  static async upsertRsvp(gameId: string, userId: string, status: RsvpStatus) {
+  static async upsertRsvp(
+    gameId: string,
+    userId: string,
+    status: RsvpStatus
+  ): Promise<RsvpWithUser> {
     // Verify game exists and get team info
     const game = await prisma.game.findUnique({
       where: { id: gameId },
@@ -49,15 +76,7 @@ export class RsvpService {
       update: {
         status,
       },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
+      include: RSVP_INCLUDE,
     });
 
     // Send RSVP confirmation email (fire-and-forget; never block the response)
@@ -95,7 +114,7 @@ export class RsvpService {
   /**
    * Get all RSVPs for a game with counts
    */
-  static async getGameRsvps(gameId: string, userId: string) {
+  static async getGameRsvps(gameId: string, userId: string): Promise<GameRsvps> {
     // Verify game exists and get team info
     const game = await prisma.game.findUnique({
       where: { id: gameId },
@@ -115,15 +134,7 @@ export class RsvpService {
     const [rsvps, counts] = await Promise.all([
       prisma.gameRsvp.findMany({
         where: { gameId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
+        include: RSVP_INCLUDE,
         orderBy: { createdAt: 'asc' },
       }),
       prisma.gameRsvp.groupBy({
@@ -133,14 +144,14 @@ export class RsvpService {
       }),
     ]);
 
-    const summary = {
+    const summary: RsvpSummary = {
       yes: 0,
       no: 0,
       maybe: 0,
     };
 
     for (const count of counts) {
-      const key = count.status.toLowerCase() as keyof typeof summary;
+      const key = count.status.toLowerCase() as keyof RsvpSummary;
       summary[key] = count._count.status;
     }
 
@@ -150,7 +161,7 @@ export class RsvpService {
   /**
    * Get a user's RSVP for a specific game
    */
-  static async getUserRsvp(gameId: string, userId: string) {
+  static async getUserRsvp(gameId: string, userId: string): Promise<GameRsvp | null> {
     return prisma.gameRsvp.findUnique({
       where: {
         gameId_userId: { gameId, userId },

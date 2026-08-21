@@ -25,7 +25,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -75,7 +75,7 @@ describe('Invitations API', () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
 
       const response = await request(app).get('/api/v1/invitations');
 
@@ -89,7 +89,7 @@ describe('Invitations API', () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
 
       const response = await request(app)
         .get('/api/v1/invitations')
@@ -107,7 +107,7 @@ describe('Invitations API', () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
 
       const response = await request(app)
         .get('/api/v1/invitations')
@@ -124,7 +124,7 @@ describe('Invitations API', () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],
         pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
 
       const response = await request(app)
         .get('/api/v1/invitations')
@@ -137,7 +137,7 @@ describe('Invitations API', () => {
 
   describe('GET /api/v1/invitations/:id', () => {
     it('should get an invitation by ID', async () => {
-      mockInvitationService.getInvitationById.mockResolvedValue(mockInvitation as any);
+      mockInvitationService.getInvitationById.mockResolvedValue(mockInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.getInvitationById>>);
 
       const response = await request(app).get(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 
@@ -175,7 +175,7 @@ describe('Invitations API', () => {
       mockInvitationService.acceptInvitation.mockResolvedValue({
         invitation: acceptedInvitation,
         teamMember: mockTeamMember,
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.acceptInvitation>>);
 
       const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
 
@@ -220,7 +220,7 @@ describe('Invitations API', () => {
   describe('POST /api/v1/invitations/:id/reject', () => {
     it('should reject an invitation successfully', async () => {
       const rejectedInvitation = { ...mockInvitation, status: 'REJECTED' };
-      mockInvitationService.rejectInvitation.mockResolvedValue(rejectedInvitation as any);
+      mockInvitationService.rejectInvitation.mockResolvedValue(rejectedInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.rejectInvitation>>);
 
       const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/reject`);
 
@@ -254,7 +254,7 @@ describe('Invitations API', () => {
   describe('DELETE /api/v1/invitations/:id', () => {
     it('should cancel an invitation successfully', async () => {
       const cancelledInvitation = { ...mockInvitation, status: 'CANCELLED' };
-      mockInvitationService.cancelInvitation.mockResolvedValue(cancelledInvitation as any);
+      mockInvitationService.cancelInvitation.mockResolvedValue(cancelledInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.cancelInvitation>>);
 
       const response = await request(app).delete(`/api/v1/invitations/${TEST_INVITATION_ID}`);
 

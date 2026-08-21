@@ -43,7 +43,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
     req.user = { ...mockAuthUser };
     next();
   }),
-  requireRole: jest.fn(() => (_req: any, _res: any, next: any) => next()),
+  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the services
@@ -84,7 +84,7 @@ describe('Teams API', () => {
 
   describe('POST /api/v1/teams', () => {
     it('should create a team successfully', async () => {
-      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -118,7 +118,7 @@ describe('Teams API', () => {
 
     it('should create a team with chatLink', async () => {
       const teamWithChat = { ...mockTeam, chatLink: 'https://chat.whatsapp.com/abc123' };
-      mockTeamService.createTeam.mockResolvedValue(teamWithChat as any);
+      mockTeamService.createTeam.mockResolvedValue(teamWithChat as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -160,7 +160,7 @@ describe('Teams API', () => {
 
     it('allows a FREE user under the limit to create a team', async () => {
       (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
-      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -206,7 +206,7 @@ describe('Teams API', () => {
     it('allows a PREMIUM user unlimited team creation without a count query', async () => {
       mockAuthUser.subscriptionTier = 'PREMIUM';
       mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -219,7 +219,7 @@ describe('Teams API', () => {
     it('allows a LEAGUE user unlimited team creation', async () => {
       mockAuthUser.subscriptionTier = 'LEAGUE';
       mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      mockTeamService.createTeam.mockResolvedValue(mockTeam as any);
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -235,7 +235,7 @@ describe('Teams API', () => {
       mockTeamService.listTeams.mockResolvedValue({
         teams: [mockTeam],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
 
       const response = await request(app).get('/api/v1/teams');
 
@@ -249,7 +249,7 @@ describe('Teams API', () => {
       mockTeamService.listTeams.mockResolvedValue({
         teams: [mockTeam],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
 
       const response = await request(app)
         .get('/api/v1/teams')
@@ -266,7 +266,7 @@ describe('Teams API', () => {
       mockTeamService.listTeams.mockResolvedValue({
         teams: [mockTeam],
         pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as any);
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
 
       const response = await request(app)
         .get('/api/v1/teams')
@@ -282,7 +282,7 @@ describe('Teams API', () => {
 
   describe('GET /api/v1/teams/:id', () => {
     it('should get a team by ID', async () => {
-      mockTeamService.getTeamById.mockResolvedValue(mockTeam as any);
+      mockTeamService.getTeamById.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.getTeamById>>);
 
       const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
 
@@ -313,7 +313,7 @@ describe('Teams API', () => {
   describe('PATCH /api/v1/teams/:id', () => {
     it('should update a team successfully', async () => {
       const updatedTeam = { ...mockTeam, name: 'Updated Lakers' };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as any);
+      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -354,7 +354,7 @@ describe('Teams API', () => {
 
     it('should update chatLink', async () => {
       const updatedTeam = { ...mockTeam, chatLink: 'https://t.me/team_chat' };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as any);
+      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -370,7 +370,7 @@ describe('Teams API', () => {
 
     it('should clear chatLink with null', async () => {
       const updatedTeam = { ...mockTeam, chatLink: null };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as any);
+      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -387,7 +387,7 @@ describe('Teams API', () => {
 
   describe('DELETE /api/v1/teams/:id', () => {
     it('should delete a team successfully', async () => {
-      mockTeamService.deleteTeam.mockResolvedValue(undefined as any);
+      mockTeamService.deleteTeam.mockResolvedValue({ success: true });
 
       const response = await request(app).delete(`/api/v1/teams/${TEST_TEAM_ID}`);
 
@@ -438,7 +438,7 @@ describe('Teams API', () => {
     };
 
     it('should create an invitation successfully', async () => {
-      mockInvitationService.createInvitation.mockResolvedValue(mockInvitation as any);
+      mockInvitationService.createInvitation.mockResolvedValue(mockInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
@@ -472,7 +472,7 @@ describe('Teams API', () => {
 
   describe('DELETE /api/v1/teams/:id/players/:playerId', () => {
     it('should remove a player from team successfully', async () => {
-      mockTeamService.removePlayer.mockResolvedValue(undefined as any);
+      mockTeamService.removePlayer.mockResolvedValue({ success: true });
 
       const response = await request(app)
         .delete(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`);
@@ -504,7 +504,7 @@ describe('Teams API', () => {
     };
 
     it('should update a team member successfully', async () => {
-      mockTeamService.updateTeamMember.mockResolvedValue(mockTeamMember as any);
+      mockTeamService.updateTeamMember.mockResolvedValue(mockTeamMember as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeamMember>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
@@ -527,7 +527,7 @@ describe('Teams API', () => {
 
     it('should accept jersey number 0 (boundary)', async () => {
       const memberWithZero = { ...mockTeamMember, jerseyNumber: 0 };
-      mockTeamService.updateTeamMember.mockResolvedValue(memberWithZero as any);
+      mockTeamService.updateTeamMember.mockResolvedValue(memberWithZero as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeamMember>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
@@ -539,7 +539,7 @@ describe('Teams API', () => {
 
     it('should accept jersey number 99 (boundary)', async () => {
       const memberWith99 = { ...mockTeamMember, jerseyNumber: 99 };
-      mockTeamService.updateTeamMember.mockResolvedValue(memberWith99 as any);
+      mockTeamService.updateTeamMember.mockResolvedValue(memberWith99 as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeamMember>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
