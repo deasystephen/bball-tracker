@@ -46,6 +46,7 @@ describe('auth-store', () => {
     jest.clearAllMocks();
     useAuthStore.setState({
       accessToken: null,
+      refreshToken: null,
       user: null,
       isAuthenticated: false,
       isLoading: true,
@@ -135,5 +136,39 @@ describe('auth-store', () => {
     expect(typeof first.setAuthToken).toBe('function');
     expect(typeof first.setUser).toBe('function');
     expect(typeof first.logout).toBe('function');
+  });
+
+  it('setAuthToken stores the refresh token alongside the access token', () => {
+    useAuthStore.getState().setAuthToken('access', 'refresh');
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      isAuthenticated: true,
+    });
+
+    // Dev-login has no refresh token; it must clear any stale one.
+    useAuthStore.getState().setAuthToken('dev_token');
+    expect(useAuthStore.getState().refreshToken).toBeNull();
+  });
+
+  it('logout clears the refresh token', () => {
+    useAuthStore.getState().setAuthToken('access', 'refresh');
+    useAuthStore.getState().logout();
+    expect(useAuthStore.getState().refreshToken).toBeNull();
+  });
+
+  it('persists the refresh token so sessions survive an app restart', () => {
+    // partialize is what decides what lands in AsyncStorage.
+    const persistOptions = (useAuthStore as unknown as {
+      persist: { getOptions: () => { partialize: (s: unknown) => Record<string, unknown> } };
+    }).persist.getOptions();
+    const persisted = persistOptions.partialize({
+      accessToken: 'a',
+      refreshToken: 'r',
+      user: null,
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    expect(persisted).toEqual({ accessToken: 'a', refreshToken: 'r', user: null, isAuthenticated: true });
   });
 });

@@ -72,6 +72,19 @@ export class WorkOSService {
   }
 
   /**
+   * Exchange a refresh token for a fresh access/refresh token pair.
+   * WorkOS access tokens are short-lived (minutes); clients must call this
+   * before/after expiry instead of holding one access token forever. WorkOS
+   * rotates the refresh token on every use, so callers must persist the new one.
+   */
+  static async refreshSession(refreshToken: string): Promise<WorkOSAuthentication> {
+    return workos.userManagement.authenticateWithRefreshToken({
+      clientId: WORKOS_CLIENT_ID,
+      refreshToken,
+    });
+  }
+
+  /**
    * Get user information from WorkOS
    */
   static async getUser(userId: string): Promise<WorkOSUser> {

@@ -10,6 +10,7 @@
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent, Event, EventHint } from '@sentry/node';
 import type { Request, Response, NextFunction } from 'express';
+import { AppError } from './errors';
 
 type SentryRequest = NonNullable<Event['request']>;
 
@@ -148,6 +149,16 @@ export function captureException(
 }
 
 /**
+ * Operational 4xx errors (expired token, bad input, not found, 402 upgrade
+ * prompts) are expected client outcomes, not defects — reporting each one as
+ * an error is noise that buries real failures. 5xx and non-AppError throws
+ * are still captured.
+ */
+export function isExpectedClientError(err: unknown): boolean {
+  return err instanceof AppError && err.isOperational && err.statusCode < 500;
+}
+
+/**
  * Express error handler that forwards the error to Sentry (if enabled) before
  * calling `next(err)` so downstream handlers still run.
  */
@@ -157,7 +168,7 @@ export function sentryErrorHandler(
   _res: Response,
   next: NextFunction
 ): void {
-  if (initialized) {
+  if (initialized && !isExpectedClientError(err)) {
     Sentry.withScope(scope => {
       if (req.user) {
         scope.setUser({ id: req.user.id });

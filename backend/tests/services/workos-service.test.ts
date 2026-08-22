@@ -9,6 +9,7 @@ jest.mock('../../src/utils/workos-client', () => {
       userManagement: {
         getAuthorizationUrl: jest.fn(),
         authenticateWithCode: jest.fn(),
+        authenticateWithRefreshToken: jest.fn(),
         getUser: jest.fn(),
         listUsers: jest.fn(),
       },
@@ -28,6 +29,7 @@ const mockWorkos = {
   userManagement: {
     getAuthorizationUrl: workos.userManagement.getAuthorizationUrl as jest.Mock,
     authenticateWithCode: workos.userManagement.authenticateWithCode as jest.Mock,
+    authenticateWithRefreshToken: workos.userManagement.authenticateWithRefreshToken as jest.Mock,
     getUser: workos.userManagement.getUser as jest.Mock,
     listUsers: workos.userManagement.listUsers as jest.Mock,
   },
@@ -154,6 +156,30 @@ describe('WorkOSService', () => {
         clientId: 'test-client-id',
         code: 'auth-code',
       });
+    });
+  });
+
+  describe('refreshSession', () => {
+    it('should exchange a refresh token for a new token pair', async () => {
+      const mockResponse = {
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+        user: { id: 'user_123', email: 'test@example.com' },
+      };
+      mockWorkos.userManagement.authenticateWithRefreshToken.mockResolvedValue(mockResponse);
+
+      const result = await WorkOSService.refreshSession('old-refresh-token');
+
+      expect(result).toEqual(mockResponse);
+      expect(mockWorkos.userManagement.authenticateWithRefreshToken).toHaveBeenCalledWith({
+        clientId: 'test-client-id',
+        refreshToken: 'old-refresh-token',
+      });
+    });
+
+    it('should propagate WorkOS errors so the route can map them to 401', async () => {
+      mockWorkos.userManagement.authenticateWithRefreshToken.mockRejectedValue(new Error('invalid_grant'));
+      await expect(WorkOSService.refreshSession('bad')).rejects.toThrow('invalid_grant');
     });
   });
 

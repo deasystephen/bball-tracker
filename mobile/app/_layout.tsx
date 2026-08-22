@@ -12,6 +12,7 @@ import { Oswald_700Bold } from '@expo-google-fonts/oswald';
 import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
 import { initSentry } from '../services/sentry';
 import { useNotificationSetup } from '../hooks/useNotifications';
+import { useAuthRedirect } from '../hooks/useAuthRedirect';
 import '../i18n/config'; // Initialize i18n
 
 // Initialize Sentry as early as possible so crashes during startup are captured.
@@ -43,6 +44,12 @@ const queryClient = new QueryClient({
  */
 function NotificationHandler() {
   useNotificationSetup();
+  return null;
+}
+
+/** Routes to /login when the session is lost mid-app (see useAuthRedirect). */
+function AuthRedirectHandler() {
+  useAuthRedirect();
   return null;
 }
 
@@ -78,6 +85,7 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
             <ToastProvider>
               <NotificationHandler />
+              <AuthRedirectHandler />
               <Stack
                 screenOptions={{
                   headerShown: false,
