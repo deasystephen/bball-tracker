@@ -159,6 +159,10 @@ describe('Auth API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.user.email).toBe('test@example.com');
       expect(response.body.accessToken).toBe('mock-access-token');
+      // Regression (#349): the client needs the refresh token to survive
+      // access-token expiry. Dropping it silently logs every user out after
+      // the WorkOS access-token lifetime.
+      expect(response.body.refreshToken).toBe('mock-refresh-token');
     });
 
     it('should return 400 for missing code', async () => {
@@ -193,6 +197,46 @@ describe('Auth API', () => {
       expect(mockCaptureException).toHaveBeenCalledWith(expect.any(Error), {
         flow: 'auth-callback',
       });
+    });
+  });
+
+  describe('POST /api/v1/auth/refresh', () => {
+    it('should exchange a refresh token for a new token pair', async () => {
+      mockWorkOSService.refreshSession.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.refreshSession>>);
+
+      const response = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: 'old-refresh-token' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        success: true,
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+      });
+      expect(mockWorkOSService.refreshSession).toHaveBeenCalledWith('old-refresh-token');
+    });
+
+    it('should return 400 when refreshToken is missing', async () => {
+      const response = await request(app).post('/api/v1/auth/refresh').send({});
+      expect(response.status).toBe(400);
+      expect(mockWorkOSService.refreshSession).not.toHaveBeenCalled();
+    });
+
+    it('should return 401 (not 500) when WorkOS rejects the refresh token', async () => {
+      mockWorkOSService.refreshSession.mockRejectedValue(new Error('invalid_grant'));
+
+      const response = await request(app)
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: 'revoked' });
+
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Invalid or expired refresh token');
+      expect(mockCaptureException).not.toHaveBeenCalled();
     });
   });
 

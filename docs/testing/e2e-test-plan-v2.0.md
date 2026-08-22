@@ -80,6 +80,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   1. Force-quit the app
   2. Re-open
 - **Expected:** Still logged in; lands on last-visited tab or home (no login prompt).
+- **Regression (#349):** repeat after leaving the app closed for longer than the WorkOS access-token lifetime (≥ 10 min is safe). Teams/Home must load normally — the client should silently call `POST /auth/refresh` (visible in backend logs as a 200) rather than show a 401 `ErrorState` or report `Invalid or expired token` to Sentry. Also confirm that when a session truly cannot be recovered (e.g. revoke the session in the WorkOS dashboard) the app lands on the login screen instead of sitting on a tab with failing requests.
 - **Notes:** ___________
 
 ### A.4 — Logout

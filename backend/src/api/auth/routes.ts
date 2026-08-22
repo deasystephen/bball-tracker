@@ -17,8 +17,16 @@ import { z } from 'zod';
 
 const router = Router();
 
-// Apply stricter rate limiting to all auth endpoints
-router.use(authRateLimit);
+// Apply stricter rate limiting to the credential-handling endpoints only.
+// Authenticated session endpoints (/me, /me/usage, /entitlements, /push-token)
+// are polled by the app on every foreground/tab visit; with a 20-req/15-min
+// IP budget a family on one NAT would be locked out, and since #349 the
+// client also calls /refresh whenever its access token expires. Those routes
+// fall under the general API limiter applied in index.ts.
+router.use(
+  ['/login', '/callback', '/refresh', '/debug', '/dev-users', '/dev-login'],
+  authRateLimit
+);
 
 /**
  * Development-only endpoints
@@ -188,7 +196,7 @@ router.get('/callback', async (req, res) => {
     }
 
     // Exchange code for token
-    const { user: workosUser, accessToken } = await WorkOSService.exchangeCodeForToken(code);
+    const { user: workosUser, accessToken, refreshToken } = await WorkOSService.exchangeCodeForToken(code);
 
     // Sync user to our database
     const user = await WorkOSService.syncUser({
@@ -211,6 +219,9 @@ router.get('/callback', async (req, res) => {
         role: user.role,
       },
       accessToken, // Mobile app will store this securely
+      // Short-lived access token + rotating refresh token. Without the refresh
+      // token the client is dead as soon as the access token expires (#349).
+      refreshToken,
     });
   } catch (error) {
     logger.error('Error in auth callback', { error: error instanceof Error ? error.message : String(error) });
@@ -222,6 +233,33 @@ router.get('/callback', async (req, res) => {
       captureException(error, { flow: 'auth-callback' });
       res.status(500).json({ error: 'Authentication failed' });
     }
+  }
+});
+
+const refreshSchema = z.object({
+  refreshToken: z.string().min(1),
+});
+
+/**
+ * POST /api/v1/auth/refresh
+ * Exchange a WorkOS refresh token for a new access + refresh token pair.
+ * The refresh token rotates on every call — clients must store the new one.
+ * Returns 401 (not 500) when WorkOS rejects the token so the client can
+ * fall back to a full re-login.
+ */
+router.post('/refresh', async (req, res) => {
+  const parsed = refreshSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'refreshToken is required' });
+    return;
+  }
+
+  try {
+    const { accessToken, refreshToken } = await WorkOSService.refreshSession(parsed.data.refreshToken);
+    res.json({ success: true, accessToken, refreshToken });
+  } catch (error) {
+    logger.warn('Refresh token rejected', { error: error instanceof Error ? error.message : String(error) });
+    res.status(401).json({ error: 'Invalid or expired refresh token' });
   }
 });
 

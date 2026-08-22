@@ -140,6 +140,14 @@ Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
 - State management: Zustand (client) + TanStack Query (server state) in mobile
 - Authentication: WorkOS (AuthKit). JWT is the session token format — WorkOS is the identity provider.
 
+### Session tokens & refresh (#349)
+- WorkOS access tokens are **short-lived (minutes)**. `GET /auth/callback` returns both `accessToken` and a rotating `refreshToken`; `POST /auth/refresh { refreshToken }` returns a new pair (401 if WorkOS rejects it). `WorkOSService.refreshSession()` wraps `authenticateWithRefreshToken`.
+- Mobile `services/api-client.ts`: on a 401 it performs a **single-flight** refresh (concurrent 401s share one call — WorkOS invalidates the old refresh token on use), stores the new pair via `setAuthToken(access, refresh)`, and replays the original request once. Auth endpoints (`/auth/refresh`, `/auth/callback`, `/auth/login`, `/auth/dev-login`) and already-retried requests never trigger a refresh. If no refresh token exists or the refresh fails → `logout()`.
+- `hooks/useAuthRedirect.ts` (mounted in `app/_layout.tsx`) routes to `/login` whenever `isAuthenticated` flips true→false, so a dead session can't strand the user on a tab. Cold-start routing stays in `app/index.tsx`.
+- Dev-login tokens (`dev_…`) have no refresh token and are only accepted when `NODE_ENV=development`.
+- The strict `authRateLimit` (20 req / 15 min / IP) applies only to `/auth/login`, `/auth/callback`, `/auth/refresh` and the dev endpoints; authenticated session routes (`/auth/me`, `/auth/me/usage`, `/auth/entitlements`, `/auth/push-token`) use the general API limiter.
+- Sentry: `sentryErrorHandler` skips operational `AppError`s with status < 500 (`isExpectedClientError`) — an expired token is an expected outcome, not a defect. 5xx and non-`AppError` throws are still reported.
+
 ## Code Style
 
 - **Files**: kebab-case (e.g., `game-service.ts`)
