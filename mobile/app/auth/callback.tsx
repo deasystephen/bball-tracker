@@ -52,9 +52,9 @@ export default function AuthCallbackScreen() {
     (async () => {
       try {
         const response = await apiClient.get('/auth/callback', { params: { code } });
-        const { accessToken, user } = response.data;
+        const { accessToken, refreshToken, user } = response.data;
 
-        setAuthToken(accessToken);
+        setAuthToken(accessToken, refreshToken ?? null);
         setUser(user);
 
         router.replace('/(tabs)/home');

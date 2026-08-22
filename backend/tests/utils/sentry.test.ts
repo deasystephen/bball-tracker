@@ -2,7 +2,8 @@
  * Tests for Sentry PII scrubbing via beforeSend.
  */
 
-import { beforeSend } from '../../src/utils/sentry';
+import { beforeSend, isExpectedClientError } from '../../src/utils/sentry';
+import { AppError, NotFoundError, UnauthorizedError } from '../../src/utils/errors';
 import type { Event } from '@sentry/node';
 
 describe('sentry beforeSend', () => {
@@ -75,5 +76,22 @@ describe('sentry beforeSend', () => {
   it('returns the event unchanged when no sensitive data present', () => {
     const event: Event = { message: 'hello' };
     expect(beforeSend(event)).toEqual({ message: 'hello' });
+  });
+});
+
+describe('isExpectedClientError', () => {
+  // Regression (#349): an expired bearer token produced a Sentry error on every
+  // request. Operational 4xx AppErrors are expected client outcomes, not defects.
+  it('treats operational 4xx AppErrors as expected', () => {
+    expect(isExpectedClientError(new UnauthorizedError('Invalid or expired token'))).toBe(true);
+    expect(isExpectedClientError(new NotFoundError())).toBe(true);
+    expect(isExpectedClientError(new AppError('nope', 400))).toBe(true);
+  });
+
+  it('still reports 5xx AppErrors, non-operational errors, and plain Errors', () => {
+    expect(isExpectedClientError(new AppError('boom', 500))).toBe(false);
+    expect(isExpectedClientError(new AppError('boom', 400, false))).toBe(false);
+    expect(isExpectedClientError(new Error('boom'))).toBe(false);
+    expect(isExpectedClientError('string')).toBe(false);
   });
 });

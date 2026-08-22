@@ -7,10 +7,16 @@ import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../service
 
 interface AuthState {
   accessToken: string | null;
+  /**
+   * WorkOS refresh token. Access tokens are short-lived (minutes); the API
+   * client swaps this for a new pair on the first 401 (see api-client.ts).
+   * Null for dev-login sessions, which never expire server-side.
+   */
+  refreshToken: string | null;
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  setAuthToken: (token: string) => void;
+  setAuthToken: (token: string, refreshToken?: string | null) => void;
   setUser: (user: User) => void;
   logout: () => void;
 }
@@ -23,12 +29,13 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       accessToken: null,
+      refreshToken: null,
       user: null,
       isAuthenticated: false,
       isLoading: true,
 
-      setAuthToken: (token: string) => {
-        set({ accessToken: token, isAuthenticated: true });
+      setAuthToken: (token: string, refreshToken: string | null = null) => {
+        set({ accessToken: token, refreshToken, isAuthenticated: true });
       },
 
       setUser: (user: User) => {
@@ -42,6 +49,7 @@ export const useAuthStore = create<AuthState>()(
         resetUser();
         set({
           accessToken: null,
+          refreshToken: null,
           user: null,
           isAuthenticated: false,
           isLoading: false,
@@ -53,6 +61,7 @@ export const useAuthStore = create<AuthState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
@@ -61,6 +70,7 @@ export const useAuthStore = create<AuthState>()(
           // In dev mode, always start logged out to avoid stale auth state
           if (__DEV__) {
             state.accessToken = null;
+            state.refreshToken = null;
             state.user = null;
             state.isAuthenticated = false;
           }
