@@ -1,5 +1,6 @@
 import { FakeMailer, createMailer, MailSendParams } from '../../src/services/mailer';
-import { SesMailer } from '../../src/services/mailer/ses-mailer';
+import { SesMailer, hashRecipient } from '../../src/services/mailer/ses-mailer';
+import { logger } from '../../src/utils/logger';
 import { invitationTemplate } from '../../src/services/mailer/templates/invitation';
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
@@ -127,6 +128,38 @@ describe('SesMailer', () => {
       })
     );
     expect(sesModule.__mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  // Audit #48: recipient addresses must not reach info-level logs.
+  it('logs a hashed recipient at info, never the address', async () => {
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
+    try {
+      const mailerInstance = new SesMailer({ region: 'us-east-1', fromAddress: 'x@y.com' });
+      await mailerInstance.send(makeParams({ to: 'Player@Example.com' }));
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      const [msg, ctx] = infoSpy.mock.calls[0] as [string, Record<string, unknown>];
+      expect(msg).toBe('Email sent via SES');
+      expect(ctx.to).toBeUndefined();
+      expect(ctx.toHash).toBe(hashRecipient('player@example.com'));
+      expect(ctx.toHash).toMatch(/^[0-9a-f]{12}$/);
+      expect(ctx.messageId).toBe('ses-msg-123');
+      expect(ctx.event_type).toBe('test');
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toMatch(/example\.com/i);
+
+      // Full address only at debug (emitted solely under NODE_ENV=development).
+      expect(debugSpy).toHaveBeenCalledWith('Email recipient', { to: 'Player@Example.com', messageId: 'ses-msg-123' });
+    } finally {
+      infoSpy.mockRestore();
+      debugSpy.mockRestore();
+    }
+  });
+
+  it('hashRecipient is case/whitespace-insensitive and non-reversible in shape', () => {
+    expect(hashRecipient('A@B.com')).toBe(hashRecipient(' a@b.com '));
+    expect(hashRecipient('a@b.com')).not.toBe(hashRecipient('c@b.com'));
+    expect(hashRecipient('a@b.com')).not.toContain('@');
   });
 
   it('returns empty messageId when SES response has no MessageId', async () => {

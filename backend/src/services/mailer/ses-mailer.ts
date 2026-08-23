@@ -1,6 +1,16 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { Mailer, MailSendParams, MailSendResult } from './index';
+import { createHash } from 'crypto';
 import { logger } from '../../utils/logger';
+
+/**
+ * Stable, non-reversible recipient identifier for logs: first 12 hex chars of
+ * sha256(lowercased address). Lets ops correlate repeated sends to one
+ * recipient without putting the address itself in CloudWatch (audit #48).
+ */
+export function hashRecipient(address: string): string {
+  return createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 12);
+}
 
 export class SesMailer implements Mailer {
   private client: SESv2Client;
@@ -37,10 +47,13 @@ export class SesMailer implements Mailer {
 
     logger.info('Email sent via SES', {
       template: template.name,
-      to,
+      toHash: hashRecipient(to),
       messageId,
       ...metadata,
     });
+    // Full address only at debug, which `logger` emits solely under
+    // NODE_ENV=development — never in production logs.
+    logger.debug('Email recipient', { to, messageId });
 
     return { messageId };
   }
