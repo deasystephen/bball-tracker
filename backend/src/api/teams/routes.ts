@@ -19,8 +19,9 @@ import {
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
-import { createInvitationSchema } from '../invitations/schemas';
+import { createInvitationSchema, inviteGuardianSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
+import { GuardianService } from '../../services/guardian-service';
 import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
@@ -293,6 +294,106 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
     }
   }
 });
+
+/**
+ * POST /api/v1/teams/:teamId/members/:playerId/guardians
+ * Invite an adult (by email) to be a guardian of a rostered player (PARENT
+ * role). Requires canManageRoster. Body: { email, relationship }.
+ */
+router.post(
+  '/:teamId/members/:playerId/guardians',
+  validateUuidParams('teamId', 'playerId'),
+  async (req, res) => {
+    try {
+      const validationResult = inviteGuardianSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        throw new BadRequestError(
+          validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+        );
+      }
+
+      const invitation = await GuardianService.inviteGuardian(
+        req.params.teamId as string,
+        req.params.playerId as string,
+        validationResult.data,
+        req.user!.id
+      );
+
+      res.status(201).json({ success: true, invitation: omitToken(invitation) });
+    } catch (error) {
+      logger.error('Error inviting guardian', { error: error instanceof Error ? error.message : String(error) });
+      if (
+        error instanceof BadRequestError ||
+        error instanceof NotFoundError ||
+        error instanceof ForbiddenError
+      ) {
+        res.status(error.statusCode).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to invite guardian' });
+      }
+    }
+  }
+);
+
+/**
+ * GET /api/v1/teams/:teamId/members/:playerId/guardians
+ * Guardians + pending guardian invitations of a rostered player. Roster
+ * managers and the player's own guardians may read this.
+ */
+router.get(
+  '/:teamId/members/:playerId/guardians',
+  validateUuidParams('teamId', 'playerId'),
+  async (req, res) => {
+    try {
+      const result = await GuardianService.listGuardians(
+        req.params.teamId as string,
+        req.params.playerId as string,
+        req.user!.id
+      );
+
+      res.json({
+        success: true,
+        guardians: result.guardians,
+        pendingInvitations: result.pendingInvitations.map(omitToken),
+      });
+    } catch (error) {
+      logger.error('Error listing guardians', { error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof NotFoundError || error instanceof ForbiddenError) {
+        res.status(error.statusCode).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to list guardians' });
+      }
+    }
+  }
+);
+
+/**
+ * DELETE /api/v1/teams/:teamId/members/:playerId/guardians/:guardianUserId
+ * Unlink a guardian (roster manager, or the guardian removing themself).
+ */
+router.delete(
+  '/:teamId/members/:playerId/guardians/:guardianUserId',
+  validateUuidParams('teamId', 'playerId', 'guardianUserId'),
+  async (req, res) => {
+    try {
+      await GuardianService.removeGuardian(
+        req.params.teamId as string,
+        req.params.playerId as string,
+        req.params.guardianUserId as string,
+        req.user!.id
+      );
+
+      res.json({ success: true, message: 'Guardian removed successfully' });
+    } catch (error) {
+      logger.error('Error removing guardian', { error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof NotFoundError || error instanceof ForbiddenError) {
+        res.status(error.statusCode).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to remove guardian' });
+      }
+    }
+  }
+);
 
 /**
  * DELETE /api/v1/teams/:id/players/:playerId

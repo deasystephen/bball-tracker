@@ -32,6 +32,40 @@ const ALL_PERMISSIONS: TeamPermissions = {
   canShareStats: true,
 };
 
+/** Rostered players and guardians of rostered players: read-only. */
+const VIEW_ONLY_PERMISSIONS: TeamPermissions = {
+  canManageTeam: false,
+  canManageRoster: false,
+  canTrackStats: false,
+  canViewStats: true,
+  canShareStats: false,
+};
+
+/**
+ * Is `userId` a guardian (PARENT role link) of `childId`?
+ */
+export async function isGuardianOf(userId: string, childId: string): Promise<boolean> {
+  const link = await prisma.guardian.findUnique({
+    where: { parentId_childId: { parentId: userId, childId } },
+    select: { id: true },
+  });
+  return !!link;
+}
+
+/**
+ * Is `userId` a guardian of any current member of `teamId`?
+ */
+export async function isGuardianOfTeamMember(userId: string, teamId: string): Promise<boolean> {
+  const link = await prisma.guardian.findFirst({
+    where: {
+      parentId: userId,
+      child: { teamMembers: { some: { teamId } } },
+    },
+    select: { id: true },
+  });
+  return !!link;
+}
+
 /**
  * Get a user's permissions for a specific team
  */
@@ -94,13 +128,12 @@ export async function getTeamPermissions(
     });
 
     if (isMember) {
-      return {
-        canManageTeam: false,
-        canManageRoster: false,
-        canTrackStats: false,
-        canViewStats: true,
-        canShareStats: false,
-      };
+      return VIEW_ONLY_PERMISSIONS;
+    }
+
+    // Guardian of a current member (PARENT role) — read-only, like a member.
+    if (await isGuardianOfTeamMember(userId, teamId)) {
+      return VIEW_ONLY_PERMISSIONS;
     }
 
     return NO_PERMISSIONS;
@@ -186,7 +219,12 @@ export async function canAccessTeam(userId: string, teamId: string): Promise<boo
     },
   });
 
-  return !!isMember;
+  if (isMember) {
+    return true;
+  }
+
+  // Guardian of a current member (PARENT role) gets the member's read set
+  return isGuardianOfTeamMember(userId, teamId);
 }
 
 export interface PlayerTeamAccess {

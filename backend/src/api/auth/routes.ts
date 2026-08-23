@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
 import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
 import { updateRoleSchema, updateProfileSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
+import { GuardianService } from '../../services/guardian-service';
 import prisma from '../../models';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
@@ -113,7 +114,11 @@ if (process.env.NODE_ENV === 'development') {
 
       return res.json({
         success: true,
-        user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id) },
+        user: {
+          ...user,
+          leagueAdminOf: await getLeagueAdminOf(user.id),
+          guardianOf: await GuardianService.getGuardianOf(user.id),
+        },
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
@@ -257,6 +262,8 @@ router.get('/callback', async (req, res) => {
 
     // In production, you'd set this as an HTTP-only cookie or return it securely
     // For now, return user info and token (mobile app will handle token storage)
+    const guardianOf = await GuardianService.getGuardianOf(user.id);
+
     res.json({
       success: true,
       user: {
@@ -266,6 +273,7 @@ router.get('/callback', async (req, res) => {
         role: user.role,
         profilePictureUrl: user.profilePictureUrl,
         leagueAdminOf: await getLeagueAdminOf(user.id),
+        guardianOf,
       },
       accessToken, // Mobile app will store this securely
       // Short-lived access token + rotating refresh token. Without the refresh
@@ -368,9 +376,13 @@ router.get('/me', async (req, res) => {
       throw new UnauthorizedError('User not found');
     }
 
+    // Children the caller is a guardian of (PARENT role) — the mobile app
+    // shows "Parent" affordances whenever this is non-empty.
+    const guardianOf = await GuardianService.getGuardianOf(user.id);
+
     res.json({
       success: true,
-      user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id) },
+      user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id), guardianOf },
     });
   } catch (error) {
     logger.error('Error getting user', { error: error instanceof Error ? error.message : String(error) });

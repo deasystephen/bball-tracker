@@ -1,12 +1,28 @@
 /**
  * Unit tests for the head-coach / staff-management permission helpers, the
- * distinct-team counter (role matrix B2.3 / B2.8) and getPlayerTeamAccess
- * (B2.4 / B2.10).
+ * distinct-team counter (role matrix B2.3 / B2.8), getPlayerTeamAccess
+ * (B2.4 / B2.10) and the guardian (PARENT role) branches.
  */
 
-import { isHeadCoach, canManageStaff, countDistinctStaffTeams, getPlayerTeamAccess } from '../../src/utils/permissions';
+import {
+  isHeadCoach,
+  canManageStaff,
+  countDistinctStaffTeams,
+  getPlayerTeamAccess,
+  canAccessTeam,
+  getTeamPermissions,
+  isGuardianOf,
+  isGuardianOfTeamMember,
+} from '../../src/utils/permissions';
 import { mockPrisma } from '../setup';
-import { createAdmin, createCoach, createTeam, createTeamStaff } from '../factories';
+import {
+  createAdmin,
+  createCoach,
+  createPlayer,
+  createTeam,
+  createTeamStaff,
+  createUser,
+} from '../factories';
 
 describe('permissions helpers', () => {
   describe('isHeadCoach', () => {
@@ -183,5 +199,122 @@ describe('getPlayerTeamAccess', () => {
     const args = (mockPrisma.teamMember.findMany as jest.Mock).mock.calls[0][0];
     expect(args.select.team.select.staff.where).toEqual({ userId: 'coach-1', role: { canManageRoster: true } });
     expect(args.select.team.select.season.select.league.select.admins.where).toEqual({ userId: 'coach-1' });
+  });
+});
+// ---------------------------------------------------------------------------
+// Guardian (PARENT role) branches — docs/plans/parent-role-spec.md
+// ---------------------------------------------------------------------------
+
+const TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
+
+function setPlainUser(): void {
+  (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createUser({ role: 'PARENT' }));
+  (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+    ...createTeam({ id: TEAM_ID }),
+    season: { league: { admins: [] } },
+  });
+  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+  (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+}
+
+describe('permissions — guardian branches', () => {
+  describe('isGuardianOf', () => {
+    it('is true when a Guardian row links parent and child', async () => {
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+
+      expect(await isGuardianOf('parent-1', 'child-1')).toBe(true);
+      expect(mockPrisma.guardian.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentId_childId: { parentId: 'parent-1', childId: 'child-1' } } })
+      );
+    });
+
+    it('is false otherwise', async () => {
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(null);
+      expect(await isGuardianOf('parent-1', 'child-1')).toBe(false);
+    });
+  });
+
+  describe('isGuardianOfTeamMember', () => {
+    it('queries for a guardian link whose child is rostered on the team', async () => {
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue({ id: 'g-1' });
+
+      expect(await isGuardianOfTeamMember('parent-1', TEAM_ID)).toBe(true);
+      expect(mockPrisma.guardian.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { parentId: 'parent-1', child: { teamMembers: { some: { teamId: TEAM_ID } } } },
+        })
+      );
+    });
+
+    it('is false when no child is on the team', async () => {
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
+      expect(await isGuardianOfTeamMember('parent-1', TEAM_ID)).toBe(false);
+    });
+  });
+
+  describe('canAccessTeam', () => {
+    it('grants access to a guardian of a current member', async () => {
+      setPlainUser();
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue({ id: 'g-1' });
+
+      expect(await canAccessTeam('parent-1', TEAM_ID)).toBe(true);
+    });
+
+    it('denies access when the user is neither staff, member nor guardian', async () => {
+      setPlainUser();
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
+
+      expect(await canAccessTeam('stranger', TEAM_ID)).toBe(false);
+    });
+
+    it('does not consult guardian links for a rostered member', async () => {
+      setPlainUser();
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
+
+      expect(await canAccessTeam('player-1', TEAM_ID)).toBe(true);
+      expect(mockPrisma.guardian.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getTeamPermissions', () => {
+    it('returns canViewStats only for a guardian with no staff row', async () => {
+      setPlainUser();
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue({ id: 'g-1' });
+
+      expect(await getTeamPermissions('parent-1', TEAM_ID)).toEqual({
+        canManageTeam: false,
+        canManageRoster: false,
+        canTrackStats: false,
+        canViewStats: true,
+        canShareStats: false,
+      });
+    });
+
+    it('returns no permissions for a non-guardian non-member', async () => {
+      setPlainUser();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createPlayer());
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
+
+      expect(await getTeamPermissions('stranger', TEAM_ID)).toEqual({
+        canManageTeam: false,
+        canManageRoster: false,
+        canTrackStats: false,
+        canViewStats: false,
+        canShareStats: false,
+      });
+    });
+
+    it('a guardian who is also staff gets the staff role permissions', async () => {
+      setPlainUser();
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { role: { canManageTeam: false, canManageRoster: false, canTrackStats: true, canViewStats: true, canShareStats: true } },
+      ]);
+
+      const perms = await getTeamPermissions('parent-coach', TEAM_ID);
+
+      expect(perms.canTrackStats).toBe(true);
+      expect(mockPrisma.guardian.findFirst).not.toHaveBeenCalled();
+    });
   });
 });

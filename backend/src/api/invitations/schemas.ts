@@ -3,6 +3,7 @@
  */
 
 import { z } from 'zod';
+import { GuardianRelationship } from '@prisma/client';
 
 /**
  * Schema for creating a team invitation.
@@ -57,5 +58,17 @@ export const invitationQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/**
+ * Schema for inviting a guardian (PARENT role) for a rostered player:
+ * `POST /teams/:teamId/members/:playerId/guardians`.
+ */
+export const inviteGuardianSchema = z.object({
+  email: z.string().trim().email('Invalid email format').max(255),
+  relationship: z.nativeEnum(GuardianRelationship, {
+    error: 'Relationship must be MOTHER, FATHER, GUARDIAN or OTHER',
+  }),
+});
+
+export type InviteGuardianInput = z.infer<typeof inviteGuardianSchema>;
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 export type InvitationQueryParams = z.infer<typeof invitationQuerySchema>;

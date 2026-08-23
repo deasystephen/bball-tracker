@@ -19,6 +19,7 @@ import {
   createSeason,
   createLeague,
   createGameEvent,
+  createUser,
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 
@@ -665,6 +666,57 @@ describe('PlayerService', () => {
         ).rejects.toMatchObject({ statusCode: 403 });
         expect(mockPrisma.teamMember.findMany).not.toHaveBeenCalled();
       });
+    });
+
+    it('lets a guardian rename their child and set the avatar (PARENT role)', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      const kid = { ...createPlayer(), email: null, workosUserId: null, isManaged: true, managedById: 'coach-x' };
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(kid)
+        .mockResolvedValueOnce(parent);
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...kid, name: 'Kiddo', profilePictureUrl: 'https://cdn/x.png' });
+
+      const result = await PlayerService.updatePlayer(
+        kid.id,
+        { name: 'Kiddo', profilePictureUrl: 'https://cdn/x.png' },
+        parent.id
+      );
+
+      expect(result.name).toBe('Kiddo');
+      expect(mockPrisma.guardian.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentId_childId: { parentId: parent.id, childId: kid.id } } })
+      );
+    });
+
+    it('forbids a guardian from changing their child\'s email', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      const kid = { ...createPlayer(), email: null, workosUserId: null, isManaged: true, managedById: 'coach-x' };
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(kid)
+        .mockResolvedValueOnce(parent);
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+
+      await expect(
+        PlayerService.updatePlayer(kid.id, { email: 'kid@test.com' }, parent.id)
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('forbids a non-guardian PARENT from editing an unrelated player', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      const kid = { ...createPlayer(), isManaged: true, managedById: 'coach-x' };
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(kid)
+        .mockResolvedValueOnce(parent);
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        PlayerService.updatePlayer(kid.id, { name: 'Nope' }, parent.id)
+      ).rejects.toMatchObject({ statusCode: 403 });
     });
 
     it('should throw NotFoundError if player does not exist', async () => {

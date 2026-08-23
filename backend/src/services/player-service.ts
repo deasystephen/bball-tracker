@@ -16,7 +16,7 @@ import {
   ConflictError,
 } from '../utils/errors';
 import { deletePreviousAvatar } from './upload-service';
-import { getPlayerTeamAccess } from '../utils/permissions';
+import { getPlayerTeamAccess, isGuardianOf } from '../utils/permissions';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -356,7 +356,15 @@ export class PlayerService {
       playerId !== userId &&
       currentUser.role !== 'ADMIN' &&
       (await PlayerService.isCurrentManager(userId, player));
-    if (playerId !== userId && currentUser.role !== 'ADMIN' && !isManagedByUser) {
+    // A guardian (PARENT role) may edit their child's name / avatar — never
+    // the email (login identity), which is gated below to admins and the
+    // managing coach of an unclaimed managed player.
+    const isGuardianOfPlayer =
+      playerId !== userId &&
+      currentUser.role !== 'ADMIN' &&
+      !isManagedByUser &&
+      (await isGuardianOf(userId, playerId));
+    if (playerId !== userId && currentUser.role !== 'ADMIN' && !isManagedByUser && !isGuardianOfPlayer) {
       throw new ForbiddenError('You can only update your own profile');
     }
 

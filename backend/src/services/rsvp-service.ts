@@ -5,7 +5,7 @@
 import prisma from '../models';
 import { GameRsvp, Prisma, RsvpStatus } from '@prisma/client';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
-import { canAccessTeam, hasTeamPermission } from '../utils/permissions';
+import { canAccessTeam, hasTeamPermission, isGuardianOf } from '../utils/permissions';
 import { mailer } from './mailer';
 import { rsvpConfirmationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -49,7 +49,8 @@ export class RsvpService {
   static async upsertRsvp(
     gameId: string,
     userId: string,
-    status: RsvpStatus
+    status: RsvpStatus,
+    playerId?: string
   ): Promise<RsvpWithUser> {
     // Verify game exists and get team info
     const game = await prisma.game.findUnique({
@@ -67,19 +68,47 @@ export class RsvpService {
       throw new NotFoundError('Game not found');
     }
 
-    // Verify user has access to this team
-    const hasAccess = await canAccessTeam(userId, game.teamId);
-    if (!hasAccess) {
-      throw new ForbiddenError('You do not have access to this team');
+    // RSVP on behalf of a child (PARENT role): the caller must be a guardian
+    // of the player and the player must be rostered on the game's team. The
+    // row is keyed on the player so the coach's RSVP roster stays per-player.
+    const onBehalfOfChild = playerId !== undefined && playerId !== userId;
+    let confirmationEmail: string | null = null;
+
+    if (onBehalfOfChild) {
+      if (!(await isGuardianOf(userId, playerId))) {
+        throw new ForbiddenError('You can only RSVP for players you are a guardian of');
+      }
+
+      const member = await prisma.teamMember.findUnique({
+        where: { teamId_playerId: { teamId: game.teamId, playerId } },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new ForbiddenError('This player is not on the team playing this game');
+      }
+
+      const guardian = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      });
+      confirmationEmail = guardian?.email ?? null;
+    } else {
+      // Verify user has access to this team
+      const hasAccess = await canAccessTeam(userId, game.teamId);
+      if (!hasAccess) {
+        throw new ForbiddenError('You do not have access to this team');
+      }
     }
+
+    const rsvpUserId = onBehalfOfChild ? playerId : userId;
 
     const rsvp = await prisma.gameRsvp.upsert({
       where: {
-        gameId_userId: { gameId, userId },
+        gameId_userId: { gameId, userId: rsvpUserId },
       },
       create: {
         gameId,
-        userId,
+        userId: rsvpUserId,
         status,
       },
       update: {
@@ -88,14 +117,17 @@ export class RsvpService {
       include: RSVP_INCLUDE,
     });
 
-    // Send RSVP confirmation email (fire-and-forget; never block the response)
-    if (rsvp.user.email) {
+    // Send RSVP confirmation email (fire-and-forget; never block the response).
+    // A guardian answering for a (usually email-less managed) child gets the
+    // confirmation at their own address.
+    const to = onBehalfOfChild ? confirmationEmail : rsvp.user.email;
+    if (to) {
       mailer
         .send({
           template: rsvpConfirmationTemplate,
-          to: rsvp.user.email,
+          to,
           variables: {
-            playerName: rsvp.user.name ?? rsvp.user.email,
+            playerName: rsvp.user.name ?? to,
             teamName: game.team.name,
             opponent: game.opponent,
             gameDate: formatEmailDateTime(game.date),

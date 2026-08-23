@@ -29,6 +29,10 @@ jest.mock('../../src/api/auth/middleware', () => ({
 
 // Mock the service
 jest.mock('../../src/services/invitation-service');
+jest.mock('../../src/services/guardian-service');
+
+import { GuardianService } from '../../src/services/guardian-service';
+const mockGuardianService = GuardianService as jest.Mocked<typeof GuardianService>;
 
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
 
@@ -191,6 +195,46 @@ describe('Invitations API', () => {
   });
 
   describe('POST /api/v1/invitations/:id/accept', () => {
+    beforeEach(() => {
+      // No guardian invitation with this id by default → team invitation path
+      mockGuardianService.findInvitationForUser.mockResolvedValue(null);
+    });
+
+    it('accepts a guardian invitation addressed to the caller (kind: guardian)', async () => {
+      const guardianInvitationId = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+      mockGuardianService.findInvitationForUser.mockResolvedValue({
+        id: guardianInvitationId,
+      } as unknown as Awaited<ReturnType<typeof mockGuardianService.findInvitationForUser>>);
+      mockGuardianService.acceptInvitation.mockResolvedValue({
+        kind: 'guardian',
+        invitation: { id: guardianInvitationId, status: 'ACCEPTED', token: 'SECRET' } as unknown as Awaited<
+          ReturnType<typeof mockGuardianService.acceptInvitation>
+        >['invitation'],
+        guardian: { id: 'g-1', parentId: TEST_USER_ID, childId: 'child-1', relationship: 'MOTHER', isPrimary: true },
+      });
+
+      const response = await request(app).post(`/api/v1/invitations/${guardianInvitationId}/accept`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.kind).toBe('guardian');
+      expect(response.body.guardian.childId).toBe('child-1');
+      expect(response.body.invitation).not.toHaveProperty('token');
+      expect(response.body).not.toHaveProperty('teamMember');
+      expect(mockInvitationService.acceptInvitation).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the guardian invitation was addressed to someone else', async () => {
+      const { ForbiddenError } = jest.requireActual('../../src/utils/errors');
+      mockGuardianService.findInvitationForUser.mockRejectedValue(
+        new ForbiddenError('This invitation was not sent to you')
+      );
+
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
+
+      expect(response.status).toBe(403);
+      expect(mockInvitationService.acceptInvitation).not.toHaveBeenCalled();
+    });
+
     it('should accept an invitation successfully', async () => {
       const acceptedInvitation = { ...mockInvitation, status: 'ACCEPTED' };
       mockInvitationService.acceptInvitation.mockResolvedValue({
@@ -251,6 +295,30 @@ describe('Invitations API', () => {
   });
 
   describe('POST /api/v1/invitations/:id/reject', () => {
+    beforeEach(() => {
+      mockGuardianService.findInvitationForUser.mockResolvedValue(null);
+    });
+
+    it('rejects a guardian invitation addressed to the caller (kind: guardian)', async () => {
+      const guardianInvitationId = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+      mockGuardianService.findInvitationForUser.mockResolvedValue({
+        id: guardianInvitationId,
+      } as unknown as Awaited<ReturnType<typeof mockGuardianService.findInvitationForUser>>);
+      mockGuardianService.rejectInvitation.mockResolvedValue({
+        id: guardianInvitationId,
+        status: 'REJECTED',
+        token: 'SECRET',
+      } as unknown as Awaited<ReturnType<typeof mockGuardianService.rejectInvitation>>);
+
+      const response = await request(app).post(`/api/v1/invitations/${guardianInvitationId}/reject`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.kind).toBe('guardian');
+      expect(response.body.invitation.status).toBe('REJECTED');
+      expect(response.body.invitation).not.toHaveProperty('token');
+      expect(mockInvitationService.rejectInvitation).not.toHaveBeenCalled();
+    });
+
     it('should reject an invitation successfully', async () => {
       const rejectedInvitation = { ...mockInvitation, status: 'REJECTED' };
       mockInvitationService.rejectInvitation.mockResolvedValue(rejectedInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.rejectInvitation>>);

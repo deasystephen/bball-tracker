@@ -17,6 +17,7 @@ import {
   createGameEvent,
   createTeamRole,
   createTeamStaff,
+  createUser,
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
 
@@ -410,6 +411,39 @@ describe('GameEventService', () => {
       } catch (error) {
         expectForbiddenError(error, 'You do not have permission to create game events');
       }
+    });
+
+    it('should throw ForbiddenError when a guardian (PARENT role) tries to record an event', async () => {
+      // Guardian of a rostered child: canAccessTeam is true, canTrackStats is false
+      const parent = createUser({ role: 'PARENT' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [{ playerId: 'child-1' }] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      // guardian of a current member
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValueOnce({ id: 'g-1' });
+
+      await expect(
+        GameEventService.createEvent(
+          game.id,
+          { playerId: 'child-1', eventType: 'SHOT', metadata: { made: true, points: 2 } },
+          parent.id
+        )
+      ).rejects.toMatchObject({ statusCode: 403, message: 'You do not have permission to create game events' });
+      expect(mockPrisma.gameEvent.create).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenError if player is not on team', async () => {

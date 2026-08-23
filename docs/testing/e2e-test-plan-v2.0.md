@@ -379,6 +379,35 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** Status now CANCELLED. Screen shows "Invitation Cancelled."
 - **Notes:** ___________
 
+### E.12a — Coach invites a guardian for a managed player (PARENT role)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH (canManageRoster)
+- **Prereq:** D.3 (a managed player on the roster)
+- **Steps:** `POST /api/v1/teams/<teamId>/members/<managedPlayerId>/guardians { email: <fresh adult email>, relationship: "MOTHER" }` (mobile: roster card → "Invite a parent" once the mobile PR lands).
+- **Expected:** 201 with `invitation` (`status: PENDING`, `invitedEmail`, `relationship`, no `token`). A `User` row with `role: PARENT` is created for the email (not `isManaged`). 📧 Email "You've been invited as <child>'s guardian on <team>" with a `capyhoops.com/invite/<token>` link. `GET …/guardians` lists it under `pendingInvitations`.
+- **Notes:** ___________
+
+### E.12b — Guardian accepts the invite link
+- [ ] Pass / Fail / Skipped
+- **Role:** invited adult (web page or deep link, unauthenticated)
+- **Steps:** Open the link from E.12a → `GET /invitations/by-token/<token>` shows `kind: "guardian"`, `childName`, `teamName` → accept (`POST /invitations/by-token/<token>/accept`).
+- **Expected:** 200 `{ kind: "guardian", guardian: { childId, isPrimary: true } }`. Sign in with that email → `GET /auth/me` returns `guardianOf: [{ childId, childName, relationship: "MOTHER", isPrimary: true }]`. The child's team is visible on the Teams tab (read-only); roster shows names without emails.
+- **Notes:** ___________
+
+### E.12c — 🔒 Guardian cannot manage the team
+- [ ] Pass / Fail / Skipped
+- **Role:** guardian from E.12b (no staff row)
+- **Steps:** Try to record a game event (`POST /games/<id>/events`), send a team invitation, post an announcement, export stats.
+- **Expected:** 403 on each (`getTeamPermissions` → `canViewStats` only). Second guardian invited for the same child is `isPrimary: false`. Re-inviting the same email while PENDING → 400 "already exists".
+- **Notes:** ___________
+
+### E.12d — Remove a guardian
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH, then guardian
+- **Steps:** `DELETE /teams/<teamId>/members/<playerId>/guardians/<guardianUserId>` as coach; invite again and have the guardian call the same DELETE on themself.
+- **Expected:** 200 both times; a non-manager deleting *another* guardian → 403. Removing the last guardian leaves the child on the roster. If the primary leaves, the next guardian becomes primary.
+- **Notes:** ___________
+
 ### E.13 — 🔒 Coach cannot send invite to player already on team
 - [ ] Pass / Fail / Skipped
 - **Steps:** Try to invite a user who is already a team member.
@@ -602,6 +631,28 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH
 - **Steps:** Game detail → RSVPs section.
 - **Expected:** List of who's YES/NO/MAYBE/NO_RESPONSE for the scheduled game.
+- **Notes:** ___________
+
+### I.5 — Guardian RSVPs for their child (PARENT role)
+- [ ] Pass / Fail / Skipped
+- **Role:** guardian from E.12b
+- **Prereq:** a scheduled game on the child's team
+- **Steps:** `POST /api/v1/games/<gameId>/rsvp { status: "YES", playerId: <childId> }` (mobile: game detail RSVP control → "for <child>" picker once the mobile PR lands).
+- **Expected:** 200; `rsvp.userId` is the **child's** id. Coach's RSVP roster (I.4) shows the child as YES. 📧 Confirmation email goes to the guardian's address (the managed child has none). Repeating with `NO` updates the same row.
+- **Notes:** ___________
+
+### I.6 — 🔒 Non-guardian cannot RSVP for someone else
+- [ ] Pass / Fail / Skipped
+- **Role:** a rostered PLAYER (or a guardian of a different child)
+- **Steps:** `POST /games/<gameId>/rsvp { status: "YES", playerId: <someone else's id> }`.
+- **Expected:** 403 "You can only RSVP for players you are a guardian of". A guardian passing a child who is **not** on that game's team → 403 "This player is not on the team playing this game". A non-UUID `playerId` → 400.
+- **Notes:** ___________
+
+### I.7 — Guardian accepts a team invitation addressed to the child
+- [ ] Pass / Fail / Skipped
+- **Role:** guardian
+- **Steps:** As a coach of another team, invite the child (`POST /teams/<otherTeam>/invitations { playerId: <childId> }`). As the guardian, `GET /invitations` → the child's invitation is listed → `POST /invitations/<id>/accept`.
+- **Expected:** Accepted; the child appears on the other team's roster and the guardian can now see that team too. Team push notifications for the child's teams are delivered to the guardian (if a push token is registered).
 - **Notes:** ___________
 
 ---

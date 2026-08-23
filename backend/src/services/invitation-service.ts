@@ -14,7 +14,14 @@ import {
   ForbiddenError,
 } from '../utils/errors';
 import { randomBytes } from 'crypto';
-import { hasTeamPermission, canAccessTeam, isSystemAdmin, getPlayerTeamAccess } from '../utils/permissions';
+import {
+  hasTeamPermission,
+  canAccessTeam,
+  isSystemAdmin,
+  getPlayerTeamAccess,
+  isGuardianOf,
+} from '../utils/permissions';
+import { GuardianService } from './guardian-service';
 import { mailer } from './mailer';
 import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -355,12 +362,17 @@ export class InvitationService {
     }
 
     if (playerId) {
-      // Another player's invitations are visible to system ADMINs, to roster
-      // managers of the requested team, or — with no teamId — to roster
-      // managers of a team that player is on, scoped to those teams. The
-      // self-selected global COACH role used to be enough, which let any
-      // user enumerate anyone's invitations (role matrix B2.4).
-      if (playerId !== userId && !(await isSystemAdmin(userId))) {
+      // Another player's invitations are visible to system ADMINs, to the
+      // player's guardians (PARENT role), to roster managers of the requested
+      // team, or — with no teamId — to roster managers of a team that player
+      // is on, scoped to those teams. The self-selected global COACH role used
+      // to be enough, which let any user enumerate anyone's invitations (role
+      // matrix B2.4).
+      if (
+        playerId !== userId &&
+        !(await isSystemAdmin(userId)) &&
+        !(await isGuardianOf(userId, playerId))
+      ) {
         if (teamId) {
           if (scopeToCaller) {
             throw new ForbiddenError('You can only view your own invitations');
@@ -376,8 +388,10 @@ export class InvitationService {
 
       where.playerId = playerId;
     } else if (scopeToCaller) {
-      // If no playerId specified, default to current user's invitations
-      where.playerId = userId;
+      // If no playerId specified, default to the caller's own invitations plus
+      // those addressed to the caller's children (guardian).
+      const childIds = await GuardianService.getChildIds(userId);
+      where.playerId = childIds.length > 0 ? { in: [userId, ...childIds] } : userId;
     }
 
     // Get total count and invitations in parallel
@@ -449,8 +463,8 @@ export class InvitationService {
       throw new NotFoundError('Invitation not found');
     }
 
-    // Verify user is the invited player
-    if (invitation.playerId !== userId) {
+    // Verify user is the invited player, or a guardian of the invited player
+    if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
       throw new ForbiddenError('You can only accept your own invitations');
     }
 
@@ -561,8 +575,8 @@ export class InvitationService {
       throw new NotFoundError('Invitation not found');
     }
 
-    // Verify user is the invited player
-    if (invitation.playerId !== userId) {
+    // Verify user is the invited player, or a guardian of the invited player
+    if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
       throw new ForbiddenError('You can only reject your own invitations');
     }
 

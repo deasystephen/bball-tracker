@@ -20,6 +20,9 @@ jest.mock('../../src/models', () => ({
   leagueAdmin: {
     findMany: jest.fn(),
   },
+  guardian: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
 }));
 
 // Spy on Sentry capture while keeping the rest of the util real (index.ts needs
@@ -222,6 +225,8 @@ describe('Auth API', () => {
       expect(response.body.user).toHaveProperty('profilePictureUrl', null);
       // Decision 3: league-admin rows travel with the session user
       expect(response.body.user.leagueAdminOf).toEqual([]);
+      // PARENT role: children the user is a guardian of
+      expect(response.body.user.guardianOf).toEqual([]);
     });
 
     it('returns the league ids the user administers as leagueAdminOf (decision 3)', async () => {
@@ -470,6 +475,7 @@ describe('Auth API', () => {
       expect(response.body.user.id).toBe('user-1');
       expect(response.body.user.email).toBe('test@example.com');
       expect(response.body.user.leagueAdminOf).toEqual([]);
+      expect(response.body.user.guardianOf).toEqual([]);
     });
 
     it('includes leagueAdminOf with the league ids the user administers (decision 3)', async () => {
@@ -491,6 +497,26 @@ describe('Auth API', () => {
         leagueAdminOf: ['spring-league'],
       });
       expect(response.body.user).toHaveProperty('createdAt');
+    });
+
+    it('returns guardianOf with the caller\'s children (PARENT role)', async () => {
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...mockUser, role: 'PARENT' });
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([
+        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One' } },
+      ]);
+
+      const response = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.user.guardianOf).toEqual([
+        { childId: 'child-1', childName: 'Kid One', relationship: 'MOTHER', isPrimary: true },
+      ]);
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentId: 'user-1' } })
+      );
     });
 
     it('should return 401 for missing authorization header', async () => {

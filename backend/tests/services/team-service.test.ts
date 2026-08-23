@@ -15,6 +15,7 @@ import {
   createFullTeam,
   createTeamRole,
   createTeamStaff,
+  createUser,
 } from '../factories';
 import {
   expectNotFoundError,
@@ -336,6 +337,33 @@ describe('TeamService', () => {
       // Roster players do not get teammate emails (audit #80)
       expect(result.members[0].player).toEqual({ id: player.id, name: player.name });
       expect(result.members[0].player).not.toHaveProperty('email');
+    });
+
+    it('returns the team to a guardian of a member with roster emails stripped (PARENT role)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 1 });
+      const child = members[0].player;
+      const parent = createUser({ role: 'PARENT' });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [{ playerId: child.id, player: { id: child.id, name: child.name, email: child.email } }],
+        games: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      // Guardian of a rostered child (Once: clearAllMocks keeps implementations,
+      // and later "no access" tests rely on the default undefined)
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValueOnce({ id: 'g-1' });
+
+      const result = await TeamService.getTeamById(team.id, parent.id);
+
+      expect(result).toHaveProperty('id', team.id);
+      expect(result.members[0].player).not.toHaveProperty('email');
+      expect(result.members[0].player.name).toBe(child.name);
     });
 
     it('should throw NotFoundError if team does not exist', async () => {

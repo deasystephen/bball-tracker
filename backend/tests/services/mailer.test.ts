@@ -4,6 +4,7 @@ import { logger } from '../../src/utils/logger';
 import { invitationTemplate } from '../../src/services/mailer/templates/invitation';
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
+import { guardianInvitationTemplate } from '../../src/services/mailer/templates/guardian-invitation';
 
 // Mock the AWS SES SDK so SesMailer tests don't make real network calls
 jest.mock('@aws-sdk/client-sesv2', () => {
@@ -228,6 +229,62 @@ describe('invitationTemplate', () => {
     const text = invitationTemplate.text({ ...vars, acceptUrl: '' });
     expect(text).not.toContain('https://');
     expect(text).toContain('Open the CapyHoops app');
+  });
+});
+
+describe('guardianInvitationTemplate', () => {
+  const vars = {
+    guardianName: 'Pat',
+    childName: 'Kid Smith',
+    teamName: 'Bulls',
+    inviterName: 'Phil',
+    expiresAt: '2026-09-01',
+    acceptUrl: 'https://capyhoops.com/invite/xyz789',
+  };
+
+  it('has a distinct template name', () => {
+    expect(guardianInvitationTemplate.name).toBe('guardian-invitation');
+  });
+
+  it('subject names the child and the team', () => {
+    const subject = guardianInvitationTemplate.subject(vars);
+    expect(subject).toContain('Kid Smith');
+    expect(subject).toContain('Bulls');
+  });
+
+  it('html greets the guardian, names child/team/inviter and links the accept URL', () => {
+    const html = guardianInvitationTemplate.html(vars);
+    expect(html).toContain('Hi Pat');
+    expect(html).toContain('Kid Smith');
+    expect(html).toContain('Bulls');
+    expect(html).toContain('Phil');
+    expect(html).toContain('https://capyhoops.com/invite/xyz789');
+    expect(html).toContain('Accept Invitation');
+    expect(html).toContain('2026-09-01');
+  });
+
+  it('html falls back to generic copy when acceptUrl is missing', () => {
+    const html = guardianInvitationTemplate.html({ ...vars, acceptUrl: '' });
+    expect(html).not.toContain('Accept Invitation');
+    expect(html).toContain('Open the CapyHoops app');
+  });
+
+  it('text mirrors the html content', () => {
+    const text = guardianInvitationTemplate.text(vars);
+    expect(text).toContain('Kid Smith');
+    expect(text).toContain('Bulls');
+    expect(text).toContain('Accept your invitation: https://capyhoops.com/invite/xyz789');
+  });
+
+  it('text falls back to generic copy when acceptUrl is missing', () => {
+    const text = guardianInvitationTemplate.text({ ...vars, acceptUrl: '' });
+    expect(text).toContain('Open the CapyHoops app');
+  });
+
+  it('escapes HTML in the child name', () => {
+    const html = guardianInvitationTemplate.html({ ...vars, childName: '<img src=x onerror=alert(1)>' });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
   });
 });
 

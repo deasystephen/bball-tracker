@@ -2,12 +2,18 @@
  * Public invitation routes — no authentication required.
  * The invitation token itself is the shared secret.
  *
+ * A token resolves to EITHER a TeamInvitation (`kind: 'team'`) or a
+ * GuardianInvitation (`kind: 'guardian'`, PARENT role —
+ * docs/plans/parent-role-spec.md). Team invitations are looked up first; a
+ * miss falls through to guardian invitations.
+ *
  * Mount these BEFORE the auth-protected invitation router so Express
  * resolves /by-token/* without hitting the authenticate middleware.
  */
 
 import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
+import { GuardianService } from '../../services/guardian-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
 import {
@@ -21,6 +27,23 @@ const TOKEN_RE = /^[A-Za-z0-9\-_]+$/;
 
 function validateToken(token: string): boolean {
   return TOKEN_RE.test(token) && token.length >= 8 && token.length <= 128;
+}
+
+/**
+ * Run the team-invitation lookup first; on NotFound, try the guardian one.
+ */
+async function resolveByKind<T, G>(
+  team: () => Promise<T>,
+  guardian: () => Promise<G>
+): Promise<T | G> {
+  try {
+    return await team();
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return guardian();
+    }
+    throw error;
+  }
 }
 
 /**
@@ -41,7 +64,13 @@ router.get('/by-token/:token', invitationTokenRateLimit, async (req, res) => {
   }
 
   try {
-    const invitation = await InvitationService.getInvitationByToken(token as string);
+    const invitation = await resolveByKind(
+      async () => ({
+        kind: 'team' as const,
+        ...(await InvitationService.getInvitationByToken(token as string)),
+      }),
+      () => GuardianService.getInvitationByToken(token as string)
+    );
     res.json({ success: true, invitation });
   } catch (error) {
     logger.error('Error fetching invitation by token', {
@@ -57,7 +86,8 @@ router.get('/by-token/:token', invitationTokenRateLimit, async (req, res) => {
 
 /**
  * POST /api/v1/invitations/by-token/:token/accept
- * Accepts the invitation on behalf of the invited player.
+ * Accepts the invitation on behalf of the invited player (team kind) or the
+ * invited adult (guardian kind — creates the Guardian link).
  * Token acts as authentication (one-time secret, like a password-reset link).
  */
 router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
@@ -69,13 +99,27 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
   }
 
   try {
-    const result = await InvitationService.acceptInvitationByToken(token as string);
-    res.json({
-      success: true,
-      invitation: result.invitation,
-      teamMember: result.teamMember,
-      message: 'Invitation accepted. You have been added to the team.',
-    });
+    const result = await resolveByKind(
+      async () => {
+        const accepted = await InvitationService.acceptInvitationByToken(token as string);
+        return {
+          kind: 'team' as const,
+          invitation: accepted.invitation,
+          teamMember: accepted.teamMember,
+          message: 'Invitation accepted. You have been added to the team.',
+        };
+      },
+      async () => {
+        const accepted = await GuardianService.acceptInvitationByToken(token as string);
+        return {
+          kind: 'guardian' as const,
+          invitation: accepted.invitation,
+          guardian: accepted.guardian,
+          message: 'Invitation accepted. You are now a guardian of this player.',
+        };
+      }
+    );
+    res.json({ success: true, ...result });
   } catch (error) {
     logger.error('Error accepting invitation by token', {
       error: error instanceof Error ? error.message : String(error),

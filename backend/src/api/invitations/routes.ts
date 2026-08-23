@@ -4,6 +4,7 @@
 
 import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
+import { GuardianService } from '../../services/guardian-service';
 import {
   invitationQuerySchema,
 } from './schemas';
@@ -94,13 +95,29 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
   try {
-    const result = await InvitationService.acceptInvitation(
-      req.params.id as string,
-      req.user!.id
-    );
+    const id = req.params.id as string;
+
+    // Guardian invitation (PARENT role) addressed to the signed-in adult?
+    // Mirrors the by-token accept; the id is tried as a GuardianInvitation
+    // first because its accept creates a Guardian link, not a TeamMember.
+    const guardianInvitation = await GuardianService.findInvitationForUser(id, req.user!.id);
+    if (guardianInvitation) {
+      const accepted = await GuardianService.acceptInvitation(id, req.user!.id);
+      res.json({
+        success: true,
+        kind: 'guardian',
+        invitation: omitToken(accepted.invitation),
+        guardian: accepted.guardian,
+        message: 'Invitation accepted. You are now a guardian of this player.',
+      });
+      return;
+    }
+
+    const result = await InvitationService.acceptInvitation(id, req.user!.id);
 
     res.json({
       success: true,
+      kind: 'team',
       invitation: omitToken(result.invitation),
       teamMember: result.teamMember,
       message: 'Invitation accepted. You have been added to the team.',
@@ -125,13 +142,25 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
  */
 router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
   try {
-    const invitation = await InvitationService.rejectInvitation(
-      req.params.id as string,
-      req.user!.id
-    );
+    const id = req.params.id as string;
+
+    const guardianInvitation = await GuardianService.findInvitationForUser(id, req.user!.id);
+    if (guardianInvitation) {
+      const rejected = await GuardianService.rejectInvitation(id, req.user!.id);
+      res.json({
+        success: true,
+        kind: 'guardian',
+        invitation: omitToken(rejected),
+        message: 'Invitation rejected.',
+      });
+      return;
+    }
+
+    const invitation = await InvitationService.rejectInvitation(id, req.user!.id);
 
     res.json({
       success: true,
+      kind: 'team',
       invitation: omitToken(invitation),
       message: 'Invitation rejected.',
     });

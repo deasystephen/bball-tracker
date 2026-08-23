@@ -432,7 +432,8 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
     const rsvp = await RsvpService.upsertRsvp(
       req.params.gameId as string,
       req.user!.id,
-      validationResult.data.status
+      validationResult.data.status,
+      validationResult.data.playerId
     );
 
     res.json({
