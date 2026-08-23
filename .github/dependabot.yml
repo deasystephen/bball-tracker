@@ -79,6 +79,7 @@ updates:
       - dependency-name: "react-native-gesture-handler"
       - dependency-name: "react-native-reanimated"
       - dependency-name: "react-native-safe-area-context"
+      - dependency-name: "expo-secure-store"
       - dependency-name: "react-native-screens"
       - dependency-name: "react-native-worklets"
       # lottie-react-native >=7.4.0 requires react-native >=0.84; we're on the

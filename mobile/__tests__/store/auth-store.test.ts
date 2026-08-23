@@ -7,13 +7,17 @@
  */
 
 import { renderHook } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { requireOptionalNativeModule } from 'expo';
 import {
   useAuthStore,
   useAuthUser,
   useIsAuthenticated,
   useAuthActions,
   getLogoutEpoch,
+  AUTH_STORAGE_KEY,
 } from '../../store/auth-store';
+import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, SecureStoreNative } from '../../services/secure-storage';
 import { setSessionHooks } from '../../store/session-hooks';
 import {
   trackEvent,
@@ -22,6 +26,14 @@ import {
   AnalyticsEvents,
 } from '../../services/analytics';
 import { UserRole, User } from '../../../shared/types';
+
+// In-memory ExpoSecureStore native mock from jest.setup.js.
+const secureNative = requireOptionalNativeModule('ExpoSecureStore') as SecureStoreNative;
+const keychainGet = (key: string) => secureNative.getValueWithKeyAsync(key, {});
+// Let Zustand persist's async storage writes settle.
+const flushPersist = async () => {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+};
 
 jest.mock('../../services/analytics', () => ({
   trackEvent: jest.fn(),
@@ -172,6 +184,33 @@ describe('auth-store', () => {
       isLoading: false,
     });
     expect(persisted).toEqual({ accessToken: 'a', refreshToken: 'r', user: null, isAuthenticated: true });
+  });
+
+  it('persists tokens to SecureStore and everything else to AsyncStorage (audit #52)', async () => {
+    useAuthStore.getState().setAuthToken('jwt-access', 'jwt-refresh');
+    useAuthStore.getState().setUser(makeUser());
+    await flushPersist();
+
+    expect(await keychainGet(ACCESS_TOKEN_KEY)).toBe('jwt-access');
+    expect(await keychainGet(REFRESH_TOKEN_KEY)).toBe('jwt-refresh');
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    expect(raw).not.toContain('jwt-access');
+    expect(raw).not.toContain('jwt-refresh');
+    expect(JSON.parse(raw as string).state.user.id).toBe('user-1');
+  });
+
+  it('clearSession wipes the SecureStore tokens and the AsyncStorage blob', async () => {
+    useAuthStore.getState().setAuthToken('jwt-access', 'jwt-refresh');
+    await flushPersist();
+    expect(await keychainGet(ACCESS_TOKEN_KEY)).toBe('jwt-access');
+
+    useAuthStore.getState().clearSession();
+    await flushPersist();
+
+    expect(await keychainGet(ACCESS_TOKEN_KEY)).toBeNull();
+    expect(await keychainGet(REFRESH_TOKEN_KEY)).toBeNull();
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    expect(raw === null || !JSON.parse(raw).state.accessToken).toBe(true);
   });
 });
 

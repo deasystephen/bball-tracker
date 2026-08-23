@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureAuthStorage, clearPersistedAuth } from '../services/secure-storage';
 import { User } from '../../shared/types';
 import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
 import { getSessionHooks } from './session-hooks';
@@ -43,6 +43,9 @@ interface AuthState {
 let logoutEpoch = 0;
 export const getLogoutEpoch = (): number => logoutEpoch;
 
+/** Zustand persist key (the AsyncStorage half); see services/secure-storage.ts. */
+export const AUTH_STORAGE_KEY = 'auth-storage';
+
 const CLEARED_SESSION = {
   accessToken: null,
   refreshToken: null,
@@ -52,8 +55,9 @@ const CLEARED_SESSION = {
 } as const;
 
 /**
- * Auth store using Zustand for managing authentication state
- * Persists to AsyncStorage for token persistence across app restarts
+ * Auth store using Zustand for managing authentication state.
+ * Persisted through `services/secure-storage.ts` (audit #52): the tokens go
+ * to expo-secure-store (Keychain/Keystore), `user`/flags to AsyncStorage.
  */
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -86,6 +90,9 @@ export const useAuthStore = create<AuthState>()(
           resetUser();
         }
         set(CLEARED_SESSION);
+        // Belt-and-braces: persist writes the cleared state too, but wipe the
+        // keychain entries explicitly so a failed write can't leave a token.
+        clearPersistedAuth(AUTH_STORAGE_KEY).catch(() => undefined);
         // Side effects live in services/session-logout.ts and are reached
         // through the session-hooks registry so this store never imports the
         // api-client (which imports this store). Audit #17 (socket identity)
@@ -112,8 +119,8 @@ export const useAuthStore = create<AuthState>()(
       },
     }),
     {
-      name: 'auth-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      name: AUTH_STORAGE_KEY,
+      storage: createJSONStorage(() => secureAuthStorage),
       partialize: (state) => ({
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
