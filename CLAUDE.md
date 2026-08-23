@@ -113,6 +113,16 @@ issue #26 for the Redis adapter follow-up.
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.
+- Handshake rejection recovery (mobile `services/socket.ts`, audit #17b): a
+  middleware rejection arrives as `connect_error` and socket.io does **not**
+  auto-reconnect from it. `Unauthorized` → refresh via the api-client's
+  single-flight `refreshAccessToken()` then `socket.connect()` (the `auth`
+  callback reads the new token), max `MAX_AUTH_REFRESHES` (2) in a row; a
+  rejected refresh token is left to the next REST 401 to log out. `Service
+  unavailable` (backend cannot reach JWKS) → exponential back-off
+  (2s·2ⁿ, max `MAX_UNAVAILABLE_RETRIES` = 5). A successful `connect` resets
+  both budgets; `resetSocket()` cancels any pending retry. `useLiveGame`
+  reports `reconnecting` while `isSocketRecovering()` and `error` otherwise.
 
 ### Entitlements / Feature Gating
 

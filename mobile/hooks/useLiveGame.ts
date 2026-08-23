@@ -15,7 +15,7 @@
 
 import { useEffect, useReducer, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import { getSocket } from '../services/socket';
+import { getSocket, isSocketRecovering } from '../services/socket';
 import type { GameEvent, GameStatus } from '../types/game';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'error';
@@ -181,6 +181,13 @@ export function useLiveGame(gameId: string | undefined): UseLiveGameResult {
     };
 
     const handleConnectError = (err: Error) => {
+      // services/socket.ts owns recovery from handshake rejections (token
+      // refresh on `Unauthorized`, back-off on `Service unavailable`). While
+      // it is retrying, show "reconnecting" instead of a terminal error.
+      if (isSocketRecovering()) {
+        dispatch({ type: 'reconnecting' });
+        return;
+      }
       dispatch({ type: 'error', message: err.message });
     };
 
