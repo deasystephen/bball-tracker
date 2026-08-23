@@ -182,7 +182,20 @@ export default function Profile() {
                         </ThemedText>
                       </View>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                    {child.teams && child.teams.length > 0 ? (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Manage guardians for ${child.childName}`}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        onPress={() =>
+                          router.push(`/teams/${child.teams![0].id}/players/${child.childId}/guardians`)
+                        }
+                      >
+                        <Ionicons name="people-circle-outline" size={24} color={colors.primary} />
+                      </TouchableOpacity>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                    )}
                   </TouchableOpacity>
                 </React.Fragment>
               ))}

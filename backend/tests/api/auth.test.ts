@@ -503,7 +503,7 @@ describe('Auth API', () => {
       mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...mockUser, role: 'PARENT' });
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([
-        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One' } },
+        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One', teamMembers: [] } },
       ]);
 
       const response = await request(app)
@@ -512,7 +512,7 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.user.guardianOf).toEqual([
-        { childId: 'child-1', childName: 'Kid One', relationship: 'MOTHER', isPrimary: true },
+        { childId: 'child-1', childName: 'Kid One', relationship: 'MOTHER', isPrimary: true, teams: [] },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'user-1' } })

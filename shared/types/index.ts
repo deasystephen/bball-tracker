@@ -87,6 +87,8 @@ export interface GuardianOfEntry {
   childName: string;
   relationship: GuardianRelationship;
   isPrimary: boolean;
+  /** Teams the child is currently rostered on (for deep-linking guardian management). */
+  teams?: { id: string; name: string }[];
 }
 
 export interface League {

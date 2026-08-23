@@ -126,7 +126,12 @@ export class GuardianService {
         childId: true,
         relationship: true,
         isPrimary: true,
-        child: { select: { name: true } },
+        child: {
+          select: {
+            name: true,
+            teamMembers: { select: { team: { select: { id: true, name: true } } } },
+          },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -136,6 +141,9 @@ export class GuardianService {
       childName: link.child.name,
       relationship: link.relationship,
       isPrimary: link.isPrimary,
+      // Lets the app deep-link to the child's guardians screen, which is
+      // addressed per team (/teams/:teamId/members/:playerId/guardians).
+      teams: (link.child.teamMembers ?? []).map((m) => ({ id: m.team.id, name: m.team.name })),
     }));
   }
 
