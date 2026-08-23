@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ListItem } from '../../components';
 import { useToast } from '../../components/Toast';
 import { useCreateTeam } from '../../hooks/useTeams';
+import { isUpgradeRequiredError, getApiErrorMessage } from '../../services/api-client';
 import { useLeagues } from '../../hooks/useLeagues';
 import { useSeasons } from '../../hooks/useSeasons';
 import { useTheme } from '../../hooks/useTheme';
@@ -96,9 +97,10 @@ export default function CreateTeamScreen() {
       toast.showToast('Team created successfully', 'success');
       router.push(`/teams/${team.id}`);
     } catch (error) {
+      // 402 upgrade_required: FREE-tier team cap (see CLAUDE.md "Usage Metering").
       Alert.alert(
-        t('common.error'),
-        error instanceof Error ? error.message : 'Failed to create team'
+        isUpgradeRequiredError(error) ? 'Upgrade required' : t('common.error'),
+        getApiErrorMessage(error, 'Failed to create team')
       );
     }
   };

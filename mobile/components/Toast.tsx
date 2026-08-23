@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Text,
   View,
-  Dimensions,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -67,7 +66,6 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }) {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const translateY = useSharedValue(-100);
   const translateX = useSharedValue(0);
   const opacity = useSharedValue(0);
@@ -144,17 +142,15 @@ function ToastItem({
   }));
 
   const toastColor = getToastColor();
-  const screenWidth = Dimensions.get('window').width;
 
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View
+        testID={`toast-${toast.type}`}
+        accessibilityRole="alert"
         style={[
           styles.toast,
           {
-            top: insets.top + spacing.sm,
-            width: screenWidth - spacing.md * 2,
-            left: spacing.md,
             backgroundColor: colors.card,
             borderLeftColor: toastColor,
             ...shadows.lg,
@@ -182,13 +178,17 @@ function ToastItem({
   );
 }
 
+/** Upper bound on simultaneously visible toasts; the oldest is dropped first. */
+export const MAX_VISIBLE_TOASTS = 3;
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const insets = useSafeAreaInsets();
 
   const showToast = useCallback(
     (message: string, type: ToastType = 'success', duration: number = DEFAULT_DURATION) => {
       const id = Date.now().toString() + Math.random().toString(36).slice(2);
-      setToasts((prev) => [...prev, { id, message, type, duration }]);
+      setToasts((prev) => [...prev, { id, message, type, duration }].slice(-MAX_VISIBLE_TOASTS));
     },
     []
   );
@@ -200,7 +200,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <View style={styles.container} pointerEvents="box-none">
+      {/* Toasts flow as a column (newest at the bottom) so concurrent
+          messages stack instead of overlapping at the same offset. */}
+      <View
+        style={[styles.container, { paddingTop: insets.top + spacing.sm }]}
+        pointerEvents="box-none"
+      >
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />
         ))}
@@ -217,9 +222,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 9999,
     elevation: 9999,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
   },
   toast: {
-    position: 'absolute',
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,

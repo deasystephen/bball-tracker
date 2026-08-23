@@ -558,7 +558,7 @@ export default function ManagePlayersScreen() {
             <Card variant="default" style={styles.playersCard}>
               {members.map((member) => {
                 const details = [
-                  member.jerseyNumber && `#${member.jerseyNumber}`,
+                  member.jerseyNumber != null && `#${member.jerseyNumber}`,
                   member.position,
                 ].filter(Boolean).join(' • ');
 
