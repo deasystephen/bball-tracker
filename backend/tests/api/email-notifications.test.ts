@@ -43,7 +43,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
 // Mock the mailer so we can spy without hitting AWS SES

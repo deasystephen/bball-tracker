@@ -375,6 +375,7 @@ describe('LeagueService', () => {
         if (args.where.id === newAdmin.id) return Promise.resolve(newAdmin);
         return Promise.resolve(null);
       });
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ id: league.id });
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.leagueAdmin.create as jest.Mock).mockResolvedValue({
         leagueId: league.id,
@@ -392,7 +393,9 @@ describe('LeagueService', () => {
       );
     });
 
-    it('should add a new league admin when caller is an existing league admin', async () => {
+    // Decision 3: league admins can no longer grant the role to others — the
+    // previous behaviour let any league admin silently extend the admin set.
+    it('should reject an existing league admin who is not a system admin (403)', async () => {
       const callerCoach = createCoach({ id: 'existing-league-admin' });
       const league = createLeague();
       const newAdmin = createCoach({ id: 'new-admin' });
@@ -402,23 +405,15 @@ describe('LeagueService', () => {
         if (args.where.id === newAdmin.id) return Promise.resolve(newAdmin);
         return Promise.resolve(null);
       });
-      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockImplementation((args: { where: { leagueId_userId: { userId: string } } }) => {
-        if (args.where.leagueId_userId.userId === callerCoach.id) {
-          return Promise.resolve({ leagueId: league.id, userId: callerCoach.id });
-        }
-        return Promise.resolve(null);
-      });
-      (mockPrisma.leagueAdmin.create as jest.Mock).mockResolvedValue({
-        leagueId: league.id,
-        userId: newAdmin.id,
-        user: { id: newAdmin.id, name: newAdmin.name, email: newAdmin.email },
-      });
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: league.id, userId: callerCoach.id });
 
-      const result = await LeagueService.addLeagueAdmin(league.id, newAdmin.id, callerCoach.id);
-      expect(result.user.id).toBe(newAdmin.id);
+      await expect(
+        LeagueService.addLeagueAdmin(league.id, newAdmin.id, callerCoach.id)
+      ).rejects.toMatchObject({ statusCode: 403, message: 'Only system administrators can manage league admins' });
+      expect(mockPrisma.leagueAdmin.create).not.toHaveBeenCalled();
     });
 
-    it('should throw BadRequestError if caller is neither system admin nor league admin', async () => {
+    it('should throw ForbiddenError if caller is neither system admin nor league admin', async () => {
       const randomUser = createPlayer();
       const league = createLeague();
 
@@ -427,10 +422,22 @@ describe('LeagueService', () => {
 
       try {
         await LeagueService.addLeagueAdmin(league.id, 'some-user', randomUser.id);
-        fail('Expected BadRequestError');
+        fail('Expected ForbiddenError');
       } catch (error) {
-        expectForbiddenError(error, 'You do not have permission to manage league admins');
+        expectForbiddenError(error, 'Only system administrators can manage league admins');
       }
+      expect(mockPrisma.leagueAdmin.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundError if the league does not exist', async () => {
+      const sysAdmin = createAdmin();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        LeagueService.addLeagueAdmin('missing-league', 'some-user', sysAdmin.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'League not found' });
       expect(mockPrisma.leagueAdmin.create).not.toHaveBeenCalled();
     });
 
@@ -442,6 +449,7 @@ describe('LeagueService', () => {
         if (args.where.id === sysAdmin.id) return Promise.resolve(sysAdmin);
         return Promise.resolve(null);
       });
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ id: league.id });
 
       try {
         await LeagueService.addLeagueAdmin(league.id, 'missing-user', sysAdmin.id);
@@ -462,6 +470,7 @@ describe('LeagueService', () => {
         if (args.where.id === existingAdmin.id) return Promise.resolve(existingAdmin);
         return Promise.resolve(null);
       });
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ id: league.id });
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({
         leagueId: league.id,
         userId: existingAdmin.id,
@@ -484,16 +493,28 @@ describe('LeagueService', () => {
       const target = createCoach();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
-      (mockPrisma.leagueAdmin.delete as jest.Mock).mockResolvedValue({});
+      (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       const result = await LeagueService.removeLeagueAdmin(league.id, target.id, sysAdmin.id);
       expect(result).toEqual({ success: true });
-      expect(mockPrisma.leagueAdmin.delete).toHaveBeenCalledWith({
-        where: { leagueId_userId: { leagueId: league.id, userId: target.id } },
+      expect(mockPrisma.leagueAdmin.deleteMany).toHaveBeenCalledWith({
+        where: { leagueId: league.id, userId: target.id },
       });
     });
 
-    it('should throw BadRequestError when caller is not a system admin', async () => {
+    it('should throw NotFoundError when the user is not an admin of the league', async () => {
+      const sysAdmin = createAdmin();
+      const league = createLeague();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
+      (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await expect(
+        LeagueService.removeLeagueAdmin(league.id, 'not-an-admin', sysAdmin.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'League admin not found' });
+    });
+
+    it('should throw ForbiddenError when caller is not a system admin', async () => {
       const coach = createCoach();
       const league = createLeague();
 
@@ -501,11 +522,11 @@ describe('LeagueService', () => {
 
       try {
         await LeagueService.removeLeagueAdmin(league.id, 'target', coach.id);
-        fail('Expected BadRequestError');
+        fail('Expected ForbiddenError');
       } catch (error) {
         expectForbiddenError(error, 'Only system administrators can remove league admins');
       }
-      expect(mockPrisma.leagueAdmin.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.leagueAdmin.deleteMany).not.toHaveBeenCalled();
     });
   });
 

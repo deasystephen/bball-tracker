@@ -5,7 +5,7 @@
 import prisma from '../models';
 import { GameRsvp, Prisma, RsvpStatus } from '@prisma/client';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
-import { canAccessTeam } from '../utils/permissions';
+import { canAccessTeam, hasTeamPermission } from '../utils/permissions';
 import { mailer } from './mailer';
 import { rsvpConfirmationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -22,6 +22,14 @@ const RSVP_INCLUDE = {
 } satisfies Prisma.GameRsvpInclude;
 
 export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCLUDE }>;
+/**
+ * `GET /games/:id/rsvps` row. `user.email` is present only for callers with
+ * `canManageRoster` on the game's team (plus the caller's own row); everyone
+ * else gets `{ id, name }` (role matrix B2.5).
+ */
+export type RsvpView = Omit<RsvpWithUser, 'user'> & {
+  user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
+};
 
 export interface RsvpSummary {
   yes: number;
@@ -30,7 +38,7 @@ export interface RsvpSummary {
 }
 
 export interface GameRsvps {
-  rsvps: RsvpWithUser[];
+  rsvps: RsvpView[];
   summary: RsvpSummary;
 }
 
@@ -132,7 +140,7 @@ export class RsvpService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    const [rsvps, counts] = await Promise.all([
+    const [rows, counts, canManageRoster] = await Promise.all([
       prisma.gameRsvp.findMany({
         where: { gameId },
         include: RSVP_INCLUDE,
@@ -143,7 +151,16 @@ export class RsvpService {
         where: { gameId },
         _count: { status: true },
       }),
+      hasTeamPermission(userId, game.teamId, 'canManageRoster'),
     ]);
+
+    // Roster managers see everyone's email; other team members only their own.
+    const rsvps: RsvpView[] = canManageRoster
+      ? rows
+      : rows.map(({ user, ...rsvp }) => ({
+          ...rsvp,
+          user: user.id === userId ? user : { id: user.id, name: user.name },
+        }));
 
     const summary: RsvpSummary = {
       yes: 0,

@@ -16,6 +16,14 @@ import {
   ConflictError,
 } from '../utils/errors';
 import { deletePreviousAvatar } from './upload-service';
+import { getPlayerTeamAccess } from '../utils/permissions';
+
+/**
+ * A managed player that is on no team yet stays editable/deletable by its
+ * creator for this long after creation, so the "create, then fix a typo /
+ * undo" flow keeps working before the player is rostered (role matrix B2.10).
+ */
+export const MANAGED_PLAYER_GRACE_MS = 24 * 60 * 60 * 1000;
 
 const PLAYER_SELECT = {
   id: true,
@@ -168,6 +176,35 @@ export class PlayerService {
     return Boolean(staff || leagueAdmin);
   }
 
+  /**
+   * Does `userId` *currently* manage this managed player?
+   *
+   * `managedById` alone never expires — a coach who created a player years
+   * ago and has since left every team could still rename, re-email or delete
+   * them. The creator keeps rights only while they have `canManageRoster`
+   * on at least one team the player is rostered on, or — so create-then-edit
+   * works — while the player is on no team yet and was created by the caller
+   * within `MANAGED_PLAYER_GRACE_MS` (role matrix B2.10).
+   */
+  private static async isCurrentManager(
+    userId: string,
+    player: { id: string; isManaged: boolean; managedById: string | null; createdAt: Date }
+  ): Promise<boolean> {
+    if (!player.isManaged || player.managedById !== userId) {
+      return false;
+    }
+
+    const { memberTeamIds, manageableTeamIds } = await getPlayerTeamAccess(userId, player.id);
+    if (manageableTeamIds.length > 0) {
+      return true;
+    }
+
+    return (
+      memberTeamIds.length === 0 &&
+      Date.now() - player.createdAt.getTime() < MANAGED_PLAYER_GRACE_MS
+    );
+  }
+
   /** Convert a Prisma unique-constraint violation on `email` into a 409. */
   private static mapUniqueViolation(error: unknown): unknown {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -315,7 +352,10 @@ export class PlayerService {
       throw new NotFoundError('User not found');
     }
 
-    const isManagedByUser = player.isManaged && player.managedById === userId;
+    const isManagedByUser =
+      playerId !== userId &&
+      currentUser.role !== 'ADMIN' &&
+      (await PlayerService.isCurrentManager(userId, player));
     if (playerId !== userId && currentUser.role !== 'ADMIN' && !isManagedByUser) {
       throw new ForbiddenError('You can only update your own profile');
     }
@@ -401,9 +441,8 @@ export class PlayerService {
       throw new NotFoundError('Player not found');
     }
 
-    // Check permissions: admin or managing coach
-    const isManagedByUser = player.isManaged && player.managedById === userId;
-    if (currentUser.role !== 'ADMIN' && !isManagedByUser) {
+    // Check permissions: admin or *current* managing coach (see isCurrentManager)
+    if (currentUser.role !== 'ADMIN' && !(await PlayerService.isCurrentManager(userId, player))) {
       throw new ForbiddenError('Only administrators can delete players');
     }
 

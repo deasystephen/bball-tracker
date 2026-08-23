@@ -27,6 +27,15 @@ export const leagueQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
+/**
+ * Schema for `POST /leagues/:id/admins` — grant league-admin rights to a user.
+ * User ids are UUIDs (unlike league/season ids, which are custom strings).
+ */
+export const addLeagueAdminSchema = z.object({
+  userId: z.string().uuid('userId must be a valid UUID'),
+});
+
 export type CreateLeagueInput = z.infer<typeof createLeagueSchema>;
+export type AddLeagueAdminInput = z.infer<typeof addLeagueAdminSchema>;
 export type UpdateLeagueInput = z.infer<typeof updateLeagueSchema>;
 export type LeagueQueryParams = z.infer<typeof leagueQuerySchema>;

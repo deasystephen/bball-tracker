@@ -217,6 +217,10 @@ describe('Managed Player - PlayerService.updatePlayer (coach updating managed pl
     (mockPrisma.user.findUnique as jest.Mock)
       .mockResolvedValueOnce(managedPlayer) // player lookup
       .mockResolvedValueOnce(coach);         // current user lookup
+    // Coach still manages the roster of a team the player is on (B2.10)
+    (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+      { teamId: 'team-1', team: { season: { league: { admins: [] } }, staff: [{ id: 'staff-1' }] } },
+    ]);
     (mockPrisma.user.update as jest.Mock).mockResolvedValue({
       ...managedPlayer,
       name: 'Updated Name',
@@ -275,6 +279,8 @@ describe('Managed Player - PlayerService.deletePlayer (coach deleting managed pl
     (mockPrisma.user.findUnique as jest.Mock)
       .mockResolvedValueOnce(coach)          // current user lookup
       .mockResolvedValueOnce(managedPlayer); // player lookup
+    // Not rostered anywhere and just created → inside the 24h grace window (B2.10)
+    (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.user.delete as jest.Mock).mockResolvedValue(managedPlayer);
 
     const result = await PlayerService.deletePlayer(managedPlayer.id, coach.id);

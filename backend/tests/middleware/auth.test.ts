@@ -3,10 +3,10 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { authenticate, requireRole } from '../../src/api/auth/middleware';
+import { authenticate } from '../../src/api/auth/middleware';
 import { WorkOSService } from '../../src/services/workos-service';
 import { mockPrisma } from '../setup';
-import { createPlayer, createCoach, createAdmin } from '../factories';
+import { createPlayer } from '../factories';
 
 // Mock WorkOSService
 jest.mock('../../src/services/workos-service');
@@ -163,118 +163,6 @@ describe('Auth Middleware', () => {
       );
 
       expect(nextFn).toHaveBeenCalledWith(expect.any(Error));
-    });
-  });
-
-  describe('requireRole', () => {
-    it('should call next() with error if user is not authenticated', () => {
-      const middleware = requireRole('COACH');
-
-      middleware(
-        mockReq as Request,
-        mockRes as Response,
-        nextFn as NextFunction
-      );
-
-      expect(nextFn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Authentication required',
-          statusCode: 401,
-        })
-      );
-    });
-
-    it('should call next() with error if user does not have required role', () => {
-      const player = createPlayer();
-      mockReq.user = {
-        id: player.id,
-        email: player.email,
-        name: player.name,
-        role: 'PLAYER',
-        subscriptionTier: 'FREE',
-        subscriptionExpiresAt: null,
-      };
-
-      const middleware = requireRole('COACH');
-
-      middleware(
-        mockReq as Request,
-        mockRes as Response,
-        nextFn as NextFunction
-      );
-
-      expect(nextFn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: 'Insufficient permissions',
-          statusCode: 403,
-        })
-      );
-    });
-
-    it('should call next() if user has required role', () => {
-      const coach = createCoach();
-      mockReq.user = {
-        id: coach.id,
-        email: coach.email,
-        name: coach.name,
-        role: 'COACH',
-        subscriptionTier: 'FREE',
-        subscriptionExpiresAt: null,
-      };
-
-      const middleware = requireRole('COACH');
-
-      middleware(
-        mockReq as Request,
-        mockRes as Response,
-        nextFn as NextFunction
-      );
-
-      expect(nextFn).toHaveBeenCalledWith();
-    });
-
-    it('should allow multiple roles', () => {
-      const player = createPlayer();
-      mockReq.user = {
-        id: player.id,
-        email: player.email,
-        name: player.name,
-        role: 'PLAYER',
-        subscriptionTier: 'FREE',
-        subscriptionExpiresAt: null,
-      };
-
-      const middleware = requireRole('COACH', 'PLAYER', 'ADMIN');
-
-      middleware(
-        mockReq as Request,
-        mockRes as Response,
-        nextFn as NextFunction
-      );
-
-      expect(nextFn).toHaveBeenCalledWith();
-    });
-
-    it('should work with ADMIN role', () => {
-      const admin = createAdmin();
-      mockReq.user = {
-        id: admin.id,
-        email: admin.email,
-        name: admin.name,
-        role: 'ADMIN',
-        subscriptionTier: 'FREE',
-        subscriptionExpiresAt: null,
-      };
-
-      const middleware = requireRole('ADMIN');
-
-      middleware(
-        mockReq as Request,
-        mockRes as Response,
-        nextFn as NextFunction
-      );
-
-      expect(nextFn).toHaveBeenCalledWith();
     });
   });
 });

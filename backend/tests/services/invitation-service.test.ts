@@ -13,6 +13,7 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 import {
   createInvitation,
   createTeam,
+  createAdmin,
   createCoach,
   createPlayer,
   createLeague,
@@ -920,37 +921,114 @@ describe('InvitationService', () => {
       });
     });
 
-    it("allows a coach to list another player's invitations", async () => {
-      const coach = createCoach();
-      const otherPlayer = createPlayer();
+    describe("another player's invitations (role matrix B2.4)", () => {
+      it('lets a system ADMIN list any player, unscoped', async () => {
+        const admin = createAdmin();
+        const otherPlayer = createPlayer();
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+        (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
 
-      await InvitationService.listInvitations(
-        { playerId: otherPlayer.id, limit: 10, offset: 0 },
-        coach.id
-      );
+        await InvitationService.listInvitations({ playerId: otherPlayer.id, limit: 10, offset: 0 }, admin.id);
 
-      const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
-      expect(findArgs.where.playerId).toBe(otherPlayer.id);
-    });
+        const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+        expect(findArgs.where).toEqual({ playerId: otherPlayer.id });
+        expect(mockPrisma.teamMember.findMany).not.toHaveBeenCalled();
+      });
 
-    it("throws ForbiddenError when a non-coach lists another player's invitations", async () => {
-      const requester = createPlayer();
-      const otherPlayer = createPlayer();
+      it('scopes a head coach to the teams the player is on that they manage', async () => {
+        const coach = createCoach();
+        const otherPlayer = createPlayer();
 
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(requester);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        // getPlayerTeamAccess: player on two teams, coach manages the roster of one
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+          { teamId: 'team-managed', team: { season: { league: { admins: [] } }, staff: [{ id: 's1' }] } },
+          { teamId: 'team-other', team: { season: { league: { admins: [] } }, staff: [] } },
+        ]);
+        (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
 
-      await expect(
-        InvitationService.listInvitations(
-          { playerId: otherPlayer.id, limit: 10, offset: 0 },
-          requester.id
-        )
-      ).rejects.toMatchObject({
-        statusCode: 403,
-        message: 'You can only view your own invitations',
+        await InvitationService.listInvitations({ playerId: otherPlayer.id, limit: 10, offset: 0 }, coach.id);
+
+        const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+        expect(findArgs.where).toEqual({ playerId: otherPlayer.id, teamId: { in: ['team-managed'] } });
+        expect(mockPrisma.teamMember.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { playerId: otherPlayer.id } })
+        );
+      });
+
+      it('rejects a self-selected COACH with no roster relationship to the player (403)', async () => {
+        const coach = createCoach();
+        const otherPlayer = createPlayer();
+
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+          { teamId: 'team-other', team: { season: { league: { admins: [] } }, staff: [] } },
+        ]);
+
+        await expect(
+          InvitationService.listInvitations({ playerId: otherPlayer.id, limit: 10, offset: 0 }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 403, message: 'You can only view your own invitations' });
+        expect(mockPrisma.teamInvitation.findMany).not.toHaveBeenCalled();
+      });
+
+      it("throws ForbiddenError when a player lists another player's invitations", async () => {
+        const requester = createPlayer();
+        const otherPlayer = createPlayer();
+
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(requester);
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+
+        await expect(
+          InvitationService.listInvitations({ playerId: otherPlayer.id, limit: 10, offset: 0 }, requester.id)
+        ).rejects.toMatchObject({ statusCode: 403, message: 'You can only view your own invitations' });
+      });
+
+      it('with teamId: allows a roster manager of that team and rejects a plain member', async () => {
+        const { team, coach, player, season, league } = createFullInvitation();
+        const otherPlayer = createPlayer();
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+        const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+
+        // Coach: canAccessTeam via staff, canManageRoster via role
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+          ...team,
+          season: { ...season, league: { ...league, admins: [] } },
+        });
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+        await InvitationService.listInvitations(
+          { teamId: team.id, playerId: otherPlayer.id, limit: 10, offset: 0 },
+          coach.id
+        );
+        const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+        expect(findArgs.where).toEqual({ teamId: team.id, playerId: otherPlayer.id });
+
+        // Rostered player: canAccessTeam via membership, no roster permission → 403
+        jest.clearAllMocks();
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+          ...team,
+          season: { ...season, league: { ...league, admins: [] } },
+        });
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
+          createTeamMember({ teamId: team.id, playerId: player.id })
+        );
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+
+        await expect(
+          InvitationService.listInvitations(
+            { teamId: team.id, playerId: otherPlayer.id, limit: 10, offset: 0 },
+            player.id
+          )
+        ).rejects.toMatchObject({ statusCode: 403 });
       });
     });
   });

@@ -140,36 +140,9 @@ describe('GameService', () => {
   });
 
   describe('getGameById', () => {
-    it('should return game for staff member', async () => {
+    it('should return game for staff member, including member emails (canManageRoster)', async () => {
       const coach = createCoach();
-      const league = createLeague();
-      const season = createSeason({ leagueId: league.id });
-      const team = createTeam({ seasonId: season.id });
-      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
-      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
-      const game = createGame({ teamId: team.id });
-
-      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
-        ...game,
-        team: {
-          ...team,
-          season: { ...season, league },
-          staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-          members: [],
-        },
-        events: [],
-      });
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-
-      const result = await GameService.getGameById(game.id, coach.id);
-
-      expect(result).toHaveProperty('id', game.id);
-    });
-
-    it('should return game for team member', async () => {
-      const coach = createCoach();
-      const player = createPlayer();
+      const player = createPlayer({ email: 'kid@test.com' });
       const league = createLeague();
       const season = createSeason({ leagueId: league.id });
       const team = createTeam({ seasonId: season.id });
@@ -184,17 +157,71 @@ describe('GameService', () => {
           ...team,
           season: { ...season, league },
           staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-          members: [{ ...member, playerId: player.id }],
+          members: [{ ...member, player: { id: player.id, name: player.name, email: player.email } }],
+        },
+        events: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      // getTeamPermissions → head coach role has canManageRoster
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+
+      const result = await GameService.getGameById(game.id, coach.id);
+
+      expect(result).toHaveProperty('id', game.id);
+      expect(result.team.members[0].player).toEqual({ id: player.id, name: player.name, email: 'kid@test.com' });
+      expect(result.team.staff[0].user.email).toBe(coach.email);
+    });
+
+    it('should return game for team member without other members\' emails (role matrix B2.5)', async () => {
+      const coach = createCoach();
+      const player = createPlayer();
+      const teammate = createPlayer({ email: 'teammate@test.com' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+      const teammateMember = createTeamMember({ teamId: team.id, playerId: teammate.id });
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: {
+          ...team,
+          season: { ...season, league },
+          staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+          members: [
+            { ...member, player: { id: player.id, name: player.name, email: player.email } },
+            { ...teammateMember, player: { id: teammate.id, name: teammate.name, email: teammate.email } },
+          ],
         },
         events: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(member);
 
       const result = await GameService.getGameById(game.id, player.id);
 
       expect(result).toHaveProperty('id', game.id);
+      expect(result.team.members).toHaveLength(2);
+      for (const m of result.team.members) {
+        expect(m.player).not.toHaveProperty('email');
+      }
+      expect(JSON.stringify(result.team.members)).not.toContain('teammate@test.com');
+      // Staff (coach) contact info stays visible, as on the team detail
+      expect(result.team.staff[0].user.email).toBe(coach.email);
     });
 
     it('should throw NotFoundError if game does not exist', async () => {

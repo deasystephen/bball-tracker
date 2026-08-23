@@ -6,7 +6,7 @@
 
 import { RsvpService } from '../../src/services/rsvp-service';
 import { mockPrisma } from '../setup';
-import { createAdmin, createCoach, createGame } from '../factories';
+import { createAdmin, createCoach, createGame, createPlayer } from '../factories';
 import {
   expectForbiddenError,
   expectNotFoundError,
@@ -269,6 +269,47 @@ describe('RsvpService', () => {
 
       expect(result.rsvps).toEqual(rsvps);
       expect(result.summary).toEqual({ yes: 3, no: 1, maybe: 2 });
+    });
+
+    it('keeps every RSVP user email for a roster manager (admin)', async () => {
+      const game = createGame();
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ id: game.id, teamId: game.teamId });
+      setAdminAccess();
+      (mockPrisma.gameRsvp.findMany as jest.Mock).mockResolvedValue([
+        { id: 'r1', gameId: game.id, userId: 'u1', status: 'YES', user: { id: 'u1', name: 'A', email: 'a@test.com' } },
+      ]);
+      (mockPrisma.gameRsvp.groupBy as jest.Mock).mockResolvedValue([]);
+
+      const result = await RsvpService.getGameRsvps(game.id, 'admin-1');
+
+      expect(result.rsvps[0].user).toEqual({ id: 'u1', name: 'A', email: 'a@test.com' });
+    });
+
+    it('strips other users\' emails for a plain team member, keeping their own (role matrix B2.5)', async () => {
+      const game = createGame();
+      const player = createPlayer({ id: 'me' });
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ id: game.id, teamId: game.teamId });
+      // canAccessTeam: member (not admin, not league admin, not staff)
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        id: game.teamId,
+        season: { league: { admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ teamId: game.teamId, playerId: 'me' });
+      // getTeamPermissions: no staff roles → view-only
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.gameRsvp.findMany as jest.Mock).mockResolvedValue([
+        { id: 'r1', gameId: game.id, userId: 'me', status: 'YES', user: { id: 'me', name: 'Me', email: 'me@test.com' } },
+        { id: 'r2', gameId: game.id, userId: 'u2', status: 'NO', user: { id: 'u2', name: 'Other', email: 'other@test.com' } },
+      ]);
+      (mockPrisma.gameRsvp.groupBy as jest.Mock).mockResolvedValue([]);
+
+      const result = await RsvpService.getGameRsvps(game.id, 'me');
+
+      expect(result.rsvps[0].user).toEqual({ id: 'me', name: 'Me', email: 'me@test.com' });
+      expect(result.rsvps[1].user).toEqual({ id: 'u2', name: 'Other' });
+      expect(JSON.stringify(result)).not.toContain('other@test.com');
     });
 
     it('defaults summary to zeros when there are no RSVPs', async () => {

@@ -337,17 +337,24 @@ export class LeagueService {
    * Add a league admin
    * @param leagueId League ID
    * @param adminUserId User ID to add as admin
-   * @param userId User ID making the request (must be system admin or existing league admin)
+   * @param userId User ID making the request (must be a system admin)
    */
   static async addLeagueAdmin(
     leagueId: string,
     adminUserId: string,
     userId: string
   ): Promise<LeagueAdminWithUser> {
-    // Check permission
-    const canManage = await isLeagueAdmin(userId, leagueId);
-    if (!canManage) {
-      throw new ForbiddenError('You do not have permission to manage league admins');
+    // System ADMIN only (decision 3). Existing league admins could previously
+    // grant the role to anyone; delegated league administration is not a
+    // product decision yet, so it is symmetric with removeLeagueAdmin for now.
+    const isSysAdmin = await isSystemAdmin(userId);
+    if (!isSysAdmin) {
+      throw new ForbiddenError('Only system administrators can manage league admins');
+    }
+
+    const league = await prisma.league.findUnique({ where: { id: leagueId }, select: { id: true } });
+    if (!league) {
+      throw new NotFoundError('League not found');
     }
 
     // Verify user exists
@@ -402,15 +409,14 @@ export class LeagueService {
       throw new ForbiddenError('Only system administrators can remove league admins');
     }
 
-    // Delete admin
-    await prisma.leagueAdmin.delete({
-      where: {
-        leagueId_userId: {
-          leagueId,
-          userId: adminUserId,
-        },
-      },
+    // Delete admin (404 rather than a Prisma P2025 → 500 when no such row)
+    const { count } = await prisma.leagueAdmin.deleteMany({
+      where: { leagueId, userId: adminUserId },
     });
+
+    if (count === 0) {
+      throw new NotFoundError('League admin not found');
+    }
 
     return { success: true };
   }
