@@ -7,6 +7,7 @@
 import { renderHook, act } from '@testing-library/react-native';
 import { useAuthRedirect } from '../../hooks/useAuthRedirect';
 import { useAuthStore } from '../../store/auth-store';
+import { setSessionHooks } from '../../store/session-hooks';
 
 const mockReplace = jest.fn();
 jest.mock('expo-router', () => ({
@@ -23,6 +24,7 @@ jest.mock('../../services/analytics', () => ({
 describe('useAuthRedirect', () => {
   beforeEach(() => {
     mockReplace.mockClear();
+    setSessionHooks({ remoteLogout: () => Promise.resolve(), localCleanup: () => undefined });
     useAuthStore.setState({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false, isLoading: false });
   });
 
@@ -42,9 +44,20 @@ describe('useAuthRedirect', () => {
     useAuthStore.setState({ accessToken: 't', isAuthenticated: true });
     renderHook(() => useAuthRedirect());
 
-    act(() => useAuthStore.getState().logout());
+    act(() => useAuthStore.getState().clearSession());
 
     expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith('/login');
+  });
+
+  it('redirects to /login after a user-initiated logout', async () => {
+    useAuthStore.setState({ accessToken: 't', isAuthenticated: true });
+    renderHook(() => useAuthRedirect());
+
+    await act(async () => {
+      await useAuthStore.getState().logout();
+    });
+
     expect(mockReplace).toHaveBeenCalledWith('/login');
   });
 });

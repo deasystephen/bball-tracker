@@ -21,9 +21,14 @@ import * as Notifications from 'expo-notifications';
 
 import { apiClient } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
-import { useNotificationSetup } from '../../hooks/useNotifications';
+import {
+  useNotificationSetup,
+  unregisterPushToken,
+  getRegisteredPushToken,
+} from '../../hooks/useNotifications';
 
 const mockedPost = apiClient.post as jest.Mock;
+const mockedDelete = apiClient.delete as jest.Mock;
 
 // expo-device — control isDevice flag per test via a getter so mutation
 // from test bodies actually takes effect when the hook reads it.
@@ -98,7 +103,10 @@ function setAuthenticated(token: string | null) {
 }
 
 describe('useNotificationSetup runtime', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Forget any token a previous test registered (module-level state).
+    mockedDelete.mockResolvedValue({ data: { success: true } });
+    await unregisterPushToken();
     jest.clearAllMocks();
     mockNotificationsState.lastHandler = null;
     setAuthenticated(null);
@@ -108,6 +116,91 @@ describe('useNotificationSetup runtime', () => {
     Object.defineProperty(Platform, 'OS', {
       configurable: true,
       get: () => 'ios',
+    });
+  });
+
+  // Audit #62: the effect is keyed on the session, not the access-token
+  // string — a refresh must not re-prompt / re-register.
+  it('does not re-register when only the access token rotates', async () => {
+    setAuthenticated('jwt-1');
+    mockedGetPermissions.mockResolvedValue({ status: 'granted' });
+    mockedGetToken.mockResolvedValue({ data: 'tok' });
+    mockedPost.mockResolvedValue({ data: { success: true } });
+
+    renderHook(() => useNotificationSetup());
+    await waitFor(() => expect(mockedPost).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useAuthStore.getState().setAuthToken('jwt-2', 'refresh-2');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockedPost).toHaveBeenCalledTimes(1);
+    expect(mockedAddListener).toHaveBeenCalledTimes(1);
+
+    mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+    await unregisterPushToken();
+  });
+
+  // Audit #62: a rejected permission/token promise must not become an
+  // unhandled rejection.
+  it('swallows a rejection from the permission / push-token APIs', async () => {
+    setAuthenticated('jwt-token');
+    mockedGetPermissions.mockRejectedValueOnce(new Error('permissions API unavailable'));
+    const unhandled = jest.fn();
+    process.on('unhandledRejection', unhandled);
+
+    renderHook(() => useNotificationSetup());
+    await waitFor(() => expect(mockedGetPermissions).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+
+    process.off('unhandledRejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(mockedPost).not.toHaveBeenCalled();
+  });
+
+  describe('unregisterPushToken (audit #18)', () => {
+    it('is a no-op when nothing was registered', async () => {
+      expect(getRegisteredPushToken()).toBeNull();
+      await unregisterPushToken();
+      expect(mockedDelete).not.toHaveBeenCalled();
+    });
+
+    it('deletes exactly the token this device registered and forgets it on success', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+      mockedGetToken.mockResolvedValueOnce({ data: 'ExponentPushToken[dev]' });
+      mockedPost.mockResolvedValueOnce({ data: { success: true } });
+      renderHook(() => useNotificationSetup());
+      await waitFor(() => expect(getRegisteredPushToken()).toBe('ExponentPushToken[dev]'));
+
+      mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+      await unregisterPushToken(4000);
+
+      expect(mockedDelete).toHaveBeenCalledWith('/auth/push-token', {
+        data: { token: 'ExponentPushToken[dev]' },
+        timeout: 4000,
+      });
+      expect(getRegisteredPushToken()).toBeNull();
+    });
+
+    it('keeps the local record and rethrows when the delete fails', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+      mockedGetToken.mockResolvedValueOnce({ data: 'tok-keep' });
+      mockedPost.mockResolvedValueOnce({ data: { success: true } });
+      renderHook(() => useNotificationSetup());
+      await waitFor(() => expect(getRegisteredPushToken()).toBe('tok-keep'));
+
+      mockedDelete.mockRejectedValueOnce(new Error('offline'));
+      await expect(unregisterPushToken()).rejects.toThrow('offline');
+      expect(getRegisteredPushToken()).toBe('tok-keep');
+
+      // Clean up module state for later tests.
+      mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+      await unregisterPushToken();
     });
   });
 
@@ -218,6 +311,9 @@ describe('useNotificationSetup runtime', () => {
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalledTimes(1);
     });
+    await new Promise((r) => setTimeout(r, 0));
+    // A failed registration must not be "remembered" as registered.
+    expect(getRegisteredPushToken()).toBeNull();
   });
 
   it('routes to the game screen when a notification with gameId is tapped', async () => {

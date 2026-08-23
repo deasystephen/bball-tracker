@@ -9,7 +9,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../services/api-client';
-import { useAuthStore } from '../store/auth-store';
+import { useIsAuthenticated } from '../store/auth-store';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -20,6 +20,33 @@ Notifications.setNotificationHandler({
     shouldSetBadge: true,
   }),
 });
+
+/**
+ * The Expo push token this device last registered with the backend, so logout
+ * can `DELETE /auth/push-token` for exactly that token (audit #18). Null until
+ * a registration succeeds, and after it has been unregistered.
+ */
+let registeredPushToken: string | null = null;
+
+export function getRegisteredPushToken(): string | null {
+  return registeredPushToken;
+}
+
+/**
+ * Unregister this device's push token from the backend. No-op when nothing
+ * was registered. Must run while the access token is still valid (i.e. before
+ * the auth store is cleared). Throws on request failure so the caller decides
+ * whether that matters; the local record is cleared only on success.
+ */
+export async function unregisterPushToken(timeoutMs?: number): Promise<void> {
+  const token = registeredPushToken;
+  if (!token) return;
+  await apiClient.delete('/auth/push-token', {
+    data: { token },
+    ...(timeoutMs ? { timeout: timeoutMs } : {}),
+  });
+  registeredPushToken = null;
+}
 
 /**
  * Register for push notifications and return the token
@@ -53,24 +80,29 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
 export function useNotificationSetup() {
   const router = useRouter();
   const responseListener = useRef<Notifications.EventSubscription>(null);
-  const { accessToken } = useAuthStore();
+  // Keyed on the *session*, not the access-token string: a token refresh
+  // every ~10 minutes must not re-run permission prompts and re-POST the
+  // push token (audit #62).
+  const isAuthenticated = useIsAuthenticated();
 
   useEffect(() => {
-    if (!accessToken) return;
+    if (!isAuthenticated) return;
 
-    // Register push token
-    registerForPushNotificationsAsync().then(async (token) => {
-      if (token) {
-        try {
-          await apiClient.post('/auth/push-token', {
-            token,
-            platform: Platform.OS,
-          });
-        } catch {
-          // Silently fail - token registration is not critical
-        }
-      }
-    });
+    // Register push token. Every step can reject (permission API, Expo push
+    // service, backend) — none of it is critical, but an unhandled rejection
+    // here surfaces as a red box / Sentry noise.
+    registerForPushNotificationsAsync()
+      .then(async (token) => {
+        if (!token) return;
+        await apiClient.post('/auth/push-token', {
+          token,
+          platform: Platform.OS,
+        });
+        registeredPushToken = token;
+      })
+      .catch(() => {
+        // Silently fail - token registration is not critical
+      });
 
     // Handle notification taps (deep-link to relevant screen)
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
@@ -88,5 +120,5 @@ export function useNotificationSetup() {
     return () => {
       responseListener.current?.remove();
     };
-  }, [accessToken, router]);
+  }, [isAuthenticated, router]);
 }

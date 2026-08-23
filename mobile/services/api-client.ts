@@ -1,6 +1,6 @@
 import { create as createAxiosInstance, AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import Constants from 'expo-constants';
-import { useAuthStore } from '../store/auth-store';
+import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 
 /**
  * API client configuration
@@ -140,10 +140,14 @@ export const refreshAccessToken = (client: AxiosInstance = apiClient): Promise<R
 
   const { refreshToken, setAuthToken } = useAuthStore.getState();
   if (!refreshToken) return Promise.resolve({ status: 'rejected' });
+  const epoch = getLogoutEpoch();
 
   refreshInFlight = client
     .post<RefreshResponse>('/auth/refresh', { refreshToken })
     .then((res): RefreshOutcome => {
+      // The user signed out while this was in flight: do not resurrect the
+      // session with the new pair (audit #41).
+      if (getLogoutEpoch() !== epoch) return { status: 'rejected' };
       setAuthToken(res.data.accessToken, res.data.refreshToken);
       return { status: 'ok', accessToken: res.data.accessToken };
     })
@@ -224,8 +228,9 @@ const createApiClient = (): AxiosInstance => {
       }
 
       // No refresh token, refresh token rejected, or the retry itself 401'd:
-      // the session is gone. Clearing auth triggers useAuthRedirect → /login.
-      useAuthStore.getState().logout();
+      // the session is gone. Local clear only (no network — the token is
+      // dead); it triggers useAuthRedirect → /login.
+      useAuthStore.getState().clearSession();
       return Promise.reject(error);
     }
   );

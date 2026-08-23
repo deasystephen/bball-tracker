@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../../shared/types';
 import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
+import { getSessionHooks } from './session-hooks';
 
 interface AuthState {
   accessToken: string | null;
@@ -20,8 +21,35 @@ interface AuthState {
   setUser: (user: User) => void;
   /** Merge fields into the current user without re-firing login analytics. */
   updateUser: (patch: Partial<User>) => void;
-  logout: () => void;
+  /**
+   * User-initiated sign-out: unregister this device's push token and revoke
+   * the WorkOS session (both best-effort), then `clearSession()`.
+   */
+  logout: () => Promise<void>;
+  /**
+   * Local-only sign-out: drop tokens/user, reset the socket and query cache.
+   * Used directly when the session is already dead server-side (refresh
+   * rejected) — no network calls, so it can never recurse through the
+   * api-client interceptor.
+   */
+  clearSession: () => void;
 }
+
+/**
+ * Incremented on every sign-out. The api-client captures it before a refresh
+ * and discards the result if it changed, so a refresh that resolves after
+ * logout cannot resurrect the session (audit #41).
+ */
+let logoutEpoch = 0;
+export const getLogoutEpoch = (): number => logoutEpoch;
+
+const CLEARED_SESSION = {
+  accessToken: null,
+  refreshToken: null,
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+} as const;
 
 /**
  * Auth store using Zustand for managing authentication state
@@ -29,7 +57,7 @@ interface AuthState {
  */
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       accessToken: null,
       refreshToken: null,
       user: null,
@@ -50,16 +78,37 @@ export const useAuthStore = create<AuthState>()(
         set((state) => (state.user ? { user: { ...state.user, ...patch } } : {}));
       },
 
-      logout: () => {
-        trackEvent(AnalyticsEvents.USER_LOGGED_OUT);
-        resetUser();
-        set({
-          accessToken: null,
-          refreshToken: null,
-          user: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
+      clearSession: () => {
+        logoutEpoch += 1;
+        const wasSignedIn = get().isAuthenticated || get().accessToken !== null;
+        if (wasSignedIn) {
+          trackEvent(AnalyticsEvents.USER_LOGGED_OUT);
+          resetUser();
+        }
+        set(CLEARED_SESSION);
+        // Side effects live in services/session-logout.ts and are reached
+        // through the session-hooks registry so this store never imports the
+        // api-client (which imports this store). Audit #17 (socket identity)
+        // and #19 (query cache).
+        try {
+          getSessionHooks().localCleanup?.();
+        } catch {
+          // Cleanup must never block a sign-out.
+        }
+      },
+
+      logout: async () => {
+        // Bump first so any refresh already in flight is discarded (#41),
+        // then spend the still-valid access token on the remote steps.
+        logoutEpoch += 1;
+        if (get().accessToken) {
+          try {
+            await getSessionHooks().remoteLogout?.();
+          } catch {
+            // Best-effort; local sign-out always proceeds.
+          }
+        }
+        get().clearSession();
       },
     }),
     {
@@ -122,5 +171,6 @@ export const useAuthActions = () =>
       setUser: state.setUser,
       updateUser: state.updateUser,
       logout: state.logout,
+      clearSession: state.clearSession,
     }))
   );
