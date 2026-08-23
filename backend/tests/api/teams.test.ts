@@ -515,6 +515,31 @@ describe('Teams API', () => {
       expect(response.status).toBe(400);
     });
 
+    it('should create-and-invite a new player with name + email in one call (audit #69)', async () => {
+      mockInvitationService.createInvitation.mockResolvedValue(mockInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ name: 'Jane Hooper', email: 'jane@example.com', jerseyNumber: 7 });
+
+      expect(response.status).toBe(201);
+      expect(response.body.invitation).not.toHaveProperty('token');
+      expect(mockInvitationService.createInvitation).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ name: 'Jane Hooper', email: 'jane@example.com', jerseyNumber: 7 }),
+        TEST_USER_ID
+      );
+    });
+
+    it('should return 400 when playerId and email are both supplied', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ playerId: TEST_PLAYER_ID, name: 'Jane', email: 'jane@example.com' });
+
+      expect(response.status).toBe(400);
+      expect(mockInvitationService.createInvitation).not.toHaveBeenCalled();
+    });
+
     it('should handle service errors', async () => {
       mockInvitationService.createInvitation.mockRejectedValue(
         new NotFoundError('Player not found')

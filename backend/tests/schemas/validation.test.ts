@@ -147,6 +147,60 @@ describe('Schema Validation', () => {
         expect(result.success).toBe(true);
       });
 
+      describe('createInvitationSchema create-and-invite (audit #69)', () => {
+        it('accepts name + email without playerId', () => {
+          const result = createInvitationSchema.safeParse({
+            name: '  Jane Hooper ',
+            email: 'jane@example.com',
+            jerseyNumber: 7,
+          });
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data.name).toBe('Jane Hooper');
+            expect(result.data.playerId).toBeUndefined();
+            expect(result.data.expiresInDays).toBe(7);
+          }
+        });
+
+        it('accepts an https profilePictureUrl with name + email', () => {
+          const result = createInvitationSchema.safeParse({
+            name: 'Jane',
+            email: 'jane@example.com',
+            profilePictureUrl: 'https://cdn.example.com/a.png',
+          });
+          expect(result.success).toBe(true);
+        });
+
+        it('rejects a body with neither playerId nor name + email', () => {
+          expect(createInvitationSchema.safeParse({}).success).toBe(false);
+          expect(createInvitationSchema.safeParse({ name: 'Jane' }).success).toBe(false);
+          expect(createInvitationSchema.safeParse({ email: 'jane@example.com' }).success).toBe(false);
+        });
+
+        it('rejects playerId combined with name/email', () => {
+          const result = createInvitationSchema.safeParse({
+            playerId: UUID_ID,
+            name: 'Jane',
+            email: 'jane@example.com',
+          });
+          expect(result.success).toBe(false);
+        });
+
+        it('rejects an invalid email and an empty name', () => {
+          expect(createInvitationSchema.safeParse({ name: 'Jane', email: 'nope' }).success).toBe(false);
+          expect(createInvitationSchema.safeParse({ name: '   ', email: 'jane@example.com' }).success).toBe(false);
+        });
+
+        it('rejects a non-http profilePictureUrl', () => {
+          const result = createInvitationSchema.safeParse({
+            name: 'Jane',
+            email: 'jane@example.com',
+            profilePictureUrl: 'ftp://cdn.example.com/a.png',
+          });
+          expect(result.success).toBe(false);
+        });
+      });
+
       it('should accept optional playerId in createGameEventSchema', () => {
         const result = createGameEventSchema.safeParse({
           eventType: 'SHOT',

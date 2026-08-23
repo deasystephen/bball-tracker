@@ -17,6 +17,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { formatInvitationExpiry, isInvitationExpired } from '../../utils/invitation-expiry';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 
@@ -92,24 +93,8 @@ export default function InvitationsScreen() {
     }
   };
 
-  const formatExpirationDate = (expiresAt: string) => {
-    const date = new Date(expiresAt);
-    const now = new Date();
-    const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) {
-      return 'Expired';
-    } else if (diffDays === 0) {
-      return 'Expires today';
-    } else if (diffDays === 1) {
-      return 'Expires tomorrow';
-    } else {
-      return `Expires in ${diffDays} days`;
-    }
-  };
-
   const renderInvitation = ({ item }: { item: TeamInvitation }) => {
-    const isExpired = new Date(item.expiresAt) < new Date();
+    const isExpired = isInvitationExpired(item.expiresAt);
     const isPending = item.status === 'PENDING';
     const canAccept = isPending && !isExpired;
 
@@ -169,7 +154,7 @@ export default function InvitationsScreen() {
           <View style={styles.detailRow}>
             <Ionicons name="time-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary">
-              {formatExpirationDate(item.expiresAt)}
+              {formatInvitationExpiry(item.expiresAt)}
             </ThemedText>
           </View>
         </View>

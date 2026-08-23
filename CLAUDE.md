@@ -289,6 +289,18 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
   `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
   other callers with team access (rostered players) remain scoped to `playerId = caller`.
+- **Create-and-invite (audit #69).** `POST /teams/:id/invitations` accepts **either** `{ playerId }` or
+  `{ name, email, profilePictureUrl? }` (never both — `createInvitationSchema` `superRefine`). With an email:
+  an existing account with that email is reused (so a retry or a self-signed-up player just works);
+  otherwise the `User` (`role: PLAYER`, unverified) and the `TeamInvitation` are created in **one
+  `$transaction`**, so a failed invite never leaves an orphan player. Mobile `app/teams/[id]/players.tsx`
+  uses this single call (the old `POST /players` → `POST /invitations` two-step is gone).
+- **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
+  (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `capyhoops.com/invite/<token>` is
+  rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
+  stays on the IP-keyed `writeRateLimit` (the browser calls it directly).
+- Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
+  `isInvitationExpired`, timestamp compare — no `Math.ceil` → `-0` "Expires today" on a dead invite, #59).
 
 ### Player directory (`/api/v1/players`)
 
