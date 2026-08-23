@@ -8,7 +8,7 @@
 
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Button } from '../../components';
@@ -25,6 +25,7 @@ type Choice = UserRole.PLAYER | UserRole.COACH;
 
 export default function RoleSelectScreen() {
   const router = useRouter();
+  const { from } = useLocalSearchParams<{ from?: string }>();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -35,8 +36,11 @@ export default function RoleSelectScreen() {
   );
   const [saving, setSaving] = useState(false);
 
+  // Only the Profile → "Change account type" path should pop back. On the
+  // first-login path the previous stack entry is the login screen, so
+  // `router.back()` would strand a freshly signed-in coach on it.
   const finish = () => {
-    if (router.canGoBack()) {
+    if (from === 'profile' && router.canGoBack()) {
       router.back();
     } else {
       router.replace(HOME_ROUTE);
