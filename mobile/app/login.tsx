@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -28,6 +28,22 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [showDevLogin, setShowDevLogin] = useState(false);
   const [devUsers, setDevUsers] = useState<DevUser[]>([]);
+  // True while the system browser is open for WorkOS sign-in. If the user
+  // backs out of the browser without completing the flow, no deep link ever
+  // arrives — so the spinner must be cleared when the app returns to the
+  // foreground (audit #33). A successful sign-in lands on /auth/callback and
+  // unmounts this screen, so resetting here is harmless in that case.
+  const awaitingBrowserRef = useRef(false);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && awaitingBrowserRef.current) {
+        awaitingBrowserRef.current = false;
+        setIsLoading(false);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // The OAuth redirect (bball-tracker://auth/callback?code=…) is handled by the
   // dedicated `app/auth/callback.tsx` route, which Expo Router matches on the
@@ -50,12 +66,14 @@ export default function Login() {
       // Open the authorization URL in browser
       const canOpen = await Linking.canOpenURL(url);
       if (canOpen) {
+        awaitingBrowserRef.current = true;
         await Linking.openURL(url);
       } else {
         Alert.alert('Error', 'Cannot open browser. Please check your device settings.');
         setIsLoading(false);
       }
     } catch (error) {
+      awaitingBrowserRef.current = false;
       captureException(error, { flow: 'login-initiate' });
       console.error('Login error:', error);
       Alert.alert('Error', 'Failed to initiate login. Please try again.');

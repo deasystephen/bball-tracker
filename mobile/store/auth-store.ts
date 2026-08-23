@@ -71,17 +71,34 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          // In dev mode, always start logged out to avoid stale auth state
-          if (__DEV__) {
-            state.accessToken = null;
-            state.refreshToken = null;
-            state.user = null;
-            state.isAuthenticated = false;
-          }
-          state.isLoading = false;
+      // Called with (state, undefined) on success and (undefined, error) when
+      // AsyncStorage is unreadable/corrupt. Both branches must clear
+      // `isLoading`, or app/index.tsx shows "Loading…" forever (audit #34).
+      // Use `set`, never mutate the passed state object (it is a snapshot).
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.warn('Auth storage rehydration failed; starting logged out', error);
+          useAuthStore.setState({
+            accessToken: null,
+            refreshToken: null,
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+          return;
         }
+        if (__DEV__) {
+          // In dev mode, always start logged out to avoid stale auth state
+          useAuthStore.setState({
+            accessToken: null,
+            refreshToken: null,
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+          return;
+        }
+        useAuthStore.setState({ isLoading: false });
       },
     }
   )

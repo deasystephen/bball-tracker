@@ -29,27 +29,56 @@ interface RefreshResponse {
 }
 
 /**
+ * Outcome of a refresh attempt.
+ *  - `ok`: new access token stored and returned.
+ *  - `rejected`: the server said the refresh token is invalid (401) or there
+ *    is none to send — the session is gone and the caller should log out.
+ *  - `unavailable`: the refresh could not be completed (network error,
+ *    timeout, 5xx/503, 429). The stored tokens are still valid as far as we
+ *    know, so callers must NOT log out; surface the error and let the user
+ *    retry (audit #20).
+ */
+export type RefreshOutcome =
+  | { status: 'ok'; accessToken: string }
+  | { status: 'rejected' }
+  | { status: 'unavailable'; error: unknown };
+
+const isAxiosError = (err: unknown): err is AxiosError =>
+  typeof err === 'object' && err !== null && 'isAxiosError' in err && (err as AxiosError).isAxiosError === true;
+
+/** True only for a definitive "this refresh token is no good" answer. */
+const isRefreshRejection = (err: unknown): boolean => {
+  const status = isAxiosError(err)
+    ? err.response?.status
+    : (err as { response?: { status?: number } } | null)?.response?.status;
+  return status === 401;
+};
+
+/**
  * Single-flight refresh. When several requests 401 at once (e.g. Home firing
  * teams + games + invitations after the app returns from background with an
  * expired token) they all await the same refresh call; WorkOS rotates the
  * refresh token on every use, so firing it in parallel would invalidate all
  * but the first.
  */
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
 
-const refreshAccessToken = (client: AxiosInstance): Promise<string | null> => {
+export const refreshAccessToken = (client: AxiosInstance = apiClient): Promise<RefreshOutcome> => {
   if (refreshInFlight) return refreshInFlight;
 
   const { refreshToken, setAuthToken } = useAuthStore.getState();
-  if (!refreshToken) return Promise.resolve(null);
+  if (!refreshToken) return Promise.resolve({ status: 'rejected' });
 
   refreshInFlight = client
     .post<RefreshResponse>('/auth/refresh', { refreshToken })
-    .then((res) => {
+    .then((res): RefreshOutcome => {
       setAuthToken(res.data.accessToken, res.data.refreshToken);
-      return res.data.accessToken;
+      return { status: 'ok', accessToken: res.data.accessToken };
     })
-    .catch(() => null)
+    .catch((err: unknown): RefreshOutcome => {
+      if (isRefreshRejection(err)) return { status: 'rejected' };
+      return { status: 'unavailable', error: err };
+    })
     .finally(() => {
       refreshInFlight = null;
     });
@@ -92,18 +121,30 @@ const createApiClient = (): AxiosInstance => {
         return Promise.reject(error);
       }
 
-      // Expired access token: refresh once and replay the original request.
       const original = error.config as RetriableConfig | undefined;
-      if (original && !original._retry && !isNoRefreshPath(original.url)) {
+
+      // A 401 from an auth endpoint is that endpoint's own business (a
+      // rejected refresh is handled by refreshAccessToken's caller; a failed
+      // login/callback never had a session to end). Never log out here.
+      if (original && isNoRefreshPath(original.url)) {
+        return Promise.reject(error);
+      }
+
+      // Expired access token: refresh once and replay the original request.
+      if (original && !original._retry) {
         original._retry = true;
-        const newToken = await refreshAccessToken(client);
-        if (newToken) {
-          original.headers.Authorization = `Bearer ${newToken}`;
+        const outcome = await refreshAccessToken(client);
+        if (outcome.status === 'ok') {
+          original.headers.Authorization = `Bearer ${outcome.accessToken}`;
           return client.request(original);
+        }
+        if (outcome.status === 'unavailable') {
+          // Transient: keep the session, surface the failure to the caller.
+          return Promise.reject(error);
         }
       }
 
-      // No refresh token, refresh rejected, or the retry itself 401'd:
+      // No refresh token, refresh token rejected, or the retry itself 401'd:
       // the session is gone. Clearing auth triggers useAuthRedirect → /login.
       useAuthStore.getState().logout();
       return Promise.reject(error);

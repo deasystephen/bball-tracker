@@ -173,6 +173,39 @@ describe('auth-store', () => {
   });
 });
 
+describe('auth-store rehydration', () => {
+  type RehydrateCb = (state: unknown, error?: unknown) => void;
+  const getOnRehydrate = (): RehydrateCb =>
+    (useAuthStore as unknown as {
+      persist: { getOptions: () => { onRehydrateStorage: () => RehydrateCb } };
+    }).persist.getOptions().onRehydrateStorage();
+
+  beforeEach(() => {
+    useAuthStore.setState({ accessToken: 'a', refreshToken: 'r', user: makeUser(), isAuthenticated: true, isLoading: true });
+  });
+
+  // Audit #34: persist calls the callback with (undefined, error) when
+  // AsyncStorage is corrupt/unreadable. isLoading must still clear or
+  // app/index.tsx shows "Loading…" forever.
+  it('clears isLoading and starts logged out when hydration fails', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    getOnRehydrate()(undefined, new Error('corrupt'));
+    expect(useAuthStore.getState()).toMatchObject({
+      isLoading: false,
+      isAuthenticated: false,
+      accessToken: null,
+      refreshToken: null,
+      user: null,
+    });
+    warn.mockRestore();
+  });
+
+  it('clears isLoading on successful hydration', () => {
+    getOnRehydrate()(useAuthStore.getState(), undefined);
+    expect(useAuthStore.getState().isLoading).toBe(false);
+  });
+});
+
 describe('auth-store updateUser', () => {
   beforeEach(() => {
     useAuthStore.getState().logout();
