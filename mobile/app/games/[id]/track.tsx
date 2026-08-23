@@ -55,6 +55,8 @@ export default function TrackGameScreen() {
     lastMilestone,
     selectPlayer,
     recordEvent,
+    confirmEvent,
+    discardEvent,
     clearLastEvent,
     undoLast,
     setUndoTimer,
@@ -141,16 +143,18 @@ export default function TrackGameScreen() {
         metadata: { made, points },
       };
 
-      // Record locally first (optimistic)
-      recordEvent(eventData, selectedPlayerName || undefined);
+      // Record locally first (optimistic). UNDO stays disabled until the
+      // server id is known (audit #7).
+      const local = recordEvent(eventData, selectedPlayerName || undefined);
 
       try {
         // Create event on server. The response carries the server-derived
         // score, which the mutation writes into the game cache.
-        await createEvent.mutateAsync({
+        const { event } = await createEvent.mutateAsync({
           gameId: id,
           data: eventData,
         });
+        confirmEvent(local.localId, event.id);
 
         // Set up undo timer
         const timerId = setTimeout(() => {
@@ -166,7 +170,7 @@ export default function TrackGameScreen() {
         refetchEvents();
       } catch (error) {
         // Remove local event on failure
-        undoLast();
+        discardEvent(local.localId);
         Alert.alert(
           'Error',
           error instanceof Error ? error.message : 'Failed to record shot'
@@ -178,12 +182,13 @@ export default function TrackGameScreen() {
       selectedPlayerName,
       id,
       recordEvent,
+      confirmEvent,
       createEvent,
       clearLastEvent,
       setUndoTimer,
       selectPlayer,
       refetchEvents,
-      undoLast,
+      discardEvent,
     ]
   );
 
@@ -233,15 +238,17 @@ export default function TrackGameScreen() {
         metadata,
       };
 
-      // Record locally first (optimistic)
-      recordEvent(eventData, selectedPlayerName || undefined);
+      // Record locally first (optimistic). UNDO stays disabled until the
+      // server id is known (audit #7).
+      const local = recordEvent(eventData, selectedPlayerName || undefined);
 
       try {
         // Create event on server
-        await createEvent.mutateAsync({
+        const { event } = await createEvent.mutateAsync({
           gameId: id,
           data: eventData,
         });
+        confirmEvent(local.localId, event.id);
 
         // Set up undo timer
         const timerId = setTimeout(() => {
@@ -257,7 +264,7 @@ export default function TrackGameScreen() {
         refetchEvents();
       } catch (error) {
         // Remove local event on failure
-        undoLast();
+        discardEvent(local.localId);
         Alert.alert(
           'Error',
           error instanceof Error ? error.message : `Failed to record ${statLabel}`
@@ -269,40 +276,42 @@ export default function TrackGameScreen() {
       selectedPlayerName,
       id,
       recordEvent,
+      confirmEvent,
       createEvent,
       clearLastEvent,
       setUndoTimer,
       selectPlayer,
       refetchEvents,
-      undoLast,
+      discardEvent,
     ]
   );
 
-  // Handle undo
+  // Handle undo — deletes the exact server event the banner refers to. The
+  // banner is disabled until `confirmEvent` has attached the server id, so
+  // we never fall back to guessing from the events cache (audit #7).
   const handleUndo = useCallback(async () => {
+    const { lastEvent: target } = useGameTrackingStore.getState();
+    if (!target?.serverId) return;
+
     const undoneEvent = undoLast();
     if (!undoneEvent) return;
 
-    // Find the most recent server event that matches
-    if (events && events.length > 0) {
-      const mostRecentEvent = events[0];
-      try {
-        // The server recomputes the home score when a SHOT is removed and
-        // returns it; the mutation writes it into the game cache.
-        await deleteEvent.mutateAsync({
-          gameId: id,
-          eventId: mostRecentEvent.id,
-        });
+    try {
+      // The server recomputes the home score when a SHOT is removed and
+      // returns it; the mutation writes it into the game cache.
+      await deleteEvent.mutateAsync({
+        gameId: id,
+        eventId: target.serverId,
+      });
 
-        refetchEvents();
-      } catch (error) {
-        Alert.alert(
-          'Error',
-          error instanceof Error ? error.message : 'Failed to undo'
-        );
-      }
+      refetchEvents();
+    } catch (error) {
+      Alert.alert(
+        'Error',
+        error instanceof Error ? error.message : 'Failed to undo'
+      );
     }
-  }, [undoLast, events, id, deleteEvent, refetchEvents]);
+  }, [undoLast, id, deleteEvent, refetchEvents]);
 
   // Handle end game
   const handleEndGame = useCallback(() => {
@@ -469,12 +478,14 @@ export default function TrackGameScreen() {
         <EventTimeline events={displayEvents} maxEvents={10} />
       </ScrollView>
 
-      {/* Undo Banner */}
+      {/* Undo Banner — keyed by event so the countdown restarts per event */}
       <UndoBanner
+        key={lastEvent?.localId ?? 'none'}
         visible={!!lastEvent}
         message={undoMessage}
         onUndo={handleUndo}
         duration={UNDO_DURATION}
+        pending={!!lastEvent && !lastEvent.serverId}
       />
 
       {/* Confetti on win */}

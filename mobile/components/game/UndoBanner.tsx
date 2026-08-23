@@ -20,6 +20,15 @@ interface UndoBannerProps {
   message: string;
   onUndo: () => void;
   duration?: number; // Duration in seconds
+  /**
+   * True while the event is still being persisted. The UNDO button is
+   * disabled and the countdown doesn't start until the server id is known,
+   * so an undo can never target the wrong event (audit #7).
+   *
+   * Callers should `key` the banner by event id so the countdown restarts
+   * for each consecutive event (audit #77).
+   */
+  pending?: boolean;
 }
 
 export const UndoBanner: React.FC<UndoBannerProps> = ({
@@ -27,6 +36,7 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
   message,
   onUndo,
   duration = 5,
+  pending = false,
 }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -50,24 +60,27 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
     if (visible) {
       opacity.set(withTiming(1, { duration: 200 }));
       translateY.set(withTiming(0, { duration: 200 }));
-      // Progress bar shrinks from 100% to 0% over the duration
+      // Progress bar shrinks from 100% to 0% over the duration, starting only
+      // once the event is confirmed.
       progressWidth.set(1);
-      progressWidth.set(withTiming(0, { duration: duration * 1000 }));
+      if (!pending) {
+        progressWidth.set(withTiming(0, { duration: duration * 1000 }));
+      }
     } else {
       opacity.set(withTiming(0, { duration: 200 }));
       translateY.set(withTiming(50, { duration: 200 }));
     }
-  }, [visible, duration, opacity, translateY, progressWidth]);
+  }, [visible, pending, duration, opacity, translateY, progressWidth]);
 
   useEffect(() => {
-    if (!visible || countdown <= 0) return;
+    if (!visible || pending || countdown <= 0) return;
 
     const timer = setInterval(() => {
       setCountdown((prev) => prev - 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [visible, countdown]);
+  }, [visible, pending, countdown]);
 
   const containerAnimatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -113,10 +126,16 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
         </View>
         <TouchableOpacity
           onPress={onUndo}
-          style={[styles.undoButton, { backgroundColor: colors.primary }]}
+          disabled={pending}
+          accessibilityState={{ disabled: pending }}
+          style={[
+            styles.undoButton,
+            { backgroundColor: colors.primary },
+            pending && styles.undoButtonPending,
+          ]}
         >
           <ThemedText variant="captionBold" style={styles.undoText}>
-            UNDO ({countdown}s)
+            {pending ? 'SAVING…' : `UNDO (${countdown}s)`}
           </ThemedText>
         </TouchableOpacity>
         {/* Countdown progress bar */}
@@ -171,6 +190,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: 8,
     marginLeft: spacing.sm,
+  },
+  undoButtonPending: {
+    opacity: 0.5,
   },
   undoText: {
     color: '#FFFFFF',

@@ -452,9 +452,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### G.3 — Undo last event
 - [ ] Pass / Fail / Skipped
-- **Steps:** After G.1, tap Undo banner.
-- **Expected:** Event removed. Score decrements. Spectator view updates.
-- **Notes:** ___________
+- **Steps:** After G.1, record a made 2-pt and tap the Undo banner. Then record two events back-to-back (made 3, then a rebound) and watch the banner.
+- **Expected:** The banner shows "SAVING…" (disabled) until the event is persisted, then "UNDO (5s)". Undo removes **that** event (not an earlier one): timeline drops it, home score decrements, spectator view updates. The second back-to-back event restarts the countdown at 5s with the new message. Tapping the banner while it still says "SAVING…" does nothing.
+- **Notes:** Audit #7 — previously undo deleted `events[0]` from the cache, i.e. the *previous* play, if tapped before the create resolved.
 
 ### G.4 — Hot-streak milestone
 - [ ] Pass / Fail / Skipped
