@@ -4,23 +4,19 @@ Source: adversarially verified audit of `backend/` + `mobile/` at commit 71646b4
 artifact https://claude.ai/code/artifact/1dfe2db8-9265-4116-9b2d-95ac49f13d5f). Entry numbers below (`#n`)
 refer to that ranking.
 
-**Status 2026-08-23 (re-verified against `main`, per-entry statuses on the report artifact):** 77 of 82
-entries are fixed — shipped in PRs #352–#401 (PR-0 JWT verification, PR-1 role self-select, lanes A–I, and
-the native build for #37/#52). The role-matrix follow-ups that grew out of lane A/B (team staff management,
-permission gates, PARENT/guardian role, dead entitlement UI) landed in #392–#400. The remainder — none of
-which was assigned to a lane:
+**Status 2026-08-23 (final — verified against `main`, per-entry statuses on the report artifact):**
+all 82 entries are addressed. 77 shipped in PRs #352–#401 (PR-0 JWT verification, PR-1 role self-select,
+lanes A–I, the native build for #37/#52, and the role-matrix follow-ups #392–#400 that grew out of lane
+A/B). The re-verification remainder — none of which had been assigned to a lane — closed the same day:
 
-- **#16 (partial):** the WorkOS-quota half is fixed (local JWKS verify, #352), but there is still no
-  per-IP socket connection limiter or `join-game` throttle in `backend/src/websocket/`.
-- **#42 (fixed in this follow-up):** `/auth/callback` now maps a WorkOS 4xx code rejection
-  (`invalid_grant`, PKCE mismatch) to 400 without a Sentry capture; outages still 500 + Sentry.
-- **#68 (fixed in this follow-up):** the surviving jersey-`0` truthiness checks in
-  `(tabs)/invitations.tsx`, `components/game/PlayerRoster.tsx` and `components/stats/BoxScoreTable.tsx`
-  are now `!= null`.
-- **#72 (deferred by design):** socket eviction on team removal folded into issue #49 (mid-session
-  re-auth), per the comment in `game-events.ts` — that issue is the tracked disposition.
-- **#74 (fixed in this follow-up):** `app/auth/callback.tsx` no longer renders the `error` query param
-  verbatim — known OAuth codes map to fixed copy, everything else gets a generic message.
+- **#42, #68, #74 → fixed in #405** (callback code rejection answers 400 without Sentry; jersey `0`
+  renders in the invitations tab / tracker roster / box score; the OAuth `error` deep-link param is never
+  rendered verbatim).
+- **#16 → fixed in #406** (`websocket/rate-limit.ts`: 60 handshake attempts/min per IP checked before
+  auth, 50 concurrent sockets per IP, `join-game` 20/min per socket; mobile backs off on `Rate limited`).
+  The WorkOS-quota half had already been fixed by #352's local JWKS verification.
+- **#72 → resolved by disposition:** socket eviction on team removal is folded into issue #49
+  (mid-session re-auth), per the comment in `game-events.ts` and the status note on that issue.
 
 Otherwise this document is historical; current behaviour is described in `CLAUDE.md`.
 
