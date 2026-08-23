@@ -618,6 +618,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   FG (1/1) and a second with 1 made of 9 attempts (1/9), then reopen this screen.
 - **Expected:** Team-wide aggregates + per-player table. Season FG% reads **20.0%** (2/10, attempt-weighted),
   not 55.6% (mean of the per-game percentages). Fixed in audit #26.
+- **Tie (audit #56):** finish a game with equal scores (e.g. 40-40). The record shows a third, grey **T**
+  column (e.g. `1 - 0 - 1`); the Games tab, Home recent-activity row, box score header, and the streak dots on
+  the Stats tab all render that game as a grey **T**, not a red L.
 - **Notes:** ___________
 
 ### K.4 — Career stats across seasons

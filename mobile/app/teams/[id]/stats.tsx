@@ -27,6 +27,7 @@ import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
+import { getResultColor } from '../../../utils/game-result';
 
 type SortKey = 'ppg' | 'rpg' | 'apg' | 'efficiency';
 
@@ -141,6 +142,14 @@ export default function TeamStatsScreen() {
                 <ThemedText variant="h1" color="error">
                   {seasonStats.losses}
                 </ThemedText>
+                {seasonStats.ties > 0 && (
+                  <>
+                    <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
+                    <ThemedText variant="h1" color="textSecondary">
+                      {seasonStats.ties}
+                    </ThemedText>
+                  </>
+                )}
               </View>
             </View>
             <ThemedText variant="caption" color="textSecondary" style={styles.gamesPlayed}>
@@ -200,9 +209,7 @@ export default function TeamStatsScreen() {
                     <View style={styles.gameResult}>
                       <ThemedText
                         variant="bodyBold"
-                        style={{
-                          color: game.result === 'W' ? colors.success : colors.error,
-                        }}
+                        style={{ color: getResultColor(game.result, colors) }}
                       >
                         {game.result}
                       </ThemedText>

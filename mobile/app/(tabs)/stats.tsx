@@ -20,6 +20,7 @@ import { useTeamSeasonStats, useTeamRosterStats } from '../../hooks/useStats';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { getResultColor } from '../../utils/game-result';
 
 export default function Stats() {
   const router = useRouter();
@@ -180,6 +181,24 @@ export default function Stats() {
                       L
                     </ThemedText>
                   </View>
+                  {seasonStats.ties > 0 && (
+                    <>
+                      <ThemedText variant="h2" color="textTertiary">
+                        -
+                      </ThemedText>
+                      <View style={styles.recordNum}>
+                        <ThemedText
+                          variant="h1"
+                          style={{ color: colors.textSecondary, fontSize: 48, lineHeight: 54 }}
+                        >
+                          {seasonStats.ties}
+                        </ThemedText>
+                        <ThemedText variant="caption" color="textSecondary">
+                          T
+                        </ThemedText>
+                      </View>
+                    </>
+                  )}
                 </View>
 
                 {/* Streak indicator dots */}
@@ -191,8 +210,7 @@ export default function Stats() {
                         style={[
                           styles.streakDot,
                           {
-                            backgroundColor:
-                              result === 'W' ? colors.success : colors.error,
+                            backgroundColor: getResultColor(result, colors),
                           },
                         ]}
                       />

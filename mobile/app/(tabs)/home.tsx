@@ -27,6 +27,7 @@ import {
 } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { getGameResult, getResultColor } from '../../utils/game-result';
 import { getTeamColor } from '../../utils/team-colors';
 import type { Game } from '../../types/game';
 
@@ -403,7 +404,8 @@ export default function Home() {
           ))}
 
           {recentGames.map((game: Game) => {
-            const isWin = game.homeScore > game.awayScore;
+            const result = getGameResult(game.homeScore, game.awayScore);
+            const resultColor = getResultColor(result, colors);
             return (
               <TouchableOpacity
                 key={`game-${game.id}`}
@@ -413,26 +415,20 @@ export default function Home() {
                 <View
                   style={[
                     styles.activityStripe,
-                    {
-                      backgroundColor: isWin ? colors.success : colors.error,
-                    },
+                    { backgroundColor: resultColor },
                   ]}
                 />
                 <View
                   style={[
                     styles.activityIcon,
-                    {
-                      backgroundColor: isWin
-                        ? colors.success + '20'
-                        : colors.error + '20',
-                    },
+                    { backgroundColor: resultColor + '20' },
                   ]}
                 >
                   <ThemedText
                     variant="captionBold"
-                    style={{ color: isWin ? colors.success : colors.error }}
+                    style={{ color: resultColor }}
                   >
-                    {isWin ? 'W' : 'L'}
+                    {result}
                   </ThemedText>
                 </View>
                 <View style={styles.activityInfo}>

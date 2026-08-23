@@ -199,6 +199,11 @@ current score so a client can drop events and still converge.
   `20260822120000_team_stats_shooting_counts` backfilled existing rows from their `PlayerStats`.
 - Use the exported `shootingPercentage(made, attempted)` helper (1 decimal, `0` when nothing attempted)
   rather than inlining the rounding.
+- **Ties.** Equal scores are a `'T'`, never a loss: the season record is `{ wins, losses, ties }`
+  (`gamesPlayed = wins + losses + ties`) and `recentGames[].result` is `'W' | 'L' | 'T'` (`gameResult()` in
+  `stats-service.ts`). Mobile derives outcomes only through `mobile/utils/game-result.ts`
+  (`getGameResult`, `getResultColor` — T is neutral `textSecondary`, `formatRecord`); never compare
+  `homeScore > awayScore` inline in a screen. Screens show the tie count only when it is non-zero.
 
 ### Game score (server-derived, audit #6/#8/#38)
 
