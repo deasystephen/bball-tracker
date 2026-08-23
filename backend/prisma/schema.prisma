@@ -306,7 +306,14 @@ model TeamInvitation {
   player    User @relation("PlayerInvitations", fields: [playerId], references: [id], onDelete: Cascade)
   invitedBy User @relation("SentInvitations", fields: [invitedById], references: [id])
 
-  @@unique([teamId, playerId, status], name: "unique_pending_invitation")
+  // Uniqueness is enforced by a PARTIAL unique index that Prisma cannot
+  // express: "TeamInvitation_pending_teamId_playerId_key" ON (teamId, playerId)
+  // WHERE status = 'PENDING' — see migration
+  // 20260823060000_partial_unique_pending_invitation (audit #22). Only one
+  // PENDING invitation may exist per team/player; any number of
+  // ACCEPTED/REJECTED/CANCELLED/EXPIRED rows may accumulate. Do not re-add a
+  // plain @@unique here — it would break the re-invite lifecycle (P2002).
+  @@index([teamId, playerId])
   @@index([playerId])
   @@index([teamId])
   @@index([status])
