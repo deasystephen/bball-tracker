@@ -234,7 +234,7 @@ export class TeamService {
       ...team,
       members: team.members.map(({ player, ...member }) => ({
         ...member,
-        player: { id: player.id, name: player.name },
+        player: { id: player.id, name: player.name, isManaged: player.isManaged },
       })),
     };
   }
