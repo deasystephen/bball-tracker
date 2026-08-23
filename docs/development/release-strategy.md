@@ -1,59 +1,53 @@
 # Release Strategy
 
-## Branch Purpose
+`main` is the only long-lived branch and is always deployable. "Releasing" means
+different things per package:
 
-- **`main`**: Production-ready, stable code that could be deployed
-- **`develop`**: Active development, integration of features
+| Package | How it reaches users | Trigger |
+|---|---|---|
+| `backend/` | Docker image → ECR → ECS Fargate (`api.capyhoops.com`) | **Automatic** on every merge to `main` that touches `backend/` (`.github/workflows/ci.yml`; Prisma migrations run from `docker/entrypoint.sh`) |
+| `mobile/` JS-only changes | EAS **OTA update** on the `production` branch | Manual: `npx eas-cli update --branch production --environment production --platform ios --non-interactive --message "…"` (run from `mobile/`) |
+| `mobile/` native changes (new native module, `app.config.js` plugins/entitlements, Expo SDK bump) | EAS **build** → TestFlight / App Store | Manual: `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` |
+| `web/` | Not deployed yet (`capyhoops.com` has no hosting target) | — |
 
-## When to Merge to Main
+## Backend
 
-### Recommended Approach
+1. Merge to `main` → CI builds, pushes to ECR and rolls the ECS service (deploy
+   waiter 10 min; health check `GET /health` → `{"status":"ok","db":"ok"}`).
+2. Verify with `curl -s https://api.capyhoops.com/health` and the Datadog /
+   Sentry dashboards. Roll back by re-deploying the previous task-definition
+   revision.
 
-Merge `develop` → `main` when you reach **milestones**:
+## Mobile
 
-1. **Initial Setup Complete** (Current milestone)
-   - ✅ Project structure
-   - ✅ Backend foundation
-   - ✅ Basic documentation
-   - **Status**: Ready to merge to `main` ✅
+Decide OTA vs. native build **before** merging:
 
-2. **MVP Ready** (Future milestone)
-   - Backend APIs working
-   - Mobile app can connect to backend
-   - Basic features functional
-   - **Status**: Ready for first release
+- **OTA** is only for JS/asset changes. An `eas update` evaluates
+  `app.config.js` on your machine — always pass `--environment production` so
+  `APP_ENV`, `SENTRY_DSN` and `AMPLITUDE_API_KEY` are loaded (otherwise the
+  update ships `apiUrl: http://127.0.0.1:3000`). Updates apply on the **second**
+  launch after download.
+- **Native build** whenever a native dependency changes (e.g.
+  `@sentry/react-native`, Reanimated, Expo SDK), or `app.config.js` gains
+  plugins / entitlements (`ios.associatedDomains` for Universal Links). Bump the
+  marketing version in `app.config.js` when a new native build is cut; the EAS
+  `appVersion` runtime policy then scopes future OTAs to that binary.
+- Build numbers auto-increment on EAS (`appVersionSource: remote`) and are not
+  tracked in-repo.
 
-3. **Feature Complete** (Future milestone)
-   - All core features implemented
-   - Tested and stable
-   - **Status**: Ready for v1.0.0
+Never use `npm start` / Expo Go for this app — the dev client must be built with
+`npx expo run:ios`.
 
-## Current Recommendation
+## Tagging
 
-**Yes, push `develop` to GitHub now:**
-- You have completed backend initialization
-- It's a logical checkpoint
-- Good for backup and collaboration
+Tag `main` (`git tag -a vX.Y.Z`) for notable milestones — see
+[`git-workflow.md`](./git-workflow.md#tagging-releases). Tags are informational;
+deploys are driven by merges, not tags.
 
-**Consider merging to `main` when:**
-- You have a few more features complete (mobile app setup, basic APIs)
-- OR when you want to tag your first release
-- OR when you're ready to deploy something
+## Pre-release verification
 
-## Typical Release Cycle
-
-```
-1. Work on features → develop
-2. Test on develop
-3. When stable → merge to main
-4. Tag release: git tag -a v0.1.0
-5. Continue development on develop
-```
-
-## For Open Source Projects
-
-- `main` should always be in a deployable state
-- Anyone cloning the repo should get working code
-- Releases are tagged from `main`
-- `develop` can be "work in progress"
-
+Run the manual E2E plan in
+[`docs/testing/e2e-test-plan-v2.0.md`](../testing/e2e-test-plan-v2.0.md)
+against a fresh TestFlight build + the current ECS revision before declaring a
+release ready. Maestro flows in `.maestro/` cover the main mobile journeys
+locally (they are not run in CI).

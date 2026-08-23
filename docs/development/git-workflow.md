@@ -2,134 +2,82 @@
 
 ## Branch Strategy
 
-We use a **feature branch workflow** with the following branches:
+There is **one long-lived branch: `main`** (protected). There is no `develop`
+branch. All work happens on short-lived branches cut from `main` and merged back
+through a pull request.
 
-- **`main`**: Production-ready code (protected)
-- **`develop`**: Integration branch for completed features
-- **`feature/*`**: Feature development branches
-- **`fix/*`**: Bug fix branches
+- **`main`** — production-ready code. Every merge to `main` that touches
+  `backend/` is auto-deployed to ECS by CI (`.github/workflows/ci.yml`).
+- **`feature/*`** — new functionality
+- **`fix/*`** — bug fixes
+- **`docs/*`** — documentation-only changes
+- **`chore/*`** — dependency bumps, tooling
 
 ## Workflow
 
-### Starting a New Feature
-
-1. **Ensure you're on `develop` and it's up to date:**
+1. **Start from an up-to-date `main`:**
    ```bash
-   git checkout develop
-   git pull origin develop
-   ```
-
-2. **Create a feature branch:**
-   ```bash
+   git checkout main
+   git pull origin main
    git checkout -b feature/your-feature-name
    ```
 
-3. **Work on your feature and commit regularly:**
+2. **Commit with [Conventional Commits](https://www.conventionalcommits.org/)**
+   (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`), scoped when it
+   helps (`feat(mobile): …`, `fix(auth): …`):
    ```bash
-   git add .
-   git commit -m "feat: description of changes"
+   git add -p
+   git commit -m "feat(teams): add staff management screen"
    ```
 
-4. **When feature is complete, merge back to `develop`:**
+3. **Keep docs in the same change.** If behaviour, APIs, schema, env vars,
+   commands or ops steps change, update `CLAUDE.md` / `docs/` in the same PR.
+   The committed Stop hook (`.claude/hooks/check-docs-updated.sh`) reminds you
+   when code changed without a docs update.
+
+4. **Before pushing**, run the package checks for everything you touched:
    ```bash
-   git checkout develop
-   git merge feature/your-feature-name
-   git push origin develop
+   cd backend && npm run lint && npm run type-check && npm test
+   cd mobile  && npm run lint && npm run type-check && npm test
+   cd web     && npm run lint && npm run build
+   ```
+   Lint runs with `--max-warnings 0` in CI — warnings fail the build.
+
+5. **Open a PR against `main`:**
+   ```bash
+   git push -u origin feature/your-feature-name
+   gh pr create --fill
+   gh pr checks <n> --watch
+   ```
+   Required checks: lint / type-check / Jest for backend and mobile, the Metro
+   `expo export` smoke build, and CodeQL.
+
+6. **Merge with squash and delete the branch:**
+   ```bash
+   gh pr merge <n> --squash --delete-branch
    ```
 
-### Working on Multiple Features
+## Tagging releases
 
-You can work on multiple feature branches in parallel:
+Tag `main` when a notable milestone lands (new feature set, design overhaul,
+large refactor) using semantic versioning:
 
 ```bash
-# Work on backend feature
-git checkout -b feature/backend-auth
-# ... make changes and commit
-
-# Switch to mobile feature
-git checkout -b feature/mobile-app-init
-# ... make changes and commit
-
-# Switch back to backend
-git checkout feature/backend-auth
+git tag -a v1.2.0 -m "Team staff management + PARENT role"
+git push origin v1.2.0
 ```
 
-Each feature branch is independent and can be worked on separately.
+- **Major** (vX.0.0): breaking changes / architectural rewrites
+- **Minor** (v0.X.0): new features, significant improvements
+- **Patch** (v0.0.X): bug fixes, small tweaks
 
-### Committing Work
+See [`release-strategy.md`](./release-strategy.md) for how backend deploys and
+mobile builds/OTA updates relate to `main`.
 
-**Best Practice:** Commit work incrementally as you complete logical units:
+## Automation on `main`
 
-- ✅ Commit backend setup when it's working
-- ✅ Commit mobile setup when it's working
-- ✅ Commit each feature as it's completed
-
-**Why?**
-- Easier to review changes
-- Easier to roll back if needed
-- Better git history
-- Can share work with others incrementally
-
-## Current Situation
-
-For the backend work we just completed:
-
-1. **Option A (Recommended):** Commit backend to `develop` first
-   ```bash
-   git checkout develop
-   git add backend/ docs/
-   git commit -m "feat: backend initialization with Express, Prisma, and tests"
-   git push origin develop
-   
-   # Then continue mobile work on feature branch
-   git checkout feature/mobile-app-init
-   ```
-
-2. **Option B:** Commit backend work to the mobile branch
-   - Less ideal, but works if you want to keep everything together
-   - You can always reorganize later with interactive rebase
-
-## Pushing to GitHub
-
-**When to push `develop` to GitHub:**
-- ✅ After completing a feature and merging it to `develop`
-- ✅ Before starting a new feature (so others can see your work)
-- ✅ Regularly to backup your work
-- ✅ When you want to collaborate with others
-
-**Best Practice:** Push `develop` after each completed feature merge.
-
-## Merging to Main
-
-**When to merge `develop` → `main`:**
-- ✅ When you have a **stable, working version** ready for production
-- ✅ When you want to create a **release** or **tag a version**
-- ✅ When you have **tested everything** and it's ready for users
-- ✅ Before deploying to production
-
-**Typical workflow:**
-1. Complete features on `develop` (backend, mobile, etc.)
-2. Test everything thoroughly on `develop`
-3. When stable and ready, merge `develop` → `main`
-4. Tag the release: `git tag -a v0.1.0 -m "Initial release"`
-5. Push tags: `git push origin --tags`
-
-**For this project:**
-- `main` = Production-ready, deployable code
-- `develop` = Integration branch for active development
-- Merge to `main` when you have a working MVP or major milestone
-
-## Example: Current Project
-
-```
-main
-  └── develop (has initial setup)
-       ├── feature/mobile-app-init (you are here)
-       └── (backend work uncommitted)
-```
-
-**Recommended next steps:**
-1. Commit backend work to `develop`
-2. Continue mobile work on `feature/mobile-app-init`
-3. Later merge mobile branch back to `develop`
-
+- **Dependabot** PRs (patch/minor bumps) are auto-merged by
+  `.github/workflows/dependabot-auto-merge.yml` once CI passes.
+- The **Daily Upgrade Scan** (`.github/workflows/daily-upgrade-scan.yml`) opens
+  PRs for vulnerable transitives and mobile lockfile-only bumps — see
+  [`docs/automation/daily-upgrade-scan.md`](../automation/daily-upgrade-scan.md).

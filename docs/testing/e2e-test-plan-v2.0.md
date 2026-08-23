@@ -1,7 +1,9 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build (v1.2.0; #25 or newer — cut from `main` ≥ `74549d3`, see revision history), Backend ECS task-def revision 223 (commit `71ec39d`, deployed 2026-08-20), SES `mail.capyhoops.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:capyhoops.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.capyhoops.com`, Web — not deployed
+**Checkboxes:** 129 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
+**Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
 
 Run-through guide for verifying v2.0 functionality end-to-end before declaring the release ready for general access. Check the `- [ ]` box for each pass, note Fail + reason in the Notes line. Tests are grouped by feature area; later sections often depend on test data created earlier (e.g., Games require a Team from D).
@@ -23,26 +25,28 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 ### P.1 — Build & environment verification
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  1. On iPhone, confirm the **latest** TestFlight build (v1.2.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.) **Do not test on #21 or older** — `@sentry/react-native` and several Expo SDK 55 native modules were bumped after #21, and OTA updates cannot carry native changes, so an older binary would not reflect `main`.
+  1. On iPhone, confirm the **latest** TestFlight build (v1.2.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.) **Do not test on #24 or older** — `expo-secure-store` (audit #52, runtime 1.2.0) and the `ios.associatedDomains` entitlement (Universal Links, audit #37) are native changes that landed after #24; OTA updates cannot carry them, so an older binary would not reflect `main`.
   2. From terminal: `curl -s https://api.capyhoops.com/health` → expect 200
   3. From terminal: `aws sesv2 get-email-identity --email-identity mail.capyhoops.com --region us-east-1 | jq '.VerifiedForSendingStatus'` → expect `true`
 - **Notes:** ___________
 
 ### P.2 — Test data prerequisites
 - [ ] Pass / Fail / Skipped
-- **Steps:** Identify at least one test user per role you intend to test:
-  - System ADMIN: `deasystephen@gmail.com` (per `ADMIN_EMAIL` env var on ECS)
-  - COACH: dev-user `Frank Vogel` (per Maestro fixtures)
-  - PLAYER: dev-user `LeBron James` (per Maestro fixtures)
-  - PARENT: identify or create
+- **Steps:** Identify at least one test user per role you intend to test. Against production use the WorkOS personas from `workos-test-accounts.md`; against a local `NODE_ENV=development` backend + dev build use the seeded dev-login users (`backend/prisma/seed.ts`, `npx prisma db seed`):
+  - System ADMIN: `deasystephen@gmail.com` (on the `ADMIN_EMAILS` allowlist on ECS) / seed `System Admin` (`admin@bball-tracker.com`, also league admin of the seeded league)
+  - COACH (head coach): `+headcoach` alias after self-selecting "I coach a team" / seed `Frank Vogel` (Lakers head coach, used by most Maestro flows) or `Steve Kerr` (Warriors head coach)
+  - Assistant Coach / Team Manager (team staff; system role stays PLAYER): `+asstcoach`, `+manager` added via "Add staff" / seed `Mike Brown` (Warriors assistant, COACH) and `Dell Curry` (Warriors Team Manager, PARENT)
+  - PLAYER (rostered, no staff row): `+player` alias / seed `Steph Curry` (Warriors) or `LeBron James` (Lakers)
+  - PARENT (guardian, no staff row): `+parent` alias created through a guardian invite (E.12a) / seed `Sonya Curry` (MOTHER of Steph) or `Gloria James` (MOTHER of LeBron). `Dell Curry` is FATHER of Steph **and** Warriors staff, so he is not a pure-guardian fixture.
+  - Outsider (no affiliation): `+outsider` alias — the seed has no unaffiliated user.
 - **Notes:** ___________
 
 ### P.3 — Dev-login availability
 - [ ] Pass / Fail / Skipped
 - **Steps:**
   1. Open app, tap login
-  2. Verify "Developer login with test users" option is present (only available in non-prod builds — confirm whether the current build exposes it)
-- **Expected:** If hidden in production builds, all subsequent tests must use real WorkOS sign-in instead — flag this and substitute personal accounts for each role.
+  2. Look for the "Dev Login (Test Users)" button (accessibilityLabel "Developer login with test users").
+- **Expected:** **Hidden on TestFlight / production builds** — the button is compiled in only for `__DEV__` builds and `POST /auth/dev-login` exists only when the backend runs with `NODE_ENV=development`. All subsequent tests against production use real WorkOS sign-in with the personas in `workos-test-accounts.md`. Dev-login is available on a simulator dev client (`npx expo run:ios`) against a local seeded backend.
 - **Notes:** ___________
 
 ---
@@ -54,10 +58,10 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Role:** new user
 - **Steps:**
   1. Cold-start app (or logout if logged in)
-  2. Tap "Log In" → routes to WorkOS hosted page
+  2. Skip the intro carousel (`app/onboarding/index.tsx`, shown before login) → tap the sign-in button → the system browser opens the WorkOS AuthKit page (the app sent `state` + `code_challenge`, PKCE audit #5)
   3. Choose "Sign up" → enter a fresh email + password
   4. Complete email verification if prompted
-- **Expected:** Lands on onboarding flow (`app/onboarding/index.tsx`); session token persisted; navigating back to app shows logged-in state.
+- **Expected:** Browser redirects to `bball-tracker://auth/callback?code=…&state=…`; the app exchanges the code (with `code_verifier`) and lands on the **"How will you use Capyhoops?"** account-type screen (A.1b) because every new sign-up is created as `PLAYER`. `GET /auth/me` → `role: PLAYER`, `leagueAdminOf: []`, `guardianOf: []`. Access + refresh tokens persisted; returning to the app shows the logged-in state.
 - **Notes:** ___________
 
 ### A.1b — Account type selection after first sign-in
@@ -70,7 +74,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   4. Profile tab → role badge reads COACH; Teams tab → Create Team succeeds (no 403)
   5. Logout, log in again → screen does NOT reappear
   6. Profile → "Change account type" → pick "I play on a team" → Continue → role badge reads PLAYER
-- **Expected:** `PATCH /auth/me/role` 200 each time; ADMIN accounts never see the screen or the Profile row. Maestro: `.maestro/onboarding-role.yaml`.
+- **Expected:** `PATCH /auth/me/role` 200 each time; ADMIN accounts never see the screen or the Profile row, and a guardian (non-empty `guardianOf`) has no "Change account type" row either (PARENT is derived — `PATCH /auth/me/role { role: 'PARENT' }` → 403). Maestro: `.maestro/onboarding-role.yaml` (dev-login as seeded PLAYER Steph Curry).
 - **Notes:** ___________
 
 ### A.2 — Existing user login
@@ -85,6 +89,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   - The WorkOS redirect `bball-tracker://auth/callback?code=…` must resolve to the callback screen — **not** an Expo Router "Unmatched Route" page (fixed in #213 via `app/auth/callback.tsx`).
   - The callback screen must not hang or crash with "Maximum update depth exceeded" (Zustand v5 `useShallow` fix, #218).
   - Also try the error branch: `xcrun simctl openurl booted "bball-tracker://auth/callback?error=access_denied"` (or the `.maestro/auth-callback.yaml` flow) → "Sign In Failed" screen renders.
+  - PKCE/CSRF (audit #5): open `bball-tracker://auth/callback?code=bogus&state=wrong` while no sign-in is pending → "Sign In Failed" with **no** network call to `/auth/callback` (the `state` must match the pending login stored on the device).
 - **Notes:** ___________
 
 ### A.3 — Session persistence across cold start
@@ -94,7 +99,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   1. Force-quit the app
   2. Re-open
 - **Expected:** Still logged in; lands on last-visited tab or home (no login prompt).
-- **Regression (#349):** repeat after leaving the app closed for longer than the WorkOS access-token lifetime (≥ 10 min is safe). Teams/Home must load normally — the client should silently call `POST /auth/refresh` (visible in backend logs as a 200) rather than show a 401 `ErrorState` or report `Invalid or expired token` to Sentry. Also confirm that when a session truly cannot be recovered (e.g. revoke the session in the WorkOS dashboard) the app lands on the login screen instead of sitting on a tab with failing requests.
+- **Regression (#349 / audit #20):** repeat after leaving the app closed for longer than the WorkOS access-token lifetime (≥ 10 min is safe). Teams/Home must load normally — the client should silently call `POST /auth/refresh` (visible in backend logs as a 200) rather than show a 401 `ErrorState` or report `Invalid or expired token` to Sentry. Also confirm that when a session truly cannot be recovered (e.g. revoke the session in the WorkOS dashboard → `/auth/refresh` 401) the app lands on the login screen instead of sitting on a tab with failing requests. A 429 / 503 from `/auth/refresh` (WorkOS rate limit / outage) must **not** log the user out.
 - **Notes:** ___________
 
 ### A.4 — Logout
@@ -102,16 +107,16 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Role:** any logged-in user
 - **Steps:**
   1. Profile tab → swipe to Logout button → confirm
-- **Expected:** Returns to login screen. Re-opening app stays on login. Push tokens cleared (verify in backend logs — no further notifications).
+- **Expected:** Returns to login screen. Re-opening app stays on login. Backend log shows `DELETE /auth/push-token` then `POST /auth/logout` → `{ success: true, revoked: true }` (WorkOS session revoked; see N.4). Maestro: `.maestro/logout.yaml`.
 - **Notes:** ___________
 
 ### A.5 — ADMIN auto-assignment on first sign-up
 - [ ] Pass / Fail / Skipped
-- **Role:** new user using `deasystephen@gmail.com`
+- **Role:** new user whose email is on `ADMIN_EMAILS` (comma-separated allowlist on the ECS task def; legacy `ADMIN_EMAIL` still honoured)
 - **Steps:**
-  1. (Only relevant if `deasystephen@gmail.com` has never signed up before — destructive, skip if already an admin)
+  1. (Only relevant for an allowlisted email that has never signed up — skip if `deasystephen@gmail.com` is already an admin; see "Adding an admin tester" in `workos-test-accounts.md`)
   2. Sign up with that email
-- **Expected:** UserRole is `ADMIN` (verify via `GET /api/v1/auth/me`).
+- **Expected:** `GET /api/v1/auth/me` → `role: ADMIN`; the account-type screen (A.1b) is skipped. Re-login never changes an existing user's role.
 - **Notes:** ___________
 
 ### A.6 — Session token included on Socket.io connect
@@ -145,7 +150,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Profile tab → tap avatar
   2. Pick an image from camera roll
-- **Expected:** Image uploads via presigned URL (`POST /api/v1/uploads/avatar-url` → S3 PUT). Avatar updates everywhere within ~3s.
+- **Expected:** `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`, 5 MB cap enforced by the policy); the app posts the multipart form, then `PATCH /api/v1/auth/me { profilePictureUrl }` (never `PATCH /players/:id`). Avatar updates everywhere within ~3s; the previously uploaded object is deleted from the avatars bucket (audit #61). A failed S3 upload shows an error toast and does **not** persist a dangling URL (audit #39).
 - **Notes:** ___________
 
 ### B.3 — Toggle dark mode
@@ -170,7 +175,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN
 - **Steps:**
-  1. Admin → Leagues → Create
+  1. Profile tab → "Leagues & Seasons" (visible only to ADMIN or users with `leagueAdminOf`) → Leagues → Create
   2. Enter name `Test League 2026`
 - **Expected:** League appears in list. ID returned matches the slug pattern (e.g., `test-league-2026`).
 - **Notes:** ___________
@@ -179,7 +184,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN
 - **Steps:**
-  1. Admin → Seasons → Create
+  1. Profile → "Leagues & Seasons" → Seasons → Create
   2. Pick the league from C.1, name `Spring 2026`
 - **Expected:** Season appears under the league.
 - **Notes:** ___________
@@ -187,14 +192,14 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 ### C.3 — 🔒 Non-admin cannot create league
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH
-- **Steps:** As a COACH, attempt `POST /api/v1/leagues` via direct HTTP or via app UI (Admin tab should be hidden).
-- **Expected:** Admin tab not visible; direct HTTP returns 403.
+- **Steps:** As a COACH, attempt `POST /api/v1/leagues` via direct HTTP; in the app check Profile.
+- **Expected:** No "Leagues & Seasons" entry on Profile (it appears only for ADMIN or a user with a non-empty `leagueAdminOf`); direct HTTP returns 403. A league admin (added by ADMIN via `POST /leagues/:id/admins { userId }`) sees only their own leagues and still cannot create/delete leagues.
 - **Notes:** ___________
 
 ### C.4 — Delete league
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN
-- **Steps:** Admin → Leagues → tap created league → Delete (use a *throwaway* league).
+- **Steps:** Profile → "Leagues & Seasons" → Leagues → tap created league → Delete (use a *throwaway* league; ADMIN only).
 - **Expected:** League removed; associated seasons cascade or are blocked per current behavior (note which).
 - **Notes:** ___________
 
@@ -204,29 +209,29 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ### D.1 — Create team
 - [ ] Pass / Fail / Skipped
-- **Role:** COACH (or higher)
+- **Role:** COACH (self-selected in A.1b), ADMIN, or a league admin — a PLAYER sees no "Create new team" control at all (Teams tab and Home "Create Team" card are hidden, #389) and `POST /teams` returns 403
 - **Prereq:** Season from C.2
 - **Steps:**
-  1. Teams tab → Create
+  1. Teams tab → "Create new team"
   2. Name `Test Team`, link to the Spring 2026 season
-- **Expected:** Team appears. Creator is auto-assigned `HEAD_COACH`.
+- **Expected:** Team appears. Creator is auto-assigned the `HEAD_COACH` staff row and the three default roles (Head Coach / Assistant Coach / Team Manager) exist. FREE tier: a 4th distinct team → 402 `upgrade_required` toast (Profile `UsageMeter` shows `1 / 3`). Maestro: `.maestro/create-team.yaml`.
 - **Notes:** ___________
 
 ### D.2 — View team detail
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH (creator)
 - **Steps:** Teams tab → tap `Test Team`.
-- **Expected:** Shows team name, league, roster (empty), staff, "View Team Stats" link.
+- **Expected:** Shows team name, league/season, empty roster with "Add Player", the **Staff** card (head coach name + count → staff screen), "Announcements", "View Team Stats". Maestro: `.maestro/team-detail.yaml`.
 - **Notes:** ___________
 
 ### D.3 — Add a roster player (managed)
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageRoster`
 - **Steps:**
-  1. Team detail → Add Player → switch to "Add Roster Player"
-  2. Enter name `Test Player 1`, jersey `#99`
-- **Expected:** Player added to roster (managed account — no email required). Visible in roster list.
-- **Notes:** Per `POST /api/v1/teams/:teamId/managed-players`.
+  1. Team detail → "Add Player" → tap "Add Roster Player"
+  2. Enter name `Test Player 1`, jersey `99` → "Add to Roster"
+- **Expected:** Player added to roster (managed account — no email required). Visible in roster list, badged "Roster player"; the roster card offers "Invite a parent" (E.12a). Maestro: `.maestro/roster-management.yaml`.
+- **Notes:** Per `POST /api/v1/teams/:teamId/managed-players` (creates the managed `User` + `TeamMember` in one transaction).
 
 ### D.4 — Edit team name
 - [ ] Pass / Fail / Skipped
@@ -253,7 +258,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Role:** any user NOT on the team and NOT a league/system admin
 - **Steps:** `curl` `GET /api/v1/teams/:id` with their bearer token.
-- **Expected:** 403 (or 404 to avoid leaking team existence).
+- **Expected:** 403 `You do not have access to this team`. `GET /api/v1/teams` never lists it (access clause is ANDed server-side for non-admins). A guardian of a rostered player **does** get 200 (read-only, emails stripped) — see E.12b.
 - **Notes:** ___________
 
 ### D.8 — Head coach adds an assistant (staff management, role matrix decision 2 / B2.3)
@@ -287,14 +292,12 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canManageRoster`
 - **Prereq:** Team from D.1, ECS rev 133+ deployed
 - **Steps:**
-  1. Team detail → Add Player → switch to "Invite by Email" (or equivalent)
-  2. Enter `deasystephen@gmail.com` (the verified sandbox recipient)
-  3. Optional message: `Welcome to the test`
-  4. Submit
+  1. Team detail → "Add Player" → (stay on "Invite Player") → "Create New Player"
+  2. Enter name + `deasystephen+player@gmail.com` (a verified sandbox recipient) → "Create & Send Invitation". (For a user already visible in the player search, select them and tap "Send Invitation" instead.)
 - **Expected:**
-  - HTTP 201 from `POST /api/v1/teams/:teamId/invitations`
-  - Invitation appears in app's "pending invitations" list for the team
-  - Within ~10s an email arrives at `deasystephen@gmail.com`
+  - One HTTP 201 from `POST /api/v1/teams/:teamId/invitations { name, email }` (create-and-invite, audit #69 — there is no separate `POST /players` call; an existing account with that email is reused). The response carries **no** `token` (audit #14).
+  - Invitation appears in the coach's pending list (`GET /invitations?teamId=`) and on the invitee's Invitations tab
+  - Within ~10s an email arrives at that address
 - **Notes:** ___________
 
 ### E.2 — Email contents
@@ -327,7 +330,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** invited user (signed in)
 - **Prereq:** E.4 successful OR navigate to `bball-tracker://invite/<token>` directly
 - **Steps:** On the invite screen, tap "Accept Invitation" → confirm alert.
-- **Expected:** Toast confirmation. Navigates to the invitations tab. The invitation moves from PENDING to ACCEPTED. User now appears on the team roster.
+- **Expected:** Toast confirmation. Navigates to the Invitations tab. The invitation moves from PENDING to ACCEPTED (`POST /invitations/by-token/:token/accept` when opened from the link while signed out, or the authenticated `POST /invitations/:id/accept`). User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
 - **Notes:** ___________
 
 ### E.6 — Reject invitation
@@ -347,9 +350,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### E.8 — Expired invitation token
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  1. Manually expire an invitation (DB update OR wait past the `expiresAt` from creation default of 7 days; for testing, create with `expiresInDays: 0` and wait a few seconds)
+  1. Expire an invitation: `expiresInDays` is validated to 1..30 (default 7), so either `UPDATE "TeamInvitation" SET "expiresAt" = now() - interval '1 minute' WHERE id = …` or wait it out. Nothing schedules expiry — the row stays `PENDING` until touched (lazy expiry, audit #22).
   2. Tap the link
-- **Expected:** Invite screen shows "Invitation Expired" + "Go Home" CTA. No Accept button.
+- **Expected:** Invite screen shows "Invitation Expired" + "Go Home" CTA (timestamp compare, never "Expires today", #59). No Accept button. The row flips to `EXPIRED` on contact, and the coach can re-invite the same player (E.14).
 - **Notes:** ___________
 
 ### E.9 — Invalid (garbage) token
@@ -384,7 +387,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH (canManageRoster)
 - **Prereq:** D.3 (a managed player on the roster)
-- **Steps:** `POST /api/v1/teams/<teamId>/members/<managedPlayerId>/guardians { email: <fresh adult email>, relationship: "MOTHER" }` (mobile: roster card → "Invite a parent" once the mobile PR lands).
+- **Steps:** Team detail → "Add Player" roster screen → on `Test Player 1`'s card tap **"Invite a parent"** → `/teams/<id>/players/<playerId>/guardians` → email `deasystephen+parent@gmail.com`, relationship chip **Mother** → Invite. API: `POST /api/v1/teams/<teamId>/members/<managedPlayerId>/guardians { email, relationship: "MOTHER" }` (#398/#399).
 - **Expected:** 201 with `invitation` (`status: PENDING`, `invitedEmail`, `relationship`, no `token`). A `User` row with `role: PARENT` is created for the email (not `isManaged`). 📧 Email "You've been invited as <child>'s guardian on <team>" with a `capyhoops.com/invite/<token>` link. `GET …/guardians` lists it under `pendingInvitations`.
 - **Notes:** ___________
 
@@ -399,7 +402,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** guardian from E.12b (no staff row)
 - **Steps:** Try to record a game event (`POST /games/<id>/events`), send a team invitation, post an announcement, export stats.
-- **Expected:** 403 on each (`getTeamPermissions` → `canViewStats` only). Second guardian invited for the same child is `isPrimary: false`. Re-inviting the same email while PENDING → 400 "already exists".
+- **Expected:** 403 on each (`getTeamPermissions` → `canViewStats` only); in the app no Start/End/Delete/Continue Tracking/Add Player/Add staff controls render. Second guardian invited for the same child is `isPrimary: false`. Re-inviting the same email while PENDING → 400 "A pending guardian invitation already exists for this email".
 - **Notes:** ___________
 
 ### E.12d — Remove a guardian
@@ -417,8 +420,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### E.14 — 🔒 Duplicate pending invitation prevented
 - [ ] Pass / Fail / Skipped
-- **Steps:** Send invitation, don't accept. Send another to the same person.
-- **Expected:** 400 BadRequest "A pending invitation already exists for this player."
+- **Steps:** Send invitation, don't accept. Send another to the same person. Then reject (or cancel) it and invite once more.
+- **Expected:** 400 BadRequest "A pending invitation already exists for this player." After reject/cancel the re-invite succeeds (201) — uniqueness is a partial index on `status = 'PENDING'` only (audit #22/#23/#58).
 - **Notes:** ___________
 
 ### E.15 — 🔒 Public invite endpoint accepts ONLY valid token (no auth bypass)
@@ -426,7 +429,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:**
   - `curl -i https://api.capyhoops.com/api/v1/invitations/by-token/abc` (token too short)
   - `curl -i https://api.capyhoops.com/api/v1/invitations/by-token/<valid-token>`
-- **Expected:** Short/invalid token → 400 or 404; valid token → 200 with invitation payload. No auth header required for either.
+- **Expected:** Short/invalid token → 400 or 404; valid token → 200 with `invitation.kind: "team"` (or `"guardian"`) and never the token itself. No auth header required for either. The lookup is limited to 30 requests / 15 min **per token** (audit #36); the accept `POST` uses the IP-keyed write limiter.
 - **Notes:** ___________
 
 ### E.16 — 📧 SES bounce handling for invalid recipient
@@ -459,8 +462,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### F.3 — End game
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canTrackStats`
-- **Steps:** Tracking screen → End Game.
-- **Expected:** Status changes to COMPLETED. Score frozen. Stats finalized.
+- **Steps:** Tracking screen → "End game" (or game detail → "End Game" → confirm).
+- **Expected:** Status changes to **FINISHED** (detail shows "Game completed"). Score frozen. `PlayerStats` / `TeamStats` finalized. Maestro: `.maestro/game-lifecycle.yaml`, `.maestro/game-tracking.yaml`.
 - **Post-finish edit (audit #27):** after finishing, delete (undo) one of player A's shots. The box score and
   A's season line drop that shot immediately; if A has no events left, A disappears from the box score
   rather than lingering with stale numbers.
@@ -468,15 +471,15 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### F.4 — Cancel a scheduled game
 - [ ] Pass / Fail / Skipped
-- **Role:** COACH with `canManageTeam`
-- **Steps:** Game detail → Cancel.
-- **Expected:** Status CANCELLED. No further events accepted.
+- **Role:** COACH with `canManageTeam` (or `canTrackStats` — status changes need `canManageTeam || canTrackStats`)
+- **Steps:** The app has no Cancel control; `curl -X PATCH …/api/v1/games/:id -d '{"status":"CANCELLED"}'`.
+- **Expected:** Status CANCELLED (detail badge "Cancelled"). No further events accepted; an unaffiliated user gets 403 `You do not have access to this game` regardless of body, and an empty body → 400 `At least one field must be provided`.
 - **Notes:** ___________
 
 ### F.5 — Delete game
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageTeam`
-- **Steps:** Game detail → Delete (use a *throwaway* scheduled game).
+- **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game). Rendered only with `canManage` (`canManageTeam`).
 - **Expected:** Removed from list. Stats removed.
 - **Notes:** ___________
 
@@ -548,7 +551,6 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   - Profile has no "Leagues & Seasons" entry (unless the user is in `leagueAdminOf`).
   - Automated: `maestro test .maestro/player-no-tracking.yaml`; Jest `__tests__/app/game-detail-gating.test.tsx`
     and `__tests__/app/track-gating.test.tsx`.
-- 2026-08-23: added D.8 (head coach adds an assistant — mobile staff screen, role matrix decision 2 / B2.3).
 - **Notes:** ___________
 
 ---
@@ -559,7 +561,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** PLAYER (team member, not the tracker)
 - **Prereq:** Game in progress (F.2), coach actively tracking on another device
-- **Steps:** Open the same game's `live` screen. Open via deep link if available, else navigate Games tab → game → Watch Live.
+- **Steps:** Games tab → game → "Watch Live" (`/games/:id/live`). Maestro: `.maestro/live-spectator.yaml` (render + connect only).
 - **Expected:** Joins the Socket.io room. Sees current score, status: LIVE, last ~100 events in reverse-chronological order.
 - **Notes:** ___________
 
@@ -638,7 +640,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** guardian from E.12b
 - **Prereq:** a scheduled game on the child's team
-- **Steps:** `POST /api/v1/games/<gameId>/rsvp { status: "YES", playerId: <childId> }`. **Mobile:** dev-login as the guardian (seed: Dell Curry) → Games tab lists the child's team's games → open the scheduled game → RSVP card shows **Responding for** chips (child; plus "Me" only if the guardian is rostered) → pick the child → tap **Going**. Profile → **My kids** lists the child → tap opens `/players/<childId>/stats`. Maestro: `.maestro/guardian-rsvp.yaml`.
+- **Steps:** `POST /api/v1/games/<gameId>/rsvp { status: "YES", playerId: <childId> }`. **Mobile:** sign in as the guardian (prod: `+parent`; seed: Sonya Curry — *not* Dell Curry, who is also Warriors staff) → Games tab lists the child's team's games → open the scheduled game → RSVP card shows **Responding for** chips (child; plus "Me" only if the guardian is rostered) → pick the child → tap **Going**. Profile → **My kids** lists the child → tap opens `/players/<childId>/stats`. Maestro: `.maestro/guardian-rsvp.yaml`.
 - **Expected:** 200; `rsvp.userId` is the **child's** id. Coach's RSVP roster (I.4) shows the child as YES. 📧 Confirmation email goes to the guardian's address (the managed child has none). Repeating with `NO` updates the same row.
 - **Notes:** ___________
 
@@ -664,9 +666,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH
 - **Steps:**
-  1. Team detail → Announcements → New
-  2. Title `Practice tomorrow`, body `6pm sharp`
-- **Expected:** Posts. 📧 Email sent to all team members + parents (sandbox-limited).
+  1. Team detail → "Announcements" → "+" (accessibilityLabel "New announcement")
+  2. Title `Practice tomorrow`, body `6pm sharp` → "Post Announcement"
+- **Expected:** Posts. 📧 Email + push sent to all team members and the guardians of members (deduped; sandbox-limited). Dates in emails render in `DEFAULT_TIMEZONE` (`America/Los_Angeles`), not UTC (audit #57).
 - **Notes:** ___________
 
 ### J.2 — Members see the announcement in app
@@ -727,9 +729,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### L.1 — Get team calendar URL
 - [ ] Pass / Fail / Skipped
-- **Role:** COACH
-- **Steps:** Team detail → "Calendar feed" → copy URL (format `https://api.capyhoops.com/api/v1/teams/:id/calendar.ics?token=...`).
-- **Expected:** URL includes opaque token.
+- **Role:** ADMIN (bypasses entitlements) or a PREMIUM user — `CALENDAR_SYNC` is PREMIUM-gated; a FREE coach gets 402 `upgrade_required`
+- **Steps:** The app has no calendar UI. `curl -X POST -H "Authorization: Bearer $TOKEN" https://api.capyhoops.com/api/v1/teams/:id/calendar/subscribe` → copy the returned URL (format `https://api.capyhoops.com/api/v1/teams/:id/calendar.ics?token=...`; the host comes from `API_BASE_URL`, audit #24 — never `capyhoops.com`).
+- **Expected:** URL includes an opaque token and uses the API host. As a FREE-tier coach → 402.
 - **Notes:** ___________
 
 ### L.2 — Subscribe in Apple Calendar
@@ -741,14 +743,14 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### L.3 — Rate-limit honored
 - [ ] Pass / Fail / Skipped
 - **Steps:** From terminal, hammer the URL: `for i in {1..70}; do curl -s -o /dev/null -w "%{http_code} " https://api.capyhoops.com/api/v1/teams/<id>/calendar.ics?token=<token>; done`
-- **Expected:** After ~60 requests/hour, returns 429.
-- **Notes:** Per memory: 60 req/hr/IP cap on calendar feed.
+- **Expected:** After 60 requests in an hour, returns 429 `Too many calendar feed requests`.
+- **Notes:** `calendarFeedRateLimit` — 60 req / 60 min / IP.
 
 ### L.4 — Revoke token
 - [ ] Pass / Fail / Skipped
-- **Steps:** Team → Calendar → Revoke token. Subsequent requests to old URL → 401.
-- **Expected:** Old token rejected; new token generated.
-- **Notes:** Soft-revocation per memory.
+- **Steps:** `curl -X POST -H "Authorization: Bearer $TOKEN" …/api/v1/teams/:id/calendar/revoke`. Subsequent requests to the old URL → 401/403.
+- **Expected:** Old token rejected; subscribing again issues a new token. Also: a feed whose owner lost team access or whose tier no longer includes `CALENDAR_SYNC` answers 403 on the next fetch (audit #43).
+- **Notes:** Soft-revocation (`revokedAt`).
 
 ### L.5 — 🔒 Calendar URL without token
 - [ ] Pass / Fail / Skipped
@@ -763,20 +765,20 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### M.1 — Per-game CSV export
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canShareStats` (or higher)
-- **Steps:** Game detail → Export CSV. OR `curl -H "Authorization: Bearer $TOKEN" https://api.capyhoops.com/api/v1/games/:gameId/export.csv -o game.csv`.
+- **Steps:** The app has no export UI (entitlement UI removed in #392) — `curl -H "Authorization: Bearer $TOKEN" https://api.capyhoops.com/api/v1/games/:gameId/export.csv -o game.csv`.
 - **Expected:** CSV download. Columns: timestamp, player, event_type, points, etc. User-controlled string cells prefixed with `'` if they start with `=`, `+`, `-`, `@`.
 - **Notes:** Per memory: cursor-paginated, escapeCsvCell for formula triggers.
 
 ### M.2 — Per-game PDF box score
 - [ ] Pass / Fail / Skipped
-- **Steps:** Game detail → Export Box Score (PDF). OR `curl ...api/v1/games/:gameId/boxscore.pdf`.
+- **Steps:** `curl -H "Authorization: Bearer $TOKEN" …/api/v1/games/:gameId/boxscore.pdf -o box.pdf` (no app UI).
 - **Expected:** PDF downloads with both teams' stats lines. Filename has Content-Disposition with proper encoding.
 - **Notes:** Per #46 + memory. **As of #172 the underlying `pdfkit` is 0.19.1 (was 0.18.0)** — eyeball text layout, column alignment, and any custom fonts for rendering regressions.
 
 ### M.3 — Team season stats CSV
 - [ ] Pass / Fail / Skipped
-- **Steps:** Team detail → Export season stats CSV. OR `curl ...api/v1/teams/:id/season-stats.csv`.
-- **Expected:** Aggregated season stats CSV.
+- **Steps:** `curl -H "Authorization: Bearer $TOKEN" …/api/v1/teams/:id/season-stats.csv` (no app UI). Run as ADMIN or a PREMIUM user; then repeat as a FREE-tier coach.
+- **Expected:** Aggregated season stats CSV (percentages are Σmade/Σattempted, ties counted). FREE-tier coach → 402 `{ code: 'upgrade_required', feature: 'STATS_EXPORT' }` (`requireEntitlement`).
 - **Notes:** ___________
 
 ### M.4 — 🔒 CSV injection defense
@@ -866,14 +868,14 @@ Cross-cuts E, I, J — but worth aggregating here.
 
 ### P.6 — Rate limit on auth endpoints
 - [ ] Pass / Fail / Skipped
-- **Steps:** Hammer `POST /api/v1/auth/dev-login` 100 times in a minute.
-- **Expected:** After threshold, 429. Doesn't crash the ALB.
-- **Notes:** Per memory: `app.set('trust proxy', 1)` required behind ALB.
+- **Steps:** `/auth/dev-login` does not exist in production. Hammer `GET /api/v1/auth/login?format=json` 25 times in a minute from one IP; separately `POST /api/v1/auth/refresh` with the same bogus `refreshToken` 65 times.
+- **Expected:** `/auth/login`: 429 after 20 requests / 15 min / IP (`authRateLimit`, also on `/auth/callback`). `/auth/refresh`: 429 after 60 / 15 min **per refresh token** (keyed by token hash, audit #21). `/auth/me` and other session routes use the general limiter (100 / min / IP). Doesn't crash the ALB.
+- **Notes:** `app.set('trust proxy', 1)` required behind ALB.
 
 ### P.7 — Health endpoint
 - [ ] Pass / Fail / Skipped
-- **Steps:** `curl https://api.capyhoops.com/health` (and `/api/v1/health` if separate).
-- **Expected:** 200 with simple body.
+- **Steps:** `curl https://api.capyhoops.com/health` (there is no `/api/v1/health`).
+- **Expected:** 200 `{"status":"ok","db":"ok","timestamp":…}`; 503 `{"status":"degraded","db":"down"}` if the DB ping fails.
 - **Notes:** Used by ECS health check.
 
 ### P.8 — App handles offline / network failure gracefully
@@ -885,7 +887,7 @@ Cross-cuts E, I, J — but worth aggregating here.
 ### P.9 — Token expiry mid-session (Socket.io)
 - [ ] ⚠ Known issue per memory — verify graceful (or document)
 - **Steps:** Open spectator view. Force a JWT expiration (manipulate token TTL if possible, or wait the TTL).
-- **Expected (current):** Session stays connected per memory: "Handshake-only auth. JWT is validated once at connect; tokens that expire mid-session stay connected." This is #49 deferred behavior.
+- **Expected (current):** An already-connected socket stays connected (handshake-only auth; #49 deferred). A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
 - **Notes:** ___________
 
 ---
@@ -899,13 +901,22 @@ These are quick `curl` checks. Each test verifies a role CANNOT do something the
 | Q.1 | PLAYER (member) | `DELETE /teams/:id` | 403 |
 | Q.2 | PLAYER (member) | `PATCH /teams/:id` (rename) | 403 |
 | Q.3 | PLAYER (non-member) | `GET /teams/:otherTeamId` | 403/404 |
-| Q.4 | COACH (assistant) | `POST /teams/:id/managed-players` | Depends on role flags — verify per `canManageRoster` |
+| Q.4 | Assistant Coach | `POST /teams/:id/managed-players` | 201 (Assistant Coach has `canManageRoster`) |
 | Q.5 | COACH (head) of team A | `POST /teams/:teamB/invitations` | 403 (no cross-team access) |
-| Q.6 | TEAM_MANAGER | `POST /games/:id/events` | Depends on `canTrackStats` — verify behavior matches the role's flags |
-| Q.7 | PARENT | `GET /teams/:teamId` (child on team) | 200 (read-only) |
+| Q.6 | Team Manager | `POST /games/:id/events` | 201 (`canTrackStats: true`) |
+| Q.7 | PARENT (guardian of a rostered child) | `GET /teams/:teamId` | 200, read-only; `members[].player` has no `email` |
 | Q.8 | PARENT | `POST /teams/:teamId/managed-players` | 403 |
-| Q.9 | non-staff | `GET /api/v1/teams/:teamId/announcements` | 403 unless team member |
-| Q.10 | unauthenticated | any `/api/v1/*` except `/invitations/by-token/*` | 401 |
+| Q.9 | non-member | `GET /api/v1/teams/:teamId/announcements` | 403 unless team member / staff / guardian |
+| Q.10 | unauthenticated | any `/api/v1/*` except `/invitations/by-token/*`, `/teams/:id/calendar.ics`, `/auth/login`, `/auth/callback`, `/auth/refresh` | 401 |
+| Q.11 | Assistant Coach | `POST /teams/:id/staff`, `DELETE /teams/:id`, `PATCH /teams/:id { seasonId }` | 403 (head-coach-only; self `DELETE /teams/:id/staff/:ownId` → 200) |
+| Q.12 | Head Coach (last one) | `DELETE /teams/:id/staff/:ownId` | 400 "last head coach" |
+| Q.13 | Team Manager | `PATCH /games/:finishedId { status: 'IN_PROGRESS' }` | 403 (reopening a FINISHED game needs `canManageRoster`) |
+| Q.14 | any non-admin | `PATCH /auth/me/role { role: 'ADMIN' }` (or `PARENT`) | 403 |
+| Q.15 | PLAYER | `GET /invitations?playerId=<other user>` | 403 (role matrix B2.4) |
+| Q.16 | PLAYER | `GET /players/:id` for a user on none of their teams | 404 (not 403 — no id enumeration) |
+| Q.17 | PLAYER | `POST /players { name, email }` | 403 (ADMIN or roster-managing staff only) |
+| Q.18 | league admin of the team's league (no staff row) | `PATCH /teams/:id`, `POST /teams/:id/staff` | 200 / 201 |
+| Q.19 | PLAYER | `POST /auth/push-token` with a token bound to another account (< 24h) | 409 |
 
 Check each: - [ ] Pass / Fail / Skipped — Notes: ___________
 
@@ -925,12 +936,12 @@ Check each: - [ ] Pass / Fail / Skipped — Notes: ___________
 ### R.3 — Game with 0 events ended
 - [ ] Pass / Fail / Skipped
 - **Steps:** Start a game → end immediately.
-- **Expected:** Game completes with status COMPLETED, score 0-0, no crash on stats screen.
+- **Expected:** Game completes with status FINISHED, score 0-0, no `PlayerStats`/`TeamStats` rows; it counts in the record (`gamesPlayed`) but not in `trackedGames`, so averages are not deflated; no crash on stats screen.
 
 ### R.4 — Player on multiple teams
 - [ ] Pass / Fail / Skipped
 - **Steps:** Add the same user to two different teams. Send invite to a third.
-- **Expected:** No collision. Stats aggregate per team.
+- **Expected:** No collision. Stats aggregate per team. A coach of team A who is not staff on team B cannot read B's invitations for that player (`GET /invitations?playerId=` is scoped to teams they can manage).
 
 ### R.5 — Concurrent stat tracking (two coaches on the same game)
 - [ ] Pass / Fail / Skipped
@@ -1012,8 +1023,7 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 - **Expected fail mode:** Long sessions (>2hr typical JWT TTL) stay connected with stale auth.
 
 ### S.9 — ✓ Mobile ESLint
-- [x] Resolved in #132 — ESLint + eslint-config-expo wired up in mobile/ (`mobile/eslint.config.mjs`), and the CI `Run linter` step no longer skips mobile (`matrix.project == 'backend'` gate removed).
-- **Status:** `npm run lint` in mobile/ now runs the flat config and exits 0 (warnings backlog tracked separately).
+- Resolved in #132 (ESLint + eslint-config-expo wired up in `mobile/eslint.config.mjs`, CI lints mobile) and #346 (all warnings burned down; `--max-warnings 0` enforced in both packages). Nothing to verify manually.
 
 ### S.10 — ⚠ Web/ test framework absent
 - [ ] Verified-broken / Notes
@@ -1063,7 +1073,16 @@ After testing, optionally tear down:
 - Architecture: `docs/architecture/overview.md` (stale per audit — see B-deferred)
 - Runbooks: `docs/runbooks/` (RDS backup/restore, etc.)
 - Automation: `docs/automation/daily-upgrade-scan.md`
-- Maestro flows: `.maestro/` (reference for what's automated)
+- Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend; **not** run in CI). All flows dev-login and skip the intro carousel:
+  - `login.yaml`, `logout.yaml`, `navigation.yaml`, `profile.yaml` — session + tab smoke (Frank Vogel)
+  - `auth-callback.yaml` — `bball-tracker://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
+  - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)
+  - `create-team.yaml`, `team-detail.yaml`, `roster-management.yaml` — D.1 / D.2 / D.3
+  - `team-staff.yaml` — staff screen + "Add staff" form for the head coach, read-only (D.8)
+  - `game-lifecycle.yaml`, `game-tracking.yaml`, `live-spectator.yaml`, `stats-viewing.yaml` — F.1–F.3, G.1/G.2, H.1, K
+  - `player-no-tracking.yaml` — PLAYER sees RSVP but no lifecycle/tracking controls (G.8, Steph Curry)
+  - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
+  - Not covered: invite accept (E), announcements (J), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management
 To verify additional sandbox recipients for broader testing:
@@ -1080,3 +1099,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-06-20: de-pinned the Mobile build reference — was "TestFlight #17", now "latest TestFlight build" (iOS build numbers are auto-incremented remotely by EAS and not tracked in-repo, so the `#17` pin went stale as newer builds shipped). Marketing version is still v1.0.0.
 - 2026-08-20: pre-testing refresh. Marketing version → v1.1.0 (bumped for build #19/#21 in June). Backend target → ECS rev 223 / `71ec39d` (auto-deployed by CI on every backend-touching merge; verified `GET /health` → `{"status":"ok","db":"ok"}`). A.2 gained regression checks for the auth/callback route (#213) and Zustand render-loop (#218) fixes that shipped after v1. Since #21 only dependency bumps have landed in `mobile/` (~40 daily patch-bump PRs, incl. `@sentry/react-native` 8.15→8.23 and Expo SDK 55 point releases) — a fresh native build (#22+) is required before running this plan. Known-broken items S.1–S.8, S.10 re-verified as still open (#139, #114, #113, #34, #49, #48).
 - 2026-08-23: audit #52 — session tokens moved to `expo-secure-store` (native). Marketing version → v1.2.0 (runtimeVersion policy `appVersion`: OTAs now target 1.2.0 builds only; build #24 stays on its last 1.1.0 OTA). A.2 gained the cold-start persistence check and the #24→#25 upgrade-migration check. Build #25+ required for A.2.
+- 2026-08-23: refresh for the authz/role-matrix batch on `main` (#370–#401): JWKS-verified access tokens + PKCE (A.1/A.2), self-selected COACH (A.1b), presigned-POST avatars (B.2), "Leagues & Seasons" replaces the Admin tab (C), player-hidden team creation + 402 cap (D.1), staff management (D.8, Q.11/Q.12), create-and-invite + tokenless invitation responses + lazy expiry/partial unique index (E.1/E.8/E.14/E.15), PARENT role (E.12a–d, I.5–I.7, Q.7), `FINISHED` status and server-derived score (F.3/F.4/H.2/R.3), calendar/export have no app UI and are PREMIUM-gated (L, M), rate limiters (P.6), health body (P.7), Q.13–Q.19 boundary rows, Maestro flow list. Dev-login is dev-build-only (P.3). Target build → v1.2.0 / #25+ (set by #401, kept). Seeded fixtures re-verified against `backend/prisma/seed.ts` (Dell Curry is Warriors staff, Sonya Curry is the pure guardian). Nothing marked passed.

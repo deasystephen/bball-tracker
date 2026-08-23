@@ -13,9 +13,9 @@ appId: com.bballtracker.mobile
 - tapOn: "Track game tab"
 - tapOn: "Create new game"
 - assertVisible: "New Game"
-- inputText:
+- tapOn:
     id: "opponent-name-input"
-    text: "Test Rival"
+- inputText: "Test Rival"
 # Select the Lakers team from the list
 - tapOn: "Lakers.*"
 - tapOn: "Create Game"
