@@ -14,6 +14,7 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
+import { deletePreviousAvatar } from '../../services/upload-service';
 import { z } from 'zod';
 
 const router = Router();
@@ -367,6 +368,12 @@ router.patch('/me', authenticate, async (req, res) => {
     }
 
     const { name, profilePictureUrl } = parsed.data;
+    // req.user does not carry the avatar; read it so the replaced S3 object
+    // can be removed after the update (audit #61, best-effort).
+    const previous =
+      profilePictureUrl !== undefined
+        ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
+        : null;
     const user = await prisma.user.update({
       where: { id: req.user!.id },
       data: {
@@ -375,6 +382,10 @@ router.patch('/me', authenticate, async (req, res) => {
       },
       select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, createdAt: true },
     });
+
+    if (profilePictureUrl !== undefined) {
+      await deletePreviousAvatar(previous?.profilePictureUrl, user.profilePictureUrl);
+    }
 
     res.json({ success: true, user });
   } catch (error) {

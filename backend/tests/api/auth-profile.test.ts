@@ -27,12 +27,19 @@ jest.mock('../../src/api/auth/middleware', () => ({
   requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
+jest.mock('../../src/services/upload-service', () => ({
+  deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
+}));
+import { deletePreviousAvatar } from '../../src/services/upload-service';
+const mockDeletePreviousAvatar = deletePreviousAvatar as jest.Mock;
+
 const AUTH = { Authorization: 'Bearer token' };
 
 describe('PATCH /api/v1/auth/me', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     currentRole = 'COACH';
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/old.jpg' });
     (mockPrisma.user.update as jest.Mock).mockImplementation(
       async ({ data }: { data: { name?: string; profilePictureUrl?: string | null } }) => ({
         id: TEST_USER_ID,
@@ -67,6 +74,25 @@ describe('PATCH /api/v1/auth/me', () => {
         data: { profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/photo.jpg' },
       })
     );
+  });
+
+  it('deletes the replaced avatar object (best-effort) after the update', async () => {
+    await request(app)
+      .patch('/api/v1/auth/me')
+      .set(AUTH)
+      .send({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/new.jpg' });
+
+    expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(
+      'https://bucket.s3.amazonaws.com/avatars/u/old.jpg',
+      'https://bucket.s3.amazonaws.com/avatars/u/new.jpg'
+    );
+  });
+
+  it('does not look up or delete the avatar on a name-only update', async () => {
+    await request(app).patch('/api/v1/auth/me').set(AUTH).send({ name: 'X' });
+
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
   });
 
   it('updates the name', async () => {
