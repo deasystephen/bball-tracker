@@ -70,15 +70,20 @@ describe('GuardianService', () => {
   describe('getGuardianOf', () => {
     it('maps guardian links to { childId, childName, relationship, isPrimary }', async () => {
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([
-        { childId: 'c1', relationship: 'FATHER', isPrimary: true, child: { name: 'Kid One' } },
-        { childId: 'c2', relationship: 'OTHER', isPrimary: false, child: { name: 'Kid Two' } },
+        {
+          childId: 'c1',
+          relationship: 'FATHER',
+          isPrimary: true,
+          child: { name: 'Kid One', teamMembers: [{ team: { id: 't1', name: 'Warriors' } }] },
+        },
+        { childId: 'c2', relationship: 'OTHER', isPrimary: false, child: { name: 'Kid Two', teamMembers: [] } },
       ]);
 
       const result = await GuardianService.getGuardianOf('parent-1');
 
       expect(result).toEqual([
-        { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true },
-        { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false },
+        { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true, teams: [{ id: 't1', name: 'Warriors' }] },
+        { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false, teams: [] },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'parent-1' } })

@@ -103,10 +103,15 @@ import { AppError } from './utils/errors';
 app.use(sentryErrorHandler);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
-  logger.error(err.message, {
+  // Expected client outcomes (expired token, 403, 404, malformed body) are
+  // warnings — reserving `error` for 5xx keeps the error stream meaningful.
+  const status = err instanceof AppError ? err.statusCode : clientErrorStatus(err);
+  const log = status !== undefined && status < 500 ? logger.warn : logger.error;
+  log(err.message, {
     requestId: _req.requestId,
     method: _req.method,
     path: loggablePath(_req),
+    status,
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 
