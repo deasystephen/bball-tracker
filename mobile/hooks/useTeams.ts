@@ -268,13 +268,30 @@ export function useRemovePlayerFromTeam() {
   });
 }
 
-// Helper to check if user is a staff member with specific permission
+export type TeamPermission =
+  | 'canManageTeam'
+  | 'canManageRoster'
+  | 'canTrackStats'
+  | 'canViewStats'
+  | 'canShareStats';
+
+/**
+ * Effective team permission for the current user.
+ *
+ * Mirrors the backend (`utils/permissions.ts`): a system `ADMIN` passes every
+ * check regardless of staff rows, otherwise the user's staff role decides.
+ * League admins are also allowed server-side, but `GET /teams/:id` does not
+ * return league-admin rows, so they still see no edit controls here until the
+ * API exposes effective permissions (follow-up to audit #79).
+ */
 export function hasTeamPermission(
   team: Team | undefined,
   userId: string | undefined,
-  permission: 'canManageTeam' | 'canManageRoster' | 'canTrackStats' | 'canViewStats' | 'canShareStats'
+  permission: TeamPermission,
+  userRole?: string | null
 ): boolean {
   if (!team || !userId) return false;
+  if (userRole === 'ADMIN') return true;
 
   const staffMember = team.staff?.find((s) => s.userId === userId);
   if (!staffMember) return false;

@@ -68,6 +68,20 @@ describe('useTeams pure helpers', () => {
       expect(hasTeamPermission(team, 'u-asst', 'canManageTeam')).toBe(false);
       expect(hasTeamPermission(team, 'u-asst', 'canShareStats')).toBe(false);
     });
+    it('grants every permission to a system ADMIN even without a staff row (audit #79)', () => {
+      expect(hasTeamPermission(team, 'stranger', 'canManageTeam', 'ADMIN')).toBe(true);
+      expect(hasTeamPermission(team, 'u-asst', 'canManageTeam', 'ADMIN')).toBe(true);
+      expect(hasTeamPermission(team, 'stranger', 'canShareStats', 'ADMIN')).toBe(true);
+    });
+    it('does not grant extra permissions to COACH/PLAYER roles', () => {
+      expect(hasTeamPermission(team, 'stranger', 'canManageTeam', 'COACH')).toBe(false);
+      expect(hasTeamPermission(team, 'u-asst', 'canManageTeam', 'PLAYER')).toBe(false);
+      expect(hasTeamPermission(team, 'u-asst', 'canTrackStats', null)).toBe(true);
+    });
+    it('still requires a team and user id for ADMIN', () => {
+      expect(hasTeamPermission(undefined, 'u-head', 'canManageTeam', 'ADMIN')).toBe(false);
+      expect(hasTeamPermission(team, undefined, 'canManageTeam', 'ADMIN')).toBe(false);
+    });
   });
 
   describe('isHeadCoach', () => {

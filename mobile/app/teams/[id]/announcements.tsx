@@ -75,7 +75,7 @@ export default function AnnouncementsScreen() {
   };
   const createAnnouncement = useCreateAnnouncement();
 
-  const canPost = hasTeamPermission(team, user?.id, 'canManageTeam');
+  const canPost = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role);
 
   const handleSubmit = async () => {
     if (!title.trim() || !body.trim()) return;

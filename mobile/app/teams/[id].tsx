@@ -42,8 +42,8 @@ export default function TeamDetailsScreen() {
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
 
-  const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam');
-  const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster');
+  const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role);
+  const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role);
 
   const headCoaches = team?.staff?.filter((s) => s.role.type === 'HEAD_COACH') ?? [];
 
@@ -235,7 +235,7 @@ export default function TeamDetailsScreen() {
                 >
                   <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>
                     <ThemedText variant="h3" style={{ color: teamColor }}>
-                      {member.jerseyNumber || '-'}
+                      {member.jerseyNumber != null ? member.jerseyNumber : '-'}
                     </ThemedText>
                   </View>
                   <ThemedText variant="captionBold" numberOfLines={1}>

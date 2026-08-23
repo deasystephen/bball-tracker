@@ -23,6 +23,78 @@ const isNoRefreshPath = (url?: string): boolean =>
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
+/**
+ * Shape of the backend's JSON error body (`utils/errors.ts` + the Express
+ * error handler): `{ error: string, code?: string, ...details }`. Some
+ * validation paths use `message` instead of `error`.
+ */
+export interface ApiErrorBody {
+  error?: string;
+  message?: string;
+  code?: string;
+  [key: string]: unknown;
+}
+
+export interface ApiErrorInfo extends ApiErrorBody {
+  status: number;
+}
+
+/** An axios error after `normalizeApiError` has run over it. */
+export type NormalizedApiError = AxiosError & {
+  /** Server `code` (e.g. `upgrade_required`); falls back to axios' own code. */
+  code?: string;
+  apiError?: ApiErrorInfo;
+};
+
+export const UPGRADE_REQUIRED_CODE = 'upgrade_required';
+
+/**
+ * Lift the server's error body onto the thrown error so every
+ * `error instanceof Error ? error.message : …` site shows the real reason
+ * ("Free tier is limited to 3 teams") instead of axios' generic
+ * "Request failed with status code 402" (audit #40). Mutates and returns the
+ * same object so `instanceof AxiosError` and `error.response` keep working.
+ */
+export const normalizeApiError = (error: unknown): unknown => {
+  if (!isAxiosError(error) || !error.response) return error;
+  const status = error.response.status;
+  const data = error.response.data;
+  if (typeof data !== 'object' || data === null) return error;
+
+  const body = data as ApiErrorBody;
+  const normalized = error as NormalizedApiError;
+  const message =
+    typeof body.error === 'string' && body.error.trim()
+      ? body.error
+      : typeof body.message === 'string' && body.message.trim()
+        ? body.message
+        : undefined;
+
+  if (message) normalized.message = message;
+  if (typeof body.code === 'string' && body.code) normalized.code = body.code;
+  normalized.apiError = { ...body, status };
+  return normalized;
+};
+
+/** True for a 402 `upgrade_required` response (entitlement / tier cap). */
+export const isUpgradeRequiredError = (error: unknown): error is NormalizedApiError => {
+  if (!isAxiosError(error)) return false;
+  const status = error.response?.status;
+  const code = (error as NormalizedApiError).apiError?.code ?? (error as NormalizedApiError).code;
+  return status === 402 || code === UPGRADE_REQUIRED_CODE;
+};
+
+/** Message to show a user for any thrown value, preferring the server's text. */
+export const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (isAxiosError(error)) {
+    const info = (error as NormalizedApiError).apiError;
+    if (info?.error) return info.error;
+    if (typeof info?.message === 'string' && info.message) return info.message;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+};
+
 interface RefreshResponse {
   accessToken: string;
   refreshToken: string;
@@ -111,6 +183,13 @@ const createApiClient = (): AxiosInstance => {
     (error) => {
       return Promise.reject(error);
     }
+  );
+
+  // Normalize server error bodies first (runs before the auth interceptor
+  // below, so a 401's message is also readable if it is surfaced).
+  client.interceptors.response.use(
+    (response) => response,
+    (error: unknown) => Promise.reject(normalizeApiError(error))
   );
 
   // Add response interceptor to handle errors

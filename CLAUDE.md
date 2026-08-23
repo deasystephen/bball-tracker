@@ -122,6 +122,24 @@ Backend API (Node.js/Express)
   management routes are ADMIN-only). Follow-up: surface league-admin rows from `GET /auth/me` if per-league
   admins should get the entry.
 
+#### Mobile API errors, permissions & toasts
+- `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
+  interceptor. For any response with a JSON body it copies the server's `error` (or `message`) onto
+  `error.message`, the server `code` onto `error.code`, and the whole body + `status` onto `error.apiError`.
+  The existing `error instanceof Error ? error.message : fallback` sites therefore show the real reason
+  (e.g. the FREE-tier team cap) instead of "Request failed with status code N". Helpers:
+  `getApiErrorMessage(err, fallback)` and `isUpgradeRequiredError(err)` (402 or `code === 'upgrade_required'`).
+  Network errors keep axios' own `code` (`ECONNABORTED`, …).
+- `hasTeamPermission(team, userId, permission, userRole?)` returns `true` for a system `ADMIN` regardless of
+  staff rows (mirrors `backend/src/utils/permissions.ts`). Pass `user?.role` from the auth store. League
+  admins are still not recognised client-side because `GET /teams/:id` doesn't return league-admin rows —
+  follow-up to audit #79: expose effective permissions from the API.
+- Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
+  (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
+- Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
+- `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
+  at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
+
 ### Socket.io (Live Game Broadcast)
 
 Real-time game updates use Socket.io with an in-memory adapter. Single-replica

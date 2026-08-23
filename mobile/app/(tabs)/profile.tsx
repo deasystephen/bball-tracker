@@ -42,7 +42,7 @@ export default function Profile() {
           playerId: user.id,
           data: { profilePictureUrl: '' },
         });
-        useAuthStore.getState().setUser({ ...user, profilePictureUrl: undefined });
+        useAuthStore.getState().updateUser({ profilePictureUrl: undefined });
       } catch {
         Alert.alert('Error', 'Failed to remove photo');
       }
@@ -56,7 +56,7 @@ export default function Profile() {
         playerId: user.id,
         data: { profilePictureUrl: imageUrl },
       });
-      useAuthStore.getState().setUser({ ...user, profilePictureUrl: imageUrl });
+      useAuthStore.getState().updateUser({ profilePictureUrl: imageUrl });
     } catch {
       Alert.alert('Error', 'Failed to upload photo');
     } finally {
