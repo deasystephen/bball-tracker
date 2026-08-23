@@ -296,8 +296,10 @@ export class SeasonService {
     }
 
     // Validate date range
-    const newStartDate = updateData.startDate ?? season.startDate;
-    const newEndDate = updateData.endDate ?? season.endDate;
+    // `!== undefined` (not `??`): an explicit `null` means "clear the date" and
+    // must not fall back to the stored value for the range check.
+    const newStartDate = updateData.startDate !== undefined ? updateData.startDate : season.startDate;
+    const newEndDate = updateData.endDate !== undefined ? updateData.endDate : season.endDate;
     if (newStartDate && newEndDate && newStartDate > newEndDate) {
       throw new BadRequestError('Start date must be before end date');
     }

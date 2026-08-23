@@ -48,7 +48,11 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error creating game', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError || error instanceof ForbiddenError) {
+    if (
+      error instanceof BadRequestError ||
+      error instanceof ForbiddenError ||
+      error instanceof NotFoundError
+    ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to create game' });
@@ -78,8 +82,12 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error listing games', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError) {
-      res.status(400).json({ error: error.message });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof ForbiddenError ||
+      error instanceof NotFoundError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list games' });
     }

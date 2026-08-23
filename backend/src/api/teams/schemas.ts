@@ -116,4 +116,14 @@ export const createAnnouncementSchema = z.object({
   body: z.string().min(1, 'Body is required').max(5000, 'Body too long'),
 });
 
+/**
+ * Schema for announcement list query parameters.
+ * Mirrors the other list schemas: bounded limit (1-100), non-negative offset.
+ */
+export const announcementQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
 export type CreateAnnouncementInput = z.infer<typeof createAnnouncementSchema>;
+export type AnnouncementQueryParams = z.infer<typeof announcementQuerySchema>;
