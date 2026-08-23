@@ -5,7 +5,7 @@
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
-import { GameEventType } from '@prisma/client';
+import { GameEventType, GameStatus } from '@prisma/client';
 
 // Types for stats responses
 export interface PlayerGameStats {
@@ -85,7 +85,10 @@ export interface BoxScore {
 export interface TeamSeasonStats {
   teamId: string;
   teamName: string;
+  /** FINISHED games (wins + losses). */
   gamesPlayed: number;
+  /** FINISHED games with a finalized box score; the divisor for the per-game averages. */
+  trackedGames: number;
   wins: number;
   losses: number;
   pointsPerGame: number;
@@ -119,6 +122,13 @@ interface ReboundMetadata {
  */
 export function shootingPercentage(made: number, attempted: number): number {
   return attempted > 0 ? Math.round((made / attempted) * 1000) / 10 : 0;
+}
+
+/**
+ * Per-game average rounded to one decimal place; 0 when no games were played.
+ */
+export function perGame(total: number, games: number): number {
+  return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
 }
 
 export class StatsService {
@@ -347,6 +357,14 @@ export class StatsService {
    * Finalize game stats when game status changes to FINISHED
    * This persists calculated stats to PlayerStats and TeamStats tables.
    * Uses a transaction to batch all upserts together.
+   *
+   * Idempotent and safe to re-run: stale PlayerStats rows for players who no
+   * longer have any events are deleted, so a reopen → edit → finish cycle (or
+   * an event created/deleted while the game is already FINISHED) converges on
+   * the current event set. A game with no player events ends up with NO
+   * PlayerStats/TeamStats rows at all — it is "untracked" and is excluded from
+   * per-game averages (it still counts toward the W/L record, which is
+   * score-based).
    */
   static async finalizeGameStats(gameId: string): Promise<void> {
     const game = await prisma.game.findUnique({
@@ -361,10 +379,26 @@ export class StatsService {
     }
 
     const playerStats = await this.calculatePlayerStats(gameId);
+
+    if (playerStats.length === 0) {
+      await prisma.$transaction([
+        prisma.playerStats.deleteMany({ where: { gameId } }),
+        prisma.teamStats.deleteMany({ where: { gameId } }),
+      ]);
+      return;
+    }
+
     const teamStats = this.calculateTeamTotals(game.teamId, game.team.name, playerStats);
 
-    // Batch all upserts in a single transaction
+    // Batch all writes in a single transaction
     await prisma.$transaction([
+      // Drop rows for players who no longer appear in the event set
+      prisma.playerStats.deleteMany({
+        where: {
+          gameId,
+          playerId: { notIn: playerStats.map((stats) => stats.playerId) },
+        },
+      }),
       // Upsert player stats
       ...playerStats.map((stats) =>
         prisma.playerStats.upsert({
@@ -450,6 +484,16 @@ export class StatsService {
         },
       }),
     ]);
+  }
+
+  /**
+   * Re-run finalization for a game that is already FINISHED so its stored
+   * box score tracks event edits made after the fact. No-op for any other
+   * status (live games are finalized when they transition to FINISHED).
+   */
+  static async refinalizeIfFinished(game: { id: string; status: GameStatus }): Promise<void> {
+    if (game.status !== 'FINISHED') return;
+    await this.finalizeGameStats(game.id);
   }
 
   /**
@@ -702,6 +746,11 @@ export class StatsService {
       : [];
 
     const gamesPlayed = games.length;
+    // Per-game averages divide by the number of games that were actually
+    // tracked (have a finalized TeamStats row), not every FINISHED game —
+    // a game created directly as FINISHED, or finished without any events,
+    // has no box score and must not deflate the averages.
+    const trackedGames = teamStats.length;
     let wins = 0;
     let losses = 0;
 
@@ -762,10 +811,11 @@ export class StatsService {
       gamesPlayed,
       wins,
       losses,
-      pointsPerGame: gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0,
-      reboundsPerGame: gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0,
-      assistsPerGame: gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0,
-      turnoversPerGame: gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0,
+      trackedGames,
+      pointsPerGame: perGame(totals.points, trackedGames),
+      reboundsPerGame: perGame(totals.rebounds, trackedGames),
+      assistsPerGame: perGame(totals.assists, trackedGames),
+      turnoversPerGame: perGame(totals.turnovers, trackedGames),
       fieldGoalPercentage: shootingPercentage(totals.fieldGoalsMade, totals.fieldGoalsAttempted),
       threePointPercentage: shootingPercentage(totals.threePointersMade, totals.threePointersAttempted),
       freeThrowPercentage: shootingPercentage(totals.freeThrowsMade, totals.freeThrowsAttempted),

@@ -134,6 +134,7 @@ export const mockPrisma = {
     update: jest.fn(),
     upsert: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn(),
     count: jest.fn(),
   },
   teamStats: {
@@ -144,6 +145,7 @@ export const mockPrisma = {
     update: jest.fn(),
     upsert: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn(),
     count: jest.fn(),
   },
   calendarFeedToken: {

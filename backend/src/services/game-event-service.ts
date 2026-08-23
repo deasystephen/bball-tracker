@@ -3,11 +3,13 @@
  */
 
 import prisma from '../models';
-import { GameEventType, Prisma } from '@prisma/client';
+import { GameEventType, GameStatus, Prisma } from '@prisma/client';
 import { CreateGameEventInput, GameEventQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 import { emitGameEvent } from '../websocket/emit';
+import { StatsService } from './stats-service';
+import { logger } from '../utils/logger';
 
 const GAME_ACCESS_INCLUDE = {
   team: {
@@ -50,6 +52,22 @@ interface GameAccess {
 }
 
 export class GameEventService {
+  /**
+   * Keep the stored box score in sync when events change on a game that is
+   * already FINISHED. Failures are logged, not surfaced: the event write has
+   * already succeeded and the next finalize will converge anyway.
+   */
+  private static async syncFinalizedStats(game: { id: string; status: GameStatus }): Promise<void> {
+    try {
+      await StatsService.refinalizeIfFinished(game);
+    } catch (error) {
+      logger.error('Error re-finalizing game stats after event change', {
+        gameId: game.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   /**
    * Verify user has access to a game and return permissions
    * Returns the game and user permissions
@@ -127,6 +145,8 @@ export class GameEventService {
       event,
       score: { homeScore: game.homeScore, awayScore: game.awayScore },
     });
+
+    await this.syncFinalizedStats(game);
 
     return event;
   }
@@ -217,7 +237,7 @@ export class GameEventService {
     eventId: string,
     userId: string
   ): Promise<{ success: true }> {
-    const { canTrackStats } = await this.verifyGameAccess(gameId, userId);
+    const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to delete events (for undo functionality)
     if (!canTrackStats) {
@@ -239,6 +259,8 @@ export class GameEventService {
     await prisma.gameEvent.delete({
       where: { id: eventId },
     });
+
+    await this.syncFinalizedStats(game);
 
     return { success: true };
   }

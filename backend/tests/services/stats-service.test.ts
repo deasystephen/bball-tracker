@@ -290,6 +290,64 @@ describe('StatsService', () => {
       expect(mockPrisma.teamStats.upsert).toHaveBeenCalled();
     });
 
+    it('deletes stale PlayerStats rows for players no longer in the event set (audit #27)', async () => {
+      const team = createTeam();
+      const playerA = createPlayer();
+      const playerB = createPlayer();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: {
+          ...team,
+          members: [
+            createTeamMember({ teamId: team.id, playerId: playerA.id }),
+            createTeamMember({ teamId: team.id, playerId: playerB.id }),
+          ],
+        },
+      });
+      // Only player B has events now (A's were deleted after the first finalize).
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...createGameEvent({ gameId: game.id, playerId: playerB.id, eventType: 'ASSIST' }),
+          player: { id: playerB.id, name: playerB.name },
+        },
+      ]);
+      (mockPrisma.playerStats.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
+
+      await StatsService.finalizeGameStats(game.id);
+
+      expect(mockPrisma.playerStats.deleteMany).toHaveBeenCalledWith({
+        where: { gameId: game.id, playerId: { notIn: [playerB.id] } },
+      });
+      expect(mockPrisma.playerStats.upsert).toHaveBeenCalledTimes(1);
+      expect((mockPrisma.playerStats.upsert as jest.Mock).mock.calls[0][0].where).toEqual({
+        playerId_gameId: { playerId: playerB.id, gameId: game.id },
+      });
+    });
+
+    it('removes all stored stats when the game has no player events', async () => {
+      const team = createTeam();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [] },
+      });
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.playerStats.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.teamStats.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await StatsService.finalizeGameStats(game.id);
+
+      expect(mockPrisma.playerStats.deleteMany).toHaveBeenCalledWith({ where: { gameId: game.id } });
+      expect(mockPrisma.teamStats.deleteMany).toHaveBeenCalledWith({ where: { gameId: game.id } });
+      expect(mockPrisma.playerStats.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.teamStats.upsert).not.toHaveBeenCalled();
+    });
+
     it('persists raw made/attempted counts on TeamStats alongside percentages', async () => {
       const team = createTeam();
       const player = createPlayer();
@@ -337,6 +395,26 @@ describe('StatsService', () => {
       } catch (error) {
         expectNotFoundError(error, 'Game not found');
       }
+    });
+  });
+
+  describe('refinalizeIfFinished', () => {
+    it('finalizes when the game is FINISHED', async () => {
+      const spy = jest.spyOn(StatsService, 'finalizeGameStats').mockResolvedValue();
+
+      await StatsService.refinalizeIfFinished({ id: 'game-1', status: 'FINISHED' });
+
+      expect(spy).toHaveBeenCalledWith('game-1');
+      spy.mockRestore();
+    });
+
+    it.each(['SCHEDULED', 'IN_PROGRESS', 'CANCELLED'] as const)('is a no-op for %s games', async (status) => {
+      const spy = jest.spyOn(StatsService, 'finalizeGameStats').mockResolvedValue();
+
+      await StatsService.refinalizeIfFinished({ id: 'game-1', status });
+
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
     });
   });
 
@@ -497,6 +575,35 @@ describe('StatsService', () => {
       expect(result.wins).toBe(1);
       expect(result.losses).toBe(1);
       expect(result.recentGames).toHaveLength(2);
+    });
+
+    it('divides per-game averages by tracked (finalized) games, not all FINISHED games (audit #53)', async () => {
+      const admin = createAdmin();
+      const team = createTeam({ id: 'team-tracked', name: 'Tracked' });
+      const game1 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 80, awayScore: 70 });
+      const game2 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 60, awayScore: 70 });
+      // Created directly as FINISHED with a score but never tracked: no TeamStats row.
+      const untracked = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 55, awayScore: 50 });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([game1, game2, untracked]);
+      (mockPrisma.teamStats.findMany as jest.Mock).mockResolvedValue([
+        createTeamStats({ teamId: team.id, gameId: game1.id, points: 80, rebounds: 40, assists: 20, turnovers: 10 }),
+        createTeamStats({ teamId: team.id, gameId: game2.id, points: 60, rebounds: 30, assists: 10, turnovers: 14 }),
+      ]);
+
+      const result = await StatsService.getTeamSeasonStats(team.id, admin.id);
+
+      expect(result.gamesPlayed).toBe(3);
+      expect(result.wins).toBe(2);
+      expect(result.losses).toBe(1);
+      expect(result.trackedGames).toBe(2);
+      // 140 / 2 tracked games, not 140 / 3 = 46.7
+      expect(result.pointsPerGame).toBe(70);
+      expect(result.reboundsPerGame).toBe(35);
+      expect(result.assistsPerGame).toBe(15);
+      expect(result.turnoversPerGame).toBe(12);
     });
 
     it('weights season shooting percentages by attempts, not by game (audit #26)', async () => {

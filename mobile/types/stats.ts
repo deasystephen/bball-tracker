@@ -79,7 +79,10 @@ export interface BoxScore {
 export interface TeamSeasonStats {
   teamId: string;
   teamName: string;
+  /** FINISHED games (wins + losses). */
   gamesPlayed: number;
+  /** FINISHED games with a finalized box score; the divisor for per-game averages. */
+  trackedGames: number;
   wins: number;
   losses: number;
   pointsPerGame: number;

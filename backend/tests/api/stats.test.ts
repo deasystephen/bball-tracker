@@ -135,6 +135,7 @@ describe('Stats API', () => {
     teamId: TEST_TEAM_ID,
     teamName: 'Lakers',
     gamesPlayed: 15,
+    trackedGames: 15,
     wins: 10,
     losses: 5,
     pointsPerGame: 88.5,
@@ -323,6 +324,7 @@ describe('Stats API', () => {
       expect(response.body.stats).toBeDefined();
       expect(response.body.stats.teamId).toBe(TEST_TEAM_ID);
       expect(response.body.stats.gamesPlayed).toBe(15);
+      expect(response.body.stats.trackedGames).toBe(15);
       expect(response.body.stats.wins).toBe(10);
       expect(response.body.stats.losses).toBe(5);
       expect(response.body.stats.recentGames).toHaveLength(1);
