@@ -325,6 +325,30 @@ describe('dead push token pruning (audit #60)', () => {
     expect(mockPrisma.pushToken.deleteMany).not.toHaveBeenCalled();
   });
 
+  it('still returns tickets when pruning dead tokens fails (logged, not thrown)', async () => {
+    (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([{ token: VALID_TOKEN }]);
+    (mockPrisma.pushToken.deleteMany as jest.Mock).mockRejectedValue(new Error('db down'));
+    jest.spyOn(ExpoProto, 'sendPushNotificationsAsync').mockResolvedValue([
+      { status: 'error', message: 'gone', details: { error: 'DeviceNotRegistered' } },
+    ]);
+
+    const tickets = await NotificationService.sendToUsers(['user-1'], { title: 't', body: 'b' });
+
+    expect(tickets).toHaveLength(1);
+    expect(mockPrisma.pushToken.deleteMany).toHaveBeenCalled();
+  });
+
+  it('swallows a failing scheduled receipt check', async () => {
+    (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([{ token: VALID_TOKEN }]);
+    jest.spyOn(ExpoProto, 'sendPushNotificationsAsync').mockResolvedValue([{ status: 'ok', id: 'ticket-1' }]);
+    const check = jest.spyOn(NotificationService, 'checkReceipts').mockRejectedValue(new Error('boom'));
+
+    await NotificationService.sendToUsers(['user-1'], { title: 't', body: 'b' });
+    await expect(jest.advanceTimersByTimeAsync(15 * 60 * 1000)).resolves.toBeUndefined();
+
+    expect(check).toHaveBeenCalledWith(new Map([['ticket-1', VALID_TOKEN]]));
+  });
+
   it('pruneDeadTokens is a no-op for an empty list', async () => {
     await expect(NotificationService.pruneDeadTokens([])).resolves.toBe(0);
     expect(mockPrisma.pushToken.deleteMany).not.toHaveBeenCalled();
