@@ -18,6 +18,8 @@ interface AuthState {
   isLoading: boolean;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
   setUser: (user: User) => void;
+  /** Merge fields into the current user without re-firing login analytics. */
+  updateUser: (patch: Partial<User>) => void;
   logout: () => void;
 }
 
@@ -42,6 +44,10 @@ export const useAuthStore = create<AuthState>()(
         identifyUser(user.id);
         trackEvent(AnalyticsEvents.USER_LOGGED_IN);
         set({ user, isAuthenticated: true, isLoading: false });
+      },
+
+      updateUser: (patch: Partial<User>) => {
+        set((state) => (state.user ? { user: { ...state.user, ...patch } } : {}));
       },
 
       logout: () => {
@@ -97,6 +103,7 @@ export const useAuthActions = () =>
     useShallow((state) => ({
       setAuthToken: state.setAuthToken,
       setUser: state.setUser,
+      updateUser: state.updateUser,
       logout: state.logout,
     }))
   );

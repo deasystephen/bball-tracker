@@ -172,3 +172,31 @@ describe('auth-store', () => {
     expect(persisted).toEqual({ accessToken: 'a', refreshToken: 'r', user: null, isAuthenticated: true });
   });
 });
+
+describe('auth-store updateUser', () => {
+  beforeEach(() => {
+    useAuthStore.getState().logout();
+    jest.clearAllMocks();
+  });
+
+  it('merges fields into the current user without re-firing login analytics', () => {
+    useAuthStore.getState().setUser(makeUser({ role: UserRole.PLAYER }));
+    jest.clearAllMocks();
+
+    useAuthStore.getState().updateUser({ role: UserRole.COACH });
+
+    expect(useAuthStore.getState().user).toMatchObject({ id: 'user-1', role: UserRole.COACH, email: 'test@example.com' });
+    expect(trackEvent).not.toHaveBeenCalled();
+    expect(identifyUser).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when nobody is logged in', () => {
+    useAuthStore.getState().updateUser({ role: UserRole.COACH });
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('is exposed through useAuthActions', () => {
+    const { result } = renderHook(() => useAuthActions());
+    expect(typeof result.current.updateUser).toBe('function');
+  });
+});

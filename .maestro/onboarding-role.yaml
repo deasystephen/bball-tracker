@@ -1,0 +1,27 @@
+appId: com.bballtracker.mobile
+---
+# Self-select account type after first sign-in (audit #9).
+# Steph Curry is seeded as a PLAYER, so the role step appears once after
+# dev-login. Frank Vogel (COACH, used by every other flow) never sees it.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- assertVisible: "Basketball Tracker"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Steph Curry.*"
+# Role step
+- assertVisible: "How will you use Capyhoops?"
+- tapOn: "I coach a team"
+- tapOn: "Continue"
+# Lands on home as a coach
+- assertVisible: "Your Teams"
+- tapOn: "Profile tab"
+- assertVisible: "COACH"
+- assertVisible: "Change account type"
+# Switch back to player from Profile
+- tapOn: "Change account type"
+- assertVisible: "How will you use Capyhoops?"
+- tapOn: "I play on a team"
+- tapOn: "Continue"
+- assertVisible: "PLAYER"

@@ -18,6 +18,7 @@ import { useAuthActions } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { spacing } from '../../theme';
+import { postLoginRoute } from '../../utils/role-onboarding';
 
 /**
  * Errors that are knowable from the deep link itself (WorkOS returned an error,
@@ -57,7 +58,7 @@ export default function AuthCallbackScreen() {
         setAuthToken(accessToken, refreshToken ?? null);
         setUser(user);
 
-        router.replace('/(tabs)/home');
+        router.replace(await postLoginRoute(user));
       } catch (err) {
         captureException(err, { flow: 'auth-callback' });
         console.error('Token exchange error:', err);

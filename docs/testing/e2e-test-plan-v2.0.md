@@ -60,6 +60,19 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Lands on onboarding flow (`app/onboarding/index.tsx`); session token persisted; navigating back to app shows logged-in state.
 - **Notes:** ___________
 
+### A.1b — Account type selection after first sign-in
+- [ ] Pass / Fail / Skipped
+- **Role:** new user (created as PLAYER)
+- **Steps:**
+  1. Complete A.1 sign-up
+  2. After the callback, the "How will you use Capyhoops?" screen appears
+  3. Choose "I coach a team" → Continue
+  4. Profile tab → role badge reads COACH; Teams tab → Create Team succeeds (no 403)
+  5. Logout, log in again → screen does NOT reappear
+  6. Profile → "Change account type" → pick "I play on a team" → Continue → role badge reads PLAYER
+- **Expected:** `PATCH /auth/me/role` 200 each time; ADMIN accounts never see the screen or the Profile row. Maestro: `.maestro/onboarding-role.yaml`.
+- **Notes:** ___________
+
 ### A.2 — Existing user login
 - [ ] Pass / Fail / Skipped
 - **Role:** any existing user

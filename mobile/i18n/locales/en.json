@@ -66,5 +66,21 @@
     "teams": "Teams",
     "seasons": "Seasons",
     "upgradeForUnlimited": "Upgrade for unlimited"
+  },
+  "roleOnboarding": {
+    "title": "How will you use Capyhoops?",
+    "subtitle": "Coaches create teams and track games. Players join teams and follow their stats. You can change this later in Profile.",
+    "coachTitle": "I coach a team",
+    "coachBody": "Create teams, invite players, run games and track stats.",
+    "playerTitle": "I play on a team",
+    "playerBody": "Accept invitations, follow games and see your numbers.",
+    "continue": "Continue",
+    "hint": "Admins and parents manage accounts elsewhere.",
+    "errorTitle": "Couldn't save",
+    "errorBody": "We couldn't update your account type. Check your connection and try again.",
+    "sectionTitle": "Account",
+    "changeRole": "Change account type",
+    "currentCoach": "You're set up as a coach",
+    "currentPlayer": "You're set up as a player"
   }
 }

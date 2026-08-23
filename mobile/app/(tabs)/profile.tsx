@@ -207,6 +207,35 @@ export default function Profile() {
           </View>
         )}
 
+        {/* Account type (PLAYER <-> COACH self-select) */}
+        {(user?.role === 'PLAYER' || user?.role === 'COACH') && (
+          <View style={styles.section}>
+            <ThemedText variant="h4" style={styles.sectionTitle}>
+              {t('roleOnboarding.sectionTitle')}
+            </ThemedText>
+            <Card variant="default" style={styles.settingsCard}>
+              <TouchableOpacity
+                style={styles.settingRow}
+                accessibilityLabel={t('roleOnboarding.changeRole')}
+                onPress={() => router.push('/onboarding/role')}
+              >
+                <View style={styles.settingLeft}>
+                  <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
+                    <Ionicons name="swap-horizontal" size={18} color={colors.primary} />
+                  </View>
+                  <View style={styles.settingContent}>
+                    <ThemedText variant="body">{t('roleOnboarding.changeRole')}</ThemedText>
+                    <ThemedText variant="caption" color="textSecondary">
+                      {user.role === 'COACH' ? t('roleOnboarding.currentCoach') : t('roleOnboarding.currentPlayer')}
+                    </ThemedText>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              </TouchableOpacity>
+            </Card>
+          </View>
+        )}
+
         {/* Admin Section */}
         {(user?.role === 'ADMIN' || user?.role === 'COACH') && (
           <View style={styles.section}>
