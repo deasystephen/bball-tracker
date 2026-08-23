@@ -354,6 +354,40 @@ describe('Auth API', () => {
       expect(mockWorkOSService.refreshSession).toHaveBeenCalledWith('old-refresh-token');
     });
 
+    it('returns 401 for a definite WorkOS rejection (4xx)', async () => {
+      mockWorkOSService.refreshSession.mockRejectedValue(Object.assign(new Error('invalid_grant'), { status: 400 }));
+
+      const response = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: 'revoked' });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('returns 503 (not 401) when WorkOS is down — the client must keep its tokens', async () => {
+      mockWorkOSService.refreshSession.mockRejectedValue(Object.assign(new Error('Internal'), { status: 503 }));
+
+      const response = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: 'still-valid' });
+
+      expect(response.status).toBe(503);
+      expect(response.body.error).toBe('Authentication service unavailable');
+    });
+
+    it('returns 503 on a network failure reaching WorkOS (no status)', async () => {
+      mockWorkOSService.refreshSession.mockRejectedValue(new TypeError('fetch failed'));
+
+      const response = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: 'still-valid' });
+
+      expect(response.status).toBe(503);
+    });
+
+    it('returns 429 with Retry-After when WorkOS rate-limits the refresh', async () => {
+      mockWorkOSService.refreshSession.mockRejectedValue(Object.assign(new Error('rate limited'), { status: 429 }));
+
+      const response = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: 'still-valid' });
+
+      expect(response.status).toBe(429);
+      expect(response.headers['retry-after']).toBe('5');
+    });
+
     it('should return 400 when refreshToken is missing', async () => {
       const response = await request(app).post('/api/v1/auth/refresh').send({});
       expect(response.status).toBe(400);
@@ -380,7 +414,7 @@ describe('Auth API', () => {
     });
 
     it('should return 401 (not 500) when WorkOS rejects the refresh token', async () => {
-      mockWorkOSService.refreshSession.mockRejectedValue(new Error('invalid_grant'));
+      mockWorkOSService.refreshSession.mockRejectedValue(Object.assign(new Error('invalid_grant'), { status: 400 }));
 
       const response = await request(app)
         .post('/api/v1/auth/refresh')
