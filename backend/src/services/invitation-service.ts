@@ -25,7 +25,31 @@ const USER_SUMMARY_SELECT = {
   email: true,
 } satisfies Prisma.UserSelect;
 
-const INVITATION_INCLUDE = {
+/**
+ * Scalar fields safe to return on authenticated responses.
+ *
+ * `token` is deliberately absent: it is a bearer secret that lets anyone call
+ * the unauthenticated `POST /invitations/by-token/:token/accept`, so it must
+ * only ever travel inside the invitation email (audit #14).
+ */
+const INVITATION_SCALAR_SELECT = {
+  id: true,
+  teamId: true,
+  playerId: true,
+  invitedById: true,
+  status: true,
+  jerseyNumber: true,
+  position: true,
+  message: true,
+  expiresAt: true,
+  createdAt: true,
+  updatedAt: true,
+  acceptedAt: true,
+  rejectedAt: true,
+} satisfies Prisma.TeamInvitationSelect;
+
+const INVITATION_SELECT = {
+  ...INVITATION_SCALAR_SELECT,
   team: {
     select: {
       id: true,
@@ -46,16 +70,17 @@ const INVITATION_INCLUDE = {
   },
   player: { select: USER_SUMMARY_SELECT },
   invitedBy: { select: USER_SUMMARY_SELECT },
-} satisfies Prisma.TeamInvitationInclude;
+} satisfies Prisma.TeamInvitationSelect;
 
-const INVITATION_TEAM_INCLUDE = {
+const INVITATION_TEAM_SELECT = {
+  ...INVITATION_SCALAR_SELECT,
   team: {
     select: {
       id: true,
       name: true,
     },
   },
-} satisfies Prisma.TeamInvitationInclude;
+} satisfies Prisma.TeamInvitationSelect;
 
 const ACCEPTED_MEMBER_INCLUDE = {
   player: { select: USER_SUMMARY_SELECT },
@@ -67,11 +92,15 @@ const ACCEPTED_MEMBER_INCLUDE = {
   },
 } satisfies Prisma.TeamMemberInclude;
 
+/** Invitation without its secret `token` (every authenticated response). */
+export type InvitationSummary = Prisma.TeamInvitationGetPayload<{
+  select: typeof INVITATION_SCALAR_SELECT;
+}>;
 export type InvitationWithRelations = Prisma.TeamInvitationGetPayload<{
-  include: typeof INVITATION_INCLUDE;
+  select: typeof INVITATION_SELECT;
 }>;
 export type InvitationWithTeam = Prisma.TeamInvitationGetPayload<{
-  include: typeof INVITATION_TEAM_INCLUDE;
+  select: typeof INVITATION_TEAM_SELECT;
 }>;
 export type AcceptedTeamMember = Prisma.TeamMemberGetPayload<{
   include: typeof ACCEPTED_MEMBER_INCLUDE;
@@ -88,7 +117,7 @@ export interface InvitationList {
 }
 
 export interface AcceptInvitationResult {
-  invitation: TeamInvitation;
+  invitation: InvitationSummary;
   teamMember: AcceptedTeamMember;
 }
 
@@ -200,13 +229,13 @@ export class InvitationService {
         expiresAt,
         status: 'PENDING',
       },
-      include: INVITATION_INCLUDE,
+      select: INVITATION_SELECT,
     });
 
     // Send invitation email (fire-and-forget; never block the response)
     if (invitation.player.email) {
       const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
-      const acceptUrl = `${baseUrl}/invite/${invitation.token}`;
+      const acceptUrl = `${baseUrl}/invite/${token}`;
       mailer
         .send({
           template: invitationTemplate,
@@ -288,7 +317,7 @@ export class InvitationService {
       prisma.teamInvitation.count({ where }),
       prisma.teamInvitation.findMany({
         where,
-        include: INVITATION_INCLUDE,
+        select: INVITATION_SELECT,
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset,
@@ -317,7 +346,7 @@ export class InvitationService {
   ): Promise<InvitationWithRelations> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
-      include: INVITATION_INCLUDE,
+      select: INVITATION_SELECT,
     });
 
     if (!invitation) {
@@ -397,6 +426,7 @@ export class InvitationService {
           status: 'ACCEPTED',
           acceptedAt: new Date(),
         },
+        select: INVITATION_SCALAR_SELECT,
       });
 
       // Add player to team
@@ -449,7 +479,7 @@ export class InvitationService {
         status: 'REJECTED',
         rejectedAt: new Date(),
       },
-      include: INVITATION_TEAM_INCLUDE,
+      select: INVITATION_TEAM_SELECT,
     });
 
     return updatedInvitation;
@@ -460,7 +490,7 @@ export class InvitationService {
    * @param invitationId Invitation ID
    * @param userId User ID
    */
-  static async cancelInvitation(invitationId: string, userId: string): Promise<TeamInvitation> {
+  static async cancelInvitation(invitationId: string, userId: string): Promise<InvitationSummary> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
     });
@@ -488,6 +518,7 @@ export class InvitationService {
       data: {
         status: 'CANCELLED',
       },
+      select: INVITATION_SCALAR_SELECT,
     });
 
     return updatedInvitation;

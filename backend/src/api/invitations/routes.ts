@@ -15,6 +15,7 @@ import {
 } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
+import { omitToken } from './serializers';
 
 const router = Router();
 
@@ -43,6 +44,7 @@ router.get('/', async (req, res) => {
     res.json({
       success: true,
       ...result,
+      invitations: result.invitations.map(omitToken),
     });
   } catch (error) {
     logger.error('Error listing invitations', { error: error instanceof Error ? error.message : String(error) });
@@ -71,7 +73,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
 
     res.json({
       success: true,
-      invitation,
+      invitation: omitToken(invitation),
     });
   } catch (error) {
     logger.error('Error getting invitation', { error: error instanceof Error ? error.message : String(error) });
@@ -99,7 +101,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
 
     res.json({
       success: true,
-      invitation: result.invitation,
+      invitation: omitToken(result.invitation),
       teamMember: result.teamMember,
       message: 'Invitation accepted. You have been added to the team.',
     });
@@ -130,7 +132,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
 
     res.json({
       success: true,
-      invitation,
+      invitation: omitToken(invitation),
       message: 'Invitation rejected.',
     });
   } catch (error) {
@@ -160,7 +162,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
 
     res.json({
       success: true,
-      invitation,
+      invitation: omitToken(invitation),
       message: 'Invitation cancelled.',
     });
   } catch (error) {

@@ -447,6 +447,9 @@ describe('Teams API', () => {
       expect(response.status).toBe(201);
       expect(response.body.success).toBe(true);
       expect(response.body.invitation).toBeDefined();
+      // Audit #14: the token only travels in the invitation email.
+      expect(response.body.invitation).not.toHaveProperty('token');
+      expect(JSON.stringify(response.body)).not.toContain('abc123');
     });
 
     it('should return 400 for missing playerId', async () => {

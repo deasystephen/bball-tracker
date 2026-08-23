@@ -162,6 +162,19 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
   `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
 
+### Team Invitations
+
+- `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random
+  `token` and emails the player a `capyhoops.com/invite/<token>` link. The token is a **bearer secret**:
+  `POST /invitations/by-token/:token/accept` is unauthenticated and accepts on behalf of the invited player.
+- **The token is never returned on an authenticated response** (audit #14). `invitation-service.ts` reads
+  invitations back through explicit `select` constants (`INVITATION_SCALAR_SELECT` / `INVITATION_SELECT` /
+  `INVITATION_TEAM_SELECT`) that omit `token`, and `api/invitations/serializers.ts#omitToken` strips it again
+  at the route layer as defense in depth. Only `getInvitationByToken` / `acceptInvitationByToken` (the
+  public routes, where the caller already holds the token) touch it. Tests in `tests/api/invitations.test.ts`,
+  `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
+  create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
+
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
 - Event-driven: Kafka for game events, Flink for real-time aggregation

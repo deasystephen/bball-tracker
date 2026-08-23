@@ -13,7 +13,8 @@ export interface TeamInvitation {
   playerId: string;
   invitedById: string;
   status: InvitationStatus;
-  token: string;
+  // The secret `token` is never returned on authenticated responses — it only
+  // travels inside the invitation email (backend audit #14).
   jerseyNumber?: number | null;
   position?: string | null;
   message?: string | null;

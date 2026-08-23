@@ -18,6 +18,7 @@ import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/erro
 import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
+import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
 import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitlements';
@@ -271,7 +272,7 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
 
     res.status(201).json({
       success: true,
-      invitation,
+      invitation: omitToken(invitation),
     });
   } catch (error) {
     logger.error('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });

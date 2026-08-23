@@ -94,13 +94,22 @@ describe('InvitationService', () => {
       expect(result).toHaveProperty('status', 'PENDING');
       expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
 
+      // Audit #14: the row is read back with an explicit select that omits the
+      // secret token, and the email link uses the freshly generated token.
+      const createArgs = (mockPrisma.teamInvitation.create as jest.Mock).mock.calls[0][0];
+      expect(createArgs.select).toBeDefined();
+      expect(createArgs.select).not.toHaveProperty('token');
+      expect(createArgs.include).toBeUndefined();
+      const generatedToken = createArgs.data.token as string;
+      expect(generatedToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+
       // Flush microtasks so the fire-and-forget mailer.send call resolves
       await new Promise((resolve) => setImmediate(resolve));
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({
           to: player.email,
           variables: expect.objectContaining({
-            acceptUrl: `https://capyhoops.com/invite/${invitation.token}`,
+            acceptUrl: `https://capyhoops.com/invite/${generatedToken}`,
           }),
         })
       );
@@ -132,12 +141,13 @@ describe('InvitationService', () => {
         });
 
         await InvitationService.createInvitation(team.id, { playerId: player.id, expiresInDays: 7 }, coach.id);
+        const generatedToken = (mockPrisma.teamInvitation.create as jest.Mock).mock.calls[0][0].data.token;
 
         await new Promise((resolve) => setImmediate(resolve));
         expect(mockedMailerSend).toHaveBeenCalledWith(
           expect.objectContaining({
             variables: expect.objectContaining({
-              acceptUrl: `https://staging.capyhoops.com/invite/${invitation.token}`,
+              acceptUrl: `https://staging.capyhoops.com/invite/${generatedToken}`,
             }),
           })
         );
@@ -766,6 +776,78 @@ describe('InvitationService', () => {
       } catch (error) {
         expectForbiddenError(error, 'You do not have access to this invitation');
       }
+    });
+  });
+
+  describe('token is never selected on authenticated queries (audit #14)', () => {
+    const expectSelectWithoutToken = (args: { select?: Record<string, unknown>; include?: unknown }): void => {
+      expect(args.include).toBeUndefined();
+      expect(args.select).toBeDefined();
+      expect(args.select).not.toHaveProperty('token');
+      expect(args.select).toHaveProperty('id', true);
+      expect(args.select).toHaveProperty('status', true);
+    };
+
+    it('listInvitations selects without token', async () => {
+      const { player } = createFullInvitation();
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations({ limit: 10, offset: 0 }, player.id);
+
+      expectSelectWithoutToken((mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0]);
+    });
+
+    it('getInvitationById selects without token', async () => {
+      const { invitation, player } = createFullInvitation();
+      const withoutToken: Partial<typeof invitation> = { ...invitation };
+      delete withoutToken.token;
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withoutToken);
+
+      const result = await InvitationService.getInvitationById(invitation.id, player.id);
+
+      expectSelectWithoutToken((mockPrisma.teamInvitation.findUnique as jest.Mock).mock.calls[0][0]);
+      expect(result).not.toHaveProperty('token');
+    });
+
+    it('acceptInvitation updates with a select that omits token', async () => {
+      const { invitation, player } = createFullInvitation();
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      const txUpdate = jest.fn().mockResolvedValue({ id: invitation.id, status: 'ACCEPTED' });
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
+        callback({
+          teamInvitation: { update: txUpdate },
+          teamMember: { create: jest.fn().mockResolvedValue({ teamId: invitation.teamId, playerId: player.id }) },
+        })
+      );
+
+      await InvitationService.acceptInvitation(invitation.id, player.id);
+
+      expectSelectWithoutToken(txUpdate.mock.calls[0][0]);
+    });
+
+    it('rejectInvitation updates with a select that omits token', async () => {
+      const { invitation, player } = createFullInvitation();
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({ id: invitation.id, status: 'REJECTED' });
+
+      await InvitationService.rejectInvitation(invitation.id, player.id);
+
+      expectSelectWithoutToken((mockPrisma.teamInvitation.update as jest.Mock).mock.calls[0][0]);
+    });
+
+    it('cancelInvitation updates with a select that omits token', async () => {
+      const { invitation, coach, team } = createFullInvitation();
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({ id: invitation.id, status: 'CANCELLED' });
+
+      await InvitationService.cancelInvitation(invitation.id, coach.id);
+
+      expectSelectWithoutToken((mockPrisma.teamInvitation.update as jest.Mock).mock.calls[0][0]);
     });
   });
 
