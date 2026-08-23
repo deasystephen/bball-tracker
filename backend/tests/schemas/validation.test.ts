@@ -7,7 +7,7 @@
  */
 
 import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../../src/api/seasons/schemas';
-import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema, updateTeamMemberSchema } from '../../src/api/teams/schemas';
+import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
 import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
 import { createGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
@@ -476,6 +476,47 @@ describe('Schema Validation', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should keep explicit null dates as null in createSeasonSchema (not coerce to 1970)', () => {
+      const result = createSeasonSchema.safeParse({
+        leagueId: UUID_ID,
+        name: 'Spring 2024',
+        startDate: null,
+        endDate: null,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.startDate).toBeNull();
+        expect(result.data.endDate).toBeNull();
+      }
+    });
+
+    it('should keep explicit null dates as null in updateSeasonSchema', () => {
+      const result = updateSeasonSchema.safeParse({ startDate: null, endDate: null });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.startDate).toBeNull();
+        expect(result.data.endDate).toBeNull();
+      }
+    });
+
+    it('should leave omitted dates undefined in createSeasonSchema', () => {
+      const result = createSeasonSchema.safeParse({ leagueId: UUID_ID, name: 'Spring 2024' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.startDate).toBeUndefined();
+        expect(result.data.endDate).toBeUndefined();
+      }
+    });
+
+    it('should reject an unparseable date string in createSeasonSchema', () => {
+      const result = createSeasonSchema.safeParse({
+        leagueId: UUID_ID,
+        name: 'Spring 2024',
+        startDate: 'not-a-date',
+      });
+      expect(result.success).toBe(false);
+    });
+
     it('should accept ISO date string in createGameSchema', () => {
       const result = createGameSchema.safeParse({
         teamId: UUID_ID,
@@ -500,6 +541,38 @@ describe('Schema Validation', () => {
       if (result.success) {
         expect(result.data.date).toBeInstanceOf(Date);
       }
+    });
+  });
+
+  describe('Announcement Query Schema', () => {
+    it('should default limit to 20 and offset to 0', () => {
+      const result = announcementQuerySchema.safeParse({});
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual({ limit: 20, offset: 0 });
+      }
+    });
+
+    it('should coerce numeric strings', () => {
+      const result = announcementQuerySchema.safeParse({ limit: '5', offset: '10' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual({ limit: 5, offset: 10 });
+      }
+    });
+
+    it('should reject non-numeric limit', () => {
+      expect(announcementQuerySchema.safeParse({ limit: 'abc' }).success).toBe(false);
+    });
+
+    it('should reject limit of 0, limit above 100 and negative offset', () => {
+      expect(announcementQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+      expect(announcementQuerySchema.safeParse({ limit: '101' }).success).toBe(false);
+      expect(announcementQuerySchema.safeParse({ offset: '-1' }).success).toBe(false);
+    });
+
+    it('should reject fractional values', () => {
+      expect(announcementQuerySchema.safeParse({ limit: '2.5' }).success).toBe(false);
     });
   });
 

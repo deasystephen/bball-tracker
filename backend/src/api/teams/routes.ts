@@ -13,6 +13,7 @@ import {
   teamQuerySchema,
   createManagedPlayerSchema,
   createAnnouncementSchema,
+  announcementQuerySchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
@@ -403,13 +404,17 @@ router.post('/:teamId/announcements', validateUuidParams('teamId'), async (req, 
  */
 router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, res) => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+    const validationResult = announcementQuerySchema.safeParse(req.query);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
 
     const result = await AnnouncementService.listAnnouncements(
       req.params.teamId as string,
       req.user!.id,
-      { limit, offset }
+      validationResult.data
     );
 
     res.json({
@@ -419,6 +424,7 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
   } catch (error) {
     logger.error('Error listing announcements', { error: error instanceof Error ? error.message : String(error) });
     if (
+      error instanceof BadRequestError ||
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
     ) {

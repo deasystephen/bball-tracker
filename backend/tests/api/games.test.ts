@@ -95,9 +95,47 @@ describe('Games API', () => {
 
       expect(response.status).toBe(403);
     });
+
+    it('should return 404 (not 500) when the team does not exist', async () => {
+      mockGameService.createGame.mockRejectedValue(new NotFoundError('Team not found'));
+
+      const response = await request(app)
+        .post('/api/v1/games')
+        .send({
+          teamId: TEST_TEAM_ID,
+          opponent: 'Celtics',
+          date: '2024-03-15T18:00:00Z',
+        });
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('Team not found');
+    });
   });
 
   describe('GET /api/v1/games', () => {
+    it('should return 403 (not 500) when filtering by a team the user cannot access', async () => {
+      mockGameService.listGames.mockRejectedValue(
+        new ForbiddenError('You do not have access to this team')
+      );
+
+      const response = await request(app)
+        .get('/api/v1/games')
+        .query({ teamId: TEST_TEAM_ID });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You do not have access to this team');
+    });
+
+    it('should return 404 (not 500) when the filtered team does not exist', async () => {
+      mockGameService.listGames.mockRejectedValue(new NotFoundError('Team not found'));
+
+      const response = await request(app)
+        .get('/api/v1/games')
+        .query({ teamId: TEST_TEAM_ID });
+
+      expect(response.status).toBe(404);
+    });
+
     it('should list games successfully', async () => {
       mockGameService.listGames.mockResolvedValue({
         games: [mockGame],

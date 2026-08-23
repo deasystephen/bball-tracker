@@ -137,6 +137,49 @@ describe('Announcements API', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should return 400 (not 500) for a non-numeric limit', async () => {
+      const response = await request(app)
+        .get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`)
+        .query({ limit: 'abc' });
+
+      expect(response.status).toBe(400);
+      expect(mockAnnouncementService.listAnnouncements).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a limit above 100', async () => {
+      const response = await request(app)
+        .get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`)
+        .query({ limit: 1000 });
+
+      expect(response.status).toBe(400);
+      expect(mockAnnouncementService.listAnnouncements).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a negative offset', async () => {
+      const response = await request(app)
+        .get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`)
+        .query({ offset: -1 });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should apply default pagination when none is supplied', async () => {
+      mockAnnouncementService.listAnnouncements.mockResolvedValue({
+        announcements: [],
+        total: 0,
+        limit: 20,
+        offset: 0,
+      } as unknown as Awaited<ReturnType<typeof mockAnnouncementService.listAnnouncements>>);
+
+      await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/announcements`);
+
+      expect(mockAnnouncementService.listAnnouncements).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        TEST_USER_ID,
+        { limit: 20, offset: 0 }
+      );
+    });
   });
 });
 

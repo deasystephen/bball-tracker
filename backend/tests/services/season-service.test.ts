@@ -345,6 +345,36 @@ describe('SeasonService', () => {
       }
     });
 
+    it('clearing startDate to null does not fall back to the stored date for the range check', async () => {
+      const admin = createAdmin();
+      // Stored startDate (Sep) is after the new endDate (Jun). If the cleared
+      // startDate leaked through `??` the range check would reject this update.
+      const season = createSeason({
+        startDate: new Date('2026-09-01'),
+        endDate: new Date('2026-12-01'),
+      });
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+        ...season,
+        league: createLeague({ id: season.leagueId }),
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.update as jest.Mock).mockResolvedValue({
+        ...season,
+        startDate: null,
+        endDate: new Date('2026-06-01'),
+      });
+
+      await SeasonService.updateSeason(
+        season.id,
+        { startDate: null, endDate: new Date('2026-06-01') },
+        admin.id
+      );
+
+      const updateArgs = (mockPrisma.season.update as jest.Mock).mock.calls[0][0];
+      expect(updateArgs.data.startDate).toBeNull();
+      expect(updateArgs.data.endDate).toEqual(new Date('2026-06-01'));
+    });
+
     it('applies updates and returns the updated season', async () => {
       const admin = createAdmin();
       const season = createSeason({ name: 'Old' });

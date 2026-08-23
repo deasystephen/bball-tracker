@@ -107,6 +107,29 @@ describe('Seasons API', () => {
       );
     });
 
+    it('should accept explicit null dates and pass them through as null (not 1970)', async () => {
+      mockSeasonService.createSeason.mockResolvedValue({
+        ...mockSeason,
+        startDate: null,
+        endDate: null,
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.createSeason>>);
+
+      const response = await request(app)
+        .post('/api/v1/seasons')
+        .send({
+          leagueId: TEST_LEAGUE_ID_UUID,
+          name: 'Spring 2024',
+          startDate: null,
+          endDate: null,
+        });
+
+      expect(response.status).toBe(201);
+      expect(mockSeasonService.createSeason).toHaveBeenCalledWith(
+        { leagueId: TEST_LEAGUE_ID_UUID, name: 'Spring 2024', startDate: null, endDate: null },
+        TEST_USER_ID
+      );
+    });
+
     it('should return 400 for missing league ID', async () => {
       const response = await request(app)
         .post('/api/v1/seasons')
@@ -364,6 +387,25 @@ describe('Seasons API', () => {
         .send({ name: 'New Name' });
 
       expect(response.status).toBe(404);
+    });
+
+    it('should clear dates when null is sent', async () => {
+      mockSeasonService.updateSeason.mockResolvedValue({
+        ...mockSeason,
+        startDate: null,
+        endDate: null,
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.updateSeason>>);
+
+      const response = await request(app)
+        .patch(`/api/v1/seasons/${TEST_SEASON_ID}`)
+        .send({ startDate: null, endDate: null });
+
+      expect(response.status).toBe(200);
+      expect(mockSeasonService.updateSeason).toHaveBeenCalledWith(
+        TEST_SEASON_ID,
+        { startDate: null, endDate: null },
+        TEST_USER_ID
+      );
     });
 
     it('should return 403 for unauthorized update', async () => {
