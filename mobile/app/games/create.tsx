@@ -27,7 +27,7 @@ import {
 } from '../../components';
 import { useToast } from '../../components/Toast';
 import { useCreateGame } from '../../hooks/useGames';
-import { useTeams } from '../../hooks/useTeams';
+import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
@@ -48,7 +48,7 @@ export default function CreateGameScreen() {
     {}
   );
 
-  const { data: teams, isLoading: teamsLoading } = useTeams();
+  const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
   const createGame = useCreateGame();
   const toast = useToast();
 

@@ -23,7 +23,7 @@ import {
   ErrorState,
 } from '../../components';
 import { GameCard } from '../../components/game';
-import { useGames } from '../../hooks/useGames';
+import { useInfiniteGames } from '../../hooks/useGames';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -47,19 +47,26 @@ export default function Games() {
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
 
+  // Status filtering is server-side so a long backlog of scheduled games can't
+  // push live/finished games past the first page.
   const {
-    data: games,
+    data,
     isLoading,
     error,
     refetch,
     isRefetching,
-  } = useGames();
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteGames(activeFilter === 'ALL' ? undefined : { status: activeFilter });
 
-  const filteredGames = useMemo(() => {
-    if (!games) return [];
-    if (activeFilter === 'ALL') return games;
-    return games.filter((g) => g.status === activeFilter);
-  }, [games, activeFilter]);
+  const filteredGames = useMemo(() => data?.games ?? [], [data]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleGamePress = useCallback(
     (game: Game) => {
@@ -308,9 +315,14 @@ export default function Games() {
           removeClippedSubviews
           maxToRenderPerBatch={10}
           windowSize={5}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? <LoadingSpinner message="Loading more..." /> : null
+          }
           refreshControl={
             <RefreshControl
-              refreshing={isRefetching}
+              refreshing={isRefetching && !isFetchingNextPage}
               onRefresh={refetch}
               tintColor={colors.primary}
             />

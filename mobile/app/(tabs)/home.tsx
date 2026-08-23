@@ -14,8 +14,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/auth-store';
-import { useTeams } from '../../hooks/useTeams';
-import { useGames } from '../../hooks/useGames';
+import { useInfiniteTeams } from '../../hooks/useTeams';
+import { useGames, useGamesPage, useLiveGames } from '../../hooks/useGames';
 import { useInvitations } from '../../hooks/useInvitations';
 import { useTheme } from '../../hooks/useTheme';
 import {
@@ -38,17 +38,34 @@ export default function Home() {
   const insets = useSafeAreaInsets();
 
   const {
-    data: teams,
+    data: teamsData,
     isLoading: teamsLoading,
     refetch: refetchTeams,
     isRefetching: teamsRefetching,
-  } = useTeams();
+  } = useInfiniteTeams();
+  const teams = teamsData?.teams;
+  const teamsTotal = teamsData?.total ?? teams?.length ?? 0;
+
+  // Each card asks the server for exactly what it shows. A long backlog of
+  // scheduled games (date-desc ordering) can no longer hide a live or recently
+  // finished game behind the first page.
+  const {
+    data: liveGames,
+    refetch: refetchLiveGames,
+    isRefetching: liveGamesRefetching,
+  } = useLiveGames();
 
   const {
-    data: games,
-    refetch: refetchGames,
-    isRefetching: gamesRefetching,
-  } = useGames();
+    data: recentGamesData,
+    refetch: refetchRecentGames,
+    isRefetching: recentGamesRefetching,
+  } = useGames({ status: 'FINISHED', limit: 5 });
+
+  const {
+    data: upcomingPage,
+    refetch: refetchUpcoming,
+    isRefetching: upcomingRefetching,
+  } = useGamesPage({ status: 'SCHEDULED', limit: 1 });
 
   const {
     data: invitationsData,
@@ -59,12 +76,19 @@ export default function Home() {
 
   const pendingInvitations = invitationsData?.invitations || [];
   const isLoading = teamsLoading || invitationsLoading;
-  const isRefetching = teamsRefetching || invitationsRefetching || gamesRefetching;
+  const isRefetching =
+    teamsRefetching ||
+    invitationsRefetching ||
+    liveGamesRefetching ||
+    recentGamesRefetching ||
+    upcomingRefetching;
 
   const handleRefresh = () => {
     refetchTeams();
     refetchInvitations();
-    refetchGames();
+    refetchLiveGames();
+    refetchRecentGames();
+    refetchUpcoming();
   };
 
   const getGreeting = () => {
@@ -74,9 +98,9 @@ export default function Home() {
     return 'Good evening';
   };
 
-  const liveGame = games?.find((g: Game) => g.status === 'IN_PROGRESS');
-  const recentGames =
-    games?.filter((g: Game) => g.status === 'FINISHED').slice(0, 5) || [];
+  const liveGame = liveGames?.[0];
+  const recentGames: Game[] = recentGamesData ?? [];
+  const upcomingCount = upcomingPage?.total ?? 0;
 
   if (isLoading) {
     return <LoadingSpinner fullScreen message="Loading dashboard..." />;
@@ -229,7 +253,7 @@ export default function Home() {
               {recentGames.filter((g: Game) => g.homeScore > g.awayScore).length}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
-              Wins
+              Wins (last 5)
             </ThemedText>
           </View>
           <View
@@ -239,7 +263,7 @@ export default function Home() {
             ]}
           >
             <ThemedText variant="h3" color="primary">
-              {teams?.length || 0}
+              {teamsTotal}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
               Teams
@@ -252,7 +276,7 @@ export default function Home() {
             ]}
           >
             <ThemedText variant="h3" color="textSecondary">
-              {games?.filter((g: Game) => g.status === 'SCHEDULED').length || 0}
+              {upcomingCount}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
               Upcoming

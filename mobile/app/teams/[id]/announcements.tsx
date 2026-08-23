@@ -25,7 +25,7 @@ import {
   ErrorState,
   EmptyState,
 } from '../../../components';
-import { useAnnouncements, useCreateAnnouncement } from '../../../hooks/useAnnouncements';
+import { useInfiniteAnnouncements, useCreateAnnouncement } from '../../../hooks/useAnnouncements';
 import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
 import { useAuthStore } from '../../../store/auth-store';
 import { useTheme } from '../../../hooks/useTheme';
@@ -58,7 +58,21 @@ export default function AnnouncementsScreen() {
   const [body, setBody] = useState('');
 
   const { data: team } = useTeam(id);
-  const { data, isLoading, error, refetch } = useAnnouncements(id);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteAnnouncements(id);
+
+  const handleEndReached = () => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  };
   const createAnnouncement = useCreateAnnouncement();
 
   const canPost = hasTeamPermission(team, user?.id, 'canManageTeam');
@@ -183,6 +197,11 @@ export default function AnnouncementsScreen() {
             data={data.announcements}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
+            onEndReached={handleEndReached}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              isFetchingNextPage ? <LoadingSpinner message="Loading more..." /> : null
+            }
             contentContainerStyle={{
               padding,
               paddingBottom: insets.bottom + spacing.xl,
