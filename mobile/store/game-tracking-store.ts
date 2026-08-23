@@ -5,10 +5,15 @@
 import { create } from 'zustand';
 import type { CreateGameEventInput, ShotMetadata } from '../types/game';
 
-interface LocalEvent extends CreateGameEventInput {
+export interface LocalEvent extends CreateGameEventInput {
   localId: string;
   playerName?: string;
   createdAt: string;
+  /**
+   * Id of the persisted server event, set by `confirmEvent` once the create
+   * resolves. Undo targets this id — never a guess from the events cache.
+   */
+  serverId?: string;
 }
 
 interface GameTrackingState {
@@ -42,6 +47,13 @@ interface GameTrackingState {
   // Actions
   selectPlayer: (playerId: string | null, playerName?: string | null) => void;
   recordEvent: (event: CreateGameEventInput, playerName?: string) => LocalEvent;
+  /** Attach the server id to a local event once the create has resolved. */
+  confirmEvent: (localId: string, serverId: string) => void;
+  /**
+   * Drop a local event whose server create failed. If it's still the undo
+   * target this behaves like `undoLast`; otherwise it's just removed.
+   */
+  discardEvent: (localId: string) => void;
   removeLocalEvent: (localId: string) => void;
   clearLastEvent: () => void;
   undoLast: () => LocalEvent | null;
@@ -190,6 +202,27 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
     }));
 
     return localEvent;
+  },
+
+  confirmEvent: (localId, serverId) => {
+    set((state) => ({
+      localEvents: state.localEvents.map((e) =>
+        e.localId === localId ? { ...e, serverId } : e
+      ),
+      lastEvent:
+        state.lastEvent?.localId === localId
+          ? { ...state.lastEvent, serverId }
+          : state.lastEvent,
+    }));
+  },
+
+  discardEvent: (localId) => {
+    const { lastEvent, undoLast, removeLocalEvent } = get();
+    if (lastEvent?.localId === localId) {
+      undoLast();
+    } else {
+      removeLocalEvent(localId);
+    }
   },
 
   removeLocalEvent: (localId) => {

@@ -47,8 +47,14 @@ function applyScoreToGameDetail(
 export const gameEventKeys = {
   all: ['gameEvents'] as const,
   lists: () => [...gameEventKeys.all, 'list'] as const,
+  /**
+   * Prefix matching every list query for one game regardless of filters.
+   * Use this for invalidation: `list(gameId)` ends in `undefined`, which
+   * TanStack's partial matcher does not treat as a wildcard (audit #76).
+   */
+  listsFor: (gameId: string) => [...gameEventKeys.lists(), gameId] as const,
   list: (gameId: string, filters?: GameEventFilters) =>
-    [...gameEventKeys.lists(), gameId, filters] as const,
+    [...gameEventKeys.listsFor(gameId), filters] as const,
   details: () => [...gameEventKeys.all, 'detail'] as const,
   detail: (gameId: string, eventId: string) =>
     [...gameEventKeys.details(), gameId, eventId] as const,
@@ -115,7 +121,7 @@ export function useCreateGameEvent() {
       // trust the returned score, then refetch for everything else.
       applyScoreToGameDetail(queryClient, variables.gameId, result.score);
       queryClient.invalidateQueries({
-        queryKey: gameEventKeys.list(variables.gameId),
+        queryKey: gameEventKeys.listsFor(variables.gameId),
       });
       queryClient.invalidateQueries({
         queryKey: gameKeys.detail(variables.gameId),
@@ -144,7 +150,7 @@ export function useDeleteGameEvent() {
     onSuccess: (result, variables) => {
       applyScoreToGameDetail(queryClient, variables.gameId, result.score);
       queryClient.invalidateQueries({
-        queryKey: gameEventKeys.list(variables.gameId),
+        queryKey: gameEventKeys.listsFor(variables.gameId),
       });
       queryClient.invalidateQueries({
         queryKey: gameKeys.detail(variables.gameId),

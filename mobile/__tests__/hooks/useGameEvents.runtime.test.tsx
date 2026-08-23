@@ -101,6 +101,9 @@ describe('useGameEvents runtime', () => {
 
     expect(mockedPost).toHaveBeenCalledWith('/games/g1/events', { eventType: 'SHOT' });
     expect(returned).toEqual({ event, score });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: gameEventKeys.listsFor('g1'),
+    });
     expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({
       id: 'g1',
       opponent: 'X',
@@ -129,7 +132,7 @@ describe('useGameEvents runtime', () => {
     expect(mockedDelete).toHaveBeenCalledWith('/games/g1/events/e1');
     expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({ homeScore: 10, awayScore: 7 });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: gameEventKeys.list('g1'),
+      queryKey: gameEventKeys.listsFor('g1'),
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: gameKeys.detail('g1'),
@@ -152,5 +155,29 @@ describe('useGameEvents runtime', () => {
     });
 
     expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({ homeScore: 4, awayScore: 1 });
+  });
+
+  it('invalidation after create actually hits a filtered list query (audit #76)', async () => {
+    mockedGet.mockResolvedValue({ data: { events: [] } });
+    mockedPost.mockResolvedValueOnce({ data: { event: { id: 'e1' }, score: { homeScore: 2, awayScore: 0 } } });
+
+    const { wrapper, client } = createQueryWrapper();
+    const { result: list } = renderHook(() => useGameEvents('g1', { limit: 100 }), { wrapper });
+    await waitFor(() => expect(list.current.isSuccess).toBe(true));
+    expect(mockedGet).toHaveBeenCalledTimes(1);
+
+    const { result: create } = renderHook(() => useCreateGameEvent(), { wrapper });
+    await act(async () => {
+      await create.current.mutateAsync({
+        gameId: 'g1',
+        data: { eventType: 'SHOT' } as unknown as Parameters<
+          typeof create.current.mutateAsync
+        >[0]['data'],
+      });
+    });
+
+    const state = client.getQueryState(gameEventKeys.list('g1', { limit: 100 }));
+    expect(state?.isInvalidated || state?.fetchStatus === 'fetching' || mockedGet.mock.calls.length > 1).toBe(true);
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(2));
   });
 });

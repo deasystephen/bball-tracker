@@ -215,6 +215,16 @@ current score so a client can drop events and still converge.
 - Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
   renders `game.homeScore` from the detail cache, which
   `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.
+- **Undo targets the created event (audit #7/#77/#76):** `recordEvent` returns
+  a `LocalEvent`; once the create resolves the screen calls
+  `confirmEvent(localId, event.id)` which attaches `serverId`. The
+  `UndoBanner` is rendered `pending` (button disabled, countdown held, label
+  "SAVING…") until then, and is `key`ed by `localId` so the 5s countdown
+  restarts per event. `handleUndo` deletes `lastEvent.serverId` — never
+  `events[0]` from the TanStack cache. A failed create calls
+  `discardEvent(localId)`. Invalidate event lists with
+  `gameEventKeys.listsFor(gameId)` (`list(gameId)` ends in `undefined`, which
+  TanStack's partial matcher does not treat as a wildcard).
 
 ### Entitlements / Feature Gating
 

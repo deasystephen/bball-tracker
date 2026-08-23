@@ -228,4 +228,51 @@ describe('game-tracking-store', () => {
     recordForPlayer('p1', madeTwo, 'Alice');
     expect(useGameTrackingStore.getState().undoTimerId).toBeNull();
   });
+
+  it('confirmEvent attaches the server id to the matching local + last event', () => {
+    const e1 = recordForPlayer('p1', madeTwo, 'Alice');
+    const e2 = recordForPlayer('p1', rebound, 'Alice');
+    expect(useGameTrackingStore.getState().lastEvent?.serverId).toBeUndefined();
+
+    useGameTrackingStore.getState().confirmEvent(e1.localId, 'srv-1');
+    let s = useGameTrackingStore.getState();
+    expect(s.localEvents.find((e) => e.localId === e1.localId)?.serverId).toBe('srv-1');
+    // e1 is no longer lastEvent, so lastEvent (e2) stays unconfirmed
+    expect(s.lastEvent?.localId).toBe(e2.localId);
+    expect(s.lastEvent?.serverId).toBeUndefined();
+
+    useGameTrackingStore.getState().confirmEvent(e2.localId, 'srv-2');
+    s = useGameTrackingStore.getState();
+    expect(s.lastEvent?.serverId).toBe('srv-2');
+    expect(s.localEvents[0].serverId).toBe('srv-2');
+  });
+
+  it('undoLast returns the confirmed server id so undo can target the exact event', () => {
+    const e1 = recordForPlayer('p1', madeTwo, 'Alice');
+    useGameTrackingStore.getState().confirmEvent(e1.localId, 'srv-1');
+
+    const undone = useGameTrackingStore.getState().undoLast();
+    expect(undone?.serverId).toBe('srv-1');
+    expect(useGameTrackingStore.getState().localEvents).toHaveLength(0);
+  });
+
+  it('discardEvent behaves like undoLast for the current undo target', () => {
+    const e1 = recordForPlayer('p1', madeTwo, 'Alice');
+    useGameTrackingStore.getState().discardEvent(e1.localId);
+
+    const s = useGameTrackingStore.getState();
+    expect(s.lastEvent).toBeNull();
+    expect(s.localEvents).toHaveLength(0);
+    expect(s.playerStreaks['p1']).toBe(0);
+  });
+
+  it('discardEvent only removes an older local event and keeps the undo target', () => {
+    const e1 = recordForPlayer('p1', madeTwo, 'Alice');
+    const e2 = recordForPlayer('p1', rebound, 'Alice');
+    useGameTrackingStore.getState().discardEvent(e1.localId);
+
+    const s = useGameTrackingStore.getState();
+    expect(s.lastEvent?.localId).toBe(e2.localId);
+    expect(s.localEvents.map((e) => e.localId)).toEqual([e2.localId]);
+  });
 });

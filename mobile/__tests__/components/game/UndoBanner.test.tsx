@@ -10,6 +10,7 @@
  */
 
 import React from 'react';
+import { View } from 'react-native';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 import { UndoBanner } from '../../../components/game/UndoBanner';
@@ -101,5 +102,48 @@ describe('UndoBanner', () => {
       <UndoBanner visible={false} message="hello" onUndo={jest.fn()} duration={5} />
     );
     expect(queryByText('hello')).toBeNull();
+  });
+
+  it('disables UNDO and holds the countdown while pending; starts once confirmed', () => {
+    const onUndo = jest.fn();
+    const { getByText, queryByText, rerender } = render(
+      <UndoBanner visible pending message="x" onUndo={onUndo} duration={3} />
+    );
+    expect(getByText('SAVING…')).toBeTruthy();
+    expect(queryByText('UNDO (3s)')).toBeNull();
+
+    fireEvent.press(getByText('SAVING…'));
+    expect(onUndo).not.toHaveBeenCalled();
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+    // Still pending: countdown hasn't moved
+    expect(getByText('SAVING…')).toBeTruthy();
+
+    rerender(<UndoBanner visible pending={false} message="x" onUndo={onUndo} duration={3} />);
+    expect(getByText('UNDO (3s)')).toBeTruthy();
+
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(getByText('UNDO (2s)')).toBeTruthy();
+
+    fireEvent.press(getByText('UNDO (2s)'));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts the countdown when remounted with a new key (consecutive events)', () => {
+    const { getByText, rerender } = render(
+      <View><UndoBanner key="e1" visible message="first" onUndo={jest.fn()} duration={5} /></View>
+    );
+    act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(getByText('UNDO (2s)')).toBeTruthy();
+
+    rerender(<View><UndoBanner key="e2" visible message="second" onUndo={jest.fn()} duration={5} /></View>);
+    expect(getByText('second')).toBeTruthy();
+    expect(getByText('UNDO (5s)')).toBeTruthy();
   });
 });
