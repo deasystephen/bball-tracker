@@ -59,6 +59,9 @@ describe('GameEventService', () => {
     });
     (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
     (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+    // SHOT create/delete recompute the score inside a transaction (audit #6)
+    (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 0, awayScore: 0 });
     return { coachId: coach.id };
   }
 
@@ -133,7 +136,7 @@ describe('GameEventService', () => {
       (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
       (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
 
-      await expect(GameEventService.deleteEvent(game.id, event.id, coachId)).resolves.toEqual({ success: true });
+      await expect(GameEventService.deleteEvent(game.id, event.id, coachId)).resolves.toMatchObject({ success: true });
     });
   });
 
