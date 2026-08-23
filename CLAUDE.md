@@ -246,6 +246,8 @@ current score so a client can drop events and still converge.
 
 ### Entitlements / Feature Gating
 
+**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the PREMIUM-gated features (team CSV export, calendar subscribe). The backend gates stay as the single source of truth. The only tier feedback users see is the 402 `upgrade_required` message on team create (`UsageMeter` on Profile still shows FREE-tier usage). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
+
 Subscription feature gating has a **single source of truth**:
 `backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
 feature->tier map (FREE / PREMIUM / LEAGUE), usage limits, and the
