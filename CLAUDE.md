@@ -46,7 +46,9 @@ eas build --platform android --profile preview   # Android APK for testing
 eas build --platform ios --profile preview        # iOS (requires Apple Developer account)
 eas build --platform all --profile production     # Production builds for stores
 eas update --environment preview --message "description" # OTA update to preview builds
+npx eas-cli update --branch production --environment production --platform ios --non-interactive --message "description" # production OTA
 ```
+**OTA env gotcha:** `eas update` evaluates `app.config.js` on *your* machine. `getApiUrl()` keys off `APP_ENV`; if it is unset the update ships `apiUrl: http://127.0.0.1:3000` (plus no Sentry DSN) and every device that takes it shows "Network error" on all API-backed tabs. The EAS `production` environment now provides `APP_ENV`, `SENTRY_ENVIRONMENT` and `SENTRY_DSN` (visibility *sensitive*, not *secret* — secret vars are builder-only and invisible to `eas update`). Always use `--environment production` and check the CLI line "Environment variables … loaded from the production environment" lists `APP_ENV`. (`AMPLITUDE_API_KEY` is *sensitive* too.) Remember an update runs on the **second** launch after it is downloaded.
 **eas-cli pinning:** `mobile/package.json` pins `eas-cli ^22` and `eas.json` enforces `cli.version >= 22.2.0`. The `overrides` block must keep `@oclif/core > minimatch ^10` scoped to **@oclif/core only** — eas-cli itself needs the v5 default export, and giving it v9+ makes every credentials step fail with a misleading "Provisioning Profile is malformed" (#343).
 ```
 
