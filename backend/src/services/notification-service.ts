@@ -33,11 +33,16 @@ export class NotificationService {
   }
 
   /**
-   * Remove a push token
+   * Remove a push token owned by the given user.
+   *
+   * Scoped to `userId` so a caller can only unregister their own device —
+   * previously any authenticated user could delete anyone's token by value
+   * (audit #47). Returns `{ count: 0 }` when the token exists but belongs to
+   * someone else, which callers treat as a no-op.
    */
-  static async removeToken(token: string): Promise<Prisma.BatchPayload> {
+  static async removeToken(userId: string, token: string): Promise<Prisma.BatchPayload> {
     return prisma.pushToken.deleteMany({
-      where: { token },
+      where: { token, userId },
     });
   }
 

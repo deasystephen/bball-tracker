@@ -97,6 +97,17 @@ export class WorkOSService {
   }
 
   /**
+   * Revoke a WorkOS session (server-side logout).
+   *
+   * Revoking the session invalidates the refresh token bound to it, so a
+   * leaked refresh token can no longer mint new access tokens after the user
+   * logs out. The `sessionId` is the `sid` claim of a verified access token.
+   */
+  static async revokeSession(sessionId: string): Promise<void> {
+    await workos.userManagement.revokeSession({ sessionId });
+  }
+
+  /**
    * Get user information from WorkOS
    */
   static async getUser(userId: string): Promise<WorkOSUser> {

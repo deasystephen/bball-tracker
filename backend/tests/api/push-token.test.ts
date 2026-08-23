@@ -97,6 +97,22 @@ describe('Push Token API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
+      // Scoped to the caller so nobody can unregister another user's device (audit #47)
+      expect(mockNotificationService.removeToken).toHaveBeenCalledWith(
+        TEST_USER_ID,
+        'ExponentPushToken[abc123]'
+      );
+    });
+
+    it('returns 200 (no-op) when the token belongs to another user', async () => {
+      mockNotificationService.removeToken.mockResolvedValue({ count: 0 } as unknown as Awaited<ReturnType<typeof mockNotificationService.removeToken>>);
+
+      const response = await request(app)
+        .delete('/api/v1/auth/push-token')
+        .send({ token: 'ExponentPushToken[someone-else]' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
     });
 
     it('should return 400 for missing token', async () => {
