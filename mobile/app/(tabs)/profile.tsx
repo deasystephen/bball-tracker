@@ -11,7 +11,7 @@ import { useAuthStore } from '../../store/auth-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
-import { useUpdatePlayer } from '../../hooks/usePlayers';
+import { useUpdateProfile } from '../../hooks/useProfile';
 import { useUsage } from '../../hooks/useUsage';
 import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter } from '../../components';
 import { spacing, borderRadius } from '../../theme';
@@ -28,7 +28,7 @@ export default function Profile() {
   const insets = useSafeAreaInsets();
   const { data: teams } = useTeams({ limit: TEAMS_MAX_LIMIT });
   const { data: usage } = useUsage();
-  const updatePlayer = useUpdatePlayer();
+  const updateProfile = useUpdateProfile();
   const { t } = useTranslation();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -38,11 +38,9 @@ export default function Profile() {
     if (!uri) {
       // Remove photo
       try {
-        await updatePlayer.mutateAsync({
-          playerId: user.id,
-          data: { profilePictureUrl: '' },
-        });
-        useAuthStore.getState().updateUser({ profilePictureUrl: undefined });
+        // PATCH /auth/me works for every role; the hook merges the result
+        // into the auth store (audit #10).
+        await updateProfile.mutateAsync({ profilePictureUrl: '' });
       } catch {
         Alert.alert('Error', 'Failed to remove photo');
       }
@@ -52,11 +50,7 @@ export default function Profile() {
     try {
       setUploadingAvatar(true);
       const imageUrl = await uploadAvatar(uri);
-      await updatePlayer.mutateAsync({
-        playerId: user.id,
-        data: { profilePictureUrl: imageUrl },
-      });
-      useAuthStore.getState().updateUser({ profilePictureUrl: imageUrl });
+      await updateProfile.mutateAsync({ profilePictureUrl: imageUrl });
     } catch {
       Alert.alert('Error', 'Failed to upload photo');
     } finally {

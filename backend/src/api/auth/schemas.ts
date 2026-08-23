@@ -53,3 +53,24 @@ export const callbackQuerySchema = z
   .refine((q) => (q.state === undefined) === (q.code_verifier === undefined), {
     message: 'state and code_verifier must be supplied together',
   });
+
+/**
+ * Self-service profile edits (audit #10). Email and role are deliberately not
+ * editable here: email is owned by WorkOS, role has its own endpoint.
+ */
+const safeUrlSchema = z
+  .string()
+  .url('Invalid URL format')
+  .refine((url) => /^https?:\/\//i.test(url), { message: 'URL must use http or https protocol' });
+
+export const updateProfileSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Name is required').max(100, 'Name too long').optional(),
+    // Empty string clears the avatar
+    profilePictureUrl: safeUrlSchema.or(z.literal('')).optional(),
+  })
+  .refine((data) => data.name !== undefined || data.profilePictureUrl !== undefined, {
+    message: 'At least one of name or profilePictureUrl is required',
+  });
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
