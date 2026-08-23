@@ -26,6 +26,7 @@ import {
 import {
   useTeam,
   useRemovePlayerFromTeam,
+  hasTeamPermission,
 } from '../../../hooks/useTeams';
 import {
   useCreateInvitation,
@@ -42,6 +43,8 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { useAuthUser } from '../../../store/auth-store';
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
@@ -71,6 +74,16 @@ export default function ManagePlayersScreen() {
   const createInvitation = useCreateInvitation();
   const createManagedPlayer = useCreateManagedPlayer();
   const toast = useToast();
+
+  // Roster changes need `canManageRoster` (backend team-service); guard the
+  // screen itself since it is reachable by deep link.
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user && !!team,
+    hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf),
+    t('teams.rosterNotAllowed'),
+    { fallback: `/teams/${id}` }
+  );
 
   // Search for players
   const { data: playersData, isLoading: searchingPlayers } = usePlayers({
@@ -220,7 +233,7 @@ export default function ManagePlayersScreen() {
     );
   };
 
-  if (isLoading) {
+  if (isLoading || (team && !allowed)) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 

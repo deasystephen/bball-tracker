@@ -15,6 +15,7 @@ import { queryClient } from '../services/query-client';
 import '../services/session-logout'; // registers logout side effects with the auth store
 import { useNotificationSetup } from '../hooks/useNotifications';
 import { useAuthRedirect } from '../hooks/useAuthRedirect';
+import { useSessionRefresh } from '../hooks/useSessionRefresh';
 import '../i18n/config'; // Initialize i18n
 
 // Initialize Sentry as early as possible so crashes during startup are captured.
@@ -38,6 +39,12 @@ function NotificationHandler() {
 /** Routes to /login when the session is lost mid-app (see useAuthRedirect). */
 function AuthRedirectHandler() {
   useAuthRedirect();
+  return null;
+}
+
+/** Re-syncs role / league-admin grants from GET /auth/me on foreground. */
+function SessionRefreshHandler() {
+  useSessionRefresh();
   return null;
 }
 
@@ -74,6 +81,7 @@ export default function RootLayout() {
             <ToastProvider>
               <NotificationHandler />
               <AuthRedirectHandler />
+              <SessionRefreshHandler />
               <Stack
                 screenOptions={{
                   headerShown: false,

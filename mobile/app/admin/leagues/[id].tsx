@@ -25,6 +25,9 @@ import {
 import { useLeague, useDeleteLeague } from '../../../hooks/useLeagues';
 import { useSeasons, Season } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { useAuthUser } from '../../../store/auth-store';
+import { canCreateLeagues, canManageLeague } from '../../../utils/team-permissions';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
@@ -38,6 +41,17 @@ export default function LeagueDetailScreen() {
   const { data: league, isLoading: leagueLoading, error: leagueError, refetch: refetchLeague } = useLeague(id);
   const { data: seasonsData, isLoading: seasonsLoading, refetch: refetchSeasons, isRefetching } = useSeasons({ leagueId: id });
   const deleteLeague = useDeleteLeague();
+
+  // Managing a league (seasons etc.) needs system ADMIN or admin of this
+  // league; deleting the league itself stays ADMIN-only on the backend.
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user,
+    canManageLeague(user, id),
+    'Only admins of this league can manage it',
+    { fallback: '/admin' }
+  );
+  const canDelete = canCreateLeagues(user);
 
   const seasons = seasonsData?.seasons || [];
 
@@ -129,7 +143,7 @@ export default function LeagueDetailScreen() {
     );
   };
 
-  if (leagueLoading || seasonsLoading) {
+  if (leagueLoading || seasonsLoading || !allowed) {
     return <LoadingSpinner message="Loading league..." fullScreen />;
   }
 
@@ -169,14 +183,16 @@ export default function LeagueDetailScreen() {
             {seasons.length} {seasons.length === 1 ? 'season' : 'seasons'}
           </ThemedText>
         </View>
-        <TouchableOpacity
-          onPress={handleDeleteLeague}
-          style={styles.deleteButton}
-          accessibilityRole="button"
-          accessibilityLabel="Delete league"
-        >
-          <Ionicons name="trash-outline" size={22} color={colors.error} />
-        </TouchableOpacity>
+        {canDelete && (
+          <TouchableOpacity
+            onPress={handleDeleteLeague}
+            style={styles.deleteButton}
+            accessibilityRole="button"
+            accessibilityLabel="Delete league"
+          >
+            <Ionicons name="trash-outline" size={22} color={colors.error} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Seasons List */}

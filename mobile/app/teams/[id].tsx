@@ -42,8 +42,8 @@ export default function TeamDetailsScreen() {
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
 
-  const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role);
-  const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role);
+  const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
+  const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
 
   const headCoaches = team?.staff?.filter((s) => s.role.type === 'HEAD_COACH') ?? [];
 

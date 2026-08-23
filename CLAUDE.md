@@ -120,9 +120,38 @@ Backend API (Node.js/Express)
   `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
 - `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`
   renders an `EmptyState` for that case ("No stats yet" for the current user) instead of an error.
-- The Profile "Leagues & Seasons" entry is shown only to `user.role === 'ADMIN'` (the backend league/season
-  management routes are ADMIN-only). Follow-up: surface league-admin rows from `GET /auth/me` if per-league
-  admins should get the entry.
+- The Profile "Leagues & Seasons" entry is shown to system `ADMIN`s and to users with at least one league in
+  `user.leagueAdminOf` (`utils/team-permissions.ts#canAccessAdmin`). See "Mobile permission gating" below.
+
+#### Mobile permission gating (role matrix M3, M8, M9, M12–M18, M27, M4.1, M4.2)
+Every gated control mirrors a backend rule; the API is still the authority (403). Rules live in two helpers —
+never inline a role check in a screen:
+- `hooks/useTeams.ts#hasTeamPermission(team, userId, flag, userRole?, leagueAdminOf?)` — system `ADMIN` → true;
+  a user whose `leagueAdminOf` contains `team.season.league.id` → true (matches backend `isLeagueAdmin`);
+  otherwise the staff role flag. Accepts any `{ staff?, season? }` shape, so `game.team` from `GET /games/:id`
+  (which includes `staff` + `season.league`) works without a second fetch.
+- `utils/team-permissions.ts` — `canCreateTeams(user)` (COACH / ADMIN / any league admin), `canAccessAdmin(user)`
+  (ADMIN or `leagueAdminOf.length > 0`), `canCreateLeagues(user)` (ADMIN only), `canManageLeague(user, leagueId)`
+  (ADMIN or that league in `leagueAdminOf`). `utils/game-permissions.ts#getGamePermissions(game.team, user)`
+  derives `{ canManage, canTrack, canChangeStatus, canEditFinished }` from the game rules in `game-service` /
+  `game-event-service` (create/edit/delete → `canManageTeam`; start/end/score → `canManageTeam || canTrackStats`;
+  record/undo → `canTrackStats`; rewrite a FINISHED game → `canManageRoster`).
+- `user.leagueAdminOf?: string[]` is an **optional** field on the shared `User` type (populated by
+  `GET /auth/me` / `GET /auth/callback` once the backend ships it); `undefined` means "admin of no leagues".
+- Screens: Games tab FAB + `games/create` (teams the user can manage; bounce if none); `games/[id]` shows
+  Start/End only with `canChangeStatus`, Delete with `canManage`, Continue Tracking with `canTrack` (players keep
+  Watch Live / RSVP / box score); `games/[id]/track` guards itself (toast + `replace` to the game detail) because
+  it is deep-linkable. Admin screens (`admin/*`), `teams/[id]/edit` (`canManageTeam`) and `teams/[id]/players`
+  (`canManageRoster`) use `hooks/useAccessGuard.ts` (toast + `back()`, `replace(fallback)` when there is no
+  history; returns `allowed` so the screen renders a spinner instead of flashing gated controls). League admins
+  see only their own leagues in `admin/index`; league create/delete stay ADMIN-only.
+- Teams tab shows the spinner until `user` has rehydrated — a `null` user must never render the player empty
+  state. Home's "no teams → Create Team" card uses `canCreateTeams(user)` like the Teams tab.
+- `hooks/useSessionRefresh.ts` (mounted in `_layout.tsx`) re-fetches `GET /auth/me` when a session becomes
+  active and on every foreground (AppState → `active`), throttled to once per 5 min, and merges
+  `role` / `leagueAdminOf` / `name` / `profilePictureUrl` via `auth-store.updateUser`. Failures are ignored.
+- Maestro: `.maestro/player-no-tracking.yaml` (Steph Curry = seeded PLAYER) asserts the create FAB, Start Game,
+  Delete game, Continue Tracking and End Game are absent while RSVP remains.
 
 #### Mobile API errors, permissions & toasts
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
@@ -132,10 +161,9 @@ Backend API (Node.js/Express)
   (e.g. the FREE-tier team cap) instead of "Request failed with status code N". Helpers:
   `getApiErrorMessage(err, fallback)` and `isUpgradeRequiredError(err)` (402 or `code === 'upgrade_required'`).
   Network errors keep axios' own `code` (`ECONNABORTED`, …).
-- `hasTeamPermission(team, userId, permission, userRole?)` returns `true` for a system `ADMIN` regardless of
-  staff rows (mirrors `backend/src/utils/permissions.ts`). Pass `user?.role` from the auth store. League
-  admins are still not recognised client-side because `GET /teams/:id` doesn't return league-admin rows —
-  follow-up to audit #79: expose effective permissions from the API.
+- `hasTeamPermission(team, userId, permission, userRole?, leagueAdminOf?)` returns `true` for a system `ADMIN`
+  regardless of staff rows and for an admin of the team's league (mirrors `backend/src/utils/permissions.ts`).
+  Pass `user?.role` and `user?.leagueAdminOf` from the auth store (see "Mobile permission gating").
 - Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
   (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
 - Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.

@@ -20,10 +20,14 @@ import {
   ThemedText,
   Input,
   Button,
+  LoadingSpinner,
 } from '../../../components';
 import { useToast } from '../../../components/Toast';
 import { useCreateLeague } from '../../../hooks/useLeagues';
 import { useTheme } from '../../../hooks/useTheme';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { useAuthUser } from '../../../store/auth-store';
+import { canCreateLeagues } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
@@ -38,6 +42,16 @@ export default function CreateLeagueScreen() {
 
   const createLeague = useCreateLeague();
   const toast = useToast();
+
+  // League create is system-ADMIN only (league admins manage seasons, not
+  // leagues). Deep links can still land here, so guard at screen level.
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user,
+    canCreateLeagues(user),
+    'Only system admins can create leagues',
+    { fallback: '/admin' }
+  );
 
   const validate = (): boolean => {
     const newErrors: { name?: string } = {};
@@ -67,6 +81,10 @@ export default function CreateLeagueScreen() {
       );
     }
   };
+
+  if (!allowed) {
+    return <LoadingSpinner message="Loading..." fullScreen />;
+  }
 
   return (
     <ThemedView variant="background" style={styles.container}>

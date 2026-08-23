@@ -29,6 +29,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useAuthStore } from '../../../store/auth-store';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 
 const getStatusColor = (
@@ -106,13 +107,20 @@ export default function GameDetailScreen() {
     ? ['#0D1117', '#161B22'] as const
     : ['#1A3A5C', '#0F2540'] as const;
 
+  // Mirrors the backend: manage → create/edit/delete; manage|track → start/end;
+  // track → the tracker. Players and non-staff only get Watch Live / RSVP /
+  // box score (role matrix M12–M18).
+  const permissions = getGamePermissions(game?.team, user);
+
   const handleStartGame = async () => {
     try {
       await updateGame.mutateAsync({
         gameId: id,
         data: { status: 'IN_PROGRESS' },
       });
-      router.push(`/games/${id}/track`);
+      if (permissions.canTrack) {
+        router.push(`/games/${id}/track`);
+      }
     } catch (err) {
       Alert.alert(
         'Error',
@@ -211,7 +219,7 @@ export default function GameDetailScreen() {
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerSpacer} />
-          {isScheduled && (
+          {isScheduled && permissions.canManage && (
             <TouchableOpacity
               onPress={handleDelete}
               style={styles.iconButton}
@@ -377,7 +385,7 @@ export default function GameDetailScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          {isScheduled && (
+          {isScheduled && permissions.canChangeStatus && (
             <Button
               title="Start Game"
               onPress={handleStartGame}
@@ -396,21 +404,25 @@ export default function GameDetailScreen() {
                 fullWidth
                 size="large"
               />
-              <Button
-                title="Continue Tracking"
-                onPress={handleContinueTracking}
-                fullWidth
-                size="large"
-                style={styles.endButton}
-              />
-              <Button
-                title="End Game"
-                variant="danger"
-                onPress={handleEndGame}
-                loading={updateGame.isPending}
-                fullWidth
-                style={styles.endButton}
-              />
+              {permissions.canTrack && (
+                <Button
+                  title="Continue Tracking"
+                  onPress={handleContinueTracking}
+                  fullWidth
+                  size="large"
+                  style={styles.endButton}
+                />
+              )}
+              {permissions.canChangeStatus && (
+                <Button
+                  title="End Game"
+                  variant="danger"
+                  onPress={handleEndGame}
+                  loading={updateGame.isPending}
+                  fullWidth
+                  style={styles.endButton}
+                />
+              )}
             </>
           )}
 

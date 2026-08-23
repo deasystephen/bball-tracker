@@ -47,7 +47,7 @@ export default function CreateTeamScreen() {
   const createTeam = useCreateTeam();
   const toast = useToast();
   const user = useAuthUser();
-  const canCreate = canCreateTeams(user?.role);
+  const canCreate = canCreateTeams(user);
 
   // Deep links / stale screens can still land here; bounce players out
   // before they fill in a form the API will reject with 403.

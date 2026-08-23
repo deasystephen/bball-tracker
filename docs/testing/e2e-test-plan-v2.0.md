@@ -481,6 +481,25 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** 403 Forbidden.
 - **Notes:** ___________
 
+### G.8 — 🔒 Player cannot track (mobile gating)
+- [ ] Pass / Fail / Skipped
+- **Role:** PLAYER (team member, not staff — e.g. seeded Steph Curry on the Warriors)
+- **Steps:**
+  1. Sign in as the player. Open the Games tab.
+  2. Open a SCHEDULED team game, then (after a coach starts one) an IN_PROGRESS team game.
+  3. Deep-link straight to `bball-tracker://games/<inProgressGameId>/track`.
+  4. Open Profile.
+- **Expected:**
+  - Games tab has no "Create new game" FAB; the empty state does not say "Create your first game".
+  - SCHEDULED game: RSVP buttons visible; no "Start Game", no "Delete game" icon.
+  - IN_PROGRESS game: "Watch Live" visible; no "Continue Tracking", no "End Game".
+  - Tracker deep link: toast "You do not have permission to track stats for this game" and the app lands on the
+    game detail — no stat buttons ever render.
+  - Profile has no "Leagues & Seasons" entry (unless the user is in `leagueAdminOf`).
+  - Automated: `maestro test .maestro/player-no-tracking.yaml`; Jest `__tests__/app/game-detail-gating.test.tsx`
+    and `__tests__/app/track-gating.test.tsx`.
+- **Notes:** ___________
+
 ---
 
 ## H. Spectator (Socket.io live view)

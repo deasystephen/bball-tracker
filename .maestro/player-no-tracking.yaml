@@ -1,0 +1,36 @@
+appId: com.bballtracker.mobile
+---
+# Player cannot track: a seeded PLAYER (Steph Curry, Warriors roster, no
+# staff row) opens a team game and only sees spectator/RSVP controls. The
+# lifecycle controls (Start Game / Delete game / Continue Tracking / the
+# create-game FAB) are hidden because the API would reject them with 403.
+#
+# The seed has no IN_PROGRESS Warriors game, so this uses the scheduled
+# "Warriors vs Lakers" game: RSVP is visible, Start/Delete are not. When a
+# coach has started a game, the same user sees "Watch Live" but never
+# "Continue Tracking" / "End Game".
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Steph Curry.*"
+
+# Games tab: no create-game FAB for a player
+- tapOn: "Track game tab"
+- assertVisible: "Games"
+- assertNotVisible: "Create new game"
+
+# Open a scheduled Warriors game (opponent "Lakers")
+- tapOn: "vs Lakers"
+- assertVisible: "Scheduled"
+
+# Spectator / member controls are present…
+- assertVisible: "Going"
+
+# …lifecycle + tracking controls are not
+- assertNotVisible: "Start Game"
+- assertNotVisible: "Delete game"
+- assertNotVisible: "Continue Tracking"
+- assertNotVisible: "End Game"
+- assertNotVisible: "Record Assist"

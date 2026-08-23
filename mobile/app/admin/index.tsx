@@ -23,6 +23,14 @@ import {
 } from '../../components';
 import { useLeagues, League } from '../../hooks/useLeagues';
 import { useTheme } from '../../hooks/useTheme';
+import { useAccessGuard } from '../../hooks/useAccessGuard';
+import { useAuthUser } from '../../store/auth-store';
+import {
+  canAccessAdmin,
+  canCreateLeagues,
+  isSystemAdmin,
+  leagueAdminIds,
+} from '../../utils/team-permissions';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 
@@ -33,12 +41,27 @@ export default function AdminDashboard() {
   const insets = useSafeAreaInsets();
 
   const {
-    data: leagues,
+    data: allLeagues,
     isLoading,
     error,
     refetch,
     isRefetching,
   } = useLeagues();
+
+  // System ADMINs or admins of at least one league (`leagueAdminOf`). League
+  // admins only see — and can only manage — their own leagues; creating a
+  // league stays ADMIN-only (backend `league-service.createLeague`).
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user,
+    canAccessAdmin(user),
+    'League admin access required',
+    { fallback: '/(tabs)/profile' }
+  );
+  const canCreate = canCreateLeagues(user);
+  const leagues = isSystemAdmin(user)
+    ? allLeagues
+    : allLeagues?.filter((league) => leagueAdminIds(user).includes(league.id));
 
   const handleCreateLeague = () => {
     router.push('/admin/leagues/create');
@@ -101,7 +124,7 @@ export default function AdminDashboard() {
     );
   };
 
-  if (isLoading) {
+  if (isLoading || !allowed) {
     return <LoadingSpinner message="Loading leagues..." fullScreen />;
   }
 
@@ -140,21 +163,29 @@ export default function AdminDashboard() {
             Create and manage leagues and seasons
           </ThemedText>
         </View>
-        <TouchableOpacity
-          onPress={handleCreateLeague}
-          style={[styles.addButton, { backgroundColor: colors.primary }]}
-        >
-          <Ionicons name="add" size={24} color={colors.textInverse} />
-        </TouchableOpacity>
+        {canCreate && (
+          <TouchableOpacity
+            onPress={handleCreateLeague}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Create league"
+          >
+            <Ionicons name="add" size={24} color={colors.textInverse} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {!leagues || leagues.length === 0 ? (
         <EmptyState
           icon="trophy-outline"
           title="No Leagues"
-          message="Create your first league to get started"
-          actionLabel="Create League"
-          onAction={handleCreateLeague}
+          message={
+            canCreate
+              ? 'Create your first league to get started'
+              : 'You are not an admin of any league yet'
+          }
+          actionLabel={canCreate ? 'Create League' : undefined}
+          onAction={canCreate ? handleCreateLeague : undefined}
         />
       ) : (
         <FlatList

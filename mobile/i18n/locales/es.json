@@ -40,7 +40,9 @@
     "noTeams": "No se encontraron equipos",
     "createNew": "Crear Nuevo Equipo",
     "details": "Detalles del Equipo",
-    "managePlayers": "Administrar Jugadores"
+    "managePlayers": "Administrar Jugadores",
+    "editNotAllowed": "Solo los administradores del equipo pueden editarlo.",
+    "rosterNotAllowed": "Solo los administradores del equipo pueden cambiar la plantilla."
   },
   "players": {
     "title": "Jugadores",
