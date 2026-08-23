@@ -24,9 +24,15 @@ resource "aws_db_instance" "main" {
   identifier = "${local.name_prefix}-postgres"
 
   # Engine configuration
-  engine         = "postgres"
-  engine_version = "15.15"
-  instance_class = var.db_instance_class
+  engine = "postgres"
+  # Major version only: RDS applies minor upgrades itself during the
+  # maintenance window (auto_minor_version_upgrade), and pinning a minor here
+  # made `terraform apply` fail with "Cannot upgrade postgres from 15.17 to
+  # 15.15" once AWS had moved ahead. The provider suppresses the diff when the
+  # config is a prefix of the running version.
+  engine_version             = "15"
+  auto_minor_version_upgrade = true
+  instance_class             = var.db_instance_class
 
   # Storage - start small with autoscaling enabled
   allocated_storage     = 20
@@ -53,8 +59,8 @@ resource "aws_db_instance" "main" {
   multi_az = var.environment == "production" ? true : false
 
   # Deletion protection - prevent accidental destruction
-  deletion_protection = var.environment == "production" ? true : false
-  skip_final_snapshot = var.environment != "production"
+  deletion_protection       = var.environment == "production" ? true : false
+  skip_final_snapshot       = var.environment != "production"
   final_snapshot_identifier = var.environment == "production" ? "${local.name_prefix}-final-snapshot" : null
 
   # Performance Insights for monitoring (free tier for db.t3.micro)
