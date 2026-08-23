@@ -1,4 +1,5 @@
 import { apiClient } from './api-client';
+import { captureException } from './sentry';
 
 interface AvatarUploadResponse {
   uploadUrl: string;
@@ -51,7 +52,22 @@ export async function uploadAvatar(localUri: string): Promise<string> {
 
   const res = await fetch(data.uploadUrl, { method: 'POST', body: form });
   if (!res.ok) {
-    throw new Error(`Avatar upload failed (${res.status})`);
+    // S3 explains policy failures in an XML body (<Code>, <Message>). Surface
+    // it so a failed upload is diagnosable from Sentry instead of a bare alert.
+    const body = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+    const code = /<Code>([^<]+)<\/Code>/.exec(body)?.[1];
+    const detail = /<Message>([^<]+)<\/Message>/.exec(body)?.[1];
+    const error = new Error(
+      `Avatar upload failed (${res.status}${code ? ` ${code}` : ''}${detail ? `: ${detail}` : ''})`
+    );
+    captureException(error, {
+      flow: 'avatar-upload',
+      status: String(res.status),
+      code: code ?? 'unknown',
+      contentType,
+      size: String(blob.size),
+    });
+    throw error;
   }
 
   return data.imageUrl;
