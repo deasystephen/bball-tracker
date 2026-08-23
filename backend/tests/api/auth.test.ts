@@ -3,7 +3,7 @@
  */
 
 import request from 'supertest';
-import { ServiceUnavailableError } from '../../src/utils/errors';
+import { ServiceUnavailableError, ConflictError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import prisma from '../../src/models';
@@ -213,6 +213,27 @@ describe('Auth API', () => {
       // access-token expiry. Dropping it silently logs every user out after
       // the WorkOS access-token lifetime.
       expect(response.body.refreshToken).toBe('mock-refresh-token');
+      // Audit #25: the client needs the avatar to render the profile after login
+      expect(response.body.user).toHaveProperty('profilePictureUrl', null);
+    });
+
+    it('should return 409 (not 500) when the email is bound to another login', async () => {
+      mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockRejectedValue(
+        new ConflictError('An account with this email is already linked to a different login')
+      );
+
+      const response = await request(app)
+        .get('/api/v1/auth/callback')
+        .query({ code: 'auth-code-123' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain('already linked');
+      expect(mockCaptureException).not.toHaveBeenCalled();
     });
 
     // Audit #5: the verifier travels with the code so WorkOS can enforce PKCE.

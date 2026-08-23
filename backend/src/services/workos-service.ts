@@ -4,11 +4,11 @@
 
 import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
 import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
-import { User } from '@prisma/client';
+import { Prisma, User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
-import { ServiceUnavailableError } from '../utils/errors';
+import { ConflictError, ServiceUnavailableError } from '../utils/errors';
 
 type UserManagement = typeof workos.userManagement;
 export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
@@ -142,8 +142,23 @@ export class WorkOSService {
   }
 
   /**
-   * Create or update local user from WorkOS user
-   * Syncs WorkOS user data with our database
+   * Create or link the local user for a WorkOS identity (audit #2, #25).
+   *
+   * Resolution order:
+   * 1. `workosUserId` match — the identity is already linked; refresh
+   *    `emailVerified` (and `email` if it changed in WorkOS), fill in the
+   *    avatar only if we have none. Never overwrite name/avatar edits made
+   *    in-app.
+   * 2. `email` match on a row with **no** `workosUserId` — a pre-provisioned
+   *    row (invited player, managed roster player). Claim it: set
+   *    `workosUserId`, drop `isManaged`/`managedById` so the creating coach
+   *    loses control of what is now a real account, and re-evaluate the admin
+   *    allowlist (a pre-seeded row must not suppress ADMIN bootstrap).
+   * 3. `email` match on a row linked to a *different* WorkOS identity —
+   *    refuse with 409 rather than silently merging accounts.
+   * 4. Otherwise create.
+   *
+   * Unique-constraint races surface as `ConflictError` (409), not 500.
    */
   static async syncUser(workosUser: {
     id: string;
@@ -156,43 +171,82 @@ export class WorkOSService {
     const fullName = [workosUser.firstName, workosUser.lastName]
       .filter(Boolean)
       .join(' ') || workosUser.email.split('@')[0];
+    const emailVerified = workosUser.emailVerified || false;
+    const workosAvatar = workosUser.profilePictureUrl || null;
 
-    // Try to find existing user by WorkOS ID or email
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { workosUserId: workosUser.id },
-          { email: workosUser.email },
-        ],
-      },
-    });
+    // 1. Already linked by WorkOS id
+    const linked = await prisma.user.findUnique({ where: { workosUserId: workosUser.id } });
+    if (linked) {
+      return WorkOSService.mapUniqueViolation(() =>
+        prisma.user.update({
+          where: { id: linked.id },
+          data: {
+            emailVerified,
+            ...(linked.email !== workosUser.email && { email: workosUser.email }),
+            ...(linked.profilePictureUrl === null && workosAvatar && { profilePictureUrl: workosAvatar }),
+          },
+        })
+      );
+    }
 
-    if (existingUser) {
-      // Update existing user
-      return prisma.user.update({
-        where: { id: existingUser.id },
+    // 2./3. Pre-provisioned row with the same email
+    const byEmail = await prisma.user.findUnique({ where: { email: workosUser.email } });
+    if (byEmail) {
+      if (byEmail.workosUserId) {
+        logger.warn('Refusing to link WorkOS identity to an email owned by another identity', {
+          userId: byEmail.id,
+        });
+        throw new ConflictError('An account with this email is already linked to a different login');
+      }
+
+      const promoteToAdmin = byEmail.role !== 'ADMIN' && isAdminEmail(workosUser.email);
+      logger.info('Linking WorkOS identity to pre-provisioned user', {
+        userId: byEmail.id,
+        wasManaged: byEmail.isManaged,
+        promoteToAdmin,
+      });
+
+      return WorkOSService.mapUniqueViolation(() =>
+        prisma.user.update({
+          where: { id: byEmail.id },
+          data: {
+            workosUserId: workosUser.id,
+            emailVerified,
+            // The person behind this email now owns the account
+            isManaged: false,
+            managedById: null,
+            ...(promoteToAdmin && { role: 'ADMIN' }),
+            ...(byEmail.profilePictureUrl === null && workosAvatar && { profilePictureUrl: workosAvatar }),
+          },
+        })
+      );
+    }
+
+    // 4. Brand-new user. Default role is PLAYER (self-selectable to COACH).
+    return WorkOSService.mapUniqueViolation(() =>
+      prisma.user.create({
         data: {
           workosUserId: workosUser.id,
           email: workosUser.email,
           name: fullName,
-          emailVerified: workosUser.emailVerified || false,
-          profilePictureUrl: workosUser.profilePictureUrl || null,
+          role: isAdminEmail(workosUser.email) ? 'ADMIN' : 'PLAYER',
+          emailVerified,
+          profilePictureUrl: workosAvatar,
         },
-      });
-    }
+      })
+    );
+  }
 
-    // Create new user
-    // Default role is PLAYER, can be updated later
-    return prisma.user.create({
-      data: {
-        workosUserId: workosUser.id,
-        email: workosUser.email,
-        name: fullName,
-        role: isAdminEmail(workosUser.email) ? 'ADMIN' : 'PLAYER',
-        emailVerified: workosUser.emailVerified || false,
-        profilePictureUrl: workosUser.profilePictureUrl || null,
-      },
-    });
+  /** Turn a Prisma unique-constraint violation (P2002) into a 409 instead of a 500. */
+  private static async mapUniqueViolation<T>(op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictError('An account with this email already exists');
+      }
+      throw error;
+    }
   }
 
   /**

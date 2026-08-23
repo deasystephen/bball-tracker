@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { PlayerService } from '../../src/services/player-service';
-import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
+import { NotFoundError, ForbiddenError, BadRequestError, ConflictError } from '../../src/utils/errors';
 
 // Test UUIDs
 const TEST_PLAYER_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -57,7 +57,31 @@ describe('Players API', () => {
       expect(response.status).toBe(201);
       expect(response.body.success).toBe(true);
       expect(response.body.player).toBeDefined();
-      expect(mockPlayerService.createPlayer).toHaveBeenCalled();
+      expect(mockPlayerService.createPlayer).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'player@example.com', name: 'John Player' }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'COACH' }
+      );
+    });
+
+    it('should return 403 when the caller may not create players (audit #2)', async () => {
+      mockPlayerService.createPlayer.mockRejectedValue(new ForbiddenError('Only administrators and team staff who manage a roster can create players'));
+
+      const response = await request(app)
+        .post('/api/v1/players')
+        .send({ email: 'victim@example.com', name: 'Victim' });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('should return 409 when the email is taken concurrently', async () => {
+      mockPlayerService.createPlayer.mockRejectedValue(new ConflictError('A user with this email already exists'));
+
+      const response = await request(app)
+        .post('/api/v1/players')
+        .send({ email: 'player@example.com', name: 'John Player' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toBe('A user with this email already exists');
     });
 
     it('should return 400 for missing required fields', async () => {
@@ -229,6 +253,16 @@ describe('Players API', () => {
         .send({ name: 'Updated Name' });
 
       expect(response.status).toBe(403);
+    });
+
+    it('should return 409 when an email update races another account', async () => {
+      mockPlayerService.updatePlayer.mockRejectedValue(new ConflictError('A user with this email already exists'));
+
+      const response = await request(app)
+        .patch(`/api/v1/players/${TEST_PLAYER_ID}`)
+        .send({ email: 'taken@example.com' });
+
+      expect(response.status).toBe(409);
     });
 
     it('should update player with valid profilePictureUrl', async () => {
