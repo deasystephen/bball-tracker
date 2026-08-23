@@ -107,15 +107,27 @@ function reducer(state: State, action: Action): State {
     case 'reconnecting':
       return { ...state, connectionState: 'reconnecting', error: null };
     case 'snapshot': {
-      // Server returns events oldest-first; we render newest-first.
-      const newest = [...action.payload.events].reverse().slice(0, EVENT_CAP);
+      // Server returns events oldest-first; we render newest-first. Merge by
+      // id rather than replace: a `game-event` that streamed in while the
+      // snapshot query was running is newer than anything in the snapshot
+      // and must survive (audit #73). Those extra events go first.
+      const snapshotNewest = [...action.payload.events].reverse();
+      const snapshotIds = new Set(snapshotNewest.map((e) => e.id));
+      const streamedSinceSnapshot = state.events.filter((e) => !snapshotIds.has(e.id));
+      const events = [...streamedSinceSnapshot, ...snapshotNewest].slice(0, EVENT_CAP);
+      // If we hold events the snapshot doesn't, our score (carried by the
+      // later broadcast) is the fresher one.
+      const score =
+        streamedSinceSnapshot.length > 0
+          ? state.score
+          : {
+              homeScore: action.payload.game.homeScore,
+              awayScore: action.payload.game.awayScore,
+            };
       return {
-        score: {
-          homeScore: action.payload.game.homeScore,
-          awayScore: action.payload.game.awayScore,
-        },
+        score,
         status: action.payload.game.status,
-        events: newest,
+        events,
         connectionState: 'live',
         error: null,
       };
