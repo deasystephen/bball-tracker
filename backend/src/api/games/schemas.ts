@@ -20,13 +20,17 @@ export const createGameSchema = z.object({
 /**
  * Schema for updating a game
  */
-export const updateGameSchema = z.object({
-  opponent: z.string().min(1).max(100).optional(),
-  date: z.string().datetime().or(z.date()).optional(),
-  status: z.nativeEnum(GameStatus).optional(),
-  homeScore: z.number().int().min(0).optional(),
-  awayScore: z.number().int().min(0).optional(),
-});
+export const updateGameSchema = z
+  .object({
+    opponent: z.string().min(1).max(100).optional(),
+    date: z.string().datetime().or(z.date()).optional(),
+    status: z.nativeEnum(GameStatus).optional(),
+    homeScore: z.number().int().min(0).optional(),
+    awayScore: z.number().int().min(0).optional(),
+  })
+  .refine((data) => Object.values(data).some((value) => value !== undefined), {
+    message: 'At least one field must be provided',
+  });
 
 /**
  * Schema for game query parameters

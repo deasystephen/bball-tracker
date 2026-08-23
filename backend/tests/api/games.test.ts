@@ -297,6 +297,54 @@ describe('Games API', () => {
 
       expect(response.status).toBe(403);
     });
+
+    it('should return 400 for an empty body without calling the service (audit #12)', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/games/${TEST_GAME_ID}`)
+        .send({});
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('At least one field must be provided');
+      expect(mockGameService.updateGame).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a body with only unknown keys', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/games/${TEST_GAME_ID}`)
+        .send({ somethingElse: true });
+
+      expect(response.status).toBe(400);
+      expect(mockGameService.updateGame).not.toHaveBeenCalled();
+    });
+
+    it('should return 403 when an unaffiliated user has no access to the game', async () => {
+      mockGameService.updateGame.mockRejectedValue(
+        new ForbiddenError('You do not have access to this game')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/games/${TEST_GAME_ID}`)
+        .send({ homeScore: 1 });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You do not have access to this game');
+      expect(response.body.game).toBeUndefined();
+    });
+
+    it('should return 403 when a stats tracker changes a FINISHED game status (audit #78)', async () => {
+      mockGameService.updateGame.mockRejectedValue(
+        new ForbiddenError('Only roster managers can change the status or score of a finished game')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/games/${TEST_GAME_ID}`)
+        .send({ status: 'IN_PROGRESS' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe(
+        'Only roster managers can change the status or score of a finished game'
+      );
+    });
   });
 
   describe('DELETE /api/v1/games/:id', () => {

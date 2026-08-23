@@ -9,7 +9,7 @@
 import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../../src/api/seasons/schemas';
 import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
 import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
-import { createGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
+import { createGameSchema, updateGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
 import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
 import { avatarUploadUrlSchema } from '../../src/api/uploads/schemas';
@@ -256,6 +256,32 @@ describe('Schema Validation', () => {
           opponent: 'Celtics',
         });
         expect(result.success).toBe(false);
+      });
+    });
+
+    describe('updateGameSchema', () => {
+      it('should reject an empty body', () => {
+        const result = updateGameSchema.safeParse({});
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0].message).toBe('At least one field must be provided');
+        }
+      });
+
+      it('should reject a body with only unknown keys', () => {
+        const result = updateGameSchema.safeParse({ foo: 'bar' });
+        expect(result.success).toBe(false);
+      });
+
+      it('should accept a single known field', () => {
+        expect(updateGameSchema.safeParse({ homeScore: 10 }).success).toBe(true);
+        expect(updateGameSchema.safeParse({ status: 'FINISHED' }).success).toBe(true);
+        expect(updateGameSchema.safeParse({ opponent: 'Celtics' }).success).toBe(true);
+      });
+
+      it('should still reject invalid field values', () => {
+        expect(updateGameSchema.safeParse({ homeScore: -1 }).success).toBe(false);
+        expect(updateGameSchema.safeParse({ status: 'NOPE' }).success).toBe(false);
       });
     });
 
