@@ -294,7 +294,23 @@ router.post('/refresh', async (req, res) => {
     const { accessToken, refreshToken } = await WorkOSService.refreshSession(parsed.data.refreshToken);
     res.json({ success: true, accessToken, refreshToken });
   } catch (error) {
-    logger.warn('Refresh token rejected', { error: error instanceof Error ? error.message : String(error) });
+    // WorkOS SDK errors carry an HTTP `status`; network failures carry none.
+    // Only a definite client-side rejection (4xx other than 429) means the
+    // refresh token is dead — everything else is transient and must NOT make
+    // the mobile client log out (audit #20, backend half).
+    const status = (error as { status?: unknown }).status;
+    const message = error instanceof Error ? error.message : String(error);
+    if (status === 429) {
+      logger.warn('WorkOS rate-limited refresh', { error: message });
+      res.status(429).set('Retry-After', '5').json({ error: 'Authentication service busy, retry shortly' });
+      return;
+    }
+    if (typeof status !== 'number' || status >= 500) {
+      logger.error('WorkOS unavailable during refresh', { error: message, status });
+      res.status(503).json({ error: 'Authentication service unavailable' });
+      return;
+    }
+    logger.warn('Refresh token rejected', { error: message, status });
     res.status(401).json({ error: 'Invalid or expired refresh token' });
   }
 });
