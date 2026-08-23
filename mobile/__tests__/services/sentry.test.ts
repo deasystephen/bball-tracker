@@ -200,6 +200,71 @@ describe('services/sentry', () => {
       expect(out.breadcrumbs?.[2].data).toBeUndefined();
     });
 
+    // Audit #15: XHR breadcrumbs carry the URL under `data.url`; the key-name
+    // scrub never touched it, so `?code=` and `/by-token/<t>` shipped to Sentry.
+    it('redacts breadcrumb data.url by value (OAuth code, by-token segment)', () => {
+      const { beforeSend } = loadSentryModule();
+      const out = beforeSend({
+        breadcrumbs: [
+          {
+            category: 'xhr',
+            data: {
+              url: 'https://api.capyhoops.com/api/v1/auth/callback?code=OAUTHCODE&state=ST',
+              method: 'GET',
+              status_code: 200,
+            },
+          },
+          {
+            category: 'xhr',
+            data: { url: 'https://api.capyhoops.com/api/v1/invitations/by-token/abcdef0123456789' },
+          },
+          {
+            category: 'navigation',
+            data: { from: '/invite/abcdef0123456789', to: '/login' },
+          },
+        ],
+      } as unknown as Parameters<typeof beforeSend>[0]);
+
+      expect(out.breadcrumbs?.[0].data?.url).toBe(
+        'https://api.capyhoops.com/api/v1/auth/callback?code=[scrubbed]&state=[scrubbed]'
+      );
+      expect(out.breadcrumbs?.[0].data?.method).toBe('GET');
+      expect(out.breadcrumbs?.[1].data?.url).toBe(
+        'https://api.capyhoops.com/api/v1/invitations/by-token/[scrubbed]'
+      );
+      expect(out.breadcrumbs?.[2].data?.from).toBe('/invite/[scrubbed]');
+      expect(out.breadcrumbs?.[2].data?.to).toBe('/login');
+      expect(JSON.stringify(out)).not.toMatch(/OAUTHCODE|abcdef0123456789/);
+    });
+
+    it('redacts request.url, request.query_string and transaction', () => {
+      const { beforeSend } = loadSentryModule();
+      const out = beforeSend({
+        transaction: '/api/v1/teams/t1/calendar.ics?token=CALTOKEN',
+        request: {
+          url: 'https://api.capyhoops.com/api/v1/teams/t1/calendar/abcdef0123456789?token=CALTOKEN',
+          query_string: 'token=CALTOKEN&page=1',
+        },
+      } as unknown as Parameters<typeof beforeSend>[0]);
+      expect(out.request?.url).toBe(
+        'https://api.capyhoops.com/api/v1/teams/t1/calendar/[scrubbed]?token=[scrubbed]'
+      );
+      expect(out.request?.query_string).toBe('token=[scrubbed]&page=1');
+      expect(out.transaction).toBe('/api/v1/teams/t1/calendar.ics?token=[scrubbed]');
+    });
+
+    it('registers beforeSendTransaction at init', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry } = loadSentryModule();
+      initSentry();
+      const cfg = sentryInit.mock.calls[0][0];
+      expect(typeof cfg.beforeSendTransaction).toBe('function');
+      const out = cfg.beforeSendTransaction({
+        transaction: '/api/v1/auth/callback?code=OAUTHCODE',
+      });
+      expect(out.transaction).toBe('/api/v1/auth/callback?code=[scrubbed]');
+    });
+
     it('returns the event untouched when no sensitive fields present', () => {
       const { beforeSend } = loadSentryModule();
       const event = { message: 'hi', tags: { env: 'test' } };
@@ -218,6 +283,19 @@ describe('services/sentry', () => {
         .items;
       expect(items[0].token).toBe('[scrubbed]');
       expect(items[1].safe).toBe('ok');
+    });
+  });
+
+  describe('redactUrl', () => {
+    it('masks sensitive query values and secret path segments, keeps the rest', () => {
+      const { redactUrl } = loadSentryModule();
+      expect(redactUrl('/api/v1/games?page=1&status=LIVE')).toBe('/api/v1/games?page=1&status=LIVE');
+      expect(redactUrl('/api/v1/auth/refresh?refresh_token=R')).toBe('/api/v1/auth/refresh?refresh_token=[scrubbed]');
+      expect(redactUrl('/api/v1/teams/t1/calendar/subscribe')).toBe('/api/v1/teams/t1/calendar/subscribe');
+      expect(redactUrl('https://capyhoops.com/invite/abcdef0123456789#x')).toBe(
+        'https://capyhoops.com/invite/[scrubbed]'
+      );
+      expect(redactUrl('')).toBe('');
     });
   });
 

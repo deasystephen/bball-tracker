@@ -2,7 +2,7 @@
 import './config/env';
 
 // Initialize Sentry BEFORE importing Express so instrumentation hooks attach.
-import { initSentry, sentryErrorHandler } from './utils/sentry';
+import { initSentry, sentryErrorHandler, clientErrorStatus } from './utils/sentry';
 initSentry();
 
 import express from 'express';
@@ -13,7 +13,7 @@ import { Server as SocketServer } from 'socket.io';
 import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
-import { requestLogger } from './api/middleware/request-logger';
+import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
 
 const app = express();
@@ -106,7 +106,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   logger.error(err.message, {
     requestId: _req.requestId,
     method: _req.method,
-    path: _req.originalUrl,
+    path: loggablePath(_req),
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 
@@ -114,6 +114,16 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       error: err.message,
+    });
+    return;
+  }
+
+  // body-parser / http-errors (malformed JSON → 400, >1 MB body → 413) set a
+  // 4xx `status` on a plain Error. Honor it instead of answering 500 (audit #28).
+  const clientStatus = clientErrorStatus(err);
+  if (clientStatus !== undefined) {
+    res.status(clientStatus).json({
+      error: clientStatus === 413 ? 'Request body too large' : 'Invalid request body',
     });
     return;
   }
