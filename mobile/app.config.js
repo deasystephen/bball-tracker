@@ -36,6 +36,13 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.bballtracker.mobile',
+      // Universal Links: pairs with the AASA file served at
+      // https://capyhoops.com/.well-known/apple-app-site-association (#138).
+      // Without this entitlement the AASA is inert and
+      // capyhoops.com/invite/<token> opens Safari instead of the app
+      // (audit #37). Entitlements are native — this needs a new EAS build,
+      // an OTA update cannot add it.
+      associatedDomains: ['applinks:capyhoops.com'],
       config: {
         usesNonExemptEncryption: false,
       },
