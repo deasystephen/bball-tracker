@@ -219,6 +219,115 @@ describe('RsvpService', () => {
     });
   });
 
+  describe('upsertRsvp on behalf of a child (PARENT role)', () => {
+    const CHILD_ID = 'child-1';
+
+    function setGame(): ReturnType<typeof createGame> {
+      const game = createGame();
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        id: game.id,
+        teamId: game.teamId,
+        opponent: 'Rivals',
+        date: new Date('2026-09-01T18:00:00Z'),
+        team: { name: 'Home' },
+      });
+      return game;
+    }
+
+    it('throws ForbiddenError when the caller is not a guardian of the player', async () => {
+      const game = setGame();
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(null);
+
+      try {
+        await RsvpService.upsertRsvp(game.id, 'stranger', 'YES', CHILD_ID);
+        fail('expected to throw');
+      } catch (err) {
+        expectForbiddenError(err, 'You can only RSVP for players you are a guardian of');
+      }
+      expect(mockPrisma.gameRsvp.upsert).not.toHaveBeenCalled();
+      // canAccessTeam is not consulted on the guardian path
+      expect(mockPrisma.teamStaff.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenError when the child is not on the game\'s team', async () => {
+      const game = setGame();
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+
+      try {
+        await RsvpService.upsertRsvp(game.id, 'parent-1', 'YES', CHILD_ID);
+        fail('expected to throw');
+      } catch (err) {
+        expectForbiddenError(err, 'This player is not on the team playing this game');
+      }
+      expect(mockPrisma.gameRsvp.upsert).not.toHaveBeenCalled();
+    });
+
+    it('keys the RSVP on the child and emails the guardian', async () => {
+      const game = setGame();
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
+        id: 'r-1',
+        gameId: game.id,
+        userId: CHILD_ID,
+        status: 'YES',
+        user: { id: CHILD_ID, name: 'Kid', email: null },
+      });
+
+      const result = await RsvpService.upsertRsvp(game.id, 'parent-1', 'YES', CHILD_ID);
+
+      expect(result.userId).toBe(CHILD_ID);
+      expect(mockPrisma.gameRsvp.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { gameId_userId: { gameId: game.id, userId: CHILD_ID } },
+          create: { gameId: game.id, userId: CHILD_ID, status: 'YES' },
+        })
+      );
+      expect(mockedMailerSend).toHaveBeenCalledTimes(1);
+      expect(mockedMailerSend.mock.calls[0][0].to).toBe('parent@test.com');
+      expect(mockedMailerSend.mock.calls[0][0].variables.playerName).toBe('Kid');
+    });
+
+    it('skips the confirmation email when the guardian has no email', async () => {
+      const game = setGame();
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
+        id: 'r-1',
+        gameId: game.id,
+        userId: CHILD_ID,
+        status: 'NO',
+        user: { id: CHILD_ID, name: 'Kid', email: null },
+      });
+
+      await RsvpService.upsertRsvp(game.id, 'parent-1', 'NO', CHILD_ID);
+
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('treats playerId === caller as a normal self-RSVP', async () => {
+      const game = setGame();
+      setAdminAccess();
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
+        id: 'r-1',
+        gameId: game.id,
+        userId: 'admin-1',
+        status: 'YES',
+        user: { id: 'admin-1', name: 'Admin', email: 'admin@test.com' },
+      });
+
+      await RsvpService.upsertRsvp(game.id, 'admin-1', 'YES', 'admin-1');
+
+      expect(mockPrisma.guardian.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.gameRsvp.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { gameId_userId: { gameId: game.id, userId: 'admin-1' } } })
+      );
+    });
+  });
+
   describe('getGameRsvps', () => {
     it('throws NotFoundError when game does not exist', async () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(null);

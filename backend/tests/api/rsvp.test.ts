@@ -55,8 +55,49 @@ describe('RSVP API', () => {
       expect(mockRsvpService.upsertRsvp).toHaveBeenCalledWith(
         TEST_GAME_ID,
         TEST_USER_ID,
-        'YES'
+        'YES',
+        undefined
       );
+    });
+
+    it('forwards playerId so a guardian can RSVP for a child (PARENT role)', async () => {
+      const childId = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+      mockRsvpService.upsertRsvp.mockResolvedValue({
+        ...mockRsvp,
+        userId: childId,
+        user: { id: childId, name: 'Kid', email: null },
+      } as unknown as Awaited<ReturnType<typeof mockRsvpService.upsertRsvp>>);
+
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
+        .send({ status: 'YES', playerId: childId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.rsvp.userId).toBe(childId);
+      expect(mockRsvpService.upsertRsvp).toHaveBeenCalledWith(TEST_GAME_ID, TEST_USER_ID, 'YES', childId);
+    });
+
+    it('returns 400 for a malformed playerId', async () => {
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
+        .send({ status: 'YES', playerId: 'not-a-uuid' });
+
+      expect(response.status).toBe(400);
+      expect(mockRsvpService.upsertRsvp).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the caller is not a guardian of the player', async () => {
+      const { ForbiddenError } = jest.requireActual('../../src/utils/errors');
+      mockRsvpService.upsertRsvp.mockRejectedValue(
+        new ForbiddenError('You can only RSVP for players you are a guardian of')
+      );
+
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/rsvp`)
+        .send({ status: 'YES', playerId: 'd4e5f6a7-b8c9-4123-a567-890abcdef012' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You can only RSVP for players you are a guardian of');
     });
 
     it('should accept NO status', async () => {

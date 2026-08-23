@@ -16,6 +16,7 @@ import {
   createAdmin,
   createCoach,
   createPlayer,
+  createUser,
   createLeague,
   createSeason,
   createTeamMember,
@@ -774,6 +775,38 @@ describe('InvitationService', () => {
   });
 
   describe('listInvitations', () => {
+    beforeEach(() => {
+      // Default scope also pulls in the caller's children (guardian links)
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(null);
+    });
+
+    it('includes invitations addressed to the caller\'s children in the default scope (guardian)', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([{ childId: 'child-1' }]);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations({ limit: 20, offset: 0 }, parent.id);
+
+      expect(mockPrisma.teamInvitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { playerId: { in: [parent.id, 'child-1'] } } })
+      );
+    });
+
+    it('lets a guardian filter by their child\'s playerId', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations({ playerId: 'child-1', limit: 20, offset: 0 }, parent.id);
+
+      expect(mockPrisma.teamInvitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { playerId: 'child-1' } })
+      );
+    });
+
     it('should return invitations for a player', async () => {
       const { invitation, player, team, coach, league, season } = createFullInvitation();
 

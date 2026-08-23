@@ -90,6 +90,12 @@ export const upsertRsvpSchema = z.object({
   status: z.nativeEnum(RsvpStatus, {
     error: 'Status must be YES, NO, or MAYBE',
   }),
+  /**
+   * RSVP on behalf of a child: allowed when the caller is a guardian of
+   * `playerId` and the player is rostered on the game's team. The RSVP row is
+   * keyed on the player, not the guardian.
+   */
+  playerId: z.string().uuid('Invalid player ID format').optional(),
 });
 
 export type UpsertRsvpInput = z.infer<typeof upsertRsvpSchema>;

@@ -78,37 +78,39 @@ enum RsvpStatus {
 // =============================================================================
 
 model User {
-  id                String    @id @default(uuid())
-  workosUserId      String?   @unique
-  email             String?   @unique
-  name              String
-  emailVerified     Boolean   @default(false)
-  profilePictureUrl String?
-  role              UserRole  @default(PLAYER)
-  subscriptionTier    SubscriptionTier @default(FREE)
+  id                    String           @id @default(uuid())
+  workosUserId          String?          @unique
+  email                 String?          @unique
+  name                  String
+  emailVerified         Boolean          @default(false)
+  profilePictureUrl     String?
+  role                  UserRole         @default(PLAYER)
+  subscriptionTier      SubscriptionTier @default(FREE)
   subscriptionExpiresAt DateTime?
-  isManaged         Boolean   @default(false)
-  managedById       String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  isManaged             Boolean          @default(false)
+  managedById           String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   // Relations
-  managedBy           User?             @relation("ManagedPlayers", fields: [managedById], references: [id])
-  managedPlayers      User[]            @relation("ManagedPlayers")
-  teamMembers         TeamMember[]
-  teamStaff           TeamStaff[]
-  gameEvents          GameEvent[]
-  refreshTokens       RefreshToken[]
-  sentInvitations     TeamInvitation[]  @relation("SentInvitations")
-  receivedInvitations TeamInvitation[]  @relation("PlayerInvitations")
-  leagueAdmins        LeagueAdmin[]
-  guardiansAsParent   Guardian[]        @relation("GuardianParent")
-  guardiansAsChild    Guardian[]        @relation("GuardianChild")
-  playerStats         PlayerStats[]
-  gameRsvps           GameRsvp[]
-  pushTokens          PushToken[]
-  announcements       Announcement[]
-  calendarFeedTokens  CalendarFeedToken[]
+  managedBy                  User?                @relation("ManagedPlayers", fields: [managedById], references: [id])
+  managedPlayers             User[]               @relation("ManagedPlayers")
+  teamMembers                TeamMember[]
+  teamStaff                  TeamStaff[]
+  gameEvents                 GameEvent[]
+  refreshTokens              RefreshToken[]
+  sentInvitations            TeamInvitation[]     @relation("SentInvitations")
+  receivedInvitations        TeamInvitation[]     @relation("PlayerInvitations")
+  leagueAdmins               LeagueAdmin[]
+  guardiansAsParent          Guardian[]           @relation("GuardianParent")
+  guardiansAsChild           Guardian[]           @relation("GuardianChild")
+  guardianInvitationsAsChild GuardianInvitation[] @relation("GuardianInvitationChild")
+  sentGuardianInvitations    GuardianInvitation[] @relation("GuardianInvitationInviter")
+  playerStats                PlayerStats[]
+  gameRsvps                  GameRsvp[]
+  pushTokens                 PushToken[]
+  announcements              Announcement[]
+  calendarFeedTokens         CalendarFeedToken[]
 
   @@index([email])
   @@index([role])
@@ -169,7 +171,7 @@ model League {
 model Season {
   id        String    @id @default(uuid())
   leagueId  String
-  name      String    // e.g., "Spring 2024", "Fall 2024"
+  name      String // e.g., "Spring 2024", "Fall 2024"
   startDate DateTime?
   endDate   DateTime?
   isActive  Boolean   @default(true)
@@ -211,15 +213,16 @@ model Team {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  season        Season           @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  members       TeamMember[]
-  staff         TeamStaff[]
-  roles         TeamRole[]
-  games         Game[]
-  invitations   TeamInvitation[]
-  teamStats     TeamStats[]
-  announcements Announcement[]
-  calendarFeedTokens CalendarFeedToken[]
+  season              Season               @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  members             TeamMember[]
+  staff               TeamStaff[]
+  roles               TeamRole[]
+  games               Game[]
+  invitations         TeamInvitation[]
+  guardianInvitations GuardianInvitation[]
+  teamStats           TeamStats[]
+  announcements       Announcement[]
+  calendarFeedTokens  CalendarFeedToken[]
 
   @@index([seasonId])
   @@index([name])
@@ -230,7 +233,7 @@ model TeamRole {
   id          String       @id @default(uuid())
   teamId      String
   type        TeamRoleType
-  name        String       // "Head Coach", "Assistant Coach", "Team Manager", or custom
+  name        String // "Head Coach", "Assistant Coach", "Team Manager", or custom
   description String?
 
   // Permissions
@@ -322,6 +325,35 @@ model TeamInvitation {
   @@index([status, expiresAt])
 }
 
+model GuardianInvitation {
+  id           String               @id @default(uuid())
+  token        String               @unique
+  childId      String
+  teamId       String?
+  invitedEmail String
+  relationship GuardianRelationship
+  invitedById  String
+  status       InvitationStatus     @default(PENDING)
+  expiresAt    DateTime
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  acceptedAt   DateTime?
+
+  child     User  @relation("GuardianInvitationChild", fields: [childId], references: [id], onDelete: Cascade)
+  team      Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  invitedBy User  @relation("GuardianInvitationInviter", fields: [invitedById], references: [id])
+
+  // Like TeamInvitation: only one PENDING invitation per (childId, invitedEmail)
+  // is enforced by a hand-written PARTIAL unique index that Prisma cannot express:
+  // "GuardianInvitation_pending_childId_invitedEmail_key" ON (childId, invitedEmail)
+  // WHERE status = 'PENDING' — see migration 20260823120000_guardian_invitation.
+  // Do not add a plain @@unique here.
+  @@index([childId, invitedEmail])
+  @@index([invitedEmail])
+  @@index([status])
+  @@index([expiresAt])
+}
+
 // =============================================================================
 // GAMES & EVENTS
 // =============================================================================
@@ -403,28 +435,28 @@ model PlayerStats {
 }
 
 model TeamStats {
-  id                   String   @id @default(uuid())
-  teamId               String
-  gameId               String
-  points               Int      @default(0)
-  rebounds             Int      @default(0)
-  assists              Int      @default(0)
-  turnovers            Int      @default(0)
+  id                     String   @id @default(uuid())
+  teamId                 String
+  gameId                 String
+  points                 Int      @default(0)
+  rebounds               Int      @default(0)
+  assists                Int      @default(0)
+  turnovers              Int      @default(0)
   // Raw shooting counts so season percentages can be weighted (sum made / sum
   // attempted) instead of averaging per-game percentages. fieldGoals* include
   // three-pointers, matching PlayerStats.
-  fieldGoalsMade         Int    @default(0)
-  fieldGoalsAttempted    Int    @default(0)
-  threePointersMade      Int    @default(0)
-  threePointersAttempted Int    @default(0)
-  freeThrowsMade         Int    @default(0)
-  freeThrowsAttempted    Int    @default(0)
+  fieldGoalsMade         Int      @default(0)
+  fieldGoalsAttempted    Int      @default(0)
+  threePointersMade      Int      @default(0)
+  threePointersAttempted Int      @default(0)
+  freeThrowsMade         Int      @default(0)
+  freeThrowsAttempted    Int      @default(0)
   // Per-game percentages (derived from the counts above at finalize time).
-  fieldGoalPercentage  Float    @default(0)
-  threePointPercentage Float    @default(0)
-  freeThrowPercentage  Float    @default(0)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  fieldGoalPercentage    Float    @default(0)
+  threePointPercentage   Float    @default(0)
+  freeThrowPercentage    Float    @default(0)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)

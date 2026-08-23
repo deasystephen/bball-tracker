@@ -246,6 +246,37 @@ describe('NotificationService', () => {
   });
 
   describe('sendToTeam', () => {
+    beforeEach(() => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
+    it('includes guardians of rostered players in the audience (PARENT role), deduped', async () => {
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+        { playerId: 'child-1' },
+      ]);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { userId: 'coach-1' },
+      ]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([
+        { parentId: 'parent-1' },
+        // A parent who is also staff appears once.
+        { parentId: 'coach-1' },
+      ]);
+      (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([
+        { token: VALID_TOKEN },
+      ]);
+
+      await NotificationService.sendToTeam('team-1', { title: 't', body: 'b' });
+
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { childId: { in: ['child-1'] } } })
+      );
+      const findManyCall = (mockPrisma.pushToken.findMany as jest.Mock).mock.calls[0][0];
+      const userIds = findManyCall.where.userId.in as string[];
+      expect(userIds).toHaveLength(3);
+      expect(new Set(userIds)).toEqual(new Set(['child-1', 'coach-1', 'parent-1']));
+    });
+
     it('returns [] when the team has no members and no staff', async () => {
       (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);

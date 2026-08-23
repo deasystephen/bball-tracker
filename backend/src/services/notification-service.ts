@@ -146,9 +146,21 @@ export class NotificationService {
       }),
     ]);
 
+    const memberIds = members.map(m => m.playerId);
+
+    // Guardians (PARENT role) of rostered players receive the team's
+    // notifications too; the Set dedupes a parent who is also staff.
+    const guardians = memberIds.length > 0
+      ? await prisma.guardian.findMany({
+          where: { childId: { in: memberIds } },
+          select: { parentId: true },
+        })
+      : [];
+
     const userIds = new Set([
-      ...members.map(m => m.playerId),
+      ...memberIds,
       ...staff.map(s => s.userId),
+      ...guardians.map(g => g.parentId),
     ]);
 
     if (excludeUserId) {

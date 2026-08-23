@@ -5,13 +5,27 @@
 import request from 'supertest';
 import { app } from '../../src/index';
 import { InvitationService } from '../../src/services/invitation-service';
+import { GuardianService } from '../../src/services/guardian-service';
 import { NotFoundError, BadRequestError } from '../../src/utils/errors';
 import { invitationTokenKey } from '../../src/api/middleware/rate-limit';
 import type { Request } from 'express';
 
 jest.mock('../../src/services/invitation-service');
+jest.mock('../../src/services/guardian-service');
 
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
+const mockGuardianService = GuardianService as jest.Mocked<typeof GuardianService>;
+
+const mockGuardianInvitationDetails = {
+  kind: 'guardian' as const,
+  id: 'c3d4e5f6-a7b8-4012-a456-7890abcdef01',
+  status: 'PENDING' as const,
+  childName: 'Kid Smith',
+  teamName: 'Lakers',
+  inviterName: 'Coach Smith',
+  relationship: 'MOTHER' as const,
+  expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+};
 
 const VALID_TOKEN = 'abc123defghijklmnop';
 
@@ -45,8 +59,36 @@ describe('Public Invitation Token API', () => {
       expect(mockInvitationService.getInvitationByToken).toHaveBeenCalledWith(VALID_TOKEN);
     });
 
+    it('tags a team invitation with kind: "team"', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+
+      const res = await request(app).get(`/api/v1/invitations/by-token/${VALID_TOKEN}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation.kind).toBe('team');
+      expect(mockGuardianService.getInvitationByToken).not.toHaveBeenCalled();
+    });
+
+    it('falls through to a guardian invitation (kind: "guardian") when no team invitation matches', async () => {
+      mockInvitationService.getInvitationByToken.mockRejectedValue(
+        new NotFoundError('Invitation not found')
+      );
+      mockGuardianService.getInvitationByToken.mockResolvedValue(mockGuardianInvitationDetails);
+
+      const res = await request(app).get(`/api/v1/invitations/by-token/${VALID_TOKEN}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation).toEqual(mockGuardianInvitationDetails);
+      expect(res.body.invitation.kind).toBe('guardian');
+      expect(res.body.invitation.childName).toBe('Kid Smith');
+      expect(mockGuardianService.getInvitationByToken).toHaveBeenCalledWith(VALID_TOKEN);
+    });
+
     it('should return 404 when token is not found', async () => {
       mockInvitationService.getInvitationByToken.mockRejectedValue(
+        new NotFoundError('Invitation not found')
+      );
+      mockGuardianService.getInvitationByToken.mockRejectedValue(
         new NotFoundError('Invitation not found')
       );
 
@@ -146,8 +188,57 @@ describe('Public Invitation Token API', () => {
       expect(res.body.error).toBe('This invitation has expired');
     });
 
+    it('accepts a guardian invitation (kind: "guardian") when no team invitation matches', async () => {
+      mockInvitationService.acceptInvitationByToken.mockRejectedValue(
+        new NotFoundError('Invitation not found')
+      );
+      const guardian = {
+        id: 'g-1',
+        parentId: 'parent-1',
+        childId: 'child-1',
+        relationship: 'MOTHER' as const,
+        isPrimary: true,
+      };
+      mockGuardianService.acceptInvitationByToken.mockResolvedValue({
+        kind: 'guardian',
+        invitation: {
+          id: mockGuardianInvitationDetails.id,
+          status: 'ACCEPTED',
+        } as unknown as Awaited<ReturnType<typeof mockGuardianService.acceptInvitationByToken>>['invitation'],
+        guardian,
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/invitations/by-token/${VALID_TOKEN}/accept`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.kind).toBe('guardian');
+      expect(res.body.guardian).toEqual(guardian);
+      expect(res.body.invitation.status).toBe('ACCEPTED');
+      expect(res.body).not.toHaveProperty('teamMember');
+      expect(mockGuardianService.acceptInvitationByToken).toHaveBeenCalledWith(VALID_TOKEN);
+    });
+
+    it('returns 400 when the guardian invitation is expired', async () => {
+      mockInvitationService.acceptInvitationByToken.mockRejectedValue(
+        new NotFoundError('Invitation not found')
+      );
+      mockGuardianService.acceptInvitationByToken.mockRejectedValue(
+        new BadRequestError('This invitation has expired')
+      );
+
+      const res = await request(app)
+        .post(`/api/v1/invitations/by-token/${VALID_TOKEN}/accept`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('This invitation has expired');
+    });
+
     it('should return 404 when token is not found', async () => {
       mockInvitationService.acceptInvitationByToken.mockRejectedValue(
+        new NotFoundError('Invitation not found')
+      );
+      mockGuardianService.acceptInvitationByToken.mockRejectedValue(
         new NotFoundError('Invitation not found')
       );
 
