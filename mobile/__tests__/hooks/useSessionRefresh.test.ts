@@ -77,6 +77,7 @@ describe('useSessionRefresh', () => {
           name: 'New Name',
           role: 'COACH',
           leagueAdminOf: ['league-1'],
+          guardianOf: [{ childId: 'c1', childName: 'Kid', relationship: 'MOTHER', isPrimary: true }],
           profilePictureUrl: 'https://img/x.png',
         },
       },
@@ -89,6 +90,9 @@ describe('useSessionRefresh', () => {
     const user = useAuthStore.getState().user;
     expect(user?.role).toBe('COACH');
     expect(user?.leagueAdminOf).toEqual(['league-1']);
+    expect(user?.guardianOf).toEqual([
+      { childId: 'c1', childName: 'Kid', relationship: 'MOTHER', isPrimary: true },
+    ]);
     expect(user?.name).toBe('New Name');
     expect(user?.profilePictureUrl).toBe('https://img/x.png');
     // Only the synced fields are merged; identity fields stay as cached.

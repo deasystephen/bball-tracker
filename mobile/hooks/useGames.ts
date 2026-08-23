@@ -226,10 +226,23 @@ export function useSubmitRsvp() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ gameId, status }: { gameId: string; status: RsvpStatus }) => {
+    mutationFn: async ({
+      gameId,
+      status,
+      playerId,
+    }: {
+      gameId: string;
+      status: RsvpStatus;
+      /**
+       * RSVP on behalf of a child (PARENT role): allowed when the caller is a
+       * guardian of that player on the game's team. The returned
+       * `rsvp.userId` is the child's id.
+       */
+      playerId?: string;
+    }) => {
       const response = await apiClient.post<{ success: boolean; rsvp: GameRsvp }>(
         `/games/${gameId}/rsvp`,
-        { status }
+        playerId ? { status, playerId } : { status }
       );
       return response.data.rsvp;
     },

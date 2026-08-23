@@ -1,0 +1,37 @@
+appId: com.bballtracker.mobile
+---
+# Guardian RSVPs for their child (PARENT role — docs/plans/parent-role-spec.md,
+# E2E plan I.5). Dell Curry is the seeded guardian (FATHER) of Steph Curry,
+# who plays on the Warriors; the seed has a scheduled "Warriors vs Lakers"
+# game. Dell is also the Lakers' Team Manager, so the Games tab lists both
+# teams' games — "vs Lakers" is unique to the Warriors.
+#
+# Expected: Profile shows "My kids" with Steph; the Warriors game detail shows
+# the "Responding for" picker (Dell is not rostered, so only Steph is
+# offered) and "Going" submits `POST /games/:id/rsvp { playerId: <steph> }`.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Dell Curry.*"
+
+# Profile → My kids
+- tapOn: "Profile tab"
+- assertVisible: "My kids"
+- assertVisible: "Steph Curry, Father"
+- assertNotVisible: "Change account type"
+
+# Open the child's scheduled game
+- tapOn: "Track game tab"
+- assertVisible: "Games"
+- tapOn: "vs Lakers"
+- assertVisible: "Scheduled"
+
+# RSVP for the child — guardians get no lifecycle / tracking controls
+- assertVisible: "Responding for"
+- assertVisible: "Respond for Steph Curry"
+- assertNotVisible: "Start Game"
+- assertNotVisible: "Continue Tracking"
+- tapOn: "Going"
+- assertVisible: ".*going.*"

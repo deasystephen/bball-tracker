@@ -2,7 +2,7 @@
  * Game detail screen - view game, start/end tracking
  */
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -27,6 +27,7 @@ import { useGame, useUpdateGame, useDeleteGame, useGameRsvps, useSubmitRsvp } fr
 import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { useAuthStore } from '../../../store/auth-store';
+import { guardianChildrenOnTeam, isRosteredOn } from '../../../utils/guardian';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { getGamePermissions } from '../../../utils/game-permissions';
@@ -111,6 +112,29 @@ export default function GameDetailScreen() {
   // track → the tracker. Players and non-staff only get Watch Live / RSVP /
   // box score (role matrix M12–M18).
   const permissions = getGamePermissions(game?.team, user);
+
+  // RSVP on behalf of a child (PARENT role): a guardian of at least one
+  // member of this team picks who they are responding for. `null` = self.
+  const childrenOnTeam = useMemo(
+    () => guardianChildrenOnTeam(user, game?.team),
+    [user, game?.team]
+  );
+  const selfRostered = isRosteredOn(user, game?.team);
+  const respondents = useMemo(() => {
+    const list: { id: string | null; name: string }[] = [];
+    if (selfRostered || childrenOnTeam.length === 0) list.push({ id: null, name: 'Me' });
+    for (const child of childrenOnTeam) list.push({ id: child.childId, name: child.childName });
+    return list;
+  }, [selfRostered, childrenOnTeam]);
+  // `undefined` = nothing picked yet → derive the default (self, or the first
+  // child when the guardian is not rostered themself). Derived rather than
+  // synced in an effect so a roster change can't leave a stale pick.
+  const [picked, setRespondingFor] = useState<string | null | undefined>(undefined);
+  const respondingFor: string | null =
+    picked !== undefined && respondents.some((r) => r.id === picked)
+      ? picked
+      : (respondents[0]?.id ?? null);
+  const rsvpUserId = respondingFor ?? user?.id;
 
   const handleStartGame = async () => {
     try {
@@ -343,10 +367,45 @@ export default function GameDetailScreen() {
           <Card variant="default" style={styles.rsvpCard}>
             <ThemedText variant="h3" style={styles.rsvpTitle}>RSVP</ThemedText>
 
+            {/* Responding for: self + each child on this team (guardians) */}
+            {childrenOnTeam.length > 0 && (
+              <View style={styles.respondingFor} testID="rsvp-responding-for">
+                <ThemedText variant="caption" color="textSecondary" style={styles.respondingForLabel}>
+                  Responding for
+                </ThemedText>
+                <View style={styles.respondingForChips}>
+                  {respondents.map((respondent) => {
+                    const selected = respondent.id === respondingFor;
+                    return (
+                      <TouchableOpacity
+                        key={respondent.id ?? 'self'}
+                        onPress={() => setRespondingFor(respondent.id)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={`Respond for ${respondent.name}`}
+                        style={[
+                          styles.respondingForChip,
+                          { borderColor: colors.border },
+                          selected && { backgroundColor: colors.primary, borderColor: colors.primary },
+                        ]}
+                      >
+                        <ThemedText
+                          variant="captionBold"
+                          style={selected ? { color: '#FFFFFF' } : undefined}
+                        >
+                          {respondent.name}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
             {/* RSVP Buttons */}
             <View style={styles.rsvpButtons}>
               {(['YES', 'NO', 'MAYBE'] as RsvpStatus[]).map((status) => {
-                const myRsvp = rsvpData?.rsvps?.find(r => r.userId === user?.id);
+                const myRsvp = rsvpData?.rsvps?.find(r => r.userId === rsvpUserId);
                 const isSelected = myRsvp?.status === status;
                 const label = status === 'YES' ? 'Going' : status === 'NO' ? 'Not Going' : 'Maybe';
                 return (
@@ -357,7 +416,9 @@ export default function GameDetailScreen() {
                       { borderColor: colors.border },
                       isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
                     ]}
-                    onPress={() => submitRsvp.mutate({ gameId: id, status })}
+                    onPress={() =>
+                      submitRsvp.mutate({ gameId: id, status, playerId: respondingFor ?? undefined })
+                    }
                   >
                     <ThemedText
                       variant="captionBold"
@@ -587,6 +648,23 @@ const styles = StyleSheet.create({
   },
   rsvpTitle: {
     marginBottom: spacing.md,
+  },
+  respondingFor: {
+    marginBottom: spacing.md,
+  },
+  respondingForLabel: {
+    marginBottom: spacing.xs,
+  },
+  respondingForChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  respondingForChip: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: 999,
+    borderWidth: 1,
   },
   rsvpButtons: {
     flexDirection: 'row',

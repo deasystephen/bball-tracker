@@ -37,15 +37,23 @@ router.get('/', async (req, res) => {
       );
     }
 
-    const result = await InvitationService.listInvitations(
-      validationResult.data,
-      req.user!.id
-    );
+    const query = validationResult.data;
+    const result = await InvitationService.listInvitations(query, req.user!.id);
+
+    // Pending GuardianInvitations addressed to the caller (PARENT role) ride
+    // along on the unfiltered / PENDING list so the Invitations tab can offer
+    // "Accept for <child>". Team/player-scoped listings are coach views.
+    const includeGuardian =
+      !query.teamId && !query.playerId && (!query.status || query.status === 'PENDING');
+    const guardianInvitations = includeGuardian
+      ? await GuardianService.listPendingForUser(req.user!.id)
+      : [];
 
     res.json({
       success: true,
       ...result,
       invitations: result.invitations.map(omitToken),
+      guardianInvitations: guardianInvitations.map(omitToken),
     });
   } catch (error) {
     logger.error('Error listing invitations', { error: error instanceof Error ? error.message : String(error) });

@@ -435,6 +435,32 @@ describe('TeamService', () => {
       );
     });
 
+    it('includes teams a guardian\'s children play on (PARENT role)', async () => {
+      const parent = createUser({ role: 'PARENT' });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([{ childId: 'kid-1' }]);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+
+      await TeamService.listTeams({ limit: 10, offset: 0 }, parent.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              {
+                OR: [
+                  ...(accessClause(parent.id).OR as unknown[]),
+                  { members: { some: { playerId: { in: ['kid-1'] } } } },
+                ],
+              },
+            ],
+          },
+        })
+      );
+    });
+
     it('should return empty result if user has no teams', async () => {
       const user = createPlayer();
 

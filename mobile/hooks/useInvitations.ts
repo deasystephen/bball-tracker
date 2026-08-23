@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import type { GuardianRelationship } from '../../shared/types';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
 
@@ -48,9 +49,29 @@ export interface TeamInvitation {
   };
 }
 
+export type InvitationKind = 'team' | 'guardian';
+
+/**
+ * A pending guardian invitation addressed to the signed-in adult (PARENT
+ * role). Surfaced on the unfiltered / PENDING `GET /invitations` as
+ * `guardianInvitations`; accepted through `POST /invitations/:id/accept`.
+ */
+export interface GuardianInvitationView {
+  kind: 'guardian';
+  id: string;
+  status: InvitationStatus;
+  childName: string;
+  teamName: string | null;
+  inviterName: string;
+  relationship: GuardianRelationship;
+  expiresAt: string;
+}
+
 export interface InvitationsResponse {
   success: boolean;
   invitations: TeamInvitation[];
+  /** Optional: older API builds omit it. */
+  guardianInvitations?: GuardianInvitationView[];
   pagination: {
     total: number;
     limit: number;
@@ -61,7 +82,17 @@ export interface InvitationsResponse {
 
 export interface InvitationResponse {
   success: boolean;
+  /** Which invitation model the id resolved to; older API builds omit it. */
+  kind?: InvitationKind;
   invitation: TeamInvitation;
+  /** Present on `kind: 'guardian'` accepts — the new Guardian link. */
+  guardian?: {
+    id: string;
+    parentId: string;
+    childId: string;
+    relationship: GuardianRelationship;
+    isPrimary: boolean;
+  };
   teamMember?: {
     id: string;
     teamId: string;
@@ -201,6 +232,11 @@ export function useAcceptInvitation() {
       // Invalidate team members if teamMember was returned
       if (data.teamMember) {
         queryClient.invalidateQueries({ queryKey: ['teams'] });
+      }
+      // A guardian accept unlocks the child's teams / games (PARENT role).
+      if (data.kind === 'guardian') {
+        queryClient.invalidateQueries({ queryKey: ['teams'] });
+        queryClient.invalidateQueries({ queryKey: ['games'] });
       }
     },
   });
