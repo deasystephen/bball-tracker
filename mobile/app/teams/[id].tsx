@@ -230,7 +230,7 @@ export default function TeamDetailsScreen() {
                 <TouchableOpacity
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
-                  onPress={() => router.push(`/teams/${id}/players/${member.playerId}`)}
+                  onPress={() => router.push(`/players/${member.playerId}/stats`)}
                   accessibilityLabel={member.player.name}
                 >
                   <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>

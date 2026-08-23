@@ -236,8 +236,9 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Admin Section */}
-        {(user?.role === 'ADMIN' || user?.role === 'COACH') && (
+        {/* Admin Section — league/season management is ADMIN-only on the backend
+            (league-admin rows are not surfaced by GET /auth/me yet) */}
+        {user?.role === 'ADMIN' && (
           <View style={styles.section}>
             <ThemedText variant="h4" style={styles.sectionTitle}>
               Management
@@ -305,21 +306,6 @@ export default function Profile() {
                   ]}
                 />
               </View>
-            </TouchableOpacity>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <TouchableOpacity style={styles.settingRow} onPress={() => router.push('/notifications')}>
-              <View style={styles.settingLeft}>
-                <View style={[styles.settingIcon, { backgroundColor: colors.info + '20' }]}>
-                  <Ionicons name="notifications" size={18} color={colors.info} />
-                </View>
-                <View style={styles.settingContent}>
-                  <ThemedText variant="body">Notifications</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">
-                    Manage notification preferences
-                  </ThemedText>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
             </TouchableOpacity>
           </Card>
         </View>

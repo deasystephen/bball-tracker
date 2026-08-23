@@ -12,13 +12,16 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { AxiosError } from 'axios';
 import {
   ThemedView,
   ThemedText,
   Card,
   LoadingSpinner,
   ErrorState,
+  EmptyState,
 } from '../../../components';
+import { useAuthStore } from '../../../store/auth-store';
 import { SeasonAverages, PlayerStatsCard } from '../../../components/stats';
 import { PrintButton } from '../../../components/PrintButton';
 import { usePlayerOverallStats } from '../../../hooks/useStats';
@@ -33,10 +36,33 @@ export default function PlayerStatsScreen() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
+  const currentUserId = useAuthStore((s) => s.user?.id);
+
   const { data, isLoading, error, refetch } = usePlayerOverallStats(id);
 
   if (isLoading) {
     return <LoadingSpinner message="Loading player stats..." fullScreen />;
+  }
+
+  // The backend 404s when the player has no team memberships yet. For the
+  // user's own "My Stats" that is a normal state, not an error.
+  if (error instanceof AxiosError && error.response?.status === 404) {
+    const isSelf = id === currentUserId;
+    return (
+      <ThemedView variant="background" style={styles.container}>
+        <EmptyState
+          icon="stats-chart-outline"
+          title={isSelf ? 'No stats yet' : 'No stats for this player'}
+          message={
+            isSelf
+              ? 'Join a team and play some games to see your stats here.'
+              : 'This player is not on any team yet.'
+          }
+          actionLabel={isSelf ? 'View Teams' : 'Go back'}
+          onAction={() => (isSelf ? router.push('/teams') : router.back())}
+        />
+      </ThemedView>
+    );
   }
 
   if (error || !data) {

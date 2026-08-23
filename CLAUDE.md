@@ -108,6 +108,20 @@ Backend API (Node.js/Express)
   so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
   becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the FREE-tier meter).
 
+#### Mobile routing & guards
+- The `(tabs)` shell has no auth guard of its own. Screens reachable while logged out (the `/invite/<token>`
+  deep link) must send unauthenticated users to `/login` themselves. Use `setPendingReturnPath(path)` from
+  `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and
+  cold start) consumes it (30-minute TTL, in-app absolute paths only) after the role-onboarding check, so the
+  user lands back on the deep link.
+- Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
+  `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
+- `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`
+  renders an `EmptyState` for that case ("No stats yet" for the current user) instead of an error.
+- The Profile "Leagues & Seasons" entry is shown only to `user.role === 'ADMIN'` (the backend league/season
+  management routes are ADMIN-only). Follow-up: surface league-admin rows from `GET /auth/me` if per-league
+  admins should get the entry.
+
 ### Socket.io (Live Game Broadcast)
 
 Real-time game updates use Socket.io with an in-memory adapter. Single-replica

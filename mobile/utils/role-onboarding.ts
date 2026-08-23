@@ -10,6 +10,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserRole } from '../../shared/types';
+import { consumePendingReturnPath } from './return-path';
 
 const KEY_PREFIX = 'roleChosen:';
 
@@ -46,9 +47,14 @@ export async function markRoleChosen(userId: string): Promise<void> {
 
 /**
  * Where to send a freshly authenticated user.
+ *
+ * The role step always wins. Otherwise a pending return path (a deep link such
+ * as `/invite/<token>` that sent the user to login — see `utils/return-path`)
+ * takes precedence over Home.
  */
 export async function postLoginRoute(
   user: { id: string; role: UserRole | string } | null | undefined
-): Promise<typeof ROLE_ONBOARDING_ROUTE | typeof HOME_ROUTE> {
-  return (await needsRoleChoice(user)) ? ROLE_ONBOARDING_ROUTE : HOME_ROUTE;
+): Promise<typeof ROLE_ONBOARDING_ROUTE | typeof HOME_ROUTE | string> {
+  if (await needsRoleChoice(user)) return ROLE_ONBOARDING_ROUTE;
+  return (await consumePendingReturnPath()) ?? HOME_ROUTE;
 }

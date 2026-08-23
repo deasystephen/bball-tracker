@@ -10,8 +10,9 @@ import { ThemedView, ThemedText, LoadingSpinner, Button, Card } from '../../comp
 import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/auth-store';
-import { useInvitationByToken, useAcceptInvitationByToken } from '../../hooks/useInvitationByToken';
+import { useInvitationByToken } from '../../hooks/useInvitationByToken';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
+import { setPendingReturnPath } from '../../utils/return-path';
 import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { AxiosError } from 'axios';
@@ -24,8 +25,17 @@ export default function InviteDeepLinkScreen() {
   const { isAuthenticated } = useAuthStore();
 
   const { data: invitation, isLoading, error } = useInvitationByToken(token);
-  const acceptByToken = useAcceptInvitationByToken();
   const acceptById = useAcceptInvitation();
+
+  /**
+   * Logged-out users must sign in first: accepting needs an identity, and the
+   * authenticated tab shell has no auth guard of its own. Remember this link so
+   * `postLoginRoute` brings them straight back here after sign-in.
+   */
+  async function goToLogin() {
+    if (token) await setPendingReturnPath(`/invite/${token}`);
+    router.push('/login');
+  }
 
   const isExpired =
     invitation?.status === 'EXPIRED' ||
@@ -44,13 +54,14 @@ export default function InviteDeepLinkScreen() {
   async function handleAccept() {
     if (!invitation || !token) return;
 
+    if (!isAuthenticated) {
+      await goToLogin();
+      return;
+    }
+
     const doAccept = async () => {
       try {
-        if (isAuthenticated) {
-          await acceptById.mutateAsync(invitation.id);
-        } else {
-          await acceptByToken.mutateAsync(token);
-        }
+        await acceptById.mutateAsync(invitation.id);
         toast.showToast(`You've joined ${invitation.teamName}!`, 'success');
         router.replace('/(tabs)/invitations');
       } catch (err) {
@@ -194,21 +205,12 @@ export default function InviteDeepLinkScreen() {
               </ThemedText>
             )}
             <Button
-              title="Accept Invitation"
+              title={isAuthenticated ? 'Accept Invitation' : 'Log In to Accept'}
               onPress={handleAccept}
-              loading={acceptById.isPending || acceptByToken.isPending}
+              loading={acceptById.isPending}
               style={styles.btn}
               fullWidth
             />
-            {!isAuthenticated && (
-              <Button
-                title="Log In"
-                variant="outline"
-                onPress={() => router.push('/login')}
-                style={styles.btnSecondary}
-                fullWidth
-              />
-            )}
           </>
         )}
       </View>
