@@ -1,7 +1,17 @@
 #!/bin/bash
 
-# Full Flow Testing Script
-# Tests the complete flow: League → Team → Players → Game
+# Full Flow Testing Script (local dev backend)
+# Tests the complete flow against the CURRENT API:
+#   League (ADMIN) → Season → Team (COACH) → Managed roster player → Game → Event → verify
+#
+# Usage:
+#   ./scripts/test-full-flow.sh                      # dev-login as the seeded admin (NODE_ENV=development)
+#   TOKEN="<access token>" ./scripts/test-full-flow.sh   # use a real WorkOS access token (must be ADMIN)
+#   API_BASE=http://localhost:3000/api/v1 DEV_LOGIN_EMAIL=admin@bball-tracker.com ./scripts/test-full-flow.sh
+#
+# Requires an ADMIN account because `POST /leagues` is ADMIN-only; ADMIN also bypasses the
+# COACH requirement and the FREE-tier team cap on `POST /teams`. The seeded admin
+# (`npx prisma db seed`) is admin@bball-tracker.com. Never point this at production.
 
 set -e  # Exit on error
 
@@ -13,13 +23,13 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-API_BASE="http://localhost:3000/api/v1"
-TOKEN=""
+API_BASE="${API_BASE:-http://localhost:3000/api/v1}"
+TOKEN="${TOKEN:-}"
+DEV_LOGIN_EMAIL="${DEV_LOGIN_EMAIL:-admin@bball-tracker.com}"
 
-# Check if jq is available
-HAS_JQ=false
-if command -v jq &> /dev/null; then
-    HAS_JQ=true
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}✗ jq is required (brew install jq)${NC}"
+    exit 1
 fi
 
 # Functions
@@ -39,44 +49,12 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
-# Extract JSON value (works with or without jq)
-extract_json() {
-    local key=$1
-    local json=$2
-    
-    if [ "$HAS_JQ" = true ]; then
-        echo "$json" | jq -r "$key"
-    else
-        # Simple grep/sed extraction (less robust but works for simple cases)
-        echo "$json" | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | sed "s/\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\"/\1/"
-    fi
-}
-
-# Extract nested JSON value with jq
-extract_nested_json() {
-    local path=$1
-    local json=$2
-    
-    if [ "$HAS_JQ" = true ]; then
-        echo "$json" | jq -r "$path"
-    else
-        print_warning "jq not available, using fallback extraction"
-        # Fallback: try to extract from common patterns
-        if [[ "$path" == *".id" ]]; then
-            local key=$(echo "$path" | sed 's/.*\.\([^.]*\)$/\1/')
-            extract_json "$key" "$json"
-        else
-            echo ""
-        fi
-    fi
-}
-
 # Make API request
 api_request() {
     local method=$1
     local endpoint=$2
     local data=$3
-    
+
     if [ -z "$data" ]; then
         curl -s -X "$method" \
             -H "Authorization: Bearer $TOKEN" \
@@ -94,42 +72,40 @@ api_request() {
 # Check if server is running
 check_server() {
     print_step "Checking if server is running..."
-    if curl -s -f "$API_BASE" > /dev/null 2>&1; then
-        print_success "Server is running"
+    local health_url="${API_BASE%/api/v1}/health"
+    if curl -s -f "$health_url" > /dev/null 2>&1; then
+        print_success "Server is running ($health_url)"
     else
-        print_error "Server is not running at $API_BASE"
+        print_error "Server is not running at $health_url"
         echo "Please start the server with: cd backend && npm run dev"
         exit 1
     fi
 }
 
-# Get token from user
+# Get a token: dev-login (development only) unless TOKEN was supplied
 get_token() {
     if [ -z "$TOKEN" ]; then
-        echo ""
-        print_warning "WorkOS access token is required"
-        echo "You can get a token by:"
-        echo "  1. Visit: http://localhost:3000/api/v1/auth/login?format=json"
-        echo "  2. Authenticate with WorkOS"
-        echo "  3. Copy the accessToken from the callback response"
-        echo ""
-        read -p "Enter your WorkOS access token: " TOKEN
-        
+        print_step "Dev-login as $DEV_LOGIN_EMAIL (requires NODE_ENV=development)..."
+        local login_response
+        login_response=$(curl -s -X POST -H "Content-Type: application/json" \
+            -d "{\"email\":\"$DEV_LOGIN_EMAIL\"}" "$API_BASE/auth/dev-login")
+        TOKEN=$(echo "$login_response" | jq -r '.accessToken // empty')
         if [ -z "$TOKEN" ]; then
-            print_error "Token is required"
+            print_error "Dev-login failed. Seed the DB (npx prisma db seed) or pass TOKEN=<WorkOS access token>."
+            echo "Response: $login_response"
             exit 1
         fi
+        print_success "Dev token obtained"
     fi
-    
-    # Test token
+
     print_step "Validating token..."
+    local response
     response=$(api_request "GET" "/auth/me")
-    
-    if echo "$response" | grep -q "error"; then
+    if [ "$(echo "$response" | jq -r '.success // false')" != "true" ]; then
         print_error "Invalid token. Please check your token and try again."
+        echo "Response: $response"
         exit 1
     fi
-    
     print_success "Token is valid"
 }
 
@@ -138,135 +114,127 @@ main() {
     echo -e "${BLUE}"
     echo "╔══════════════════════════════════════════════════════════╗"
     echo "║     Basketball Tracker - Full Flow Test                  ║"
-    echo "║     League → Team → Players → Game                      ║"
+    echo "║     League → Season → Team → Roster → Game → Event      ║"
     echo "╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-    
-    # Check prerequisites
+
     check_server
     get_token
-    
+
     # Step 1: Get User ID
     print_step "Step 1: Getting user information..."
     user_response=$(api_request "GET" "/auth/me")
-    USER_ID=$(extract_nested_json ".user.id" "$user_response")
-    USER_NAME=$(extract_nested_json ".user.name" "$user_response")
-    
-    if [ -z "$USER_ID" ] || [ "$USER_ID" == "null" ]; then
+    USER_ID=$(echo "$user_response" | jq -r '.user.id // empty')
+    USER_NAME=$(echo "$user_response" | jq -r '.user.name // empty')
+    USER_ROLE=$(echo "$user_response" | jq -r '.user.role // empty')
+
+    if [ -z "$USER_ID" ]; then
         print_error "Failed to get user ID"
         echo "Response: $user_response"
         exit 1
     fi
-    
-    print_success "User: $USER_NAME (ID: $USER_ID)"
-    
-    # Step 2: Create League
+    print_success "User: $USER_NAME (ID: $USER_ID, role: $USER_ROLE)"
+    if [ "$USER_ROLE" != "ADMIN" ]; then
+        print_warning "User is not ADMIN — POST /leagues will return 403"
+    fi
+
+    # Step 2: Create League (ADMIN only; id is a slug derived from the name)
     print_step "Step 2: Creating league..."
-    league_data='{
-        "name": "Test League '$(date +%s)'",
-        "season": "Winter 2024",
-        "year": 2024
-    }'
-    
+    league_data="{\"name\": \"Test League $(date +%s)\"}"
     league_response=$(api_request "POST" "/leagues" "$league_data")
-    LEAGUE_ID=$(extract_nested_json ".league.id" "$league_response")
-    
-    if [ -z "$LEAGUE_ID" ] || [ "$LEAGUE_ID" == "null" ]; then
+    LEAGUE_ID=$(echo "$league_response" | jq -r '.league.id // empty')
+    if [ -z "$LEAGUE_ID" ]; then
         print_error "Failed to create league"
         echo "Response: $league_response"
         exit 1
     fi
-    
-    LEAGUE_NAME=$(extract_nested_json ".league.name" "$league_response")
-    print_success "League created: $LEAGUE_NAME (ID: $LEAGUE_ID)"
-    
-    # Step 3: Create Team
-    print_step "Step 3: Creating team..."
-    team_data="{
-        \"name\": \"Thunder\",
-        \"leagueId\": \"$LEAGUE_ID\"
-    }"
-    
+    print_success "League created: $(echo "$league_response" | jq -r '.league.name') (ID: $LEAGUE_ID)"
+
+    # Step 3: Create Season (teams must belong to a season)
+    print_step "Step 3: Creating season..."
+    season_data="{\"leagueId\": \"$LEAGUE_ID\", \"name\": \"Test Season\"}"
+    season_response=$(api_request "POST" "/seasons" "$season_data")
+    SEASON_ID=$(echo "$season_response" | jq -r '.season.id // empty')
+    if [ -z "$SEASON_ID" ]; then
+        print_error "Failed to create season"
+        echo "Response: $season_response"
+        exit 1
+    fi
+    print_success "Season created: Test Season (ID: $SEASON_ID)"
+
+    # Step 4: Create Team (COACH / ADMIN / league admin; creator becomes Head Coach)
+    print_step "Step 4: Creating team..."
+    team_data="{\"name\": \"Thunder\", \"seasonId\": \"$SEASON_ID\"}"
     team_response=$(api_request "POST" "/teams" "$team_data")
-    TEAM_ID=$(extract_nested_json ".team.id" "$team_response")
-    
-    if [ -z "$TEAM_ID" ] || [ "$TEAM_ID" == "null" ]; then
-        print_error "Failed to create team"
+    TEAM_ID=$(echo "$team_response" | jq -r '.team.id // empty')
+    if [ -z "$TEAM_ID" ]; then
+        print_error "Failed to create team (COACH role or ADMIN required; FREE tier is capped at 3 teams → 402)"
         echo "Response: $team_response"
         exit 1
     fi
-    
-    TEAM_NAME=$(extract_nested_json ".team.name" "$team_response")
-    print_success "Team created: $TEAM_NAME (ID: $TEAM_ID)"
-    
-    # Step 4: Add Player to Team
-    print_step "Step 4: Adding player to team..."
-    player_data="{
-        \"playerId\": \"$USER_ID\",
-        \"jerseyNumber\": 23,
-        \"position\": \"Forward\"
-    }"
-    
-    player_response=$(api_request "POST" "/teams/$TEAM_ID/players" "$player_data")
-    
-    if echo "$player_response" | grep -q "error"; then
-        print_warning "Failed to add player (may already be on team)"
+    print_success "Team created: $(echo "$team_response" | jq -r '.team.name') (ID: $TEAM_ID)"
+
+    # Step 5: Add a managed roster player (no email / account needed)
+    # POST /teams/:id/players is gone (410) — real users join via invitations.
+    print_step "Step 5: Adding managed roster player..."
+    player_data='{"name": "Test Player 1", "jerseyNumber": 23, "position": "Forward"}'
+    player_response=$(api_request "POST" "/teams/$TEAM_ID/managed-players" "$player_data")
+    PLAYER_ID=$(echo "$player_response" | jq -r '.teamMember.playerId // .teamMember.player.id // empty')
+    if [ -z "$PLAYER_ID" ]; then
+        print_error "Failed to add managed player"
         echo "Response: $player_response"
-    else
-        print_success "Player added to team"
+        exit 1
     fi
-    
-    # Step 5: Create Game
-    print_step "Step 5: Creating game..."
-    game_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%S" 2>/dev/null || echo "2024-01-15T18:00:00Z")
-    game_data="{
-        \"teamId\": \"$TEAM_ID\",
-        \"opponent\": \"Lakers\",
-        \"date\": \"$game_date\",
-        \"status\": \"SCHEDULED\",
-        \"homeScore\": 0,
-        \"awayScore\": 0
-    }"
-    
+    print_success "Managed player added (ID: $PLAYER_ID)"
+
+    # Step 6: Create Game
+    print_step "Step 6: Creating game..."
+    game_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    game_data="{\"teamId\": \"$TEAM_ID\", \"opponent\": \"Lakers\", \"date\": \"$game_date\"}"
     game_response=$(api_request "POST" "/games" "$game_data")
-    GAME_ID=$(extract_nested_json ".game.id" "$game_response")
-    
-    if [ -z "$GAME_ID" ] || [ "$GAME_ID" == "null" ]; then
+    GAME_ID=$(echo "$game_response" | jq -r '.game.id // empty')
+    if [ -z "$GAME_ID" ]; then
         print_error "Failed to create game"
         echo "Response: $game_response"
         exit 1
     fi
-    
-    OPPONENT=$(extract_nested_json ".game.opponent" "$game_response")
-    print_success "Game created: vs $OPPONENT (ID: $GAME_ID)"
-    
-    # Step 6: Verify Everything
-    print_step "Step 6: Verifying created resources..."
-    
-    # Verify League
-    league_get=$(api_request "GET" "/leagues/$LEAGUE_ID")
-    if echo "$league_get" | grep -q "$LEAGUE_ID"; then
-        print_success "League verified"
-    else
-        print_warning "League verification failed"
+    print_success "Game created: vs $(echo "$game_response" | jq -r '.game.opponent') (ID: $GAME_ID, status $(echo "$game_response" | jq -r '.game.status'))"
+
+    # Step 7: Start the game and record a made 2-pointer (score is server-derived)
+    print_step "Step 7: Starting game and recording a made shot..."
+    start_response=$(api_request "PATCH" "/games/$GAME_ID" '{"status": "IN_PROGRESS"}')
+    if [ "$(echo "$start_response" | jq -r '.game.status // empty')" != "IN_PROGRESS" ]; then
+        print_error "Failed to start game"
+        echo "Response: $start_response"
+        exit 1
     fi
-    
-    # Verify Team
-    team_get=$(api_request "GET" "/teams/$TEAM_ID")
-    if echo "$team_get" | grep -q "$TEAM_ID"; then
-        print_success "Team verified"
-    else
-        print_warning "Team verification failed"
+    event_data="{\"playerId\": \"$PLAYER_ID\", \"eventType\": \"SHOT\", \"metadata\": {\"made\": true, \"points\": 2}}"
+    event_response=$(api_request "POST" "/games/$GAME_ID/events" "$event_data")
+    HOME_SCORE=$(echo "$event_response" | jq -r '.score.homeScore // empty')
+    if [ "$HOME_SCORE" != "2" ]; then
+        print_error "Expected score.homeScore == 2 after a made 2-pointer"
+        echo "Response: $event_response"
+        exit 1
     fi
-    
-    # Verify Game
-    game_get=$(api_request "GET" "/games/$GAME_ID")
-    if echo "$game_get" | grep -q "$GAME_ID"; then
-        print_success "Game verified"
+    print_success "Event recorded; server-derived score is $HOME_SCORE-$(echo "$event_response" | jq -r '.score.awayScore')"
+
+    # Step 8: Verify Everything
+    print_step "Step 8: Verifying created resources..."
+    for pair in "League:/leagues/$LEAGUE_ID:$LEAGUE_ID" "Season:/seasons/$SEASON_ID:$SEASON_ID" \
+                "Team:/teams/$TEAM_ID:$TEAM_ID" "Game:/games/$GAME_ID:$GAME_ID"; do
+        label=${pair%%:*}; rest=${pair#*:}; path=${rest%%:*}; id=${rest#*:}
+        if api_request "GET" "$path" | grep -q "$id"; then
+            print_success "$label verified"
+        else
+            print_warning "$label verification failed"
+        fi
+    done
+    if api_request "GET" "/games/$GAME_ID" | jq -e '.game.homeScore == 2' > /dev/null; then
+        print_success "Game detail shows homeScore 2"
     else
-        print_warning "Game verification failed"
+        print_warning "Game detail homeScore mismatch"
     fi
-    
+
     # Summary
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
@@ -274,14 +242,13 @@ main() {
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Created Resources:"
-    echo "  League ID: $LEAGUE_ID"
-    echo "  Team ID:   $TEAM_ID"
-    echo "  Game ID:   $GAME_ID"
+    echo "  League ID:  $LEAGUE_ID"
+    echo "  Season ID:  $SEASON_ID"
+    echo "  Team ID:    $TEAM_ID"
+    echo "  Player ID:  $PLAYER_ID"
+    echo "  Game ID:    $GAME_ID"
     echo ""
-    echo "You can verify these in your database or via the API:"
-    echo "  GET $API_BASE/leagues/$LEAGUE_ID"
-    echo "  GET $API_BASE/teams/$TEAM_ID"
-    echo "  GET $API_BASE/games/$GAME_ID"
+    echo "Clean up with: DELETE $API_BASE/leagues/$LEAGUE_ID (cascades)"
     echo ""
 }
 

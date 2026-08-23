@@ -4,6 +4,11 @@ Source: adversarially verified audit of `backend/` + `mobile/` at commit 71646b4
 artifact https://claude.ai/code/artifact/1dfe2db8-9265-4116-9b2d-95ac49f13d5f). Entry numbers below (`#n`)
 refer to that ranking.
 
+**Status 2026-08-23:** all 82 entries are addressed — shipped in PRs #352–#401 (PR-0 JWT verification,
+PR-1 role self-select, lanes A–I, and the native build #25 for #37/#52). The role-matrix follow-ups that
+grew out of lane A/B (team staff management, permission gates, PARENT/guardian role, dead entitlement UI)
+landed in #392–#400. This document is now historical; current behaviour is described in `CLAUDE.md`.
+
 Decision already made: **#9 → self-select COACH at onboarding** (global `COACH` role stays meaningful; a
 new onboarding step + endpoint sets it).
 
@@ -178,8 +183,9 @@ hide `maxSeasons`), **I4** (#37, #39 — `ios.associatedDomains`, `uploadAvatar`
   rest — don't let them queue behind lane H.
 - Mobile: lanes C/D/H + E3/F3/I4 are JS-only → one OTA after they all land
   (`npx eas-cli update --branch production --environment production --platform ios …`), **except** #37
-  (`associatedDomains`) and #52 (`expo-secure-store`, folded into C1 if time allows) which need a native
-  build → cut build #25 from `main` after the OTA-eligible set is verified.
+  (`associatedDomains`, landed in #381) and #52, which needed a native build. #52 landed in #401:
+  `expo-secure-store` for the session tokens, app version 1.2.0 (runtime version moves with it, so OTAs
+  now target 1.2.0 builds only), native build #25 cut from `main`.
 - Re-run the audit workflow (`resumeFromRunId` won't help — new code) as a final pass once all lanes land.
 
 ## Out of scope (deferred)

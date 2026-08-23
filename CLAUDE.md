@@ -52,7 +52,6 @@ npx eas-cli update --branch production --environment production --platform ios -
 **Universal Links need a native build:** `app.config.js` sets `ios.associatedDomains: ['applinks:capyhoops.com']` (audit #37) so iOS trusts the AASA file and `capyhoops.com/invite/<token>` opens the app. Entitlements are baked into the binary at build time — an `eas update` (OTA) cannot add or change them, so any change here means cutting a new `eas build` and going through TestFlight again. The `capyhoops.com` web deploy must also be serving `/.well-known/apple-app-site-association` for the link to resolve.
 **Runtime version 1.2.0 (audit #52):** `app.config.js` uses `runtimeVersion: { policy: 'appVersion' }`, so bumping `version` moves the OTA target. `1.1.0` → `1.2.0` happened when `expo-secure-store` (native) landed; every `eas update` from then on reaches **1.2.0 builds only** (build #25+). Build #24 keeps the last 1.1.0 OTA and gets nothing further — ship a native build before publishing OTAs that assume the keychain. Native-module additions are also dependabot-ignored (`.github/dependabot.yml`, `expo-secure-store` included) because the Expo SDK pins them.
 **eas-cli pinning:** `mobile/package.json` pins `eas-cli ^22` and `eas.json` enforces `cli.version >= 22.2.0`. The `overrides` block must keep `@oclif/core > minimatch ^10` scoped to **@oclif/core only** — eas-cli itself needs the v5 default export, and giving it v9+ makes every credentials step fail with a misleading "Provisioning Profile is malformed" (#343).
-```
 
 ### Infrastructure
 ```bash
@@ -188,7 +187,7 @@ never inline a role check in a screen:
   (`utils/role-onboarding.ts#needsNamePrompt`, flag `nameAsked:<userId>`) → `PATCH /auth/me { name }`. Tests:
   `__tests__/utils/guardian.test.ts`, `__tests__/hooks/useGuardians.runtime.test.tsx`,
   `__tests__/app/{game-detail-rsvp-picker,invitations-guardian,profile-my-kids}.test.tsx`. Maestro:
-  `.maestro/guardian-rsvp.yaml` (Dell Curry = seeded FATHER of Steph Curry, Warriors "vs Lakers" game).
+  `.maestro/guardian-rsvp.yaml` (Sonya Curry = seeded MOTHER of Steph Curry with no staff row, Warriors "vs Lakers" game; Dell Curry is also Steph's FATHER but is seeded as **Warriors Team Manager**, so he sees Start Game / Continue Tracking and is not a pure-guardian fixture).
 
 #### Mobile API errors, permissions & toasts
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
@@ -572,8 +571,8 @@ POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is wh
 `countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
 `requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
 `usage-service.computeCounts` — a user holding two roles on one team is one
-team. (`api/auth/middleware.ts#requireUsageLimit` still uses `teamStaff.count`;
-it is the legacy pre-#43 gate and is not mounted on team create.)
+team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
+`teamStaff` rows was removed along with `requireRole` / `requireFeature`.)
 
 ## Code Style
 
@@ -672,8 +671,9 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
    npm run prisma:migrate
    npm run dev
    ```
-3. Mobile setup:
+3. Mobile setup (custom dev client — never `npm start` / Expo Go):
    ```bash
    cd mobile && npm install
-   npm start
+   npx expo run:ios
    ```
+4. Seed test users/teams/games for dev-login: `cd backend && npx prisma db seed` (`backend/prisma/seed.ts`).

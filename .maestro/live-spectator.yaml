@@ -12,9 +12,9 @@ appId: com.bballtracker.mobile
 # Create a game with the Lakers
 - tapOn: "Track game tab"
 - tapOn: "Create new game"
-- inputText:
+- tapOn:
     id: "opponent-name-input"
-    text: "Spectator Rival"
+- inputText: "Spectator Rival"
 - tapOn: "Lakers.*"
 - tapOn: "Create Game"
 

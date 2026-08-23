@@ -115,14 +115,30 @@ aws ecs create-service \
 
 Set these in your ECS task definition or use Secrets Manager:
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `REDIS_URL`: ElastiCache Redis endpoint
-- `KAFKA_BROKERS`: Confluent Cloud Kafka brokers
-- `KAFKA_API_KEY`: Confluent Cloud API key
-- `KAFKA_API_SECRET`: Confluent Cloud API secret
-- `JWT_SECRET`: JWT signing secret
-- `S3_BUCKET`: S3 bucket name
-- `AWS_REGION`: AWS region
+The source of truth is `infra/task-definition.json` (plain values) + `infra/ecs.tf` (Secrets Manager
+references). As of 2026-08-23 the API task carries:
+
+- `DATABASE_URL` (secret): PostgreSQL connection string; TLS to RDS uses `certs/rds-global-bundle.pem`
+  (override with `RDS_CA_BUNDLE_PATH`)
+- `REDIS_URL`: ElastiCache Redis endpoint (best-effort cache; the app fails open without it)
+- `WORKOS_API_KEY`, `WORKOS_CLIENT_ID` (secrets), `WORKOS_REDIRECT_URI`; optional `WORKOS_JWT_ISSUER`
+  (default `https://api.workos.com`) for local JWKS verification of access tokens
+- `ADMIN_EMAILS` (comma-separated; legacy `ADMIN_EMAIL` still read): emails granted ADMIN at first sign-up
+- `ALLOWED_REDIRECT_HOSTS` / `ALLOWED_REDIRECT_SCHEMES` (defaults `localhost` / `bball-tracker`): allowed
+  `redirect_uri` targets for `GET /auth/login`
+- `PUBLIC_APP_URL` (`https://capyhoops.com`): human-facing links in emails / invite pages
+- `API_BASE_URL` (`https://api.capyhoops.com`): host for calendar feed / webcal URLs
+- `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
+- `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
+- `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.capyhoops.com`): SES mailer
+- `SENTRY_DSN` (secret), `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` (injected by CI from the git SHA)
+- `CORS_ORIGIN`, `PORT`, `NODE_ENV=production`
+- `REDIS_SOCKET_ADAPTER_URL`: not set — Socket.io is single-replica; the server logs a `FATAL-WARN`
+  at startup in production without it. Keep `desiredCount = 1` until a Redis adapter is wired up
+  (issue #26)
+
+Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs), `S3_BUCKET`, and the
+Kafka credentials (`backend/src/kafka/index.ts` is a config stub).
 
 ## Load Balancer Setup
 

@@ -10,8 +10,14 @@ appId: com.bballtracker.mobile
 - tapOn: "Teams tab"
 - assertVisible: "Teams"
 - tapOn: "Create new team"
-- inputText:
+# inputText has no `id` key in Maestro — focus the field first, then type.
+- tapOn:
     id: "team-name-input"
-    text: "Test Team"
+- inputText: "Test Team"
+# The Create button stays disabled until a league AND season are picked
+# (seeded: Downtown Youth Basketball League → Spring 2024).
+- tapOn: "Downtown Youth Basketball League.*"
+- tapOn: "Spring 2024.*"
+- hideKeyboard
 - tapOn: "Create"
 - assertVisible: "Test Team"

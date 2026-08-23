@@ -15,6 +15,12 @@ appId: com.bballtracker.mobile
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
 - tapOn: "Steph Curry.*"
+# Seeded PLAYERs get the one-time account-type step on first sign-in (clearState
+# wipes the roleChosen flag) — keep PLAYER so the gating below is exercised.
+- assertVisible: "How will you use Capyhoops?"
+- tapOn: "I play on a team"
+- tapOn: "Continue"
+- assertVisible: "Your Teams"
 
 # Games tab: no create-game FAB for a player
 - tapOn: "Track game tab"
