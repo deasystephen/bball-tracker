@@ -19,7 +19,7 @@ import {
   EmptyState,
   ErrorState,
 } from '../../components';
-import { useTeams, type Team } from '../../hooks/useTeams';
+import { useInfiniteTeams, type Team } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
@@ -35,12 +35,22 @@ export default function TeamsScreen() {
   const insets = useSafeAreaInsets();
 
   const {
-    data: teams,
+    data,
     isLoading,
     error,
     refetch,
     isRefetching,
-  } = useTeams();
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteTeams();
+  const teams = data?.teams;
+
+  const handleEndReached = () => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  };
 
   const handleCreateTeam = () => {
     router.push('/teams/create');
@@ -161,9 +171,14 @@ export default function TeamsScreen() {
         ]}
         numColumns={2}
         columnWrapperStyle={styles.row}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          isFetchingNextPage ? <LoadingSpinner message={t('common.loading')} /> : null
+        }
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
+            refreshing={isRefetching && !isFetchingNextPage}
             onRefresh={refetch}
             tintColor={colors.primary}
           />

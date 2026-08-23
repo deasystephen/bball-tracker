@@ -15,7 +15,7 @@ import {
   LoadingSpinner,
 } from '../../components';
 import { SeasonAverages } from '../../components/stats';
-import { useTeams } from '../../hooks/useTeams';
+import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../hooks/useStats';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, borderRadius } from '../../theme';
@@ -27,7 +27,7 @@ export default function Stats() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
-  const { data: teams, isLoading: teamsLoading } = useTeams();
+  const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
   // Only the user's explicit choice lives in state; default to the first team during render
   const [chosenTeamId, setChosenTeamId] = useState<string | null>(null);
   const selectedTeamId = chosenTeamId ?? teams?.[0]?.id ?? null;

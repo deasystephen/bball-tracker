@@ -94,6 +94,20 @@ Backend API (Node.js/Express)
 - **hooks/**: Custom React hooks
 - **i18n/**: Internationalization
 
+#### Mobile list pagination & cache invalidation
+- Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
+  (`useInfiniteGames`, `useInfiniteTeams`, `useInfiniteAnnouncements`) wired to `FlatList.onEndReached`; the
+  returned `data` is `{ items…, total }` flattened across pages. Pickers that need *every* team (Stats tab,
+  Profile, Create Game) call `useTeams({ limit: TEAMS_MAX_LIMIT })`.
+- Games status filtering is **server-side** (`GET /games?status=`). The Games tab passes the active pill as the
+  `status` filter; Home uses a dedicated `useLiveGames()` (`status=IN_PROGRESS`, small limit) for the live
+  card, `useGames({ status: 'FINISHED', limit: 5 })` for recent results (the tile is labelled "Wins (last 5)"),
+  and `useGamesPage({ status: 'SCHEDULED', limit: 1 }).total` for the Upcoming count. Never filter a
+  date-desc first page client-side — a backlog of scheduled games hides live/finished ones.
+- Infinite keys nest under the list root (`gameKeys.lists()`, `teamKeys.lists()`, `announcementKeys.team(id)`)
+  so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
+  becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the FREE-tier meter).
+
 ### Socket.io (Live Game Broadcast)
 
 Real-time game updates use Socket.io with an in-memory adapter. Single-replica

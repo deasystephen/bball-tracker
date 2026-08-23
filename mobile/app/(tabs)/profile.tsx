@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/auth-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
-import { useTeams } from '../../hooks/useTeams';
+import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useUpdatePlayer } from '../../hooks/usePlayers';
 import { useUsage } from '../../hooks/useUsage';
 import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter } from '../../components';
@@ -26,7 +26,7 @@ export default function Profile() {
   const { toggleColorScheme } = useThemeStore();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
-  const { data: teams } = useTeams();
+  const { data: teams } = useTeams({ limit: TEAMS_MAX_LIMIT });
   const { data: usage } = useUsage();
   const updatePlayer = useUpdatePlayer();
   const { t } = useTranslation();

@@ -2,8 +2,9 @@
  * React Query hooks for Teams API
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { usageKeys } from './useUsage';
 
 // Types
 export interface TeamStaff {
@@ -114,25 +115,68 @@ export const teamKeys = {
   all: ['teams'] as const,
   lists: () => [...teamKeys.all, 'list'] as const,
   list: (filters?: TeamFilters) => [...teamKeys.lists(), filters] as const,
+  infinite: (filters?: Omit<TeamFilters, 'offset'>) =>
+    [...teamKeys.lists(), 'infinite', filters] as const,
   details: () => [...teamKeys.all, 'detail'] as const,
   detail: (id: string) => [...teamKeys.details(), id] as const,
 };
 
+/** Default page size for paginated team lists (matches the server default). */
+export const TEAMS_PAGE_SIZE = 20;
+/** Server-side maximum `limit` for GET /teams — use for pickers that need every team. */
+export const TEAMS_MAX_LIMIT = 100;
+
+async function fetchTeamsPage(filters?: TeamFilters): Promise<TeamsResponse> {
+  const params = new URLSearchParams();
+  if (filters?.seasonId) params.append('seasonId', filters.seasonId);
+  if (filters?.leagueId) params.append('leagueId', filters.leagueId);
+  if (filters?.playerId) params.append('playerId', filters.playerId);
+  if (filters?.limit) params.append('limit', String(filters.limit));
+  if (filters?.offset) params.append('offset', String(filters.offset));
+
+  const response = await apiClient.get<TeamsResponse>(`/teams?${params.toString()}`);
+  const data = response.data;
+  const teams = data.teams ?? [];
+  return {
+    success: data.success,
+    teams,
+    total: data.total ?? teams.length,
+    limit: data.limit ?? filters?.limit ?? TEAMS_PAGE_SIZE,
+    offset: data.offset ?? filters?.offset ?? 0,
+  };
+}
+
 // Hooks
+
+/**
+ * Single page of teams (server default 20). Pass `{ limit: TEAMS_MAX_LIMIT }`
+ * for pickers that need every team; use `useInfiniteTeams` for scrolling lists.
+ */
 export function useTeams(filters?: TeamFilters) {
   return useQuery({
     queryKey: teamKeys.list(filters),
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (filters?.seasonId) params.append('seasonId', filters.seasonId);
-      if (filters?.leagueId) params.append('leagueId', filters.leagueId);
-      if (filters?.playerId) params.append('playerId', filters.playerId);
-      if (filters?.limit) params.append('limit', String(filters.limit));
-      if (filters?.offset) params.append('offset', String(filters.offset));
+    queryFn: async () => (await fetchTeamsPage(filters)).teams,
+  });
+}
 
-      const response = await apiClient.get<TeamsResponse>(`/teams?${params.toString()}`);
-      return response.data.teams;
+/**
+ * Infinite (paginated) teams list. Feed `fetchNextPage` to
+ * `FlatList.onEndReached`. `total` is the server count across all pages.
+ */
+export function useInfiniteTeams(filters?: Omit<TeamFilters, 'offset'>) {
+  const limit = filters?.limit ?? TEAMS_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: teamKeys.infinite(filters),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => fetchTeamsPage({ ...filters, limit, offset: pageParam }),
+    getNextPageParam: (lastPage) => {
+      const next = lastPage.offset + lastPage.teams.length;
+      return lastPage.teams.length < lastPage.limit || next >= lastPage.total ? undefined : next;
     },
+    select: (data) => ({
+      teams: data.pages.flatMap((page) => page.teams),
+      total: data.pages[0]?.total ?? 0,
+    }),
   });
 }
 
@@ -159,6 +203,8 @@ export function useCreateTeam() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      // Team count feeds the FREE-tier usage meter (#43).
+      queryClient.invalidateQueries({ queryKey: usageKeys.all });
     },
   });
 }
@@ -190,6 +236,7 @@ export function useDeleteTeam() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: usageKeys.all });
     },
   });
 }
