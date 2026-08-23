@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
 import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
-import { updateRoleSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
+import { updateRoleSchema, updateProfileSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
@@ -325,6 +325,7 @@ router.get('/me', async (req, res) => {
         email: true,
         name: true,
         role: true,
+        profilePictureUrl: true,
         createdAt: true,
       },
     });
@@ -347,6 +348,43 @@ router.get('/me', async (req, res) => {
       captureException(error, { flow: 'auth-me' });
       res.status(500).json({ error: 'Failed to get user information' });
     }
+  }
+});
+
+/**
+ * PATCH /api/v1/auth/me
+ * Edit the current user's own profile (name, avatar) regardless of role.
+ *
+ * The Profile tab used to call PATCH /players/:id for this, which 404s for
+ * every ADMIN/COACH because that endpoint only accepts PLAYER rows (audit #10).
+ * Email and role are not editable here.
+ */
+router.patch('/me', authenticate, async (req, res) => {
+  try {
+    const parsed = updateProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new BadRequestError(parsed.error.issues.map((e: { message: string }) => e.message).join(', '));
+    }
+
+    const { name, profilePictureUrl } = parsed.data;
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
+      },
+      select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, createdAt: true },
+    });
+
+    res.json({ success: true, user });
+  } catch (error) {
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    logger.error('Error updating profile', { error: error instanceof Error ? error.message : String(error) });
+    captureException(error, { flow: 'auth-profile' });
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
