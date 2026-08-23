@@ -29,6 +29,7 @@ import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { getGameResult, getResultColor } from '../../utils/game-result';
 import { getTeamColor } from '../../utils/team-colors';
+import { canCreateTeams } from '../../utils/team-permissions';
 import type { Game } from '../../types/game';
 
 export default function Home() {
@@ -465,22 +466,26 @@ export default function Home() {
                   color="textSecondary"
                   style={styles.emptyText}
                 >
-                  No teams yet
+                  {canCreateTeams(user)
+                    ? 'No teams yet'
+                    : 'No teams yet. Your coach will add you to a team.'}
                 </ThemedText>
-                <TouchableOpacity
-                  style={[
-                    styles.createButton,
-                    { backgroundColor: colors.primary },
-                  ]}
-                  onPress={() => router.push('/teams/create')}
-                >
-                  <ThemedText
-                    variant="captionBold"
-                    style={{ color: colors.textInverse }}
+                {canCreateTeams(user) && (
+                  <TouchableOpacity
+                    style={[
+                      styles.createButton,
+                      { backgroundColor: colors.primary },
+                    ]}
+                    onPress={() => router.push('/teams/create')}
                   >
-                    Create Team
-                  </ThemedText>
-                </TouchableOpacity>
+                    <ThemedText
+                      variant="captionBold"
+                      style={{ color: colors.textInverse }}
+                    >
+                      Create Team
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
               </View>
             </Card>
           </View>

@@ -2,6 +2,8 @@
  * Game and GameEvent type definitions
  */
 
+import type { TeamStaff } from '../hooks/useTeams';
+
 export type GameStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
 
 export type GameEventType =
@@ -28,6 +30,17 @@ export interface Game {
   team?: {
     id: string;
     name: string;
+    /** Staff rows with role flags — drive the client-side permission gates. */
+    staff?: TeamStaff[];
+    season?: {
+      id: string;
+      name: string;
+      isActive: boolean;
+      league: {
+        id: string;
+        name: string;
+      };
+    };
     members?: {
       id: string;
       playerId: string;

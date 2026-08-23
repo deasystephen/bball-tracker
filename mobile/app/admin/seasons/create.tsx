@@ -27,6 +27,9 @@ import { useToast } from '../../../components/Toast';
 import { useLeague } from '../../../hooks/useLeagues';
 import { useCreateSeason } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { useAuthUser } from '../../../store/auth-store';
+import { canManageLeague } from '../../../utils/team-permissions';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
@@ -47,6 +50,16 @@ export default function CreateSeasonScreen() {
   const { data: league, isLoading: leagueLoading } = useLeague(leagueId || '');
   const createSeason = useCreateSeason();
   const toast = useToast();
+
+  // Season create needs system ADMIN or admin of *this* league
+  // (backend `season-service.createSeason` → `isLeagueAdmin`).
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user,
+    canManageLeague(user, leagueId),
+    'Only admins of this league can create seasons',
+    { fallback: '/admin' }
+  );
 
   const validate = (): boolean => {
     const newErrors: { name?: string; leagueId?: string } = {};
@@ -93,7 +106,7 @@ export default function CreateSeasonScreen() {
     });
   };
 
-  if (leagueLoading) {
+  if (leagueLoading || !allowed) {
     return <LoadingSpinner message="Loading..." fullScreen />;
   }
 

@@ -2,7 +2,7 @@
  * Create Game screen
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -27,8 +27,10 @@ import {
 } from '../../components';
 import { useToast } from '../../components/Toast';
 import { useCreateGame } from '../../hooks/useGames';
-import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
+import { useTeams, TEAMS_MAX_LIMIT, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
+import { useAccessGuard } from '../../hooks/useAccessGuard';
+import { useAuthUser } from '../../store/auth-store';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -48,9 +50,28 @@ export default function CreateGameScreen() {
     {}
   );
 
-  const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
+  const { data: allTeams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
   const createGame = useCreateGame();
   const toast = useToast();
+  const user = useAuthUser();
+
+  // Only teams the user can manage are offered — creating a game needs
+  // `canManageTeam` on that team (backend `game-service.createGame`).
+  const teams = useMemo(
+    () =>
+      (allTeams ?? []).filter((team) =>
+        hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf)
+      ),
+    [allTeams, user]
+  );
+  // Deep links / stale screens can still land here; bounce users who cannot
+  // manage any team before they fill in a form the API will reject with 403.
+  const allowed = useAccessGuard(
+    !teamsLoading && !!user,
+    teams.length > 0,
+    'You need a team-manager or coach role to schedule games',
+    { fallback: '/(tabs)/games' }
+  );
 
   const validate = (): boolean => {
     const newErrors: { opponent?: string; teamId?: string } = {};
@@ -103,7 +124,7 @@ export default function CreateGameScreen() {
     });
   };
 
-  if (teamsLoading) {
+  if (teamsLoading || !allowed) {
     return <LoadingSpinner message="Loading teams..." fullScreen />;
   }
 

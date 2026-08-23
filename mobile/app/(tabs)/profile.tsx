@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/auth-store';
+import { canAccessAdmin } from '../../utils/team-permissions';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
@@ -233,9 +234,9 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Admin Section — league/season management is ADMIN-only on the backend
-            (league-admin rows are not surfaced by GET /auth/me yet) */}
-        {user?.role === 'ADMIN' && (
+        {/* Admin Section — system ADMINs and league admins (`leagueAdminOf`
+            from GET /auth/me); the admin screens guard themselves too. */}
+        {canAccessAdmin(user) && (
           <View style={styles.section}>
             <ThemedText variant="h4" style={styles.sectionTitle}>
               Management

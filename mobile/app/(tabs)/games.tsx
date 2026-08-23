@@ -24,7 +24,10 @@ import {
 } from '../../components';
 import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
+import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
+import { useAuthUser } from '../../store/auth-store';
+import { canManageAnyTeam } from '../../utils/game-permissions';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { getGameResult, getResultColor } from '../../utils/game-result';
@@ -62,6 +65,13 @@ export default function Games() {
   } = useInfiniteGames(activeFilter === 'ALL' ? undefined : { status: activeFilter });
 
   const filteredGames = useMemo(() => data?.games ?? [], [data]);
+
+  // Creating a game needs `canManageTeam` on the chosen team (backend
+  // `game-service.createGame`), so only show the entry point to users who can
+  // manage at least one of their teams.
+  const user = useAuthUser();
+  const { data: teams } = useTeams({ limit: TEAMS_MAX_LIMIT });
+  const canCreate = useMemo(() => canManageAnyTeam(teams, user), [teams, user]);
 
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -330,23 +340,27 @@ export default function Games() {
           icon="basketball-outline"
           title="No Games"
           message={
-            activeFilter === 'ALL'
-              ? 'Create your first game to start tracking stats and scores.'
-              : `No ${FILTER_TABS.find((t) => t.key === activeFilter)?.label.toLowerCase()} games.`
+            activeFilter !== 'ALL'
+              ? `No ${FILTER_TABS.find((t) => t.key === activeFilter)?.label.toLowerCase()} games.`
+              : canCreate
+                ? 'Create your first game to start tracking stats and scores.'
+                : 'Games scheduled by your coaches will show up here.'
           }
         />
       )}
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.primary }]}
-        onPress={handleCreateGame}
-        activeOpacity={0.8}
-        accessibilityRole="button"
-        accessibilityLabel="Create new game"
-      >
-        <Ionicons name="add" size={28} color="#FFFFFF" />
-      </TouchableOpacity>
+      {/* FAB — only for users who can manage a team (game create needs it) */}
+      {canCreate && (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: colors.primary }]}
+          onPress={handleCreateGame}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Create new game"
+        >
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </ThemedView>
   );
 }

@@ -22,6 +22,9 @@ import type { StatType } from '../../../components/game/StatButtons';
 import { useGame, useUpdateGame } from '../../../hooks/useGames';
 import { useGameEvents, useCreateGameEvent, useDeleteGameEvent } from '../../../hooks/useGameEvents';
 import { useGameTrackingStore } from '../../../store/game-tracking-store';
+import { useAuthUser } from '../../../store/auth-store';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { getGamePermissions } from '../../../utils/game-permissions';
 import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
 import type { ShotMetadata } from '../../../types/game';
@@ -45,6 +48,17 @@ export default function TrackGameScreen() {
   const updateGame = useUpdateGame();
 
   const { showToast } = useToast();
+
+  // Recording events needs `canTrackStats` (backend game-event-service). The
+  // tracker is deep-linkable, so guard here too: bounce to the game detail.
+  const user = useAuthUser();
+  const canTrack = getGamePermissions(game?.team, user).canTrack;
+  const allowed = useAccessGuard(
+    !!game && !!user,
+    canTrack,
+    'You do not have permission to track stats for this game',
+    { fallback: `/games/${id}`, mode: 'replace' }
+  );
 
   // Store
   const {
@@ -396,6 +410,11 @@ export default function TrackGameScreen() {
         onRetry={refetchGame}
       />
     );
+  }
+
+  // Never flash the tracker to someone being bounced out by the guard.
+  if (!allowed) {
+    return <LoadingSpinner message="Loading game..." fullScreen />;
   }
 
   // Check if game is in progress

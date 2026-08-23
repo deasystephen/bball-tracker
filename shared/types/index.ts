@@ -65,6 +65,11 @@ export interface User {
   name: string;
   role: UserRole;
   profilePictureUrl?: string;
+  /**
+   * IDs of leagues this user administers (LeagueAdmin rows). Optional: older
+   * API builds omit it, and clients must treat `undefined` as `[]`.
+   */
+  leagueAdminOf?: string[];
   createdAt: Date;
   updatedAt: Date;
 }

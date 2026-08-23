@@ -16,7 +16,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ErrorState, ListItem } from '../../../components';
 import { useToast } from '../../../components/Toast';
-import { useTeam, useUpdateTeam, type Team } from '../../../hooks/useTeams';
+import { useTeam, useUpdateTeam, hasTeamPermission, type Team } from '../../../hooks/useTeams';
+import { useAccessGuard } from '../../../hooks/useAccessGuard';
+import { useAuthUser } from '../../../store/auth-store';
 import { useLeagues } from '../../../hooks/useLeagues';
 import { useSeasons } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
@@ -31,7 +33,18 @@ export default function EditTeamScreen() {
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const { data: leagues, isLoading: leaguesLoading } = useLeagues();
 
-  if (isLoading || leaguesLoading) {
+  // Editing needs `canManageTeam` (backend `team-service.updateTeam`); the
+  // screen is deep-linkable so it guards itself rather than trusting the
+  // team-detail screen to have hidden the Edit button.
+  const user = useAuthUser();
+  const allowed = useAccessGuard(
+    !!user && !!team,
+    hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf),
+    t('teams.editNotAllowed'),
+    { fallback: `/teams/${id}` }
+  );
+
+  if (isLoading || leaguesLoading || (team && !allowed)) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 

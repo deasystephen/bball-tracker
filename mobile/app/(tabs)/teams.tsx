@@ -36,7 +36,7 @@ export default function TeamsScreen() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const user = useAuthUser();
-  const canCreate = canCreateTeams(user?.role);
+  const canCreate = canCreateTeams(user);
 
   const {
     data,
@@ -64,7 +64,10 @@ export default function TeamsScreen() {
     router.push(`/teams/${teamId}`);
   };
 
-  if (isLoading) {
+  // `user` is null while the persisted session rehydrates; don't render the
+  // player empty state (no Create button) for a coach who simply isn't
+  // loaded yet.
+  if (isLoading || !user) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 

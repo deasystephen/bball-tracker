@@ -43,7 +43,9 @@
     "managePlayers": "Manage Players",
     "playerEmptyMessage": "Your coach will add you to a team. Coaching one yourself? Switch your account type in Profile.",
     "playerEmptyAction": "Change account type",
-    "createNotAllowed": "Only coaches can create teams. You can switch your account type in Profile."
+    "createNotAllowed": "Only coaches can create teams. You can switch your account type in Profile.",
+    "editNotAllowed": "Only team managers can edit this team.",
+    "rosterNotAllowed": "Only team managers can change this roster."
   },
   "players": {
     "title": "Players",

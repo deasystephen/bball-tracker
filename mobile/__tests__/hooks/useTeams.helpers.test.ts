@@ -82,6 +82,31 @@ describe('useTeams pure helpers', () => {
       expect(hasTeamPermission(undefined, 'u-head', 'canManageTeam', 'ADMIN')).toBe(false);
       expect(hasTeamPermission(team, undefined, 'canManageTeam', 'ADMIN')).toBe(false);
     });
+
+    describe('league admins (leagueAdminOf from GET /auth/me)', () => {
+      const leagueTeam: Team = {
+        ...team,
+        season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
+      };
+
+      it('grants every permission on teams in an administered league', () => {
+        expect(hasTeamPermission(leagueTeam, 'stranger', 'canManageTeam', 'PLAYER', ['league-1'])).toBe(true);
+        expect(hasTeamPermission(leagueTeam, 'stranger', 'canTrackStats', 'COACH', ['league-1'])).toBe(true);
+        expect(hasTeamPermission(leagueTeam, 'u-asst', 'canManageTeam', 'COACH', ['x', 'league-1'])).toBe(true);
+      });
+
+      it('does not apply to other leagues, an empty/undefined list, or a team without season info', () => {
+        expect(hasTeamPermission(leagueTeam, 'stranger', 'canManageTeam', 'PLAYER', ['league-2'])).toBe(false);
+        expect(hasTeamPermission(leagueTeam, 'stranger', 'canManageTeam', 'PLAYER', [])).toBe(false);
+        expect(hasTeamPermission(leagueTeam, 'stranger', 'canManageTeam', 'PLAYER', undefined)).toBe(false);
+        expect(hasTeamPermission(team, 'stranger', 'canManageTeam', 'PLAYER', ['league-1'])).toBe(false);
+      });
+
+      it('still falls through to the staff role when not a league admin', () => {
+        expect(hasTeamPermission(leagueTeam, 'u-asst', 'canTrackStats', 'COACH', ['league-2'])).toBe(true);
+        expect(hasTeamPermission(leagueTeam, 'u-asst', 'canManageTeam', 'COACH', ['league-2'])).toBe(false);
+      });
+    });
   });
 
   describe('isHeadCoach', () => {

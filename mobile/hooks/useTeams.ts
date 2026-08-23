@@ -276,22 +276,34 @@ export type TeamPermission =
   | 'canShareStats';
 
 /**
+ * Minimal team shape the permission helpers need. Both `Team` (GET /teams/:id)
+ * and the `game.team` payload (GET /games/:id) satisfy it.
+ */
+export interface TeamPermissionTarget {
+  staff?: TeamStaff[];
+  season?: { league?: { id: string } | null } | null;
+}
+
+/**
  * Effective team permission for the current user.
  *
  * Mirrors the backend (`utils/permissions.ts`): a system `ADMIN` passes every
- * check regardless of staff rows, otherwise the user's staff role decides.
- * League admins are also allowed server-side, but `GET /teams/:id` does not
- * return league-admin rows, so they still see no edit controls here until the
- * API exposes effective permissions (follow-up to audit #79).
+ * check regardless of staff rows, an admin of the team's league passes every
+ * check (`leagueAdminOf` comes from `GET /auth/me`; see
+ * `utils/team-permissions.ts`), otherwise the user's staff role decides.
  */
 export function hasTeamPermission(
-  team: Team | undefined,
+  team: TeamPermissionTarget | undefined | null,
   userId: string | undefined,
   permission: TeamPermission,
-  userRole?: string | null
+  userRole?: string | null,
+  leagueAdminOf?: string[] | null
 ): boolean {
   if (!team || !userId) return false;
   if (userRole === 'ADMIN') return true;
+
+  const leagueId = team.season?.league?.id;
+  if (leagueId && leagueAdminOf?.includes(leagueId)) return true;
 
   const staffMember = team.staff?.find((s) => s.userId === userId);
   if (!staffMember) return false;
