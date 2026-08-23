@@ -13,6 +13,8 @@ import { uploadAvatar, MAX_AVATAR_BYTES } from '../../services/upload-service';
 import { apiClient } from '../../services/api-client';
 
 type MockedApi = { post: jest.Mock };
+jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
+
 const mockedApi = apiClient as unknown as MockedApi;
 
 const PRESIGNED = {
@@ -116,6 +118,25 @@ describe('upload-service', () => {
       .mockResolvedValueOnce({ ok: false, status: 403 }) as unknown as typeof fetch;
 
     await expect(uploadAvatar('file:///tmp/pic.jpg')).rejects.toThrow('Avatar upload failed (403)');
+  });
+
+  it('includes the S3 error code and message when the policy rejects the upload', async () => {
+    mockedApi.post.mockResolvedValueOnce({ data: PRESIGNED });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ blob: () => Promise.resolve({ size: 10 } as Blob) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: () =>
+          Promise.resolve(
+            '<?xml version="1.0"?><Error><Code>EntityTooLarge</Code><Message>Your proposed upload exceeds the maximum allowed size</Message></Error>'
+          ),
+      }) as unknown as typeof fetch;
+
+    await expect(uploadAvatar('file:///tmp/pic.jpg')).rejects.toThrow(
+      'Avatar upload failed (400 EntityTooLarge: Your proposed upload exceeds the maximum allowed size)'
+    );
   });
 
   it('rejects oversize files locally before asking for a policy', async () => {

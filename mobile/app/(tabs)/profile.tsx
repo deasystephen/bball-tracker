@@ -18,6 +18,7 @@ import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
 import { useTranslation } from '../../i18n';
+import { captureException } from '../../services/sentry';
 
 export default function Profile() {
   const router = useRouter();
@@ -51,8 +52,10 @@ export default function Profile() {
       setUploadingAvatar(true);
       const imageUrl = await uploadAvatar(uri);
       await updateProfile.mutateAsync({ profilePictureUrl: imageUrl });
-    } catch {
-      Alert.alert('Error', 'Failed to upload photo');
+    } catch (err) {
+      captureException(err, { flow: 'avatar-change' });
+      const message = err instanceof Error && err.message ? err.message : 'Failed to upload photo';
+      Alert.alert('Error', message);
     } finally {
       setUploadingAvatar(false);
     }
