@@ -42,6 +42,27 @@ export class ForbiddenError extends AppError {
   }
 }
 
+export interface UpgradeRequiredDetails {
+  feature: string;
+  currentTier: string;
+  requiredTier: string;
+}
+
+/**
+ * 402 Payment Required — the caller's subscription tier does not allow the
+ * action. `details` is the `upgrade_required` payload the client renders as an
+ * upgrade CTA (same shape as the entitlement middleware's 402 body).
+ */
+export class PaymentRequiredError extends AppError {
+  constructor(
+    public details: UpgradeRequiredDetails,
+    message: string = 'Upgrade required'
+  ) {
+    super(message, 402);
+    Object.setPrototypeOf(this, PaymentRequiredError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

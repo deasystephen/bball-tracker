@@ -38,6 +38,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
       (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
       (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -60,6 +61,120 @@ describe('TeamService', () => {
 
       expect(result).toHaveProperty('id', team.id);
       expect(result).toHaveProperty('name', team.name);
+      // Team, roles and the Head Coach staff row are written in one transaction
+      // behind a row lock on the user (audit #49 / #70).
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.team.create).toHaveBeenCalled();
+      expect(mockPrisma.teamRole.createMany).toHaveBeenCalled();
+      expect(mockPrisma.teamStaff.create).toHaveBeenCalled();
+    });
+
+    describe('FREE-tier cap inside the transaction (audit #49)', () => {
+      type Subscription = { subscriptionTier?: 'FREE' | 'PREMIUM' | 'LEAGUE'; subscriptionExpiresAt?: Date | null };
+
+      function mockCreatePath(subscription: Subscription): { coach: { id: string }; season: { id: string } } {
+        const coach = {
+          ...createCoach(),
+          subscriptionTier: 'FREE',
+          subscriptionExpiresAt: null,
+          ...subscription,
+        };
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id });
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH', name: 'Head Coach' });
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, league, teams: [] });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue(
+          createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id })
+        );
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, staff: [], roles: [], members: [] });
+        return { coach, season };
+      }
+
+      it('throws PaymentRequiredError and creates nothing when a FREE user is at the cap', async () => {
+        const { coach, season } = mockCreatePath({});
+        // The recount happens inside the transaction, after the lock: a
+        // concurrent create that committed first is visible here.
+        (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(3);
+
+        try {
+          await TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id);
+          fail('expected to throw');
+        } catch (err) {
+          const e = err as Error & { statusCode?: number; details?: Record<string, string> };
+          expect(e.statusCode).toBe(402);
+          expect(e.details).toEqual({
+            feature: 'unlimited_teams',
+            currentTier: 'FREE',
+            requiredTier: 'PREMIUM',
+          });
+        }
+        expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+        expect(mockPrisma.team.create).not.toHaveBeenCalled();
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
+      it('allows a FREE user under the cap', async () => {
+        const { coach, season } = mockCreatePath({});
+        (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(2);
+
+        await expect(
+          TeamService.createTeam({ name: 'Third', seasonId: season.id }, coach.id)
+        ).resolves.toBeDefined();
+        expect(mockPrisma.team.create).toHaveBeenCalled();
+      });
+
+      it('treats an expired PREMIUM subscription as FREE', async () => {
+        const { coach, season } = mockCreatePath({
+          subscriptionTier: 'PREMIUM',
+          subscriptionExpiresAt: new Date('2000-01-01'),
+        });
+        (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(3);
+
+        await expect(
+          TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 402 });
+      });
+
+      it('skips the count for unlimited tiers', async () => {
+        const { coach, season } = mockCreatePath({
+          subscriptionTier: 'PREMIUM',
+          subscriptionExpiresAt: new Date('2999-01-01'),
+        });
+
+        await expect(
+          TeamService.createTeam({ name: 'Tenth', seasonId: season.id }, coach.id)
+        ).resolves.toBeDefined();
+        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+      });
+
+      it('skips the cap for system admins', async () => {
+        const admin = { ...createAdmin(), subscriptionTier: 'FREE', subscriptionExpiresAt: null };
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id });
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH', name: 'Head Coach' });
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, league, teams: [] });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+        (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue(
+          createTeamStaff({ teamId: team.id, userId: admin.id, roleId: headCoachRole.id })
+        );
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, staff: [], roles: [], members: [] });
+
+        await expect(
+          TeamService.createTeam({ name: 'Admin team', seasonId: season.id }, admin.id)
+        ).resolves.toBeDefined();
+        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+      });
     });
 
     it('should throw NotFoundError if season does not exist', async () => {

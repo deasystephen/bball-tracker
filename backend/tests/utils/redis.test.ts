@@ -132,6 +132,43 @@ describe('redis cache helpers', () => {
       expect(RedisCtor).toHaveBeenCalledTimes(1);
     });
 
+    it('retryStrategy never gives up: capped exponential backoff, never null', async () => {
+      const { redisRetryDelay } = await import('../../src/utils/redis');
+
+      expect(redisRetryDelay(1)).toBe(200);
+      expect(redisRetryDelay(2)).toBe(400);
+      expect(redisRetryDelay(5)).toBe(3200);
+      expect(redisRetryDelay(50)).toBe(30_000);
+      expect(redisRetryDelay(10_000)).toBe(30_000);
+    });
+
+    it('passes that retryStrategy to ioredis', async () => {
+      const { getRedisClient, redisRetryDelay } = await import('../../src/utils/redis');
+      getRedisClient();
+
+      const options = (RedisCtor.mock.calls[0] as unknown[])[1] as { retryStrategy: (n: number) => number };
+      expect(options.retryStrategy).toBe(redisRetryDelay);
+      // Previously `times > 3` returned null and the client went to `end` for good.
+      expect(options.retryStrategy(4)).toBeGreaterThan(0);
+    });
+
+    it('recreates the client lazily after the connection ends', async () => {
+      const { getRedisClient } = await import('../../src/utils/redis');
+      const first = getRedisClient();
+      expect(RedisCtor).toHaveBeenCalledTimes(1);
+
+      const endHandler = mockRedisInstance.on.mock.calls.find(([event]) => event === 'end')?.[1] as
+        | (() => void)
+        | undefined;
+      expect(endHandler).toBeDefined();
+      endHandler!();
+
+      const second = getRedisClient();
+      expect(RedisCtor).toHaveBeenCalledTimes(2);
+      // Same mocked instance object, but a fresh construction happened.
+      expect(second).toBe(first);
+    });
+
     it('closeRedis quits the client', async () => {
       mockRedisInstance.quit.mockResolvedValue('OK');
       const mod = await import('../../src/utils/redis');

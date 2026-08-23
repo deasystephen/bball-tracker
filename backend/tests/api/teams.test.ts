@@ -6,7 +6,7 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { TeamService } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
-import { NotFoundError, ForbiddenError } from '../../src/utils/errors';
+import { NotFoundError, ForbiddenError, PaymentRequiredError } from '../../src/utils/errors';
 import { prismaMock } from '../setup';
 
 // Test UUIDs
@@ -168,6 +168,27 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(201);
       expect(mockTeamService.createTeam).toHaveBeenCalled();
+    });
+
+    it('maps a PaymentRequiredError raised inside the create transaction to the same 402 body', async () => {
+      // Middleware pre-check passes (count says 2) but a concurrent create
+      // committed first; the service's locked recount wins (audit #49).
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
+      mockTeamService.createTeam.mockRejectedValue(
+        new PaymentRequiredError({ feature: 'unlimited_teams', currentTier: 'FREE', requiredTier: 'PREMIUM' })
+      );
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(402);
+      expect(response.body).toEqual({
+        code: 'upgrade_required',
+        feature: 'unlimited_teams',
+        currentTier: 'FREE',
+        requiredTier: 'PREMIUM',
+      });
     });
 
     it('blocks a FREE user at the limit with 402 upgrade_required', async () => {

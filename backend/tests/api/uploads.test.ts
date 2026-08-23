@@ -39,7 +39,8 @@ describe('Uploads API', () => {
 
   describe('POST /api/v1/uploads/avatar-url', () => {
     const mockUploadResult = {
-      uploadUrl: 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/avatars/a1b2c3d4-e5f6-4890-a234-567890abcdef/test-uuid.jpg?X-Amz-Signature=abc123',
+      uploadUrl: 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/',
+      fields: { key: 'avatars/a1b2c3d4-e5f6-4890-a234-567890abcdef/test-uuid.jpg', Policy: 'p', 'X-Amz-Signature': 'abc123' },
       imageUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/a1b2c3d4-e5f6-4890-a234-567890abcdef/test-uuid.jpg',
     };
 
@@ -55,7 +56,8 @@ describe('Uploads API', () => {
       expect(response.body.imageUrl).toBeDefined();
       expect(mockGenerateAvatarUploadUrl).toHaveBeenCalledWith(
         TEST_USER_ID,
-        'image/jpeg'
+        'image/jpeg',
+        undefined
       );
     });
 
@@ -76,7 +78,8 @@ describe('Uploads API', () => {
       expect(response.body.imageUrl).toBeDefined();
       expect(mockGenerateAvatarUploadUrl).toHaveBeenCalledWith(
         TEST_USER_ID,
-        'image/png'
+        'image/png',
+        undefined
       );
     });
 
@@ -100,6 +103,46 @@ describe('Uploads API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.imageUrl).toContain(TEST_USER_ID);
+    });
+
+    it('should return the POST policy fields alongside the upload URL', async () => {
+      mockGenerateAvatarUploadUrl.mockResolvedValue(mockUploadResult);
+
+      const response = await request(app)
+        .post('/api/v1/uploads/avatar-url')
+        .send({ contentType: 'image/jpeg' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.fields).toEqual(mockUploadResult.fields);
+    });
+
+    it('should forward contentLength to the service', async () => {
+      mockGenerateAvatarUploadUrl.mockResolvedValue(mockUploadResult);
+
+      const response = await request(app)
+        .post('/api/v1/uploads/avatar-url')
+        .send({ contentType: 'image/jpeg', contentLength: 123456 });
+
+      expect(response.status).toBe(200);
+      expect(mockGenerateAvatarUploadUrl).toHaveBeenCalledWith(TEST_USER_ID, 'image/jpeg', 123456);
+    });
+
+    it('should return 400 when contentLength exceeds the 5 MB cap', async () => {
+      const response = await request(app)
+        .post('/api/v1/uploads/avatar-url')
+        .send({ contentType: 'image/jpeg', contentLength: 5 * 1024 * 1024 + 1 });
+
+      expect(response.status).toBe(400);
+      expect(mockGenerateAvatarUploadUrl).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a non-positive or fractional contentLength', async () => {
+      expect(
+        (await request(app).post('/api/v1/uploads/avatar-url').send({ contentType: 'image/jpeg', contentLength: 0 })).status
+      ).toBe(400);
+      expect(
+        (await request(app).post('/api/v1/uploads/avatar-url').send({ contentType: 'image/jpeg', contentLength: 1.5 })).status
+      ).toBe(400);
     });
 
     it('should return 400 for invalid content type', async () => {

@@ -2,8 +2,9 @@
  * Rate limiting middleware for sensitive endpoints
  */
 
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 
 /**
  * Strict rate limit for authentication endpoints (login, callback, dev-login)
@@ -15,6 +16,34 @@ export const authRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts, please try again later' },
+});
+
+/**
+ * Rate limit for `POST /auth/refresh`.
+ *
+ * Access tokens are short-lived (~10 min) and every device refreshes
+ * independently, so an IP-keyed budget of 20/15 min locks out a team sharing
+ * gym Wi-Fi (audit #21). Key on a hash of the refresh token instead — each
+ * device rotates its own token — and fall back to the IP only when the body
+ * carries no usable token (which the handler rejects with 400 anyway).
+ * The ceiling is deliberately generous: a healthy client refreshes ~once per
+ * token lifetime, so 60/15 min only trips on a runaway loop or token replay.
+ * The mobile client treats a 429 here as transient (keeps its session and
+ * retries later) rather than logging the user out.
+ */
+export const refreshRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const token = (req.body as { refreshToken?: unknown } | undefined)?.refreshToken;
+    if (typeof token === 'string' && token.length > 0) {
+      return `rt:${createHash('sha256').update(token).digest('hex')}`;
+    }
+    return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+  },
+  message: { error: 'Too many refresh attempts, please try again later' },
 });
 
 /**

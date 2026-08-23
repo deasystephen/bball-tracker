@@ -6,9 +6,13 @@
  * no-ops) so that a Redis outage never takes down a request path. Callers must
  * always be able to recompute the value from the source of truth.
  *
- * The client connects lazily on first use (`lazyConnect`) and retries with a
- * bounded backoff. Connection errors are logged once and then suppressed to
- * avoid log spam when Redis is intentionally absent (e.g. local dev / tests).
+ * The client connects lazily on first use (`lazyConnect`) and keeps retrying
+ * with a capped exponential backoff — it never gives up, because a Redis blip
+ * must not permanently disable caching for the life of the process (audit
+ * #50). If the connection does end for good (e.g. `quit()`), the client is
+ * dropped so the next cache access recreates it. Connection errors are logged
+ * once and then suppressed to avoid log spam when Redis is intentionally absent
+ * (e.g. local dev / tests).
  */
 
 import Redis from 'ioredis';
@@ -16,6 +20,19 @@ import { logger } from './logger';
 
 let client: Redis | null = null;
 let connectionErrorLogged = false;
+
+const RETRY_BASE_MS = 200;
+const RETRY_MAX_MS = 30_000;
+
+/**
+ * ioredis `retryStrategy`: always returns a delay (never `null`), doubling from
+ * 200ms and capped at 30s, so the client keeps reconnecting indefinitely.
+ * Individual commands still fail fast while disconnected (`enableOfflineQueue:
+ * false` + `maxRetriesPerRequest: 1`), so requests are never held up.
+ */
+export function redisRetryDelay(times: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** Math.max(0, times - 1), RETRY_MAX_MS);
+}
 
 /**
  * Get (or lazily create) the shared Redis client.
@@ -31,15 +48,15 @@ export function getRedisClient(): Redis | null {
     return null;
   }
 
-  client = new Redis(url, {
+  const instance = new Redis(url, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
-    // Bounded retry so a down Redis doesn't hang requests indefinitely.
-    retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 1000)),
+    retryStrategy: redisRetryDelay,
     enableOfflineQueue: false,
   });
+  client = instance;
 
-  client.on('error', (err) => {
+  instance.on('error', (err) => {
     if (!connectionErrorLogged) {
       logger.warn('Redis connection error — caching disabled until it recovers', {
         error: err.message,
@@ -48,11 +65,20 @@ export function getRedisClient(): Redis | null {
     }
   });
 
-  client.on('ready', () => {
+  instance.on('ready', () => {
     connectionErrorLogged = false;
   });
 
-  return client;
+  // `end` fires when ioredis will not reconnect on its own (e.g. after
+  // `quit()`). Drop the dead client so the next cache access creates a fresh one.
+  instance.on('end', () => {
+    if (client === instance) {
+      client = null;
+      logger.warn('Redis connection ended — a new client will be created on next use');
+    }
+  });
+
+  return instance;
 }
 
 /**
