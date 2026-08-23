@@ -9,6 +9,7 @@
 
 import {
   hasTeamPermission,
+  canManageStaff,
   isHeadCoach,
   getUserTeamRole,
   Team,
@@ -106,6 +107,50 @@ describe('useTeams pure helpers', () => {
         expect(hasTeamPermission(leagueTeam, 'u-asst', 'canTrackStats', 'COACH', ['league-2'])).toBe(true);
         expect(hasTeamPermission(leagueTeam, 'u-asst', 'canManageTeam', 'COACH', ['league-2'])).toBe(false);
       });
+    });
+  });
+
+  describe('canManageStaff (role matrix decision 2, B2.3)', () => {
+    const leagueTeam: Team = {
+      ...team,
+      season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
+    };
+
+    it('head coach (HEAD_COACH-type staff row) may manage staff', () => {
+      expect(canManageStaff(team, 'u-head', 'COACH')).toBe(true);
+      expect(canManageStaff(team, 'u-head')).toBe(true);
+    });
+    it('assistant coach may not, despite sharing the same permission flags', () => {
+      expect(canManageStaff(team, 'u-asst', 'COACH')).toBe(false);
+    });
+    it('a team manager / non-staff user may not', () => {
+      const managerTeam: Team = {
+        ...team,
+        staff: [
+          ...(team.staff ?? []),
+          {
+            id: 'ts3',
+            userId: 'u-mgr',
+            user: { id: 'u-mgr', name: 'C' },
+            role: { ...coachRole, id: 'r-mgr', name: 'Team Manager', type: 'TEAM_MANAGER' },
+          },
+        ],
+      };
+      expect(canManageStaff(managerTeam, 'u-mgr', 'COACH')).toBe(false);
+      expect(canManageStaff(team, 'stranger', 'COACH')).toBe(false);
+    });
+    it('league admin of the team league may manage staff; other leagues do not count', () => {
+      expect(canManageStaff(leagueTeam, 'stranger', 'PLAYER', ['league-1'])).toBe(true);
+      expect(canManageStaff(leagueTeam, 'u-asst', 'COACH', ['league-1'])).toBe(true);
+      expect(canManageStaff(leagueTeam, 'stranger', 'COACH', ['league-2'])).toBe(false);
+      expect(canManageStaff(team, 'stranger', 'COACH', ['league-1'])).toBe(false);
+    });
+    it('system ADMIN may manage staff without a staff row', () => {
+      expect(canManageStaff(team, 'stranger', 'ADMIN')).toBe(true);
+    });
+    it('requires a team and a user id', () => {
+      expect(canManageStaff(undefined, 'u-head', 'ADMIN')).toBe(false);
+      expect(canManageStaff(team, undefined, 'ADMIN')).toBe(false);
     });
   });
 

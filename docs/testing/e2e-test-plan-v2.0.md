@@ -255,6 +255,26 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** 403 (or 404 to avoid leaking team existence).
 - **Notes:** ___________
 
+### D.8 — Head coach adds an assistant (staff management, role matrix decision 2 / B2.3)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH who is the team's **head coach** (e.g. Frank Vogel on Lakers)
+- **Prereq:** the assistant already has an account (sign up once as `assistant@example.com` or use seeded
+  Mike Brown) — `POST /teams/:id/staff { email }` never creates users.
+- **Steps:**
+  1. Team detail → tap the **Staff** card (shows coach names + count) → staff screen lists name, role and
+     email (email is only present for callers with `canManageRoster`).
+  2. Tap **Add staff** → enter a made-up email → Add. Expect the inline hint
+     "No account with that email — ask them to sign up first, then invite" (API 404) and no toast.
+  3. Enter the assistant's real email, pick **Assistant Coach** → Add.
+  4. On the new row tap the role-change icon → choose **Team Manager**; then tap the remove icon → confirm.
+- **Expected:** Step 3 → toast "Staff member added", row appears with "Assistant Coach · <email>", the team
+  detail Staff card count increments. Step 4 → "Role updated", then "Staff member removed". The head coach's own
+  row has **no** remove / "Leave team" control while they are the last head coach (hint "Last head coach — add
+  another head coach before removing"). Signed in as the assistant instead: no **Add staff**, no role-change
+  icons, only **Leave team** on their own row.
+- **Notes:** Automated: `maestro test .maestro/team-staff.yaml` (read-only); Jest
+  `__tests__/app/team-staff-gating.test.tsx`, `__tests__/hooks/useTeamStaff.runtime.test.tsx`.
+
 ---
 
 ## E. Invitations & accept flow (NEW v2.0) 📧
@@ -498,6 +518,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   - Profile has no "Leagues & Seasons" entry (unless the user is in `leagueAdminOf`).
   - Automated: `maestro test .maestro/player-no-tracking.yaml`; Jest `__tests__/app/game-detail-gating.test.tsx`
     and `__tests__/app/track-gating.test.tsx`.
+- 2026-08-23: added D.8 (head coach adds an assistant — mobile staff screen, role matrix decision 2 / B2.3).
 - **Notes:** ___________
 
 ---

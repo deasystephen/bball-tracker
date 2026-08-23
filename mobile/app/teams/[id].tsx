@@ -45,7 +45,9 @@ export default function TeamDetailsScreen() {
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
 
-  const headCoaches = team?.staff?.filter((s) => s.role.type === 'HEAD_COACH') ?? [];
+  const staff = team?.staff ?? [];
+  const headCoaches = staff.filter((s) => s.role.type === 'HEAD_COACH');
+  const coachNames = (headCoaches.length > 0 ? headCoaches : staff).map((s) => s.user.name);
 
   const handleDelete = () => {
     Alert.alert(
@@ -128,7 +130,7 @@ export default function TeamDetailsScreen() {
           </ThemedText>
           {headCoaches.length > 0 && (
             <ThemedText variant="caption" style={styles.heroCoach}>
-              Coach {headCoaches[0].user.name}
+              {t('teams.coach')} {headCoaches.map((s) => s.user.name).join(', ')}
             </ThemedText>
           )}
         </View>
@@ -205,6 +207,29 @@ export default function TeamDetailsScreen() {
             </View>
           </Card>
         )}
+
+        {/* Staff (coaches / managers) → staff screen */}
+        <TouchableOpacity
+          onPress={() => router.push(`/teams/${id}/staff`)}
+          accessibilityRole="button"
+          accessibilityLabel={t('teams.staff')}
+          testID="team-staff-card"
+        >
+          <Card variant="elevated" style={styles.card}>
+            <View style={styles.infoRow}>
+              <Ionicons name="people-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <ThemedText variant="caption" color="textSecondary">
+                  {t('teams.staff')} · {t('teams.staffCount', { count: staff.length })}
+                </ThemedText>
+                <ThemedText variant="bodyBold" numberOfLines={2}>
+                  {coachNames.length > 0 ? coachNames.join(', ') : t('teams.noStaff')}
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </View>
+          </Card>
+        </TouchableOpacity>
 
         {/* Roster - 2 column grid */}
         <View style={styles.section}>
