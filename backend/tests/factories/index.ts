@@ -611,6 +611,12 @@ export interface TeamStatsData {
   rebounds: number;
   assists: number;
   turnovers: number;
+  fieldGoalsMade: number;
+  fieldGoalsAttempted: number;
+  threePointersMade: number;
+  threePointersAttempted: number;
+  freeThrowsMade: number;
+  freeThrowsAttempted: number;
   fieldGoalPercentage: number;
   threePointPercentage: number;
   freeThrowPercentage: number;
@@ -626,6 +632,12 @@ export interface CreateTeamStatsOptions {
   rebounds?: number;
   assists?: number;
   turnovers?: number;
+  fieldGoalsMade?: number;
+  fieldGoalsAttempted?: number;
+  threePointersMade?: number;
+  threePointersAttempted?: number;
+  freeThrowsMade?: number;
+  freeThrowsAttempted?: number;
   fieldGoalPercentage?: number;
   threePointPercentage?: number;
   freeThrowPercentage?: number;
@@ -643,6 +655,12 @@ export function createTeamStats(options: CreateTeamStatsOptions = {}): TeamStats
     rebounds: options.rebounds ?? 40,
     assists: options.assists ?? 20,
     turnovers: options.turnovers ?? 12,
+    fieldGoalsMade: options.fieldGoalsMade ?? 30,
+    fieldGoalsAttempted: options.fieldGoalsAttempted ?? 66,
+    threePointersMade: options.threePointersMade ?? 7,
+    threePointersAttempted: options.threePointersAttempted ?? 20,
+    freeThrowsMade: options.freeThrowsMade ?? 15,
+    freeThrowsAttempted: options.freeThrowsAttempted ?? 20,
     fieldGoalPercentage: options.fieldGoalPercentage ?? 45.5,
     threePointPercentage: options.threePointPercentage ?? 35.0,
     freeThrowPercentage: options.freeThrowPercentage ?? 75.0,

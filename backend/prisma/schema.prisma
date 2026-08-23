@@ -403,6 +403,16 @@ model TeamStats {
   rebounds             Int      @default(0)
   assists              Int      @default(0)
   turnovers            Int      @default(0)
+  // Raw shooting counts so season percentages can be weighted (sum made / sum
+  // attempted) instead of averaging per-game percentages. fieldGoals* include
+  // three-pointers, matching PlayerStats.
+  fieldGoalsMade         Int    @default(0)
+  fieldGoalsAttempted    Int    @default(0)
+  threePointersMade      Int    @default(0)
+  threePointersAttempted Int    @default(0)
+  freeThrowsMade         Int    @default(0)
+  freeThrowsAttempted    Int    @default(0)
+  // Per-game percentages (derived from the counts above at finalize time).
   fieldGoalPercentage  Float    @default(0)
   threePointPercentage Float    @default(0)
   freeThrowPercentage  Float    @default(0)

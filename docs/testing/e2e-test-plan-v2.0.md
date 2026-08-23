@@ -607,8 +607,10 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### K.3 — Team season stats
 - [ ] Pass / Fail / Skipped
-- **Steps:** Team detail → View Team Stats.
-- **Expected:** Team-wide aggregates + per-player table.
+- **Steps:** Team detail → View Team Stats. For the percentage check, finish one game with a single made
+  FG (1/1) and a second with 1 made of 9 attempts (1/9), then reopen this screen.
+- **Expected:** Team-wide aggregates + per-player table. Season FG% reads **20.0%** (2/10, attempt-weighted),
+  not 55.6% (mean of the per-game percentages). Fixed in audit #26.
 - **Notes:** ___________
 
 ### K.4 — Career stats across seasons

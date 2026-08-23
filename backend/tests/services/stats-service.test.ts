@@ -290,6 +290,44 @@ describe('StatsService', () => {
       expect(mockPrisma.teamStats.upsert).toHaveBeenCalled();
     });
 
+    it('persists raw made/attempted counts on TeamStats alongside percentages', async () => {
+      const team = createTeam();
+      const player = createPlayer();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+      const shot = (made: boolean, points: number): Record<string, unknown> => ({
+        ...createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made, points } }),
+        player: { id: player.id, name: player.name },
+      });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [member] },
+      });
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        shot(true, 2), shot(false, 2), shot(true, 3), shot(false, 3), shot(false, 3), shot(true, 1),
+      ]);
+      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
+
+      await StatsService.finalizeGameStats(game.id);
+
+      const upsertArg = (mockPrisma.teamStats.upsert as jest.Mock).mock.calls[0][0];
+      const expectedCounts = {
+        fieldGoalsMade: 2, // 2-pt + 3-pt makes
+        fieldGoalsAttempted: 5,
+        threePointersMade: 1,
+        threePointersAttempted: 3,
+        freeThrowsMade: 1,
+        freeThrowsAttempted: 1,
+        fieldGoalPercentage: 40,
+        threePointPercentage: 33.3,
+        freeThrowPercentage: 100,
+      };
+      expect(upsertArg.create).toMatchObject(expectedCounts);
+      expect(upsertArg.update).toMatchObject(expectedCounts);
+    });
+
     it('should throw NotFoundError if game does not exist', async () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(null);
 
@@ -459,6 +497,72 @@ describe('StatsService', () => {
       expect(result.wins).toBe(1);
       expect(result.losses).toBe(1);
       expect(result.recentGames).toHaveLength(2);
+    });
+
+    it('weights season shooting percentages by attempts, not by game (audit #26)', async () => {
+      const admin = createAdmin();
+      const team = createTeam({ id: 'team-weighted', name: 'Weighted' });
+      const game1 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 50, awayScore: 40 });
+      const game2 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 30, awayScore: 60 });
+
+      // Game 1: 1/1 FG (100%), 1/1 3P, 2/2 FT. Game 2: 1/9 FG (11.1%), 0/3 3P, 1/3 FT.
+      // A per-game mean would give 55.6% FG; the true season figure is 2/10 = 20%.
+      const stats1 = createTeamStats({
+        teamId: team.id, gameId: game1.id,
+        fieldGoalsMade: 1, fieldGoalsAttempted: 1, fieldGoalPercentage: 100,
+        threePointersMade: 1, threePointersAttempted: 1, threePointPercentage: 100,
+        freeThrowsMade: 2, freeThrowsAttempted: 2, freeThrowPercentage: 100,
+      });
+      const stats2 = createTeamStats({
+        teamId: team.id, gameId: game2.id,
+        fieldGoalsMade: 1, fieldGoalsAttempted: 9, fieldGoalPercentage: 11.1,
+        threePointersMade: 0, threePointersAttempted: 3, threePointPercentage: 0,
+        freeThrowsMade: 1, freeThrowsAttempted: 3, freeThrowPercentage: 33.3,
+      });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([game1, game2]);
+      (mockPrisma.teamStats.findMany as jest.Mock).mockResolvedValue([stats1, stats2]);
+
+      const result = await StatsService.getTeamSeasonStats(team.id, admin.id);
+
+      expect(result.fieldGoalPercentage).toBe(20);
+      expect(result.threePointPercentage).toBe(25);
+      expect(result.freeThrowPercentage).toBe(60);
+    });
+
+    it('ignores games with zero attempts when computing season percentages', async () => {
+      const admin = createAdmin();
+      const team = createTeam({ id: 'team-zero-att', name: 'Zero Attempts' });
+      const game1 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 50, awayScore: 40 });
+      const game2 = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 0, awayScore: 10 });
+
+      const stats1 = createTeamStats({
+        teamId: team.id, gameId: game1.id,
+        fieldGoalsMade: 1, fieldGoalsAttempted: 2, fieldGoalPercentage: 50,
+        threePointersMade: 0, threePointersAttempted: 0, threePointPercentage: 0,
+        freeThrowsMade: 0, freeThrowsAttempted: 0, freeThrowPercentage: 0,
+      });
+      // Finalized game with no shot events: every count is 0.
+      const stats2 = createTeamStats({
+        teamId: team.id, gameId: game2.id,
+        fieldGoalsMade: 0, fieldGoalsAttempted: 0, fieldGoalPercentage: 0,
+        threePointersMade: 0, threePointersAttempted: 0, threePointPercentage: 0,
+        freeThrowsMade: 0, freeThrowsAttempted: 0, freeThrowPercentage: 0,
+      });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([game1, game2]);
+      (mockPrisma.teamStats.findMany as jest.Mock).mockResolvedValue([stats1, stats2]);
+
+      const result = await StatsService.getTeamSeasonStats(team.id, admin.id);
+
+      // Old behaviour averaged 50% and 0% into 25%; the zero-attempt game must not dilute.
+      expect(result.fieldGoalPercentage).toBe(50);
+      expect(result.threePointPercentage).toBe(0);
+      expect(result.freeThrowPercentage).toBe(0);
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
