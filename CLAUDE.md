@@ -391,6 +391,41 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - Mobile Sentry (`services/sentry.ts`): `redactUrl` masks by **value** (not only by key name) on `request.url`, `request.query_string`, breadcrumb `data.url`/`from`/`to`, and `transaction`; `beforeSendTransaction` reuses `beforeSend`.
 - `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints solely under `NODE_ENV=development`.
 
+### Team staff management (role matrix B2.3 / B2.7 / B2.8, decision 2)
+
+Head Coach and Assistant Coach share the same five permission **flags**
+(`canManageTeam/Roster/TrackStats/ViewStats/ShareStats`), so flag checks cannot
+tell them apart. Staff management is keyed off the `TeamRole.type` enum instead
+(no schema change): `utils/permissions.ts` exposes `isHeadCoach(userId, teamId)`
+(HEAD_COACH-type staff row exists) and `canManageStaff(userId, teamId)` =
+system `ADMIN` **or** admin of the team's league **or** head coach.
+
+| Action | Head Coach | Assistant Coach | Team Manager | League admin / ADMIN |
+| --- | --- | --- | --- | --- |
+| Edit team name / chat link, roster, invitations | yes | yes | no | yes |
+| Track / view / share stats | yes | yes | yes | yes |
+| **Add / re-role / remove staff** | yes | no (403) | no | yes |
+| **Delete team** (`DELETE /teams/:id`) | yes | no (403) | no | yes |
+| **Move team to another season** (`PATCH /teams/:id { seasonId }`) | yes, **and** must admin the target league | no (403) | no | yes (target league) |
+| Remove **self** from staff | yes, unless last head coach | yes | yes | n/a |
+
+Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
+
+- `GET /staff` → `{ success, staff: [{ id, teamId, userId, roleId, createdAt, updatedAt, user: { id, name, isManaged, email? }, role: TeamRole }] }`. Any team member/staff/admin may read; `user.email` only for callers with `canManageRoster`.
+- `GET /roles` → `{ success, roles: [{ id, teamId, type, name, description, canManageTeam, canManageRoster, canTrackStats, canViewStats, canShareStats }] }` (definitions only, no holders).
+- `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 if the user is already staff (one role per user; use PATCH). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
+- `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
+- `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal).
+
+POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the FREE-tier team cap counts.
+
+**Distinct-teams cap fix (B2.8):** the cap now counts DISTINCT `teamId`s via
+`countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
+`requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
+`usage-service.computeCounts` — a user holding two roles on one team is one
+team. (`api/auth/middleware.ts#requireUsageLimit` still uses `teamStaff.count`;
+it is the legacy pre-#43 gate and is not mounted on team create.)
+
 ## Code Style
 
 - **Files**: kebab-case (e.g., `game-service.ts`)

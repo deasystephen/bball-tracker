@@ -45,10 +45,13 @@ function mockUserTier(
 
 /** Set up the DB counts returned by computeCounts. */
 function mockDbCounts(teamCount: number, seasonIds: string[]): void {
-  (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(teamCount);
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(
-    seasonIds.map((seasonId) => ({ team: { seasonId } }))
-  );
+  // One staff row per distinct team; the first rows carry the given seasons,
+  // any extra teams reuse the last season (seasons are distinct-counted).
+  const rows = Array.from({ length: teamCount }, (_, i) => ({
+    teamId: `team-${i}`,
+    team: { seasonId: seasonIds[Math.min(i, seasonIds.length - 1)] ?? 's0' },
+  }));
+  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows);
 }
 
 describe('usage-service', () => {
@@ -65,9 +68,22 @@ describe('usage-service', () => {
       const counts = await computeCounts(USER_ID);
 
       expect(counts).toEqual({ teams: 3, seasons: 2 });
-      expect(mockPrisma.teamStaff.count).toHaveBeenCalledWith({
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
         where: { userId: USER_ID },
+        select: { teamId: true, team: { select: { seasonId: true } } },
       });
+    });
+
+    it('counts DISTINCT teams — two roles on one team is one team (audit B2.8)', async () => {
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { teamId: 'team-a', team: { seasonId: 's1' } },
+        { teamId: 'team-a', team: { seasonId: 's1' } }, // second role row, same team
+        { teamId: 'team-b', team: { seasonId: 's2' } },
+      ]);
+
+      const counts = await computeCounts(USER_ID);
+
+      expect(counts).toEqual({ teams: 2, seasons: 2 });
     });
 
     it('returns zero usage for a user with no teams', async () => {
@@ -141,7 +157,7 @@ describe('usage-service', () => {
       const usage = await getUsage(USER_ID);
 
       expect(usage.teams.count).toBe(1);
-      expect(mockPrisma.teamStaff.count).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledTimes(1);
       expect(mockCacheSetJson).toHaveBeenCalledWith(
         `usage:counts:${USER_ID}`,
         { teams: 1, seasons: 1 },
@@ -156,8 +172,7 @@ describe('usage-service', () => {
       const usage = await getUsage(USER_ID);
 
       expect(usage.teams.count).toBe(2);
-      // teamStaff count/findMany must NOT run on a cache hit.
-      expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+      // teamStaff findMany must NOT run on a cache hit.
       expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
       expect(mockCacheSetJson).not.toHaveBeenCalled();
     });

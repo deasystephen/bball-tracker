@@ -8,8 +8,9 @@
  *
  * Design decisions:
  * - Counts are derived from existing data at read time (no separate counter
- *   table to drift out of sync). A user's "team count" = the number of teams
- *   they are staff on (`teamStaff.count({ where: { userId } })`).
+ *   table to drift out of sync). A user's "team count" = the number of
+ *   DISTINCT teams they are staff on (a user holding two roles on one team has
+ *   two `TeamStaff` rows but one team — audit B2.8).
  * - Counts are cached in Redis with a short TTL (USAGE_CACHE_TTL_SECONDS) to
  *   absorb repeated reads, and explicitly invalidated on relevant writes
  *   (e.g. team create / delete). The cache is best-effort — a Redis outage
@@ -94,18 +95,17 @@ function toMetric(count: number, limit: number): UsageMetric {
  * Exported for testing; prefer `getUsage` for normal use (it adds caching).
  */
 export async function computeCounts(userId: string): Promise<CachedCounts> {
-  const [teams, teamSeasons] = await Promise.all([
-    prisma.teamStaff.count({ where: { userId } }),
-    // Distinct seasons across the teams the user is staff on.
-    prisma.teamStaff.findMany({
-      where: { userId },
-      select: { team: { select: { seasonId: true } } },
-    }),
-  ]);
+  // One query: every staff row with its team + season; distinct-ify in JS so a
+  // user with two roles on the same team counts that team (and season) once.
+  const staffRows = await prisma.teamStaff.findMany({
+    where: { userId },
+    select: { teamId: true, team: { select: { seasonId: true } } },
+  });
 
-  const distinctSeasons = new Set(teamSeasons.map((s) => s.team.seasonId));
+  const distinctTeams = new Set(staffRows.map((s) => s.teamId));
+  const distinctSeasons = new Set(staffRows.map((s) => s.team.seasonId));
 
-  return { teams, seasons: distinctSeasons.size };
+  return { teams: distinctTeams.size, seasons: distinctSeasons.size };
 }
 
 /**

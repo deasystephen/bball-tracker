@@ -5,6 +5,9 @@
 import prisma from '../models';
 import { Prisma, TeamStaff, UserRole } from '@prisma/client';
 
+/** Prisma client or transaction client — the subset of methods helpers need. */
+type Db = Prisma.TransactionClient | typeof prisma;
+
 export interface TeamPermissions {
   canManageTeam: boolean;
   canManageRoster: boolean;
@@ -217,6 +220,70 @@ export async function isLeagueAdmin(userId: string, leagueId: string): Promise<b
   });
 
   return !!leagueAdmin;
+}
+
+/**
+ * Whether the user holds a HEAD_COACH-type staff row on the team.
+ *
+ * Head Coach and Assistant Coach share the same permission *flags* (both can
+ * manage the team and roster), so flag checks cannot tell them apart. The
+ * staff-management rule ("who may add/remove staff, delete the team or move it
+ * to another season") is keyed off the role TYPE instead — no schema change
+ * needed. See `canManageStaff`.
+ */
+export async function isHeadCoach(userId: string, teamId: string): Promise<boolean> {
+  const row = await prisma.teamStaff.findFirst({
+    where: { teamId, userId, role: { type: 'HEAD_COACH' } },
+    select: { id: true },
+  });
+  return !!row;
+}
+
+/**
+ * Whether the user may manage the team's staff roster (add/remove/re-role
+ * staff), delete the team, or move it to another season.
+ *
+ * Allowed: system ADMIN, an admin of the team's league, or a HEAD_COACH-type
+ * staff member. Assistant coaches keep manageTeam/roster/track/view/share but
+ * are NOT allowed here.
+ */
+export async function canManageStaff(userId: string, teamId: string): Promise<boolean> {
+  if (await isSystemAdmin(userId)) {
+    return true;
+  }
+
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { season: { select: { leagueId: true } } },
+  });
+
+  if (team?.season) {
+    const leagueAdmin = await prisma.leagueAdmin.findUnique({
+      where: { leagueId_userId: { leagueId: team.season.leagueId, userId } },
+    });
+    if (leagueAdmin) {
+      return true;
+    }
+  }
+
+  return isHeadCoach(userId, teamId);
+}
+
+/**
+ * Number of DISTINCT teams the user is staff on.
+ *
+ * A user can hold several roles on one team (one `TeamStaff` row per role), so
+ * `teamStaff.count` over-counts; the FREE-tier team cap must count teams, not
+ * rows (audit B2.8). Accepts a transaction client so the create-team
+ * transaction can recount behind its row lock.
+ */
+export async function countDistinctStaffTeams(userId: string, db: Db = prisma): Promise<number> {
+  const rows = await db.teamStaff.findMany({
+    where: { userId },
+    distinct: ['teamId'],
+    select: { teamId: true },
+  });
+  return rows.length;
 }
 
 /**

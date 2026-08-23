@@ -14,6 +14,8 @@ import {
   createManagedPlayerSchema,
   createAnnouncementSchema,
   announcementQuerySchema,
+  addStaffSchema,
+  updateStaffRoleSchema,
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
@@ -357,6 +359,175 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to update team member' });
+    }
+  }
+});
+
+// ============================================
+// Staff Routes (role matrix B2.3 / B2.7)
+// ============================================
+
+/**
+ * GET /api/v1/teams/:teamId/staff
+ * List the team's staff with user + role. Any team member/staff/admin may
+ * read; `user.email` is only present for callers with canManageRoster.
+ */
+router.get('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const staff = await TeamService.listStaff(req.params.teamId as string, req.user!.id);
+
+    res.json({
+      success: true,
+      staff,
+    });
+  } catch (error) {
+    logger.error('Error listing team staff', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to list team staff' });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/teams/:teamId/roles
+ * List the team's role definitions (default + custom) with their permission flags.
+ */
+router.get('/:teamId/roles', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const roles = await TeamService.getTeamRoles(req.params.teamId as string, req.user!.id);
+
+    res.json({
+      success: true,
+      roles,
+    });
+  } catch (error) {
+    logger.error('Error listing team roles', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError ||
+      error instanceof BadRequestError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to list team roles' });
+    }
+  }
+});
+
+/**
+ * POST /api/v1/teams/:teamId/staff
+ * Add an EXISTING user (by userId or email) as staff with a default role type.
+ * Head coach / league admin / system admin only (assistant coaches → 403).
+ */
+router.post('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const validationResult = addStaffSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const staff = await TeamService.addStaffMember(
+      req.params.teamId as string,
+      validationResult.data,
+      req.user!.id
+    );
+
+    // Being added as staff changes the added user's metered team count.
+    await invalidateUsage(staff.userId);
+
+    res.status(201).json({
+      success: true,
+      staff,
+    });
+  } catch (error) {
+    logger.error('Error adding team staff', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to add team staff' });
+    }
+  }
+});
+
+/**
+ * PATCH /api/v1/teams/:teamId/staff/:userId
+ * Change a staff member's role type. Same gate as POST; the last head coach
+ * cannot be demoted.
+ */
+router.patch('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), async (req, res) => {
+  try {
+    const validationResult = updateStaffRoleSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const staff = await TeamService.changeStaffRole(
+      req.params.teamId as string,
+      req.params.userId as string,
+      validationResult.data.roleType,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      staff,
+    });
+  } catch (error) {
+    logger.error('Error updating team staff role', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to update team staff role' });
+    }
+  }
+});
+
+/**
+ * DELETE /api/v1/teams/:teamId/staff/:userId
+ * Remove a staff member. Head coach / league admin / system admin may remove
+ * anyone; any staff member may remove themselves. The last head coach can
+ * never be removed (400).
+ */
+router.delete('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), async (req, res) => {
+  try {
+    const staffUserId = req.params.userId as string;
+    await TeamService.removeStaffMember(req.params.teamId as string, staffUserId, req.user!.id);
+
+    // Leaving a team changes the removed user's metered team count.
+    await invalidateUsage(staffUserId);
+
+    res.json({
+      success: true,
+      message: 'Staff member removed successfully',
+    });
+  } catch (error) {
+    logger.error('Error removing team staff', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to remove team staff' });
     }
   }
 });
