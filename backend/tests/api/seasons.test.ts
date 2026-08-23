@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { SeasonService } from '../../src/services/season-service';
-import { NotFoundError, BadRequestError } from '../../src/utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../../src/utils/errors';
 
 // Test IDs - mix of UUIDs and custom strings to test both formats
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
@@ -171,6 +171,19 @@ describe('Seasons API', () => {
       expect(response.body.error).toBe('League not found');
     });
 
+    it('should return 403 when the caller is not a league admin', async () => {
+      mockSeasonService.createSeason.mockRejectedValue(
+        new ForbiddenError('You do not have permission to create seasons for this league')
+      );
+
+      const response = await request(app)
+        .post('/api/v1/seasons')
+        .send({ leagueId: TEST_LEAGUE_ID_UUID, name: 'Spring 2024' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You do not have permission to create seasons for this league');
+    });
+
     it('should handle BadRequestError from service', async () => {
       mockSeasonService.createSeason.mockRejectedValue(
         new BadRequestError('Season with this name already exists')
@@ -277,6 +290,22 @@ describe('Seasons API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.season.id).toBe(TEST_SEASON_ID);
+      // Caller id is forwarded so the service can scope the payload (audit #4)
+      expect(mockSeasonService.getSeasonById).toHaveBeenCalledWith(TEST_SEASON_ID, TEST_USER_ID);
+    });
+
+    it('should return the stripped payload (team names only) for a non-admin', async () => {
+      mockSeasonService.getSeasonById.mockResolvedValue({
+        ...mockSeason,
+        teams: [{ id: 'team-1', name: 'Hawks' }],
+        _count: { teams: 1 },
+      } as unknown as Awaited<ReturnType<typeof mockSeasonService.getSeasonById>>);
+
+      const response = await request(app).get(`/api/v1/seasons/${TEST_SEASON_ID}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.season.teams).toEqual([{ id: 'team-1', name: 'Hawks' }]);
+      expect(JSON.stringify(response.body)).not.toContain('email');
     });
 
     it('should return 404 for non-existent season', async () => {
@@ -337,16 +366,16 @@ describe('Seasons API', () => {
       expect(response.status).toBe(404);
     });
 
-    it('should return 400 for unauthorized update', async () => {
+    it('should return 403 for unauthorized update', async () => {
       mockSeasonService.updateSeason.mockRejectedValue(
-        new BadRequestError('Not authorized to update this season')
+        new ForbiddenError('You do not have permission to update this season')
       );
 
       const response = await request(app)
         .patch(`/api/v1/seasons/${TEST_SEASON_ID}`)
         .send({ name: 'New Name' });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
     });
   });
 
@@ -371,14 +400,15 @@ describe('Seasons API', () => {
       expect(response.status).toBe(404);
     });
 
-    it('should return 400 for unauthorized delete', async () => {
+    it('should return 403 for unauthorized delete', async () => {
       mockSeasonService.deleteSeason.mockRejectedValue(
-        new BadRequestError('Not authorized to delete this season')
+        new ForbiddenError('Only system administrators can delete seasons')
       );
 
       const response = await request(app).delete(`/api/v1/seasons/${TEST_SEASON_ID}`);
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('Only system administrators can delete seasons');
     });
   });
 });

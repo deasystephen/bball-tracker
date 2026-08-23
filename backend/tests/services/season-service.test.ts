@@ -11,9 +11,10 @@ import {
   createAdmin,
   createCoach,
   createLeague,
+  createPlayer,
   createSeason,
 } from '../factories';
-import { expectBadRequestError, expectNotFoundError } from '../helpers';
+import { expectBadRequestError, expectForbiddenError, expectNotFoundError } from '../helpers';
 
 describe('SeasonService', () => {
   describe('createSeason', () => {
@@ -73,10 +74,7 @@ describe('SeasonService', () => {
         );
         fail('expected to throw');
       } catch (err) {
-        expectBadRequestError(
-          err,
-          'You do not have permission to create seasons for this league'
-        );
+        expectForbiddenError(err, 'You do not have permission to create seasons for this league');
       }
     });
 
@@ -131,27 +129,99 @@ describe('SeasonService', () => {
   });
 
   describe('getSeasonById', () => {
-    it('returns a season when found', async () => {
+    it('returns metadata + team names only for a user who is not a league admin', async () => {
+      const player = createPlayer();
       const season = createSeason();
-      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+      const summary = {
+        ...season,
+        league: { id: season.leagueId, name: 'L' },
+        teams: [{ id: 'team-1', name: 'Hawks' }],
+        _count: { teams: 1 },
+      };
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(summary);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const result = await SeasonService.getSeasonById(season.id, player.id);
+
+      expect(result.id).toBe(season.id);
+      expect(result.teams).toEqual([{ id: 'team-1', name: 'Hawks' }]);
+      // Only the summary include was fetched — never the staff/member detail
+      expect(mockPrisma.season.findUnique).toHaveBeenCalledTimes(1);
+      const call = (mockPrisma.season.findUnique as jest.Mock).mock.calls[0][0];
+      expect(call.include.teams).toEqual({ select: { id: true, name: true } });
+    });
+
+    it('returns full detail (staff + members) for a league admin', async () => {
+      const coach = createCoach();
+      const season = createSeason();
+      const summary = {
         ...season,
         league: { id: season.leagueId, name: 'L' },
         teams: [],
         _count: { teams: 0 },
+      };
+      const detail = {
+        ...summary,
+        teams: [{ id: 'team-1', name: 'Hawks', staff: [], members: [], _count: { members: 0, games: 0 } }],
+      };
+      (mockPrisma.season.findUnique as jest.Mock)
+        .mockResolvedValueOnce(summary)
+        .mockResolvedValueOnce(detail);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({
+        leagueId: season.leagueId,
+        userId: coach.id,
       });
 
-      const result = await SeasonService.getSeasonById(season.id);
-      expect(result.id).toBe(season.id);
+      const result = await SeasonService.getSeasonById(season.id, coach.id);
+
+      expect(result.teams[0]).toHaveProperty('staff');
+      expect(mockPrisma.leagueAdmin.findUnique).toHaveBeenCalledWith({
+        where: { leagueId_userId: { leagueId: season.leagueId, userId: coach.id } },
+      });
+      const detailCall = (mockPrisma.season.findUnique as jest.Mock).mock.calls[1][0];
+      expect(detailCall.include.teams.include.staff).toBeDefined();
+      expect(detailCall.include.teams.include.members).toBeDefined();
+    });
+
+    it('returns full detail for a system admin', async () => {
+      const admin = createAdmin();
+      const season = createSeason();
+      const base = { ...season, league: { id: season.leagueId, name: 'L' }, teams: [], _count: { teams: 0 } };
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(base);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+
+      await SeasonService.getSeasonById(season.id, admin.id);
+
+      expect(mockPrisma.season.findUnique).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.leagueAdmin.findUnique).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundError when not found', async () => {
+      const admin = createAdmin();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
       try {
-        await SeasonService.getSeasonById('nope');
+        await SeasonService.getSeasonById('nope', admin.id);
         fail('expected to throw');
       } catch (err) {
         expectNotFoundError(err, 'Season not found');
       }
+    });
+
+    it('throws NotFoundError when the detail row vanishes between lookups', async () => {
+      const admin = createAdmin();
+      const season = createSeason();
+      const base = { ...season, league: { id: season.leagueId, name: 'L' }, teams: [], _count: { teams: 0 } };
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.findUnique as jest.Mock)
+        .mockResolvedValueOnce(base)
+        .mockResolvedValueOnce(null);
+
+      await expect(SeasonService.getSeasonById(season.id, admin.id)).rejects.toMatchObject({
+        statusCode: 404,
+      });
     });
   });
 
@@ -222,10 +292,7 @@ describe('SeasonService', () => {
         await SeasonService.updateSeason(season.id, { name: 'x' }, coach.id);
         fail('expected to throw');
       } catch (err) {
-        expectBadRequestError(
-          err,
-          'You do not have permission to update this season'
-        );
+        expectForbiddenError(err, 'You do not have permission to update this season');
       }
     });
 
@@ -312,10 +379,7 @@ describe('SeasonService', () => {
         await SeasonService.deleteSeason('season-1', coach.id);
         fail('expected to throw');
       } catch (err) {
-        expectBadRequestError(
-          err,
-          'Only system administrators can delete seasons'
-        );
+        expectForbiddenError(err, 'Only system administrators can delete seasons');
       }
       expect(mockPrisma.season.delete).not.toHaveBeenCalled();
     });

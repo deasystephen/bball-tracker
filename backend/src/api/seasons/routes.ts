@@ -10,7 +10,7 @@ import {
   updateSeasonSchema,
   seasonQuerySchema,
 } from './schemas';
-import { BadRequestError, NotFoundError } from '../../utils/errors';
+import { AppError, BadRequestError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
 
 const router = Router();
@@ -40,7 +40,7 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error creating season', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError || error instanceof NotFoundError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to create season' });
@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error listing seasons', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list seasons' });
@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    const season = await SeasonService.getSeasonById(req.params.id);
+    const season = await SeasonService.getSeasonById(req.params.id, req.user!.id);
 
     res.json({
       success: true,
@@ -92,7 +92,7 @@ router.get('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error getting season', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to get season' });
@@ -126,7 +126,7 @@ router.patch('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error updating season', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to update season' });
@@ -148,7 +148,7 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error deleting season', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete season' });

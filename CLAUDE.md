@@ -135,6 +135,19 @@ Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
   cannot create new ones until under the cap or upgraded. PREMIUM/LEAGUE are
   unlimited and skip the count query.
 
+### League / season / team / game authorization
+
+Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin`, `isLeagueAdmin`,
+`canAccessTeam`, `getTeamPermissions`). Rules enforced in the services (audit fix plan
+`docs/plans/audit-fix-plan-2026-08-22.md`, lane B):
+
+- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): `getLeagueById(id, userId)` /
+  `getSeasonById(id, userId)` return the **full detail** (league admins with emails, team staff with
+  emails, rosters) only to system ADMINs and admins of that league. Everyone else gets league/season
+  metadata plus team `{ id, name }` — no staff, no member lists, no emails. Authorization denials throw
+  `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
+  `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
+
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
 - Event-driven: Kafka for game events, Flink for real-time aggregation
