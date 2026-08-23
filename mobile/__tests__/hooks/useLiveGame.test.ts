@@ -53,9 +53,11 @@ const createFakeSocket = (): FakeSocket => {
 };
 
 let mockSocket: FakeSocket;
+const mockRecovering = { value: false };
 
 jest.mock('../../services/socket', () => ({
   getSocket: jest.fn(() => mockSocket),
+  isSocketRecovering: jest.fn(() => mockRecovering.value),
 }));
 
 const makeEvent = (id: string, gameId = 'g1') => ({
@@ -70,6 +72,36 @@ const makeEvent = (id: string, gameId = 'g1') => ({
 describe('useLiveGame', () => {
   beforeEach(() => {
     mockSocket = createFakeSocket();
+    mockRecovering.value = false;
+  });
+
+  it('surfaces a terminal connect_error as an error state', () => {
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    act(() => {
+      mockSocket.fire('connect_error', new Error('xhr poll error'));
+    });
+
+    expect(result.current.connectionState).toBe('error');
+    expect(result.current.error).toBe('xhr poll error');
+  });
+
+  it('shows reconnecting (not error) while the socket module is recovering from an auth rejection', () => {
+    mockRecovering.value = true;
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    act(() => {
+      mockSocket.fire('connect_error', new Error('Unauthorized'));
+    });
+
+    expect(result.current.connectionState).toBe('reconnecting');
+    expect(result.current.error).toBeNull();
+
+    // Recovery succeeded: socket reconnects and the hook re-joins the room.
+    act(() => {
+      mockSocket.fire('connect');
+    });
+    expect(mockSocket.emitCalls.filter((c) => c.event === 'join-game')).toHaveLength(2);
   });
 
   it('emits join-game with the gameId on mount', () => {
