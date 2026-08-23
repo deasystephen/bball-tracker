@@ -5,7 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
-import { NotFoundError, BadRequestError } from '../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { isSystemAdmin, isLeagueAdmin } from '../utils/permissions';
 
 const LEAGUE_ADMIN_INCLUDE = {
@@ -73,6 +73,26 @@ const LEAGUE_DETAIL_INCLUDE = {
   },
 } satisfies Prisma.LeagueInclude;
 
+/**
+ * What a non-admin sees on `GET /leagues/:id`: league metadata plus season
+ * and team names. No staff, no member lists, no admin emails (audit #4).
+ */
+const LEAGUE_PUBLIC_INCLUDE = {
+  seasons: {
+    include: {
+      teams: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: {
+      startDate: 'desc',
+    },
+  },
+} satisfies Prisma.LeagueInclude;
+
 const LEAGUE_LIST_INCLUDE = {
   seasons: {
     select: {
@@ -98,6 +118,7 @@ const SEASON_INCLUDE = {
 
 export type LeagueWithSeasons = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_INCLUDE }>;
 export type LeagueDetail = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_DETAIL_INCLUDE }>;
+export type LeaguePublicDetail = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_PUBLIC_INCLUDE }>;
 export type LeagueListItem = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_LIST_INCLUDE }>;
 export type LeagueAdminWithUser = Prisma.LeagueAdminGetPayload<{
   include: typeof LEAGUE_ADMIN_INCLUDE;
@@ -121,7 +142,7 @@ export class LeagueService {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
-      throw new BadRequestError('Only system administrators can create leagues');
+      throw new ForbiddenError('Only system administrators can create leagues');
     }
 
     // Check if league with same name already exists
@@ -147,14 +168,29 @@ export class LeagueService {
   }
 
   /**
-   * Get a league by ID
+   * Get a league by ID.
+   *
+   * System admins and admins of this league get the full detail (admins with
+   * emails, team staff, rosters). Everyone else gets league metadata plus
+   * season and team names only.
    * @param leagueId League ID
+   * @param userId Requesting user ID
    */
-  static async getLeagueById(leagueId: string): Promise<LeagueDetail> {
-    const league = await prisma.league.findUnique({
-      where: { id: leagueId },
-      include: LEAGUE_DETAIL_INCLUDE,
-    });
+  static async getLeagueById(
+    leagueId: string,
+    userId: string
+  ): Promise<LeagueDetail | LeaguePublicDetail> {
+    const canManage = await isLeagueAdmin(userId, leagueId);
+
+    const league = canManage
+      ? await prisma.league.findUnique({
+          where: { id: leagueId },
+          include: LEAGUE_DETAIL_INCLUDE,
+        })
+      : await prisma.league.findUnique({
+          where: { id: leagueId },
+          include: LEAGUE_PUBLIC_INCLUDE,
+        });
 
     if (!league) {
       throw new NotFoundError('League not found');
@@ -223,13 +259,25 @@ export class LeagueService {
     // Check permission
     const canManage = await isLeagueAdmin(userId, leagueId);
     if (!canManage) {
-      throw new BadRequestError('You do not have permission to update this league');
+      throw new ForbiddenError('You do not have permission to update this league');
     }
 
     // Build update data
     const updateData: Prisma.LeagueUpdateInput = {};
 
     if (data.name !== undefined) {
+      // Same uniqueness rule as createLeague
+      const existing = await prisma.league.findFirst({
+        where: {
+          name: data.name,
+          id: { not: leagueId },
+        },
+      });
+
+      if (existing) {
+        throw new BadRequestError('League with this name already exists');
+      }
+
       updateData.name = data.name;
     }
 
@@ -252,7 +300,7 @@ export class LeagueService {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
-      throw new BadRequestError('Only system administrators can delete leagues');
+      throw new ForbiddenError('Only system administrators can delete leagues');
     }
 
     // Get league
@@ -299,7 +347,7 @@ export class LeagueService {
     // Check permission
     const canManage = await isLeagueAdmin(userId, leagueId);
     if (!canManage) {
-      throw new BadRequestError('You do not have permission to manage league admins');
+      throw new ForbiddenError('You do not have permission to manage league admins');
     }
 
     // Verify user exists
@@ -351,7 +399,7 @@ export class LeagueService {
     // Only system admin can remove league admins
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
-      throw new BadRequestError('Only system administrators can remove league admins');
+      throw new ForbiddenError('Only system administrators can remove league admins');
     }
 
     // Delete admin
@@ -381,7 +429,7 @@ export class LeagueService {
     // Check permission
     const canManage = await isLeagueAdmin(userId, leagueId);
     if (!canManage) {
-      throw new BadRequestError('You do not have permission to create seasons for this league');
+      throw new ForbiddenError('You do not have permission to create seasons for this league');
     }
 
     // Check if season with same name already exists

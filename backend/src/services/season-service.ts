@@ -5,7 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
-import { NotFoundError, BadRequestError } from '../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { isLeagueAdmin, isSystemAdmin } from '../utils/permissions';
 
 const LEAGUE_SUMMARY_SELECT = {
@@ -111,7 +111,7 @@ export class SeasonService {
     // Check permission
     const canManage = await isLeagueAdmin(userId, data.leagueId);
     if (!canManage) {
-      throw new BadRequestError('You do not have permission to create seasons for this league');
+      throw new ForbiddenError('You do not have permission to create seasons for this league');
     }
 
     // Check if season with same name already exists in this league
@@ -149,20 +149,42 @@ export class SeasonService {
   }
 
   /**
-   * Get a season by ID
+   * Get a season by ID.
+   *
+   * System admins and admins of the season's league get the full detail (team
+   * staff with emails, rosters). Everyone else gets season metadata plus team
+   * names only (`SEASON_INCLUDE`).
    * @param seasonId Season ID
+   * @param userId Requesting user ID
    */
-  static async getSeasonById(seasonId: string): Promise<SeasonDetail> {
+  static async getSeasonById(
+    seasonId: string,
+    userId: string
+  ): Promise<SeasonDetail | SeasonWithTeams> {
     const season = await prisma.season.findUnique({
       where: { id: seasonId },
-      include: SEASON_DETAIL_INCLUDE,
+      include: SEASON_INCLUDE,
     });
 
     if (!season) {
       throw new NotFoundError('Season not found');
     }
 
-    return season;
+    const canManage = await isLeagueAdmin(userId, season.leagueId);
+    if (!canManage) {
+      return season;
+    }
+
+    const detail = await prisma.season.findUnique({
+      where: { id: seasonId },
+      include: SEASON_DETAIL_INCLUDE,
+    });
+
+    if (!detail) {
+      throw new NotFoundError('Season not found');
+    }
+
+    return detail;
   }
 
   /**
@@ -238,7 +260,7 @@ export class SeasonService {
     // Check permission
     const canManage = await isLeagueAdmin(userId, season.leagueId);
     if (!canManage) {
-      throw new BadRequestError('You do not have permission to update this season');
+      throw new ForbiddenError('You do not have permission to update this season');
     }
 
     // Build update data
@@ -299,7 +321,7 @@ export class SeasonService {
     // Check if user is system admin
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
-      throw new BadRequestError('Only system administrators can delete seasons');
+      throw new ForbiddenError('Only system administrators can delete seasons');
     }
 
     // Get season

@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { LeagueService } from '../../src/services/league-service';
-import { NotFoundError, BadRequestError } from '../../src/utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../../src/utils/errors';
 
 // Mock the authenticate middleware
 jest.mock('../../src/api/auth/middleware', () => ({
@@ -82,6 +82,19 @@ describe('Leagues API', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should return 403 when the caller is not a system admin', async () => {
+      mockLeagueService.createLeague.mockRejectedValue(
+        new ForbiddenError('Only system administrators can create leagues')
+      );
+
+      const response = await request(app)
+        .post('/api/v1/leagues')
+        .send({ name: 'Spring League' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('Only system administrators can create leagues');
+    });
   });
 
   describe('GET /api/v1/leagues', () => {
@@ -138,6 +151,25 @@ describe('Leagues API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.league.id).toBe('league-1');
+      // The caller's id is forwarded so the service can scope the payload (audit #4)
+      expect(mockLeagueService.getLeagueById).toHaveBeenCalledWith('league-1', 'test-user-id');
+    });
+
+    it('should return the stripped payload (no admins/staff/members) for an unaffiliated user', async () => {
+      mockLeagueService.getLeagueById.mockResolvedValue({
+        id: 'league-1',
+        name: 'Spring League',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        seasons: [{ id: 'season-1', name: 'Spring', teams: [{ id: 'team-1', name: 'Hawks' }] }],
+      } as unknown as Awaited<ReturnType<typeof mockLeagueService.getLeagueById>>);
+
+      const response = await request(app).get('/api/v1/leagues/league-1');
+
+      expect(response.status).toBe(200);
+      expect(response.body.league.admins).toBeUndefined();
+      expect(response.body.league.seasons[0].teams[0]).toEqual({ id: 'team-1', name: 'Hawks' });
+      expect(JSON.stringify(response.body)).not.toContain('email');
     });
 
     it('should return 404 for non-existent league', async () => {
@@ -181,6 +213,32 @@ describe('Leagues API', () => {
 
       expect(response.status).toBe(404);
     });
+
+    it('should return 403 (not 400) when the caller is not a league admin', async () => {
+      mockLeagueService.updateLeague.mockRejectedValue(
+        new ForbiddenError('You do not have permission to update this league')
+      );
+
+      const response = await request(app)
+        .patch('/api/v1/leagues/league-1')
+        .send({ name: 'New Name' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You do not have permission to update this league');
+    });
+
+    it('should return 400 when the new name is already taken', async () => {
+      mockLeagueService.updateLeague.mockRejectedValue(
+        new BadRequestError('League with this name already exists')
+      );
+
+      const response = await request(app)
+        .patch('/api/v1/leagues/league-1')
+        .send({ name: 'Taken' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('League with this name already exists');
+    });
   });
 
   describe('DELETE /api/v1/leagues/:id', () => {
@@ -200,6 +258,16 @@ describe('Leagues API', () => {
       const response = await request(app).delete('/api/v1/leagues/invalid-id');
 
       expect(response.status).toBe(404);
+    });
+
+    it('should return 403 when the caller is not a system admin', async () => {
+      mockLeagueService.deleteLeague.mockRejectedValue(
+        new ForbiddenError('Only system administrators can delete leagues')
+      );
+
+      const response = await request(app).delete('/api/v1/leagues/league-1');
+
+      expect(response.status).toBe(403);
     });
 
     it('should return 400 if league has teams', async () => {

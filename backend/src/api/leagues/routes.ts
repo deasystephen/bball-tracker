@@ -10,7 +10,7 @@ import {
   updateLeagueSchema,
   leagueQuerySchema,
 } from './schemas';
-import { BadRequestError, NotFoundError } from '../../utils/errors';
+import { AppError, BadRequestError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
 
 const router = Router();
@@ -40,7 +40,7 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error creating league', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError || error instanceof NotFoundError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to create league' });
@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error listing leagues', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list leagues' });
@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    const league = await LeagueService.getLeagueById(req.params.id);
+    const league = await LeagueService.getLeagueById(req.params.id, req.user!.id);
 
     res.json({
       success: true,
@@ -92,7 +92,7 @@ router.get('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error getting league', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to get league' });
@@ -126,7 +126,7 @@ router.patch('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error updating league', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to update league' });
@@ -148,7 +148,7 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error deleting league', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof NotFoundError || error instanceof BadRequestError) {
+    if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete league' });
