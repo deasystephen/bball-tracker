@@ -30,10 +30,16 @@ export class WorkOSService {
    * Get authorization URL for user login
    * For email/password auth: No connection/organization/provider needed (enabled by default)
    * For SSO/OAuth: Requires WORKOS_CONNECTION_ID or WORKOS_ORGANIZATION_ID
-   * @param state - Optional state parameter for OAuth flow
+   * @param state - Optional state parameter for OAuth flow (echoed back on the redirect)
    * @param customRedirectUri - Optional custom redirect URI (for mobile deep linking)
+   * @param codeChallenge - Optional PKCE S256 code challenge (RFC 7636). When set, WorkOS
+   *   binds the issued code to it and the exchange must supply the matching verifier.
    */
-  static async getAuthorizationUrl(state?: string, customRedirectUri?: string): Promise<string> {
+  static async getAuthorizationUrl(
+    state?: string,
+    customRedirectUri?: string,
+    codeChallenge?: string
+  ): Promise<string> {
     const connectionId = process.env.WORKOS_CONNECTION_ID;
     const organizationId = process.env.WORKOS_ORGANIZATION_ID;
     const provider = process.env.WORKOS_PROVIDER;
@@ -70,16 +76,26 @@ export class WorkOSService {
       params.provider = 'authkit';
     }
 
+    if (codeChallenge) {
+      return workos.userManagement.getAuthorizationUrl({
+        ...params,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+      });
+    }
     return workos.userManagement.getAuthorizationUrl(params);
   }
 
   /**
-   * Exchange authorization code for user token
+   * Exchange authorization code for user token.
+   * @param codeVerifier - PKCE verifier matching the challenge sent on the
+   *   authorization request. Required by WorkOS when the code was issued with one.
    */
-  static async exchangeCodeForToken(code: string): Promise<WorkOSAuthentication> {
+  static async exchangeCodeForToken(code: string, codeVerifier?: string): Promise<WorkOSAuthentication> {
     return workos.userManagement.authenticateWithCode({
       clientId: WORKOS_CLIENT_ID,
       code,
+      ...(codeVerifier ? { codeVerifier } : {}),
     });
   }
 

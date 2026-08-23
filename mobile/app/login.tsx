@@ -11,6 +11,7 @@ import { spacing } from '../theme';
 import { borderRadius } from '../theme/border-radius';
 import { typography } from '../theme/typography';
 import { postLoginRoute } from '../utils/role-onboarding';
+import { beginPkceLogin } from '../utils/pkce';
 
 interface DevUser {
   id: string;
@@ -55,10 +56,15 @@ export default function Login() {
       // Get authorization URL from backend (request JSON format for mobile)
       // Use mobile redirect URI that deep links back to app
       const mobileRedirectUri = Linking.createURL('auth/callback', {});
+      // PKCE + state (audit #5): the verifier/state pair is persisted on the
+      // device and checked by app/auth/callback.tsx before the code exchange.
+      const { state, codeChallenge } = await beginPkceLogin();
       const response = await apiClient.get('/auth/login', {
         params: {
           format: 'json',
           redirect_uri: mobileRedirectUri,
+          state,
+          code_challenge: codeChallenge,
         },
       });
       const { url } = response.data;

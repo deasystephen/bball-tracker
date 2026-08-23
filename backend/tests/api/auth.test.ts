@@ -7,6 +7,7 @@ import { ServiceUnavailableError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import prisma from '../../src/models';
+import { authRateLimit } from '../../src/api/middleware/rate-limit';
 
 // Mock the WorkOS service
 jest.mock('../../src/services/workos-service');
@@ -63,6 +64,10 @@ describe('Auth API', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // The strict auth limiter (20 req / 15 min / IP) is shared across this
+    // file; reset it so the budget is per-test, not per-suite.
+    authRateLimit.resetKey('::ffff:127.0.0.1');
+    authRateLimit.resetKey('127.0.0.1');
   });
 
   describe('GET /api/v1/auth/login', () => {
@@ -125,8 +130,52 @@ describe('Auth API', () => {
 
       expect(mockWorkOSService.getAuthorizationUrl).toHaveBeenCalledWith(
         undefined,
-        'http://localhost:3000/callback'
+        'http://localhost:3000/callback',
+        undefined
       );
+    });
+
+    // Audit #5: PKCE + state. The mobile client generates both and we forward
+    // them so WorkOS binds the code to the client's verifier.
+    describe('PKCE + state', () => {
+      const state = 'a'.repeat(32);
+      const challenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+      it('forwards state and code_challenge to WorkOS', async () => {
+        mockWorkOSService.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize?...');
+
+        const response = await request(app)
+          .get('/api/v1/auth/login')
+          .query({ format: 'json', redirect_uri: 'bball-tracker://auth/callback', state, code_challenge: challenge });
+
+        expect(response.status).toBe(200);
+        expect(mockWorkOSService.getAuthorizationUrl).toHaveBeenCalledWith(
+          state,
+          'bball-tracker://auth/callback',
+          challenge
+        );
+      });
+
+      it('rejects state without code_challenge (and vice versa)', async () => {
+        const a = await request(app).get('/api/v1/auth/login').query({ format: 'json', state });
+        expect(a.status).toBe(400);
+        expect(a.body.error).toMatch(/together/);
+
+        const b = await request(app).get('/api/v1/auth/login').query({ format: 'json', code_challenge: challenge });
+        expect(b.status).toBe(400);
+        expect(mockWorkOSService.getAuthorizationUrl).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['short challenge', { state, code_challenge: 'too-short' }],
+        ['challenge with illegal chars', { state, code_challenge: `${'a'.repeat(42)}+/=` }],
+        ['state with illegal chars', { state: 'bad state!' + 'a'.repeat(20), code_challenge: challenge }],
+        ['state too short', { state: 'abc', code_challenge: challenge }],
+      ])('rejects malformed PKCE/state query: %s', async (_label, query) => {
+        const response = await request(app).get('/api/v1/auth/login').query({ format: 'json', ...query });
+        expect(response.status).toBe(400);
+        expect(mockWorkOSService.getAuthorizationUrl).not.toHaveBeenCalled();
+      });
     });
 
     it('should handle WorkOS service errors', async () => {
@@ -164,6 +213,68 @@ describe('Auth API', () => {
       // access-token expiry. Dropping it silently logs every user out after
       // the WorkOS access-token lifetime.
       expect(response.body.refreshToken).toBe('mock-refresh-token');
+    });
+
+    // Audit #5: the verifier travels with the code so WorkOS can enforce PKCE.
+    describe('PKCE + state', () => {
+      const state = 'b'.repeat(32);
+      const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+
+      beforeEach(() => {
+        mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+          user: mockWorkOSUser,
+          accessToken: 'mock-access-token',
+          refreshToken: 'mock-refresh-token',
+        } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+        mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+      });
+
+      it('passes code_verifier to the token exchange', async () => {
+        const response = await request(app)
+          .get('/api/v1/auth/callback')
+          .query({ code: 'auth-code-123', state, code_verifier: verifier });
+
+        expect(response.status).toBe(200);
+        expect(mockWorkOSService.exchangeCodeForToken).toHaveBeenCalledWith('auth-code-123', verifier);
+      });
+
+      it('exchanges without a verifier when neither state nor code_verifier is sent (legacy clients)', async () => {
+        const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+        expect(response.status).toBe(200);
+        expect(mockWorkOSService.exchangeCodeForToken).toHaveBeenCalledWith('auth-code-123', undefined);
+      });
+
+      it('rejects code_verifier without state (and vice versa) before touching WorkOS', async () => {
+        const a = await request(app).get('/api/v1/auth/callback').query({ code: 'c', code_verifier: verifier });
+        expect(a.status).toBe(400);
+        expect(a.body.error).toMatch(/together/);
+
+        const b = await request(app).get('/api/v1/auth/callback').query({ code: 'c', state });
+        expect(b.status).toBe(400);
+        expect(mockWorkOSService.exchangeCodeForToken).not.toHaveBeenCalled();
+      });
+
+      it('rejects a malformed code_verifier', async () => {
+        const response = await request(app)
+          .get('/api/v1/auth/callback')
+          .query({ code: 'c', state, code_verifier: 'nope' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toMatch(/code_verifier/);
+        expect(mockWorkOSService.exchangeCodeForToken).not.toHaveBeenCalled();
+      });
+
+      it('returns 500 (not a session) when WorkOS refuses the verifier', async () => {
+        mockWorkOSService.exchangeCodeForToken.mockRejectedValue(new Error('invalid_grant: code_verifier mismatch'));
+
+        const response = await request(app)
+          .get('/api/v1/auth/callback')
+          .query({ code: 'c', state, code_verifier: verifier });
+
+        expect(response.status).toBe(500);
+        expect(response.body.accessToken).toBeUndefined();
+      });
     });
 
     it('should return 400 for missing code', async () => {

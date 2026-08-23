@@ -22,6 +22,10 @@ jest.mock('expo-linking', () => ({
 
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 
+jest.mock('../../utils/pkce', () => ({
+  beginPkceLogin: jest.fn(() => Promise.resolve({ state: 'state-123', codeChallenge: 'challenge-abc' })),
+}));
+
 const mockedGet = apiClient.get as jest.Mock;
 
 type AppStateHandler = (state: string) => void;
@@ -51,8 +55,14 @@ describe('Login screen', () => {
     fireEvent.press(getByLabelText('Sign in'));
 
     await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith('https://auth.example.test/authorize'));
+    // PKCE + state (audit #5) travel with the authorization request.
     expect(mockedGet).toHaveBeenCalledWith('/auth/login', {
-      params: { format: 'json', redirect_uri: 'bball-tracker://auth/callback' },
+      params: {
+        format: 'json',
+        redirect_uri: 'bball-tracker://auth/callback',
+        state: 'state-123',
+        code_challenge: 'challenge-abc',
+      },
     });
     // Button is replaced by the spinner.
     expect(queryByLabelText('Sign in')).toBeNull();

@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
 import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ServiceUnavailableError } from '../../utils/errors';
-import { updateRoleSchema, SELF_SELECTABLE_ROLES } from './schemas';
+import { updateRoleSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
@@ -157,7 +157,18 @@ router.get('/login', async (req, res): Promise<void> => {
         return;
       }
     }
-    const authorizationUrl = await WorkOSService.getAuthorizationUrl(undefined, customRedirectUri);
+    // PKCE + state (audit #5). The mobile client generates both; we forward
+    // them to WorkOS so the issued code is bound to the client's verifier.
+    const parsedQuery = loginQuerySchema.safeParse({
+      state: req.query.state,
+      code_challenge: req.query.code_challenge,
+    });
+    if (!parsedQuery.success) {
+      res.status(400).json({ error: parsedQuery.error.issues[0]?.message ?? 'Invalid query' });
+      return;
+    }
+    const { state, code_challenge: codeChallenge } = parsedQuery.data;
+    const authorizationUrl = await WorkOSService.getAuthorizationUrl(state, customRedirectUri, codeChallenge);
 
     // Check if client wants JSON (mobile app) or redirect (web browser)
     const wantsJson = req.query.format === 'json' ||
@@ -186,18 +197,36 @@ router.get('/login', async (req, res): Promise<void> => {
  */
 router.get('/callback', async (req, res) => {
   try {
-    const { code, error } = req.query;
+    const { error } = req.query;
 
     if (error) {
       throw new BadRequestError(`Authentication error: ${error}`);
     }
 
-    if (!code || typeof code !== 'string') {
+    if (!req.query.code || typeof req.query.code !== 'string') {
       throw new BadRequestError('Authorization code is required');
     }
 
+    // PKCE (audit #5): a sign-in started with a code_challenge can only be
+    // completed with the matching code_verifier — WorkOS enforces the binding,
+    // so an intercepted code is useless to anyone without the verifier. The
+    // client also validates `state` on-device before calling us; here we only
+    // require the two to travel together and be well-formed.
+    const parsedQuery = callbackQuerySchema.safeParse({
+      code: req.query.code,
+      state: req.query.state,
+      code_verifier: req.query.code_verifier,
+    });
+    if (!parsedQuery.success) {
+      throw new BadRequestError(parsedQuery.error.issues[0]?.message ?? 'Invalid callback parameters');
+    }
+    const { code, code_verifier: codeVerifier } = parsedQuery.data;
+
     // Exchange code for token
-    const { user: workosUser, accessToken, refreshToken } = await WorkOSService.exchangeCodeForToken(code);
+    const { user: workosUser, accessToken, refreshToken } = await WorkOSService.exchangeCodeForToken(
+      code,
+      codeVerifier
+    );
 
     // Sync user to our database
     const user = await WorkOSService.syncUser({
