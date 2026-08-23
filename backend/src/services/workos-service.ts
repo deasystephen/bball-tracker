@@ -2,16 +2,28 @@
  * WorkOS service layer for authentication and user management
  */
 
-import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI } from '../utils/workos-client';
+import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
+import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
 import { User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
+import { ServiceUnavailableError } from '../utils/errors';
 
 type UserManagement = typeof workos.userManagement;
 export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
 export type WorkOSUser = Awaited<ReturnType<UserManagement['getUser']>>;
 export type WorkOSUserList = Awaited<ReturnType<UserManagement['listUsers']>>;
+
+/** Signature algorithms WorkOS uses for access tokens. Anything else is rejected outright. */
+const ALLOWED_JWT_ALGS = ['RS256', 'ES256'];
+
+/** Claims we rely on from a verified WorkOS access token. `id` is the WorkOS user id (`sub`). */
+export interface VerifiedToken {
+  id: string;
+  sessionId?: string;
+  expiresAt: number;
+}
 
 export class WorkOSService {
   /**
@@ -157,58 +169,64 @@ export class WorkOSService {
   }
 
   /**
-   * Verify WorkOS access token and get user
-   * Decodes the JWT to extract the user ID, then validates the user exists in WorkOS.
-   * NOTE: The token authenticity is validated by the WorkOS API call to getUser() -
-   * if the token's user ID is invalid or doesn't correspond to a real user, the call fails.
-   * For additional security, consider using WorkOS JWKS endpoint for local signature verification.
+   * Verify a WorkOS access token.
+   *
+   * The signature is checked against the WorkOS JWKS for this client, and the
+   * `iss`, `exp` and `sub` claims are required. Nothing about the caller is
+   * trusted until `jwtVerify` succeeds — in particular the payload is never
+   * decoded by hand (a previous implementation did, which let an unsigned
+   * `{"sub": "<victim>"}` token impersonate any user).
+   *
+   * Returns `null` for any token that fails verification (malformed, bad
+   * signature, expired, wrong issuer). Key-fetch failures surface as a thrown
+   * error so callers can return 503 rather than treating an outage as a
+   * rejected token.
    */
-  static async verifyToken(accessToken: string): Promise<WorkOSUser | null> {
+  static async verifyToken(accessToken: string): Promise<VerifiedToken | null> {
+    // Cheap structural gate before any key lookup: must be a compact JWS whose
+    // header names an allowed asymmetric algorithm. Rejects `alg: none`, HMAC
+    // downgrade attempts and plain garbage without a JWKS round-trip.
+    let alg: string | undefined;
     try {
-      // Validate token structure (must be a valid JWT with 3 parts)
-      const parts = accessToken.split('.');
-      if (parts.length !== 3) {
-        throw new Error('Invalid token format: expected JWT with 3 parts');
-      }
-
-      const base64Url = parts[1];
-      if (!base64Url) {
-        throw new Error('Invalid token format');
-      }
-
-      // Decode base64url (JWT uses base64url encoding)
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const padding = '='.repeat((4 - (base64.length % 4)) % 4);
-      const decoded = Buffer.from(base64 + padding, 'base64').toString('utf-8');
-
-      let payload: Record<string, unknown>;
-      try {
-        payload = JSON.parse(decoded);
-      } catch {
-        throw new Error('Invalid token format: payload is not valid JSON');
-      }
-
-      // Validate required claims
-      const userId = payload.sub;
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('Token does not contain a valid user ID');
-      }
-
-      // Check token expiration if present
-      if (payload.exp && typeof payload.exp === 'number') {
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp < now) {
-          throw new Error('Token has expired');
-        }
-      }
-
-      // Validate user exists in WorkOS (this also serves as a token validation step -
-      // if the userId was forged, WorkOS will reject the request)
-      const user = await workos.userManagement.getUser(userId);
-      return user;
-    } catch (error) {
-      logger.error('Error verifying WorkOS token', { error: error instanceof Error ? error.message : String(error) });
+      alg = decodeProtectedHeader(accessToken).alg;
+    } catch {
       return null;
+    }
+    if (!alg || !ALLOWED_JWT_ALGS.includes(alg)) {
+      logger.warn('Rejected WorkOS access token', { reason: 'disallowed alg', alg });
+      return null;
+    }
+
+    try {
+      const { payload } = await jwtVerify(accessToken, getWorkOSJwks(), {
+        algorithms: ALLOWED_JWT_ALGS,
+        issuer: WORKOS_JWT_ISSUER,
+        requiredClaims: ['exp', 'sub'],
+        // Small tolerance for clock skew between WorkOS and the API host.
+        clockTolerance: 30,
+      });
+
+      if (typeof payload.sub !== 'string' || payload.sub.length === 0 || typeof payload.exp !== 'number') {
+        return null;
+      }
+
+      return {
+        id: payload.sub,
+        sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
+        expiresAt: payload.exp,
+      };
+    } catch (error) {
+      if (error instanceof joseErrors.JOSEError && !(error instanceof joseErrors.JWKSTimeout)) {
+        // JWTExpired, JWSSignatureVerificationFailed, JWTClaimValidationFailed,
+        // JWSInvalid, JWKSNoMatchingKey, ... — all mean "not a valid token".
+        logger.warn('Rejected WorkOS access token', { code: error.code, message: error.message });
+        return null;
+      }
+      // Network / JWKS fetch failure: not the caller's fault.
+      logger.error('Unable to verify WorkOS access token', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError('Authentication service unavailable');
     }
   }
 }

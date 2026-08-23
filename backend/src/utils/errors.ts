@@ -49,3 +49,10 @@ export class ConflictError extends AppError {
   }
 }
 
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message: string = 'Service unavailable') {
+    super(message, 503);
+    Object.setPrototypeOf(this, ServiceUnavailableError.prototype);
+  }
+}

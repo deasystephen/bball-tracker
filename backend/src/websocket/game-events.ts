@@ -29,6 +29,7 @@ import prisma from '../models';
 import { canAccessTeam } from '../utils/permissions';
 import { WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
+import { ServiceUnavailableError } from '../utils/errors';
 
 export const GAME_ROOM_PREFIX = 'game:';
 export const SNAPSHOT_EVENT_LIMIT = 100;
@@ -141,7 +142,9 @@ export async function authenticateSocket(
     logger.error('Socket authentication failed', {
       error: error instanceof Error ? error.message : String(error),
     });
-    next(new Error('Unauthorized'));
+    // A JWKS/WorkOS outage is not a rejected token — tell the client so it
+    // can retry instead of logging out.
+    next(new Error(error instanceof ServiceUnavailableError ? 'Service unavailable' : 'Unauthorized'));
   }
 }
 

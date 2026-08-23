@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { UnauthorizedError, BadRequestError } from '../../utils/errors';
+import { UnauthorizedError, BadRequestError, ServiceUnavailableError } from '../../utils/errors';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
@@ -306,6 +306,8 @@ router.get('/me', async (req, res) => {
     logger.error('Error getting user', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof UnauthorizedError) {
       res.status(401).json({ error: error.message });
+    } else if (error instanceof ServiceUnavailableError) {
+      res.status(503).json({ error: error.message });
     } else {
       captureException(error, { flow: 'auth-me' });
       res.status(500).json({ error: 'Failed to get user information' });

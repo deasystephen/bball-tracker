@@ -16,8 +16,14 @@ jest.mock('../../src/utils/workos-client', () => {
     },
     WORKOS_CLIENT_ID: 'test-client-id',
     WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
+    WORKOS_JWT_ISSUER: 'https://api.workos.com',
+    getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
   };
 });
+
+import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet, errors as joseErrors, type JWK, type KeyLike } from 'jose';
+
+const mockGetWorkOSJwks = jest.fn();
 
 import { WorkOSService } from '../../src/services/workos-service';
 import { mockPrisma } from '../setup';
@@ -361,56 +367,127 @@ describe('WorkOSService', () => {
   });
 
   describe('verifyToken', () => {
-    it('should verify valid token and return user', async () => {
-      // Create a valid JWT payload
-      const payload = {
-        sub: 'user_123',
-        exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-      };
-      const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-      const mockToken = `header.${base64Payload}.signature`;
+    let privateKey: KeyLike;
+    let publicJwk: JWK;
+    let otherPrivateKey: KeyLike;
 
-      const mockUser = {
-        id: 'user_123',
-        email: 'test@example.com',
-      };
-      mockWorkos.userManagement.getUser.mockResolvedValue(mockUser);
+    const sign = async (
+      claims: Record<string, unknown>,
+      opts: { key?: KeyLike; kid?: string; issuer?: string | null; exp?: string | number | null } = {}
+    ): Promise<string> => {
+      const jwt = new SignJWT(claims).setProtectedHeader({ alg: 'ES256', kid: opts.kid ?? 'test-key' });
+      if (opts.issuer !== null) jwt.setIssuer(opts.issuer ?? 'https://api.workos.com');
+      if (opts.exp !== null) jwt.setExpirationTime(opts.exp ?? '10m');
+      return jwt.setIssuedAt().sign(opts.key ?? privateKey);
+    };
 
-      const result = await WorkOSService.verifyToken(mockToken);
-
-      expect(result).toEqual(mockUser);
-      expect(mockWorkos.userManagement.getUser).toHaveBeenCalledWith('user_123');
+    beforeAll(async () => {
+      ({ privateKey } = await generateKeyPair('ES256'));
+      ({ privateKey: otherPrivateKey } = await generateKeyPair('ES256'));
     });
 
-    it('should return null for invalid token format', async () => {
-      const result = await WorkOSService.verifyToken('invalid-token');
-
-      expect(result).toBeNull();
+    beforeEach(async () => {
+      // Derive the public JWK from the signing key each time so a test can swap keys.
+      const pub = await exportJWK(privateKey);
+      delete pub.d;
+      publicJwk = { ...pub, kid: 'test-key', alg: 'ES256', use: 'sig' };
+      mockGetWorkOSJwks.mockReturnValue(createLocalJWKSet({ keys: [publicJwk] }));
     });
 
-    it('should return null for token without user ID', async () => {
-      const payload = { exp: Math.floor(Date.now() / 1000) + 3600 };
-      const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-      const mockToken = `header.${base64Payload}.signature`;
+    it('returns the subject for a correctly signed token', async () => {
+      const token = await sign({ sub: 'user_123', sid: 'session_abc' });
 
-      const result = await WorkOSService.verifyToken(mockToken);
+      const result = await WorkOSService.verifyToken(token);
 
-      expect(result).toBeNull();
+      expect(result).toMatchObject({ id: 'user_123', sessionId: 'session_abc' });
+      expect(typeof result?.expiresAt).toBe('number');
+      // Verification is purely local — no WorkOS API round-trip per request.
+      expect(mockWorkos.userManagement.getUser).not.toHaveBeenCalled();
     });
 
-    it('should return null if WorkOS getUser fails', async () => {
-      const payload = {
-        sub: 'user_123',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-      };
-      const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-      const mockToken = `header.${base64Payload}.signature`;
+    it('rejects an unsigned (alg: none) token that merely names a victim', async () => {
+      const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+      const payload = Buffer.from(
+        JSON.stringify({ sub: 'user_victim', iss: 'https://api.workos.com', exp: Math.floor(Date.now() / 1000) + 3600 })
+      ).toString('base64url');
 
-      mockWorkos.userManagement.getUser.mockRejectedValue(new Error('User not found'));
+      expect(await WorkOSService.verifyToken(`${header}.${payload}.`)).toBeNull();
+      expect(await WorkOSService.verifyToken(`${header}.${payload}.x`)).toBeNull();
+    });
 
-      const result = await WorkOSService.verifyToken(mockToken);
+    it('rejects a token signed with a key that is not in the JWKS', async () => {
+      const token = await sign({ sub: 'user_123' }, { key: otherPrivateKey });
 
-      expect(result).toBeNull();
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+    });
+
+    it('rejects a token whose payload was edited after signing', async () => {
+      const token = await sign({ sub: 'user_123' });
+      const [h, , sig] = token.split('.');
+      const tampered = Buffer.from(
+        JSON.stringify({ sub: 'user_admin', iss: 'https://api.workos.com', exp: Math.floor(Date.now() / 1000) + 3600 })
+      ).toString('base64url');
+
+      expect(await WorkOSService.verifyToken(`${h}.${tampered}.${sig}`)).toBeNull();
+    });
+
+    it('rejects an expired token', async () => {
+      const token = await sign({ sub: 'user_123' }, { exp: Math.floor(Date.now() / 1000) - 120 });
+
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+    });
+
+    it('rejects a token with no exp claim', async () => {
+      const token = await sign({ sub: 'user_123' }, { exp: null });
+
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+    });
+
+    it('rejects a token with no sub claim', async () => {
+      const token = await sign({});
+
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+    });
+
+    it('rejects an HMAC-signed token (algorithm downgrade) without consulting the JWKS', async () => {
+      const secret = new TextEncoder().encode('not-the-workos-key');
+      const token = await new SignJWT({ sub: 'user_123' })
+        .setProtectedHeader({ alg: 'HS256', kid: 'test-key' })
+        .setIssuer('https://api.workos.com')
+        .setExpirationTime('10m')
+        .sign(secret);
+
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+      expect(mockGetWorkOSJwks).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token from a different issuer', async () => {
+      const token = await sign({ sub: 'user_123' }, { issuer: 'https://evil.example.com' });
+
+      expect(await WorkOSService.verifyToken(token)).toBeNull();
+    });
+
+    it('returns null for garbage input', async () => {
+      expect(await WorkOSService.verifyToken('invalid-token')).toBeNull();
+      expect(await WorkOSService.verifyToken('')).toBeNull();
+    });
+
+    it('throws ServiceUnavailableError when the JWKS cannot be fetched', async () => {
+      mockGetWorkOSJwks.mockReturnValue(async () => {
+        throw new joseErrors.JWKSTimeout();
+      });
+      const token = await sign({ sub: 'user_123' });
+
+      await expect(WorkOSService.verifyToken(token)).rejects.toMatchObject({ statusCode: 503 });
+    });
+
+    it('throws ServiceUnavailableError on a network error fetching the JWKS', async () => {
+      mockGetWorkOSJwks.mockReturnValue(async () => {
+        throw new TypeError('fetch failed');
+      });
+      const token = await sign({ sub: 'user_123' });
+
+      await expect(WorkOSService.verifyToken(token)).rejects.toMatchObject({ statusCode: 503 });
     });
   });
 });
