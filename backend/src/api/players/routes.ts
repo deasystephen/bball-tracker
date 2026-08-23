@@ -14,6 +14,7 @@ import {
   BadRequestError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
 } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { logger } from '../../utils/logger';
@@ -25,7 +26,8 @@ router.use(authenticate);
 
 /**
  * POST /api/v1/players
- * Create a new player
+ * Create a new player account for an email. ADMIN or roster-managing staff
+ * only (403 otherwise); 409 if the email is taken concurrently.
  */
 router.post('/', async (req, res) => {
   try {
@@ -37,10 +39,10 @@ router.post('/', async (req, res) => {
       );
     }
 
-    const player = await PlayerService.createPlayer(
-      validationResult.data,
-      req.user!.id
-    );
+    const player = await PlayerService.createPlayer(validationResult.data, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
 
     res.status(201).json({
       success: true,
@@ -51,7 +53,8 @@ router.post('/', async (req, res) => {
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
-      error instanceof ForbiddenError
+      error instanceof ForbiddenError ||
+      error instanceof ConflictError
     ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
@@ -149,7 +152,8 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
-      error instanceof ForbiddenError
+      error instanceof ForbiddenError ||
+      error instanceof ConflictError
     ) {
       res.status(error.statusCode).json({ error: error.message });
     } else {

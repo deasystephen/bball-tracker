@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ServiceUnavailableError } from '../../utils/errors';
+import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
 import { updateRoleSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
@@ -247,6 +247,7 @@ router.get('/callback', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        profilePictureUrl: user.profilePictureUrl,
       },
       accessToken, // Mobile app will store this securely
       // Short-lived access token + rotating refresh token. Without the refresh
@@ -257,6 +258,10 @@ router.get('/callback', async (req, res) => {
     logger.error('Error in auth callback', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: error.message });
+    } else if (error instanceof ConflictError) {
+      // Email already bound to another login — an expected (if rare) outcome,
+      // not a defect; the user needs support, not a Sentry issue.
+      res.status(409).json({ error: error.message });
     } else {
       // Unexpected failure (e.g. DB/WorkOS outage) — report to Sentry so we're
       // alerted instead of only finding it in CloudWatch logs after a user hits it.

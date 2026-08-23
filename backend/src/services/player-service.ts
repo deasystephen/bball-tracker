@@ -13,6 +13,7 @@ import {
   NotFoundError,
   BadRequestError,
   ForbiddenError,
+  ConflictError,
 } from '../utils/errors';
 
 const PLAYER_SELECT = {
@@ -113,11 +114,21 @@ export interface PlayerList {
 
 export class PlayerService {
   /**
-   * Create a new player
+   * Create a new (not yet signed-up) player account for an email address.
+   *
+   * Pre-creating a row binds that email to a User that `syncUser` will claim
+   * on first sign-in, so this is restricted to system ADMINs and to staff who
+   * manage a roster somewhere (team staff with `canManageRoster`, league
+   * admins) — the "create & invite" flow (audit #2). Roster-only players
+   * without an email go through `POST /teams/:id/managed-players`.
    * @param data Player creation data
-   * @param _userId ID of the user creating the player (for authorization - reserved for future use)
+   * @param caller The authenticated user
    */
-  static async createPlayer(data: CreatePlayerInput, _userId: string): Promise<Player> {
+  static async createPlayer(data: CreatePlayerInput, caller: PlayerCaller): Promise<Player> {
+    if (caller.role !== 'ADMIN' && !(await PlayerService.isRosterManager(caller.id))) {
+      throw new ForbiddenError('Only administrators and team staff who manage a roster can create players');
+    }
+
     // Check if user with this email already exists
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },
@@ -127,19 +138,41 @@ export class PlayerService {
       throw new BadRequestError('A user with this email already exists');
     }
 
-    // Create the player (as a User with role PLAYER)
-    const player = await prisma.user.create({
-      data: {
-        email: data.email,
-        name: data.name,
-        role: 'PLAYER',
-        profilePictureUrl: data.profilePictureUrl || null,
-        emailVerified: false, // Will be verified through WorkOS when they sign up
-      },
-      select: PLAYER_SELECT,
-    });
+    try {
+      // Create the player (as a User with role PLAYER)
+      return await prisma.user.create({
+        data: {
+          email: data.email,
+          name: data.name,
+          role: 'PLAYER',
+          profilePictureUrl: data.profilePictureUrl || null,
+          emailVerified: false, // Will be verified through WorkOS when they sign up
+        },
+        select: PLAYER_SELECT,
+      });
+    } catch (error) {
+      throw PlayerService.mapUniqueViolation(error);
+    }
+  }
 
-    return player;
+  /** True when the user is staff with `canManageRoster` on any team, or a league admin. */
+  private static async isRosterManager(userId: string): Promise<boolean> {
+    const [staff, leagueAdmin] = await Promise.all([
+      prisma.teamStaff.findFirst({
+        where: { userId, role: { canManageRoster: true } },
+        select: { id: true },
+      }),
+      prisma.leagueAdmin.findFirst({ where: { userId }, select: { id: true } }),
+    ]);
+    return Boolean(staff || leagueAdmin);
+  }
+
+  /** Convert a Prisma unique-constraint violation on `email` into a 409. */
+  private static mapUniqueViolation(error: unknown): unknown {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return new ConflictError('A user with this email already exists');
+    }
+    return error;
   }
 
   /**
@@ -288,6 +321,19 @@ export class PlayerService {
 
     // Check if email is being changed and if it's already taken
     if (data.email && data.email !== player.email) {
+      // Email is the login identity: it is bound to WorkOS by `syncUser`, so
+      // rewriting it can pre-bind someone else's future sign-up to this row
+      // (audit #2). Only admins may change it, plus the managing coach of a
+      // managed player that has not been claimed by a real login yet.
+      const unclaimedManaged = isManagedByUser && player.workosUserId === null;
+      if (currentUser.role !== 'ADMIN' && !unclaimedManaged) {
+        throw new ForbiddenError(
+          playerId === userId
+            ? 'Your email is managed by your login provider and cannot be changed here'
+            : 'You cannot change the email of a player who has signed in'
+        );
+      }
+
       const existingUser = await prisma.user.findUnique({
         where: { email: data.email },
       });
@@ -297,20 +343,21 @@ export class PlayerService {
       }
     }
 
-    // Update player
-    const updatedPlayer = await prisma.user.update({
-      where: { id: playerId },
-      data: {
-        ...(data.name && { name: data.name }),
-        ...(data.email && { email: data.email }),
-        ...(data.profilePictureUrl !== undefined && {
-          profilePictureUrl: data.profilePictureUrl || null,
-        }),
-      },
-      select: PLAYER_SELECT,
-    });
-
-    return updatedPlayer;
+    try {
+      return await prisma.user.update({
+        where: { id: playerId },
+        data: {
+          ...(data.name && { name: data.name }),
+          ...(data.email && data.email !== player.email && { email: data.email }),
+          ...(data.profilePictureUrl !== undefined && {
+            profilePictureUrl: data.profilePictureUrl || null,
+          }),
+        },
+        select: PLAYER_SELECT,
+      });
+    } catch (error) {
+      throw PlayerService.mapUniqueViolation(error);
+    }
   }
 
   /**
