@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build (v1.1.0; #22 or newer — cut from `main` ≥ `74549d3`, see revision history), Backend ECS task-def revision 223 (commit `71ec39d`, deployed 2026-08-20), SES `mail.capyhoops.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build (v1.2.0; #25 or newer — cut from `main` ≥ `74549d3`, see revision history), Backend ECS task-def revision 223 (commit `71ec39d`, deployed 2026-08-20), SES `mail.capyhoops.com`, Web — not deployed
 **Owner:** sdeasy
 
 Run-through guide for verifying v2.0 functionality end-to-end before declaring the release ready for general access. Check the `- [ ]` box for each pass, note Fail + reason in the Notes line. Tests are grouped by feature area; later sections often depend on test data created earlier (e.g., Games require a Team from D).
@@ -23,7 +23,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 ### P.1 — Build & environment verification
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  1. On iPhone, confirm the **latest** TestFlight build (v1.1.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.) **Do not test on #21 or older** — `@sentry/react-native` and several Expo SDK 55 native modules were bumped after #21, and OTA updates cannot carry native changes, so an older binary would not reflect `main`.
+  1. On iPhone, confirm the **latest** TestFlight build (v1.2.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.) **Do not test on #21 or older** — `@sentry/react-native` and several Expo SDK 55 native modules were bumped after #21, and OTA updates cannot carry native changes, so an older binary would not reflect `main`.
   2. From terminal: `curl -s https://api.capyhoops.com/health` → expect 200
   3. From terminal: `aws sesv2 get-email-identity --email-identity mail.capyhoops.com --region us-east-1 | jq '.VerifiedForSendingStatus'` → expect `true`
 - **Notes:** ___________
@@ -79,7 +79,8 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Logout if logged in
   2. Tap "Log In" → WorkOS → existing credentials
-- **Expected:** Skips onboarding, lands on home tab. Session persists across cold start.
+- **Expected:** Skips onboarding, lands on home tab. Session persists across cold start (force-quit and relaunch → still on home tab, no login screen). On a 1.2.0+ build the tokens are read back from the Keychain (`expo-secure-store`, audit #52), not AsyncStorage.
+- **Upgrade path (audit #52):** install build #24 (1.1.0) signed in, then install build #25+ (1.2.0) over it without signing out → first launch lands on the home tab still signed in (the legacy AsyncStorage tokens are migrated into the Keychain, not lost). Logout afterwards → relaunch shows the login screen (keychain entries wiped).
 - **Regression checks (fixed since v1 of this plan):**
   - The WorkOS redirect `bball-tracker://auth/callback?code=…` must resolve to the callback screen — **not** an Expo Router "Unmatched Route" page (fixed in #213 via `app/auth/callback.tsx`).
   - The callback screen must not hang or crash with "Maximum update depth exceeded" (Zustand v5 `useShallow` fix, #218).
@@ -1078,3 +1079,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-06-14: accuracy pass — pdfkit note → 0.19.1, invitation-service catch line → :171.
 - 2026-06-20: de-pinned the Mobile build reference — was "TestFlight #17", now "latest TestFlight build" (iOS build numbers are auto-incremented remotely by EAS and not tracked in-repo, so the `#17` pin went stale as newer builds shipped). Marketing version is still v1.0.0.
 - 2026-08-20: pre-testing refresh. Marketing version → v1.1.0 (bumped for build #19/#21 in June). Backend target → ECS rev 223 / `71ec39d` (auto-deployed by CI on every backend-touching merge; verified `GET /health` → `{"status":"ok","db":"ok"}`). A.2 gained regression checks for the auth/callback route (#213) and Zustand render-loop (#218) fixes that shipped after v1. Since #21 only dependency bumps have landed in `mobile/` (~40 daily patch-bump PRs, incl. `@sentry/react-native` 8.15→8.23 and Expo SDK 55 point releases) — a fresh native build (#22+) is required before running this plan. Known-broken items S.1–S.8, S.10 re-verified as still open (#139, #114, #113, #34, #49, #48).
+- 2026-08-23: audit #52 — session tokens moved to `expo-secure-store` (native). Marketing version → v1.2.0 (runtimeVersion policy `appVersion`: OTAs now target 1.2.0 builds only; build #24 stays on its last 1.1.0 OTA). A.2 gained the cold-start persistence check and the #24→#25 upgrade-migration check. Build #25+ required for A.2.

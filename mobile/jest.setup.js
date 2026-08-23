@@ -208,6 +208,33 @@ jest.mock('react-native-svg', () => {
   };
 });
 
+// Mock the ExpoSecureStore native module (see services/secure-storage.ts,
+// which probes it via `requireOptionalNativeModule` instead of importing the
+// expo-secure-store wrapper). Backed by an in-memory map so the split
+// adapter can be exercised end to end; `global.mockSecureStore` exposes it to
+// tests, and mocking `requireOptionalNativeModule` to return null simulates a
+// binary without the native module (old build).
+global.mockSecureStore = (() => {
+  const store = new Map();
+  return {
+    AFTER_FIRST_UNLOCK: 1,
+    getValueWithKeyAsync: jest.fn(async (key) => (store.has(key) ? store.get(key) : null)),
+    setValueWithKeyAsync: jest.fn(async (value, key) => {
+      store.set(key, value);
+    }),
+    deleteValueWithKeyAsync: jest.fn(async (key) => {
+      store.delete(key);
+    }),
+    __reset: () => store.clear(),
+  };
+})();
+jest.mock('expo', () => ({
+  ...jest.requireActual('expo'),
+  requireOptionalNativeModule: jest.fn((name) =>
+    name === 'ExpoSecureStore' ? global.mockSecureStore : null
+  ),
+}));
+
 // Mock expo-splash-screen
 jest.mock('expo-splash-screen', () => ({
   preventAutoHideAsync: jest.fn(),

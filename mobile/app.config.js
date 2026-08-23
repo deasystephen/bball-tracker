@@ -16,7 +16,10 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Basketball Tracker' : `Basketball Tracker (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    version: '1.1.0',
+    // 1.2.0 = first binary with expo-secure-store (audit #52). runtimeVersion
+    // policy is appVersion, so OTAs published from here on target 1.2.0
+    // builds only; build #24 stays on the last 1.1.0 OTA.
+    version: '1.2.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -63,6 +66,7 @@ export default {
       'expo-router',
       'expo-localization',
       'expo-font',
+      'expo-secure-store',
     ],
     extra: {
       apiUrl: getApiUrl(),
