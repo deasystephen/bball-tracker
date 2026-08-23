@@ -2,8 +2,9 @@
  * Unit tests for GameEventService
  */
 
-import { GameEventService } from '../../src/services/game-event-service';
+import { GameEventService, computeHomeScore } from '../../src/services/game-event-service';
 import { StatsService } from '../../src/services/stats-service';
+import { emitGameEvent, emitGameEventRemoved } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
 import {
   createGame,
@@ -18,6 +19,14 @@ import {
   createTeamStaff,
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
+
+jest.mock('../../src/websocket/emit', () => ({
+  emitGameEvent: jest.fn(),
+  emitGameEventRemoved: jest.fn(),
+}));
+
+const mockEmitGameEvent = emitGameEvent as jest.Mock;
+const mockEmitGameEventRemoved = emitGameEventRemoved as jest.Mock;
 
 describe('GameEventService', () => {
   let finalizeSpy: jest.SpyInstance;
@@ -164,6 +173,10 @@ describe('GameEventService', () => {
         ...event,
         player: { id: player.id, name: player.name },
       });
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        { eventType: 'SHOT', metadata: { made: true, points: 2 } },
+      ]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 2, awayScore: 0 });
 
       const result = await GameEventService.createEvent(
         game.id,
@@ -171,8 +184,74 @@ describe('GameEventService', () => {
         coach.id
       );
 
-      expect(result).toHaveProperty('id', event.id);
-      expect(result).toHaveProperty('eventType', 'SHOT');
+      expect(result.event).toHaveProperty('id', event.id);
+      expect(result.event).toHaveProperty('eventType', 'SHOT');
+      expect(result.score).toEqual({ homeScore: 2, awayScore: 0 });
+    });
+
+    it('should recompute and persist homeScore from SHOT events inside a transaction (audit #6, #8)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const player = createPlayer();
+      // Stale client-written score: the server must not trust it.
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS', homeScore: 1, awayScore: 7 });
+      const event = createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [{ playerId: player.id }] },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({ ...event, player: null });
+      // 101 prior made 2s + the new made 3 — more than the client's 100-event page.
+      const priorShots = Array.from({ length: 101 }, () => ({
+        eventType: 'SHOT',
+        metadata: { made: true, points: 2 },
+      }));
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        ...priorShots,
+        { eventType: 'SHOT', metadata: { made: true, points: 3 } },
+        { eventType: 'SHOT', metadata: { made: false, points: 3 } },
+      ]);
+      (mockPrisma.game.update as jest.Mock).mockImplementation(
+        async (args: { data: { homeScore: number } }) => ({
+          homeScore: args.data.homeScore,
+          awayScore: 7,
+        })
+      );
+
+      const result = await GameEventService.createEvent(
+        game.id,
+        { playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 3 } },
+        coach.id
+      );
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      // Row lock before reading the log
+      const lockSql = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0].join('?');
+      expect(lockSql).toContain('FOR UPDATE');
+      expect(mockPrisma.gameEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { gameId: game.id, eventType: 'SHOT' } })
+      );
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: game.id }, data: { homeScore: 205 } })
+      );
+      expect(result.score).toEqual({ homeScore: 205, awayScore: 7 });
+      // Broadcast carries the post-insert score, not the stale row
+      expect(mockEmitGameEvent).toHaveBeenCalledWith(game.id, {
+        event: { ...event, player: null },
+        score: { homeScore: 205, awayScore: 7 },
+      });
     });
 
     it('should throw NotFoundError if game does not exist', async () => {
@@ -248,10 +327,18 @@ describe('GameEventService', () => {
         coach.id
       );
 
-      expect(result).toHaveProperty('id', event.id);
+      expect(result.event).toHaveProperty('id', event.id);
       const createArgs = (mockPrisma.gameEvent.create as jest.Mock).mock.calls[0][0];
       expect(createArgs.data.playerId).toBeNull();
       expect(createArgs.data.timestamp).toBeInstanceOf(Date);
+      // Non-SHOT events don't touch the score, so no transaction/recompute
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+      expect(result.score).toEqual({ homeScore: game.homeScore, awayScore: game.awayScore });
+      expect(mockEmitGameEvent).toHaveBeenCalledWith(game.id, {
+        event: { ...event, player: null },
+        score: { homeScore: game.homeScore, awayScore: game.awayScore },
+      });
     });
 
     it('should default timestamp to now when omitted', async () => {
@@ -571,10 +658,57 @@ describe('GameEventService', () => {
       });
       (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
       (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        { eventType: 'SHOT', metadata: { made: true, points: 3 } },
+      ]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 3, awayScore: 5 });
 
       const result = await GameEventService.deleteEvent(game.id, event.id, coach.id);
 
-      expect(result).toEqual({ success: true });
+      expect(result).toEqual({ success: true, score: { homeScore: 3, awayScore: 5 } });
+      // SHOT removal recomputes the score in a transaction and broadcasts it (audit #8)
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.gameEvent.delete).toHaveBeenCalledWith({ where: { id: event.id } });
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: game.id }, data: { homeScore: 3 } })
+      );
+      expect(mockEmitGameEventRemoved).toHaveBeenCalledWith(game.id, {
+        gameId: game.id,
+        eventId: event.id,
+        score: { homeScore: 3, awayScore: 5 },
+      });
+    });
+
+    it('should delete a non-SHOT event without recomputing the score', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, homeScore: 12, awayScore: 9 });
+      const event = createGameEvent({ gameId: game.id, eventType: 'REBOUND' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ ...game, team: { ...team, members: [] } });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+
+      const result = await GameEventService.deleteEvent(game.id, event.id, coach.id);
+
+      expect(result).toEqual({ success: true, score: { homeScore: 12, awayScore: 9 } });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+      expect(mockEmitGameEventRemoved).toHaveBeenCalledWith(game.id, {
+        gameId: game.id,
+        eventId: event.id,
+        score: { homeScore: 12, awayScore: 9 },
+      });
     });
 
     it('should throw NotFoundError if event does not exist', async () => {
@@ -667,6 +801,26 @@ describe('GameEventService', () => {
         GameEventService.deleteEvent(game.id, event.id, coach.id)
       ).rejects.toMatchObject({ statusCode: 404, message: 'Game event not found' });
       expect(mockPrisma.gameEvent.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('computeHomeScore', () => {
+    it('sums made shots using points (default 2) and ignores misses and non-shots', () => {
+      expect(
+        computeHomeScore([
+          { eventType: 'SHOT', metadata: { made: true, points: 3 } },
+          { eventType: 'SHOT', metadata: { made: true, points: 2 } },
+          { eventType: 'SHOT', metadata: { made: true, points: 1 } },
+          { eventType: 'SHOT', metadata: { made: true } },
+          { eventType: 'SHOT', metadata: { made: false, points: 3 } },
+          { eventType: 'REBOUND', metadata: { type: 'defensive' } },
+          { eventType: 'SHOT', metadata: null },
+        ])
+      ).toBe(8);
+    });
+
+    it('returns 0 for an empty log', () => {
+      expect(computeHomeScore([])).toBe(0);
     });
   });
 });

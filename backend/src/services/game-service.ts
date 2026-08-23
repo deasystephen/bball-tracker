@@ -9,7 +9,8 @@ import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors'
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
-import { emitGameStatusChange } from '../websocket/emit';
+import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
+import { computeHomeScore } from './game-event-service';
 
 const GAME_INCLUDE = {
   team: {
@@ -351,7 +352,16 @@ export class GameService {
     }
 
     if (data.homeScore !== undefined) {
-      updateData.homeScore = data.homeScore;
+      // The home score is derived from SHOT events (see GameEventService), so
+      // a client-supplied value is only honoured for a game with no shots on
+      // record (e.g. a final score entered for a game not tracked in-app).
+      // Otherwise the derived score is re-persisted, which also self-heals
+      // games saved with an undercounted score by older clients.
+      const shots = await prisma.gameEvent.findMany({
+        where: { gameId, eventType: 'SHOT' },
+        select: { eventType: true, metadata: true },
+      });
+      updateData.homeScore = shots.length === 0 ? data.homeScore : computeHomeScore(shots);
     }
 
     if (data.awayScore !== undefined) {
@@ -383,6 +393,21 @@ export class GameService {
         gameId,
         previousStatus: game.status,
         status: updatedGame.status,
+        score: {
+          homeScore: updatedGame.homeScore,
+          awayScore: updatedGame.awayScore,
+        },
+      });
+    }
+
+    // Broadcast score edits that don't come from an event (opponent points,
+    // manual corrections) so spectators don't lag behind the tracker.
+    if (
+      updatedGame.homeScore !== game.homeScore ||
+      updatedGame.awayScore !== game.awayScore
+    ) {
+      emitGameScoreChange(gameId, {
+        gameId,
         score: {
           homeScore: updatedGame.homeScore,
           awayScore: updatedGame.awayScore,

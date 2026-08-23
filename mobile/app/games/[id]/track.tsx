@@ -2,7 +2,7 @@
  * Live stat tracking screen
  */
 
-import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,20 +81,11 @@ export default function TrackGameScreen() {
     };
   }, [clearSession]);
 
-  // Calculate home score from events
-  const homeScore = useMemo(() => {
-    if (!events) return 0;
-
-    return events
-      .filter((e) => e.eventType === 'SHOT')
-      .reduce((sum, e) => {
-        const metadata = e.metadata as ShotMetadata;
-        if (metadata?.made) {
-          return sum + (metadata.points || 0);
-        }
-        return sum;
-      }, 0);
-  }, [events]);
+  // Home score is derived server-side from the full event log and returned by
+  // every event create/delete (see useCreateGameEvent), so the cached game
+  // detail is authoritative. Summing the 100-event page here undercounted
+  // long games (audit #6).
+  const homeScore = game?.homeScore ?? 0;
 
   // Handle opponent score changes
   const handleAddOpponentPoints = useCallback(
@@ -154,20 +145,12 @@ export default function TrackGameScreen() {
       recordEvent(eventData, selectedPlayerName || undefined);
 
       try {
-        // Create event on server
+        // Create event on server. The response carries the server-derived
+        // score, which the mutation writes into the game cache.
         await createEvent.mutateAsync({
           gameId: id,
           data: eventData,
         });
-
-        // Update home score on server if shot was made
-        if (made) {
-          const newHomeScore = homeScore + points;
-          await updateGame.mutateAsync({
-            gameId: id,
-            data: { homeScore: newHomeScore },
-          });
-        }
 
         // Set up undo timer
         const timerId = setTimeout(() => {
@@ -194,10 +177,8 @@ export default function TrackGameScreen() {
       selectedPlayerId,
       selectedPlayerName,
       id,
-      homeScore,
       recordEvent,
       createEvent,
-      updateGame,
       clearLastEvent,
       setUndoTimer,
       selectPlayer,
@@ -306,23 +287,12 @@ export default function TrackGameScreen() {
     if (events && events.length > 0) {
       const mostRecentEvent = events[0];
       try {
+        // The server recomputes the home score when a SHOT is removed and
+        // returns it; the mutation writes it into the game cache.
         await deleteEvent.mutateAsync({
           gameId: id,
           eventId: mostRecentEvent.id,
         });
-
-        // If undoing a made shot, update the home score
-        if (
-          mostRecentEvent.eventType === 'SHOT' &&
-          (mostRecentEvent.metadata as ShotMetadata)?.made
-        ) {
-          const points = (mostRecentEvent.metadata as ShotMetadata)?.points || 2;
-          const newHomeScore = Math.max(0, homeScore - points);
-          await updateGame.mutateAsync({
-            gameId: id,
-            data: { homeScore: newHomeScore },
-          });
-        }
 
         refetchEvents();
       } catch (error) {
@@ -332,7 +302,7 @@ export default function TrackGameScreen() {
         );
       }
     }
-  }, [undoLast, events, id, deleteEvent, homeScore, updateGame, refetchEvents]);
+  }, [undoLast, events, id, deleteEvent, refetchEvents]);
 
   // Handle end game
   const handleEndGame = useCallback(() => {
@@ -343,11 +313,11 @@ export default function TrackGameScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
+            // homeScore is server-derived; only the opponent score is ours.
             await updateGame.mutateAsync({
               gameId: id,
               data: {
                 status: 'FINISHED',
-                homeScore: homeScore,
                 awayScore: opponentScore,
               },
             });

@@ -128,13 +128,18 @@ Real-time game updates use Socket.io with an in-memory adapter. Single-replica
 only — see `backend/src/index.ts` for the multi-replica startup guard and
 issue #26 for the Redis adapter follow-up.
 
-| Direction       | Event                | Payload                                |
-| --------------- | -------------------- | -------------------------------------- |
-| client → server | `join-game`          | `{ gameId }` (ack with success/error)  |
-| client → server | `leave-game`         | `{ gameId }`                           |
-| server → client | `game-snapshot`      | `{ game, events }` (on join / rejoin)  |
-| server → client | `game-event`         | `GameEvent` (on persist)               |
-| server → client | `game-status-change` | `{ gameId, status }` (on transition)   |
+| Direction       | Event                | Payload                                                        |
+| --------------- | -------------------- | -------------------------------------------------------------- |
+| client → server | `join-game`          | `{ gameId }` (ack with success/error)                          |
+| client → server | `leave-game`         | `{ gameId }`                                                   |
+| server → client | `game-snapshot`      | `{ game, events }` (on join / rejoin)                          |
+| server → client | `game-event`         | `{ event, score }` (on persist; score is **post-insert**)      |
+| server → client | `game-event-removed` | `{ gameId, eventId, score }` (on delete/undo; post-delete score) |
+| server → client | `game-score-change`  | `{ gameId, score }` (on `PATCH /games/:id` score edits)        |
+| server → client | `game-status-change` | `{ gameId, previousStatus, status, score }` (on transition)    |
+
+`score` is always `{ homeScore, awayScore }`. Every broadcast carries the
+current score so a client can drop events and still converge.
 
 - Handshake auth: bearer token via `socket.handshake.auth.token` (or
   `Authorization` header). Checked once at connect; see `authenticateSocket`.
@@ -174,6 +179,24 @@ issue #26 for the Redis adapter follow-up.
   `20260822120000_team_stats_shooting_counts` backfilled existing rows from their `PlayerStats`.
 - Use the exported `shootingPercentage(made, attempted)` helper (1 decimal, `0` when nothing attempted)
   rather than inlining the rounding.
+
+### Game score (server-derived, audit #6/#8/#38)
+
+- `Game.homeScore` is **derived from the event log**: `GameEventService.createEvent`
+  / `deleteEvent` recompute it from made `SHOT` events (`metadata.points || 2`,
+  same rule as `StatsService`) inside the same Prisma transaction as the
+  insert/delete, after a `SELECT … FOR UPDATE` on the game row so concurrent
+  shots can't race to an undercount. Both endpoints return the post-change
+  `score` (`POST /games/:id/events` → `{ event, score }`,
+  `DELETE /games/:id/events/:eventId` → `{ success, score }`) and broadcast it.
+- `PATCH /games/:id { homeScore }` is honoured **only while the game has no
+  SHOT events** (score entered for a game not tracked in-app). Once shots
+  exist the client value is ignored and the derived score re-persisted (old
+  clients keep working; under-counted games self-heal on their next PATCH).
+  `awayScore` is always client-supplied (opponent points).
+- Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
+  renders `game.homeScore` from the detail cache, which
+  `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.
 
 ### Entitlements / Feature Gating
 

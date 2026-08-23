@@ -7,7 +7,7 @@ import { GameEventType, GameStatus, Prisma } from '@prisma/client';
 import { CreateGameEventInput, GameEventQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
-import { emitGameEvent } from '../websocket/emit';
+import { emitGameEvent, emitGameEventRemoved, GameScore } from '../websocket/emit';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 
@@ -32,6 +32,11 @@ const GAME_EVENT_INCLUDE = {
   },
 } satisfies Prisma.GameEventInclude;
 
+const GAME_SCORE_SELECT = {
+  homeScore: true,
+  awayScore: true,
+} satisfies Prisma.GameSelect;
+
 type GameForAccess = Prisma.GameGetPayload<{ include: typeof GAME_ACCESS_INCLUDE }>;
 
 export type GameEventWithPlayer = Prisma.GameEventGetPayload<{
@@ -45,10 +50,74 @@ export interface GameEventList {
   offset: number;
 }
 
+/** Result of creating an event: the persisted event plus the post-change score. */
+export interface CreateGameEventResult {
+  event: GameEventWithPlayer;
+  score: GameScore;
+}
+
+/** Result of deleting an event: the post-change score. */
+export interface DeleteGameEventResult {
+  success: true;
+  score: GameScore;
+}
+
 interface GameAccess {
   game: GameForAccess;
   canTrackStats: boolean;
   canManageTeam: boolean;
+}
+
+interface ShotMetadata {
+  made?: boolean;
+  points?: number;
+}
+
+/**
+ * Sum the home team's points from its SHOT events.
+ *
+ * Mirrors the scoring rule in `StatsService` (`points || 2`, counted only when
+ * `made`). Non-SHOT events are ignored so callers may pass the full event log.
+ */
+export function computeHomeScore(
+  events: ReadonlyArray<{ eventType: GameEventType; metadata: Prisma.JsonValue }>
+): number {
+  let total = 0;
+  for (const event of events) {
+    if (event.eventType !== GameEventType.SHOT) continue;
+    const meta = (event.metadata ?? {}) as ShotMetadata;
+    if (meta.made) {
+      total += meta.points || 2;
+    }
+  }
+  return total;
+}
+
+/**
+ * Recompute and persist `homeScore` from the game's SHOT events.
+ *
+ * Must run inside an interactive transaction: the game row is locked with
+ * `FOR UPDATE` so two concurrent shot writes can't both read a log that's
+ * missing the other's insert and race to persist an undercounted score.
+ */
+export async function recomputeHomeScore(
+  tx: Prisma.TransactionClient,
+  gameId: string
+): Promise<GameScore> {
+  await tx.$queryRaw`SELECT "id" FROM "Game" WHERE "id" = ${gameId} FOR UPDATE`;
+
+  const shots = await tx.gameEvent.findMany({
+    where: { gameId, eventType: GameEventType.SHOT },
+    select: { eventType: true, metadata: true },
+  });
+
+  const homeScore = computeHomeScore(shots);
+
+  return tx.game.update({
+    where: { id: gameId },
+    data: { homeScore },
+    select: GAME_SCORE_SELECT,
+  });
 }
 
 export class GameEventService {
@@ -95,6 +164,11 @@ export class GameEventService {
 
   /**
    * Create a new game event
+   *
+   * SHOT events change the home score, which is derived server-side from the
+   * event log inside the same transaction as the insert (the client never
+   * supplies it). The returned/broadcast `score` is the post-insert value.
+   *
    * @param gameId Game ID
    * @param data Event creation data
    * @param userId ID of the user creating the event (must have canTrackStats permission)
@@ -103,7 +177,7 @@ export class GameEventService {
     gameId: string,
     data: CreateGameEventInput,
     userId: string
-  ): Promise<GameEventWithPlayer> {
+  ): Promise<CreateGameEventResult> {
     const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to create events
@@ -128,27 +202,39 @@ export class GameEventService {
         : data.timestamp
       : new Date();
 
-    const event = await prisma.gameEvent.create({
-      data: {
-        gameId,
-        playerId: data.playerId || null,
-        eventType: data.eventType,
-        timestamp,
-        metadata: (data.metadata || {}) as Prisma.InputJsonValue,
-      },
-      include: GAME_EVENT_INCLUDE,
-    });
+    const createData: Prisma.GameEventUncheckedCreateInput = {
+      gameId,
+      playerId: data.playerId || null,
+      eventType: data.eventType,
+      timestamp,
+      metadata: (data.metadata || {}) as Prisma.InputJsonValue,
+    };
+
+    const result: CreateGameEventResult =
+      data.eventType === GameEventType.SHOT
+        ? await prisma.$transaction(async (tx) => {
+            const event = await tx.gameEvent.create({
+              data: createData,
+              include: GAME_EVENT_INCLUDE,
+            });
+            const score = await recomputeHomeScore(tx, gameId);
+            return { event, score };
+          })
+        : {
+            event: await prisma.gameEvent.create({
+              data: createData,
+              include: GAME_EVENT_INCLUDE,
+            }),
+            score: { homeScore: game.homeScore, awayScore: game.awayScore },
+          };
 
     // Broadcast to spectators in the game room. `emitGameEvent` no-ops if
     // Socket.io isn't initialized (e.g., in tests or CLI scripts).
-    emitGameEvent(gameId, {
-      event,
-      score: { homeScore: game.homeScore, awayScore: game.awayScore },
-    });
+    emitGameEvent(gameId, result);
 
     await this.syncFinalizedStats(game);
 
-    return event;
+    return result;
   }
 
   /**
@@ -228,6 +314,10 @@ export class GameEventService {
 
   /**
    * Delete a game event
+   *
+   * Deleting a SHOT recomputes `homeScore` inside the same transaction. The
+   * removal (with the post-delete score) is broadcast as `game-event-removed`.
+   *
    * @param gameId Game ID
    * @param eventId Event ID
    * @param userId User ID (must have canTrackStats permission)
@@ -236,7 +326,7 @@ export class GameEventService {
     gameId: string,
     eventId: string,
     userId: string
-  ): Promise<{ success: true }> {
+  ): Promise<DeleteGameEventResult> {
     const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to delete events (for undo functionality)
@@ -256,12 +346,21 @@ export class GameEventService {
       throw new NotFoundError('Game event not found');
     }
 
-    await prisma.gameEvent.delete({
-      where: { id: eventId },
-    });
+    let score: GameScore;
+    if (event.eventType === GameEventType.SHOT) {
+      score = await prisma.$transaction(async (tx) => {
+        await tx.gameEvent.delete({ where: { id: eventId } });
+        return recomputeHomeScore(tx, gameId);
+      });
+    } else {
+      await prisma.gameEvent.delete({ where: { id: eventId } });
+      score = { homeScore: game.homeScore, awayScore: game.awayScore };
+    }
+
+    emitGameEventRemoved(gameId, { gameId, eventId, score });
 
     await this.syncFinalizedStats(game);
 
-    return { success: true };
+    return { success: true, score };
   }
 }

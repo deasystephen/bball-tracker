@@ -495,8 +495,12 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### H.2 — Live event arrives within ~1s of recording
 - [ ] Pass / Fail / Skipped
-- **Steps:** With H.1 connected, coach records a 2-pt on the tracking screen.
-- **Expected:** Spectator's score increments AND new event appears at top of timeline within ~1s.
+- **Steps:** With H.1 connected, coach records a made 3-pt on the tracking screen; then taps **+2** for the opponent; then records a made 2-pt and taps **UNDO** within 5s.
+- **Expected:**
+  - Made 3: spectator's home score goes 0→3 **and** the event appears at the top of the timeline within ~1s (the `game-event` payload carries the post-insert score — no one-play lag).
+  - Opponent +2: spectator's away score goes 0→2 within ~1s (`game-score-change`).
+  - Undo: the undone 2-pt disappears from the spectator timeline and home score returns to 3 (`game-event-removed`).
+  - Tracker header and spectator show the same score throughout; the tracker sends no `homeScore` PATCH (server-derived, audit #6/#8).
 - **Notes:** ___________
 
 ### H.3 — Snapshot cap of 100 most recent events on join

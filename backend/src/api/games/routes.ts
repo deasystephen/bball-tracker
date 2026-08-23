@@ -288,7 +288,7 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
       );
     }
 
-    const event = await GameEventService.createEvent(
+    const { event, score } = await GameEventService.createEvent(
       req.params.gameId as string,
       validationResult.data,
       req.user!.id
@@ -297,6 +297,7 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
     res.status(201).json({
       success: true,
       event,
+      score,
     });
   } catch (error) {
     logger.error('Error creating game event', { error: error instanceof Error ? error.message : String(error) });
@@ -386,7 +387,7 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
  */
 router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), async (req, res) => {
   try {
-    await GameEventService.deleteEvent(
+    const { score } = await GameEventService.deleteEvent(
       req.params.gameId as string,
       req.params.eventId as string,
       req.user!.id
@@ -395,6 +396,7 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
     res.json({
       success: true,
       message: 'Game event deleted successfully',
+      score,
     });
   } catch (error) {
     logger.error('Error deleting game event', { error: error instanceof Error ? error.message : String(error) });

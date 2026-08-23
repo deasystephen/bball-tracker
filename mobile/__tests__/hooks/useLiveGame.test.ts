@@ -195,6 +195,61 @@ describe('useLiveGame', () => {
     expect(result.current.score).toEqual({ homeScore: 2, awayScore: 0 });
   });
 
+  it('removes the event and applies the post-delete score on game-event-removed', () => {
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    act(() => {
+      mockSocket.fire('game-snapshot', {
+        game: {
+          id: 'g1',
+          teamId: 't1',
+          opponent: 'Rivals',
+          date: '2026-05-16T10:00:00Z',
+          status: 'IN_PROGRESS',
+          homeScore: 4,
+          awayScore: 0,
+        },
+        events: [makeEvent('e1'), makeEvent('e2')],
+      });
+    });
+
+    act(() => {
+      mockSocket.fire('game-event-removed', {
+        gameId: 'g1',
+        eventId: 'e2',
+        score: { homeScore: 2, awayScore: 0 },
+      });
+    });
+
+    expect(result.current.score).toEqual({ homeScore: 2, awayScore: 0 });
+    expect(result.current.events.map((e) => e.id)).toEqual(['e1']);
+  });
+
+  it('applies game-score-change and ignores other games', () => {
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    act(() => {
+      mockSocket.fire('game-score-change', {
+        gameId: 'g1',
+        score: { homeScore: 6, awayScore: 9 },
+      });
+    });
+    expect(result.current.score).toEqual({ homeScore: 6, awayScore: 9 });
+
+    act(() => {
+      mockSocket.fire('game-score-change', {
+        gameId: 'other',
+        score: { homeScore: 0, awayScore: 0 },
+      });
+      mockSocket.fire('game-event-removed', {
+        gameId: 'other',
+        eventId: 'x',
+        score: { homeScore: 0, awayScore: 0 },
+      });
+    });
+    expect(result.current.score).toEqual({ homeScore: 6, awayScore: 9 });
+  });
+
   it('applies game-status-change', () => {
     const { result } = renderHook(() => useLiveGame('g1'));
 
