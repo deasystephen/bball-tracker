@@ -2,6 +2,10 @@
  * Unit tests for PlayerService
  */
 
+jest.mock('../../src/services/upload-service', () => ({
+  deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
+}));
+
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { ConflictError } from '../../src/utils/errors';
@@ -17,6 +21,10 @@ import {
   createGameEvent,
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
+
+import { deletePreviousAvatar } from '../../src/services/upload-service';
+
+const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typeof deletePreviousAvatar>;
 
 const ADMIN_CALLER = { id: 'admin-caller', role: 'ADMIN' };
 const COACH_CALLER = { id: 'coach-caller', role: 'COACH' };
@@ -408,6 +416,33 @@ describe('PlayerService', () => {
   });
 
   describe('updatePlayer', () => {
+    it('deletes the replaced avatar object after a profilePictureUrl change (audit #61)', async () => {
+      const oldUrl = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/p/old.jpg';
+      const newUrl = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/p/new.jpg';
+      const player = createPlayer({ profilePictureUrl: oldUrl });
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(player);
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...player, profilePictureUrl: newUrl });
+
+      await PlayerService.updatePlayer(player.id, { profilePictureUrl: newUrl }, player.id);
+
+      expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(oldUrl, newUrl);
+    });
+
+    it('does not touch S3 when profilePictureUrl is not part of the update', async () => {
+      const player = createPlayer({ name: 'Old Name' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(player);
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...player, name: 'New' });
+
+      await PlayerService.updatePlayer(player.id, { name: 'New' }, player.id);
+
+      expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+    });
+
     it('should update player name (admin updating another player)', async () => {
       const player = createPlayer({ name: 'Old Name' });
       const adminUser = createAdmin();

@@ -37,8 +37,28 @@ resource "aws_s3_bucket_cors_configuration" "avatars" {
 
   cors_rule {
     allowed_headers = ["*"]
-    allowed_methods = ["PUT", "GET"]
+    allowed_methods = ["POST", "PUT", "GET"]
     allowed_origins = ["*"]
     max_age_seconds = 3600
+  }
+}
+
+# Avatars are uploaded with presigned POST policies (size-capped). Incomplete
+# multipart uploads are the one class of orphan S3 can expire on its own; the
+# previous avatar object is deleted by the API when a user replaces it.
+resource "aws_s3_bucket_lifecycle_configuration" "avatars" {
+  bucket = aws_s3_bucket.avatars.id
+
+  rule {
+    id     = "abort-incomplete-avatar-uploads"
+    status = "Enabled"
+
+    filter {
+      prefix = "avatars/"
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
   }
 }

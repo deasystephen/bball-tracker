@@ -15,6 +15,7 @@ import {
   ForbiddenError,
   ConflictError,
 } from '../utils/errors';
+import { deletePreviousAvatar } from './upload-service';
 
 const PLAYER_SELECT = {
   id: true,
@@ -343,8 +344,9 @@ export class PlayerService {
       }
     }
 
+    let updatedPlayer: Player;
     try {
-      return await prisma.user.update({
+      updatedPlayer = await prisma.user.update({
         where: { id: playerId },
         data: {
           ...(data.name && { name: data.name }),
@@ -358,6 +360,12 @@ export class PlayerService {
     } catch (error) {
       throw PlayerService.mapUniqueViolation(error);
     }
+
+    if (data.profilePictureUrl !== undefined) {
+      await deletePreviousAvatar(player.profilePictureUrl, updatedPlayer.profilePictureUrl);
+    }
+
+    return updatedPlayer;
   }
 
   /**

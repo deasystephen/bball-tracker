@@ -360,6 +360,25 @@ describe('Auth API', () => {
       expect(mockWorkOSService.refreshSession).not.toHaveBeenCalled();
     });
 
+    it('is not throttled per IP: many devices behind one NAT can each refresh', async () => {
+      // The old auth limiter allowed 20 req / 15 min per IP. Every device sends
+      // its own refresh token, so 21 distinct tokens from one IP must all pass.
+      // (The 429 path is covered in tests/middleware/rate-limit.test.ts — looping
+      // 60+ times here would trip the general per-IP API limiter instead.)
+      mockWorkOSService.refreshSession.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'a',
+        refreshToken: 'r',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.refreshSession>>);
+
+      for (let i = 0; i < 21; i++) {
+        const response = await request(app)
+          .post('/api/v1/auth/refresh')
+          .send({ refreshToken: `device-${i}-token` });
+        expect(response.status).toBe(200);
+      }
+    });
+
     it('should return 401 (not 500) when WorkOS rejects the refresh token', async () => {
       mockWorkOSService.refreshSession.mockRejectedValue(new Error('invalid_grant'));
 

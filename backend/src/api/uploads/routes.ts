@@ -11,7 +11,8 @@ router.use(authenticate);
 
 /**
  * POST /api/v1/uploads/avatar-url
- * Generate a presigned S3 URL for avatar upload
+ * Generate a presigned S3 POST (url + form fields) for an avatar upload.
+ * The policy caps the object at MAX_AVATAR_BYTES and pins the content type.
  */
 router.post('/avatar-url', async (req, res) => {
   try {
@@ -22,10 +23,10 @@ router.post('/avatar-url', async (req, res) => {
       );
     }
 
-    const { contentType } = validationResult.data;
+    const { contentType, contentLength } = validationResult.data;
     const userId = req.user!.id;
 
-    const result = await generateAvatarUploadUrl(userId, contentType);
+    const result = await generateAvatarUploadUrl(userId, contentType, contentLength);
     res.json(result);
   } catch (error) {
     if (error instanceof BadRequestError) {

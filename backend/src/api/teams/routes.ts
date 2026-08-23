@@ -15,7 +15,7 @@ import {
   createAnnouncementSchema,
   announcementQuerySchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
@@ -53,8 +53,9 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
       );
     }
 
-    // The tier team cap is enforced ahead of this handler by the
-    // `requireTeamCreateLimit()` middleware (402 on denial; admins bypass).
+    // The tier team cap gets a cheap pre-check in `requireTeamCreateLimit()`
+    // (402 on denial; admins bypass) and is enforced authoritatively inside
+    // `TeamService.createTeam`'s transaction, which throws PaymentRequiredError.
     const team = await TeamService.createTeam(validationResult.data, req.user!.id);
 
     // A new team changes the user's metered counts — invalidate cached usage.
@@ -66,7 +67,9 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
     });
   } catch (error) {
     logger.error('Error creating team', { error: error instanceof Error ? error.message : String(error) });
-    if (
+    if (error instanceof PaymentRequiredError) {
+      res.status(error.statusCode).json({ code: 'upgrade_required', ...error.details });
+    } else if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
       error instanceof ForbiddenError

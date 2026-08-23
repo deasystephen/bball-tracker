@@ -7,7 +7,7 @@ import { WorkOSService } from '../../services/workos-service';
 import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
 import { updateRoleSchema, updateProfileSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
 import prisma from '../../models';
-import { authRateLimit } from '../middleware/rate-limit';
+import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
 import { authenticate } from './middleware';
@@ -21,13 +21,13 @@ const router = Router();
 // Apply stricter rate limiting to the credential-handling endpoints only.
 // Authenticated session endpoints (/me, /me/usage, /entitlements, /push-token)
 // are polled by the app on every foreground/tab visit; with a 20-req/15-min
-// IP budget a family on one NAT would be locked out, and since #349 the
-// client also calls /refresh whenever its access token expires. Those routes
-// fall under the general API limiter applied in index.ts.
-router.use(
-  ['/login', '/callback', '/refresh', '/debug', '/dev-users', '/dev-login'],
-  authRateLimit
-);
+// IP budget a family on one NAT would be locked out. Those routes fall under
+// the general API limiter applied in index.ts.
+router.use(['/login', '/callback', '/debug', '/dev-users', '/dev-login'], authRateLimit);
+
+// /refresh is hit by every device whenever its ~10-minute access token expires,
+// so it gets its own limiter keyed by refresh token (not IP) — see rate-limit.ts.
+router.use('/refresh', refreshRateLimit);
 
 /**
  * Development-only endpoints

@@ -12,7 +12,20 @@ import {
   TeamQueryParams,
   CreateManagedPlayerInput,
 } from '../api/teams/schemas';
-import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
+import {
+  NotFoundError,
+  BadRequestError,
+  ForbiddenError,
+  PaymentRequiredError,
+} from '../utils/errors';
+import {
+  Feature,
+  canCreateTeam,
+  featureCode,
+  getEffectiveTier,
+  getRequiredTier,
+  getUsageLimits,
+} from './entitlements';
 import {
   hasTeamPermission,
   getTeamPermissions,
@@ -172,27 +185,52 @@ export class TeamService {
     // For now, also allow any coach to create a team
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true },
+      select: { role: true, subscriptionTier: true, subscriptionExpiresAt: true },
     });
 
     if (!canCreate && user?.role !== 'COACH') {
       throw new ForbiddenError('You do not have permission to create teams in this league');
     }
 
-    // Create the team
-    const team = await prisma.team.create({
-      data: {
-        name: data.name,
-        seasonId: data.seasonId,
-        chatLink: data.chatLink,
-      },
+    // Team + default roles + Head Coach staff row are created atomically so a
+    // failure part-way can't leave an orphan team nobody can see or delete
+    // (audit #70). The FREE-tier cap is re-checked inside the same transaction
+    // behind a row lock on the user, so concurrent creates serialize and the
+    // check-then-act race in the route middleware can't exceed the cap
+    // (audit #49). Admins bypass; unlimited tiers skip the count.
+    const team = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+
+      if (user && user.role !== 'ADMIN') {
+        const tier = getEffectiveTier({
+          subscriptionTier: user.subscriptionTier ?? 'FREE',
+          subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+        });
+        if (getUsageLimits(tier).maxTeams !== Infinity) {
+          const teamCount = await tx.teamStaff.count({ where: { userId } });
+          if (!canCreateTeam(tier, teamCount)) {
+            throw new PaymentRequiredError({
+              feature: featureCode(Feature.UNLIMITED_TEAMS),
+              currentTier: tier,
+              requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
+            });
+          }
+        }
+      }
+
+      const created = await tx.team.create({
+        data: {
+          name: data.name,
+          seasonId: data.seasonId,
+          chatLink: data.chatLink,
+        },
+      });
+
+      await createDefaultTeamRoles(created.id, tx);
+      await assignTeamRole(created.id, userId, 'Head Coach', tx);
+
+      return created;
     });
-
-    // Create default roles for the team
-    await createDefaultTeamRoles(team.id);
-
-    // Assign the creating user as Head Coach
-    await assignTeamRole(team.id, userId, 'Head Coach');
 
     // Return the full team with relations
     return prisma.team.findUnique({

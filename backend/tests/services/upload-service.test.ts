@@ -1,25 +1,19 @@
 /**
  * Unit tests for upload-service
  *
- * Tests the S3 presigned URL generation and avatar deletion logic
- * with mocked AWS SDK clients.
+ * Covers the presigned POST policy (size cap + content-type pin), avatar
+ * deletion and best-effort cleanup of a replaced avatar, with mocked AWS SDK
+ * clients.
  */
 
-import type { PutObjectCommandInput, DeleteObjectCommandInput } from '@aws-sdk/client-s3';
+import type { DeleteObjectCommandInput } from '@aws-sdk/client-s3';
 
-// Capture constructor args since jest.mock replaces classes
-const putObjectCalls: PutObjectCommandInput[] = [];
 const deleteObjectCalls: DeleteObjectCommandInput[] = [];
+const mockSend = jest.fn().mockResolvedValue({});
 
 jest.mock('@aws-sdk/client-s3', () => {
   return {
-    S3Client: jest.fn().mockImplementation(() => ({
-      send: jest.fn().mockResolvedValue({}),
-    })),
-    PutObjectCommand: jest.fn().mockImplementation((input: PutObjectCommandInput) => {
-      putObjectCalls.push(input);
-      return { input };
-    }),
+    S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
     DeleteObjectCommand: jest.fn().mockImplementation((input: DeleteObjectCommandInput) => {
       deleteObjectCalls.push(input);
       return { input };
@@ -27,138 +21,159 @@ jest.mock('@aws-sdk/client-s3', () => {
   };
 });
 
-jest.mock('@aws-sdk/s3-request-presigner', () => ({
-  getSignedUrl: jest.fn().mockResolvedValue(
-    'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/presigned?X-Amz-Signature=abc'
-  ),
+jest.mock('@aws-sdk/s3-presigned-post', () => ({
+  createPresignedPost: jest.fn().mockResolvedValue({
+    url: 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/',
+    fields: { key: 'avatars/x', Policy: 'policy', 'X-Amz-Signature': 'sig' },
+  }),
 }));
 
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { generateAvatarUploadUrl, deleteAvatar } from '../../src/services/upload-service';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import {
+  generateAvatarUploadUrl,
+  deleteAvatar,
+  deletePreviousAvatar,
+  isManagedAvatarUrl,
+  MAX_AVATAR_BYTES,
+} from '../../src/services/upload-service';
 
-const mockGetSignedUrl = getSignedUrl as jest.MockedFunction<typeof getSignedUrl>;
+const mockCreatePresignedPost = createPresignedPost as jest.MockedFunction<typeof createPresignedPost>;
+
+const BUCKET_BASE = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/';
 
 describe('Upload Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    putObjectCalls.length = 0;
+    mockSend.mockResolvedValue({});
     deleteObjectCalls.length = 0;
   });
 
   describe('generateAvatarUploadUrl', () => {
     const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
-    it('should generate presigned URL for image/jpeg', async () => {
+    it('returns the POST url, policy fields and public image URL for image/jpeg', async () => {
       const result = await generateAvatarUploadUrl(userId, 'image/jpeg');
 
-      expect(result.uploadUrl).toBeDefined();
-      expect(result.imageUrl).toBeDefined();
-      expect(result.imageUrl).toContain(userId);
+      expect(result.uploadUrl).toBe('https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/');
+      expect(result.fields).toEqual(expect.objectContaining({ Policy: 'policy' }));
+      expect(result.imageUrl).toContain(`avatars/${userId}/`);
       expect(result.imageUrl).toMatch(/\.jpg$/);
     });
 
-    it('should generate presigned URL for image/png', async () => {
+    it('uses a .png key for image/png', async () => {
       const result = await generateAvatarUploadUrl(userId, 'image/png');
-
-      expect(result.uploadUrl).toBeDefined();
-      expect(result.imageUrl).toContain(userId);
       expect(result.imageUrl).toMatch(/\.png$/);
     });
 
-    it('should use avatars/ prefix in the S3 key', async () => {
-      const result = await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(result.imageUrl).toContain('avatars/');
-    });
-
-    it('should call getSignedUrl with 300s expiry', async () => {
-      await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(mockGetSignedUrl).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.objectContaining({ input: expect.any(Object) }),
-        { expiresIn: 300 }
-      );
-    });
-
-    it('should set correct ContentType in PutObjectCommand', async () => {
+    it('caps the object size and pins the content type in the policy', async () => {
       await generateAvatarUploadUrl(userId, 'image/png');
 
-      expect(putObjectCalls).toHaveLength(1);
-      expect(putObjectCalls[0].ContentType).toBe('image/png');
-    });
-
-    it('should set correct bucket name in PutObjectCommand', async () => {
-      await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(putObjectCalls[0].Bucket).toBe('bball-tracker-avatars-dev');
-    });
-
-    it('should include user ID in the S3 key path', async () => {
-      await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(putObjectCalls[0].Key).toContain(`avatars/${userId}/`);
-    });
-
-    it('should generate unique keys for each call', async () => {
-      await generateAvatarUploadUrl(userId, 'image/jpeg');
-      await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(putObjectCalls).toHaveLength(2);
-      expect(putObjectCalls[0].Key).not.toBe(putObjectCalls[1].Key);
-    });
-
-    it('should construct imageUrl with bucket domain', async () => {
-      const result = await generateAvatarUploadUrl(userId, 'image/jpeg');
-
-      expect(result.imageUrl).toMatch(
-        /^https:\/\/bball-tracker-avatars-dev\.s3\.amazonaws\.com\/avatars\//
+      expect(mockCreatePresignedPost).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          Bucket: 'bball-tracker-avatars-dev',
+          Key: expect.stringMatching(new RegExp(`^avatars/${userId}/[0-9a-f-]+\\.png$`)),
+          Conditions: [
+            ['content-length-range', 1, MAX_AVATAR_BYTES],
+            ['eq', '$Content-Type', 'image/png'],
+          ],
+          Fields: { 'Content-Type': 'image/png' },
+          Expires: 300,
+        })
       );
     });
 
-    it('should throw for unsupported content type', async () => {
-      await expect(
-        generateAvatarUploadUrl(userId, 'image/gif')
-      ).rejects.toThrow('Unsupported content type: image/gif');
+    it('MAX_AVATAR_BYTES is 5 MB', () => {
+      expect(MAX_AVATAR_BYTES).toBe(5 * 1024 * 1024);
     });
 
-    it('should throw for non-image content type', async () => {
-      await expect(
-        generateAvatarUploadUrl(userId, 'application/pdf')
-      ).rejects.toThrow('Unsupported content type');
+    it('accepts a declared contentLength within the cap', async () => {
+      await expect(generateAvatarUploadUrl(userId, 'image/jpeg', MAX_AVATAR_BYTES)).resolves.toBeDefined();
     });
 
-    it('should propagate S3 errors', async () => {
-      mockGetSignedUrl.mockRejectedValueOnce(new Error('S3 connection failed'));
+    it('rejects a declared contentLength over the cap without signing', async () => {
+      await expect(generateAvatarUploadUrl(userId, 'image/jpeg', MAX_AVATAR_BYTES + 1)).rejects.toThrow(
+        /Avatar must be between/
+      );
+      expect(mockCreatePresignedPost).not.toHaveBeenCalled();
+    });
 
-      await expect(
-        generateAvatarUploadUrl(userId, 'image/jpeg')
-      ).rejects.toThrow('S3 connection failed');
+    it('rejects a zero contentLength', async () => {
+      await expect(generateAvatarUploadUrl(userId, 'image/jpeg', 0)).rejects.toThrow();
+    });
+
+    it('throws for unsupported content types', async () => {
+      await expect(generateAvatarUploadUrl(userId, 'image/gif')).rejects.toThrow('Unsupported content type: image/gif');
+      expect(mockCreatePresignedPost).not.toHaveBeenCalled();
+    });
+
+    it('generates a unique key per call', async () => {
+      const a = await generateAvatarUploadUrl(userId, 'image/jpeg');
+      const b = await generateAvatarUploadUrl(userId, 'image/jpeg');
+      expect(a.imageUrl).not.toBe(b.imageUrl);
     });
   });
 
   describe('deleteAvatar', () => {
-    it('should create DeleteObjectCommand with correct key', async () => {
-      await deleteAvatar(
-        'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/image.jpg'
-      );
+    it('deletes the object addressed by the image URL', async () => {
+      await deleteAvatar(`${BUCKET_BASE}user-1/pic.jpg`);
 
       expect(deleteObjectCalls).toHaveLength(1);
-      expect(deleteObjectCalls[0].Key).toBe('avatars/user-id/image.jpg');
-      expect(deleteObjectCalls[0].Bucket).toBe('bball-tracker-avatars-dev');
+      expect(deleteObjectCalls[0]).toEqual({
+        Bucket: 'bball-tracker-avatars-dev',
+        Key: 'avatars/user-1/pic.jpg',
+      });
+      expect(mockSend).toHaveBeenCalled();
     });
 
-    it('should strip leading slash from pathname', async () => {
-      await deleteAvatar(
-        'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/user-id/photo.png'
-      );
-
-      expect(deleteObjectCalls[0].Key).toBe('avatars/user-id/photo.png');
-      expect(deleteObjectCalls[0].Key).not.toMatch(/^\//);
+    it('propagates S3 errors', async () => {
+      mockSend.mockRejectedValueOnce(new Error('AccessDenied'));
+      await expect(deleteAvatar(`${BUCKET_BASE}user-1/pic.jpg`)).rejects.toThrow('AccessDenied');
     });
 
-    it('should throw for invalid URL', async () => {
-      await expect(deleteAvatar('not-a-url')).rejects.toThrow();
+    it('throws on an invalid URL', async () => {
+      await expect(deleteAvatar('not a url')).rejects.toThrow();
+    });
+  });
+
+  describe('isManagedAvatarUrl', () => {
+    it('is true only for objects under avatars/ in our bucket', () => {
+      expect(isManagedAvatarUrl(`${BUCKET_BASE}u/a.jpg`)).toBe(true);
+      expect(isManagedAvatarUrl('https://workos.example/photo.jpg')).toBe(false);
+      expect(isManagedAvatarUrl(null)).toBe(false);
+      expect(isManagedAvatarUrl(undefined)).toBe(false);
+    });
+  });
+
+  describe('deletePreviousAvatar', () => {
+    it('deletes the previous object when a new avatar replaces it', async () => {
+      await deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, `${BUCKET_BASE}u/new.jpg`);
+      expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u/old.jpg' }]);
+    });
+
+    it('deletes the previous object when the avatar is cleared', async () => {
+      await deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, null);
+      expect(deleteObjectCalls).toHaveLength(1);
+    });
+
+    it('is a no-op when the URL did not change', async () => {
+      await deletePreviousAvatar(`${BUCKET_BASE}u/same.jpg`, `${BUCKET_BASE}u/same.jpg`);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('never touches objects outside our bucket (e.g. WorkOS profile photos)', async () => {
+      await deletePreviousAvatar('https://workos.example/photo.jpg', `${BUCKET_BASE}u/new.jpg`);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('is a no-op when there was no previous avatar', async () => {
+      await deletePreviousAvatar(null, `${BUCKET_BASE}u/new.jpg`);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('swallows S3 errors (the profile update already succeeded)', async () => {
+      mockSend.mockRejectedValueOnce(new Error('boom'));
+      await expect(deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, null)).resolves.toBeUndefined();
     });
   });
 });
