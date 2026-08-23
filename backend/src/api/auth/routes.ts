@@ -4,7 +4,8 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { UnauthorizedError, BadRequestError, ServiceUnavailableError } from '../../utils/errors';
+import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ServiceUnavailableError } from '../../utils/errors';
+import { updateRoleSchema, SELF_SELECTABLE_ROLES } from './schemas';
 import prisma from '../../models';
 import { authRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
@@ -312,6 +313,46 @@ router.get('/me', async (req, res) => {
       captureException(error, { flow: 'auth-me' });
       res.status(500).json({ error: 'Failed to get user information' });
     }
+  }
+});
+
+/**
+ * PATCH /api/v1/auth/me/role
+ * Self-select account type during onboarding (PLAYER <-> COACH).
+ *
+ * Every real WorkOS sign-up is created as PLAYER; the only way to become a
+ * COACH used to be a manual DB edit, which meant no self-serve user could ever
+ * create a team (audit #9). ADMIN and PARENT accounts cannot change role here.
+ */
+router.patch('/me/role', authenticate, async (req, res) => {
+  try {
+    const parsed = updateRoleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new BadRequestError(parsed.error.issues.map((e: { message: string }) => e.message).join(', '));
+    }
+
+    const current = req.user!.role;
+    if (!(SELF_SELECTABLE_ROLES as readonly string[]).includes(current)) {
+      throw new ForbiddenError(`Role ${current} cannot be changed from the app`);
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { role: parsed.data.role },
+      select: { id: true, email: true, name: true, role: true, createdAt: true },
+    });
+
+    logger.info('User changed role', { userId: user.id, from: current, to: user.role });
+
+    res.json({ success: true, user });
+  } catch (error) {
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    logger.error('Error updating role', { error: error instanceof Error ? error.message : String(error) });
+    captureException(error, { flow: 'auth-role' });
+    res.status(500).json({ error: 'Failed to update role' });
   }
 });
 

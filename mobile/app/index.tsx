@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/auth-store';
+import { postLoginRoute } from '../utils/role-onboarding';
 
 const ONBOARDED_KEY = 'hasOnboarded';
 
@@ -12,7 +13,7 @@ const ONBOARDED_KEY = 'hasOnboarded';
  */
 export default function Index() {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, user } = useAuthStore();
   const hasNavigated = useRef(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [hasOnboarded, setHasOnboarded] = useState(false);
@@ -46,7 +47,7 @@ export default function Index() {
         if (!hasOnboarded) {
           router.replace('/onboarding');
         } else if (isAuthenticated) {
-          router.replace('/(tabs)/home');
+          router.replace(await postLoginRoute(user));
         } else {
           router.replace('/login');
         }
@@ -58,7 +59,7 @@ export default function Index() {
     };
 
     navigate();
-  }, [isAuthenticated, isLoading, onboardingChecked, hasOnboarded, router]);
+  }, [isAuthenticated, isLoading, onboardingChecked, hasOnboarded, router, user]);
 
   // Show loading screen while determining route
   return (

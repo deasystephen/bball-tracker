@@ -10,6 +10,7 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { borderRadius } from '../theme/border-radius';
 import { typography } from '../theme/typography';
+import { postLoginRoute } from '../utils/role-onboarding';
 
 interface DevUser {
   id: string;
@@ -88,7 +89,7 @@ export default function Login() {
       setAuthToken(accessToken);
       setUser(user);
 
-      router.replace('/(tabs)/home');
+      router.replace(await postLoginRoute(user));
     } catch (error) {
       console.error('Dev login error:', error);
       Alert.alert('Error', 'Dev login failed. Please try again.');
