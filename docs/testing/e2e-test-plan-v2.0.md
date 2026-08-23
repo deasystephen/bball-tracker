@@ -299,7 +299,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:**
   1. On iPhone with the latest TestFlight build, tap the "Accept Invitation" button in Gmail
 - **Expected:** Safari/Mail does NOT open. Instead the app opens to `mobile/app/invite/[token].tsx` and shows "Team Invitation" with team name, inviter, accept/decline buttons.
-- **Notes:** If it opens in Safari instead, AASA isn't being served correctly — but note that AASA is served from `capyhoops.com` which has no web deploy yet (see S.2). The fallback this triggers is the expected-broken path.
+- **Notes:** If it opens in Safari instead, AASA isn't being served correctly — but note that AASA is served from `capyhoops.com` which has no web deploy yet (see S.2). The fallback this triggers is the expected-broken path. Also requires a build that carries the `applinks:capyhoops.com` associated-domains entitlement (added to `app.config.js` in audit #37 — builds ≤ #24 do **not** have it; test on build #25 or later).
 
 ### E.5 — Accept invitation from in-app screen
 - [ ] Pass / Fail / Skipped
