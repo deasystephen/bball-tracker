@@ -26,6 +26,8 @@ import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { getTeamColor } from '../../utils/team-colors';
+import { canCreateTeams } from '../../utils/team-permissions';
+import { useAuthUser } from '../../store/auth-store';
 
 export default function TeamsScreen() {
   const router = useRouter();
@@ -33,6 +35,8 @@ export default function TeamsScreen() {
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const user = useAuthUser();
+  const canCreate = canCreateTeams(user?.role);
 
   const {
     data,
@@ -84,18 +88,29 @@ export default function TeamsScreen() {
         >
           <ThemedText variant="h1">{t('teams.title')}</ThemedText>
         </View>
-        <EmptyState
-          icon="people-outline"
-          title={t('teams.noTeams')}
-          message="Create your first team to get started"
-          actionLabel={t('teams.createNew')}
-          onAction={handleCreateTeam}
-        />
+        {canCreate ? (
+          <EmptyState
+            icon="people-outline"
+            title={t('teams.noTeams')}
+            message="Create your first team to get started"
+            actionLabel={t('teams.createNew')}
+            onAction={handleCreateTeam}
+          />
+        ) : (
+          <EmptyState
+            icon="people-outline"
+            title={t('teams.noTeams')}
+            message={t('teams.playerEmptyMessage')}
+            actionLabel={t('teams.playerEmptyAction')}
+            onAction={() => router.push('/onboarding/role?from=profile')}
+          />
+        )}
       </ThemedView>
     );
   }
 
-  const dataWithCreate = [...teams, { id: '__create__', name: '' } as Team];
+  // Players never see the create card — the API refuses them (403) anyway.
+  const dataWithCreate = canCreate ? [...teams, { id: '__create__', name: '' } as Team] : teams;
 
   const renderTeam = ({ item }: { item: Team }) => {
     if (item.id === '__create__') {
