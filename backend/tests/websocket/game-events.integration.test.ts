@@ -14,6 +14,12 @@ import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 
 import { setupWebSocketHandlers, emitGameEvent } from '../../src/websocket';
 import { setIo } from '../../src/websocket/io-registry';
+import {
+  MAX_HANDSHAKES_PER_WINDOW,
+  RATE_LIMITED_MESSAGE,
+  checkHandshakeAllowed,
+  resetSocketRateLimits,
+} from '../../src/websocket/rate-limit';
 import { mockPrisma } from '../setup';
 import {
   createCoach,
@@ -73,6 +79,36 @@ describe('websocket integration (socket.io-client)', () => {
       expect(err.message).toBe('Unauthorized');
       client.close();
       done();
+    });
+  });
+
+  it('rejects the handshake with "Rate limited" once the per-IP budget is spent (audit #16)', (done) => {
+    // The limiter middleware keys local test connections by the loopback peer
+    // address; exhaust the window for every loopback form up front so the
+    // next real handshake — even with a valid token — is refused before auth.
+    for (const ip of ['::1', '127.0.0.1', '::ffff:127.0.0.1']) {
+      for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
+        checkHandshakeAllowed(ip);
+      }
+    }
+    const coach = createCoach();
+    mockPrisma.user.findUnique.mockResolvedValue(coach);
+
+    const client = connect(buildDevToken(coach.id));
+    client.on('connect', () => {
+      client.close();
+      resetSocketRateLimits();
+      done(new Error('expected the handshake to be rate limited'));
+    });
+    client.on('connect_error', (err) => {
+      client.close();
+      resetSocketRateLimits();
+      try {
+        expect(err.message).toBe(RATE_LIMITED_MESSAGE);
+        done();
+      } catch (assertion) {
+        done(assertion as Error);
+      }
     });
   });
 

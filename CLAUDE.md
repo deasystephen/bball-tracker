@@ -227,6 +227,13 @@ current score so a client can drop events and still converge.
 
 - Handshake auth: bearer token via `socket.handshake.auth.token` (or
   `Authorization` header). Checked once at connect; see `authenticateSocket`.
+- Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
+  handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
+  max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
+  A limited handshake rejects with `connect_error: Rate limited`, which mobile `services/socket.ts`
+  backs off and retries exactly like `Service unavailable`. The IP key is the rightmost
+  `x-forwarded-for` entry (the ALB-appended hop, same trust rule as `trust proxy: 1`), falling back
+  to the peer address.
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.
