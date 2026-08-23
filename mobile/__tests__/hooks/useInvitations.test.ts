@@ -108,7 +108,6 @@ describe('useInvitations', () => {
       playerId: 'player-1',
       invitedById: 'coach-1',
       status: 'PENDING',
-      token: 'abc123',
       expiresAt: '2024-12-31T00:00:00Z',
       createdAt: '2024-01-01T00:00:00Z',
       updatedAt: '2024-01-01T00:00:00Z',

@@ -83,6 +83,10 @@ describe('Invitations API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.invitations).toHaveLength(1);
       expect(response.body.pagination).toBeDefined();
+      // Audit #14: the invitation token is a bearer secret for the public
+      // accept endpoint and must never be exposed on authenticated responses.
+      expect(response.body.invitations[0]).not.toHaveProperty('token');
+      expect(JSON.stringify(response.body)).not.toContain('abc123');
     });
 
     it('should filter invitations by status', async () => {
@@ -144,6 +148,7 @@ describe('Invitations API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.invitation.id).toBe(TEST_INVITATION_ID);
+      expect(response.body.invitation).not.toHaveProperty('token');
     });
 
     it('should return 404 for non-existent invitation', async () => {
@@ -184,6 +189,7 @@ describe('Invitations API', () => {
       expect(response.body.invitation.status).toBe('ACCEPTED');
       expect(response.body.teamMember).toBeDefined();
       expect(response.body.message).toContain('Invitation accepted');
+      expect(response.body.invitation).not.toHaveProperty('token');
     });
 
     it('should return 404 for non-existent invitation', async () => {
@@ -228,6 +234,7 @@ describe('Invitations API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.invitation.status).toBe('REJECTED');
       expect(response.body.message).toContain('Invitation rejected');
+      expect(response.body.invitation).not.toHaveProperty('token');
     });
 
     it('should return 404 for non-existent invitation', async () => {
@@ -261,6 +268,8 @@ describe('Invitations API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toContain('Invitation cancelled');
+      expect(response.body.invitation.status).toBe('CANCELLED');
+      expect(response.body.invitation).not.toHaveProperty('token');
     });
 
     it('should return 404 for non-existent invitation', async () => {
