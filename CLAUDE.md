@@ -225,6 +225,17 @@ current score so a client can drop events and still converge.
   `discardEvent(localId)`. Invalidate event lists with
   `gameEventKeys.listsFor(gameId)` (`list(gameId)` ends in `undefined`, which
   TanStack's partial matcher does not treat as a wildcard).
+- **Spectator snapshot merge (audit #73):** `useLiveGame` merges a
+  `game-snapshot` with the events already in state by id (streamed-but-not-
+  in-snapshot events stay at the top and their score wins) instead of
+  replacing, so an event broadcast while the server was building the
+  snapshot isn't lost.
+- **Hot-streak / milestone counters (audit #75):** `game-tracking-store`
+  counters are derived = `seedCounters` (folded once from the server's event
+  page via `seedFromEvents` when the tracker opens) + remaining local events.
+  `undoLast`/`discardEvent` re-fold, so undoing a miss restores the streak
+  and undoing a rebound/assist reverts the double-double math. Seeding never
+  toasts. The seed is bounded by the 100-event page the tracker loads.
 
 ### Entitlements / Feature Gating
 

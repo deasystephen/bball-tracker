@@ -458,7 +458,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### G.4 — Hot-streak milestone
 - [ ] Pass / Fail / Skipped
-- **Steps:** Have one player make 3 shots in a row.
+- **Steps:** Have one player make 3 shots in a row. Then: undo the 3rd (flame should clear), re-record it, leave the tracker with "Leave" and re-open it via Continue Tracking, and make one more shot (flame should still be on — counters are seeded from the server's events on open, audit #75).
 - **Expected:** Hot-player indicator appears. (Per memory: 3+ promotes to hot list.)
 - **Notes:** ___________
 

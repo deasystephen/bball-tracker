@@ -136,6 +136,67 @@ describe('useLiveGame', () => {
     expect(result.current.events.map((e) => e.id)).toEqual(['e3', 'e2', 'e1']);
   });
 
+  it('merges a snapshot with events that streamed in before it (join-before-snapshot race)', () => {
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    // e3 is broadcast while the server is still building the snapshot.
+    act(() => {
+      mockSocket.fire('game-event', {
+        event: makeEvent('e3'),
+        score: { homeScore: 6, awayScore: 0 },
+      });
+    });
+
+    act(() => {
+      mockSocket.fire('game-snapshot', {
+        game: {
+          id: 'g1',
+          teamId: 't1',
+          opponent: 'Rivals',
+          date: '2026-05-16T10:00:00Z',
+          status: 'IN_PROGRESS',
+          homeScore: 4,
+          awayScore: 0,
+        },
+        events: [makeEvent('e1'), makeEvent('e2')],
+      });
+    });
+
+    // e3 survives, newest first, no duplicates; the streamed score is kept.
+    expect(result.current.events.map((e) => e.id)).toEqual(['e3', 'e2', 'e1']);
+    expect(result.current.score).toEqual({ homeScore: 6, awayScore: 0 });
+    expect(result.current.connectionState).toBe('live');
+  });
+
+  it('dedupes when the streamed event is also in the snapshot and takes the snapshot score', () => {
+    const { result } = renderHook(() => useLiveGame('g1'));
+
+    act(() => {
+      mockSocket.fire('game-event', {
+        event: makeEvent('e2'),
+        score: { homeScore: 4, awayScore: 0 },
+      });
+    });
+
+    act(() => {
+      mockSocket.fire('game-snapshot', {
+        game: {
+          id: 'g1',
+          teamId: 't1',
+          opponent: 'Rivals',
+          date: '2026-05-16T10:00:00Z',
+          status: 'IN_PROGRESS',
+          homeScore: 4,
+          awayScore: 3,
+        },
+        events: [makeEvent('e1'), makeEvent('e2')],
+      });
+    });
+
+    expect(result.current.events.map((e) => e.id)).toEqual(['e2', 'e1']);
+    expect(result.current.score).toEqual({ homeScore: 4, awayScore: 3 });
+  });
+
   it('appends game-event newest-first and updates score', () => {
     const { result } = renderHook(() => useLiveGame('g1'));
 

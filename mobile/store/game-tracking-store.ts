@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import type { CreateGameEventInput, ShotMetadata } from '../types/game';
+import type { CreateGameEventInput, GameEvent, GameEventType, ShotMetadata } from '../types/game';
 
 export interface LocalEvent extends CreateGameEventInput {
   localId: string;
@@ -16,12 +16,138 @@ export interface LocalEvent extends CreateGameEventInput {
   serverId?: string;
 }
 
-interface GameTrackingState {
+/** Minimal shape shared by local and server events for counter folding. */
+interface CountableEvent {
+  playerId?: string | null;
+  eventType: GameEventType;
+  metadata?: unknown;
+}
+
+/**
+ * Per-player counters that drive hot-streak and milestone UI. They are
+ * always *derived*: `seed` (folded from the server's event log when the
+ * screen opens) + every local event still on record. Undo/discard simply
+ * re-fold, so counters can never drift from the events (audit #75).
+ */
+export interface PlayerCounters {
+  playerStreaks: Record<string, number>;
+  playerPoints: Record<string, number>;
+  playerRebounds: Record<string, number>;
+  playerAssists: Record<string, number>;
+}
+
+const EMPTY_COUNTERS: PlayerCounters = {
+  playerStreaks: {},
+  playerPoints: {},
+  playerRebounds: {},
+  playerAssists: {},
+};
+
+const HOT_STREAK = 3;
+
+function shotMeta(event: CountableEvent): ShotMetadata | undefined {
+  const meta = event.metadata as Partial<ShotMetadata> | undefined;
+  if (!meta || typeof meta !== 'object') return undefined;
+  return { made: !!meta.made, points: (meta.points as number) || 2 } as ShotMetadata;
+}
+
+/** Apply one event to a set of counters, returning new counters. */
+export function applyEventToCounters(
+  counters: PlayerCounters,
+  event: CountableEvent
+): PlayerCounters {
+  const pid = event.playerId;
+  if (!pid) return counters;
+
+  switch (event.eventType) {
+    case 'SHOT': {
+      const meta = shotMeta(event);
+      const streaks = { ...counters.playerStreaks };
+      const points = { ...counters.playerPoints };
+      if (meta?.made) {
+        streaks[pid] = (streaks[pid] || 0) + 1;
+        points[pid] = (points[pid] || 0) + meta.points;
+      } else {
+        streaks[pid] = 0;
+      }
+      return { ...counters, playerStreaks: streaks, playerPoints: points };
+    }
+    case 'REBOUND':
+      return {
+        ...counters,
+        playerRebounds: {
+          ...counters.playerRebounds,
+          [pid]: (counters.playerRebounds[pid] || 0) + 1,
+        },
+      };
+    case 'ASSIST':
+      return {
+        ...counters,
+        playerAssists: {
+          ...counters.playerAssists,
+          [pid]: (counters.playerAssists[pid] || 0) + 1,
+        },
+      };
+    default:
+      return counters;
+  }
+}
+
+/** Fold events (in chronological order) onto a base set of counters. */
+export function foldCounters(
+  base: PlayerCounters,
+  eventsChronological: readonly CountableEvent[]
+): PlayerCounters {
+  return eventsChronological.reduce(applyEventToCounters, base);
+}
+
+function hotPlayersFrom(streaks: Record<string, number>): Record<string, number> {
+  const hot: Record<string, number> = {};
+  for (const [playerId, streak] of Object.entries(streaks)) {
+    if (streak >= HOT_STREAK) hot[playerId] = streak;
+  }
+  return hot;
+}
+
+function doubleDoubleCategories(c: PlayerCounters, pid: string): number {
+  return [
+    (c.playerPoints[pid] || 0) >= 10,
+    (c.playerRebounds[pid] || 0) >= 10,
+    (c.playerAssists[pid] || 0) >= 10,
+  ].filter(Boolean).length;
+}
+
+/** Milestone crossed by going from `prev` to `next` for `pid`, if any. */
+function detectMilestone(
+  prev: PlayerCounters,
+  next: PlayerCounters,
+  pid: string,
+  playerName?: string
+): string | null {
+  const name = playerName || 'Player';
+  const prevPts = prev.playerPoints[pid] || 0;
+  const newPts = next.playerPoints[pid] || 0;
+
+  let milestone: string | null = null;
+  if (newPts >= 20 && prevPts < 20) {
+    milestone = `${name} hit 20 points!`;
+  } else if (newPts >= 10 && prevPts < 10) {
+    milestone = `${name} hit 10 points!`;
+  }
+
+  if (doubleDoubleCategories(next, pid) >= 2 && doubleDoubleCategories(prev, pid) < 2) {
+    milestone = `${name} has a double-double!`;
+  }
+
+  return milestone;
+}
+
+interface GameTrackingState extends PlayerCounters {
   // Selected player for recording events
   selectedPlayerId: string | null;
   selectedPlayerName: string | null;
 
-  // Local events (for optimistic updates)
+  // Local events (for optimistic updates), newest first
   localEvents: LocalEvent[];
 
   // Last event for undo functionality
@@ -30,22 +156,25 @@ interface GameTrackingState {
   // Undo timer ID
   undoTimerId: NodeJS.Timeout | null;
 
-  // Streak tracking: consecutive made shots per player
-  playerStreaks: Record<string, number>;
+  // Counters folded from the server's event log when the session opened
+  seedCounters: PlayerCounters;
+  seededFromServer: boolean;
 
   // Hot players: playerId -> streak count (3+ consecutive made shots)
   hotPlayers: Record<string, number>;
-
-  // Per-player cumulative stats for milestone detection
-  playerPoints: Record<string, number>;
-  playerRebounds: Record<string, number>;
-  playerAssists: Record<string, number>;
 
   // Last milestone triggered (to avoid duplicate toasts)
   lastMilestone: string | null;
 
   // Actions
   selectPlayer: (playerId: string | null, playerName?: string | null) => void;
+  /**
+   * Seed streak/milestone counters from already-persisted events (newest
+   * first, as returned by `GET /games/:id/events`). Call once when the
+   * tracking screen opens so "Continue Tracking" doesn't restart everyone at
+   * zero. Never fires a milestone toast.
+   */
+  seedFromEvents: (eventsNewestFirst: readonly GameEvent[]) => void;
   recordEvent: (event: CreateGameEventInput, playerName?: string) => LocalEvent;
   /** Attach the server id to a local event once the create has resolved. */
   confirmEvent: (localId: string, serverId: string) => void;
@@ -61,6 +190,15 @@ interface GameTrackingState {
   clearSession: () => void;
 }
 
+/** Counters + hot list derived from the seed and the remaining local events. */
+function deriveCounters(
+  seed: PlayerCounters,
+  localEventsNewestFirst: readonly LocalEvent[]
+): PlayerCounters & { hotPlayers: Record<string, number> } {
+  const counters = foldCounters(seed, [...localEventsNewestFirst].reverse());
+  return { ...counters, hotPlayers: hotPlayersFrom(counters.playerStreaks) };
+}
+
 /**
  * Game tracking store for managing live stat recording session
  */
@@ -70,11 +208,10 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
   localEvents: [],
   lastEvent: null,
   undoTimerId: null,
-  playerStreaks: {},
+  seedCounters: EMPTY_COUNTERS,
+  seededFromServer: false,
+  ...EMPTY_COUNTERS,
   hotPlayers: {},
-  playerPoints: {},
-  playerRebounds: {},
-  playerAssists: {},
   lastMilestone: null,
 
   selectPlayer: (playerId, playerName) => {
@@ -82,6 +219,15 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
       selectedPlayerId: playerId,
       selectedPlayerName: playerName ?? null,
     });
+  },
+
+  seedFromEvents: (eventsNewestFirst) => {
+    const seed = foldCounters(EMPTY_COUNTERS, [...eventsNewestFirst].reverse());
+    set((state) => ({
+      seedCounters: seed,
+      seededFromServer: true,
+      ...deriveCounters(seed, state.localEvents),
+    }));
   },
 
   recordEvent: (event, playerName) => {
@@ -98,106 +244,24 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
       clearTimeout(undoTimerId);
     }
 
-    // Update streak tracking
-    const { playerStreaks } = get();
-    const newStreaks = { ...playerStreaks };
+    const state = get();
+    const prev: PlayerCounters = {
+      playerStreaks: state.playerStreaks,
+      playerPoints: state.playerPoints,
+      playerRebounds: state.playerRebounds,
+      playerAssists: state.playerAssists,
+    };
+    const next = applyEventToCounters(prev, event);
+    const milestone = event.playerId
+      ? detectMilestone(prev, next, event.playerId, playerName)
+      : null;
 
-    if (event.eventType === 'SHOT' && event.playerId) {
-      const metadata = event.metadata as ShotMetadata | undefined;
-      if (metadata?.made) {
-        // Increment streak on made shot
-        newStreaks[event.playerId] = (newStreaks[event.playerId] || 0) + 1;
-      } else {
-        // Reset streak on miss
-        newStreaks[event.playerId] = 0;
-      }
-    }
-
-    // Build hot players map (3+ consecutive made shots)
-    const newHotPlayers: Record<string, number> = {};
-    for (const [playerId, streak] of Object.entries(newStreaks)) {
-      if (streak >= 3) {
-        newHotPlayers[playerId] = streak;
-      }
-    }
-
-    // Track per-player cumulative stats for milestones
-    const { playerPoints, playerRebounds, playerAssists } = get();
-    const newPlayerPoints = { ...playerPoints };
-    const newPlayerRebounds = { ...playerRebounds };
-    const newPlayerAssists = { ...playerAssists };
-    let milestone: string | null = null;
-
-    if (event.playerId) {
-      const pid = event.playerId;
-
-      if (event.eventType === 'SHOT') {
-        const metadata = event.metadata as ShotMetadata | undefined;
-        if (metadata?.made) {
-          const prevPts = newPlayerPoints[pid] || 0;
-          const newPts = prevPts + (metadata.points || 2);
-          newPlayerPoints[pid] = newPts;
-
-          // Check point milestones (10, 20, 30...)
-          if (newPts >= 20 && prevPts < 20) {
-            milestone = `${playerName || 'Player'} hit 20 points!`;
-          } else if (newPts >= 10 && prevPts < 10) {
-            milestone = `${playerName || 'Player'} hit 10 points!`;
-          }
-
-          // Check double-double
-          const reb = newPlayerRebounds[pid] || 0;
-          const ast = newPlayerAssists[pid] || 0;
-          const categories = [newPts >= 10, reb >= 10, ast >= 10].filter(Boolean).length;
-          if (categories >= 2) {
-            const prevCategories = [prevPts >= 10, reb >= 10, ast >= 10].filter(Boolean).length;
-            if (prevCategories < 2) {
-              milestone = `${playerName || 'Player'} has a double-double!`;
-            }
-          }
-        }
-      } else if (event.eventType === 'REBOUND') {
-        const prevReb = newPlayerRebounds[pid] || 0;
-        newPlayerRebounds[pid] = prevReb + 1;
-        const newReb = prevReb + 1;
-
-        // Check double-double with rebounds
-        const pts = newPlayerPoints[pid] || 0;
-        const ast = newPlayerAssists[pid] || 0;
-        const categories = [pts >= 10, newReb >= 10, ast >= 10].filter(Boolean).length;
-        if (categories >= 2) {
-          const prevCategories = [pts >= 10, prevReb >= 10, ast >= 10].filter(Boolean).length;
-          if (prevCategories < 2) {
-            milestone = `${playerName || 'Player'} has a double-double!`;
-          }
-        }
-      } else if (event.eventType === 'ASSIST') {
-        const prevAst = newPlayerAssists[pid] || 0;
-        newPlayerAssists[pid] = prevAst + 1;
-        const newAst = prevAst + 1;
-
-        // Check double-double with assists
-        const pts = newPlayerPoints[pid] || 0;
-        const reb = newPlayerRebounds[pid] || 0;
-        const categories = [pts >= 10, reb >= 10, newAst >= 10].filter(Boolean).length;
-        if (categories >= 2) {
-          const prevCategories = [pts >= 10, reb >= 10, prevAst >= 10].filter(Boolean).length;
-          if (prevCategories < 2) {
-            milestone = `${playerName || 'Player'} has a double-double!`;
-          }
-        }
-      }
-    }
-
-    set((state) => ({
-      localEvents: [localEvent, ...state.localEvents],
+    set((s) => ({
+      localEvents: [localEvent, ...s.localEvents],
       lastEvent: localEvent,
       undoTimerId: null,
-      playerStreaks: newStreaks,
-      hotPlayers: newHotPlayers,
-      playerPoints: newPlayerPoints,
-      playerRebounds: newPlayerRebounds,
-      playerAssists: newPlayerAssists,
+      ...next,
+      hotPlayers: hotPlayersFrom(next.playerStreaks),
       lastMilestone: milestone,
     }));
 
@@ -226,9 +290,10 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
   },
 
   removeLocalEvent: (localId) => {
-    set((state) => ({
-      localEvents: state.localEvents.filter((e) => e.localId !== localId),
-    }));
+    set((state) => {
+      const localEvents = state.localEvents.filter((e) => e.localId !== localId);
+      return { localEvents, ...deriveCounters(state.seedCounters, localEvents) };
+    });
   },
 
   clearLastEvent: () => {
@@ -247,36 +312,18 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
       clearTimeout(undoTimerId);
     }
 
-    // Revert streak if the undone event was a shot
-    const { playerStreaks } = get();
-    const newStreaks = { ...playerStreaks };
-
-    if (lastEvent.eventType === 'SHOT' && lastEvent.playerId) {
-      const metadata = lastEvent.metadata as ShotMetadata | undefined;
-      if (metadata?.made) {
-        // Decrement streak (undo a made shot)
-        newStreaks[lastEvent.playerId] = Math.max(0, (newStreaks[lastEvent.playerId] || 0) - 1);
-      } else {
-        // Can't easily restore previous streak on undo of a miss, leave as is
-      }
-    }
-
-    const newHotPlayers: Record<string, number> = {};
-    for (const [playerId, streak] of Object.entries(newStreaks)) {
-      if (streak >= 3) {
-        newHotPlayers[playerId] = streak;
-      }
-    }
-
-    set((state) => ({
-      localEvents: state.localEvents.filter(
-        (e) => e.localId !== lastEvent.localId
-      ),
-      lastEvent: null,
-      undoTimerId: null,
-      playerStreaks: newStreaks,
-      hotPlayers: newHotPlayers,
-    }));
+    // Re-derive every counter from seed + remaining events so undoing a
+    // made shot, a miss (streak restored), a rebound or an assist all revert
+    // exactly (audit #75).
+    set((state) => {
+      const localEvents = state.localEvents.filter((e) => e.localId !== lastEvent.localId);
+      return {
+        localEvents,
+        lastEvent: null,
+        undoTimerId: null,
+        ...deriveCounters(state.seedCounters, localEvents),
+      };
+    });
 
     return lastEvent;
   },
@@ -297,11 +344,10 @@ export const useGameTrackingStore = create<GameTrackingState>()((set, get) => ({
       localEvents: [],
       lastEvent: null,
       undoTimerId: null,
-      playerStreaks: {},
+      seedCounters: EMPTY_COUNTERS,
+      seededFromServer: false,
+      ...EMPTY_COUNTERS,
       hotPlayers: {},
-      playerPoints: {},
-      playerRebounds: {},
-      playerAssists: {},
       lastMilestone: null,
     });
   },

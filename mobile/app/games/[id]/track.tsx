@@ -61,7 +61,18 @@ export default function TrackGameScreen() {
     undoLast,
     setUndoTimer,
     clearSession,
+    seedFromEvents,
+    seededFromServer,
   } = useGameTrackingStore();
+
+  // Seed hot-streak / milestone counters from what's already on the server
+  // so "Continue Tracking" doesn't restart everyone at zero (audit #75).
+  // Runs once per session: clearSession() resets the flag on unmount.
+  useEffect(() => {
+    if (events && !seededFromServer) {
+      seedFromEvents(events);
+    }
+  }, [events, seededFromServer, seedFromEvents]);
 
   // Show milestone toasts
   useEffect(() => {

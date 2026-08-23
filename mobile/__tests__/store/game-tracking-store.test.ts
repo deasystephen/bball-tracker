@@ -10,7 +10,22 @@
  */
 
 import { useGameTrackingStore } from '../../store/game-tracking-store';
-import type { CreateGameEventInput } from '../../types/game';
+import type { CreateGameEventInput, GameEvent } from '../../types/game';
+
+const serverEvent = (
+  id: string,
+  playerId: string,
+  eventType: GameEvent['eventType'],
+  metadata: GameEvent['metadata'] = {},
+): GameEvent => ({
+  id,
+  gameId: 'g1',
+  playerId,
+  eventType,
+  timestamp: `2026-05-16T10:00:${id.padStart(2, '0')}Z`,
+  metadata,
+  createdAt: '2026-05-16T10:00:00Z',
+});
 
 const madeTwo: Omit<CreateGameEventInput, 'playerId'> = {
   eventType: 'SHOT',
@@ -263,7 +278,8 @@ describe('game-tracking-store', () => {
     const s = useGameTrackingStore.getState();
     expect(s.lastEvent).toBeNull();
     expect(s.localEvents).toHaveLength(0);
-    expect(s.playerStreaks['p1']).toBe(0);
+    expect(s.playerStreaks['p1'] ?? 0).toBe(0);
+    expect(s.playerPoints['p1']).toBeUndefined();
   });
 
   it('discardEvent only removes an older local event and keeps the undo target', () => {
@@ -274,5 +290,125 @@ describe('game-tracking-store', () => {
     const s = useGameTrackingStore.getState();
     expect(s.lastEvent?.localId).toBe(e2.localId);
     expect(s.localEvents.map((e) => e.localId)).toEqual([e2.localId]);
+  });
+
+  describe('counters seeded from server events + reverted on undo (audit #75)', () => {
+    it('seedFromEvents folds the server log (newest-first input) into streaks, points, rebounds, assists', () => {
+      // Newest first, as GET /games/:id/events returns them.
+      const events: GameEvent[] = [
+        serverEvent('5', 'p1', 'SHOT', { made: true, points: 3 }),
+        serverEvent('4', 'p1', 'SHOT', { made: true, points: 2 }),
+        serverEvent('3', 'p1', 'SHOT', { made: false, points: 2 }),
+        serverEvent('2', 'p1', 'SHOT', { made: true, points: 2 }),
+        serverEvent('1', 'p2', 'REBOUND', { type: 'defensive' }),
+      ];
+      useGameTrackingStore.getState().seedFromEvents(events);
+
+      const s = useGameTrackingStore.getState();
+      expect(s.seededFromServer).toBe(true);
+      expect(s.playerPoints.p1).toBe(7);
+      // Chronological: made, miss (reset), made, made → streak 2
+      expect(s.playerStreaks.p1).toBe(2);
+      expect(s.playerRebounds.p2).toBe(1);
+      expect(s.hotPlayers.p1).toBeUndefined();
+      // Seeding never toasts
+      expect(s.lastMilestone).toBeNull();
+    });
+
+    it('a seeded streak continues into the live session and can go hot', () => {
+      useGameTrackingStore.getState().seedFromEvents([
+        serverEvent('2', 'p1', 'SHOT', { made: true, points: 2 }),
+        serverEvent('1', 'p1', 'SHOT', { made: true, points: 2 }),
+      ]);
+      recordForPlayer('p1', madeTwo, 'Alice');
+      expect(useGameTrackingStore.getState().hotPlayers.p1).toBe(3);
+    });
+
+    it('milestones account for seeded points (crossing 10 with an 8-point seed)', () => {
+      useGameTrackingStore.getState().seedFromEvents([
+        serverEvent('1', 'p1', 'SHOT', { made: true, points: 3 }),
+        serverEvent('2', 'p1', 'SHOT', { made: true, points: 3 }),
+        serverEvent('3', 'p1', 'SHOT', { made: true, points: 2 }),
+      ]);
+      recordForPlayer('p1', madeTwo, 'Alice');
+      expect(useGameTrackingStore.getState().lastMilestone).toBe('Alice hit 10 points!');
+    });
+
+    it('undoLast reverts points, rebounds and assists, not just streaks', () => {
+      recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', rebound, 'Alice');
+      recordForPlayer('p1', assist, 'Alice');
+      expect(useGameTrackingStore.getState().playerAssists.p1).toBe(1);
+
+      // Only the most recent event is undoable; each undo re-derives.
+      useGameTrackingStore.getState().undoLast();
+      let s = useGameTrackingStore.getState();
+      expect(s.playerAssists.p1).toBeUndefined();
+      expect(s.playerRebounds.p1).toBe(1);
+      expect(s.playerPoints.p1).toBe(2);
+
+      useGameTrackingStore.getState().clearSession();
+      recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', rebound, 'Alice');
+      useGameTrackingStore.getState().undoLast();
+      s = useGameTrackingStore.getState();
+      expect(s.playerRebounds.p1).toBeUndefined();
+      expect(s.playerPoints.p1).toBe(2);
+    });
+
+    it('undoing the 10th rebound reverts a double-double', () => {
+      for (let i = 0; i < 5; i++) recordForPlayer('p1', madeTwo, 'Alice');
+      for (let i = 0; i < 10; i++) recordForPlayer('p1', rebound, 'Alice');
+      expect(useGameTrackingStore.getState().lastMilestone).toMatch(/double-double/);
+
+      useGameTrackingStore.getState().undoLast();
+      expect(useGameTrackingStore.getState().playerRebounds.p1).toBe(9);
+
+      // Re-recording the 10th rebound fires the double-double again
+      recordForPlayer('p1', rebound, 'Alice');
+      expect(useGameTrackingStore.getState().lastMilestone).toMatch(/double-double/);
+    });
+
+    it('undoing a miss restores the streak it had reset', () => {
+      for (let i = 0; i < 3; i++) recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', missedTwo, 'Alice');
+      expect(useGameTrackingStore.getState().playerStreaks.p1).toBe(0);
+      expect(useGameTrackingStore.getState().hotPlayers.p1).toBeUndefined();
+
+      useGameTrackingStore.getState().undoLast();
+      const s = useGameTrackingStore.getState();
+      expect(s.playerStreaks.p1).toBe(3);
+      expect(s.hotPlayers.p1).toBe(3);
+    });
+
+    it('undo never drops below the seeded baseline', () => {
+      useGameTrackingStore.getState().seedFromEvents([
+        serverEvent('1', 'p1', 'SHOT', { made: true, points: 2 }),
+      ]);
+      recordForPlayer('p1', madeTwo, 'Alice');
+      useGameTrackingStore.getState().undoLast();
+      expect(useGameTrackingStore.getState().playerPoints.p1).toBe(2);
+      expect(useGameTrackingStore.getState().playerStreaks.p1).toBe(1);
+    });
+
+    it('discardEvent of an older local event re-derives counters', () => {
+      const e1 = recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', madeTwo, 'Alice');
+      expect(useGameTrackingStore.getState().playerPoints.p1).toBe(4);
+
+      useGameTrackingStore.getState().discardEvent(e1.localId);
+      expect(useGameTrackingStore.getState().playerPoints.p1).toBe(2);
+      expect(useGameTrackingStore.getState().playerStreaks.p1).toBe(1);
+    });
+
+    it('clearSession resets the seed so the next open re-seeds', () => {
+      useGameTrackingStore.getState().seedFromEvents([
+        serverEvent('1', 'p1', 'SHOT', { made: true, points: 2 }),
+      ]);
+      useGameTrackingStore.getState().clearSession();
+      const s = useGameTrackingStore.getState();
+      expect(s.seededFromServer).toBe(false);
+      expect(s.playerPoints).toEqual({});
+    });
   });
 });
