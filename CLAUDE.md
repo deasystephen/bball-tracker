@@ -150,6 +150,18 @@ never inline a role check in a screen:
 - `hooks/useSessionRefresh.ts` (mounted in `_layout.tsx`) re-fetches `GET /auth/me` when a session becomes
   active and on every foreground (AppState → `active`), throttled to once per 5 min, and merges
   `role` / `leagueAdminOf` / `name` / `profilePictureUrl` via `auth-store.updateUser`. Failures are ignored.
+- **Team staff screen** (`app/teams/[id]/staff.tsx`, role matrix decision 2 / B2.3): reached from the "Staff"
+  card on team detail (coach names + count; the hero line lists every `HEAD_COACH`-type row from `team.staff`).
+  Lists `GET /teams/:id/staff` (name, role, email when the API returns it). Readable by anyone with team access;
+  **Add staff** (email + role chips), per-row role change and remove render only when
+  `hooks/useTeams.ts#canManageStaff(team, userId, userRole, leagueAdminOf)` — ADMIN, admin of the team's league
+  or a `HEAD_COACH`-type staff row (mirrors backend `canManageStaff`; flags can't tell head from assistant).
+  Any staff member gets **Leave team** on their own row; the last head coach never gets a remove control. A
+  `POST /staff` 404 (no account for that email) shows the inline "ask them to sign up first" hint — the
+  endpoint never creates users. Hooks in `hooks/useTeamStaff.ts` (`useTeamStaff`, `useTeamRoles`,
+  `useAddStaff`, `useUpdateStaffRole`, `useRemoveStaff`) invalidate the staff list, team detail/lists and
+  `usageKeys.all` (staff rows feed the FREE-tier team cap). Maestro: `.maestro/team-staff.yaml` (Frank Vogel =
+  seeded Lakers head coach, read-only); Jest `__tests__/app/team-staff-gating.test.tsx`.
 - Maestro: `.maestro/player-no-tracking.yaml` (Steph Curry = seeded PLAYER) asserts the create FAB, Start Game,
   Delete game, Continue Tracking and End Game are absent while RSVP remains.
 

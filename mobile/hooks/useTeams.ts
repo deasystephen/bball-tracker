@@ -13,7 +13,9 @@ export interface TeamStaff {
   user: {
     id: string;
     name: string;
-    email: string;
+    /** Only present when the caller has `canManageRoster` (GET /teams/:id/staff). */
+    email?: string | null;
+    isManaged?: boolean;
   };
   role: {
     id: string;
@@ -309,6 +311,29 @@ export function hasTeamPermission(
   if (!staffMember) return false;
 
   return staffMember.role[permission];
+}
+
+/**
+ * Who may add / re-role / remove staff (role matrix decision 2, B2.3).
+ *
+ * Mirrors backend `utils/permissions.ts#canManageStaff`: system `ADMIN`,
+ * an admin of the team's league, or a HEAD_COACH-type staff row. Head and
+ * assistant coaches share the same permission flags, so this is keyed off
+ * `role.type` rather than a flag.
+ */
+export function canManageStaff(
+  team: TeamPermissionTarget | undefined | null,
+  userId: string | undefined,
+  userRole?: string | null,
+  leagueAdminOf?: string[] | null
+): boolean {
+  if (!team || !userId) return false;
+  if (userRole === 'ADMIN') return true;
+
+  const leagueId = team.season?.league?.id;
+  if (leagueId && leagueAdminOf?.includes(leagueId)) return true;
+
+  return team.staff?.some((s) => s.userId === userId && s.role.type === 'HEAD_COACH') ?? false;
 }
 
 // Helper to check if user is a head coach

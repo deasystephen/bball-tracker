@@ -1,0 +1,54 @@
+appId: com.bballtracker.mobile
+---
+# Team Staff: head coach opens team → Staff → list renders with management controls
+# (role matrix decision 2, B2.3). Read-mostly: asserts the controls exist but
+# never mutates seed data.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers team (Frank Vogel is the seeded head coach)
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- assertVisible: "Lakers"
+
+# The Staff card on team detail shows the head coach and links to the staff screen
+- scrollUntilVisible:
+    element:
+      id: "team-staff-card"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Frank Vogel"
+- tapOn:
+    id: "team-staff-card"
+
+# Staff screen: list renders and the head coach sees "Add staff"
+- extendedWaitUntil:
+    visible: "Staff"
+    timeout: 10000
+- assertVisible: "Add staff"
+- assertVisible: "Frank Vogel \\(You\\)"
+- assertVisible: "Head Coach.*"
+
+# Open the add form, then cancel without submitting (no seed mutation)
+- tapOn: "Add staff"
+- assertVisible:
+    id: "staff-email-input"
+- assertVisible: "Assistant Coach"
+- tapOn: "Cancel"
+- assertNotVisible:
+    id: "staff-add-submit"
+
+# Back to team detail
+- tapOn: "Go back"
+- assertVisible: "Lakers"
