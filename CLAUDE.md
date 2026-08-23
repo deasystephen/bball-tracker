@@ -185,6 +185,13 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   metadata plus team `{ id, name }` — no staff, no member lists, no emails. Authorization denials throw
   `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
   `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
+- **Teams** (`team-service.ts`): `listTeams` always ANDs the caller's access clause (staff OR member OR
+  league admin of the team's league) with any `seasonId` / `leagueId` / `playerId` filter — only system
+  ADMINs skip it. `PATCH /teams/:id { seasonId }` moving a team into a different season requires
+  `isLeagueAdmin` on the **target** season's league (in addition to `canManageTeam`), otherwise 403.
+  `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
+  (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.
+  Staff emails stay in the payload for every team member (coach contact info).
 
 ### Team Invitations
 

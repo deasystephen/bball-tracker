@@ -110,6 +110,9 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...coachStaff, role: headCoachRole },
+      ]);
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -119,6 +122,70 @@ describe('TeamService', () => {
           where: { id: team.id },
         })
       );
+    });
+
+    it('should keep member emails for staff with canManageRoster', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 1 });
+      const player = members[0].player;
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
+        games: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...coachStaff, role: headCoachRole },
+      ]);
+
+      const result = await TeamService.getTeamById(team.id, coach.id);
+
+      expect(result.members[0].player).toEqual({ id: player.id, name: player.name, email: player.email });
+    });
+
+    it('should strip member emails for staff without canManageRoster (e.g. Team Manager)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 2 });
+      const managerRole = createTeamRole({
+        teamId: team.id,
+        type: 'TEAM_MANAGER',
+        name: 'Team Manager',
+        canManageTeam: false,
+        canManageRoster: false,
+        canTrackStats: true,
+        canViewStats: true,
+      });
+      const manager = createCoach();
+      const managerStaff = createTeamStaff({ teamId: team.id, userId: manager.id, roleId: managerRole.id });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: members.map(({ member, player }) => ({
+          ...member,
+          player: { id: player.id, name: player.name, email: player.email },
+        })),
+        games: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(manager);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(managerStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...managerStaff, role: managerRole },
+      ]);
+
+      const result = await TeamService.getTeamById(team.id, manager.id);
+
+      expect(result.members).toHaveLength(2);
+      for (const m of result.members) {
+        expect(m.player).not.toHaveProperty('email');
+        expect(m.player.id).toBeDefined();
+        expect(m.player.name).toBeDefined();
+      }
+      // jersey etc. preserved
+      expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
     });
 
     it('should return team for team member', async () => {
@@ -134,11 +201,15 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(members[0].member);
 
       const result = await TeamService.getTeamById(team.id, player.id);
 
       expect(result).toHaveProperty('id', team.id);
+      // Roster players do not get teammate emails (audit #80)
+      expect(result.members[0].player).toEqual({ id: player.id, name: player.name });
+      expect(result.members[0].player).not.toHaveProperty('email');
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
@@ -181,31 +252,41 @@ describe('TeamService', () => {
   });
 
   describe('listTeams', () => {
+    const accessClause = (userId: string): Record<string, unknown> => ({
+      OR: [
+        { staff: { some: { userId } } },
+        { members: { some: { playerId: userId } } },
+        { season: { league: { admins: { some: { userId } } } } },
+      ],
+    });
+
     it('should return teams the user has access to', async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.team.findMany as jest.Mock)
-        .mockResolvedValueOnce([{ id: team.id }]) // First call for user teams filter
-        .mockResolvedValueOnce([{
-          ...team,
-          season: { ...season, league },
-          staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-          members: [],
-        }]);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [],
+      }]);
       (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
 
       const result = await TeamService.listTeams({ limit: 10, offset: 0 }, coach.id);
 
       expect(result.teams).toHaveLength(1);
       expect(result.total).toBe(1);
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { AND: [accessClause(coach.id)] } })
+      );
     });
 
     it('should return empty result if user has no teams', async () => {
       const user = createPlayer();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(user);
-      (mockPrisma.team.findMany as jest.Mock).mockResolvedValueOnce([]);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
 
       const result = await TeamService.listTeams({ limit: 10, offset: 0 }, user.id);
 
@@ -213,7 +294,7 @@ describe('TeamService', () => {
       expect(result.total).toBe(0);
     });
 
-    it('should filter by seasonId', async () => {
+    it('should AND the access filter with seasonId (audit #11)', async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
@@ -231,6 +312,68 @@ describe('TeamService', () => {
       );
 
       expect(result.teams).toHaveLength(1);
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [{ seasonId: season.id }, accessClause(coach.id)] },
+        })
+      );
+      expect(mockPrisma.team.count).toHaveBeenCalledWith({
+        where: { AND: [{ seasonId: season.id }, accessClause(coach.id)] },
+      });
+    });
+
+    it('should AND the access filter with leagueId and playerId', async () => {
+      const user = createPlayer();
+      const other = createPlayer();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(user);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+
+      await TeamService.listTeams(
+        { leagueId: 'downtown-youth-league', playerId: other.id, limit: 10, offset: 0 },
+        user.id
+      );
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { season: { leagueId: 'downtown-youth-league' } },
+              { members: { some: { playerId: other.id } } },
+              accessClause(user.id),
+            ],
+          },
+        })
+      );
+    });
+
+    it('should not apply the access filter for system admins', async () => {
+      const admin = createAdmin();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+
+      await TeamService.listTeams({ leagueId: 'downtown-youth-league', limit: 10, offset: 0 }, admin.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [{ season: { leagueId: 'downtown-youth-league' } }] },
+        })
+      );
+    });
+
+    it('should use an empty where for system admins with no filters', async () => {
+      const admin = createAdmin();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+
+      await TeamService.listTeams({ limit: 10, offset: 0 }, admin.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
     });
   });
 
@@ -310,6 +453,87 @@ describe('TeamService', () => {
       } catch (error) {
         expectNotFoundError(error, 'Season not found');
       }
+    });
+
+    it('should throw ForbiddenError when a coach moves the team into a league they do not administer (audit #13)', async () => {
+      const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+      const otherLeague = createLeague();
+      const otherSeason = createSeason({ leagueId: otherLeague.id });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+        ...coachStaff,
+        role: headCoachRole,
+      }]);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const error = await TeamService.updateTeam(
+        team.id,
+        { seasonId: otherSeason.id },
+        coach.id
+      ).catch((e) => e);
+
+      expectForbiddenError(error, 'You do not have permission to move this team into that season');
+      expect(mockPrisma.leagueAdmin.findUnique).toHaveBeenCalledWith({
+        where: { leagueId_userId: { leagueId: otherLeague.id, userId: coach.id } },
+      });
+      expect(mockPrisma.team.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow moving the team when the caller administers the target league', async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+      const otherLeague = createLeague();
+      const otherSeason = createSeason({ leagueId: otherLeague.id });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+        ...coachStaff,
+        role: headCoachRole,
+      }]);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({
+        leagueId: otherLeague.id,
+        userId: coach.id,
+      });
+      (mockPrisma.team.update as jest.Mock).mockResolvedValue({
+        ...team,
+        seasonId: otherSeason.id,
+        season: { ...season, league },
+        staff: [],
+        members: [],
+      });
+
+      const result = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id);
+
+      expect(result.seasonId).toBe(otherSeason.id);
+      expect(mockPrisma.team.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ seasonId: otherSeason.id }) })
+      );
+    });
+
+    it('should not check league admin when seasonId is unchanged', async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+        ...coachStaff,
+        role: headCoachRole,
+      }]);
+      (mockPrisma.team.update as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [],
+        members: [],
+      });
+
+      await TeamService.updateTeam(team.id, { seasonId: team.seasonId }, coach.id);
+
+      expect(mockPrisma.season.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.leagueAdmin.findUnique).not.toHaveBeenCalled();
     });
   });
 
