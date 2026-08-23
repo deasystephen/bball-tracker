@@ -3,6 +3,7 @@
  */
 
 import request from 'supertest';
+import { ServiceUnavailableError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import prisma from '../../src/models';
@@ -269,6 +270,18 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.error).toContain('Authorization token required');
+    });
+
+    it('should return 503 (not 500, not 401) when token verification is unavailable', async () => {
+      mockWorkOSService.verifyToken.mockRejectedValue(new ServiceUnavailableError('Authentication service unavailable'));
+
+      const response = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(503);
+      expect(response.body.error).toBe('Authentication service unavailable');
+      expect(mockCaptureException).not.toHaveBeenCalled();
     });
 
     it('should return 401 for invalid token', async () => {
