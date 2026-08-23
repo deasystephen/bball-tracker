@@ -3,6 +3,7 @@
  */
 
 import { GameEventService } from '../../src/services/game-event-service';
+import { StatsService } from '../../src/services/stats-service';
 import { mockPrisma } from '../setup';
 import {
   createGame,
@@ -19,6 +20,114 @@ import {
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
 
 describe('GameEventService', () => {
+  let finalizeSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    finalizeSpy = jest.spyOn(StatsService, 'finalizeGameStats').mockResolvedValue();
+  });
+
+  afterEach(() => {
+    finalizeSpy.mockRestore();
+  });
+
+  /** Mocks every lookup needed for a head coach to create/delete an event on `game`. */
+  function mockCoachAccess(game: ReturnType<typeof createGame>, playerId?: string): { coachId: string } {
+    const coach = createCoach();
+    const league = createLeague();
+    const season = createSeason({ leagueId: league.id });
+    const team = createTeam({ id: game.teamId, seasonId: season.id });
+    const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+    const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+
+    (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+      ...game,
+      team: { ...team, members: playerId ? [{ playerId }] : [] },
+    });
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+    (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+      ...team,
+      season: { ...season, league: { ...league, admins: [] } },
+    });
+    (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+    return { coachId: coach.id };
+  }
+
+  describe('re-finalizing FINISHED games (audit #27)', () => {
+    it('createEvent on a FINISHED game re-runs finalizeGameStats', async () => {
+      const player = createPlayer();
+      const game = createGame({ status: 'FINISHED' });
+      const { coachId } = mockCoachAccess(game, player.id);
+      const event = createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({
+        ...event,
+        player: { id: player.id, name: player.name },
+      });
+
+      await GameEventService.createEvent(
+        game.id,
+        { playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } },
+        coachId
+      );
+
+      expect(finalizeSpy).toHaveBeenCalledWith(game.id);
+    });
+
+    it('createEvent on an IN_PROGRESS game does not finalize', async () => {
+      const player = createPlayer();
+      const game = createGame({ status: 'IN_PROGRESS' });
+      const { coachId } = mockCoachAccess(game, player.id);
+      const event = createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({
+        ...event,
+        player: { id: player.id, name: player.name },
+      });
+
+      await GameEventService.createEvent(
+        game.id,
+        { playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } },
+        coachId
+      );
+
+      expect(finalizeSpy).not.toHaveBeenCalled();
+    });
+
+    it('deleteEvent on a FINISHED game re-runs finalizeGameStats', async () => {
+      const game = createGame({ status: 'FINISHED' });
+      const { coachId } = mockCoachAccess(game);
+      const event = createGameEvent({ gameId: game.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+
+      await GameEventService.deleteEvent(game.id, event.id, coachId);
+
+      expect(finalizeSpy).toHaveBeenCalledWith(game.id);
+    });
+
+    it('deleteEvent on an IN_PROGRESS game does not finalize', async () => {
+      const game = createGame({ status: 'IN_PROGRESS' });
+      const { coachId } = mockCoachAccess(game);
+      const event = createGameEvent({ gameId: game.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+
+      await GameEventService.deleteEvent(game.id, event.id, coachId);
+
+      expect(finalizeSpy).not.toHaveBeenCalled();
+    });
+
+    it('a finalize failure is logged and does not fail the event write', async () => {
+      finalizeSpy.mockRejectedValue(new Error('db down'));
+      const game = createGame({ status: 'FINISHED' });
+      const { coachId } = mockCoachAccess(game);
+      const event = createGameEvent({ gameId: game.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+
+      await expect(GameEventService.deleteEvent(game.id, event.id, coachId)).resolves.toEqual({ success: true });
+    });
+  });
+
   describe('createEvent', () => {
     it('should create an event when user has canTrackStats permission', async () => {
       const coach = createCoach();

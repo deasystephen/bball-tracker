@@ -118,7 +118,16 @@ issue #26 for the Redis adapter follow-up.
 
 - `StatsService.finalizeGameStats(gameId)` (`backend/src/services/stats-service.ts`) recomputes a game's
   box score from `GameEvent`s and upserts `PlayerStats` (one row per player) and `TeamStats` (one row per
-  game). It runs when a game is `PATCH`ed to `FINISHED`.
+  game). It runs when a game is `PATCH`ed to `FINISHED` **and** whenever an event is created or deleted on a
+  game that is already `FINISHED` (`GameEventService` → `StatsService.refinalizeIfFinished`; post-finish
+  edits are allowed, not rejected — the stored box score just follows them). It is idempotent: `PlayerStats`
+  rows for players with no remaining events are deleted, and a game with **no** player events ends up with no
+  `PlayerStats`/`TeamStats` rows at all.
+- **Tracked vs. finished games.** `GET /api/v1/stats/teams/:teamId` returns `gamesPlayed` (all `FINISHED`
+  games = `wins + losses`, score-based) and `trackedGames` (finished games that have a `TeamStats` row).
+  Per-game averages divide by `trackedGames`, so a game created directly as `FINISHED` with a score but no
+  events (or finished with no events) counts in the record but does not deflate PPG/RPG/APG. Player season
+  averages already divide by the player's own `PlayerStats` row count.
 - `TeamStats` stores **raw shooting counts** (`fieldGoalsMade/Attempted`, `threePointersMade/Attempted`,
   `freeThrowsMade/Attempted`; FG includes 3P, matching `PlayerStats`) plus the per-game percentages.
   Season percentages in `GET /api/v1/stats/teams/:teamId` are **Σmade / Σattempted** across finalized games,

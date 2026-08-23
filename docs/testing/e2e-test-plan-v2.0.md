@@ -411,6 +411,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canTrackStats`
 - **Steps:** Tracking screen → End Game.
 - **Expected:** Status changes to COMPLETED. Score frozen. Stats finalized.
+- **Post-finish edit (audit #27):** after finishing, delete (undo) one of player A's shots. The box score and
+  A's season line drop that shot immediately; if A has no events left, A disappears from the box score
+  rather than lingering with stale numbers.
 - **Notes:** ___________
 
 ### F.4 — Cancel a scheduled game
