@@ -16,6 +16,9 @@ import {
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 
+const ADMIN_CALLER = { id: 'admin-caller', role: 'ADMIN' };
+const COACH_CALLER = { id: 'coach-caller', role: 'COACH' };
+
 describe('PlayerService', () => {
   describe('createPlayer', () => {
     it('should create a player successfully', async () => {
@@ -105,17 +108,67 @@ describe('PlayerService', () => {
         }],
       });
 
-      const result = await PlayerService.getPlayerById(player.id);
+      const result = await PlayerService.getPlayerById(player.id, ADMIN_CALLER);
 
       expect(result).toHaveProperty('id', player.id);
       expect(result.teamMembers).toHaveLength(1);
+      expect(result.email).toBe(player.email);
+      // Admins are never subjected to the shared-team check
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('returns the player (with email) when looking up yourself', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...player, teamMembers: [] });
+
+      const result = await PlayerService.getPlayerById(player.id, { id: player.id, role: 'PLAYER' });
+
+      expect(result.id).toBe(player.id);
+      expect(result.email).toBe(player.email);
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('returns a teammate without email for a non-admin caller (audit #3)', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...player, teamMembers: [] });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: player.id });
+
+      const result = await PlayerService.getPlayerById(player.id, COACH_CALLER);
+
+      expect(result.id).toBe(player.id);
+      expect(result.email).toBeNull();
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: player.id,
+            teamMembers: {
+              some: {
+                team: {
+                  OR: [
+                    { members: { some: { playerId: COACH_CALLER.id } } },
+                    { staff: { some: { userId: COACH_CALLER.id } } },
+                  ],
+                },
+              },
+            },
+          }),
+        })
+      );
+    });
+
+    it('throws NotFoundError for a non-admin looking up a player outside their teams', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...player, teamMembers: [] });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(PlayerService.getPlayerById(player.id, COACH_CALLER)).rejects.toThrow('Player not found');
     });
 
     it('should throw NotFoundError if player does not exist', async () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
       try {
-        await PlayerService.getPlayerById('non-existent');
+        await PlayerService.getPlayerById('non-existent', ADMIN_CALLER);
       } catch (error) {
         expectNotFoundError(error, 'Player not found');
       }
@@ -130,7 +183,7 @@ describe('PlayerService', () => {
       });
 
       try {
-        await PlayerService.getPlayerById(coach.id);
+        await PlayerService.getPlayerById(coach.id, ADMIN_CALLER);
       } catch (error) {
         expectNotFoundError(error, 'Player not found');
       }
@@ -168,14 +221,90 @@ describe('PlayerService', () => {
         },
       ]);
 
-      const result = await PlayerService.listPlayers({ limit: 10, offset: 0 });
+      const result = await PlayerService.listPlayers({ limit: 10, offset: 0 }, ADMIN_CALLER);
 
       expect(result.players).toHaveLength(2);
       expect(result.pagination.total).toBe(2);
       expect(result.pagination.hasMore).toBe(false);
+      // Admins are not scoped to shared teams and get email in the payload
+      const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.AND).toBeUndefined();
+      expect(call.select.email).toBe(true);
     });
 
-    it('should filter by search term', async () => {
+    it('scopes non-admin callers to themselves + users sharing a team, without email (audit #3)', async () => {
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+      await PlayerService.listPlayers({ limit: 10, offset: 0 }, COACH_CALLER);
+
+      const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.role).toBe('PLAYER');
+      expect(call.where.isManaged).toBe(false);
+      expect(call.where.AND).toEqual([
+        {
+          OR: [
+            { id: COACH_CALLER.id },
+            {
+              teamMembers: {
+                some: {
+                  team: {
+                    OR: [
+                      { members: { some: { playerId: COACH_CALLER.id } } },
+                      { staff: { some: { userId: COACH_CALLER.id } } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ]);
+      expect(call.select.email).toBe(false);
+      expect((mockPrisma.user.count as jest.Mock).mock.calls[0][0].where).toEqual(call.where);
+    });
+
+    it('ignores role and isManaged filters for non-admin callers', async () => {
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+      await PlayerService.listPlayers(
+        { role: 'ADMIN', isManaged: true, limit: 10, offset: 0 },
+        COACH_CALLER
+      );
+
+      const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.role).toBe('PLAYER');
+      expect(call.where.isManaged).toBe(false);
+    });
+
+    it('honors role and isManaged filters for admins', async () => {
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+      await PlayerService.listPlayers(
+        { role: 'COACH', isManaged: true, limit: 10, offset: 0 },
+        ADMIN_CALLER
+      );
+
+      const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.role).toBe('COACH');
+      expect(call.where.isManaged).toBe(true);
+    });
+
+    it('matches search against name only for non-admin callers', async () => {
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+      await PlayerService.listPlayers({ search: 'john@', limit: 10, offset: 0 }, COACH_CALLER);
+
+      const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.AND).toHaveLength(2);
+      expect(call.where.AND[1]).toEqual({ name: { contains: 'john@', mode: 'insensitive' } });
+      expect(JSON.stringify(call.where.AND[1])).not.toContain('email');
+    });
+
+    it('should filter by search term (admins match name or email)', async () => {
       const player = createPlayer({ name: 'John Doe', email: 'john@test.com' });
 
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
@@ -195,16 +324,20 @@ describe('PlayerService', () => {
         search: 'John',
         limit: 10,
         offset: 0,
-      });
+      }, ADMIN_CALLER);
 
       expect(result.players).toHaveLength(1);
       expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            OR: expect.arrayContaining([
-              expect.objectContaining({ name: expect.anything() }),
-              expect.objectContaining({ email: expect.anything() }),
-            ]),
+            AND: [
+              {
+                OR: expect.arrayContaining([
+                  expect.objectContaining({ name: expect.anything() }),
+                  expect.objectContaining({ email: expect.anything() }),
+                ]),
+              },
+            ],
           }),
         })
       );
@@ -226,7 +359,7 @@ describe('PlayerService', () => {
         _count: { teamMembers: 0 },
       }]);
 
-      const result = await PlayerService.listPlayers({ limit: 10, offset: 0 });
+      const result = await PlayerService.listPlayers({ limit: 10, offset: 0 }, ADMIN_CALLER);
 
       expect(result.pagination.hasMore).toBe(true);
       expect(result.pagination.total).toBe(20);

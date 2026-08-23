@@ -159,7 +159,7 @@ describe('Managed Player - PlayerService.listPlayers (isManaged filter)', () => 
     (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 
-    await PlayerService.listPlayers({ limit: 20, offset: 0 });
+    await PlayerService.listPlayers({ limit: 20, offset: 0 }, { id: 'admin-1', role: 'ADMIN' });
 
     expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -174,7 +174,7 @@ describe('Managed Player - PlayerService.listPlayers (isManaged filter)', () => 
     (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 
-    await PlayerService.listPlayers({ limit: 20, offset: 0, isManaged: true });
+    await PlayerService.listPlayers({ limit: 20, offset: 0, isManaged: true }, { id: 'admin-1', role: 'ADMIN' });
 
     expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -189,7 +189,7 @@ describe('Managed Player - PlayerService.listPlayers (isManaged filter)', () => 
     (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 
-    await PlayerService.listPlayers({ limit: 20, offset: 0, isManaged: false });
+    await PlayerService.listPlayers({ limit: 20, offset: 0, isManaged: false }, { id: 'admin-1', role: 'ADMIN' });
 
     expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -348,7 +348,7 @@ describe('Managed Player - PlayerService.getPlayerById (includes isManaged)', ()
 
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(managedPlayer);
 
-    const result = await PlayerService.getPlayerById('managed-123');
+    const result = await PlayerService.getPlayerById('managed-123', { id: 'admin-1', role: 'ADMIN' });
 
     expect(result.isManaged).toBe(true);
     expect(result.managedById).toBe('coach-123');
@@ -372,7 +372,7 @@ describe('Managed Player - PlayerService.getPlayerById (includes isManaged)', ()
 
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(regularPlayer);
 
-    const result = await PlayerService.getPlayerById('regular-123');
+    const result = await PlayerService.getPlayerById('regular-123', { id: 'admin-1', role: 'ADMIN' });
 
     expect(result.isManaged).toBe(false);
     expect(result.managedById).toBeNull();

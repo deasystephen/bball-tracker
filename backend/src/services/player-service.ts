@@ -63,9 +63,43 @@ const PLAYER_LIST_SELECT = {
   },
 } satisfies Prisma.UserSelect;
 
+/** List payload for non-admin callers: identical to PLAYER_LIST_SELECT minus `email` (audit #3). */
+const PLAYER_LIST_PUBLIC_SELECT = {
+  ...PLAYER_LIST_SELECT,
+  email: false,
+} satisfies Prisma.UserSelect;
+
 export type Player = Prisma.UserGetPayload<{ select: typeof PLAYER_SELECT }>;
 export type PlayerDetail = Prisma.UserGetPayload<{ select: typeof PLAYER_DETAIL_SELECT }>;
-export type PlayerListItem = Prisma.UserGetPayload<{ select: typeof PLAYER_LIST_SELECT }>;
+/** `email` is only present when the caller is a system ADMIN. */
+export type PlayerListItem = Prisma.UserGetPayload<{ select: typeof PLAYER_LIST_PUBLIC_SELECT }> & {
+  email?: string | null;
+};
+
+/** The authenticated caller, as attached to `req.user` by the auth middleware. */
+export interface PlayerCaller {
+  id: string;
+  role: string;
+}
+
+/**
+ * Prisma filter for "users who share at least one team with `userId`" —
+ * i.e. members of any team the caller plays on or is staff of.
+ */
+function sharesTeamWith(userId: string): Prisma.UserWhereInput {
+  return {
+    teamMembers: {
+      some: {
+        team: {
+          OR: [
+            { members: { some: { playerId: userId } } },
+            { staff: { some: { userId } } },
+          ],
+        },
+      },
+    },
+  };
+}
 
 export interface PlayerList {
   players: PlayerListItem[];
@@ -109,10 +143,16 @@ export class PlayerService {
   }
 
   /**
-   * Get a player by ID
+   * Get a player by ID.
+   *
+   * System admins can look up any player. Everyone else can only see
+   * themselves or players who share a team with them; anything else is a 404
+   * so player ids cannot be enumerated (audit #3). `email` is only returned
+   * to admins and to the player themselves.
    * @param playerId Player ID
+   * @param caller The authenticated user
    */
-  static async getPlayerById(playerId: string): Promise<PlayerDetail> {
+  static async getPlayerById(playerId: string, caller: PlayerCaller): Promise<PlayerDetail> {
     const player = await prisma.user.findUnique({
       where: { id: playerId },
       select: PLAYER_DETAIL_SELECT,
@@ -127,34 +167,61 @@ export class PlayerService {
       throw new NotFoundError('Player not found');
     }
 
+    const isAdmin = caller.role === 'ADMIN';
+    const isSelf = caller.id === playerId;
+
+    if (!isAdmin && !isSelf) {
+      const shared = await prisma.user.findFirst({
+        where: { id: playerId, ...sharesTeamWith(caller.id) },
+        select: { id: true },
+      });
+      if (!shared) {
+        throw new NotFoundError('Player not found');
+      }
+      return { ...player, email: null };
+    }
+
     return player;
   }
 
   /**
-   * List players with optional filters
+   * List players with optional filters.
+   *
+   * Non-admin callers are scoped to themselves plus users who share a team
+   * with them; the `role` / `isManaged` filters are admin-only (ignored for
+   * everyone else), `search` matches name only for non-admins, and `email` is
+   * omitted from non-admin results (audit #3).
    * @param params Query parameters
+   * @param caller The authenticated user
    */
-  static async listPlayers(params: PlayerQueryParams): Promise<PlayerList> {
+  static async listPlayers(params: PlayerQueryParams, caller: PlayerCaller): Promise<PlayerList> {
     const { search, role, isManaged, limit, offset } = params;
+    const isAdmin = caller.role === 'ADMIN';
 
-    // Build where clause
     const where: Prisma.UserWhereInput = {
-      role: role || 'PLAYER', // Default to PLAYER role
+      // Default to PLAYER role; only admins may list other roles
+      role: isAdmin && role ? role : 'PLAYER',
+      // Exclude managed players by default; only admins may include them
+      isManaged: isAdmin && isManaged !== undefined ? isManaged : false,
     };
 
-    // Filter by managed status (exclude managed players by default)
-    if (isManaged !== undefined) {
-      where.isManaged = isManaged;
-    } else {
-      where.isManaged = false;
+    const conditions: Prisma.UserWhereInput[] = [];
+
+    if (!isAdmin) {
+      conditions.push({ OR: [{ id: caller.id }, sharesTeamWith(caller.id)] });
     }
 
-    // Add search filter if provided
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
+      const nameMatch: Prisma.UserWhereInput = { name: { contains: search, mode: 'insensitive' } };
+      conditions.push(
+        isAdmin
+          ? { OR: [nameMatch, { email: { contains: search, mode: 'insensitive' } }] }
+          : nameMatch
+      );
+    }
+
+    if (conditions.length > 0) {
+      where.AND = conditions;
     }
 
     // Get total count and players in parallel
@@ -162,7 +229,7 @@ export class PlayerService {
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
-        select: PLAYER_LIST_SELECT,
+        select: isAdmin ? PLAYER_LIST_SELECT : PLAYER_LIST_PUBLIC_SELECT,
         orderBy: { name: 'asc' },
         take: limit,
         skip: offset,
