@@ -25,6 +25,7 @@ import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
+import { getGameResult, getResultColor } from '../../../utils/game-result';
 
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -154,9 +155,8 @@ export default function GameStatsScreen() {
     );
   }
 
-  const isWin = boxScore.game.homeScore > boxScore.game.awayScore;
-  const resultText = isWin ? 'W' : 'L';
-  const resultColor = isWin ? colors.success : colors.error;
+  const resultText = getGameResult(boxScore.game.homeScore, boxScore.game.awayScore);
+  const resultColor = getResultColor(resultText, colors);
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -206,7 +206,7 @@ export default function GameStatsScreen() {
               </ThemedText>
               <ThemedText
                 variant="h1"
-                style={[styles.finalScore, { color: isWin ? colors.success : colors.text }]}
+                style={[styles.finalScore, { color: resultText === 'W' ? colors.success : colors.text }]}
               >
                 {boxScore.game.homeScore}
               </ThemedText>
@@ -228,7 +228,7 @@ export default function GameStatsScreen() {
               </ThemedText>
               <ThemedText
                 variant="h1"
-                style={[styles.finalScore, { color: !isWin ? colors.error : colors.text }]}
+                style={[styles.finalScore, { color: resultText === 'L' ? colors.error : colors.text }]}
               >
                 {boxScore.game.awayScore}
               </ThemedText>

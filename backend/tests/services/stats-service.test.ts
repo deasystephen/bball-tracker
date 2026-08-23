@@ -577,6 +577,48 @@ describe('StatsService', () => {
       expect(result.recentGames).toHaveLength(2);
     });
 
+    it('counts tied games as T, not L, in the record and recent games (audit #56)', async () => {
+      const admin = createAdmin();
+      const team = createTeam({ id: 'team-ties', name: 'Ties' });
+      const win = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 70, awayScore: 60 });
+      const tie = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 65, awayScore: 65 });
+      const loss = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 50, awayScore: 55 });
+      const zeroZero = createGame({ teamId: team.id, status: 'FINISHED', homeScore: 0, awayScore: 0 });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([win, tie, loss, zeroZero]);
+      (mockPrisma.teamStats.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await StatsService.getTeamSeasonStats(team.id, admin.id);
+
+      expect(result.gamesPlayed).toBe(4);
+      expect(result.wins).toBe(1);
+      expect(result.losses).toBe(1);
+      expect(result.ties).toBe(2);
+      expect(result.recentGames.map((g) => g.result)).toEqual(['W', 'T', 'L', 'T']);
+    });
+
+    it('counts ties beyond the 10 most recent games too', async () => {
+      const admin = createAdmin();
+      const team = createTeam({ id: 'team-many-ties', name: 'Many' });
+      const games = Array.from({ length: 12 }, (_, i) =>
+        createGame({ teamId: team.id, status: 'FINISHED', homeScore: 40, awayScore: i < 10 ? 30 : 40 })
+      );
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue(games);
+      (mockPrisma.teamStats.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await StatsService.getTeamSeasonStats(team.id, admin.id);
+
+      expect(result.recentGames).toHaveLength(10);
+      expect(result.wins).toBe(10);
+      expect(result.losses).toBe(0);
+      expect(result.ties).toBe(2);
+    });
+
     it('divides per-game averages by tracked (finalized) games, not all FINISHED games (audit #53)', async () => {
       const admin = createAdmin();
       const team = createTeam({ id: 'team-tracked', name: 'Tracked' });

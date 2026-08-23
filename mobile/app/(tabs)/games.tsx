@@ -27,6 +27,7 @@ import { useInfiniteGames } from '../../hooks/useGames';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { getGameResult, getResultColor } from '../../utils/game-result';
 import type { Game, GameStatus } from '../../types/game';
 
 type FilterTab = 'ALL' | GameStatus;
@@ -190,7 +191,8 @@ export default function Games() {
       }
 
       if (isCompleted) {
-        const isWin = item.homeScore > item.awayScore;
+        const result = getGameResult(item.homeScore, item.awayScore);
+        const resultColor = getResultColor(result, colors);
         return (
           <TouchableOpacity
             onPress={() => handleGamePress(item)}
@@ -201,9 +203,7 @@ export default function Games() {
                 <View
                   style={[
                     styles.wlStripe,
-                    {
-                      backgroundColor: isWin ? colors.success : colors.error,
-                    },
+                    { backgroundColor: resultColor },
                   ]}
                 />
                 <View style={styles.completedInfo}>
@@ -216,12 +216,9 @@ export default function Games() {
                     </ThemedText>
                     <ThemedText
                       variant="captionBold"
-                      style={{
-                        color: isWin ? colors.success : colors.error,
-                        marginLeft: spacing.sm,
-                      }}
+                      style={{ color: resultColor, marginLeft: spacing.sm }}
                     >
-                      {isWin ? 'W' : 'L'}
+                      {result}
                     </ThemedText>
                   </View>
                   <ThemedText variant="footnote" color="textTertiary">

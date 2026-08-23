@@ -82,15 +82,30 @@ export interface BoxScore {
   };
 }
 
+/** Outcome of a finished game from the tracked team's point of view. */
+export type GameResult = 'W' | 'L' | 'T';
+
+/**
+ * W when the tracked team outscored the opponent, L when outscored, T on a
+ * tie. Ties are rare in basketball but the data model allows equal scores,
+ * and they must not be counted as losses.
+ */
+export function gameResult(homeScore: number, awayScore: number): GameResult {
+  if (homeScore > awayScore) return 'W';
+  if (homeScore < awayScore) return 'L';
+  return 'T';
+}
+
 export interface TeamSeasonStats {
   teamId: string;
   teamName: string;
-  /** FINISHED games (wins + losses). */
+  /** FINISHED games (wins + losses + ties). */
   gamesPlayed: number;
   /** FINISHED games with a finalized box score; the divisor for the per-game averages. */
   trackedGames: number;
   wins: number;
   losses: number;
+  ties: number;
   pointsPerGame: number;
   reboundsPerGame: number;
   assistsPerGame: number;
@@ -104,7 +119,7 @@ export interface TeamSeasonStats {
     opponent: string;
     homeScore: number;
     awayScore: number;
-    result: 'W' | 'L';
+    result: GameResult;
   }>;
 }
 
@@ -751,29 +766,20 @@ export class StatsService {
     // a game created directly as FINISHED, or finished without any events,
     // has no box score and must not deflate the averages.
     const trackedGames = teamStats.length;
-    let wins = 0;
-    let losses = 0;
-
-    const recentGames = games.slice(0, 10).map((game) => {
-      const isWin = game.homeScore > game.awayScore;
-      if (isWin) wins++;
-      else losses++;
-
-      return {
-        id: game.id,
-        date: game.date.toISOString(),
-        opponent: game.opponent,
-        homeScore: game.homeScore,
-        awayScore: game.awayScore,
-        result: isWin ? 'W' as const : 'L' as const,
-      };
-    });
-
-    // Count remaining games for win/loss record
-    for (let i = 10; i < games.length; i++) {
-      if (games[i].homeScore > games[i].awayScore) wins++;
-      else losses++;
+    const record: Record<GameResult, number> = { W: 0, L: 0, T: 0 };
+    for (const game of games) {
+      record[gameResult(game.homeScore, game.awayScore)]++;
     }
+    const { W: wins, L: losses, T: ties } = record;
+
+    const recentGames = games.slice(0, 10).map((game) => ({
+      id: game.id,
+      date: game.date.toISOString(),
+      opponent: game.opponent,
+      homeScore: game.homeScore,
+      awayScore: game.awayScore,
+      result: gameResult(game.homeScore, game.awayScore),
+    }));
 
     // Aggregate stats. Shooting percentages are weighted by attempts
     // (sum made / sum attempted across games), NOT a mean of per-game
@@ -811,6 +817,7 @@ export class StatsService {
       gamesPlayed,
       wins,
       losses,
+      ties,
       trackedGames,
       pointsPerGame: perGame(totals.points, trackedGames),
       reboundsPerGame: perGame(totals.rebounds, trackedGames),

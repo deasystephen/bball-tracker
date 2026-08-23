@@ -136,6 +136,7 @@ describe('Stats API', () => {
     teamName: 'Lakers',
     gamesPlayed: 15,
     trackedGames: 15,
+    ties: 0,
     wins: 10,
     losses: 5,
     pointsPerGame: 88.5,
@@ -327,6 +328,7 @@ describe('Stats API', () => {
       expect(response.body.stats.trackedGames).toBe(15);
       expect(response.body.stats.wins).toBe(10);
       expect(response.body.stats.losses).toBe(5);
+      expect(response.body.stats.ties).toBe(0);
       expect(response.body.stats.recentGames).toHaveLength(1);
       expect(mockStatsService.getTeamSeasonStats).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
     });

@@ -1,3 +1,5 @@
+import type { GameResult } from '../utils/game-result';
+
 /**
  * Stats type definitions
  */
@@ -79,12 +81,13 @@ export interface BoxScore {
 export interface TeamSeasonStats {
   teamId: string;
   teamName: string;
-  /** FINISHED games (wins + losses). */
+  /** FINISHED games (wins + losses + ties). */
   gamesPlayed: number;
   /** FINISHED games with a finalized box score; the divisor for per-game averages. */
   trackedGames: number;
   wins: number;
   losses: number;
+  ties: number;
   pointsPerGame: number;
   reboundsPerGame: number;
   assistsPerGame: number;
@@ -98,7 +101,7 @@ export interface TeamSeasonStats {
     opponent: string;
     homeScore: number;
     awayScore: number;
-    result: 'W' | 'L';
+    result: GameResult;
   }[];
 }
 
