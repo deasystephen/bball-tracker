@@ -244,11 +244,26 @@ router.get('/callback', async (req, res) => {
     }
     const { code, code_verifier: codeVerifier } = parsedQuery.data;
 
-    // Exchange code for token
-    const { user: workosUser, accessToken, refreshToken } = await WorkOSService.exchangeCodeForToken(
-      code,
-      codeVerifier
-    );
+    // Exchange code for token. WorkOS refusing the exchange (expired/used
+    // code, PKCE verifier mismatch — OauthException with a 4xx `status`) is an
+    // expected outcome of a stale or tampered deep link, not a defect: answer
+    // 400 without a Sentry capture (audit #42). Outages (5xx / no status)
+    // fall through to the 500 + Sentry branch below.
+    let exchanged;
+    try {
+      exchanged = await WorkOSService.exchangeCodeForToken(code, codeVerifier);
+    } catch (error) {
+      const status = (error as { status?: unknown }).status;
+      if (typeof status === 'number' && status >= 400 && status < 500 && status !== 429) {
+        logger.warn('WorkOS rejected authorization code', {
+          status,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new BadRequestError('Invalid or expired authorization code. Please sign in again.');
+      }
+      throw error;
+    }
+    const { user: workosUser, accessToken, refreshToken } = exchanged;
 
     // Sync user to our database
     const user = await WorkOSService.syncUser({

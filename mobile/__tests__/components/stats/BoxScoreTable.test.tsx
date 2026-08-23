@@ -82,6 +82,13 @@ describe('BoxScoreTable', () => {
     expect(getByText('TEAM')).toBeTruthy();
   });
 
+  it('shows jersey #0 in the player label instead of dropping it (audit #68)', () => {
+    const { getByText } = render(
+      <BoxScoreTable players={[{ ...player, jerseyNumber: 0 }]} teamStats={teamStats} />
+    );
+    expect(getByText('#0 John Doe')).toBeTruthy();
+  });
+
   it('renders a player without a jersey number', () => {
     const { getByText } = render(
       <BoxScoreTable players={[playerNoJersey]} teamStats={teamStats} />

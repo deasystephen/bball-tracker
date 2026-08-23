@@ -31,9 +31,23 @@ import { consumePendingLogin } from '../../utils/pkce';
  * Errors that are knowable from the deep link itself (WorkOS returned an error,
  * or no code came back) are derived during render — no effect/state needed.
  * Only the async token-exchange failure has to live in state.
+ *
+ * The `error` query param is attacker-controllable (anyone can open
+ * bball-tracker://auth/callback?error=…), so it is never rendered verbatim —
+ * known OAuth codes map to our own copy and everything else gets a generic
+ * message (audit #74).
  */
+const OAUTH_ERROR_COPY: Record<string, string> = {
+  access_denied: 'Sign-in was cancelled. You can try again whenever you like.',
+  invalid_request: 'The sign-in link was invalid. Please try signing in again.',
+  server_error: 'The sign-in service hit a problem. Please try again in a moment.',
+  temporarily_unavailable: 'The sign-in service is temporarily unavailable. Please try again in a moment.',
+};
+
 function getParamError(oauthError?: string, code?: string): string | null {
-  if (oauthError) return oauthError;
+  if (oauthError) {
+    return OAUTH_ERROR_COPY[oauthError] ?? 'Sign-in did not complete. Please try signing in again.';
+  }
   if (!code) return 'No authorization code was returned. Please try signing in again.';
   return null;
 }
