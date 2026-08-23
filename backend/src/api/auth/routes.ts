@@ -357,6 +357,48 @@ router.patch('/me/role', authenticate, async (req, res) => {
 });
 
 /**
+ * POST /api/v1/auth/logout
+ * Server-side logout: revokes the WorkOS session behind the bearer token so
+ * its refresh token can no longer mint new access tokens (audit #51).
+ *
+ * - Requires a valid (non-expired) access token; the client should call this
+ *   before discarding its tokens locally.
+ * - Dev-login tokens have no WorkOS session — the call is a no-op.
+ * - Revocation failures (WorkOS outage) are reported but still return 200 with
+ *   `revoked: false`; the client must clear local state either way.
+ */
+router.post('/logout', authenticate, async (req, res) => {
+  const token = req.headers.authorization!.substring(7);
+
+  if (token.startsWith('dev_')) {
+    res.json({ success: true, revoked: false });
+    return;
+  }
+
+  try {
+    // `authenticate` already verified this token; re-reading it here only
+    // extracts the session id (`sid`) that the middleware does not expose.
+    const verified = await WorkOSService.verifyToken(token);
+    if (!verified?.sessionId) {
+      logger.warn('Logout without a session id in the access token', { userId: req.user!.id });
+      res.json({ success: true, revoked: false });
+      return;
+    }
+
+    await WorkOSService.revokeSession(verified.sessionId);
+    logger.info('Revoked WorkOS session on logout', { userId: req.user!.id });
+    res.json({ success: true, revoked: true });
+  } catch (error) {
+    logger.error('Failed to revoke WorkOS session on logout', {
+      userId: req.user!.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    captureException(error, { flow: 'auth-logout' });
+    res.json({ success: true, revoked: false });
+  }
+});
+
+/**
  * GET /api/v1/auth/entitlements
  * Returns the current user's subscription tier, feature access, and usage limits
  */
@@ -427,7 +469,8 @@ router.post('/push-token', authenticate, async (req, res) => {
 
 /**
  * DELETE /api/v1/auth/push-token
- * Remove a push notification token
+ * Remove a push notification token. Only tokens registered by the caller are
+ * deleted; a token owned by another user is left untouched (audit #47).
  */
 router.delete('/push-token', authenticate, async (req, res) => {
   try {
@@ -436,7 +479,7 @@ router.delete('/push-token', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Token is required' });
     }
 
-    await NotificationService.removeToken(token);
+    await NotificationService.removeToken(req.user!.id, token);
 
     return res.json({ success: true });
   } catch (error) {

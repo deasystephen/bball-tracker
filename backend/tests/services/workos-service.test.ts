@@ -10,6 +10,7 @@ jest.mock('../../src/utils/workos-client', () => {
         getAuthorizationUrl: jest.fn(),
         authenticateWithCode: jest.fn(),
         authenticateWithRefreshToken: jest.fn(),
+        revokeSession: jest.fn(),
         getUser: jest.fn(),
         listUsers: jest.fn(),
       },
@@ -36,6 +37,7 @@ const mockWorkos = {
     getAuthorizationUrl: workos.userManagement.getAuthorizationUrl as jest.Mock,
     authenticateWithCode: workos.userManagement.authenticateWithCode as jest.Mock,
     authenticateWithRefreshToken: workos.userManagement.authenticateWithRefreshToken as jest.Mock,
+    revokeSession: workos.userManagement.revokeSession as jest.Mock,
     getUser: workos.userManagement.getUser as jest.Mock,
     listUsers: workos.userManagement.listUsers as jest.Mock,
   },
@@ -186,6 +188,22 @@ describe('WorkOSService', () => {
     it('should propagate WorkOS errors so the route can map them to 401', async () => {
       mockWorkos.userManagement.authenticateWithRefreshToken.mockRejectedValue(new Error('invalid_grant'));
       await expect(WorkOSService.refreshSession('bad')).rejects.toThrow('invalid_grant');
+    });
+  });
+
+  describe('revokeSession', () => {
+    it('revokes the WorkOS session by id', async () => {
+      mockWorkos.userManagement.revokeSession.mockResolvedValue(undefined);
+
+      await WorkOSService.revokeSession('session_123');
+
+      expect(mockWorkos.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_123' });
+    });
+
+    it('propagates WorkOS errors', async () => {
+      mockWorkos.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
+
+      await expect(WorkOSService.revokeSession('session_123')).rejects.toThrow('WorkOS down');
     });
   });
 

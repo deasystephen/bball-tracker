@@ -55,15 +55,24 @@ describe('NotificationService', () => {
   });
 
   describe('removeToken', () => {
-    it('deletes matching tokens via deleteMany', async () => {
+    it('deletes the token only when it belongs to the caller (audit #47)', async () => {
       (mockPrisma.pushToken.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
-      const result = await NotificationService.removeToken(VALID_TOKEN);
+      const result = await NotificationService.removeToken('user-1', VALID_TOKEN);
 
       expect(mockPrisma.pushToken.deleteMany).toHaveBeenCalledWith({
-        where: { token: VALID_TOKEN },
+        where: { token: VALID_TOKEN, userId: 'user-1' },
       });
       expect(result).toEqual({ count: 1 });
+    });
+
+    it('never issues an unscoped delete by token value', async () => {
+      (mockPrisma.pushToken.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await NotificationService.removeToken('user-2', VALID_TOKEN);
+
+      const where = (mockPrisma.pushToken.deleteMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.userId).toBe('user-2');
     });
   });
 
