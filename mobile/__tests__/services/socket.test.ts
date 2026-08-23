@@ -229,6 +229,19 @@ describe('socket wrapper', () => {
       expect(mockedRefresh).toHaveBeenCalledTimes(MAX_AUTH_REFRESHES + 1);
     });
 
+    it('backs off and retries on Rate limited (backend socket limiter, audit #16)', async () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      const socket = getSocket();
+
+      await handleConnectError(socket, new Error('Rate limited'));
+
+      expect(isSocketRecovering()).toBe(true);
+      jest.advanceTimersByTime(BASE_BACKOFF_MS);
+      expect(fake.connect).toHaveBeenCalledTimes(1);
+      expect(mockedRefresh).not.toHaveBeenCalled();
+    });
+
     it('ignores other connect_error reasons (socket.io retries those itself)', async () => {
       const fake = makeFake();
       mockedIo.mockReturnValue(fake);

@@ -35,6 +35,8 @@ const getBaseURL = (): string => {
 
 export const UNAUTHORIZED_MESSAGE = 'Unauthorized';
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service unavailable';
+/** Backend socket rate limiter rejected the handshake (audit #16). */
+export const RATE_LIMITED_MESSAGE = 'Rate limited';
 
 /** Consecutive `Unauthorized` handshakes we will try to refresh through. */
 export const MAX_AUTH_REFRESHES = 2;
@@ -106,7 +108,10 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
     return;
   }
 
-  if (err.message === SERVICE_UNAVAILABLE_MESSAGE) {
+  // `Rate limited` (the backend's per-IP socket limiter, audit #16) recovers
+  // the same way as an outage: back off and try again — a middleware
+  // rejection is not auto-reconnected by socket.io.
+  if (err.message === SERVICE_UNAVAILABLE_MESSAGE || err.message === RATE_LIMITED_MESSAGE) {
     if (unavailableRetries >= MAX_UNAVAILABLE_RETRIES) {
       recovering = false;
       return;

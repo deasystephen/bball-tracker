@@ -30,6 +30,15 @@ import { canAccessTeam } from '../utils/permissions';
 import { WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
 import { ServiceUnavailableError } from '../utils/errors';
+import {
+  RATE_LIMITED_MESSAGE,
+  checkHandshakeAllowed,
+  checkJoinAllowed,
+  hasConcurrentCapacity,
+  registerConnection,
+  releaseConnection,
+  socketClientIp,
+} from './rate-limit';
 
 export const GAME_ROOM_PREFIX = 'game:';
 export const SNAPSHOT_EVENT_LIMIT = 100;
@@ -257,6 +266,20 @@ export async function handleJoinGame(
  * at server startup from `setupWebSocketHandlers`.
  */
 export function registerGameEventHandlers(io: SocketServer): void {
+  // Rate limits run BEFORE authentication so unauthenticated connect spam
+  // never reaches the JWKS/user lookup (audit #16). A rejection here is a
+  // `connect_error: Rate limited` on the client, which backs off and retries
+  // like `Service unavailable`.
+  io.use((socket, next) => {
+    const ip = socketClientIp(socket);
+    if (!checkHandshakeAllowed(ip) || !hasConcurrentCapacity(ip)) {
+      logger.warn('Socket handshake rate limited', { socketId: socket.id, ip });
+      next(new Error(RATE_LIMITED_MESSAGE));
+      return;
+    }
+    next();
+  });
+
   io.use((socket, next) => {
     void authenticateSocket(socket as GameSocket, next);
   });
@@ -264,9 +287,18 @@ export function registerGameEventHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
     const typedSocket = socket as GameSocket;
     const userId = typedSocket.data.user?.id;
+    const ip = socketClientIp(socket);
+    registerConnection(ip);
     logger.info('Socket connected', { socketId: socket.id, userId });
 
     socket.on('join-game', (payload: unknown, ack?: (response: unknown) => void) => {
+      // Cheap in-memory check before the two DB queries + 100-event snapshot
+      // a join costs (audit #16).
+      if (!checkJoinAllowed(socket)) {
+        logger.warn('Socket join-game rate limited', { socketId: socket.id, userId });
+        if (ack) ack({ success: false, error: 'Too many join attempts — slow down', code: 'rate_limited' });
+        return;
+      }
       void handleJoinGame(typedSocket, payload).then((result) => {
         if (!result.ok) {
           logger.warn('Socket join-game rejected', {
@@ -304,6 +336,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     });
 
     socket.on('disconnect', (reason: string) => {
+      releaseConnection(ip);
       logger.info('Socket disconnected', { socketId: socket.id, userId, reason });
     });
   });
