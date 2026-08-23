@@ -48,6 +48,10 @@ jest.mock('../../src/api/auth/middleware', () => ({
 }));
 
 jest.mock('../../src/services/calendar-service');
+jest.mock('../../src/services/team-service');
+
+import { authenticate } from '../../src/api/auth/middleware';
+import { TeamService } from '../../src/services/team-service';
 
 const mockCalendarService = CalendarService as jest.Mocked<typeof CalendarService>;
 
@@ -249,6 +253,44 @@ describe('Calendar Feed API', () => {
       const res = await request(app).get('/api/v1/teams/not-a-uuid/calendar.ics?token=x');
       expect(res.status).toBe(400);
     });
+  });
+});
+
+describe('authenticate is scoped to calendar management routes (audit #71)', () => {
+  beforeEach(() => {
+    (authenticate as jest.Mock).mockClear();
+  });
+
+  it('runs authenticate exactly once for a plain /teams/:id request', async () => {
+    (TeamService.getTeamById as jest.Mock).mockResolvedValue({ id: TEST_TEAM_ID, name: 'Lakers' });
+
+    const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it('still authenticates the calendar subscribe route', async () => {
+    mockCalendarService.subscribe.mockResolvedValue({
+      token: 'abc123',
+      feedUrl: `https://api.capyhoops.com/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+      webcalUrl: `webcal://api.capyhoops.com/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+    });
+
+    const res = await request(app).post(`/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`);
+
+    expect(res.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not authenticate the public feed GET', async () => {
+    mockCalendarService.resolveToken.mockResolvedValue({ userId: 'u', teamId: TEST_TEAM_ID });
+    mockCalendarService.buildFeed.mockResolvedValue('BEGIN:VCALENDAR\nEND:VCALENDAR');
+
+    const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc`);
+
+    expect(res.status).toBe(200);
+    expect(authenticate).not.toHaveBeenCalled();
   });
 });
 

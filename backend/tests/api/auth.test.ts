@@ -486,7 +486,8 @@ describe('Auth API', () => {
       expect(response.body.features.STATS_EXPORT).toBe(false);
       expect(response.body.features.AD_FREE).toBe(false);
       expect(response.body.limits.maxTeams).toBe(3);
-      expect(response.body.limits.maxSeasons).toBe(1);
+      // Seasons are metered, never capped (audit #81): Infinity serializes as null.
+      expect(response.body.limits.maxSeasons).toBeNull();
       expect(response.body.expiresAt).toBeNull();
     });
 

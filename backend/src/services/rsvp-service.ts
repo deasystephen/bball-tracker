@@ -9,6 +9,7 @@ import { canAccessTeam } from '../utils/permissions';
 import { mailer } from './mailer';
 import { rsvpConfirmationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
+import { formatEmailDateTime } from '../utils/format-date';
 
 const RSVP_INCLUDE = {
   user: {
@@ -89,7 +90,7 @@ export class RsvpService {
             playerName: rsvp.user.name ?? rsvp.user.email,
             teamName: game.team.name,
             opponent: game.opponent,
-            gameDate: game.date.toLocaleDateString(),
+            gameDate: formatEmailDateTime(game.date),
             rsvpStatus: status,
           },
           metadata: {

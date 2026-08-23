@@ -17,6 +17,7 @@ import { mockPrisma } from '../setup';
 
 type ExpoProto = {
   sendPushNotificationsAsync: (m: unknown[]) => Promise<unknown[]>;
+  getPushNotificationReceiptsAsync: (ids: string[]) => Promise<Record<string, unknown>>;
 };
 const ExpoProto = (Expo as unknown as { prototype: ExpoProto }).prototype;
 
@@ -250,4 +251,84 @@ describe('NotificationService', () => {
       expect(mockPrisma.pushToken.findMany).not.toHaveBeenCalled();
     });
   });
+
+describe('dead push token pruning (audit #60)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (mockPrisma.pushToken.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('deletes a token whose send ticket says DeviceNotRegistered', async () => {
+    (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([
+      { token: VALID_TOKEN },
+      { token: VALID_TOKEN_2 },
+    ]);
+    jest.spyOn(ExpoProto, 'sendPushNotificationsAsync').mockResolvedValue([
+      { status: 'error', message: 'gone', details: { error: 'DeviceNotRegistered' } },
+      { status: 'ok', id: 'ticket-2' },
+    ]);
+
+    await NotificationService.sendToUsers(['user-1'], { title: 't', body: 'b' });
+
+    expect(mockPrisma.pushToken.deleteMany).toHaveBeenCalledWith({
+      where: { token: { in: [VALID_TOKEN] } },
+    });
+  });
+
+  it('does not delete tokens for transient ticket errors', async () => {
+    (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([{ token: VALID_TOKEN }]);
+    jest.spyOn(ExpoProto, 'sendPushNotificationsAsync').mockResolvedValue([
+      { status: 'error', message: 'slow down', details: { error: 'MessageRateExceeded' } },
+    ]);
+
+    await NotificationService.sendToUsers(['user-1'], { title: 't', body: 'b' });
+
+    expect(mockPrisma.pushToken.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('schedules a receipt check ~15 minutes after a successful send and prunes DeviceNotRegistered receipts', async () => {
+    (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([
+      { token: VALID_TOKEN },
+      { token: VALID_TOKEN_2 },
+    ]);
+    jest.spyOn(ExpoProto, 'sendPushNotificationsAsync').mockResolvedValue([
+      { status: 'ok', id: 'ticket-1' },
+      { status: 'ok', id: 'ticket-2' },
+    ]);
+    const receipts = jest.spyOn(ExpoProto, 'getPushNotificationReceiptsAsync').mockResolvedValue({
+      'ticket-1': { status: 'ok' },
+      'ticket-2': { status: 'error', message: 'gone', details: { error: 'DeviceNotRegistered' } },
+    });
+
+    await NotificationService.sendToUsers(['user-1'], { title: 't', body: 'b' });
+    expect(receipts).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(15 * 60 * 1000);
+
+    expect(receipts).toHaveBeenCalledWith(['ticket-1', 'ticket-2']);
+    expect(mockPrisma.pushToken.deleteMany).toHaveBeenCalledWith({
+      where: { token: { in: [VALID_TOKEN_2] } },
+    });
+  });
+
+  it('checkReceipts returns the number of pruned tokens and survives Expo errors', async () => {
+    jest.spyOn(ExpoProto, 'getPushNotificationReceiptsAsync').mockRejectedValue(new Error('expo down'));
+
+    const pruned = await NotificationService.checkReceipts(new Map([['ticket-1', VALID_TOKEN]]));
+
+    expect(pruned).toBe(0);
+    expect(mockPrisma.pushToken.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('pruneDeadTokens is a no-op for an empty list', async () => {
+    await expect(NotificationService.pruneDeadTokens([])).resolves.toBe(0);
+    expect(mockPrisma.pushToken.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
 });

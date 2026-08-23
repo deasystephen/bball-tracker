@@ -83,7 +83,7 @@ Backend API (Node.js/Express)
 - `services/usage-service.ts` exposes `getUsage(userId)` → per-feature `{ count, limit, limitReached }`. Counts are derived from live data at read time (no counter table) and cached in Redis for 60s (`utils/redis.ts` JSON helpers), invalidated on team create/delete.
 - **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `utils/entitlements.ts` (`getUsageLimits`) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited (paid tiers).
 - **Endpoint**: `GET /api/v1/auth/me/usage` returns all metered metrics for the current user's effective tier.
-- **Enforcement**: team create (`POST /api/v1/teams`) blocks FREE-tier users at/over the cap with a **402** (`PaymentRequiredError`); admins bypass.
+- **Enforcement**: team create (`POST /api/v1/teams`) blocks FREE-tier users at/over the cap with a **402** (`PaymentRequiredError`); admins bypass. **Seasons are metered but never capped** — `maxSeasons` is `Infinity` for every tier, so `/auth/me/usage` reports `seasons.limit: null` and `limitReached: false`. The old FREE value of 1 was never enforced anywhere and rendered as a fake paywall (audit #81); season-history depth is the `FULL_SEASON_HISTORY` feature flag, not a usage limit. If a real cap is ever wanted, enforce it where a team joins a new season and re-add the number in one place (`USAGE_LIMITS`).
 - **Race-safe**: `requireTeamCreateLimit` is only a cheap pre-check. The authoritative check runs inside `TeamService.createTeam`'s `$transaction`, after `SELECT … FROM "User" … FOR UPDATE` on the caller's row, so concurrent creates serialize and can't exceed the cap (audit #49); it throws `PaymentRequiredError` (402, same `upgrade_required` body). Team + default roles + Head Coach staff row are written in that same transaction (no orphan teams, audit #70).
 - **Grandfather rule**: enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over the cap when enforcement shipped keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or upgraded. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
 - **Out of scope** (#43): per-day/per-hour rate limits, usage-based pricing, admin usage dashboards.
@@ -343,6 +343,20 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 
 ### Avatar uploads (`services/upload-service.ts`, `api/uploads/`)
 `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
+
+### Environment URLs & time zone
+- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.capyhoops.com` in prod via `infra/ecs.tf` + `infra/task-definition.json`; default `http://localhost:3000`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://capyhoops.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API.
+- `DEFAULT_TIMEZONE` — IANA zone used to format dates in outbound email (`utils/format-date.ts#formatEmailDate/formatEmailDateTime`; default `America/Los_Angeles`). Never call `toLocaleDateString()` bare in a template variable — ECS runs in UTC (audit #57). Teams/leagues have no time-zone column yet; pass one through the helper's `timeZone` arg once they do.
+
+### Calendar feed (`services/calendar-service.ts`, `api/teams/calendar.ts`)
+- `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass) — a downgraded/expired subscription stops the feed with 403 instead of serving forever (audit #43).
+- The calendar router is mounted on `/teams` ahead of the main teams router so the public `GET /teams/:id/calendar.ics` skips auth. Because of that ordering, `authenticate` is attached **per route** to `subscribe`/`revoke` — never `router.use(authenticate)` there, or every `/teams/*` request verifies the JWT twice (audit #71).
+
+### Push notifications (`services/notification-service.ts`)
+`sendMessages` inspects Expo tickets immediately and schedules `checkReceipts()` ~15 min later (unref'd timer); any ticket/receipt with `DeviceNotRegistered` deletes that `PushToken` (`pruneDeadTokens`). Other receipt errors are logged only (audit #60). The jest mock in `tests/__mocks__/expo-server-sdk.js` stubs both the send and receipt APIs.
+
+### Transactions (audit #70)
+`TeamService.addManagedPlayer` creates the managed user + team membership inside one `$transaction` so a failed second insert can't leave an orphan managed user (the `createTeam` half — team + roles + staff row — landed with audit #49 in `fix/infra-limits-and-reconnects`).
 
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)

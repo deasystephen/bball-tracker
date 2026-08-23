@@ -8,6 +8,12 @@ class Expo {
   async sendPushNotificationsAsync(messages) {
     return messages.map(() => ({ status: 'ok', id: 'mock-receipt-id' }));
   }
+  chunkPushNotificationReceiptIds(ids) {
+    return [ids];
+  }
+  async getPushNotificationReceiptsAsync(ids) {
+    return Object.fromEntries(ids.map((id) => [id, { status: 'ok' }]));
+  }
 }
 
 module.exports = { Expo };

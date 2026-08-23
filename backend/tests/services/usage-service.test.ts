@@ -88,9 +88,9 @@ describe('usage-service', () => {
 
       expect(usage.tier).toBe('FREE');
       expect(usage.teams).toEqual({ count: 2, limit: 3, limitReached: false });
-      expect(usage.seasons.limit).toBe(1);
-      // 2 seasons against a limit of 1 => limit reached
-      expect(usage.seasons).toEqual({ count: 2, limit: 1, limitReached: true });
+      // Seasons are metered but never capped, so FREE reports limit: null and
+      // can't be "reached" (audit #81).
+      expect(usage.seasons).toEqual({ count: 2, limit: null, limitReached: false });
     });
 
     it('marks teams.limitReached true when exactly at the cap', async () => {

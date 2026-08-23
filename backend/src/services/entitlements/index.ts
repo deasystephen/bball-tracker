@@ -104,12 +104,21 @@ const TIER_ENTITLEMENTS: Record<SubscriptionTier, Set<Feature>> = {
 };
 
 export interface UsageLimits {
+  /** Hard cap on teams a user may be staff on; enforced on `POST /teams`. */
   maxTeams: number;
+  /**
+   * Seasons are metered (reported by `/auth/me/usage`) but **not capped**:
+   * nothing ever enforced the old FREE value of 1, so reporting it as
+   * `limitReached` was a lie the client rendered as a paywall (audit #81).
+   * Season-history depth is a feature flag (`FULL_SEASON_HISTORY`), not a
+   * usage limit. Keep this `Infinity` for every tier unless enforcement is
+   * added at the point a team joins a new season.
+   */
   maxSeasons: number;
 }
 
 const USAGE_LIMITS: Record<SubscriptionTier, UsageLimits> = {
-  FREE: { maxTeams: FREE_TEAM_LIMIT, maxSeasons: 1 },
+  FREE: { maxTeams: FREE_TEAM_LIMIT, maxSeasons: Infinity },
   PREMIUM: { maxTeams: Infinity, maxSeasons: Infinity },
   LEAGUE: { maxTeams: Infinity, maxSeasons: Infinity },
 };
