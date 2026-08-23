@@ -120,7 +120,8 @@ describe('Players API', () => {
 
       expect(response.status).toBe(200);
       expect(mockPlayerService.listPlayers).toHaveBeenCalledWith(
-        expect.objectContaining({ search: 'John' })
+        expect.objectContaining({ search: 'John' }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'COACH' }
       );
     });
 
@@ -136,7 +137,8 @@ describe('Players API', () => {
 
       expect(response.status).toBe(200);
       expect(mockPlayerService.listPlayers).toHaveBeenCalledWith(
-        expect.objectContaining({ role: 'PLAYER' })
+        expect.objectContaining({ role: 'PLAYER' }),
+        expect.objectContaining({ role: 'COACH' })
       );
     });
 
@@ -164,6 +166,11 @@ describe('Players API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.player.id).toBe(TEST_PLAYER_ID);
+      // The caller's identity is passed through so the service can scope access (audit #3)
+      expect(mockPlayerService.getPlayerById).toHaveBeenCalledWith(
+        TEST_PLAYER_ID,
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'COACH' }
+      );
     });
 
     it('should return 404 for non-existent player', async () => {

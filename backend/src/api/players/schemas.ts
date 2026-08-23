@@ -32,7 +32,8 @@ export const updatePlayerSchema = z.object({
  * Schema for player query parameters
  */
 export const playerQuerySchema = z.object({
-  search: z.string().optional(), // Search by name or email
+  search: z.string().optional(), // Search by name (admins: name or email)
+  // Admin-only filters — ignored for other callers (see PlayerService.listPlayers)
   role: z.enum(['PLAYER', 'COACH', 'PARENT', 'ADMIN']).optional(),
   isManaged: z.preprocess(
     (val) => val === 'true' ? true : val === 'false' ? false : val,

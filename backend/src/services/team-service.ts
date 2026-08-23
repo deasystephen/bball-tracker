@@ -27,6 +27,8 @@ const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
+  // Lets clients label roster-only (managed) players (audit #64)
+  isManaged: true,
 } satisfies Prisma.UserSelect;
 
 const TEAM_SUMMARY_SELECT = {

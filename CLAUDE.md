@@ -215,6 +215,14 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
   create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
 
+### Player directory (`/api/v1/players`)
+
+`PlayerService.listPlayers(params, caller)` / `getPlayerById(id, caller)` take the authenticated caller (`{ id, role }`) and scope by it (audit #3):
+
+- **ADMIN**: unscoped; may filter by `role` / `isManaged`; `search` matches name *or* email; `email` is included.
+- **Everyone else**: only themselves plus users who share a team with them (teams they play on or are staff of); `role` / `isManaged` filters are ignored (always `PLAYER`, non-managed); `search` matches name only; `email` is omitted from list results and is `null` on detail unless it's the caller's own record. Players outside the caller's teams are a **404**, not a 403, so ids can't be enumerated.
+- Team rosters (`GET /teams/:id`) remain the place coaches see their managed players; `USER_SUMMARY_SELECT` now includes `isManaged` so clients can label roster-only players (audit #64).
+
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
 - Event-driven: Kafka for game events, Flink for real-time aggregation

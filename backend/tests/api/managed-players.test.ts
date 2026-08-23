@@ -249,7 +249,8 @@ describe('Managed Players API', () => {
 
       expect(response.status).toBe(200);
       expect(mockPlayerService.listPlayers).toHaveBeenCalledWith(
-        expect.objectContaining({})
+        expect.objectContaining({}),
+        expect.objectContaining({ role: 'COACH' })
       );
     });
 
@@ -265,7 +266,8 @@ describe('Managed Players API', () => {
 
       expect(response.status).toBe(200);
       expect(mockPlayerService.listPlayers).toHaveBeenCalledWith(
-        expect.objectContaining({ isManaged: true })
+        expect.objectContaining({ isManaged: true }),
+        expect.objectContaining({ role: 'COACH' })
       );
     });
 
@@ -281,7 +283,8 @@ describe('Managed Players API', () => {
 
       expect(response.status).toBe(200);
       expect(mockPlayerService.listPlayers).toHaveBeenCalledWith(
-        expect.objectContaining({ isManaged: false })
+        expect.objectContaining({ isManaged: false }),
+        expect.objectContaining({ role: 'COACH' })
       );
     });
   });

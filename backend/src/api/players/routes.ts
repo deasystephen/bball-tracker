@@ -62,7 +62,9 @@ router.post('/', async (req, res) => {
 
 /**
  * GET /api/v1/players
- * List players with optional filters
+ * List players with optional filters. Non-admins only see players sharing a
+ * team with them (and themselves), without `email`; `role` / `isManaged`
+ * are admin-only filters. See PlayerService.listPlayers.
  */
 router.get('/', async (req, res) => {
   try {
@@ -74,7 +76,10 @@ router.get('/', async (req, res) => {
       );
     }
 
-    const result = await PlayerService.listPlayers(validationResult.data);
+    const result = await PlayerService.listPlayers(validationResult.data, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
 
     res.json({
       success: true,
@@ -92,11 +97,14 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/v1/players/:id
- * Get a player by ID
+ * Get a player by ID. Non-admins get 404 for players outside their teams.
  */
 router.get('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    const player = await PlayerService.getPlayerById(req.params.id as string);
+    const player = await PlayerService.getPlayerById(req.params.id as string, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
 
     res.json({
       success: true,
