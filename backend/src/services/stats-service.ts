@@ -114,6 +114,13 @@ interface ReboundMetadata {
   type: 'offensive' | 'defensive';
 }
 
+/**
+ * Shooting percentage rounded to one decimal place; 0 when nothing was attempted.
+ */
+export function shootingPercentage(made: number, attempted: number): number {
+  return attempted > 0 ? Math.round((made / attempted) * 1000) / 10 : 0;
+}
+
 export class StatsService {
   /**
    * Calculate player stats from game events for a specific game
@@ -416,6 +423,12 @@ export class StatsService {
           rebounds: teamStats.rebounds,
           assists: teamStats.assists,
           turnovers: teamStats.turnovers,
+          fieldGoalsMade: teamStats.fieldGoalsMade,
+          fieldGoalsAttempted: teamStats.fieldGoalsAttempted,
+          threePointersMade: teamStats.threePointersMade,
+          threePointersAttempted: teamStats.threePointersAttempted,
+          freeThrowsMade: teamStats.freeThrowsMade,
+          freeThrowsAttempted: teamStats.freeThrowsAttempted,
           fieldGoalPercentage: teamStats.fieldGoalPercentage,
           threePointPercentage: teamStats.threePointPercentage,
           freeThrowPercentage: teamStats.freeThrowPercentage,
@@ -425,6 +438,12 @@ export class StatsService {
           rebounds: teamStats.rebounds,
           assists: teamStats.assists,
           turnovers: teamStats.turnovers,
+          fieldGoalsMade: teamStats.fieldGoalsMade,
+          fieldGoalsAttempted: teamStats.fieldGoalsAttempted,
+          threePointersMade: teamStats.threePointersMade,
+          threePointersAttempted: teamStats.threePointersAttempted,
+          freeThrowsMade: teamStats.freeThrowsMade,
+          freeThrowsAttempted: teamStats.freeThrowsAttempted,
           fieldGoalPercentage: teamStats.fieldGoalPercentage,
           threePointPercentage: teamStats.threePointPercentage,
           freeThrowPercentage: teamStats.freeThrowPercentage,
@@ -707,15 +726,21 @@ export class StatsService {
       else losses++;
     }
 
-    // Aggregate stats
+    // Aggregate stats. Shooting percentages are weighted by attempts
+    // (sum made / sum attempted across games), NOT a mean of per-game
+    // percentages, so a 1/1 game followed by a 1/9 game reads 20%, not 55.6%.
+    // Games with zero attempts contribute nothing to the denominator.
     const totals = {
       points: 0,
       rebounds: 0,
       assists: 0,
       turnovers: 0,
-      fieldGoalPercentage: 0,
-      threePointPercentage: 0,
-      freeThrowPercentage: 0,
+      fieldGoalsMade: 0,
+      fieldGoalsAttempted: 0,
+      threePointersMade: 0,
+      threePointersAttempted: 0,
+      freeThrowsMade: 0,
+      freeThrowsAttempted: 0,
     };
 
     for (const stat of teamStats) {
@@ -723,9 +748,12 @@ export class StatsService {
       totals.rebounds += stat.rebounds;
       totals.assists += stat.assists;
       totals.turnovers += stat.turnovers;
-      totals.fieldGoalPercentage += stat.fieldGoalPercentage;
-      totals.threePointPercentage += stat.threePointPercentage;
-      totals.freeThrowPercentage += stat.freeThrowPercentage;
+      totals.fieldGoalsMade += stat.fieldGoalsMade;
+      totals.fieldGoalsAttempted += stat.fieldGoalsAttempted;
+      totals.threePointersMade += stat.threePointersMade;
+      totals.threePointersAttempted += stat.threePointersAttempted;
+      totals.freeThrowsMade += stat.freeThrowsMade;
+      totals.freeThrowsAttempted += stat.freeThrowsAttempted;
     }
 
     return {
@@ -738,15 +766,9 @@ export class StatsService {
       reboundsPerGame: gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0,
       assistsPerGame: gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0,
       turnoversPerGame: gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0,
-      fieldGoalPercentage: gamesPlayed > 0
-        ? Math.round((totals.fieldGoalPercentage / gamesPlayed) * 10) / 10
-        : 0,
-      threePointPercentage: gamesPlayed > 0
-        ? Math.round((totals.threePointPercentage / gamesPlayed) * 10) / 10
-        : 0,
-      freeThrowPercentage: gamesPlayed > 0
-        ? Math.round((totals.freeThrowPercentage / gamesPlayed) * 10) / 10
-        : 0,
+      fieldGoalPercentage: shootingPercentage(totals.fieldGoalsMade, totals.fieldGoalsAttempted),
+      threePointPercentage: shootingPercentage(totals.threePointersMade, totals.threePointersAttempted),
+      freeThrowPercentage: shootingPercentage(totals.freeThrowsMade, totals.freeThrowsAttempted),
       recentGames,
     };
   }

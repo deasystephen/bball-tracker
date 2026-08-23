@@ -114,6 +114,20 @@ issue #26 for the Redis adapter follow-up.
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.
 
+### Stats (finalized box scores & season aggregates)
+
+- `StatsService.finalizeGameStats(gameId)` (`backend/src/services/stats-service.ts`) recomputes a game's
+  box score from `GameEvent`s and upserts `PlayerStats` (one row per player) and `TeamStats` (one row per
+  game). It runs when a game is `PATCH`ed to `FINISHED`.
+- `TeamStats` stores **raw shooting counts** (`fieldGoalsMade/Attempted`, `threePointersMade/Attempted`,
+  `freeThrowsMade/Attempted`; FG includes 3P, matching `PlayerStats`) plus the per-game percentages.
+  Season percentages in `GET /api/v1/stats/teams/:teamId` are **Σmade / Σattempted** across finalized games,
+  never a mean of per-game percentages (a 1/1 game then a 1/9 game reads 20.0%, not 55.6%). Games with zero
+  attempts contribute nothing to the denominator. The migration
+  `20260822120000_team_stats_shooting_counts` backfilled existing rows from their `PlayerStats`.
+- Use the exported `shootingPercentage(made, attempted)` helper (1 decimal, `0` when nothing attempted)
+  rather than inlining the rounding.
+
 ### Entitlements / Feature Gating
 
 Subscription feature gating has a **single source of truth**:
