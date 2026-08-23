@@ -3,6 +3,7 @@
  */
 
 import { GameService } from '../../src/services/game-service';
+import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -18,6 +19,14 @@ import {
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError, expectBadRequestError } from '../helpers';
 import type { CreateGameInput } from '../../src/api/games/schemas';
+
+jest.mock('../../src/websocket/emit', () => ({
+  emitGameStatusChange: jest.fn(),
+  emitGameScoreChange: jest.fn(),
+}));
+
+const mockEmitGameScoreChange = emitGameScoreChange as jest.Mock;
+const mockEmitGameStatusChange = emitGameStatusChange as jest.Mock;
 
 // Helper to create valid game input
 const createGameInput = (overrides: {
@@ -703,6 +712,7 @@ describe('GameService', () => {
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.game.update as jest.Mock).mockResolvedValue({
         ...game,
         homeScore: 42,
@@ -711,6 +721,110 @@ describe('GameService', () => {
 
       const result = await GameService.updateGame(game.id, { homeScore: 42 }, coach.id);
       expect(result.homeScore).toBe(42);
+    });
+
+    it('accepts a client homeScore only when the game has no SHOT events (audit #6)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        homeScore: 42,
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { homeScore: 42 }, coach.id);
+
+      expect(mockPrisma.gameEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { gameId: game.id, eventType: 'SHOT' } })
+      );
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { homeScore: 42 } })
+      );
+    });
+
+    it('ignores a client homeScore and re-persists the event-derived score when SHOT events exist (audit #6)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS', homeScore: 5 });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        { eventType: 'SHOT', metadata: { made: true, points: 3 } },
+        { eventType: 'SHOT', metadata: { made: true, points: 2 } },
+        { eventType: 'SHOT', metadata: { made: false, points: 2 } },
+      ]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        homeScore: 5,
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      // Client (stale 100-event page) claims 1; the log says 5.
+      await GameService.updateGame(game.id, { homeScore: 1 }, coach.id);
+
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { homeScore: 5 } })
+      );
+    });
+
+    it('emits game-score-change when the away score changes (audit #8)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS', homeScore: 10, awayScore: 8 });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        awayScore: 11,
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { awayScore: 11 }, coach.id);
+
+      expect(mockEmitGameScoreChange).toHaveBeenCalledWith(game.id, {
+        gameId: game.id,
+        score: { homeScore: 10, awayScore: 11 },
+      });
+      expect(mockEmitGameStatusChange).not.toHaveBeenCalled();
+    });
+
+    it('does not emit game-score-change when the score is unchanged', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, homeScore: 10, awayScore: 8 });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        opponent: 'Renamed',
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { opponent: 'Renamed' }, coach.id);
+
+      expect(mockEmitGameScoreChange).not.toHaveBeenCalled();
     });
 
     it('should forbid a canTrackStats-only user from updating non-score fields', async () => {

@@ -4,7 +4,12 @@
  * silently no-op instead of throwing.
  */
 
-import { emitGameEvent, emitGameStatusChange } from '../../src/websocket/emit';
+import {
+  emitGameEvent,
+  emitGameStatusChange,
+  emitGameEventRemoved,
+  emitGameScoreChange,
+} from '../../src/websocket/emit';
 import { setIo } from '../../src/websocket/io-registry';
 import { gameRoom } from '../../src/websocket/game-events';
 import type { Server as SocketServer } from 'socket.io';
@@ -100,6 +105,52 @@ describe('websocket/emit', () => {
           status: 'IN_PROGRESS',
           score: { homeScore: 0, awayScore: 0 },
         })
+      ).not.toThrow();
+    });
+  });
+
+  describe('emitGameEventRemoved', () => {
+    it('broadcasts the removed event id and post-delete score to the game room', () => {
+      const { io, to, emit } = makeFakeIo();
+      setIo(io);
+
+      const payload = { gameId: 'game-1', eventId: 'evt-1', score: { homeScore: 2, awayScore: 2 } };
+      emitGameEventRemoved('game-1', payload);
+
+      expect(to).toHaveBeenCalledWith(gameRoom('game-1'));
+      expect(emit).toHaveBeenCalledWith('game-event-removed', payload);
+    });
+
+    it('no-ops when no Socket.io server is registered', () => {
+      expect(() =>
+        emitGameEventRemoved('game-1', {
+          gameId: 'game-1',
+          eventId: 'evt-1',
+          score: { homeScore: 0, awayScore: 0 },
+        })
+      ).not.toThrow();
+    });
+  });
+
+  describe('emitGameScoreChange', () => {
+    it('broadcasts the new score to the game room', () => {
+      const { io, to, emit } = makeFakeIo();
+      setIo(io);
+
+      const payload = { gameId: 'game-1', score: { homeScore: 12, awayScore: 9 } };
+      emitGameScoreChange('game-1', payload);
+
+      expect(to).toHaveBeenCalledWith(gameRoom('game-1'));
+      expect(emit).toHaveBeenCalledWith('game-score-change', payload);
+    });
+
+    it('swallows errors from the underlying socket server', () => {
+      const to = jest.fn(() => {
+        throw new Error('boom');
+      });
+      setIo({ to } as unknown as SocketServer);
+      expect(() =>
+        emitGameScoreChange('game-1', { gameId: 'game-1', score: { homeScore: 0, awayScore: 0 } })
       ).not.toThrow();
     });
   });

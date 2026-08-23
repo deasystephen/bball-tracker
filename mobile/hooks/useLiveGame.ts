@@ -9,7 +9,9 @@
  * Backend protocol contract — see backend/src/websocket/game-events.ts:
  *  - emit `join-game` with `{ gameId }` (ack: { success, gameId | error, code })
  *  - receive `game-snapshot`: { game, events } (events oldest-first)
- *  - receive `game-event`: { event, score }
+ *  - receive `game-event`: { event, score } (score is post-insert)
+ *  - receive `game-event-removed`: { gameId, eventId, score } (undo)
+ *  - receive `game-score-change`: { gameId, score } (opponent points / edits)
  *  - receive `game-status-change`: { gameId, previousStatus, status, score }
  */
 
@@ -45,6 +47,17 @@ interface GameEventBroadcast {
   score: Score;
 }
 
+interface GameEventRemovedBroadcast {
+  gameId: string;
+  eventId: string;
+  score: Score;
+}
+
+interface GameScoreChangeBroadcast {
+  gameId: string;
+  score: Score;
+}
+
 interface GameStatusChangeBroadcast {
   gameId: string;
   previousStatus: GameStatus;
@@ -74,6 +87,8 @@ type Action =
   | { type: 'reconnecting' }
   | { type: 'snapshot'; payload: GameSnapshotPayload }
   | { type: 'event'; payload: GameEventBroadcast }
+  | { type: 'eventRemoved'; payload: GameEventRemovedBroadcast }
+  | { type: 'scoreChange'; payload: GameScoreChangeBroadcast }
   | { type: 'statusChange'; payload: GameStatusChangeBroadcast }
   | { type: 'error'; message: string };
 
@@ -114,6 +129,14 @@ function reducer(state: State, action: Action): State {
       const events = [incoming, ...state.events].slice(0, EVENT_CAP);
       return { ...state, score: action.payload.score, events };
     }
+    case 'eventRemoved':
+      return {
+        ...state,
+        score: action.payload.score,
+        events: state.events.filter((e) => e.id !== action.payload.eventId),
+      };
+    case 'scoreChange':
+      return { ...state, score: action.payload.score };
     case 'statusChange':
       return {
         ...state,
@@ -166,6 +189,16 @@ export function useLiveGame(gameId: string | undefined): UseLiveGameResult {
       dispatch({ type: 'event', payload });
     };
 
+    const handleEventRemoved = (payload: GameEventRemovedBroadcast) => {
+      if (payload?.gameId !== gameId) return;
+      dispatch({ type: 'eventRemoved', payload });
+    };
+
+    const handleScoreChange = (payload: GameScoreChangeBroadcast) => {
+      if (payload?.gameId !== gameId) return;
+      dispatch({ type: 'scoreChange', payload });
+    };
+
     const handleStatusChange = (payload: GameStatusChangeBroadcast) => {
       if (payload?.gameId !== gameId) return;
       dispatch({ type: 'statusChange', payload });
@@ -193,6 +226,8 @@ export function useLiveGame(gameId: string | undefined): UseLiveGameResult {
 
     socket.on('game-snapshot', handleSnapshot);
     socket.on('game-event', handleEvent);
+    socket.on('game-event-removed', handleEventRemoved);
+    socket.on('game-score-change', handleScoreChange);
     socket.on('game-status-change', handleStatusChange);
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
@@ -207,6 +242,8 @@ export function useLiveGame(gameId: string | undefined): UseLiveGameResult {
     return () => {
       socket.off('game-snapshot', handleSnapshot);
       socket.off('game-event', handleEvent);
+      socket.off('game-event-removed', handleEventRemoved);
+      socket.off('game-score-change', handleScoreChange);
       socket.off('game-status-change', handleStatusChange);
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);

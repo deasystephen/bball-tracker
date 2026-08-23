@@ -79,16 +79,19 @@ describe('useGameEvents runtime', () => {
     expect(result.current.fetchStatus).toBe('idle');
   });
 
-  it('creates an event and invalidates list + game detail caches', async () => {
+  it('creates an event, returns event + server score, writes the score into the game cache and invalidates', async () => {
     const event = { id: 'e1' };
-    mockedPost.mockResolvedValueOnce({ data: { event } });
+    const score = { homeScore: 12, awayScore: 7 };
+    mockedPost.mockResolvedValueOnce({ data: { event, score } });
 
     const { wrapper, client } = createQueryWrapper();
+    client.setQueryData(gameKeys.detail('g1'), { id: 'g1', homeScore: 0, awayScore: 7, opponent: 'X' });
     const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useCreateGameEvent(), { wrapper });
 
+    let returned: unknown;
     await act(async () => {
-      await result.current.mutateAsync({
+      returned = await result.current.mutateAsync({
         gameId: 'g1',
         data: { eventType: 'SHOT' } as unknown as Parameters<
           typeof result.current.mutateAsync
@@ -97,6 +100,13 @@ describe('useGameEvents runtime', () => {
     });
 
     expect(mockedPost).toHaveBeenCalledWith('/games/g1/events', { eventType: 'SHOT' });
+    expect(returned).toEqual({ event, score });
+    expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({
+      id: 'g1',
+      opponent: 'X',
+      homeScore: 12,
+      awayScore: 7,
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: gameEventKeys.list('g1'),
     });
@@ -105,9 +115,10 @@ describe('useGameEvents runtime', () => {
     });
   });
 
-  it('deletes an event and invalidates list + game detail caches', async () => {
-    mockedDelete.mockResolvedValueOnce({ data: {} });
+  it('deletes an event, writes the returned score into the game cache and invalidates', async () => {
+    mockedDelete.mockResolvedValueOnce({ data: { success: true, score: { homeScore: 10, awayScore: 7 } } });
     const { wrapper, client } = createQueryWrapper();
+    client.setQueryData(gameKeys.detail('g1'), { id: 'g1', homeScore: 12, awayScore: 7 });
     const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useDeleteGameEvent(), { wrapper });
 
@@ -116,11 +127,30 @@ describe('useGameEvents runtime', () => {
     });
 
     expect(mockedDelete).toHaveBeenCalledWith('/games/g1/events/e1');
+    expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({ homeScore: 10, awayScore: 7 });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: gameEventKeys.list('g1'),
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: gameKeys.detail('g1'),
     });
+  });
+
+  it('leaves the game cache untouched when the create response has no score', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { event: { id: 'e1' } } });
+    const { wrapper, client } = createQueryWrapper();
+    client.setQueryData(gameKeys.detail('g1'), { id: 'g1', homeScore: 4, awayScore: 1 });
+    const { result } = renderHook(() => useCreateGameEvent(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        gameId: 'g1',
+        data: { eventType: 'TIMEOUT' } as unknown as Parameters<
+          typeof result.current.mutateAsync
+        >[0]['data'],
+      });
+    });
+
+    expect(client.getQueryData(gameKeys.detail('g1'))).toMatchObject({ homeScore: 4, awayScore: 1 });
   });
 });

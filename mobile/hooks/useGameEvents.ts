@@ -5,11 +5,43 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import type {
+  Game,
   GameEvent,
   GameEventFilters,
   CreateGameEventInput,
 } from '../types/game';
 import { gameKeys } from './useGames';
+
+export interface GameScore {
+  homeScore: number;
+  awayScore: number;
+}
+
+/** `POST /games/:id/events` response: the persisted event + post-change score. */
+export interface CreateGameEventResult {
+  event: GameEvent;
+  score: GameScore;
+}
+
+/** `DELETE /games/:id/events/:eventId` response: the post-change score. */
+export interface DeleteGameEventResult {
+  score: GameScore;
+}
+
+/**
+ * Write a server-authoritative score straight into the cached game detail so
+ * the tracker/score header updates without waiting for the refetch.
+ */
+function applyScoreToGameDetail(
+  queryClient: ReturnType<typeof useQueryClient>,
+  gameId: string,
+  score: GameScore | undefined
+): void {
+  if (!score) return;
+  queryClient.setQueryData<Game>(gameKeys.detail(gameId), (old) =>
+    old ? { ...old, homeScore: score.homeScore, awayScore: score.awayScore } : old
+  );
+}
 
 // Query keys
 export const gameEventKeys = {
@@ -71,15 +103,20 @@ export function useCreateGameEvent() {
     }: {
       gameId: string;
       data: CreateGameEventInput;
-    }) => {
+    }): Promise<CreateGameEventResult> => {
       const response = await apiClient.post(`/games/${gameId}/events`, data);
-      return response.data.event as GameEvent;
+      return {
+        event: response.data.event as GameEvent,
+        score: response.data.score as GameScore,
+      };
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
+      // The home score is derived server-side from the event log (audit #6);
+      // trust the returned score, then refetch for everything else.
+      applyScoreToGameDetail(queryClient, variables.gameId, result.score);
       queryClient.invalidateQueries({
         queryKey: gameEventKeys.list(variables.gameId),
       });
-      // Also invalidate game detail to update scores if needed
       queryClient.invalidateQueries({
         queryKey: gameKeys.detail(variables.gameId),
       });
@@ -100,14 +137,15 @@ export function useDeleteGameEvent() {
     }: {
       gameId: string;
       eventId: string;
-    }) => {
-      await apiClient.delete(`/games/${gameId}/events/${eventId}`);
+    }): Promise<DeleteGameEventResult> => {
+      const response = await apiClient.delete(`/games/${gameId}/events/${eventId}`);
+      return { score: response.data?.score as GameScore };
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
+      applyScoreToGameDetail(queryClient, variables.gameId, result.score);
       queryClient.invalidateQueries({
         queryKey: gameEventKeys.list(variables.gameId),
       });
-      // Also invalidate game detail to update scores if needed
       queryClient.invalidateQueries({
         queryKey: gameKeys.detail(variables.gameId),
       });

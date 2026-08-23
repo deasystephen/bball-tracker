@@ -57,3 +57,51 @@ export function emitGameStatusChange(
     });
   }
 }
+
+export interface GameEventRemovedBroadcast {
+  gameId: string;
+  eventId: string;
+  /** Score after the event was removed. */
+  score: GameScore;
+}
+
+export function emitGameEventRemoved(
+  gameId: string,
+  payload: GameEventRemovedBroadcast
+): void {
+  const io = getIo();
+  if (!io) return;
+  try {
+    io.to(gameRoom(gameId)).emit('game-event-removed', payload);
+  } catch (error) {
+    logger.error('Failed to emit game-event-removed', {
+      gameId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export interface GameScoreChangeBroadcast {
+  gameId: string;
+  score: GameScore;
+}
+
+/**
+ * Broadcast a score edit that did not come from an event (opponent points,
+ * manual corrections via `PATCH /games/:id`).
+ */
+export function emitGameScoreChange(
+  gameId: string,
+  payload: GameScoreChangeBroadcast
+): void {
+  const io = getIo();
+  if (!io) return;
+  try {
+    io.to(gameRoom(gameId)).emit('game-score-change', payload);
+  } catch (error) {
+    logger.error('Failed to emit game-score-change', {
+      gameId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}

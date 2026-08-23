@@ -49,8 +49,11 @@ describe('Game Events API', () => {
   });
 
   describe('POST /api/v1/games/:gameId/events', () => {
-    it('should create an event successfully', async () => {
-      mockGameEventService.createEvent.mockResolvedValue(mockEvent as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
+    it('should create an event successfully and return the post-change score', async () => {
+      mockGameEventService.createEvent.mockResolvedValue({
+        event: mockEvent,
+        score: { homeScore: 2, awayScore: 0 },
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -64,6 +67,7 @@ describe('Game Events API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.event).toBeDefined();
       expect(response.body.event.eventType).toBe('SHOT');
+      expect(response.body.score).toEqual({ homeScore: 2, awayScore: 0 });
       expect(mockGameEventService.createEvent).toHaveBeenCalledWith(
         TEST_GAME_ID,
         expect.objectContaining({
@@ -76,7 +80,10 @@ describe('Game Events API', () => {
 
     it('should create an event without playerId (timeout)', async () => {
       const timeoutEvent = { ...mockEvent, playerId: null, eventType: 'TIMEOUT', metadata: { type: 'full' } };
-      mockGameEventService.createEvent.mockResolvedValue(timeoutEvent as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
+      mockGameEventService.createEvent.mockResolvedValue({
+        event: timeoutEvent,
+        score: { homeScore: 0, awayScore: 0 },
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
 
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -287,8 +294,11 @@ describe('Game Events API', () => {
   });
 
   describe('DELETE /api/v1/games/:gameId/events/:eventId', () => {
-    it('should delete an event successfully', async () => {
-      mockGameEventService.deleteEvent.mockResolvedValue({ success: true });
+    it('should delete an event successfully and return the post-change score', async () => {
+      mockGameEventService.deleteEvent.mockResolvedValue({
+        success: true,
+        score: { homeScore: 10, awayScore: 4 },
+      });
 
       const response = await request(app).delete(
         `/api/v1/games/${TEST_GAME_ID}/events/${TEST_EVENT_ID}`
@@ -297,6 +307,7 @@ describe('Game Events API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Game event deleted successfully');
+      expect(response.body.score).toEqual({ homeScore: 10, awayScore: 4 });
       expect(mockGameEventService.deleteEvent).toHaveBeenCalledWith(
         TEST_GAME_ID,
         TEST_EVENT_ID,
