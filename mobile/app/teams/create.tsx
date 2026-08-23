@@ -2,7 +2,7 @@
  * Create Team screen
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -25,6 +25,8 @@ import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
+import { canCreateTeams } from '../../utils/team-permissions';
+import { useAuthUser } from '../../store/auth-store';
 
 export default function CreateTeamScreen() {
   const router = useRouter();
@@ -44,6 +46,17 @@ export default function CreateTeamScreen() {
   );
   const createTeam = useCreateTeam();
   const toast = useToast();
+  const user = useAuthUser();
+  const canCreate = canCreateTeams(user?.role);
+
+  // Deep links / stale screens can still land here; bounce players out
+  // before they fill in a form the API will reject with 403.
+  useEffect(() => {
+    if (user && !canCreate) {
+      toast.showToast(t('teams.createNotAllowed'), 'error');
+      router.replace('/(tabs)/teams');
+    }
+  }, [user, canCreate, router, toast, t]);
 
   // Get seasons for the selected league
   const seasons = useMemo(() => {
