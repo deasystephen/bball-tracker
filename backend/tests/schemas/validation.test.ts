@@ -221,7 +221,7 @@ describe('Schema Validation', () => {
       it('should accept UUID format for userId in addStaffSchema', () => {
         const result = addStaffSchema.safeParse({
           userId: UUID_ID,
-          roleName: 'Head Coach',
+          roleType: 'HEAD_COACH',
         });
         expect(result.success).toBe(true);
       });
@@ -229,7 +229,7 @@ describe('Schema Validation', () => {
       it('should reject non-UUID format for userId in addStaffSchema', () => {
         const result = addStaffSchema.safeParse({
           userId: CUSTOM_STRING_ID,
-          roleName: 'Head Coach',
+          roleType: 'HEAD_COACH',
         });
         expect(result.success).toBe(false);
       });

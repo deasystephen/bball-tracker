@@ -6,8 +6,14 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { TeamService } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
-import { NotFoundError, ForbiddenError, PaymentRequiredError } from '../../src/utils/errors';
+import { NotFoundError, ForbiddenError, PaymentRequiredError, BadRequestError } from '../../src/utils/errors';
+import { invalidateUsage } from '../../src/services/usage-service';
 import { prismaMock } from '../setup';
+
+/** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
+function staffTeams(n: number): Array<{ teamId: string }> {
+  return Array.from({ length: n }, (_, i) => ({ teamId: `team-${i}` }));
+}
 
 // Test UUIDs
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
@@ -159,7 +165,7 @@ describe('Teams API', () => {
     });
 
     it('allows a FREE user under the limit to create a team', async () => {
-      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(2));
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -173,7 +179,7 @@ describe('Teams API', () => {
     it('maps a PaymentRequiredError raised inside the create transaction to the same 402 body', async () => {
       // Middleware pre-check passes (count says 2) but a concurrent create
       // committed first; the service's locked recount wins (audit #49).
-      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(2));
       mockTeamService.createTeam.mockRejectedValue(
         new PaymentRequiredError({ feature: 'unlimited_teams', currentTier: 'FREE', requiredTier: 'PREMIUM' })
       );
@@ -192,7 +198,7 @@ describe('Teams API', () => {
     });
 
     it('blocks a FREE user at the limit with 402 upgrade_required', async () => {
-      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(3);
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -211,7 +217,7 @@ describe('Teams API', () => {
     it('GRANDFATHERS over-limit FREE users: existing teams remain, new create blocked', async () => {
       // A user already over the cap (e.g. downgraded from PREMIUM with 5 teams)
       // keeps those teams (no deletion happens here) but cannot create more.
-      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(5);
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(5));
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -234,7 +240,7 @@ describe('Teams API', () => {
         .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
 
       expect(response.status).toBe(201);
-      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
     });
 
     it('allows a LEAGUE user unlimited team creation', async () => {
@@ -247,7 +253,7 @@ describe('Teams API', () => {
         .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
 
       expect(response.status).toBe(201);
-      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -675,6 +681,385 @@ describe('Teams API', () => {
         .send({ jerseyNumber: 23.5 });
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  // ============================================
+  // Staff management routes (role matrix B2.3 / B2.7)
+  // ============================================
+
+  describe('GET /api/v1/teams/:teamId/staff', () => {
+    const staffRow = {
+      id: 'staff-1',
+      teamId: TEST_TEAM_ID,
+      userId: TEST_USER_ID,
+      roleId: 'role-1',
+      user: { id: TEST_USER_ID, name: 'Test User', email: 'test@example.com', isManaged: false },
+      role: { id: 'role-1', teamId: TEST_TEAM_ID, type: 'HEAD_COACH', name: 'Head Coach' },
+    };
+
+    it('lists staff with user + role', async () => {
+      mockTeamService.listStaff.mockResolvedValue([staffRow] as unknown as Awaited<ReturnType<typeof mockTeamService.listStaff>>);
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.staff).toHaveLength(1);
+      expect(response.body.staff[0]).toMatchObject({
+        userId: TEST_USER_ID,
+        user: { id: TEST_USER_ID, name: 'Test User', email: 'test@example.com' },
+        role: { type: 'HEAD_COACH', name: 'Head Coach' },
+      });
+      expect(mockTeamService.listStaff).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
+    });
+
+    it('passes through an email-less list unchanged (non-manager view)', async () => {
+      const { user, ...rest } = staffRow;
+      mockTeamService.listStaff.mockResolvedValue([
+        { ...rest, user: { id: user.id, name: user.name, isManaged: false } },
+      ] as unknown as Awaited<ReturnType<typeof mockTeamService.listStaff>>);
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.staff[0].user).not.toHaveProperty('email');
+    });
+
+    it('returns 400 for a non-UUID teamId', async () => {
+      const response = await request(app).get('/api/v1/teams/not-a-uuid/staff');
+
+      expect(response.status).toBe(400);
+      expect(mockTeamService.listStaff).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 for an outsider', async () => {
+      mockTeamService.listStaff.mockRejectedValue(new ForbiddenError('You do not have access to this team'));
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 404 for a missing team', async () => {
+      mockTeamService.listStaff.mockRejectedValue(new NotFoundError('Team not found'));
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
+
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      mockTeamService.listStaff.mockRejectedValue(new Error('boom'));
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
+
+      expect(response.status).toBe(500);
+      expect(response.body.error).toBe('Failed to list team staff');
+    });
+  });
+
+  describe('GET /api/v1/teams/:teamId/roles', () => {
+    it('lists role definitions with permission flags', async () => {
+      mockTeamService.getTeamRoles.mockResolvedValue([
+        {
+          id: 'role-1', teamId: TEST_TEAM_ID, type: 'HEAD_COACH', name: 'Head Coach', description: null,
+          canManageTeam: true, canManageRoster: true, canTrackStats: true, canViewStats: true, canShareStats: true,
+        },
+      ] as unknown as Awaited<ReturnType<typeof mockTeamService.getTeamRoles>>);
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/roles`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.roles[0]).toMatchObject({ type: 'HEAD_COACH', canManageTeam: true });
+      expect(mockTeamService.getTeamRoles).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
+    });
+
+    it('returns 403 when the caller cannot access the team', async () => {
+      mockTeamService.getTeamRoles.mockRejectedValue(new ForbiddenError('You do not have access to this team'));
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/roles`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      mockTeamService.getTeamRoles.mockRejectedValue(new Error('boom'));
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/roles`);
+
+      expect(response.status).toBe(500);
+    });
+  });
+
+  describe('POST /api/v1/teams/:teamId/staff', () => {
+    const created = {
+      id: 'staff-2',
+      teamId: TEST_TEAM_ID,
+      userId: TEST_PLAYER_ID,
+      roleId: 'role-2',
+      user: { id: TEST_PLAYER_ID, name: 'New Coach', email: 'new@example.com', isManaged: false },
+      role: { id: 'role-2', type: 'ASSISTANT_COACH', name: 'Assistant Coach' },
+    };
+
+    it('adds staff by userId and invalidates the ADDED user\'s usage cache', async () => {
+      mockTeamService.addStaffMember.mockResolvedValue(created as unknown as Awaited<ReturnType<typeof mockTeamService.addStaffMember>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ userId: TEST_PLAYER_ID, roleType: 'ASSISTANT_COACH' });
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(response.body.staff).toMatchObject({ userId: TEST_PLAYER_ID, role: { type: 'ASSISTANT_COACH' } });
+      expect(mockTeamService.addStaffMember).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        { userId: TEST_PLAYER_ID, roleType: 'ASSISTANT_COACH' },
+        TEST_USER_ID
+      );
+      expect(invalidateUsage).toHaveBeenCalledWith(TEST_PLAYER_ID);
+    });
+
+    it('adds staff by email', async () => {
+      mockTeamService.addStaffMember.mockResolvedValue(created as unknown as Awaited<ReturnType<typeof mockTeamService.addStaffMember>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ email: 'new@example.com', roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(201);
+      expect(mockTeamService.addStaffMember).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        { email: 'new@example.com', roleType: 'TEAM_MANAGER' },
+        TEST_USER_ID
+      );
+    });
+
+    it('returns 400 when neither userId nor email is given', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ roleType: 'HEAD_COACH' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('exactly one of userId or email');
+      expect(mockTeamService.addStaffMember).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 for an invalid roleType (CUSTOM / role names are not assignable here)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ userId: TEST_PLAYER_ID, roleType: 'Head Coach' });
+
+      expect(response.status).toBe(400);
+      expect(mockTeamService.addStaffMember).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when an ASSISTANT coach tries to add staff (B2.3)', async () => {
+      mockTeamService.addStaffMember.mockRejectedValue(
+        new ForbiddenError('You do not have permission to manage team staff')
+      );
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ userId: TEST_PLAYER_ID, roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(403);
+      expect(invalidateUsage).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the email does not belong to an existing user (never creates users)', async () => {
+      mockTeamService.addStaffMember.mockRejectedValue(new NotFoundError('User not found'));
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ email: 'nobody@example.com', roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('User not found');
+    });
+
+    it('returns 400 when the user is already staff', async () => {
+      mockTeamService.addStaffMember.mockRejectedValue(
+        new BadRequestError('User is already a staff member of this team')
+      );
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ userId: TEST_PLAYER_ID, roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      mockTeamService.addStaffMember.mockRejectedValue(new Error('boom'));
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/staff`)
+        .send({ userId: TEST_PLAYER_ID, roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(500);
+      expect(response.body.error).toBe('Failed to add team staff');
+    });
+  });
+
+  describe('PATCH /api/v1/teams/:teamId/staff/:userId', () => {
+    it('changes the staff member\'s role', async () => {
+      mockTeamService.changeStaffRole.mockResolvedValue({
+        id: 'staff-2', teamId: TEST_TEAM_ID, userId: TEST_PLAYER_ID, roleId: 'role-3',
+        role: { id: 'role-3', type: 'TEAM_MANAGER', name: 'Team Manager' },
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.changeStaffRole>>);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`)
+        .send({ roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.staff.role.type).toBe('TEAM_MANAGER');
+      expect(mockTeamService.changeStaffRole).toHaveBeenCalledWith(
+        TEST_TEAM_ID, TEST_PLAYER_ID, 'TEAM_MANAGER', TEST_USER_ID
+      );
+    });
+
+    it('returns 400 for a missing/invalid roleType', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`)
+        .send({});
+
+      expect(response.status).toBe(400);
+      expect(mockTeamService.changeStaffRole).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 for a non-UUID userId param', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/not-a-uuid`)
+        .send({ roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(400);
+      expect(mockTeamService.changeStaffRole).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 for an assistant coach', async () => {
+      mockTeamService.changeStaffRole.mockRejectedValue(
+        new ForbiddenError('You do not have permission to manage team staff')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`)
+        .send({ roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 400 when demoting the last head coach', async () => {
+      mockTeamService.changeStaffRole.mockRejectedValue(
+        new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_USER_ID}`)
+        .send({ roleType: 'ASSISTANT_COACH' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('last Head Coach');
+    });
+
+    it('returns 404 when the target is not staff', async () => {
+      mockTeamService.changeStaffRole.mockRejectedValue(
+        new NotFoundError('User is not a staff member of this team')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`)
+        .send({ roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      mockTeamService.changeStaffRole.mockRejectedValue(new Error('boom'));
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`)
+        .send({ roleType: 'TEAM_MANAGER' });
+
+      expect(response.status).toBe(500);
+    });
+  });
+
+  describe('DELETE /api/v1/teams/:teamId/staff/:userId', () => {
+    it('removes a staff member and invalidates the REMOVED user\'s usage cache', async () => {
+      mockTeamService.removeStaffMember.mockResolvedValue({ success: true });
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true, message: 'Staff member removed successfully' });
+      expect(mockTeamService.removeStaffMember).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_PLAYER_ID, TEST_USER_ID);
+      expect(invalidateUsage).toHaveBeenCalledWith(TEST_PLAYER_ID);
+    });
+
+    it('lets a staff member remove themselves (self path is decided by the service)', async () => {
+      mockTeamService.removeStaffMember.mockResolvedValue({ success: true });
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_USER_ID}`);
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.removeStaffMember).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID, TEST_USER_ID);
+      expect(invalidateUsage).toHaveBeenCalledWith(TEST_USER_ID);
+    });
+
+    it('returns 400 when removing the last head coach', async () => {
+      mockTeamService.removeStaffMember.mockRejectedValue(
+        new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.')
+      );
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_USER_ID}`);
+
+      expect(response.status).toBe(400);
+      expect(invalidateUsage).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when an assistant coach removes someone else', async () => {
+      mockTeamService.removeStaffMember.mockRejectedValue(
+        new ForbiddenError('You do not have permission to manage team staff')
+      );
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`);
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 404 when the target is not staff', async () => {
+      mockTeamService.removeStaffMember.mockRejectedValue(
+        new NotFoundError('User is not a staff member of this team')
+      );
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`);
+
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 400 for a non-UUID userId param', async () => {
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/not-a-uuid`);
+
+      expect(response.status).toBe(400);
+      expect(mockTeamService.removeStaffMember).not.toHaveBeenCalled();
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      mockTeamService.removeStaffMember.mockRejectedValue(new Error('boom'));
+
+      const response = await request(app)
+        .delete(`/api/v1/teams/${TEST_TEAM_ID}/staff/${TEST_PLAYER_ID}`);
+
+      expect(response.status).toBe(500);
+      expect(response.body.error).toBe('Failed to remove team staff');
     });
   });
 });

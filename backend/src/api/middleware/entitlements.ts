@@ -27,7 +27,7 @@ import {
   featureCode,
 } from '../../services/entitlements';
 import { UnauthorizedError } from '../../utils/errors';
-import prisma from '../../models';
+import { countDistinctStaffTeams } from '../../utils/permissions';
 
 const PAYMENT_REQUIRED = 402;
 
@@ -100,9 +100,7 @@ export function requireTeamCreateLimit() {
       return next();
     }
 
-    const teamCount = await prisma.teamStaff.count({
-      where: { userId: req.user.id },
-    });
+    const teamCount = await countDistinctStaffTeams(req.user.id);
 
     if (canCreateTeam(currentTier, teamCount)) {
       return next();

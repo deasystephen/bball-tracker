@@ -46,19 +46,32 @@ export const updateTeamMemberSchema = z.object({
 });
 
 /**
- * Schema for adding a staff member to a team
+ * Default staff role types assignable through the staff API. CUSTOM roles are
+ * created via createCustomRole and are not assignable here.
  */
-export const addStaffSchema = z.object({
-  userId: z.string().uuid('Invalid user ID format'),
-  roleName: z.string().min(1, 'Role name is required'),
+export const staffRoleTypeSchema = z.enum(['HEAD_COACH', 'ASSISTANT_COACH', 'TEAM_MANAGER'], {
+  message: 'roleType must be one of HEAD_COACH, ASSISTANT_COACH, TEAM_MANAGER',
 });
 
 /**
- * Schema for removing a staff member from a team
+ * Schema for adding a staff member to a team.
+ * Exactly one of `userId` / `email` identifies an EXISTING user.
  */
-export const removeStaffSchema = z.object({
-  userId: z.string().uuid('Invalid user ID format'),
-  roleName: z.string().min(1, 'Role name is required'),
+export const addStaffSchema = z
+  .object({
+    userId: z.string().uuid('Invalid user ID format').optional(),
+    email: z.string().email('Invalid email format').max(255).optional(),
+    roleType: staffRoleTypeSchema,
+  })
+  .refine((d) => (d.userId ? 1 : 0) + (d.email ? 1 : 0) === 1, {
+    message: 'Provide exactly one of userId or email',
+  });
+
+/**
+ * Schema for changing a staff member's role
+ */
+export const updateStaffRoleSchema = z.object({
+  roleType: staffRoleTypeSchema,
 });
 
 /**
@@ -102,8 +115,9 @@ export type CreateTeamInput = z.infer<typeof createTeamSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
 export type UpdateTeamMemberInput = z.infer<typeof updateTeamMemberSchema>;
+export type StaffRoleType = z.infer<typeof staffRoleTypeSchema>;
 export type AddStaffInput = z.infer<typeof addStaffSchema>;
-export type RemoveStaffInput = z.infer<typeof removeStaffSchema>;
+export type UpdateStaffRoleInput = z.infer<typeof updateStaffRoleSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;
 export type CreateManagedPlayerInput = z.infer<typeof createManagedPlayerSchema>;

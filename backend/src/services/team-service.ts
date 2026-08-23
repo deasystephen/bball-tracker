@@ -11,7 +11,11 @@ import {
   UpdateTeamMemberInput,
   TeamQueryParams,
   CreateManagedPlayerInput,
+  AddStaffInput,
+  StaffRoleType,
 } from '../api/teams/schemas';
+import { NotificationService } from './notification-service';
+import { logger } from '../utils/logger';
 import {
   NotFoundError,
   BadRequestError,
@@ -34,6 +38,8 @@ import {
   isLeagueAdmin,
   createDefaultTeamRoles,
   assignTeamRole,
+  canManageStaff,
+  countDistinctStaffTeams,
 } from '../utils/permissions';
 
 const USER_SUMMARY_SELECT = {
@@ -117,13 +123,18 @@ const MANAGED_MEMBER_INCLUDE = {
   team: { select: TEAM_SUMMARY_SELECT },
 } satisfies Prisma.TeamMemberInclude;
 
-const TEAM_ROLE_INCLUDE = {
-  staff: {
-    include: {
-      user: { select: USER_SUMMARY_SELECT },
-    },
-  },
-} satisfies Prisma.TeamRoleInclude;
+const TEAM_ROLE_SELECT = {
+  id: true,
+  teamId: true,
+  type: true,
+  name: true,
+  description: true,
+  canManageTeam: true,
+  canManageRoster: true,
+  canTrackStats: true,
+  canViewStats: true,
+  canShareStats: true,
+} satisfies Prisma.TeamRoleSelect;
 
 export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>;
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
@@ -150,7 +161,14 @@ export type ManagedTeamMember = Prisma.TeamMemberGetPayload<{
 export type TeamStaffWithRelations = Prisma.TeamStaffGetPayload<{
   include: typeof TEAM_STAFF_INCLUDE;
 }>;
-export type TeamRoleWithStaff = Prisma.TeamRoleGetPayload<{ include: typeof TEAM_ROLE_INCLUDE }>;
+export type TeamRoleSummary = Prisma.TeamRoleGetPayload<{ select: typeof TEAM_ROLE_SELECT }>;
+/**
+ * `GET /teams/:id/staff` row. `user.email` is present only when the caller
+ * has `canManageRoster` on the team (same rule as member emails, audit #80).
+ */
+export type TeamStaffView = Omit<TeamStaffWithRelations, 'user'> & {
+  user: Omit<TeamStaffWithRelations['user'], 'email'> & { email?: string | null };
+};
 
 export interface TeamList {
   teams: TeamListItem[];
@@ -207,7 +225,7 @@ export class TeamService {
           subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
         });
         if (getUsageLimits(tier).maxTeams !== Infinity) {
-          const teamCount = await tx.teamStaff.count({ where: { userId } });
+          const teamCount = await countDistinctStaffTeams(userId, tx);
           if (!canCreateTeam(tier, teamCount)) {
             throw new PaymentRequiredError({
               feature: featureCode(Feature.UNLIMITED_TEAMS),
@@ -365,7 +383,14 @@ export class TeamService {
     // If seasonId is being updated, verify the new season exists and that the
     // caller administers its league. Moving a team re-parents it under another
     // league's admins, so team-level canManageTeam is not enough (audit #13).
+    // On the team side only a head coach (or league/system admin) may move it
+    // — assistant coaches share canManageTeam but not this (role matrix B2.3).
     if (data.seasonId && data.seasonId !== team.seasonId) {
+      const isHeadCoachOrAdmin = await canManageStaff(userId, teamId);
+      if (!isHeadCoachOrAdmin) {
+        throw new ForbiddenError('Only a head coach can move this team to another season');
+      }
+
       const season = await prisma.season.findUnique({
         where: { id: data.seasonId },
       });
@@ -410,7 +435,8 @@ export class TeamService {
   /**
    * Delete a team
    * @param teamId Team ID
-   * @param userId User ID (must have canManageTeam permission)
+   * @param userId User ID (must be a head coach, league admin or system admin —
+   *   assistant coaches share canManageTeam but cannot delete; role matrix B2.3)
    */
   static async deleteTeam(teamId: string, userId: string): Promise<{ success: true }> {
     // Get team
@@ -423,7 +449,7 @@ export class TeamService {
     }
 
     // Check permission
-    const canManage = await hasTeamPermission(userId, teamId, 'canManageTeam');
+    const canManage = await canManageStaff(userId, teamId);
     if (!canManage) {
       throw new ForbiddenError('You do not have permission to delete this team');
     }
@@ -621,16 +647,92 @@ export class TeamService {
   }
 
   /**
-   * Add a staff member to a team with a specific role
+   * List a team's staff (every role assignment) with user + role.
+   * Any team member/staff/admin may read; emails are only included for
+   * callers who can manage the roster.
+   */
+  static async listStaff(teamId: string, userId: string): Promise<TeamStaffView[]> {
+    const team = await prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) {
+      throw new NotFoundError('Team not found');
+    }
+
+    const hasAccess = await canAccessTeam(userId, teamId);
+    if (!hasAccess) {
+      throw new ForbiddenError('You do not have access to this team');
+    }
+
+    const staff = await prisma.teamStaff.findMany({
+      where: { teamId },
+      include: TEAM_STAFF_INCLUDE,
+      orderBy: [{ role: { type: 'asc' } }, { createdAt: 'asc' }],
+    });
+
+    const permissions = await getTeamPermissions(userId, teamId);
+    if (permissions.canManageRoster) {
+      return staff;
+    }
+
+    return staff.map(({ user, ...row }) => ({
+      ...row,
+      user: { id: user.id, name: user.name, isManaged: user.isManaged },
+    }));
+  }
+
+  /**
+   * Resolve the target user of a staff mutation from `{ userId }` or
+   * `{ email }`. Never creates users: an unknown email is a 404.
+   */
+  private static async resolveStaffTarget(
+    target: Pick<AddStaffInput, 'userId' | 'email'>
+  ): Promise<{ id: string; name: string }> {
+    const user = target.userId
+      ? await prisma.user.findUnique({ where: { id: target.userId }, select: { id: true, name: true } })
+      : await prisma.user.findFirst({
+          where: { email: { equals: target.email, mode: 'insensitive' } },
+          select: { id: true, name: true },
+        });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+    return user;
+  }
+
+  /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
+  private static async findRoleByType(teamId: string, roleType: StaffRoleType): Promise<TeamRole> {
+    const role = await prisma.teamRole.findFirst({ where: { teamId, type: roleType } });
+    if (!role) {
+      throw new NotFoundError(`Role "${roleType}" not found for this team`);
+    }
+    return role;
+  }
+
+  /**
+   * Throw if `staffUserId` is the team's only head coach. Used before any
+   * change that would remove their HEAD_COACH row.
+   */
+  private static async assertNotLastHeadCoach(teamId: string, staffUserId: string): Promise<void> {
+    const headCoaches = await prisma.teamStaff.findMany({
+      where: { teamId, role: { type: 'HEAD_COACH' } },
+      select: { userId: true },
+    });
+    const isHead = headCoaches.some((h) => h.userId === staffUserId);
+    const distinctHeadCoaches = new Set(headCoaches.map((h) => h.userId)).size;
+    if (isHead && distinctHeadCoaches <= 1) {
+      throw new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.');
+    }
+  }
+
+  /**
+   * Add a staff member to a team with a default role type.
    * @param teamId Team ID
-   * @param userId User to add as staff
-   * @param roleName Role name (e.g., "Head Coach", "Assistant Coach", "Team Manager")
-   * @param requestingUserId User making the request
+   * @param data `{ userId | email, roleType }` — existing users only
+   * @param requestingUserId Must be a head coach, league admin or system admin
    */
   static async addStaffMember(
     teamId: string,
-    staffUserId: string,
-    roleName: string,
+    data: AddStaffInput,
     requestingUserId: string
   ): Promise<TeamStaffWithRelations> {
     // Get team
@@ -642,70 +744,105 @@ export class TeamService {
       throw new NotFoundError('Team not found');
     }
 
-    // Check permission
-    const canManage = await hasTeamPermission(requestingUserId, teamId, 'canManageTeam');
+    // Check permission (head coach / league admin / ADMIN — not assistants)
+    const canManage = await canManageStaff(requestingUserId, teamId);
     if (!canManage) {
       throw new ForbiddenError('You do not have permission to manage team staff');
     }
 
-    // Verify user exists
-    const user = await prisma.user.findUnique({
-      where: { id: staffUserId },
-    });
+    const user = await TeamService.resolveStaffTarget(data);
+    const role = await TeamService.findRoleByType(teamId, data.roleType);
 
-    if (!user) {
-      throw new NotFoundError('User not found');
-    }
-
-    // Get the role
-    const role = await prisma.teamRole.findUnique({
-      where: {
-        teamId_name: {
-          teamId,
-          name: roleName,
-        },
-      },
-    });
-
-    if (!role) {
-      throw new NotFoundError(`Role "${roleName}" not found for this team`);
-    }
-
-    // Check if user already has this role
-    const existingStaff = await prisma.teamStaff.findUnique({
-      where: {
-        teamId_userId_roleId: {
-          teamId,
-          userId: staffUserId,
-          roleId: role.id,
-        },
-      },
+    // One role per user: existing staff must be re-roled via changeStaffRole
+    const existingStaff = await prisma.teamStaff.findFirst({
+      where: { teamId, userId: user.id },
     });
 
     if (existingStaff) {
-      throw new BadRequestError('User already has this role on the team');
+      throw new BadRequestError('User is already a staff member of this team');
     }
 
     // Add staff member
     const teamStaff = await prisma.teamStaff.create({
       data: {
         teamId,
-        userId: staffUserId,
+        userId: user.id,
         roleId: role.id,
       },
       include: TEAM_STAFF_INCLUDE,
     });
 
+    // Best-effort push notification; never fails the request.
+    try {
+      await NotificationService.sendToUsers([user.id], {
+        title: 'Added to team staff',
+        body: `You were added to ${team.name} as ${role.name}`,
+        data: { type: 'team_staff_added', teamId, roleType: role.type },
+      });
+    } catch (error) {
+      logger.warn('Failed to send staff-added notification', {
+        teamId,
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     return teamStaff;
   }
 
   /**
-   * Remove a staff member from a team role
+   * Change a staff member's role type.
+   * @param requestingUserId Must be a head coach, league admin or system admin
+   */
+  static async changeStaffRole(
+    teamId: string,
+    staffUserId: string,
+    roleType: StaffRoleType,
+    requestingUserId: string
+  ): Promise<TeamStaffWithRelations> {
+    const team = await prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) {
+      throw new NotFoundError('Team not found');
+    }
+
+    const canManage = await canManageStaff(requestingUserId, teamId);
+    if (!canManage) {
+      throw new ForbiddenError('You do not have permission to manage team staff');
+    }
+
+    const current = await prisma.teamStaff.findFirst({
+      where: { teamId, userId: staffUserId },
+      include: { role: true },
+    });
+    if (!current) {
+      throw new NotFoundError('User is not a staff member of this team');
+    }
+
+    const role = await TeamService.findRoleByType(teamId, roleType);
+    if (current.roleId === role.id) {
+      throw new BadRequestError('User already has this role on the team');
+    }
+
+    // Demoting the only head coach would leave the team unmanageable.
+    if (current.role.type === 'HEAD_COACH') {
+      await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
+    }
+
+    return prisma.teamStaff.update({
+      where: { id: current.id },
+      data: { roleId: role.id },
+      include: TEAM_STAFF_INCLUDE,
+    });
+  }
+
+  /**
+   * Remove a staff member (all of their roles) from a team.
+   * Head coaches / league admins / system admins may remove anyone; any staff
+   * member may remove THEMSELVES. The last head coach can never be removed.
    */
   static async removeStaffMember(
     teamId: string,
     staffUserId: string,
-    roleName: string,
     requestingUserId: string
   ): Promise<{ success: true }> {
     // Get team
@@ -717,49 +854,26 @@ export class TeamService {
       throw new NotFoundError('Team not found');
     }
 
-    // Check permission
-    const canManage = await hasTeamPermission(requestingUserId, teamId, 'canManageTeam');
-    if (!canManage) {
-      throw new ForbiddenError('You do not have permission to manage team staff');
-    }
-
-    // Get the role
-    const role = await prisma.teamRole.findUnique({
-      where: {
-        teamId_name: {
-          teamId,
-          name: roleName,
-        },
-      },
-    });
-
-    if (!role) {
-      throw new NotFoundError(`Role "${roleName}" not found for this team`);
-    }
-
-    // Check if removing the last Head Coach
-    if (role.type === 'HEAD_COACH') {
-      const headCoaches = await prisma.teamStaff.count({
-        where: {
-          teamId,
-          role: { type: 'HEAD_COACH' },
-        },
-      });
-
-      if (headCoaches <= 1) {
-        throw new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.');
+    // Check permission: self-removal is always allowed (subject to the guard)
+    const isSelf = requestingUserId === staffUserId;
+    if (!isSelf) {
+      const canManage = await canManageStaff(requestingUserId, teamId);
+      if (!canManage) {
+        throw new ForbiddenError('You do not have permission to manage team staff');
       }
     }
 
-    // Remove staff member
-    await prisma.teamStaff.delete({
-      where: {
-        teamId_userId_roleId: {
-          teamId,
-          userId: staffUserId,
-          roleId: role.id,
-        },
-      },
+    const existing = await prisma.teamStaff.findFirst({
+      where: { teamId, userId: staffUserId },
+    });
+    if (!existing) {
+      throw new NotFoundError('User is not a staff member of this team');
+    }
+
+    await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
+
+    await prisma.teamStaff.deleteMany({
+      where: { teamId, userId: staffUserId },
     });
 
     return { success: true };
@@ -829,9 +943,9 @@ export class TeamService {
   }
 
   /**
-   * Get all roles for a team
+   * Get all roles for a team (definitions only — see `listStaff` for holders)
    */
-  static async getTeamRoles(teamId: string, userId: string): Promise<TeamRoleWithStaff[]> {
+  static async getTeamRoles(teamId: string, userId: string): Promise<TeamRoleSummary[]> {
     // Check access
     const hasAccess = await canAccessTeam(userId, teamId);
     if (!hasAccess) {
@@ -840,7 +954,7 @@ export class TeamService {
 
     const roles = await prisma.teamRole.findMany({
       where: { teamId },
-      include: TEAM_ROLE_INCLUDE,
+      select: TEAM_ROLE_SELECT,
       orderBy: [
         { type: 'asc' },
         { name: 'asc' },
