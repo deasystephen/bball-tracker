@@ -12,7 +12,9 @@ import {
   useAuthUser,
   useIsAuthenticated,
   useAuthActions,
+  getLogoutEpoch,
 } from '../../store/auth-store';
+import { setSessionHooks } from '../../store/session-hooks';
 import {
   trackEvent,
   identifyUser,
@@ -81,7 +83,7 @@ describe('auth-store', () => {
     expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN);
   });
 
-  it('logout clears token + user, resets auth flags, and notifies analytics', () => {
+  it('logout clears token + user, resets auth flags, and notifies analytics', async () => {
     useAuthStore.setState({
       accessToken: 'jwt-abc',
       user: makeUser(),
@@ -89,7 +91,7 @@ describe('auth-store', () => {
       isLoading: false,
     });
 
-    useAuthStore.getState().logout();
+    await useAuthStore.getState().logout();
 
     const state = useAuthStore.getState();
     expect(state.accessToken).toBeNull();
@@ -151,9 +153,9 @@ describe('auth-store', () => {
     expect(useAuthStore.getState().refreshToken).toBeNull();
   });
 
-  it('logout clears the refresh token', () => {
+  it('logout clears the refresh token', async () => {
     useAuthStore.getState().setAuthToken('access', 'refresh');
-    useAuthStore.getState().logout();
+    await useAuthStore.getState().logout();
     expect(useAuthStore.getState().refreshToken).toBeNull();
   });
 
@@ -170,6 +172,100 @@ describe('auth-store', () => {
       isLoading: false,
     });
     expect(persisted).toEqual({ accessToken: 'a', refreshToken: 'r', user: null, isAuthenticated: true });
+  });
+});
+
+/**
+ * Clean logout (audit #17, #18, #19, #41): remote steps run while the token
+ * is still valid, local cleanup always runs, and the logout epoch advances so
+ * an in-flight refresh cannot resurrect the session.
+ */
+describe('auth-store logout sequence', () => {
+  const mockedRemote = jest.fn(() => Promise.resolve());
+  const mockedLocal = jest.fn();
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setSessionHooks({ remoteLogout: mockedRemote, localCleanup: mockedLocal });
+    useAuthStore.setState({ accessToken: 'a', refreshToken: 'r', user: makeUser(), isAuthenticated: true, isLoading: false });
+  });
+
+  it('runs the remote steps with the token still in the store, then clears locally', async () => {
+    let tokenDuringRemote: string | null = 'unset';
+    mockedRemote.mockImplementationOnce(async () => {
+      tokenDuringRemote = useAuthStore.getState().accessToken;
+    });
+
+    await useAuthStore.getState().logout();
+    await flush();
+
+    expect(tokenDuringRemote).toBe('a');
+    expect(mockedRemote).toHaveBeenCalledTimes(1);
+    expect(mockedLocal).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState()).toMatchObject({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false });
+    expect(resetUser).toHaveBeenCalled();
+  });
+
+  it('still signs out locally when the remote steps fail', async () => {
+    mockedRemote.mockRejectedValueOnce(new Error('offline'));
+
+    await useAuthStore.getState().logout();
+    await flush();
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(mockedLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the remote steps when there is no access token', async () => {
+    useAuthStore.setState({ accessToken: null, isAuthenticated: false });
+    await useAuthStore.getState().logout();
+    expect(mockedRemote).not.toHaveBeenCalled();
+  });
+
+  it('advances the logout epoch before the remote steps run (audit #41)', async () => {
+    const before = getLogoutEpoch();
+    let epochDuringRemote = before;
+    mockedRemote.mockImplementationOnce(async () => {
+      epochDuringRemote = getLogoutEpoch();
+    });
+
+    await useAuthStore.getState().logout();
+
+    expect(epochDuringRemote).toBeGreaterThan(before);
+    expect(getLogoutEpoch()).toBeGreaterThan(epochDuringRemote); // clearSession bumps again
+  });
+
+  it('clearSession is synchronous, makes no remote calls, and runs local cleanup', async () => {
+    const before = getLogoutEpoch();
+
+    useAuthStore.getState().clearSession();
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(getLogoutEpoch()).toBe(before + 1);
+    expect(mockedRemote).not.toHaveBeenCalled();
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT);
+    await flush();
+    expect(mockedLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('clearSession on an already signed-out store does not re-fire logout analytics', () => {
+    useAuthStore.setState({ accessToken: null, isAuthenticated: false, user: null });
+    jest.clearAllMocks();
+    useAuthStore.getState().clearSession();
+    expect(trackEvent).not.toHaveBeenCalled();
+    expect(resetUser).not.toHaveBeenCalled();
+  });
+
+  it('tolerates a throwing local cleanup hook', () => {
+    setSessionHooks({ localCleanup: () => { throw new Error('boom'); } });
+    expect(() => useAuthStore.getState().clearSession()).not.toThrow();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it('exposes clearSession through useAuthActions', () => {
+    const { result } = renderHook(() => useAuthActions());
+    expect(typeof result.current.clearSession).toBe('function');
   });
 });
 
@@ -208,7 +304,7 @@ describe('auth-store rehydration', () => {
 
 describe('auth-store updateUser', () => {
   beforeEach(() => {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().clearSession();
     jest.clearAllMocks();
   });
 

@@ -53,15 +53,16 @@ jest.mock('expo-constants', () => ({
 }));
 
 jest.mock('../../store/auth-store', () => {
-  const state = { accessToken: null as string | null, logoutCalls: 0 };
+  const state = { accessToken: null as string | null, clearCalls: 0 };
   return {
     __esModule: true,
     __state: state,
+    getLogoutEpoch: () => 0,
     useAuthStore: {
       getState: () => ({
         accessToken: state.accessToken,
-        logout: () => {
-          state.logoutCalls += 1;
+        clearSession: () => {
+          state.clearCalls += 1;
         },
       }),
     },
@@ -138,15 +139,16 @@ describe('api-client', () => {
       default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
     }));
     const authMock = {
-      state: { accessToken: 'jwt-xyz' as string | null, logoutCalls: 0 },
+      state: { accessToken: 'jwt-xyz' as string | null, clearCalls: 0 },
     };
     jest.doMock('../../store/auth-store', () => ({
       __esModule: true,
+      getLogoutEpoch: () => 0,
       useAuthStore: {
         getState: () => ({
           accessToken: authMock.state.accessToken,
-          logout: () => {
-            authMock.state.logoutCalls += 1;
+          clearSession: () => {
+            authMock.state.clearCalls += 1;
           },
         }),
       },
@@ -192,14 +194,15 @@ describe('api-client', () => {
       __esModule: true,
       default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
     }));
-    const authMock = { state: { accessToken: 't' as string | null, logoutCalls: 0 } };
+    const authMock = { state: { accessToken: 't' as string | null, clearCalls: 0 } };
     jest.doMock('../../store/auth-store', () => ({
       __esModule: true,
+      getLogoutEpoch: () => 0,
       useAuthStore: {
         getState: () => ({
           accessToken: authMock.state.accessToken,
-          logout: () => {
-            authMock.state.logoutCalls += 1;
+          clearSession: () => {
+            authMock.state.clearCalls += 1;
           },
         }),
       },
@@ -208,16 +211,16 @@ describe('api-client', () => {
 
     const err401 = { response: { status: 401 }, message: '401' };
     await expect(captured.responseError!(err401)).rejects.toBe(err401);
-    expect(authMock.state.logoutCalls).toBe(1);
+    expect(authMock.state.clearCalls).toBe(1);
 
     const err500 = { response: { status: 500 }, message: '500' };
     await expect(captured.responseError!(err500)).rejects.toBe(err500);
     // 500 must NOT trigger logout.
-    expect(authMock.state.logoutCalls).toBe(1);
+    expect(authMock.state.clearCalls).toBe(1);
 
     const errNoResponse = { message: 'network' };
     await expect(captured.responseError!(errNoResponse)).rejects.toBe(errNoResponse);
-    expect(authMock.state.logoutCalls).toBe(1);
+    expect(authMock.state.clearCalls).toBe(1);
   });
 
   /**
@@ -233,8 +236,8 @@ describe('api-client', () => {
   };
 
   const loadRefreshable = (opts: { refreshToken: string | null; refreshResult: RefreshResult }) => {
-    const calls = { post: [] as unknown[][], request: [] as unknown[][], logoutCalls: 0, setTokens: [] as unknown[][] };
-    const auth = { accessToken: 'stale' as string | null, refreshToken: opts.refreshToken };
+    const calls = { post: [] as unknown[][], request: [] as unknown[][], clearCalls: 0, setTokens: [] as unknown[][] };
+    const auth = { accessToken: 'stale' as string | null, refreshToken: opts.refreshToken, epoch: 0 };
     jest.doMock('axios', () => {
       const create = jest.fn(() => ({
         interceptors: {
@@ -265,6 +268,7 @@ describe('api-client', () => {
     }));
     jest.doMock('../../store/auth-store', () => ({
       __esModule: true,
+      getLogoutEpoch: () => auth.epoch,
       useAuthStore: {
         getState: () => ({
           accessToken: auth.accessToken,
@@ -274,8 +278,8 @@ describe('api-client', () => {
             auth.accessToken = token;
             auth.refreshToken = refresh;
           },
-          logout: () => {
-            calls.logoutCalls += 1;
+          clearSession: () => {
+            calls.clearCalls += 1;
           },
         }),
       },
@@ -302,7 +306,7 @@ describe('api-client', () => {
     expect(calls.request).toHaveLength(1);
     expect(err.config.headers.Authorization).toBe('Bearer fresh');
     expect(result).toEqual({ data: { retried: true } });
-    expect(calls.logoutCalls).toBe(0);
+    expect(calls.clearCalls).toBe(0);
   });
 
   it('logs out when the refresh token is rejected', async () => {
@@ -312,7 +316,7 @@ describe('api-client', () => {
     await expect(captured.responseError!(err)).rejects.toBe(err);
     expect(calls.post).toHaveLength(1);
     expect(calls.request).toHaveLength(0);
-    expect(calls.logoutCalls).toBe(1);
+    expect(calls.clearCalls).toBe(1);
   });
 
   it('logs out without attempting a refresh when no refresh token is stored', async () => {
@@ -321,7 +325,7 @@ describe('api-client', () => {
 
     await expect(captured.responseError!(err)).rejects.toBe(err);
     expect(calls.post).toHaveLength(0);
-    expect(calls.logoutCalls).toBe(1);
+    expect(calls.clearCalls).toBe(1);
   });
 
   it('never tries to refresh for auth endpoints or an already-retried request', async () => {
@@ -331,14 +335,14 @@ describe('api-client', () => {
     // by the interceptor — it neither refreshes nor logs out here.
     const refreshErr = make401('/auth/refresh');
     await expect(captured.responseError!(refreshErr)).rejects.toBe(refreshErr);
-    expect(calls.logoutCalls).toBe(0);
+    expect(calls.clearCalls).toBe(0);
 
     // The replayed request 401'd with a fresh token: the session is gone.
     const retried = { ...make401('/teams'), config: { ...make401('/teams').config, _retry: true } };
     await expect(captured.responseError!(retried)).rejects.toBe(retried);
 
     expect(calls.post).toHaveLength(0);
-    expect(calls.logoutCalls).toBe(1);
+    expect(calls.clearCalls).toBe(1);
   });
 
   // Audit #20: a WorkOS/backend outage during refresh must not destroy the
@@ -357,7 +361,7 @@ describe('api-client', () => {
 
       expect(calls.post).toHaveLength(1);
       expect(calls.request).toHaveLength(0);
-      expect(calls.logoutCalls).toBe(0);
+      expect(calls.clearCalls).toBe(0);
       expect(calls.setTokens).toHaveLength(0);
       expect(auth.refreshToken).toBe('r1');
     });
@@ -368,7 +372,22 @@ describe('api-client', () => {
     await expect(captured.responseError!(make401('/teams'))).rejects.toBeDefined();
     await expect(captured.responseError!(make401('/games'))).rejects.toBeDefined();
     expect(calls.post).toHaveLength(2);
-    expect(calls.logoutCalls).toBe(0);
+    expect(calls.clearCalls).toBe(0);
+  });
+
+  // Audit #41: a refresh that resolves after the user signed out must not
+  // write the new token pair back into the (now cleared) store.
+  it('discards a refresh that completes after logout (epoch changed)', async () => {
+    const { calls, auth } = loadRefreshable({ refreshToken: 'r1', refreshResult: 'ok' });
+    const err = make401('/teams');
+
+    const pending = captured.responseError!(err);
+    auth.epoch += 1; // user logged out while /auth/refresh was in flight
+    await expect(pending).rejects.toBe(err);
+
+    expect(calls.post).toHaveLength(1);
+    expect(calls.setTokens).toHaveLength(0);
+    expect(calls.request).toHaveLength(0);
   });
 
   describe('refreshAccessToken (exported)', () => {
@@ -411,6 +430,6 @@ describe('api-client', () => {
     // WorkOS rotates refresh tokens: a second parallel call would be rejected.
     expect(calls.post).toHaveLength(1);
     expect(calls.request).toHaveLength(3);
-    expect(calls.logoutCalls).toBe(0);
+    expect(calls.clearCalls).toBe(0);
   });
 });

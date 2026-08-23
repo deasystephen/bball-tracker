@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { LogBox } from 'react-native';
 import { Stack } from 'expo-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -11,6 +11,8 @@ import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_7
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
 import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
 import { initSentry } from '../services/sentry';
+import { queryClient } from '../services/query-client';
+import '../services/session-logout'; // registers logout side effects with the auth store
 import { useNotificationSetup } from '../hooks/useNotifications';
 import { useAuthRedirect } from '../hooks/useAuthRedirect';
 import '../i18n/config'; // Initialize i18n
@@ -23,20 +25,6 @@ if (__DEV__) {
 }
 
 SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      refetchOnWindowFocus: false, // Not applicable in React Native
-      gcTime: 10 * 60 * 1000, // 10 minutes garbage collection
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
 
 /**
  * Root layout - navigation is handled by index.tsx after mount

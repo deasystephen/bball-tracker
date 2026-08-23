@@ -711,8 +711,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### N.4 — Push token cleared on logout
 - [ ] Pass / Fail / Skipped
 - **Steps:** Logout (A.4). Trigger a notification from another account.
-- **Expected:** No notification arrives on the logged-out device.
-- **Notes:** ___________
+- **Expected:** No notification arrives on the logged-out device. Backend log shows `DELETE /auth/push-token` (this device's token) followed by `POST /auth/logout` (`revoked: true`) *before* the app lands on the login screen; no `POST /auth/push-token` re-registration after the token refresh that follows a later sign-in.
+- **Notes:** Implemented by the mobile logout sequence (audit #18, lane C1 — `services/session-logout.ts`). Logging out while offline must still reach the login screen within ~8s (two 4s best-effort calls). ___________
 
 ---
 
