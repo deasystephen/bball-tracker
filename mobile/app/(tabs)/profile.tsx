@@ -211,7 +211,7 @@ export default function Profile() {
               <TouchableOpacity
                 style={styles.settingRow}
                 accessibilityLabel={t('roleOnboarding.changeRole')}
-                onPress={() => router.push('/onboarding/role')}
+                onPress={() => router.push('/onboarding/role?from=profile')}
               >
                 <View style={styles.settingLeft}>
                   <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
