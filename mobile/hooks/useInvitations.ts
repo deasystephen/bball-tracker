@@ -72,13 +72,21 @@ export interface InvitationResponse {
   message?: string;
 }
 
-export interface CreateInvitationInput {
-  playerId: string;
+/**
+ * Invite an existing user by `playerId`, or create-and-invite a new player in
+ * a single backend call with `name` + `email` (the server creates the user
+ * and the invitation in one transaction, so a failure leaves no orphan
+ * player — audit #69).
+ */
+export type CreateInvitationInput = {
   jerseyNumber?: number;
   position?: string;
   message?: string;
   expiresInDays?: number;
-}
+} & (
+  | { playerId: string; name?: never; email?: never; profilePictureUrl?: never }
+  | { playerId?: never; name: string; email: string; profilePictureUrl?: string }
+);
 
 export interface InvitationsQueryParams {
   status?: InvitationStatus;
@@ -166,6 +174,10 @@ export function useCreateInvitation() {
       // Invalidate invitation lists
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
       queryClient.invalidateQueries({ queryKey: invitationKeys.team(variables.teamId) });
+      if (variables.data.email) {
+        // A new player account may have been created; refresh player search
+        queryClient.invalidateQueries({ queryKey: ['players'] });
+      }
     },
   });
 }

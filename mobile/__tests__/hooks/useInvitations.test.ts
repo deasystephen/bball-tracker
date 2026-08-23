@@ -238,6 +238,17 @@ describe('useInvitations', () => {
       expect(input.expiresInDays).toBe(14);
     });
 
+    it('should accept create-and-invite input with name + email (audit #69)', () => {
+      const input: CreateInvitationInput = {
+        name: 'Jane Hooper',
+        email: 'jane@example.com',
+        profilePictureUrl: 'https://cdn.example.com/a.png',
+        jerseyNumber: 7,
+      };
+      expect(input.email).toBe('jane@example.com');
+      expect(input.playerId).toBeUndefined();
+    });
+
     it('should accept complete input', () => {
       const input: CreateInvitationInput = {
         playerId: 'player-1',

@@ -6,6 +6,8 @@ import request from 'supertest';
 import { app } from '../../src/index';
 import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, BadRequestError } from '../../src/utils/errors';
+import { invitationTokenKey } from '../../src/api/middleware/rate-limit';
+import type { Request } from 'express';
 
 jest.mock('../../src/services/invitation-service');
 
@@ -70,6 +72,36 @@ describe('Public Invitation Token API', () => {
         .unset('Authorization');
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe('rate limiting (audit #36)', () => {
+    it('keys the lookup limiter on the token, not the client IP', () => {
+      const key = invitationTokenKey({ params: { token: 'tok-abc' }, ip: '203.0.113.7' } as unknown as Request);
+      expect(key).toBe('invite-token:tok-abc');
+      expect(key).not.toContain('203.0.113.7');
+    });
+
+    it('lets many distinct tokens be looked up from one IP (server-side rendering)', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+
+      // More than the per-token cap (30) from a single IP. Kept under the
+      // global apiRateLimit (100/min/IP) so the rest of this file still runs.
+      for (let i = 0; i < 35; i += 1) {
+        const res = await request(app).get(`/api/v1/invitations/by-token/many-tokens-${i}-abcdefgh`);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it('limits repeated lookups of a single token with 429', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+      const token = 'single-token-limited-abcdefgh';
+      let lastStatus = 200;
+      for (let i = 0; i < 31; i += 1) {
+        const res = await request(app).get(`/api/v1/invitations/by-token/${token}`);
+        lastStatus = res.status;
+      }
+      expect(lastStatus).toBe(429);
     });
   });
 

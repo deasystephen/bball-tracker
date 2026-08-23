@@ -11,7 +11,7 @@ import { InvitationService } from '../../services/invitation-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
 import {
-  calendarFeedRateLimit,
+  invitationTokenRateLimit,
   writeRateLimit,
 } from '../middleware/rate-limit';
 
@@ -27,8 +27,12 @@ function validateToken(token: string): boolean {
  * GET /api/v1/invitations/by-token/:token
  * Returns invitation details for display on the web landing page.
  * Intentionally returns a limited view (no player PII).
+ *
+ * Rate-limited per token, not per IP: the web invite page fetches this
+ * server-side from one egress IP (audit #36). The accept route below stays on
+ * the IP-keyed writeRateLimit because the browser calls it directly.
  */
-router.get('/by-token/:token', calendarFeedRateLimit, async (req, res) => {
+router.get('/by-token/:token', invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
 
   if (!validateToken(token as string)) {

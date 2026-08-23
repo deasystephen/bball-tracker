@@ -32,7 +32,6 @@ import {
 } from '../../../hooks/useInvitations';
 import {
   usePlayers,
-  useCreatePlayer,
   useCreateManagedPlayer,
   type Player,
 } from '../../../hooks/usePlayers';
@@ -69,7 +68,6 @@ export default function ManagePlayersScreen() {
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
-  const createPlayer = useCreatePlayer();
   const createInvitation = useCreateInvitation();
   const createManagedPlayer = useCreateManagedPlayer();
   const toast = useToast();
@@ -97,18 +95,14 @@ export default function ManagePlayersScreen() {
         setUploadingAvatar(false);
       }
 
-      // Create the player first
-      const newPlayerResult = await createPlayer.mutateAsync({
-        name: newPlayerName.trim(),
-        email: newPlayerEmail.trim(),
-        profilePictureUrl,
-      });
-
-      // Then send invitation
+      // Create the player and send the invitation in one backend call so a
+      // failed invite can't leave an orphan player behind (audit #69).
       await createInvitation.mutateAsync({
         teamId: id,
         data: {
-          playerId: newPlayerResult.player.id,
+          name: newPlayerName.trim(),
+          email: newPlayerEmail.trim(),
+          profilePictureUrl,
           jerseyNumber: jerseyNumber ? parseInt(jerseyNumber, 10) : undefined,
           position: position.trim() || undefined,
         },
@@ -519,7 +513,7 @@ export default function ManagePlayersScreen() {
                 <Button
                   title={uploadingAvatar ? 'Uploading photo...' : 'Create & Send Invitation'}
                   onPress={handleCreateAndInvitePlayer}
-                  loading={createPlayer.isPending || createInvitation.isPending || uploadingAvatar}
+                  loading={createInvitation.isPending || uploadingAvatar}
                   disabled={!newPlayerName.trim() || !newPlayerEmail.trim()}
                   fullWidth
                 />

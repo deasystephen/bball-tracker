@@ -173,47 +173,6 @@ export class InvitationService {
       throw new ForbiddenError('You do not have permission to send invitations for this team');
     }
 
-    // Verify user exists
-    const player = await prisma.user.findUnique({
-      where: { id: data.playerId },
-    });
-
-    if (!player) {
-      throw new NotFoundError('User not found');
-    }
-
-    // Check if player is already on the team
-    const existingMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_playerId: {
-          teamId,
-          playerId: data.playerId,
-        },
-      },
-    });
-
-    if (existingMember) {
-      throw new BadRequestError('Player is already on this team');
-    }
-
-    // Check if there's already a live pending invitation. A PENDING row whose
-    // expiresAt has passed is not a blocker: mark it EXPIRED and carry on
-    // (audit #23 — nothing else ever flips expired rows, so dedupe must).
-    const existingInvitation = await prisma.teamInvitation.findFirst({
-      where: {
-        teamId,
-        playerId: data.playerId,
-        status: 'PENDING',
-      },
-    });
-
-    if (existingInvitation) {
-      if (existingInvitation.expiresAt.getTime() > Date.now()) {
-        throw new BadRequestError('A pending invitation already exists for this player');
-      }
-      await this.markExpired(existingInvitation.id);
-    }
-
     // Calculate expiration date
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + (data.expiresInDays || 7));
@@ -221,21 +180,74 @@ export class InvitationService {
     // Generate secure token
     const token = this.generateToken();
 
-    // Create invitation
-    const invitation = await prisma.teamInvitation.create({
-      data: {
-        teamId,
-        playerId: data.playerId,
-        invitedById: userId,
-        token,
-        jerseyNumber: data.jerseyNumber,
-        position: data.position,
-        message: data.message,
-        expiresAt,
-        status: 'PENDING',
-      },
-      select: INVITATION_SELECT,
+    const invitationData = (playerId: string): Prisma.TeamInvitationUncheckedCreateInput => ({
+      teamId,
+      playerId,
+      invitedById: userId,
+      token,
+      jerseyNumber: data.jerseyNumber,
+      position: data.position,
+      message: data.message,
+      expiresAt,
+      status: 'PENDING',
     });
+
+    let invitation: InvitationWithRelations;
+
+    if (data.playerId) {
+      // Invite an existing user
+      const player = await prisma.user.findUnique({
+        where: { id: data.playerId },
+      });
+
+      if (!player) {
+        throw new NotFoundError('User not found');
+      }
+
+      await this.assertInvitable(teamId, player.id);
+
+      invitation = await prisma.teamInvitation.create({
+        data: invitationData(player.id),
+        select: INVITATION_SELECT,
+      });
+    } else {
+      // Create-and-invite (audit #69). `name` + `email` are guaranteed by the
+      // schema. If the email already belongs to a user (e.g. a retry after a
+      // partial failure, or a player who signed up on their own) reuse that
+      // account instead of failing; otherwise create the user and the
+      // invitation in ONE transaction so a failed invite leaves no orphan.
+      const email = data.email as string;
+      const name = data.name as string;
+
+      const existingUser = await prisma.user.findUnique({ where: { email } });
+
+      if (existingUser) {
+        await this.assertInvitable(teamId, existingUser.id);
+
+        invitation = await prisma.teamInvitation.create({
+          data: invitationData(existingUser.id),
+          select: INVITATION_SELECT,
+        });
+      } else {
+        invitation = await prisma.$transaction(async (tx) => {
+          const created = await tx.user.create({
+            data: {
+              name,
+              email,
+              role: 'PLAYER',
+              emailVerified: false,
+              profilePictureUrl: data.profilePictureUrl,
+            },
+            select: { id: true },
+          });
+
+          return tx.teamInvitation.create({
+            data: invitationData(created.id),
+            select: INVITATION_SELECT,
+          });
+        });
+      }
+    }
 
     // Send invitation email (fire-and-forget; never block the response)
     if (invitation.player.email) {
@@ -269,6 +281,42 @@ export class InvitationService {
     }
 
     return invitation;
+  }
+
+  /**
+   * Reject when the player is already rostered or already has a live PENDING
+   * invitation. A PENDING row whose expiresAt has passed is not a blocker:
+   * mark it EXPIRED and carry on (audit #23 — nothing else ever flips expired
+   * rows, so dedupe must).
+   */
+  private static async assertInvitable(teamId: string, playerId: string): Promise<void> {
+    const existingMember = await prisma.teamMember.findUnique({
+      where: {
+        teamId_playerId: {
+          teamId,
+          playerId,
+        },
+      },
+    });
+
+    if (existingMember) {
+      throw new BadRequestError('Player is already on this team');
+    }
+
+    const existingInvitation = await prisma.teamInvitation.findFirst({
+      where: {
+        teamId,
+        playerId,
+        status: 'PENDING',
+      },
+    });
+
+    if (existingInvitation) {
+      if (existingInvitation.expiresAt.getTime() > Date.now()) {
+        throw new BadRequestError('A pending invitation already exists for this player');
+      }
+      await this.markExpired(existingInvitation.id);
+    }
   }
 
   /**
