@@ -31,7 +31,9 @@
         { "name": "SES_FROM_ADDRESS", "value": "noreply@mail.capyhoops.com" },
         { "name": "PUBLIC_APP_URL", "value": "https://capyhoops.com" },
         { "name": "API_BASE_URL", "value": "https://api.capyhoops.com" },
-        { "name": "DEFAULT_TIMEZONE", "value": "America/Los_Angeles" }
+        { "name": "DEFAULT_TIMEZONE", "value": "America/Los_Angeles" },
+        { "name": "S3_AVATARS_BUCKET", "value": "bball-tracker-avatars-production" },
+        { "name": "AWS_REGION", "value": "us-east-1" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:982343512143:secret:bball-tracker-production/database-url-1QlcXz" },
