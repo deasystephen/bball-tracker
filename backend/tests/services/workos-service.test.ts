@@ -85,6 +85,31 @@ describe('WorkOSService', () => {
       );
     });
 
+    it('forwards a PKCE code challenge with the S256 method (audit #5)', async () => {
+      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
+
+      await WorkOSService.getAuthorizationUrl('st', 'myapp://callback', 'challenge-abc');
+
+      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: 'st',
+          redirectUri: 'myapp://callback',
+          codeChallenge: 'challenge-abc',
+          codeChallengeMethod: 'S256',
+        })
+      );
+    });
+
+    it('omits the PKCE fields entirely when no challenge is given', async () => {
+      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
+
+      await WorkOSService.getAuthorizationUrl();
+
+      const arg = mockWorkos.userManagement.getAuthorizationUrl.mock.calls[0][0];
+      expect(arg).not.toHaveProperty('codeChallenge');
+      expect(arg).not.toHaveProperty('codeChallengeMethod');
+    });
+
     it('should use custom redirect URI if provided', async () => {
       mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize'
@@ -163,6 +188,18 @@ describe('WorkOSService', () => {
       expect(mockWorkos.userManagement.authenticateWithCode).toHaveBeenCalledWith({
         clientId: 'test-client-id',
         code: 'auth-code',
+      });
+    });
+
+    it('passes the PKCE code verifier through to WorkOS when given', async () => {
+      mockWorkos.userManagement.authenticateWithCode.mockResolvedValue({ accessToken: 'a' });
+
+      await WorkOSService.exchangeCodeForToken('auth-code', 'verifier-xyz');
+
+      expect(mockWorkos.userManagement.authenticateWithCode).toHaveBeenCalledWith({
+        clientId: 'test-client-id',
+        code: 'auth-code',
+        codeVerifier: 'verifier-xyz',
       });
     });
   });

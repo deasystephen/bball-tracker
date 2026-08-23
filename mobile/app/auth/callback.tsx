@@ -1,11 +1,17 @@
 /**
- * OAuth callback route for bball-tracker://auth/callback?code=<code>
+ * OAuth callback route for bball-tracker://auth/callback?code=<code>&state=<state>
  *
  * WorkOS redirects the browser back to this deep link after the user signs in.
  * Expo Router matches the path to this screen, which exchanges the authorization
  * code for a session token and then routes the user into the app. Without a real
  * route here, the incoming deep link lands on Expo Router's "Unmatched Route"
  * screen (see login.tsx's redirect URI built with `Linking.createURL('auth/callback')`).
+ *
+ * Security (audit #5): the custom scheme can be claimed by any app, so before
+ * exchanging anything this screen requires the echoed `state` to match the
+ * sign-in this device started (utils/pkce.ts) and sends that sign-in's PKCE
+ * `code_verifier` along with the code. A deep link with a foreign or replayed
+ * `state` is refused without contacting the backend.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -19,6 +25,7 @@ import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { spacing } from '../../theme';
 import { postLoginRoute } from '../../utils/role-onboarding';
+import { consumePendingLogin } from '../../utils/pkce';
 
 /**
  * Errors that are knowable from the deep link itself (WorkOS returned an error,
@@ -35,8 +42,9 @@ export default function AuthCallbackScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { setAuthToken, setUser } = useAuthActions();
-  const { code, error: oauthError } = useLocalSearchParams<{
+  const { code, state, error: oauthError } = useLocalSearchParams<{
     code?: string;
+    state?: string;
     error?: string;
   }>();
 
@@ -52,7 +60,16 @@ export default function AuthCallbackScreen() {
 
     (async () => {
       try {
-        const response = await apiClient.get('/auth/callback', { params: { code } });
+        const pending = await consumePendingLogin(state);
+        if (!pending) {
+          setExchangeError(
+            'This sign-in link did not come from a sign-in started on this device, or it has expired. Please try again.'
+          );
+          return;
+        }
+        const response = await apiClient.get('/auth/callback', {
+          params: { code, state: pending.state, code_verifier: pending.verifier },
+        });
         const { accessToken, refreshToken, user } = response.data;
 
         setAuthToken(accessToken, refreshToken ?? null);
@@ -65,7 +82,7 @@ export default function AuthCallbackScreen() {
         setExchangeError('Failed to complete sign in. Please try again.');
       }
     })();
-  }, [code, paramError, router, setAuthToken, setUser]);
+  }, [code, state, paramError, router, setAuthToken, setUser]);
 
   const errorMessage = paramError ?? exchangeError;
 
