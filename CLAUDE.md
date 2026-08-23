@@ -174,6 +174,18 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   public routes, where the caller already holds the token) touch it. Tests in `tests/api/invitations.test.ts`,
   `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
   create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
+- **Lifecycle (audit #22/#23/#58).** Uniqueness is a hand-written **partial** unique index
+  `TeamInvitation_pending_teamId_playerId_key ON (teamId, playerId) WHERE status = 'PENDING'` (migration
+  `20260823060000_partial_unique_pending_invitation`; Prisma can't express it, so `schema.prisma` carries a
+  comment and a plain `@@index([teamId, playerId])` instead of `@@unique`). Any number of
+  REJECTED/CANCELLED/EXPIRED rows may pile up per team/player, so invite → reject → re-invite works.
+  Nothing schedules `expireOldInvitations`; expiry is **lazy**: `createInvitation` treats a PENDING row whose
+  `expiresAt` has passed as non-blocking and flips it to EXPIRED before creating the new one, and accept
+  paths flip it on contact. State transitions out of PENDING go through `transitionPending()` —
+  `updateMany … where { id, status: 'PENDING' }` inside the transaction — so the loser of a concurrent
+  accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
+  `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
+  other callers with team access (rostered players) remain scoped to `playerId = caller`.
 
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)

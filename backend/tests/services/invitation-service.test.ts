@@ -282,6 +282,49 @@ describe('InvitationService', () => {
       }
     });
 
+    it('lazily expires a stale PENDING invitation and creates a new one (audit #23)', async () => {
+      const coach = createCoach();
+      const player = createPlayer();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const stale = createInvitation({
+        teamId: team.id,
+        playerId: player.id,
+        invitedById: coach.id,
+        expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+      const fresh = createInvitation({ teamId: team.id, playerId: player.id, invitedById: coach.id });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(stale);
+      (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
+        ...fresh,
+        team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+        player: { id: player.id, name: player.name, email: player.email },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+      });
+
+      const result = await InvitationService.createInvitation(
+        team.id,
+        createInvitationInput({ playerId: player.id }),
+        coach.id
+      );
+
+      expect(result).toHaveProperty('id', fresh.id);
+      expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
+        where: { id: stale.id, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
+      expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
+    });
+
     it('should throw BadRequestError if pending invitation already exists', async () => {
       const coach = createCoach();
       const player = createPlayer();
@@ -324,10 +367,12 @@ describe('InvitationService', () => {
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
         const mockTx = {
           teamInvitation: {
-            update: jest.fn().mockResolvedValue({
+            updateMany: txUpdateMany,
+            findUniqueOrThrow: jest.fn().mockResolvedValue({
               ...invitation,
               status: 'ACCEPTED',
               acceptedAt: new Date(),
@@ -349,6 +394,35 @@ describe('InvitationService', () => {
 
       expect(result.invitation).toHaveProperty('status', 'ACCEPTED');
       expect(result.teamMember).toHaveProperty('playerId', player.id);
+      // Audit #58: the status flip is guarded by a PENDING predicate
+      expect(txUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: invitation.id, status: 'PENDING' } })
+      );
+    });
+
+    it('returns 400 (not 500) when a concurrent accept already moved it out of PENDING', async () => {
+      const { invitation, player } = createFullInvitation();
+      const txMemberCreate = jest.fn();
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
+        callback({
+          teamInvitation: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            findUniqueOrThrow: jest.fn(),
+          },
+          teamMember: { create: txMemberCreate },
+        })
+      );
+
+      await expect(
+        InvitationService.acceptInvitation(invitation.id, player.id)
+      ).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Cannot accept invitation: it is no longer pending',
+      });
+      expect(txMemberCreate).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundError if invitation does not exist', async () => {
@@ -395,16 +469,15 @@ describe('InvitationService', () => {
       };
 
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(expiredInvitation);
-      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({
-        ...expiredInvitation,
-        status: 'EXPIRED',
-      });
+      (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
-      try {
-        await InvitationService.acceptInvitation(invitation.id, player.id);
-      } catch (error) {
-        expectBadRequestError(error, 'This invitation has expired');
-      }
+      await expect(
+        InvitationService.acceptInvitation(invitation.id, player.id)
+      ).rejects.toMatchObject({ statusCode: 400, message: 'This invitation has expired' });
+      expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
+        where: { id: invitation.id, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
     });
 
     it('should throw BadRequestError if player is already on team', async () => {
@@ -628,6 +701,53 @@ describe('InvitationService', () => {
       expect(findArgs.where.teamId).toBe(team.id);
     });
 
+    it('lists every invitation for the team when the caller can manage the roster (audit #23)', async () => {
+      const { team, coach, season, league } = createFullInvitation();
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      // hasTeamPermission(canManageRoster)
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations({ teamId: team.id, limit: 10, offset: 0 }, coach.id);
+
+      const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where).toEqual({ teamId: team.id });
+      expect(findArgs.where).not.toHaveProperty('playerId');
+    });
+
+    it('scopes a rostered player (no roster permission) to their own invitations when filtering by teamId', async () => {
+      const { team, player, season, league } = createFullInvitation();
+
+      // canAccessTeam: not admin, not staff, but a team member
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
+        createTeamMember({ teamId: team.id, playerId: player.id })
+      );
+      // hasTeamPermission: no staff roles
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      await InvitationService.listInvitations({ teamId: team.id, limit: 10, offset: 0 }, player.id);
+
+      const findArgs = (mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0];
+      expect(findArgs.where).toEqual({ teamId: team.id, playerId: player.id });
+    });
+
     it('should throw ForbiddenError when filtering by a team the user cannot access', async () => {
       const team = createTeam();
       const outsider = createPlayer();
@@ -814,17 +934,17 @@ describe('InvitationService', () => {
       const { invitation, player } = createFullInvitation();
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
-      const txUpdate = jest.fn().mockResolvedValue({ id: invitation.id, status: 'ACCEPTED' });
+      const txFind = jest.fn().mockResolvedValue({ id: invitation.id, status: 'ACCEPTED' });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
         callback({
-          teamInvitation: { update: txUpdate },
+          teamInvitation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), findUniqueOrThrow: txFind },
           teamMember: { create: jest.fn().mockResolvedValue({ teamId: invitation.teamId, playerId: player.id }) },
         })
       );
 
       await InvitationService.acceptInvitation(invitation.id, player.id);
 
-      expectSelectWithoutToken(txUpdate.mock.calls[0][0]);
+      expectSelectWithoutToken(txFind.mock.calls[0][0]);
     });
 
     it('rejectInvitation updates with a select that omits token', async () => {
@@ -887,10 +1007,12 @@ describe('InvitationService', () => {
 
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
         const mockTx = {
           teamInvitation: {
-            update: jest.fn().mockResolvedValue({
+            updateMany: txUpdateMany,
+            findUniqueOrThrow: jest.fn().mockResolvedValue({
               ...invitation,
               status: 'ACCEPTED',
               acceptedAt: new Date(),
@@ -910,6 +1032,31 @@ describe('InvitationService', () => {
 
       expect(result.invitation).toHaveProperty('status', 'ACCEPTED');
       expect(result.teamMember).toHaveProperty('playerId', player.id);
+      expect(txUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: invitation.id, status: 'PENDING' } })
+      );
+    });
+
+    it('returns 400 when a concurrent accept already consumed the token', async () => {
+      const { invitation } = createFullInvitation();
+      const txMemberCreate = jest.fn();
+
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(invitation);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
+        callback({
+          teamInvitation: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            findUniqueOrThrow: jest.fn(),
+          },
+          teamMember: { create: txMemberCreate },
+        })
+      );
+
+      await expect(
+        InvitationService.acceptInvitationByToken(invitation.token)
+      ).rejects.toMatchObject({ statusCode: 400 });
+      expect(txMemberCreate).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundError if token does not match', async () => {

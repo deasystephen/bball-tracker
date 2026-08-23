@@ -122,7 +122,7 @@ export interface AcceptInvitationResult {
 }
 
 export interface AcceptInvitationByTokenResult {
-  invitation: TeamInvitation;
+  invitation: InvitationSummary;
   teamMember: TeamMember;
 }
 
@@ -196,7 +196,9 @@ export class InvitationService {
       throw new BadRequestError('Player is already on this team');
     }
 
-    // Check if there's already a pending invitation
+    // Check if there's already a live pending invitation. A PENDING row whose
+    // expiresAt has passed is not a blocker: mark it EXPIRED and carry on
+    // (audit #23 — nothing else ever flips expired rows, so dedupe must).
     const existingInvitation = await prisma.teamInvitation.findFirst({
       where: {
         teamId,
@@ -206,7 +208,10 @@ export class InvitationService {
     });
 
     if (existingInvitation) {
-      throw new BadRequestError('A pending invitation already exists for this player');
+      if (existingInvitation.expiresAt.getTime() > Date.now()) {
+        throw new BadRequestError('A pending invitation already exists for this player');
+      }
+      await this.markExpired(existingInvitation.id);
     }
 
     // Calculate expiration date
@@ -284,6 +289,11 @@ export class InvitationService {
       where.status = status;
     }
 
+    // Staff who can manage the roster see every invitation for the team
+    // (pending, rejected, expired, ...). Anyone else with team access (a
+    // rostered player) is scoped to their own rows, as before (audit #23).
+    let scopeToCaller = true;
+
     if (teamId) {
       // Verify user has access to this team
       const hasAccess = await canAccessTeam(userId, teamId);
@@ -292,6 +302,7 @@ export class InvitationService {
       }
 
       where.teamId = teamId;
+      scopeToCaller = !(await hasTeamPermission(userId, teamId, 'canManageRoster'));
     }
 
     if (playerId) {
@@ -307,7 +318,7 @@ export class InvitationService {
       }
 
       where.playerId = playerId;
-    } else {
+    } else if (scopeToCaller) {
       // If no playerId specified, default to current user's invitations
       where.playerId = userId;
     }
@@ -395,11 +406,7 @@ export class InvitationService {
 
     // Check if invitation has expired
     if (new Date() > invitation.expiresAt) {
-      // Update status to expired
-      await prisma.teamInvitation.update({
-        where: { id: invitationId },
-        data: { status: 'EXPIRED' },
-      });
+      await this.markExpired(invitationId);
       throw new BadRequestError('This invitation has expired');
     }
 
@@ -419,15 +426,15 @@ export class InvitationService {
 
     // Use transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
-      // Update invitation status
-      const updatedInvitation = await tx.teamInvitation.update({
-        where: { id: invitationId },
-        data: {
-          status: 'ACCEPTED',
-          acceptedAt: new Date(),
-        },
-        select: INVITATION_SCALAR_SELECT,
-      });
+      // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
+      // accepts (double-tap, web + app) race here; the loser sees 0 rows and
+      // gets a 400 instead of a P2002 500 from the TeamMember insert (audit #58).
+      const updatedInvitation = await this.transitionPending(
+        tx,
+        invitationId,
+        { status: 'ACCEPTED', acceptedAt: new Date() },
+        'accept'
+      );
 
       // Add player to team
       const teamMember = await tx.teamMember.create({
@@ -444,6 +451,43 @@ export class InvitationService {
     });
 
     return result;
+  }
+
+  /**
+   * Lazily mark a PENDING invitation EXPIRED. Status-guarded so a concurrent
+   * accept/reject/cancel is never overwritten.
+   */
+  private static async markExpired(invitationId: string): Promise<void> {
+    await prisma.teamInvitation.updateMany({
+      where: { id: invitationId, status: 'PENDING' },
+      data: { status: 'EXPIRED' },
+    });
+  }
+
+  /**
+   * Move an invitation out of PENDING with a status predicate, returning the
+   * updated row. Throws BadRequestError when the row is no longer PENDING —
+   * i.e. another request won the race.
+   */
+  private static async transitionPending(
+    tx: Prisma.TransactionClient,
+    invitationId: string,
+    data: Prisma.TeamInvitationUpdateManyMutationInput,
+    action: 'accept' | 'reject' | 'cancel'
+  ): Promise<InvitationSummary> {
+    const { count } = await tx.teamInvitation.updateMany({
+      where: { id: invitationId, status: 'PENDING' },
+      data,
+    });
+
+    if (count === 0) {
+      throw new BadRequestError(`Cannot ${action} invitation: it is no longer pending`);
+    }
+
+    return tx.teamInvitation.findUniqueOrThrow({
+      where: { id: invitationId },
+      select: INVITATION_SCALAR_SELECT,
+    });
   }
 
   /**
@@ -593,10 +637,7 @@ export class InvitationService {
     }
 
     if (new Date() > invitation.expiresAt) {
-      await prisma.teamInvitation.update({
-        where: { token },
-        data: { status: 'EXPIRED' },
-      });
+      await this.markExpired(invitation.id);
       throw new BadRequestError('This invitation has expired');
     }
 
@@ -614,10 +655,12 @@ export class InvitationService {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const updatedInvitation = await tx.teamInvitation.update({
-        where: { token },
-        data: { status: 'ACCEPTED', acceptedAt: new Date() },
-      });
+      const updatedInvitation = await this.transitionPending(
+        tx,
+        invitation.id,
+        { status: 'ACCEPTED', acceptedAt: new Date() },
+        'accept'
+      );
 
       const teamMember = await tx.teamMember.create({
         data: {
@@ -635,8 +678,11 @@ export class InvitationService {
   }
 
   /**
-   * Expire old invitations (background job)
-   * Should be run periodically to mark expired invitations
+   * Bulk-expire PENDING invitations past their expiresAt.
+   *
+   * Not scheduled anywhere today — expiry is applied lazily by
+   * createInvitation (dedupe) and accept/acceptByToken (audit #23). Kept for a
+   * future cron/maintenance job.
    */
   static async expireOldInvitations(): Promise<Prisma.BatchPayload> {
     const now = new Date();

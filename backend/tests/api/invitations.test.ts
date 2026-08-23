@@ -212,6 +212,17 @@ describe('Invitations API', () => {
       expect(response.status).toBe(400);
     });
 
+    it('should return 400 (not 500) when a concurrent accept already consumed the invitation', async () => {
+      mockInvitationService.acceptInvitation.mockRejectedValue(
+        new BadRequestError('Cannot accept invitation: it is no longer pending')
+      );
+
+      const response = await request(app).post(`/api/v1/invitations/${TEST_INVITATION_ID}/accept`);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('no longer pending');
+    });
+
     it('should return 403 if not the invited player', async () => {
       mockInvitationService.acceptInvitation.mockRejectedValue(
         new ForbiddenError('Only the invited player can accept')
