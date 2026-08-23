@@ -70,8 +70,23 @@ export interface User {
    * API builds omit it, and clients must treat `undefined` as `[]`.
    */
   leagueAdminOf?: string[];
+  /**
+   * Children this user is a guardian of (Guardian rows — PARENT role,
+   * docs/plans/parent-role-spec.md). Optional like `leagueAdminOf`: older API
+   * builds omit it and clients treat `undefined` as `[]`.
+   */
+  guardianOf?: GuardianOfEntry[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type GuardianRelationship = 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
+
+export interface GuardianOfEntry {
+  childId: string;
+  childName: string;
+  relationship: GuardianRelationship;
+  isPrimary: boolean;
 }
 
 export interface League {

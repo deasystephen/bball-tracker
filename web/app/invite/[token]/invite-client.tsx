@@ -2,7 +2,13 @@
 
 import { useState } from 'react';
 
-interface InvitationDetails {
+/**
+ * `GET /invitations/by-token/:token` is polymorphic: a team invitation
+ * (`kind: 'team'`, or no `kind` on older API builds) or a guardian invitation
+ * (`kind: 'guardian'` — PARENT role, docs/plans/parent-role-spec.md).
+ */
+export interface TeamInvitationDetails {
+  kind?: 'team';
   id: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   teamName: string;
@@ -12,6 +18,19 @@ interface InvitationDetails {
   message: string | null;
   expiresAt: string;
 }
+
+export interface GuardianInvitationDetails {
+  kind: 'guardian';
+  id: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
+  childName: string;
+  teamName: string | null;
+  inviterName: string;
+  relationship: 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
+  expiresAt: string;
+}
+
+export type InvitationDetails = TeamInvitationDetails | GuardianInvitationDetails;
 
 interface Props {
   invitation: InvitationDetails;
@@ -31,12 +50,31 @@ function formatExpiry(expiresAt: string): string {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+const RELATIONSHIP_LABEL: Record<GuardianInvitationDetails['relationship'], string> = {
+  MOTHER: 'mother',
+  FATHER: 'father',
+  GUARDIAN: 'guardian',
+  OTHER: 'guardian',
+};
+
 export function InviteClient({ invitation, token }: Props) {
   const [acceptState, setAcceptState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 
   const expired = isExpired(invitation.expiresAt);
   const isPending = invitation.status === 'PENDING' && !expired;
+  const guardian = invitation.kind === 'guardian' ? invitation : null;
+  const teamInvite = invitation.kind === 'guardian' ? null : invitation;
+  // What the invitation is "to" / "for" in the status copy below.
+  const subject = guardian ? (
+    <>
+      <strong>{guardian.childName}</strong>
+      {guardian.teamName ? <> ({guardian.teamName})</> : null}
+    </>
+  ) : (
+    <strong>{invitation.teamName}</strong>
+  );
+  const preposition = guardian ? 'for' : 'to';
 
   function openInApp() {
     const deepLink = `bball-tracker://invite/${token}`;
@@ -85,8 +123,16 @@ export function InviteClient({ invitation, token }: Props) {
       <main className="container">
         <div className="card">
           <div className="logo">✅</div>
-          <p className="success-state">You&apos;ve joined {invitation.teamName}!</p>
-          <p>Download the app to see your team, track games, and view stats.</p>
+          <p className="success-state">
+            {guardian
+              ? `You are now ${guardian.childName}'s ${RELATIONSHIP_LABEL[guardian.relationship]}!`
+              : `You've joined ${invitation.teamName}!`}
+          </p>
+          <p>
+            {guardian
+              ? "Download the app to see your child's schedule, RSVP for games, and view stats."
+              : 'Download the app to see your team, track games, and view stats.'}
+          </p>
           <div className="actions" style={{ marginTop: 24 }}>
             <a href={APP_STORE_URL} className="btn btn-primary">Download on the App Store</a>
             <a href={PLAY_STORE_URL} className="btn btn-outline">Get it on Google Play</a>
@@ -103,7 +149,7 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="logo">✅</div>
           <span className="status-badge status-accepted">Accepted</span>
           <h1>Already Accepted</h1>
-          <p>This invitation to <strong>{invitation.teamName}</strong> has already been accepted.</p>
+          <p>This invitation {preposition} {subject} has already been accepted.</p>
           <div className="actions">
             <button className="btn btn-primary" onClick={openInApp}>Open in App</button>
           </div>
@@ -119,7 +165,7 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="logo">🚫</div>
           <span className="status-badge status-rejected">Rejected</span>
           <h1>Invitation Declined</h1>
-          <p>This invitation to <strong>{invitation.teamName}</strong> was declined.</p>
+          <p>This invitation {preposition} {subject} was declined.</p>
         </div>
       </main>
     );
@@ -132,7 +178,7 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="logo">🚫</div>
           <span className="status-badge status-cancelled">Cancelled</span>
           <h1>Invitation Cancelled</h1>
-          <p>This invitation to <strong>{invitation.teamName}</strong> has been cancelled by the team coach.</p>
+          <p>This invitation {preposition} {subject} has been cancelled by the team coach.</p>
         </div>
       </main>
     );
@@ -146,7 +192,7 @@ export function InviteClient({ invitation, token }: Props) {
           <span className="status-badge status-expired">Expired</span>
           <h1>Invitation Expired</h1>
           <p>
-            This invitation to <strong>{invitation.teamName}</strong> expired on{' '}
+            This invitation {preposition} {subject} expired on{' '}
             {formatExpiry(invitation.expiresAt)}.
           </p>
           <p className="footer">Ask the team coach to send a new invitation.</p>
@@ -159,28 +205,51 @@ export function InviteClient({ invitation, token }: Props) {
   return (
     <main className="container">
       <div className="card">
-        <div className="logo">🏀</div>
-        <h1>You&apos;re invited to join a team!</h1>
+        <div className="logo">{guardian ? '👨‍👧' : '🏀'}</div>
+        <h1>
+          {guardian
+            ? `You're invited to be ${guardian.childName}'s ${RELATIONSHIP_LABEL[guardian.relationship]}`
+            : "You're invited to join a team!"}
+        </h1>
 
         <div className="invite-meta">
-          <div className="invite-meta-row">
-            <span className="meta-label">Team</span>
-            <span className="meta-value">{invitation.teamName}</span>
-          </div>
+          {guardian ? (
+            <>
+              <div className="invite-meta-row">
+                <span className="meta-label">Child</span>
+                <span className="meta-value">{guardian.childName}</span>
+              </div>
+              <div className="invite-meta-row">
+                <span className="meta-label">Relationship</span>
+                <span className="meta-value">{RELATIONSHIP_LABEL[guardian.relationship]}</span>
+              </div>
+              {guardian.teamName && (
+                <div className="invite-meta-row">
+                  <span className="meta-label">Team</span>
+                  <span className="meta-value">{guardian.teamName}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="invite-meta-row">
+              <span className="meta-label">Team</span>
+              <span className="meta-value">{invitation.teamName}</span>
+            </div>
+          )}
           <div className="invite-meta-row">
             <span className="meta-label">From</span>
             <span className="meta-value">{invitation.inviterName}</span>
           </div>
-          {invitation.position && (
+          {teamInvite?.position && (
             <div className="invite-meta-row">
               <span className="meta-label">Position</span>
-              <span className="meta-value">{invitation.position}</span>
+              <span className="meta-value">{teamInvite.position}</span>
             </div>
           )}
-          {invitation.jerseyNumber != null && (
+          {teamInvite?.jerseyNumber != null && (
             <div className="invite-meta-row">
               <span className="meta-label">Jersey</span>
-              <span className="meta-value">#{invitation.jerseyNumber}</span>
+              <span className="meta-value">#{teamInvite.jerseyNumber}</span>
             </div>
           )}
           <div className="invite-meta-row">
@@ -189,8 +258,8 @@ export function InviteClient({ invitation, token }: Props) {
           </div>
         </div>
 
-        {invitation.message && (
-          <p className="invite-message">&ldquo;{invitation.message}&rdquo;</p>
+        {teamInvite?.message && (
+          <p className="invite-message">&ldquo;{teamInvite.message}&rdquo;</p>
         )}
 
         {isPending && (
@@ -206,7 +275,11 @@ export function InviteClient({ invitation, token }: Props) {
               onClick={acceptWithoutApp}
               disabled={acceptState === 'loading'}
             >
-              {acceptState === 'loading' ? 'Accepting…' : 'Accept without app'}
+              {acceptState === 'loading'
+                ? 'Accepting…'
+                : guardian
+                  ? `Accept for ${guardian.childName}`
+                  : 'Accept without app'}
             </button>
 
             {acceptState === 'error' && (

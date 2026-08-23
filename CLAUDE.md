@@ -164,6 +164,30 @@ never inline a role check in a screen:
   seeded Lakers head coach, read-only); Jest `__tests__/app/team-staff-gating.test.tsx`.
 - Maestro: `.maestro/player-no-tracking.yaml` (Steph Curry = seeded PLAYER) asserts the create FAB, Start Game,
   Delete game, Continue Tracking and End Game are absent while RSVP remains.
+- **Guardians (PARENT role, role-matrix decision 1 / `docs/plans/parent-role-spec.md`).** `user.guardianOf?:
+  { childId, childName, relationship, isPrimary }[]` is optional on the shared `User` type like `leagueAdminOf`
+  (`useSessionRefresh` merges it). Helpers in `utils/guardian.ts` — `isGuardian(user)`, `guardianChildrenOnTeam(user,
+  team)` (children rostered on a `{ members }` shape, works with `game.team`), `isRosteredOn`, `needsDisplayName`,
+  `relationshipLabel`. Guardians have no staff row, so the gates above already hide every manage/track control.
+  Screens: Profile → **"My kids"** (each child → `/players/:childId/stats`; "Change account type" is hidden when
+  `guardianOf` is non-empty — PARENT is derived, never picked); game detail RSVP shows a **"Responding for"** chip
+  row when the user is a guardian of ≥1 member of the game's team ("Me" only when the user is rostered; defaults to
+  the first child otherwise) and sends `playerId` for a child (`useSubmitRsvp({ gameId, status, playerId? })`, the
+  selected state reads the child's `rsvp.userId` row); Invitations tab renders `guardianInvitations` from
+  `GET /invitations` ("Become <relationship> of <child> on <team>" / "Accept for <child>" / Decline — accept goes
+  through the polymorphic `POST /invitations/:id/accept`, then re-reads `GET /auth/me` so "My kids" appears at
+  once) and labels team invitations addressed to a child "For <child>" / "Accept for <child>"; `/invite/[token]`
+  and `web/app/invite/[token]` branch on `invitation.kind === 'guardian'` (child / relationship / team rows, same
+  accept call). Coach side: `teams/[id]/players` roster cards for **managed** players get an "Invite a parent"
+  action → `app/teams/[id]/players/[playerId]/guardians.tsx` (guardians + pending invites, email + relationship
+  chips, remove; invite/remove-others need `canManageRoster`, a guardian gets **Leave** on their own row). Hooks:
+  `hooks/useGuardians.ts` (`usePlayerGuardians`, `useInviteGuardian`, `useRemoveGuardian` — invalidate the guardian
+  list + team detail, invites also `invitationKeys.all`). Accounts created by a guardian invite carry
+  `name = email local part`; `postLoginRoute` sends such guardians to `app/onboarding/name.tsx` once
+  (`utils/role-onboarding.ts#needsNamePrompt`, flag `nameAsked:<userId>`) → `PATCH /auth/me { name }`. Tests:
+  `__tests__/utils/guardian.test.ts`, `__tests__/hooks/useGuardians.runtime.test.tsx`,
+  `__tests__/app/{game-detail-rsvp-picker,invitations-guardian,profile-my-kids}.test.tsx`. Maestro:
+  `.maestro/guardian-rsvp.yaml` (Dell Curry = seeded FATHER of Steph Curry, Warriors "vs Lakers" game).
 
 #### Mobile API errors, permissions & toasts
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
@@ -443,6 +467,12 @@ Removing the last guardian never deletes the child.
   /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on
   the coach-only team-member route). `GET /auth/me`, `/auth/callback` and `/auth/dev-login` add
   `user.guardianOf: { childId, childName, relationship, isPrimary }[]`.
+- **List scoping (mobile PR).** `TeamService.listTeams` and `GameService.listGames` add
+  `{ members: { some: { playerId: { in: childIds } } } }` (via `GuardianService.getChildIds`) to the caller-access
+  `OR`, so a guardian's Teams / Games / Home tabs show the children's teams. `GET /invitations` (no `teamId` /
+  `playerId`, status unset or `PENDING`) also returns `guardianInvitations: PublicGuardianInvitation[]` — the
+  caller's pending, unexpired `GuardianInvitation`s matched on `invitedEmail` case-insensitively
+  (`GuardianService.listPendingForUser`), no token — which the mobile Invitations tab renders as "Accept for <child>".
 - Tests: `tests/services/guardian-service.test.ts`, `tests/api/guardians.test.ts`,
   `tests/utils/permissions.test.ts`, `tests/schemas/guardian.test.ts`, guardian cases in the rsvp /
   invitation / notification / player-service / auth suites. Out of scope (v1): claim-by-code, parent-to-parent

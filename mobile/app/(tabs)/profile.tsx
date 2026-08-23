@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/auth-store';
 import { canAccessAdmin } from '../../utils/team-permissions';
+import { guardianChildren, isGuardian, relationshipLabel } from '../../utils/guardian';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
@@ -151,6 +152,44 @@ export default function Profile() {
           </TouchableOpacity>
         )}
 
+        {/* My kids — guardians (PARENT role, `guardianOf` from GET /auth/me).
+            Each child opens their stats; a coach who is also a parent sees
+            this too (guardian links are independent of the global role). */}
+        {isGuardian(user) && (
+          <View style={styles.section} testID="my-kids-section">
+            <ThemedText variant="h4" style={styles.sectionTitle}>
+              My kids
+            </ThemedText>
+            <Card variant="default" style={styles.settingsCard}>
+              {guardianChildren(user).map((child, index) => (
+                <React.Fragment key={child.childId}>
+                  {index > 0 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+                  <TouchableOpacity
+                    style={styles.settingRow}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${child.childName}, ${relationshipLabel(child.relationship)}`}
+                    onPress={() => router.push(`/players/${child.childId}/stats`)}
+                  >
+                    <View style={styles.settingLeft}>
+                      <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
+                        <Ionicons name="people" size={18} color={colors.primary} />
+                      </View>
+                      <View style={styles.settingContent}>
+                        <ThemedText variant="body">{child.childName}</ThemedText>
+                        <ThemedText variant="caption" color="textSecondary">
+                          {relationshipLabel(child.relationship)}
+                          {child.isPrimary ? ' \u00B7 Primary' : ''}
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                </React.Fragment>
+              ))}
+            </Card>
+          </View>
+        )}
+
         {/* Account Info */}
         <View style={styles.section}>
           <ThemedText variant="h4" style={styles.sectionTitle}>
@@ -205,8 +244,9 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Account type (PLAYER <-> COACH self-select) */}
-        {(user?.role === 'PLAYER' || user?.role === 'COACH') && (
+        {/* Account type (PLAYER <-> COACH self-select). Hidden for guardians:
+            PARENT is derived from guardian links, never self-selected. */}
+        {(user?.role === 'PLAYER' || user?.role === 'COACH') && !isGuardian(user) && (
           <View style={styles.section}>
             <ThemedText variant="h4" style={styles.sectionTitle}>
               {t('roleOnboarding.sectionTitle')}

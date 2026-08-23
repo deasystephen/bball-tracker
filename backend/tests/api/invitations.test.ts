@@ -71,9 +71,54 @@ describe('Invitations API', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGuardianService.listPendingForUser.mockResolvedValue([]);
   });
 
   describe('GET /api/v1/invitations', () => {
+    it('includes pending guardian invitations addressed to the caller on the unfiltered list (PARENT role)', async () => {
+      mockInvitationService.listInvitations.mockResolvedValue({
+        invitations: [],
+        pagination: { total: 0, limit: 10, offset: 0, hasMore: false },
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
+      mockGuardianService.listPendingForUser.mockResolvedValue([
+        {
+          kind: 'guardian',
+          id: 'b2c3d4e5-f6a7-4901-a345-67890abcdef1',
+          status: 'PENDING',
+          childName: 'Kid Smith',
+          teamName: 'Lakers',
+          inviterName: 'Coach Smith',
+          relationship: 'MOTHER',
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+      ]);
+
+      const response = await request(app).get('/api/v1/invitations').query({ status: 'PENDING' });
+
+      expect(response.status).toBe(200);
+      expect(mockGuardianService.listPendingForUser).toHaveBeenCalledWith(TEST_USER_ID);
+      expect(response.body.guardianInvitations).toHaveLength(1);
+      expect(response.body.guardianInvitations[0]).toMatchObject({
+        kind: 'guardian',
+        childName: 'Kid Smith',
+        relationship: 'MOTHER',
+      });
+      expect(response.body.guardianInvitations[0]).not.toHaveProperty('token');
+    });
+
+    it('omits guardian invitations from team-scoped (coach) listings', async () => {
+      mockInvitationService.listInvitations.mockResolvedValue({
+        invitations: [],
+        pagination: { total: 0, limit: 10, offset: 0, hasMore: false },
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
+
+      const response = await request(app).get('/api/v1/invitations').query({ teamId: TEST_TEAM_ID });
+
+      expect(response.status).toBe(200);
+      expect(mockGuardianService.listPendingForUser).not.toHaveBeenCalled();
+      expect(response.body.guardianInvitations).toEqual([]);
+    });
+
     it('should list invitations successfully', async () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [mockInvitation],

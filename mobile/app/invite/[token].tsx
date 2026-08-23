@@ -10,7 +10,10 @@ import { ThemedView, ThemedText, LoadingSpinner, Button, Card } from '../../comp
 import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/auth-store';
-import { useInvitationByToken } from '../../hooks/useInvitationByToken';
+import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
+import { relationshipLabel } from '../../utils/guardian';
+import { apiClient } from '../../services/api-client';
+import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
 import { setPendingReturnPath } from '../../utils/return-path';
 import { spacing } from '../../theme';
@@ -22,7 +25,7 @@ export default function InviteDeepLinkScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const toast = useToast();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, updateUser } = useAuthStore();
 
   const { data: invitation, isLoading, error } = useInvitationByToken(token);
   const acceptById = useAcceptInvitation();
@@ -43,6 +46,14 @@ export default function InviteDeepLinkScreen() {
 
   const isPending = invitation?.status === 'PENDING' && !isExpired;
 
+  // Guardian (PARENT role) invitations have no team of their own; describe
+  // them by the child instead (docs/plans/parent-role-spec.md).
+  const guardian = isGuardianInvitation(invitation) ? invitation : null;
+  const teamInvite = invitation && !isGuardianInvitation(invitation) ? invitation : null;
+  const subject = guardian
+    ? `${guardian.childName}${guardian.teamName ? ` (${guardian.teamName})` : ''}`
+    : invitation?.teamName ?? '';
+
   function formatExpiry(expiresAt: string) {
     return new Date(expiresAt).toLocaleDateString(undefined, {
       year: 'numeric',
@@ -62,6 +73,20 @@ export default function InviteDeepLinkScreen() {
     const doAccept = async () => {
       try {
         await acceptById.mutateAsync(invitation.id);
+        if (guardian) {
+          // Pull the new `guardianOf` so Profile → "My kids" shows up now.
+          try {
+            const me = await apiClient.get<{ success: boolean; user: Partial<User> }>('/auth/me');
+            if (me.data?.user?.guardianOf) {
+              updateUser({ guardianOf: me.data.user.guardianOf, role: me.data.user.role });
+            }
+          } catch {
+            // useSessionRefresh catches up on the next foreground.
+          }
+          toast.showToast(`You are now ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}`, 'success');
+          router.replace('/(tabs)/profile');
+          return;
+        }
         toast.showToast(`You've joined ${invitation.teamName}!`, 'success');
         router.replace('/(tabs)/invitations');
       } catch (err) {
@@ -75,7 +100,9 @@ export default function InviteDeepLinkScreen() {
 
     Alert.alert(
       'Accept Invitation',
-      `Join ${invitation.teamName}?`,
+      guardian
+        ? `Become ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}?`
+        : `Join ${invitation.teamName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Accept', onPress: doAccept },
@@ -109,7 +136,7 @@ export default function InviteDeepLinkScreen() {
           <Ionicons name="checkmark-circle-outline" size={64} color={colors.success} />
           <ThemedText variant="h2" style={styles.title}>Already Accepted</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            You&apos;ve already accepted the invitation to {invitation.teamName}.
+            You&apos;ve already accepted the invitation{guardian ? ' for' : ' to'} {subject}.
           </ThemedText>
           <Button
             title="View Invitations"
@@ -128,7 +155,7 @@ export default function InviteDeepLinkScreen() {
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
           <ThemedText variant="h2" style={styles.title}>Invitation Declined</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation to {invitation.teamName} was declined.
+            This invitation{guardian ? ' for' : ' to'} {subject} was declined.
           </ThemedText>
           <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
         </View>
@@ -143,7 +170,7 @@ export default function InviteDeepLinkScreen() {
           <Ionicons name="ban-outline" size={64} color={colors.textTertiary} />
           <ThemedText variant="h2" style={styles.title}>Invitation Cancelled</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation to {invitation.teamName} has been cancelled.
+            This invitation{guardian ? ' for' : ' to'} {subject} has been cancelled.
           </ThemedText>
           <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
         </View>
@@ -158,7 +185,7 @@ export default function InviteDeepLinkScreen() {
           <Ionicons name="time-outline" size={64} color={colors.warning} />
           <ThemedText variant="h2" style={styles.title}>Invitation Expired</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation to {invitation.teamName} expired on{' '}
+            This invitation{guardian ? ' for' : ' to'} {subject} expired on{' '}
             {formatExpiry(invitation.expiresAt)}.
           </ThemedText>
           <ThemedText variant="caption" color="textTertiary" style={styles.hint}>
@@ -173,27 +200,39 @@ export default function InviteDeepLinkScreen() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <View style={styles.content}>
-        <Ionicons name="mail-open-outline" size={64} color={colors.primary} />
-        <ThemedText variant="h1" style={styles.title}>Team Invitation</ThemedText>
+        <Ionicons name={guardian ? 'people-outline' : 'mail-open-outline'} size={64} color={colors.primary} />
+        <ThemedText variant="h1" style={styles.title}>
+          {guardian ? 'Parent Invitation' : 'Team Invitation'}
+        </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-          You&apos;ve been invited to join a team!
+          {guardian
+            ? `You've been invited to be ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}.`
+            : "You've been invited to join a team!"}
         </ThemedText>
 
         <Card variant="elevated" style={styles.detailCard}>
-          <DetailRow label="Team" value={invitation.teamName} />
-          <DetailRow label="From" value={invitation.inviterName} />
-          {invitation.position != null && (
-            <DetailRow label="Position" value={invitation.position} />
+          {guardian ? (
+            <>
+              <DetailRow label="Child" value={guardian.childName} />
+              <DetailRow label="Relationship" value={relationshipLabel(guardian.relationship)} />
+              {guardian.teamName != null && <DetailRow label="Team" value={guardian.teamName} />}
+            </>
+          ) : (
+            <DetailRow label="Team" value={teamInvite?.teamName ?? ''} />
           )}
-          {invitation.jerseyNumber != null && (
-            <DetailRow label="Jersey" value={`#${invitation.jerseyNumber}`} />
+          <DetailRow label="From" value={invitation.inviterName} />
+          {teamInvite?.position != null && (
+            <DetailRow label="Position" value={teamInvite.position} />
+          )}
+          {teamInvite?.jerseyNumber != null && (
+            <DetailRow label="Jersey" value={`#${teamInvite.jerseyNumber}`} />
           )}
           <DetailRow label="Expires" value={formatExpiry(invitation.expiresAt)} />
         </Card>
 
-        {invitation.message != null && (
+        {teamInvite?.message != null && (
           <ThemedText variant="body" color="textSecondary" style={styles.message}>
-            &ldquo;{invitation.message}&rdquo;
+            &ldquo;{teamInvite.message}&rdquo;
           </ThemedText>
         )}
 
@@ -201,11 +240,19 @@ export default function InviteDeepLinkScreen() {
           <>
             {!isAuthenticated && (
               <ThemedText variant="caption" color="textSecondary" style={styles.hint}>
-                Log in to accept this invitation and join the team.
+                {guardian
+                  ? 'Log in to accept this invitation.'
+                  : 'Log in to accept this invitation and join the team.'}
               </ThemedText>
             )}
             <Button
-              title={isAuthenticated ? 'Accept Invitation' : 'Log In to Accept'}
+              title={
+                isAuthenticated
+                  ? guardian
+                    ? `Accept for ${guardian.childName}`
+                    : 'Accept Invitation'
+                  : 'Log In to Accept'
+              }
               onPress={handleAccept}
               loading={acceptById.isPending}
               style={styles.btn}

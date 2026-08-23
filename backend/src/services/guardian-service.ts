@@ -145,7 +145,48 @@ export class GuardianService {
       where: { parentId: userId },
       select: { childId: true },
     });
-    return links.map((l) => l.childId);
+    return (links ?? []).map((l) => l.childId);
+  }
+
+  /**
+   * Pending, unexpired guardian invitations addressed to the signed-in adult
+   * (matched on the account email, case-insensitively). Surfaced on
+   * `GET /invitations` as `guardianInvitations` so the mobile Invitations tab
+   * can offer "Accept for <child>"; accepting goes through
+   * `POST /invitations/:id/accept`. Never includes the token.
+   */
+  static async listPendingForUser(userId: string): Promise<PublicGuardianInvitation[]> {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user?.email) return [];
+
+    const rows = await prisma.guardianInvitation.findMany({
+      where: {
+        invitedEmail: { equals: user.email, mode: 'insensitive' },
+        status: 'PENDING',
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        status: true,
+        relationship: true,
+        expiresAt: true,
+        child: { select: { name: true } },
+        team: { select: { name: true } },
+        invitedBy: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return (rows ?? []).map((invitation) => ({
+      kind: 'guardian' as const,
+      id: invitation.id,
+      status: invitation.status,
+      childName: invitation.child.name,
+      teamName: invitation.team?.name ?? null,
+      inviterName: invitation.invitedBy.name,
+      relationship: invitation.relationship,
+      expiresAt: invitation.expiresAt.toISOString(),
+    }));
   }
 
   /**

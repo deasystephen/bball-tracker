@@ -637,7 +637,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** guardian from E.12b
 - **Prereq:** a scheduled game on the child's team
-- **Steps:** `POST /api/v1/games/<gameId>/rsvp { status: "YES", playerId: <childId> }` (mobile: game detail RSVP control → "for <child>" picker once the mobile PR lands).
+- **Steps:** `POST /api/v1/games/<gameId>/rsvp { status: "YES", playerId: <childId> }`. **Mobile:** dev-login as the guardian (seed: Dell Curry) → Games tab lists the child's team's games → open the scheduled game → RSVP card shows **Responding for** chips (child; plus "Me" only if the guardian is rostered) → pick the child → tap **Going**. Profile → **My kids** lists the child → tap opens `/players/<childId>/stats`. Maestro: `.maestro/guardian-rsvp.yaml`.
 - **Expected:** 200; `rsvp.userId` is the **child's** id. Coach's RSVP roster (I.4) shows the child as YES. 📧 Confirmation email goes to the guardian's address (the managed child has none). Repeating with `NO` updates the same row.
 - **Notes:** ___________
 
@@ -645,14 +645,14 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** a rostered PLAYER (or a guardian of a different child)
 - **Steps:** `POST /games/<gameId>/rsvp { status: "YES", playerId: <someone else's id> }`.
-- **Expected:** 403 "You can only RSVP for players you are a guardian of". A guardian passing a child who is **not** on that game's team → 403 "This player is not on the team playing this game". A non-UUID `playerId` → 400.
+- **Expected:** 403 "You can only RSVP for players you are a guardian of". A guardian passing a child who is **not** on that game's team → 403 "This player is not on the team playing this game". A non-UUID `playerId` → 400. **Mobile:** a rostered PLAYER with no `guardianOf` sees no "Responding for" row; a guardian opening a game of a team none of their children play on sees no picker either.
 - **Notes:** ___________
 
 ### I.7 — Guardian accepts a team invitation addressed to the child
 - [ ] Pass / Fail / Skipped
 - **Role:** guardian
 - **Steps:** As a coach of another team, invite the child (`POST /teams/<otherTeam>/invitations { playerId: <childId> }`). As the guardian, `GET /invitations` → the child's invitation is listed → `POST /invitations/<id>/accept`.
-- **Expected:** Accepted; the child appears on the other team's roster and the guardian can now see that team too. Team push notifications for the child's teams are delivered to the guardian (if a push token is registered).
+- **Expected:** Accepted; the child appears on the other team's roster and the guardian can now see that team too. Team push notifications for the child's teams are delivered to the guardian (if a push token is registered). **Mobile:** Invitations tab shows the card labelled "For <child>" with **Accept for <child>**; a pending *guardian* invitation for the signed-in adult (coach → roster card "Invite a parent" → `/teams/<id>/players/<childId>/guardians`) shows "Become <relationship> of <child> on <team>" with **Accept for <child>** / Decline, and "My kids" appears on Profile immediately after accepting. The same guardian invitation opened from the email link (`/invite/<token>`, app or web) shows Child / Relationship / Team rows and "Accept for <child>".
 - **Notes:** ___________
 
 ---

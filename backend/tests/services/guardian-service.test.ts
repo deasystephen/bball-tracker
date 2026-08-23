@@ -93,6 +93,55 @@ describe('GuardianService', () => {
     });
   });
 
+  describe('listPendingForUser', () => {
+    it('returns the public view of pending, unexpired invitations addressed to the caller email', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({ email: 'Mom@Example.com' });
+      const expiresAt = new Date(Date.now() + 86400000);
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'gi-1',
+          status: 'PENDING',
+          relationship: 'MOTHER',
+          expiresAt,
+          child: { name: 'Kid Smith' },
+          team: { name: 'Lakers' },
+          invitedBy: { name: 'Coach' },
+          token: 'must-not-leak',
+        },
+      ]);
+
+      const result = await GuardianService.listPendingForUser('parent-1');
+
+      expect(result).toEqual([
+        {
+          kind: 'guardian',
+          id: 'gi-1',
+          status: 'PENDING',
+          childName: 'Kid Smith',
+          teamName: 'Lakers',
+          inviterName: 'Coach',
+          relationship: 'MOTHER',
+          expiresAt: expiresAt.toISOString(),
+        },
+      ]);
+      expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            invitedEmail: { equals: 'Mom@Example.com', mode: 'insensitive' },
+            status: 'PENDING',
+            expiresAt: { gt: expect.any(Date) },
+          }),
+        })
+      );
+    });
+
+    it('returns [] for an account without an email', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({ email: null });
+      expect(await GuardianService.listPendingForUser('kid')).toEqual([]);
+      expect(mockPrisma.guardianInvitation.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('inviteGuardian', () => {
     const coach = createCoach({ id: 'coach-1' });
     const input = { email: 'Parent@Test.com', relationship: 'MOTHER' as const };

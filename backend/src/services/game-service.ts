@@ -7,6 +7,7 @@ import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
+import { GuardianService } from './guardian-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
@@ -232,6 +233,9 @@ export class GameService {
     if (!isSysAdmin) {
       // Filter by user access (staff, team member, or league admin) — the
       // same set canAccessTeam grants (audit #29).
+      // Guardians (PARENT role) also see games of the teams their children
+      // play on (docs/plans/parent-role-spec.md).
+      const childIds = await GuardianService.getChildIds(userId);
       const userTeams = await prisma.team.findMany({
         where: {
           OR: [
@@ -260,6 +264,7 @@ export class GameService {
                 },
               },
             },
+            ...(childIds.length > 0 ? [{ members: { some: { playerId: { in: childIds } } } }] : []),
           ],
         },
         select: { id: true },

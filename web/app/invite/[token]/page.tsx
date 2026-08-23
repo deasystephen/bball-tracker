@@ -1,17 +1,6 @@
-import { InviteClient } from './invite-client';
+import { InviteClient, type InvitationDetails } from './invite-client';
 
 export const dynamic = 'force-dynamic';
-
-interface InvitationDetails {
-  id: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
-  teamName: string;
-  inviterName: string;
-  position: string | null;
-  jerseyNumber: number | null;
-  message: string | null;
-  expiresAt: string;
-}
 
 async function getInvitation(token: string): Promise<InvitationDetails | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3000';

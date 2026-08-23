@@ -16,6 +16,7 @@ import {
 } from '../api/teams/schemas';
 import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
+import { GuardianService } from './guardian-service';
 import {
   NotFoundError,
   BadRequestError,
@@ -321,11 +322,15 @@ export class TeamService {
     // on, or administer via the league.
     const isSysAdmin = await isSystemAdmin(userId);
     if (!isSysAdmin) {
+      // Guardians (PARENT role) see the teams their children play on — the
+      // same read set `canAccessTeam` grants (docs/plans/parent-role-spec.md).
+      const childIds = await GuardianService.getChildIds(userId);
       conditions.push({
         OR: [
           { staff: { some: { userId } } },
           { members: { some: { playerId: userId } } },
           { season: { league: { admins: { some: { userId } } } } },
+          ...(childIds.length > 0 ? [{ members: { some: { playerId: { in: childIds } } } }] : []),
         ],
       });
     }

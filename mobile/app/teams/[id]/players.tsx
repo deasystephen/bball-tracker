@@ -584,13 +584,30 @@ export default function ManagePlayersScreen() {
                       ) : undefined
                     }
                     rightElement={
-                      <TouchableOpacity
-                        onPress={() =>
-                          handleRemovePlayer(member.playerId, member.player.name)
-                        }
-                      >
-                        <Ionicons name="close-circle" size={24} color={colors.error} />
-                      </TouchableOpacity>
+                      <View style={styles.rowActions}>
+                        {member.player.isManaged && (
+                          <TouchableOpacity
+                            onPress={() =>
+                              router.push(`/teams/${id}/players/${member.playerId}/guardians`)
+                            }
+                            accessibilityRole="button"
+                            accessibilityLabel={`Invite a parent: ${member.player.name}`}
+                            style={styles.rowButton}
+                          >
+                            <Ionicons name="people-outline" size={24} color={colors.primary} />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          onPress={() =>
+                            handleRemovePlayer(member.playerId, member.player.name)
+                          }
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove player: ${member.player.name}`}
+                          style={styles.rowButton}
+                        >
+                          <Ionicons name="close-circle" size={24} color={colors.error} />
+                        </TouchableOpacity>
+                      </View>
                     }
                   />
                 );
@@ -636,6 +653,14 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: spacing.md,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  rowButton: {
+    padding: spacing.xs,
   },
   playersCard: {
     marginTop: spacing.sm,

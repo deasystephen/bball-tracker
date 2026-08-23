@@ -8,7 +8,7 @@ import type { User } from '../../shared/types';
 export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Fields the server may change out from under the cached session user. */
-const SYNCED_FIELDS = ['role', 'leagueAdminOf', 'name', 'profilePictureUrl'] as const;
+const SYNCED_FIELDS = ['role', 'leagueAdminOf', 'guardianOf', 'name', 'profilePictureUrl'] as const;
 
 interface MeResponse {
   success: boolean;
@@ -19,7 +19,7 @@ interface MeResponse {
  * Keeps the cached `auth-store.user` in step with the server.
  *
  * The user payload is only written at login, so a role change, a new
- * league-admin grant or a profile edit made elsewhere would not reach the
+ * league-admin grant, a new guardian link or a profile edit made elsewhere would not reach the
  * permission gates until the next sign-in. This hook re-fetches `GET /auth/me`
  * when the app returns to the foreground (and once when a session becomes
  * active), throttled to once per `SESSION_REFRESH_INTERVAL_MS`, and merges the

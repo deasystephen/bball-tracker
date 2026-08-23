@@ -7,6 +7,7 @@ import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/e
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
+  createUser,
   createGame,
   createTeam,
   createCoach,
@@ -536,6 +537,31 @@ describe('GameService', () => {
             { staff: { some: { userId: leagueAdmin.id } } },
             { members: { some: { playerId: leagueAdmin.id } } },
             { season: { league: { admins: { some: { userId: leagueAdmin.id } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+    });
+
+    it('includes teams the user\'s children play on for guardians (PARENT role)', async () => {
+      const parent = createUser({ role: 'PARENT' });
+      const game = createGame({ teamId: 'team-1' });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([{ childId: 'kid-1' }]);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 'team-1' }]);
+      (mockPrisma.game.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([game]);
+
+      await GameService.listGames(baseQuery, parent.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { staff: { some: { userId: parent.id } } },
+            { members: { some: { playerId: parent.id } } },
+            { season: { league: { admins: { some: { userId: parent.id } } } } },
+            { members: { some: { playerId: { in: ['kid-1'] } } } },
           ],
         },
         select: { id: true },
