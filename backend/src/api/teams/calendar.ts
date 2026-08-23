@@ -65,8 +65,11 @@ router.get(
   }
 );
 
-// All management endpoints require authentication.
-router.use(authenticate);
+// Management endpoints require authentication. `authenticate` is attached
+// per-route (not `router.use`) because this router is mounted on `/teams`
+// ahead of the main teams router: a router-wide `use` ran for *every*
+// `/teams/*` request and then the teams router verified the token again
+// (audit #71).
 
 /**
  * POST /api/v1/teams/:id/calendar/subscribe
@@ -74,6 +77,7 @@ router.use(authenticate);
  */
 router.post(
   '/:id/calendar/subscribe',
+  authenticate,
   validateUuidParams('id'),
   requireEntitlement(Feature.CALENDAR_SYNC),
   async (req, res) => {
@@ -110,6 +114,7 @@ router.post(
  */
 router.post(
   '/:id/calendar/revoke',
+  authenticate,
   validateUuidParams('id'),
   async (req, res) => {
     try {

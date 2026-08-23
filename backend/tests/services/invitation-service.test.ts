@@ -115,6 +115,52 @@ describe('InvitationService', () => {
       );
     });
 
+    it('formats expiresAt in DEFAULT_TIMEZONE (audit #57)', async () => {
+      const previous = process.env.DEFAULT_TIMEZONE;
+      process.env.DEFAULT_TIMEZONE = 'America/Los_Angeles';
+      try {
+        const coach = createCoach();
+        const player = createPlayer();
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id });
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH', name: 'Head Coach' });
+        const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+        const invitation = createInvitation({
+          teamId: team.id,
+          playerId: player.id,
+          invitedById: coach.id,
+          // 02:30Z on the 16th is still the 15th in Los Angeles.
+          expiresAt: new Date('2026-03-16T02:30:00Z'),
+        });
+
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
+          ...invitation,
+          team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+          player: { id: player.id, name: player.name, email: player.email },
+          invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+        });
+
+        await InvitationService.createInvitation(team.id, createInvitationInput({ playerId: player.id }), coach.id);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(mockedMailerSend).toHaveBeenCalledWith(
+          expect.objectContaining({
+            to: player.email,
+            variables: expect.objectContaining({ expiresAt: 'Mar 15, 2026' }),
+          })
+        );
+      } finally {
+        if (previous === undefined) delete process.env.DEFAULT_TIMEZONE;
+        else process.env.DEFAULT_TIMEZONE = previous;
+      }
+    });
+
     it('uses PUBLIC_APP_URL env var for invite link when set', async () => {
       const previous = process.env.PUBLIC_APP_URL;
       process.env.PUBLIC_APP_URL = 'https://staging.capyhoops.com';

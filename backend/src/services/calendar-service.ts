@@ -8,15 +8,26 @@ import { createEvents, EventAttributes, DateArray } from 'ics';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
+import { Feature, getEffectiveTier, hasFeature } from './entitlements';
 
 // Assume games run ~2 hours. Game model has only a start `date`.
 const DEFAULT_GAME_DURATION_HOURS = 2;
 
 /**
- * Public base URL for deep links back to games. Falls back to localhost in dev.
+ * Base URL of this API, used for the feed/webcal URLs handed to calendar
+ * clients. This must be the host that actually serves `/api/v1/...`
+ * (`https://api.capyhoops.com` in production via the ECS task definition) —
+ * not `PUBLIC_APP_URL`, which is the web apex and serves no API (audit #24).
+ */
+function getApiBaseUrl(): string {
+  return process.env.API_BASE_URL || 'http://localhost:3000';
+}
+
+/**
+ * Public web base URL for human-facing deep links (e.g. "View game").
  */
 function getPublicAppUrl(): string {
-  return process.env.PUBLIC_APP_URL || process.env.API_BASE_URL || 'http://localhost:3000';
+  return process.env.PUBLIC_APP_URL || 'http://localhost:3000';
 }
 
 function dateToDateArray(d: Date): DateArray {
@@ -88,7 +99,7 @@ export class CalendarService {
           },
         });
 
-    const base = getPublicAppUrl().replace(/\/$/, '');
+    const base = getApiBaseUrl().replace(/\/$/, '');
     const path = `/api/v1/teams/${teamId}/calendar.ics?token=${encodeURIComponent(
       tokenRow.token
     )}`;
@@ -127,6 +138,8 @@ export class CalendarService {
    *   - not revoked
    *   - token's teamId matches the URL's teamId
    *   - user still has access to the team
+   *   - user's *current* tier still includes CALENDAR_SYNC (admins bypass), so
+   *     a feed stops serving when the subscription lapses (audit #43)
    */
   static async resolveToken(
     teamId: string,
@@ -156,6 +169,25 @@ export class CalendarService {
     const hasAccess = await canAccessTeam(tokenRow.userId, tokenRow.teamId);
     if (!hasAccess) {
       throw new ForbiddenError('User no longer has access to this team');
+    }
+
+    // Re-check the entitlement on every fetch: subscribe-time gating alone
+    // would keep serving the feed forever after a downgrade/expiry.
+    const user = await prisma.user.findUnique({
+      where: { id: tokenRow.userId },
+      select: { role: true, subscriptionTier: true, subscriptionExpiresAt: true },
+    });
+    if (!user) {
+      throw new ForbiddenError('User no longer exists');
+    }
+    if (user.role !== 'ADMIN') {
+      const tier = getEffectiveTier({
+        subscriptionTier: user.subscriptionTier ?? 'FREE',
+        subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+      });
+      if (!hasFeature(tier, Feature.CALENDAR_SYNC)) {
+        throw new ForbiddenError('Calendar sync is no longer included in your subscription');
+      }
     }
 
     return { userId: tokenRow.userId, teamId: tokenRow.teamId };

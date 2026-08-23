@@ -1419,6 +1419,8 @@ describe('TeamService', () => {
         admin.id
       );
 
+      // Managed user + membership are written in one transaction (audit #70).
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'Junior Smith',

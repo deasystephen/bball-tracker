@@ -186,7 +186,63 @@ describe('CalendarService', () => {
     });
   });
 
+  describe('feed URL base (audit #24)', () => {
+    const ORIGINAL_API = process.env.API_BASE_URL;
+    const ORIGINAL_PUBLIC = process.env.PUBLIC_APP_URL;
+
+    afterEach(() => {
+      process.env.API_BASE_URL = ORIGINAL_API;
+      process.env.PUBLIC_APP_URL = ORIGINAL_PUBLIC;
+      if (ORIGINAL_API === undefined) delete process.env.API_BASE_URL;
+      if (ORIGINAL_PUBLIC === undefined) delete process.env.PUBLIC_APP_URL;
+    });
+
+    function mockSubscribe(): { team: { id: string }; user: { id: string } } {
+      const team = createTeam();
+      const user = createUser();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (canAccessTeam as jest.Mock).mockResolvedValue(true);
+      (mockPrisma.calendarFeedToken.findFirst as jest.Mock).mockResolvedValue({
+        id: 'token-id',
+        userId: user.id,
+        teamId: team.id,
+        token: 'tok',
+        revokedAt: null,
+        createdAt: new Date(),
+      });
+      return { team, user };
+    }
+
+    it('builds feedUrl/webcalUrl on API_BASE_URL, not PUBLIC_APP_URL', async () => {
+      process.env.API_BASE_URL = 'https://api.capyhoops.com/';
+      process.env.PUBLIC_APP_URL = 'https://capyhoops.com';
+      const { team, user } = mockSubscribe();
+
+      const result = await CalendarService.subscribe(team.id, user.id);
+
+      expect(result.feedUrl).toBe(`https://api.capyhoops.com/api/v1/teams/${team.id}/calendar.ics?token=tok`);
+      expect(result.webcalUrl).toBe(`webcal://api.capyhoops.com/api/v1/teams/${team.id}/calendar.ics?token=tok`);
+    });
+
+    it('ignores PUBLIC_APP_URL for the feed and falls back to localhost when API_BASE_URL is unset', async () => {
+      delete process.env.API_BASE_URL;
+      process.env.PUBLIC_APP_URL = 'https://capyhoops.com';
+      const { team, user } = mockSubscribe();
+
+      const result = await CalendarService.subscribe(team.id, user.id);
+
+      expect(result.feedUrl.startsWith('http://localhost:3000/api/v1/teams/')).toBe(true);
+    });
+  });
+
   describe('resolveToken', () => {
+    const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const premiumUser = { role: 'COACH', subscriptionTier: 'PREMIUM', subscriptionExpiresAt: future };
+
+    beforeEach(() => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(premiumUser);
+    });
+
     it('resolves a valid token', async () => {
       const team = createTeam();
       const tokenRow = {
@@ -202,6 +258,63 @@ describe('CalendarService', () => {
 
       const res = await CalendarService.resolveToken(team.id, 'abc');
       expect(res).toEqual({ userId: 'user-1', teamId: team.id });
+    });
+
+    describe('entitlement re-check on every fetch (audit #43)', () => {
+      const tokenRow = {
+        id: 'id',
+        userId: 'user-1',
+        teamId: 't',
+        token: 'abc',
+        revokedAt: null,
+        createdAt: new Date(),
+      };
+
+      beforeEach(() => {
+        (mockPrisma.calendarFeedToken.findUnique as jest.Mock).mockResolvedValue(tokenRow);
+        (canAccessTeam as jest.Mock).mockResolvedValue(true);
+      });
+
+      it('rejects a FREE-tier user even though the token is otherwise valid', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+          role: 'COACH',
+          subscriptionTier: 'FREE',
+          subscriptionExpiresAt: null,
+        });
+        await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer included/);
+      });
+
+      it('rejects a PREMIUM user whose subscription has expired', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+          role: 'COACH',
+          subscriptionTier: 'PREMIUM',
+          subscriptionExpiresAt: new Date('2000-01-01'),
+        });
+        await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer included/);
+      });
+
+      it('allows LEAGUE tier', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+          role: 'COACH',
+          subscriptionTier: 'LEAGUE',
+          subscriptionExpiresAt: future,
+        });
+        await expect(CalendarService.resolveToken('t', 'abc')).resolves.toEqual({ userId: 'user-1', teamId: 't' });
+      });
+
+      it('lets system admins through regardless of tier', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+          role: 'ADMIN',
+          subscriptionTier: 'FREE',
+          subscriptionExpiresAt: null,
+        });
+        await expect(CalendarService.resolveToken('t', 'abc')).resolves.toBeDefined();
+      });
+
+      it('rejects when the user row is gone', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer exists/);
+      });
     });
 
     it('rejects missing token with BadRequest', async () => {

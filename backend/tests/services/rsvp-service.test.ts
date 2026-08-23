@@ -153,6 +153,44 @@ describe('RsvpService', () => {
       );
     });
 
+    it('formats gameDate in DEFAULT_TIMEZONE with the time, not the server zone (audit #57)', async () => {
+      const previous = process.env.DEFAULT_TIMEZONE;
+      process.env.DEFAULT_TIMEZONE = 'America/Los_Angeles';
+      try {
+        // 02:30Z on the 16th is still the evening of the 15th in Los Angeles.
+        const game = createGame({ date: new Date('2026-03-16T02:30:00Z') });
+        (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+          id: game.id,
+          teamId: game.teamId,
+          opponent: game.opponent,
+          date: game.date,
+          team: { name: 'Test Team' },
+        });
+        setAdminAccess();
+        (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
+          id: 'rsvp-tz',
+          gameId: game.id,
+          userId: 'user-1',
+          status: 'YES',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          user: { id: 'user-1', name: 'Tz Tester', email: 'tz@test.com' },
+        });
+
+        await RsvpService.upsertRsvp(game.id, 'user-1', 'YES');
+        await Promise.resolve();
+
+        const call = mockedMailerSend.mock.calls.find(
+          ([arg]: [{ to: string }]) => arg.to === 'tz@test.com'
+        );
+        expect(call).toBeDefined();
+        expect(call![0].variables.gameDate).toMatch(/^Mar 15, 2026, 7:30/);
+      } finally {
+        if (previous === undefined) delete process.env.DEFAULT_TIMEZONE;
+        else process.env.DEFAULT_TIMEZONE = previous;
+      }
+    });
+
     it('skips sending email when the user has no email address', async () => {
       const game = createGame();
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({

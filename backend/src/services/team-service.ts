@@ -876,29 +876,30 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to manage this team\'s roster');
     }
 
-    // Create managed user (no email, no account)
-    const managedUser = await prisma.user.create({
-      data: {
-        name: data.name,
-        role: 'PLAYER',
-        isManaged: true,
-        managedById: userId,
-        email: null,
-        profilePictureUrl: data.profilePictureUrl,
-      },
-    });
+    // Managed user + team membership are created atomically: a failure on the
+    // second insert must not leave an orphan managed user that belongs to no
+    // roster and can't be reached through any team (audit #70).
+    return prisma.$transaction(async (tx) => {
+      const managedUser = await tx.user.create({
+        data: {
+          name: data.name,
+          role: 'PLAYER',
+          isManaged: true,
+          managedById: userId,
+          email: null,
+          profilePictureUrl: data.profilePictureUrl,
+        },
+      });
 
-    // Create team member linking managed user to team
-    const teamMember = await prisma.teamMember.create({
-      data: {
-        teamId,
-        playerId: managedUser.id,
-        jerseyNumber: data.jerseyNumber,
-        position: data.position,
-      },
-      include: MANAGED_MEMBER_INCLUDE,
+      return tx.teamMember.create({
+        data: {
+          teamId,
+          playerId: managedUser.id,
+          jerseyNumber: data.jerseyNumber,
+          position: data.position,
+        },
+        include: MANAGED_MEMBER_INCLUDE,
+      });
     });
-
-    return teamMember;
   }
 }

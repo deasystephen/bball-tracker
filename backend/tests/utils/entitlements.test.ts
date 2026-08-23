@@ -46,10 +46,11 @@ describe('Entitlements', () => {
   });
 
   describe('getUsageLimits', () => {
-    it('should return limited teams for FREE tier', () => {
+    it('should return limited teams (but uncapped seasons) for FREE tier', () => {
       const limits = getUsageLimits('FREE');
       expect(limits.maxTeams).toBe(3);
-      expect(limits.maxSeasons).toBe(1);
+      // Seasons are metered, never capped (audit #81).
+      expect(limits.maxSeasons).toBe(Infinity);
     });
 
     it('should return unlimited for PREMIUM tier', () => {

@@ -18,6 +18,7 @@ import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 import { mailer } from './mailer';
 import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
+import { formatEmailDate } from '../utils/format-date';
 
 const USER_SUMMARY_SELECT = {
   id: true,
@@ -262,7 +263,7 @@ export class InvitationService {
             teamName: invitation.team.name,
             inviterName: invitation.invitedBy.name ?? invitation.invitedBy.email ?? '',
             message: invitation.message ?? '',
-            expiresAt: invitation.expiresAt.toLocaleDateString(),
+            expiresAt: formatEmailDate(invitation.expiresAt),
             acceptUrl,
           },
           metadata: {

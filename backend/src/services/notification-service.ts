@@ -2,12 +2,21 @@
  * Push notification service using Expo Push Notifications
  */
 
-import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-server-sdk';
 import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 
 const expo = new Expo();
+
+/**
+ * Expo recommends polling receipts ~15 minutes after sending; APNs/FCM
+ * errors such as DeviceNotRegistered only surface there (audit #60).
+ */
+const RECEIPT_CHECK_DELAY_MS = 15 * 60 * 1000;
+
+/** Receipt/ticket error codes that mean the token will never work again. */
+const DEAD_TOKEN_ERRORS = new Set(['DeviceNotRegistered']);
 
 export class NotificationService {
   /**
@@ -106,21 +115,105 @@ export class NotificationService {
   }
 
   /**
-   * Internal: send messages via Expo SDK
+   * Delete push tokens Expo/APNs/FCM reported as permanently dead.
+   */
+  static async pruneDeadTokens(tokens: string[]): Promise<number> {
+    if (tokens.length === 0) return 0;
+    const result = await prisma.pushToken.deleteMany({ where: { token: { in: tokens } } });
+    if (result.count > 0) {
+      logger.info('Pruned unregistered push tokens', { count: result.count });
+    }
+    return result.count;
+  }
+
+  /**
+   * Fetch receipts for the given ticket ids and prune tokens whose receipt
+   * says DeviceNotRegistered. Exposed for tests and for callers that want to
+   * poll explicitly; `sendMessages` schedules it automatically.
+   */
+  static async checkReceipts(ticketToToken: Map<string, string>): Promise<number> {
+    const ids = [...ticketToToken.keys()];
+    if (ids.length === 0) return 0;
+
+    const dead: string[] = [];
+    for (const chunk of expo.chunkPushNotificationReceiptIds(ids)) {
+      let receipts: Record<string, ExpoPushReceipt>;
+      try {
+        receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+      } catch (error) {
+        logger.error('Error fetching push receipts', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+      for (const [id, receipt] of Object.entries(receipts)) {
+        if (receipt.status !== 'error') continue;
+        const token = ticketToToken.get(id);
+        const code = receipt.details?.error;
+        logger.warn('Push receipt error', { code, message: receipt.message });
+        if (token && code && DEAD_TOKEN_ERRORS.has(code)) {
+          dead.push(token);
+        }
+      }
+    }
+
+    return NotificationService.pruneDeadTokens(dead);
+  }
+
+  /**
+   * Internal: send messages via Expo SDK. Tickets are inspected immediately
+   * (Expo rejects tokens it already knows are dead at send time) and a receipt
+   * check is scheduled for the rest.
    */
   private static async sendMessages(messages: ExpoPushMessage[]): Promise<ExpoPushTicket[]> {
     const chunks = expo.chunkPushNotifications(messages);
     const tickets: ExpoPushTicket[] = [];
+    const dead: string[] = [];
+    const ticketToToken = new Map<string, string>();
 
     for (const chunk of chunks) {
+      let ticketChunk: ExpoPushTicket[];
       try {
-        const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-        tickets.push(...ticketChunk);
+        ticketChunk = await expo.sendPushNotificationsAsync(chunk);
       } catch (error) {
         logger.error('Error sending push notification chunk', {
           error: error instanceof Error ? error.message : String(error),
         });
+        continue;
       }
+      tickets.push(...ticketChunk);
+
+      // Tickets come back in the same order as the messages in the chunk.
+      ticketChunk.forEach((ticket, i) => {
+        const to = chunk[i]?.to;
+        const token = Array.isArray(to) ? to[0] : to;
+        if (!token) return;
+        if (ticket.status === 'ok') {
+          ticketToToken.set(ticket.id, token);
+        } else if (ticket.details?.error && DEAD_TOKEN_ERRORS.has(ticket.details.error)) {
+          dead.push(token);
+        }
+      });
+    }
+
+    if (dead.length > 0) {
+      await NotificationService.pruneDeadTokens(dead).catch((error: unknown) => {
+        logger.error('Failed to prune dead push tokens', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    if (ticketToToken.size > 0) {
+      // Fire-and-forget; `unref` so a pending check never holds the process open.
+      const timer = setTimeout(() => {
+        NotificationService.checkReceipts(ticketToToken).catch((error: unknown) => {
+          logger.error('Push receipt check failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }, RECEIPT_CHECK_DELAY_MS);
+      timer.unref();
     }
 
     return tickets;
