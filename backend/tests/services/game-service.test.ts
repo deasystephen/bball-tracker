@@ -16,7 +16,7 @@ import {
   createTeamRole,
   createTeamStaff,
 } from '../factories';
-import { expectNotFoundError, expectForbiddenError } from '../helpers';
+import { expectNotFoundError, expectForbiddenError, expectBadRequestError } from '../helpers';
 import type { CreateGameInput } from '../../src/api/games/schemas';
 
 // Helper to create valid game input
@@ -246,6 +246,7 @@ describe('GameService', () => {
 
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
         ...coachStaff,
         role: headCoachRole,
@@ -284,6 +285,7 @@ describe('GameService', () => {
 
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
@@ -291,11 +293,55 @@ describe('GameService', () => {
         season: { ...season, league: { ...league, admins: [] } },
       });
 
-      try {
-        await GameService.updateGame(game.id, { opponent: 'New Opponent' }, otherUser.id);
-      } catch (error) {
-        expectForbiddenError(error, 'You do not have permission to update this game');
-      }
+      const error = await GameService.updateGame(
+        game.id,
+        { opponent: 'New Opponent' },
+        otherUser.id
+      ).catch((e) => e);
+      expectForbiddenError(error, 'You do not have access to this game');
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject an empty body from an unaffiliated user with 403 before touching permissions (audit #12)', async () => {
+      const otherUser = createPlayer();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+
+      const error = await GameService.updateGame(game.id, {}, otherUser.id).catch((e) => e);
+
+      expectForbiddenError(error, 'You do not have access to this game');
+      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject an empty body from an authorized coach with 400', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+
+      const error = await GameService.updateGame(game.id, {}, coach.id).catch((e) => e);
+
+      expectBadRequestError(error, 'No fields to update');
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
     });
   });
 
@@ -437,6 +483,29 @@ describe('GameService', () => {
       expect(findManyArgs.where.teamId).toEqual({ in: [team1Id, team2Id] });
     });
 
+    it('should include teams the user administers via the league in the access set (audit #29)', async () => {
+      const leagueAdmin = createCoach();
+      const game = createGame({ teamId: 'team-1' });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(leagueAdmin);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: 'team-1' }]);
+      (mockPrisma.game.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([game]);
+
+      await GameService.listGames(baseQuery, leagueAdmin.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { staff: { some: { userId: leagueAdmin.id } } },
+            { members: { some: { playerId: leagueAdmin.id } } },
+            { season: { league: { admins: { some: { userId: leagueAdmin.id } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+    });
+
     it('should allow non-admin to query a specific team they have access to', async () => {
       const coach = createCoach();
       const teamId = 'team-allowed';
@@ -525,16 +594,104 @@ describe('GameService', () => {
 
   describe('updateGame (extended)', () => {
     const setupCoachWithTrackStatsOnly = (team: ReturnType<typeof createTeam>, coach: ReturnType<typeof createCoach>): void => {
-      // canTrackStats=true, canManageTeam=false
+      // canTrackStats=true, canManageTeam=false, canManageRoster=false
       const trackerRole = createTeamRole({
         teamId: team.id,
         type: 'ASSISTANT_COACH',
         canManageTeam: false,
+        canManageRoster: false,
         canTrackStats: true,
       });
       const staff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: trackerRole.id });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(staff);
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...staff, role: trackerRole }]);
     };
+
+    it('should forbid a canTrackStats-only user from changing the status of a FINISHED game (audit #78)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+
+      const error = await GameService.updateGame(game.id, { status: 'IN_PROGRESS' }, coach.id).catch(
+        (e) => e
+      );
+
+      expectForbiddenError(error, 'Only roster managers can change the status or score of a finished game');
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+    });
+
+    it('should forbid a canTrackStats-only user from rewriting the score of a FINISHED game', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+
+      const error = await GameService.updateGame(game.id, { homeScore: 99 }, coach.id).catch((e) => e);
+
+      expectForbiddenError(error, 'Only roster managers can change the status or score of a finished game');
+      expect(mockPrisma.game.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow a roster manager (head coach) to reopen a FINISHED game', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        status: 'IN_PROGRESS',
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      const result = await GameService.updateGame(game.id, { status: 'IN_PROGRESS' }, coach.id);
+
+      expect(result.status).toBe('IN_PROGRESS');
+    });
+
+    it('should not apply the FINISHED guard when only opponent/date change', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        opponent: 'Renamed',
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { opponent: 'Renamed' }, coach.id);
+
+      // canManageTeam + canTrackStats lookups only — no third canManageRoster round-trip
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.game.update).toHaveBeenCalled();
+    });
 
     it('should allow a canTrackStats-only user to update scores during game', async () => {
       const coach = createCoach();

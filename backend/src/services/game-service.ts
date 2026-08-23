@@ -5,7 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
-import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
@@ -197,7 +197,8 @@ export class GameService {
     const isSysAdmin = await isSystemAdmin(userId);
 
     if (!isSysAdmin) {
-      // Filter by user access (staff or team member)
+      // Filter by user access (staff, team member, or league admin) — the
+      // same set canAccessTeam grants (audit #29).
       const userTeams = await prisma.team.findMany({
         where: {
           OR: [
@@ -212,6 +213,17 @@ export class GameService {
               members: {
                 some: {
                   playerId: userId,
+                },
+              },
+            },
+            {
+              season: {
+                league: {
+                  admins: {
+                    some: {
+                      userId,
+                    },
+                  },
                 },
               },
             },
@@ -279,15 +291,37 @@ export class GameService {
       throw new NotFoundError('Game not found');
     }
 
-    // Check permission - canManageTeam for full updates, canTrackStats for score updates during game
-    const canManage = await hasTeamPermission(userId, game.teamId, 'canManageTeam');
-    const canTrack = await hasTeamPermission(userId, game.teamId, 'canTrackStats');
+    // Access check runs before any field-specific branch so an empty or
+    // unrecognised body can never leak the game + staff payload (audit #12).
+    const hasAccess = await canAccessTeam(userId, game.teamId);
+    if (!hasAccess) {
+      throw new ForbiddenError('You do not have access to this game');
+    }
 
-    // If only updating scores and game is IN_PROGRESS, allow with canTrackStats
     const isScoreOnlyUpdate =
       data.homeScore !== undefined || data.awayScore !== undefined;
     const isStatusUpdate = data.status !== undefined;
     const isOtherUpdate = data.opponent !== undefined || data.date !== undefined;
+
+    if (!isScoreOnlyUpdate && !isStatusUpdate && !isOtherUpdate) {
+      throw new BadRequestError('No fields to update');
+    }
+
+    // Check permission - canManageTeam for full updates, canTrackStats for score updates during game
+    const canManage = await hasTeamPermission(userId, game.teamId, 'canManageTeam');
+    const canTrack = await hasTeamPermission(userId, game.teamId, 'canTrackStats');
+
+    // Once a game is FINISHED its status and score are part of the record;
+    // reopening or rewriting it takes roster-management-level staff, not a
+    // stats tracker (audit #78).
+    if (game.status === 'FINISHED' && (isStatusUpdate || isScoreOnlyUpdate)) {
+      const canManageRoster = await hasTeamPermission(userId, game.teamId, 'canManageRoster');
+      if (!canManageRoster) {
+        throw new ForbiddenError(
+          'Only roster managers can change the status or score of a finished game'
+        );
+      }
+    }
 
     if (!canManage) {
       if (isOtherUpdate) {

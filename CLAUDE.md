@@ -192,6 +192,14 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
   (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.
   Staff emails stay in the payload for every team member (coach contact info).
+- **Games** (`game-service.ts`): `updateGame` runs `canAccessTeam` **before** any field-specific branch
+  (403 `You do not have access to this game` for unaffiliated users, regardless of body) and rejects a
+  body with no updatable fields (`updateGameSchema` `.refine` → 400 `At least one field must be provided`;
+  the service also throws `BadRequestError('No fields to update')` as defense in depth). Changing `status`
+  or a score on a `FINISHED` game requires `canManageRoster` (head/assistant coach, league admin, system
+  admin) — a `canTrackStats`-only Team Manager can no longer reopen or rewrite a final. `listGames`
+  includes teams the caller administers via the league (same set as `canAccessTeam`). Lane D owns the
+  socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
 
 ### Team Invitations
 
