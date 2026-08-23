@@ -225,7 +225,14 @@ describe('api-client', () => {
    * refresh-and-retry path can run end to end, plus an auth-store mock with a
    * refresh token and a recording setAuthToken.
    */
-  const loadRefreshable = (opts: { refreshToken: string | null; refreshResult: 'ok' | 'fail' }) => {
+  type RefreshResult = 'ok' | 'fail' | 'network' | { status: number };
+  const refreshRejection = (r: RefreshResult) => {
+    if (r === 'network') return { isAxiosError: true, code: 'ECONNABORTED', message: 'timeout of 10000ms exceeded' };
+    if (r === 'fail') return { isAxiosError: true, response: { status: 401 } };
+    return { isAxiosError: true, response: { status: (r as { status: number }).status } };
+  };
+
+  const loadRefreshable = (opts: { refreshToken: string | null; refreshResult: RefreshResult }) => {
     const calls = { post: [] as unknown[][], request: [] as unknown[][], logoutCalls: 0, setTokens: [] as unknown[][] };
     const auth = { accessToken: 'stale' as string | null, refreshToken: opts.refreshToken };
     jest.doMock('axios', () => {
@@ -243,7 +250,7 @@ describe('api-client', () => {
           calls.post.push(args);
           return opts.refreshResult === 'ok'
             ? Promise.resolve({ data: { accessToken: 'fresh', refreshToken: 'fresh-refresh' } })
-            : Promise.reject({ response: { status: 401 } });
+            : Promise.reject(refreshRejection(opts.refreshResult));
         }),
         request: jest.fn((...args: unknown[]) => {
           calls.request.push(args);
@@ -320,14 +327,76 @@ describe('api-client', () => {
   it('never tries to refresh for auth endpoints or an already-retried request', async () => {
     const { calls } = loadRefreshable({ refreshToken: 'r1', refreshResult: 'ok' });
 
+    // A 401 from /auth/refresh is handled by refreshAccessToken's caller, not
+    // by the interceptor — it neither refreshes nor logs out here.
     const refreshErr = make401('/auth/refresh');
     await expect(captured.responseError!(refreshErr)).rejects.toBe(refreshErr);
+    expect(calls.logoutCalls).toBe(0);
 
+    // The replayed request 401'd with a fresh token: the session is gone.
     const retried = { ...make401('/teams'), config: { ...make401('/teams').config, _retry: true } };
     await expect(captured.responseError!(retried)).rejects.toBe(retried);
 
     expect(calls.post).toHaveLength(0);
-    expect(calls.logoutCalls).toBe(2);
+    expect(calls.logoutCalls).toBe(1);
+  });
+
+  // Audit #20: a WorkOS/backend outage during refresh must not destroy the
+  // session. Only a definitive 401 from /auth/refresh means "re-login".
+  describe.each([
+    ['503 service unavailable', { status: 503 } as RefreshResult],
+    ['500 server error', { status: 500 } as RefreshResult],
+    ['429 rate limited', { status: 429 } as RefreshResult],
+    ['network timeout', 'network' as RefreshResult],
+  ])('keeps the session when the refresh fails with %s', (_label, refreshResult) => {
+    it('does not log out, does not replay, and surfaces the original error', async () => {
+      const { calls, auth } = loadRefreshable({ refreshToken: 'r1', refreshResult });
+      const err = make401('/teams');
+
+      await expect(captured.responseError!(err)).rejects.toBe(err);
+
+      expect(calls.post).toHaveLength(1);
+      expect(calls.request).toHaveLength(0);
+      expect(calls.logoutCalls).toBe(0);
+      expect(calls.setTokens).toHaveLength(0);
+      expect(auth.refreshToken).toBe('r1');
+    });
+  });
+
+  it('a later 401 retries the refresh after a transient failure (single-flight slot is released)', async () => {
+    const { calls } = loadRefreshable({ refreshToken: 'r1', refreshResult: { status: 503 } });
+    await expect(captured.responseError!(make401('/teams'))).rejects.toBeDefined();
+    await expect(captured.responseError!(make401('/games'))).rejects.toBeDefined();
+    expect(calls.post).toHaveLength(2);
+    expect(calls.logoutCalls).toBe(0);
+  });
+
+  describe('refreshAccessToken (exported)', () => {
+    it('reports ok with the new access token', async () => {
+      loadRefreshable({ refreshToken: 'r1', refreshResult: 'ok' });
+      const { refreshAccessToken } = jest.requireActual('../../services/api-client');
+      await expect(refreshAccessToken()).resolves.toEqual({ status: 'ok', accessToken: 'fresh' });
+    });
+
+    it('reports rejected on 401 and when no refresh token is stored', async () => {
+      loadRefreshable({ refreshToken: 'r1', refreshResult: 'fail' });
+      const mod = jest.requireActual('../../services/api-client');
+      await expect(mod.refreshAccessToken()).resolves.toEqual({ status: 'rejected' });
+
+      jest.resetModules();
+      const { calls } = loadRefreshable({ refreshToken: null, refreshResult: 'ok' });
+      const mod2 = jest.requireActual('../../services/api-client');
+      await expect(mod2.refreshAccessToken()).resolves.toEqual({ status: 'rejected' });
+      expect(calls.post).toHaveLength(0);
+    });
+
+    it('reports unavailable with the underlying error on 5xx/network failures', async () => {
+      loadRefreshable({ refreshToken: 'r1', refreshResult: { status: 503 } });
+      const { refreshAccessToken } = jest.requireActual('../../services/api-client');
+      const outcome = await refreshAccessToken();
+      expect(outcome.status).toBe('unavailable');
+      expect(outcome.error).toMatchObject({ response: { status: 503 } });
+    });
   });
 
   it('coalesces concurrent 401s into a single refresh call', async () => {
