@@ -321,8 +321,27 @@ describe('Auth API', () => {
         expect(mockWorkOSService.exchangeCodeForToken).not.toHaveBeenCalled();
       });
 
-      it('returns 500 (not a session) when WorkOS refuses the verifier', async () => {
-        mockWorkOSService.exchangeCodeForToken.mockRejectedValue(new Error('invalid_grant: code_verifier mismatch'));
+      it('returns 400 (not a session, not a 500) when WorkOS refuses the verifier', async () => {
+        // Real SDK shape: OauthException carries a 4xx `status` (audit #42).
+        mockWorkOSService.exchangeCodeForToken.mockRejectedValue(
+          Object.assign(new Error('Error: invalid_grant\nError Description: code_verifier mismatch'), {
+            status: 400,
+          })
+        );
+
+        const response = await request(app)
+          .get('/api/v1/auth/callback')
+          .query({ code: 'c', state, code_verifier: verifier });
+
+        expect(response.status).toBe(400);
+        expect(response.body.accessToken).toBeUndefined();
+        expect(response.body.error).toMatch(/authorization code/i);
+      });
+
+      it('still returns 500 when the exchange fails without a definite 4xx (outage)', async () => {
+        mockWorkOSService.exchangeCodeForToken.mockRejectedValue(
+          Object.assign(new Error('Internal server error'), { status: 500 })
+        );
 
         const response = await request(app)
           .get('/api/v1/auth/callback')

@@ -88,7 +88,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
       onPress={handlePress}
       style={[styles.playerChip, animatedChipStyle]}
       accessibilityRole="button"
-      accessibilityLabel={`${member.player.name}${member.jerseyNumber ? `, number ${member.jerseyNumber}` : ''}`}
+      accessibilityLabel={`${member.player.name}${member.jerseyNumber != null ? `, number ${member.jerseyNumber}` : ''}`}
       accessibilityState={{ selected: isSelected }}
     >
       <View
@@ -108,7 +108,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
             { color: isSelected ? '#FFFFFF' : colors.primary },
           ]}
         >
-          {member.jerseyNumber
+          {member.jerseyNumber != null
             ? `#${member.jerseyNumber}`
             : getInitials(member.player.name)}
         </ThemedText>

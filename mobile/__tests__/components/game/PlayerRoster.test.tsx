@@ -84,6 +84,19 @@ describe('PlayerRoster', () => {
     expect(queryByText('AA')).toBeNull();
   });
 
+  it('treats jersey #0 as a real number, not "no jersey" (audit #68)', () => {
+    const { getByText, queryByText, getByLabelText } = render(
+      <PlayerRoster
+        players={[player({ playerId: 'p1', name: 'Alice Adams', jerseyNumber: 0 })]}
+        selectedPlayerId={null}
+        onSelectPlayer={jest.fn()}
+      />
+    );
+    expect(getByText('#0')).toBeTruthy();
+    expect(queryByText('AA')).toBeNull();
+    expect(getByLabelText('Alice Adams, number 0')).toBeTruthy();
+  });
+
   it('falls back to initials (first two, uppercased) when no jersey number', () => {
     const { getByText } = render(
       <PlayerRoster

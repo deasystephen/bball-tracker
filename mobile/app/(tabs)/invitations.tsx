@@ -280,7 +280,7 @@ export default function InvitationsScreen() {
               Invited by {item.invitedBy.name}
             </ThemedText>
           </View>
-          {item.jerseyNumber && (
+          {item.jerseyNumber != null && (
             <View style={styles.detailRow}>
               <Ionicons name="shirt-outline" size={16} color={colors.textTertiary} />
               <ThemedText variant="caption" color="textSecondary">

@@ -33,7 +33,7 @@ const baseColumns: ColumnDef[] = [
     width: 120,
     getValue: (stats) => {
       if ('playerName' in stats) {
-        const jersey = stats.jerseyNumber ? `#${stats.jerseyNumber} ` : '';
+        const jersey = stats.jerseyNumber != null ? `#${stats.jerseyNumber} ` : '';
         return `${jersey}${stats.playerName}`;
       }
       return 'TEAM';

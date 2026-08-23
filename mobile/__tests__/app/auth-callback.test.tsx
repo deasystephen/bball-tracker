@@ -86,12 +86,24 @@ describe('AuthCallbackScreen', () => {
     expect(mockedGet).not.toHaveBeenCalled();
   });
 
-  it('shows the WorkOS error without touching pending state or the backend', async () => {
+  it('maps a known OAuth error to our copy without touching pending state or the backend', async () => {
     mockParams.error = 'access_denied';
 
-    const { findByText } = render(<AuthCallbackScreen />);
+    const { findByText, queryByText } = render(<AuthCallbackScreen />);
 
-    expect(await findByText('access_denied')).toBeTruthy();
+    expect(await findByText('Sign-in was cancelled. You can try again whenever you like.')).toBeTruthy();
+    expect(queryByText('access_denied')).toBeNull();
+    expect(mockedConsume).not.toHaveBeenCalled();
+    expect(mockedGet).not.toHaveBeenCalled();
+  });
+
+  it('never renders an unknown error param verbatim (attacker-controllable deep link, audit #74)', async () => {
+    mockParams.error = 'Your account was suspended, call 555-0100';
+
+    const { findByText, queryByText } = render(<AuthCallbackScreen />);
+
+    expect(await findByText('Sign-in did not complete. Please try signing in again.')).toBeTruthy();
+    expect(queryByText(/555-0100/)).toBeNull();
     expect(mockedConsume).not.toHaveBeenCalled();
     expect(mockedGet).not.toHaveBeenCalled();
   });
