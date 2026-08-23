@@ -19,6 +19,22 @@ import { z } from 'zod';
 
 const router = Router();
 
+/**
+ * League ids the user administers (`LeagueAdmin` rows). Returned as
+ * `user.leagueAdminOf: string[]` on `/auth/me`, `/auth/callback` and
+ * `/auth/dev-login` so the app can show league-admin UI without a second
+ * round-trip (role matrix decision 3). System ADMINs are not listed here —
+ * they are implied admins of every league via `role === 'ADMIN'`.
+ */
+async function getLeagueAdminOf(userId: string): Promise<string[]> {
+  const rows = await prisma.leagueAdmin.findMany({
+    where: { userId },
+    select: { leagueId: true },
+    orderBy: { leagueId: 'asc' },
+  });
+  return rows.map(r => r.leagueId);
+}
+
 // Apply stricter rate limiting to the credential-handling endpoints only.
 // Authenticated session endpoints (/me, /me/usage, /entitlements, /push-token)
 // are polled by the app on every foreground/tab visit; with a 20-req/15-min
@@ -97,7 +113,7 @@ if (process.env.NODE_ENV === 'development') {
 
       return res.json({
         success: true,
-        user,
+        user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id) },
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
@@ -249,6 +265,7 @@ router.get('/callback', async (req, res) => {
         name: user.name,
         role: user.role,
         profilePictureUrl: user.profilePictureUrl,
+        leagueAdminOf: await getLeagueAdminOf(user.id),
       },
       accessToken, // Mobile app will store this securely
       // Short-lived access token + rotating refresh token. Without the refresh
@@ -353,7 +370,7 @@ router.get('/me', async (req, res) => {
 
     res.json({
       success: true,
-      user,
+      user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id) },
     });
   } catch (error) {
     logger.error('Error getting user', { error: error instanceof Error ? error.message : String(error) });
@@ -534,7 +551,12 @@ router.get('/me/usage', authenticate, async (req, res) => {
 
 /**
  * POST /api/v1/auth/push-token
- * Register a push notification token for the current user
+ * Register a push notification token for the current user.
+ *
+ * A token already bound to a *different* account is rejected with **409**
+ * unless that binding is older than 24h (see
+ * `NotificationService.registerToken`); the previous owner unregisters via
+ * `DELETE /auth/push-token` (logout does this) to hand the device over.
  */
 const pushTokenSchema = z.object({
   token: z.string().min(1, 'Token is required'),
@@ -561,6 +583,9 @@ router.post('/push-token', authenticate, async (req, res) => {
     logger.error('Error registering push token', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof Error && error.message === 'Invalid Expo push token') {
       return res.status(400).json({ error: error.message });
+    }
+    if (error instanceof ConflictError) {
+      return res.status(409).json({ error: error.message });
     }
     return res.status(500).json({ error: 'Failed to register push token' });
   }

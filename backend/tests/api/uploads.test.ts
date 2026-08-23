@@ -22,7 +22,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the upload service

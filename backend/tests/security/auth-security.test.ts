@@ -3,7 +3,7 @@
  */
 
 import { mockPrisma } from '../setup';
-import { authenticate, requireRole } from '../../src/api/auth/middleware';
+import { authenticate } from '../../src/api/auth/middleware';
 import { PlayerService } from '../../src/services/player-service';
 import { Request, Response, NextFunction } from 'express';
 import type { WorkOSService } from '../../src/services/workos-service';
@@ -81,41 +81,6 @@ describe('Authentication Security', () => {
       const error = mockNext.mock.calls[0][0] as unknown as Error & { statusCode?: number };
       expect(error).toBeInstanceOf(Error);
       expect(error.statusCode).toBe(401);
-    });
-  });
-
-  describe('requireRole middleware', () => {
-    it('should reject unauthenticated requests with 401', () => {
-      mockReq.user = undefined;
-      const middleware = requireRole('ADMIN');
-      middleware(mockReq as Request, mockRes as Response, mockNext);
-      expect(mockNext).toHaveBeenCalled();
-      const error = mockNext.mock.calls[0][0] as unknown as Error & { statusCode?: number };
-      expect(error.statusCode).toBe(401);
-    });
-
-    it('should reject insufficient role with 403 (not 401)', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'PLAYER', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
-      const middleware = requireRole('ADMIN');
-      middleware(mockReq as Request, mockRes as Response, mockNext);
-      expect(mockNext).toHaveBeenCalled();
-      const error = mockNext.mock.calls[0][0] as unknown as Error & { statusCode?: number };
-      expect(error.statusCode).toBe(403);
-      expect(error.message).toBe('Insufficient permissions');
-    });
-
-    it('should allow authorized role', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'ADMIN', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
-      const middleware = requireRole('ADMIN');
-      middleware(mockReq as Request, mockRes as Response, mockNext);
-      expect(mockNext).toHaveBeenCalledWith();
-    });
-
-    it('should allow multiple roles', () => {
-      mockReq.user = { id: '1', email: 'test@test.com', name: 'Test', role: 'COACH', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
-      const middleware = requireRole('ADMIN', 'COACH');
-      middleware(mockReq as Request, mockRes as Response, mockNext);
-      expect(mockNext).toHaveBeenCalledWith();
     });
   });
 });

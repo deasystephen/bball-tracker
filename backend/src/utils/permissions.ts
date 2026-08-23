@@ -189,6 +189,59 @@ export async function canAccessTeam(userId: string, teamId: string): Promise<boo
   return !!isMember;
 }
 
+export interface PlayerTeamAccess {
+  /** Every team the player is currently rostered on. */
+  memberTeamIds: string[];
+  /**
+   * The subset of `memberTeamIds` on which `userId` has `canManageRoster`
+   * (staff with a roster-managing role, league admin of the team's league,
+   * or system ADMIN — for whom this equals `memberTeamIds`).
+   */
+  manageableTeamIds: string[];
+}
+
+/**
+ * Which of a player's teams can `userId` manage the roster of?
+ *
+ * Single query over the player's memberships; used to scope "act on behalf
+ * of another player" operations (invitation listing, managed-player edits)
+ * to a *current* roster relationship instead of a global role or a
+ * never-expiring `managedById` link.
+ */
+export async function getPlayerTeamAccess(
+  userId: string,
+  playerId: string
+): Promise<PlayerTeamAccess> {
+  const memberships = await prisma.teamMember.findMany({
+    where: { playerId },
+    select: {
+      teamId: true,
+      team: {
+        select: {
+          season: { select: { league: { select: { admins: { where: { userId }, select: { id: true } } } } } },
+          staff: { where: { userId, role: { canManageRoster: true } }, select: { id: true } },
+        },
+      },
+    },
+  });
+
+  const memberTeamIds = memberships.map(m => m.teamId);
+  const manageableTeamIds = memberships
+    .filter(m => m.team.staff.length > 0 || m.team.season.league.admins.length > 0)
+    .map(m => m.teamId);
+
+  // Only consult the global role when the per-team rows grant nothing.
+  if (
+    memberTeamIds.length > 0 &&
+    manageableTeamIds.length < memberTeamIds.length &&
+    (await isSystemAdmin(userId))
+  ) {
+    return { memberTeamIds, manageableTeamIds: memberTeamIds };
+  }
+
+  return { memberTeamIds, manageableTeamIds };
+}
+
 /**
  * Check if user is a system admin
  */

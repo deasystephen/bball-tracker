@@ -21,7 +21,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 describe('PATCH /api/v1/auth/me/role', () => {

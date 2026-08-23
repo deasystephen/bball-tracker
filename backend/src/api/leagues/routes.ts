@@ -9,9 +9,11 @@ import {
   createLeagueSchema,
   updateLeagueSchema,
   leagueQuerySchema,
+  addLeagueAdminSchema,
 } from './schemas';
 import { AppError, BadRequestError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
+import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
 
@@ -152,6 +154,67 @@ router.delete('/:id', async (req, res) => {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete league' });
+    }
+  }
+});
+
+/**
+ * POST /api/v1/leagues/:id/admins
+ * Grant league-admin rights to a user. System ADMIN only (decision 3): the
+ * service used to let any existing league admin add another; tightened until
+ * there is a product decision on delegated league administration.
+ */
+router.post('/:id/admins', async (req, res) => {
+  try {
+    const validationResult = addLeagueAdminSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const admin = await LeagueService.addLeagueAdmin(
+      req.params.id as string,
+      validationResult.data.userId,
+      req.user!.id
+    );
+
+    res.status(201).json({
+      success: true,
+      admin,
+    });
+  } catch (error) {
+    logger.error('Error adding league admin', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to add league admin' });
+    }
+  }
+});
+
+/**
+ * DELETE /api/v1/leagues/:id/admins/:userId
+ * Revoke league-admin rights. System ADMIN only.
+ */
+router.delete('/:id/admins/:userId', validateUuidParams('userId'), async (req, res) => {
+  try {
+    await LeagueService.removeLeagueAdmin(
+      req.params.id as string,
+      req.params.userId as string,
+      req.user!.id
+    );
+
+    res.json({
+      success: true,
+      message: 'League admin removed successfully',
+    });
+  } catch (error) {
+    logger.error('Error removing league admin', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to remove league admin' });
     }
   }
 });

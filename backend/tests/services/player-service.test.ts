@@ -29,6 +29,23 @@ const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typ
 const ADMIN_CALLER = { id: 'admin-caller', role: 'ADMIN' };
 const COACH_CALLER = { id: 'coach-caller', role: 'COACH' };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type MembershipRow = {
+  teamId: string;
+  team: { season: { league: { admins: { id: string }[] } }; staff: { id: string }[] };
+};
+/** A `getPlayerTeamAccess` membership row on which the caller has canManageRoster. */
+const manageableMembership = (teamId = 'team-1'): MembershipRow => ({
+  teamId,
+  team: { season: { league: { admins: [] } }, staff: [{ id: 'staff-1' }] },
+});
+/** A membership row on a team the caller cannot manage. */
+const unmanageableMembership = (teamId = 'team-2'): MembershipRow => ({
+  teamId,
+  team: { season: { league: { admins: [] } }, staff: [] },
+});
+
 describe('PlayerService', () => {
   describe('createPlayer', () => {
     it('should create a player successfully (admin)', async () => {
@@ -533,6 +550,7 @@ describe('PlayerService', () => {
         .mockResolvedValueOnce(managed)
         .mockResolvedValueOnce(coach)
         .mockResolvedValueOnce(null); // email free
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([manageableMembership()]);
       (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...managed, email: 'kid@test.com' });
 
       const result = await PlayerService.updatePlayer(managed.id, { email: 'kid@test.com' }, coach.id);
@@ -547,6 +565,7 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(claimed)
         .mockResolvedValueOnce(coach);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([manageableMembership()]);
 
       await expect(
         PlayerService.updatePlayer(claimed.id, { email: 'victim@test.com' }, coach.id)
@@ -561,11 +580,91 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(claimed)
         .mockResolvedValueOnce(coach);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([manageableMembership()]);
       (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...claimed, name: 'Renamed' });
 
       const result = await PlayerService.updatePlayer(claimed.id, { name: 'Renamed', email: 'kid@test.com' }, coach.id);
 
       expect(result.name).toBe('Renamed');
+    });
+
+    describe('managed-player rights expire with the roster relationship (role matrix B2.10)', () => {
+      it('forbids the creator once they no longer manage a roster the player is on', async () => {
+        const coach = createCoach();
+        const managed = {
+          ...createPlayer(),
+          isManaged: true,
+          managedById: coach.id,
+          createdAt: new Date(Date.now() - 30 * DAY_MS),
+        };
+
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(managed)
+          .mockResolvedValueOnce(coach);
+        // Player is rostered, but on a team where the coach has no canManageRoster
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([unmanageableMembership()]);
+
+        await expect(
+          PlayerService.updatePlayer(managed.id, { name: 'Hijacked' }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 403, message: 'You can only update your own profile' });
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+        expect(mockPrisma.teamMember.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { playerId: managed.id } })
+        );
+      });
+
+      it('forbids the creator of an old, un-rostered managed player (grace period elapsed)', async () => {
+        const coach = createCoach();
+        const managed = {
+          ...createPlayer(),
+          isManaged: true,
+          managedById: coach.id,
+          createdAt: new Date(Date.now() - 2 * DAY_MS),
+        };
+
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(managed)
+          .mockResolvedValueOnce(coach);
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+
+        await expect(
+          PlayerService.updatePlayer(managed.id, { name: 'Late edit' }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 403 });
+      });
+
+      it('lets the creator edit a just-created managed player before it is rostered (create-then-edit)', async () => {
+        const coach = createCoach();
+        const managed = {
+          ...createPlayer(),
+          isManaged: true,
+          managedById: coach.id,
+          createdAt: new Date(Date.now() - 5 * 60 * 1000),
+        };
+
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(managed)
+          .mockResolvedValueOnce(coach);
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...managed, name: 'Fixed typo' });
+
+        const result = await PlayerService.updatePlayer(managed.id, { name: 'Fixed typo' }, coach.id);
+
+        expect(result.name).toBe('Fixed typo');
+      });
+
+      it('never grants rights to a non-managed player via managedById', async () => {
+        const coach = createCoach();
+        const player = { ...createPlayer(), isManaged: false, managedById: coach.id };
+
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(player)
+          .mockResolvedValueOnce(coach);
+
+        await expect(
+          PlayerService.updatePlayer(player.id, { name: 'Nope' }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 403 });
+        expect(mockPrisma.teamMember.findMany).not.toHaveBeenCalled();
+      });
     });
 
     it('should throw NotFoundError if player does not exist', async () => {
@@ -766,6 +865,49 @@ describe('PlayerService', () => {
         expect(err.statusCode).toBe(403);
         expect(err.message).toBe('Only administrators can delete players');
       }
+    });
+
+    it('lets the creator delete a just-created, un-rostered managed player', async () => {
+      const coach = createCoach();
+      const managed = {
+        ...createPlayer(),
+        isManaged: true,
+        managedById: coach.id,
+        createdAt: new Date(),
+        teamMembers: [],
+        gameEvents: [],
+      };
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(coach)
+        .mockResolvedValueOnce(managed);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.user.delete as jest.Mock).mockResolvedValue(managed);
+
+      await expect(PlayerService.deletePlayer(managed.id, coach.id)).resolves.toEqual({ success: true });
+    });
+
+    it('forbids the creator from deleting an old un-rostered managed player (B2.10)', async () => {
+      const coach = createCoach();
+      const managed = {
+        ...createPlayer(),
+        isManaged: true,
+        managedById: coach.id,
+        createdAt: new Date(Date.now() - 3 * DAY_MS),
+        teamMembers: [],
+        gameEvents: [],
+      };
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(coach)
+        .mockResolvedValueOnce(managed);
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+
+      await expect(PlayerService.deletePlayer(managed.id, coach.id)).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'Only administrators can delete players',
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
   });
 });

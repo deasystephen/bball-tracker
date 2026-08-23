@@ -282,7 +282,9 @@ feature->tier map (FREE / PREMIUM / LEAGUE), usage limits, and the
 `FREE_TEAM_LIMIT` constant (3). Do not redefine tier rules elsewhere — import
 from there (issue #43's usage metering reuses these constants).
 
-Enforcement lives in `backend/src/api/middleware/entitlements.ts`:
+Enforcement lives in `backend/src/api/middleware/entitlements.ts` (the only entitlement middleware —
+the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware.ts`, which answered
+403, are gone):
 
 - `requireEntitlement(feature)` — gates a route behind a feature. On denial it
   returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
@@ -307,6 +309,24 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   metadata plus team `{ id, name }` — no staff, no member lists, no emails. Authorization denials throw
   `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
   `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
+- **League admins (decision 3)**: `POST /leagues/:id/admins { userId }` (201, `userId` must be a UUID)
+  and `DELETE /leagues/:id/admins/:userId` (404 if not an admin) are **system-ADMIN-only** — an existing
+  league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
+  match `removeLeagueAdmin`; revisit if delegated league administration becomes a product decision).
+  The session user payload on `GET /auth/me`, `GET /auth/callback` and `POST /auth/dev-login` carries
+  `leagueAdminOf: string[]` (league ids from `LeagueAdmin` rows, sorted; empty for most users, and **not**
+  populated for system ADMINs, who are implied admins of every league via `role === 'ADMIN'`).
+- **Global role is never an access check.** The self-selectable `User.role` (`COACH` / `PLAYER`) is
+  only read by services to (a) short-circuit for `ADMIN` and (b) allow team creation. Everything
+  "on behalf of another player" goes through `utils/permissions.ts#getPlayerTeamAccess(userId, playerId)`
+  → `{ memberTeamIds, manageableTeamIds }` (teams the player is on / the subset the caller has
+  `canManageRoster` on). `requireRole`, `requireFeature` and `requireUsageLimit` were removed from
+  `api/auth/middleware.ts` — they were unmounted and contradicted the 402 entitlement contract.
+- **Managed players (role matrix B2.10)**: `PATCH/DELETE /players/:id` for a managed player requires
+  the caller to be its `managedById` **and** currently have `canManageRoster` on a team the player is
+  rostered on, or — so create-then-edit works — the player is on no team yet and was created < 24h ago
+  (`MANAGED_PLAYER_GRACE_MS`). A creator who has left the roster loses edit/delete/email rights; system
+  ADMINs are unaffected. Consequence: deleting an un-rostered managed player older than 24h is admin-only.
 - **Teams** (`team-service.ts`): `listTeams` always ANDs the caller's access clause (staff OR member OR
   league admin of the team's league) with any `seasonId` / `leagueId` / `playerId` filter — only system
   ADMINs skip it. `PATCH /teams/:id { seasonId }` moving a team into a different season requires
@@ -322,6 +342,10 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   admin) — a `canTrackStats`-only Team Manager can no longer reopen or rewrite a final. `listGames`
   includes teams the caller administers via the league (same set as `canAccessTeam`). Lane D owns the
   socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
+  `GET /games/:id` (`GameDetailView`) and `GET /games/:id/rsvps` (`RsvpView`) apply the team-detail
+  email rule (role matrix B2.5): `team.members[].player.email` / `rsvps[].user.email` only for callers
+  with `canManageRoster` (RSVP keeps the caller's own row intact); staff emails stay. `listGames` uses
+  `GAME_LIST_INCLUDE` (no people at all).
 
 ### Team Invitations
 
@@ -335,6 +359,11 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   public routes, where the caller already holds the token) touch it. Tests in `tests/api/invitations.test.ts`,
   `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
   create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
+- **`GET /invitations?playerId=<other user>`** (role matrix B2.4): allowed for system ADMINs (unscoped);
+  with `teamId`, for callers with `canManageRoster` on that team; without `teamId`, for callers with
+  `canManageRoster` on at least one team the player is rostered on — results are then scoped to those
+  teams (`teamId: { in: manageableTeamIds }`). Everyone else gets 403. The old check (`user.role ===
+  'COACH'`, a self-selected role) let any user enumerate anyone's invitations.
 - **Lifecycle (audit #22/#23/#58).** Uniqueness is a hand-written **partial** unique index
   `TeamInvitation_pending_teamId_playerId_key ON (teamId, playerId) WHERE status = 'PENDING'` (migration
   `20260823060000_partial_unique_pending_invitation`; Prisma can't express it, so `schema.prisma` carries a
@@ -412,6 +441,7 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - The strict `authRateLimit` (20 req / 15 min / IP) applies only to `/auth/login`, `/auth/callback` and the dev endpoints; authenticated session routes (`/auth/me`, `/auth/me/usage`, `/auth/entitlements`, `/auth/push-token`) use the general API limiter.
 - `/auth/refresh` has its own `refreshRateLimit` (60 req / 15 min) keyed by a SHA-256 of the refresh token (IP fallback when the body has no token), so a team on shared gym Wi-Fi can't lock each other out — every device rotates its own token (audit #21). Mobile treats a 429 from `/auth/refresh` as transient (keeps the session, retries later); only a 401 logs out.
 - Sentry: `sentryErrorHandler` skips operational `AppError`s with status < 500 (`isExpectedClientError`) — an expired token is an expected outcome, not a defect. It also skips non-`AppError` throws carrying a 4xx `status`/`statusCode` (body-parser `entity.parse.failed` → 400, `entity.too.large` → 413; `clientErrorStatus()`), and the central error handler in `index.ts` answers those with that status instead of 500. 5xx and other non-`AppError` throws are still reported.
+- **Push tokens (role matrix B2.9).** `PushToken` is unique on `token` (a device, not an account). `POST /auth/push-token` upserts when the token is new or already the caller's; a token bound to a **different** user is rejected with **409** (`Push token is registered to another account`) unless that binding's `updatedAt` is older than 24h (`PUSH_TOKEN_REBIND_AFTER_MS` — a leftover from a build that never unregistered), in which case it is rebound to the caller. Hand-over on a shared device is `DELETE /auth/push-token` by the owner (logout does this). `PushToken.updatedAt` was added by migration `20260823000000_push_token_updated_at`.
 
 ### Logging & Sentry redaction (audit #15/#28/#48)
 - **Never log `req.originalUrl`.** `request-logger.ts` logs `loggablePath(req)`: the path with secret segments masked (`/invitations/by-token/<x>`, `/teams/:id/calendar/<x>`, `/invite/<x>` → `[redacted]`) plus a query string whose *keys* are kept and whose sensitive *values* (`code`, `state`, `token`, anything containing `token`/`secret`/`password`/`api_key`) are masked. Helpers live in `backend/src/utils/redact.ts` (`redactUrl`, `redactPath`, `redactQueryString`, `redactQueryObject`) — reuse them for any new log line that includes a URL.

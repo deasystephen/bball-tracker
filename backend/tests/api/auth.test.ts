@@ -17,6 +17,9 @@ jest.mock('../../src/models', () => ({
   user: {
     findUnique: jest.fn(),
   },
+  leagueAdmin: {
+    findMany: jest.fn(),
+  },
 }));
 
 // Spy on Sentry capture while keeping the rest of the util real (index.ts needs
@@ -68,6 +71,8 @@ describe('Auth API', () => {
     // file; reset it so the budget is per-test, not per-suite.
     authRateLimit.resetKey('::ffff:127.0.0.1');
     authRateLimit.resetKey('127.0.0.1');
+    // Default: the user administers no leagues (decision 3 payload)
+    (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   describe('GET /api/v1/auth/login', () => {
@@ -215,6 +220,31 @@ describe('Auth API', () => {
       expect(response.body.refreshToken).toBe('mock-refresh-token');
       // Audit #25: the client needs the avatar to render the profile after login
       expect(response.body.user).toHaveProperty('profilePictureUrl', null);
+      // Decision 3: league-admin rows travel with the session user
+      expect(response.body.user.leagueAdminOf).toEqual([]);
+    });
+
+    it('returns the league ids the user administers as leagueAdminOf (decision 3)', async () => {
+      mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+      (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([
+        { leagueId: 'downtown-youth-league' },
+        { leagueId: 'spring-league' },
+      ]);
+
+      const response = await request(app)
+        .get('/api/v1/auth/callback')
+        .query({ code: 'auth-code-123' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.user.leagueAdminOf).toEqual(['downtown-youth-league', 'spring-league']);
+      expect(mockPrisma.leagueAdmin.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'user-1' } })
+      );
     });
 
     it('should return 409 (not 500) when the email is bound to another login', async () => {
@@ -439,6 +469,28 @@ describe('Auth API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.user.id).toBe('user-1');
       expect(response.body.user.email).toBe('test@example.com');
+      expect(response.body.user.leagueAdminOf).toEqual([]);
+    });
+
+    it('includes leagueAdminOf with the league ids the user administers (decision 3)', async () => {
+      mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([{ leagueId: 'spring-league' }]);
+
+      const response = await request(app)
+        .get('/api/v1/auth/me')
+        .set('Authorization', 'Bearer valid-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.user).toMatchObject({
+        id: 'user-1',
+        email: 'test@example.com',
+        name: 'Test User',
+        role: 'PLAYER',
+        profilePictureUrl: null,
+        leagueAdminOf: ['spring-league'],
+      });
+      expect(response.body.user).toHaveProperty('createdAt');
     });
 
     it('should return 401 for missing authorization header', async () => {

@@ -18,7 +18,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -39,6 +38,133 @@ describe('Leagues API', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('league admins (decision 3)', () => {
+    const TARGET_USER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+
+    describe('POST /api/v1/leagues/:id/admins', () => {
+      it('adds a league admin and returns 201', async () => {
+        mockLeagueService.addLeagueAdmin.mockResolvedValue({
+          id: 'la-1',
+          leagueId: 'league-1',
+          userId: TARGET_USER_ID,
+          createdAt: new Date(),
+          user: { id: TARGET_USER_ID, name: 'New Admin', email: 'admin@example.com' },
+        } as unknown as Awaited<ReturnType<typeof mockLeagueService.addLeagueAdmin>>);
+
+        const response = await request(app)
+          .post('/api/v1/leagues/league-1/admins')
+          .send({ userId: TARGET_USER_ID });
+
+        expect(response.status).toBe(201);
+        expect(response.body.success).toBe(true);
+        expect(response.body.admin.user.id).toBe(TARGET_USER_ID);
+        expect(mockLeagueService.addLeagueAdmin).toHaveBeenCalledWith('league-1', TARGET_USER_ID, 'test-user-id');
+      });
+
+      it('returns 400 when userId is missing or not a UUID', async () => {
+        const missing = await request(app).post('/api/v1/leagues/league-1/admins').send({});
+        expect(missing.status).toBe(400);
+
+        const bad = await request(app).post('/api/v1/leagues/league-1/admins').send({ userId: 'not-a-uuid' });
+        expect(bad.status).toBe(400);
+        expect(bad.body.error).toContain('UUID');
+        expect(mockLeagueService.addLeagueAdmin).not.toHaveBeenCalled();
+      });
+
+      it('returns 403 when the caller is not a system admin', async () => {
+        mockLeagueService.addLeagueAdmin.mockRejectedValue(
+          new ForbiddenError('Only system administrators can manage league admins')
+        );
+
+        const response = await request(app)
+          .post('/api/v1/leagues/league-1/admins')
+          .send({ userId: TARGET_USER_ID });
+
+        expect(response.status).toBe(403);
+        expect(response.body.error).toBe('Only system administrators can manage league admins');
+      });
+
+      it('returns 404 when the league or user does not exist', async () => {
+        mockLeagueService.addLeagueAdmin.mockRejectedValue(new NotFoundError('League not found'));
+
+        const response = await request(app)
+          .post('/api/v1/leagues/missing/admins')
+          .send({ userId: TARGET_USER_ID });
+
+        expect(response.status).toBe(404);
+      });
+
+      it('returns 400 when the user is already an admin', async () => {
+        mockLeagueService.addLeagueAdmin.mockRejectedValue(
+          new BadRequestError('User is already an admin of this league')
+        );
+
+        const response = await request(app)
+          .post('/api/v1/leagues/league-1/admins')
+          .send({ userId: TARGET_USER_ID });
+
+        expect(response.status).toBe(400);
+      });
+
+      it('returns 500 on unexpected errors', async () => {
+        mockLeagueService.addLeagueAdmin.mockRejectedValue(new Error('boom'));
+
+        const response = await request(app)
+          .post('/api/v1/leagues/league-1/admins')
+          .send({ userId: TARGET_USER_ID });
+
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe('Failed to add league admin');
+      });
+    });
+
+    describe('DELETE /api/v1/leagues/:id/admins/:userId', () => {
+      it('removes a league admin', async () => {
+        mockLeagueService.removeLeagueAdmin.mockResolvedValue({ success: true });
+
+        const response = await request(app).delete(`/api/v1/leagues/league-1/admins/${TARGET_USER_ID}`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(mockLeagueService.removeLeagueAdmin).toHaveBeenCalledWith('league-1', TARGET_USER_ID, 'test-user-id');
+      });
+
+      it('returns 400 for a non-UUID userId param', async () => {
+        const response = await request(app).delete('/api/v1/leagues/league-1/admins/not-a-uuid');
+
+        expect(response.status).toBe(400);
+        expect(mockLeagueService.removeLeagueAdmin).not.toHaveBeenCalled();
+      });
+
+      it('returns 403 when the caller is not a system admin', async () => {
+        mockLeagueService.removeLeagueAdmin.mockRejectedValue(
+          new ForbiddenError('Only system administrators can remove league admins')
+        );
+
+        const response = await request(app).delete(`/api/v1/leagues/league-1/admins/${TARGET_USER_ID}`);
+
+        expect(response.status).toBe(403);
+      });
+
+      it('returns 404 when the user is not an admin of the league', async () => {
+        mockLeagueService.removeLeagueAdmin.mockRejectedValue(new NotFoundError('League admin not found'));
+
+        const response = await request(app).delete(`/api/v1/leagues/league-1/admins/${TARGET_USER_ID}`);
+
+        expect(response.status).toBe(404);
+      });
+
+      it('returns 500 on unexpected errors', async () => {
+        mockLeagueService.removeLeagueAdmin.mockRejectedValue(new Error('boom'));
+
+        const response = await request(app).delete(`/api/v1/leagues/league-1/admins/${TARGET_USER_ID}`);
+
+        expect(response.status).toBe(500);
+        expect(response.body.error).toBe('Failed to remove league admin');
+      });
+    });
   });
 
   describe('POST /api/v1/leagues', () => {

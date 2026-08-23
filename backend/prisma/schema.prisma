@@ -464,6 +464,9 @@ model PushToken {
   token     String   @unique
   platform  String
   createdAt DateTime @default(now())
+  // Bumped on every (re-)registration; drives the 24h stale-rebind rule in
+  // NotificationService.registerToken.
+  updatedAt DateTime @default(now()) @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

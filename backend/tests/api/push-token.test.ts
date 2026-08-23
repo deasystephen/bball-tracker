@@ -5,6 +5,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { NotificationService } from '../../src/services/notification-service';
+import { ConflictError } from '../../src/utils/errors';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
@@ -21,7 +22,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 jest.mock('../../src/services/notification-service');
@@ -84,6 +84,19 @@ describe('Push Token API', () => {
 
       expect(response.status).toBe(400);
       expect(response.body.error).toBe('Invalid Expo push token');
+    });
+
+    it('returns 409 when the token is freshly bound to another account (role matrix B2.9)', async () => {
+      mockNotificationService.registerToken.mockRejectedValue(
+        new ConflictError('Push token is registered to another account')
+      );
+
+      const response = await request(app)
+        .post('/api/v1/auth/push-token')
+        .send({ token: 'ExponentPushToken[someone-elses]', platform: 'ios' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toBe('Push token is registered to another account');
     });
   });
 

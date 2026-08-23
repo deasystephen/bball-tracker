@@ -6,8 +6,18 @@ import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-ser
 import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
+import { ConflictError } from '../utils/errors';
 
 const expo = new Expo();
+
+/**
+ * A push token bound to a *different* user may only be rebound to the caller
+ * once the existing binding is older than this (audit: push-token hijack,
+ * role matrix B2.9). Current builds unregister on logout, so a fresh row
+ * belonging to someone else means the device is still theirs; an old row is
+ * a leftover from a build that never called `DELETE /auth/push-token`.
+ */
+export const PUSH_TOKEN_REBIND_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Expo recommends polling receipts ~15 minutes after sending; APNs/FCM
@@ -20,11 +30,47 @@ const DEAD_TOKEN_ERRORS = new Set(['DeviceNotRegistered']);
 
 export class NotificationService {
   /**
-   * Register a push token for a user
+   * Register a push token for a user.
+   *
+   * Expo push tokens identify a device, not an account, so the same token can
+   * legitimately move between users on a shared device. But because the row
+   * is unique on `token`, a blind upsert let any authenticated user re-point
+   * another user's device to their own account and receive their
+   * notifications. Rules:
+   *
+   * - token unknown, or already bound to the caller → upsert (refreshes
+   *   `platform` / `updatedAt`).
+   * - token bound to a different user and that binding was touched within
+   *   the last 24h → **409 Conflict**; the previous owner must unregister
+   *   (logout does this) first.
+   * - token bound to a different user and stale (> 24h) → rebind to the
+   *   caller (old build that never unregistered).
    */
   static async registerToken(userId: string, token: string, platform: string): Promise<PushToken> {
     if (!Expo.isExpoPushToken(token)) {
       throw new Error('Invalid Expo push token');
+    }
+
+    const existing = await prisma.pushToken.findUnique({ where: { token } });
+
+    if (existing && existing.userId !== userId) {
+      const ageMs = Date.now() - existing.updatedAt.getTime();
+      if (ageMs < PUSH_TOKEN_REBIND_AFTER_MS) {
+        logger.warn('Refused to rebind push token registered to another user', {
+          tokenOwnerId: existing.userId,
+          callerId: userId,
+        });
+        throw new ConflictError('Push token is registered to another account');
+      }
+
+      logger.info('Rebinding stale push token to a new user', {
+        previousOwnerId: existing.userId,
+        callerId: userId,
+      });
+      return prisma.pushToken.update({
+        where: { token },
+        data: { userId, platform },
+      });
     }
 
     return prisma.pushToken.upsert({

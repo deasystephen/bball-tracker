@@ -12,7 +12,7 @@
  */
 
 import { Expo } from 'expo-server-sdk';
-import { NotificationService } from '../../src/services/notification-service';
+import { NotificationService, PUSH_TOKEN_REBIND_AFTER_MS } from '../../src/services/notification-service';
 import { mockPrisma } from '../setup';
 
 type ExpoProto = {
@@ -34,7 +34,8 @@ describe('NotificationService', () => {
       expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
     });
 
-    it('upserts a valid token keyed by token string with platform + userId', async () => {
+    it('upserts a new token keyed by token string with platform + userId', async () => {
+      (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.pushToken.upsert as jest.Mock).mockResolvedValue({
         id: 'pt-1',
         userId: 'user-1',
@@ -44,6 +45,7 @@ describe('NotificationService', () => {
 
       const result = await NotificationService.registerToken('user-1', VALID_TOKEN, 'ios');
 
+      expect(mockPrisma.pushToken.findUnique).toHaveBeenCalledWith({ where: { token: VALID_TOKEN } });
       expect(mockPrisma.pushToken.upsert).toHaveBeenCalledWith({
         where: { token: VALID_TOKEN },
         create: { userId: 'user-1', token: VALID_TOKEN, platform: 'ios' },
@@ -52,6 +54,74 @@ describe('NotificationService', () => {
       expect(result).toEqual(
         expect.objectContaining({ token: VALID_TOKEN, platform: 'ios' })
       );
+    });
+
+    describe('token already registered (role matrix B2.9)', () => {
+      const existingRow = (userId: string, ageMs: number): {
+        id: string;
+        userId: string;
+        token: string;
+        platform: string;
+        createdAt: Date;
+        updatedAt: Date;
+      } => ({
+        id: 'pt-1',
+        userId,
+        token: VALID_TOKEN,
+        platform: 'ios',
+        createdAt: new Date(Date.now() - ageMs - 60_000),
+        updatedAt: new Date(Date.now() - ageMs),
+      });
+
+      it('lets the same user re-register (refreshes platform)', async () => {
+        (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(existingRow('user-1', 0));
+        (mockPrisma.pushToken.upsert as jest.Mock).mockResolvedValue(existingRow('user-1', 0));
+
+        await NotificationService.registerToken('user-1', VALID_TOKEN, 'android');
+
+        expect(mockPrisma.pushToken.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { token: VALID_TOKEN }, update: { userId: 'user-1', platform: 'android' } })
+        );
+        expect(mockPrisma.pushToken.update).not.toHaveBeenCalled();
+      });
+
+      it('rejects rebinding a token freshly registered to a different user with 409', async () => {
+        (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(existingRow('victim', 5 * 60 * 1000));
+
+        await expect(
+          NotificationService.registerToken('attacker', VALID_TOKEN, 'ios')
+        ).rejects.toMatchObject({ statusCode: 409, message: 'Push token is registered to another account' });
+        expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
+        expect(mockPrisma.pushToken.update).not.toHaveBeenCalled();
+      });
+
+      it('still rejects at just under the 24h boundary', async () => {
+        (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(
+          existingRow('victim', PUSH_TOKEN_REBIND_AFTER_MS - 1000)
+        );
+
+        await expect(
+          NotificationService.registerToken('attacker', VALID_TOKEN, 'ios')
+        ).rejects.toMatchObject({ statusCode: 409 });
+      });
+
+      it('rebinds a stale (> 24h) token left by another user to the caller', async () => {
+        (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(
+          existingRow('previous-owner', PUSH_TOKEN_REBIND_AFTER_MS + 1000)
+        );
+        (mockPrisma.pushToken.update as jest.Mock).mockResolvedValue({
+          ...existingRow('user-2', 0),
+        });
+
+        const result = await NotificationService.registerToken('user-2', VALID_TOKEN, 'ios');
+
+        expect(mockPrisma.pushToken.update).toHaveBeenCalledWith({
+          where: { token: VALID_TOKEN },
+          data: { userId: 'user-2', platform: 'ios' },
+        });
+        expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
+        expect(result.userId).toBe('user-2');
+      });
     });
   });
 

@@ -25,7 +25,6 @@ jest.mock('../../src/api/auth/middleware', () => ({
     };
     next();
   }),
-  requireRole: jest.fn(() => (_req: unknown, _res: unknown, next: () => void): void => next()),
 }));
 
 // Mock the service
@@ -102,6 +101,23 @@ describe('Invitations API', () => {
       expect(response.status).toBe(200);
       expect(mockInvitationService.listInvitations).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'PENDING' }),
+        TEST_USER_ID
+      );
+    });
+
+    it("maps the service's 403 when listing another player's invitations (role matrix B2.4)", async () => {
+      mockInvitationService.listInvitations.mockRejectedValue(
+        new ForbiddenError('You can only view your own invitations')
+      );
+
+      const response = await request(app)
+        .get('/api/v1/invitations')
+        .query({ playerId: TEST_PLAYER_ID });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You can only view your own invitations');
+      expect(mockInvitationService.listInvitations).toHaveBeenCalledWith(
+        expect.objectContaining({ playerId: TEST_PLAYER_ID }),
         TEST_USER_ID
       );
     });

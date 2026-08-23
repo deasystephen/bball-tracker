@@ -14,7 +14,7 @@ import {
   ForbiddenError,
 } from '../utils/errors';
 import { randomBytes } from 'crypto';
-import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
+import { hasTeamPermission, canAccessTeam, isSystemAdmin, getPlayerTeamAccess } from '../utils/permissions';
 import { mailer } from './mailer';
 import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -355,14 +355,22 @@ export class InvitationService {
     }
 
     if (playerId) {
-      // Verify user is requesting their own invitations or has permission
-      if (playerId !== userId) {
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-        });
-
-        if (!user || user.role !== 'COACH') {
-          throw new ForbiddenError('You can only view your own invitations');
+      // Another player's invitations are visible to system ADMINs, to roster
+      // managers of the requested team, or — with no teamId — to roster
+      // managers of a team that player is on, scoped to those teams. The
+      // self-selected global COACH role used to be enough, which let any
+      // user enumerate anyone's invitations (role matrix B2.4).
+      if (playerId !== userId && !(await isSystemAdmin(userId))) {
+        if (teamId) {
+          if (scopeToCaller) {
+            throw new ForbiddenError('You can only view your own invitations');
+          }
+        } else {
+          const { manageableTeamIds } = await getPlayerTeamAccess(userId, playerId);
+          if (manageableTeamIds.length === 0) {
+            throw new ForbiddenError('You can only view your own invitations');
+          }
+          where.teamId = { in: manageableTeamIds };
         }
       }
 

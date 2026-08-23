@@ -91,6 +91,22 @@ const GAME_LIST_INCLUDE = {
 
 export type GameWithTeam = Prisma.GameGetPayload<{ include: typeof GAME_INCLUDE }>;
 export type GameDetail = Prisma.GameGetPayload<{ include: typeof GAME_DETAIL_INCLUDE }>;
+type GameDetailMember = GameDetail['team']['members'][number];
+/**
+ * `GET /games/:id` payload. Mirrors `TeamDetailView`: member `player.email`
+ * is present only when the caller has `canManageRoster` on the game's team
+ * (role matrix B2.5); players and stats-only staff get `{ id, name }`. Staff
+ * emails stay (coach contact info), as on the team detail.
+ */
+export type GameDetailView = Omit<GameDetail, 'team'> & {
+  team: Omit<GameDetail['team'], 'members'> & {
+    members: Array<
+      Omit<GameDetailMember, 'player'> & {
+        player: Omit<GameDetailMember['player'], 'email'> & { email?: string | null };
+      }
+    >;
+  };
+};
 export type GameListItem = Prisma.GameGetPayload<{ include: typeof GAME_LIST_INCLUDE }>;
 
 export interface GameList {
@@ -146,7 +162,7 @@ export class GameService {
    * @param gameId Game ID
    * @param userId User ID (for authorization)
    */
-  static async getGameById(gameId: string, userId: string): Promise<GameDetail> {
+  static async getGameById(gameId: string, userId: string): Promise<GameDetailView> {
     const game = await prisma.game.findUnique({
       where: { id: gameId },
       include: GAME_DETAIL_INCLUDE,
@@ -163,7 +179,23 @@ export class GameService {
       throw new ForbiddenError('You do not have access to this game');
     }
 
-    return game;
+    // Same rule as TeamService.getTeamById: roster managers see member
+    // emails, everyone else gets names only.
+    const canManageRoster = await hasTeamPermission(userId, game.teamId, 'canManageRoster');
+    if (canManageRoster) {
+      return game;
+    }
+
+    return {
+      ...game,
+      team: {
+        ...game.team,
+        members: game.team.members.map(({ player, ...member }) => ({
+          ...member,
+          player: { id: player.id, name: player.name },
+        })),
+      },
+    };
   }
 
   /**
