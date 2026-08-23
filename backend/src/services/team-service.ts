@@ -15,6 +15,7 @@ import {
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import {
   hasTeamPermission,
+  getTeamPermissions,
   canAccessTeam,
   isSystemAdmin,
   isLeagueAdmin,
@@ -111,6 +112,19 @@ const TEAM_ROLE_INCLUDE = {
 
 export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>;
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
+type TeamDetailMember = TeamDetail['members'][number];
+/**
+ * `GET /teams/:id` payload. Member `player.email` is present only when the
+ * caller has `canManageRoster` on the team (audit #80); other callers get
+ * `{ id, name }` for each member's player.
+ */
+export type TeamDetailView = Omit<TeamDetail, 'members'> & {
+  members: Array<
+    Omit<TeamDetailMember, 'player'> & {
+      player: Omit<TeamDetailMember['player'], 'email'> & { email?: string | null };
+    }
+  >;
+};
 export type TeamListItem = Prisma.TeamGetPayload<{ include: typeof TEAM_LIST_INCLUDE }>;
 export type TeamMemberWithRelations = Prisma.TeamMemberGetPayload<{
   include: typeof TEAM_MEMBER_INCLUDE;
@@ -190,7 +204,7 @@ export class TeamService {
    * @param teamId Team ID
    * @param userId User ID (for authorization)
    */
-  static async getTeamById(teamId: string, userId: string): Promise<TeamDetail> {
+  static async getTeamById(teamId: string, userId: string): Promise<TeamDetailView> {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
       include: TEAM_DETAIL_INCLUDE,
@@ -207,7 +221,20 @@ export class TeamService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    return team;
+    // Roster managers (head/assistant coach, league admin, system admin) see
+    // member emails; everyone else (players, stats-only staff) gets names only.
+    const permissions = await getTeamPermissions(userId, teamId);
+    if (permissions.canManageRoster) {
+      return team;
+    }
+
+    return {
+      ...team,
+      members: team.members.map(({ player, ...member }) => ({
+        ...member,
+        player: { id: player.id, name: player.name },
+      })),
+    };
   }
 
   /**
@@ -216,67 +243,36 @@ export class TeamService {
    * @param userId User ID (for filtering by access)
    */
   static async listTeams(query: TeamQueryParams, userId: string): Promise<TeamList> {
-    // Build where clause
-    const where: Prisma.TeamWhereInput = {};
+    // Every clause is ANDed: the caller's access restriction always applies,
+    // regardless of which optional filters are supplied (audit #11).
+    const conditions: Prisma.TeamWhereInput[] = [];
 
     if (query.seasonId) {
-      where.seasonId = query.seasonId;
+      conditions.push({ seasonId: query.seasonId });
     }
 
     if (query.leagueId) {
-      where.season = {
-        leagueId: query.leagueId,
-      };
+      conditions.push({ season: { leagueId: query.leagueId } });
     }
 
     if (query.playerId) {
-      where.members = {
-        some: {
-          playerId: query.playerId,
-        },
-      };
+      conditions.push({ members: { some: { playerId: query.playerId } } });
     }
 
-    // Check if user is system admin (can see all teams)
+    // System admins see all teams; everyone else only teams they staff, play
+    // on, or administer via the league.
     const isSysAdmin = await isSystemAdmin(userId);
-
-    // Filter by user access (staff or team member) unless admin
-    if (!isSysAdmin && !query.seasonId && !query.leagueId && !query.playerId) {
-      const userTeams = await prisma.team.findMany({
-        where: {
-          OR: [
-            {
-              staff: {
-                some: {
-                  userId,
-                },
-              },
-            },
-            {
-              members: {
-                some: {
-                  playerId: userId,
-                },
-              },
-            },
-          ],
-        },
-        select: { id: true },
+    if (!isSysAdmin) {
+      conditions.push({
+        OR: [
+          { staff: { some: { userId } } },
+          { members: { some: { playerId: userId } } },
+          { season: { league: { admins: { some: { userId } } } } },
+        ],
       });
-
-      const teamIds = userTeams.map((team) => team.id);
-      if (teamIds.length > 0) {
-        where.id = { in: teamIds };
-      } else {
-        // User has no teams, return empty result
-        return {
-          teams: [],
-          total: 0,
-          limit: query.limit,
-          offset: query.offset,
-        };
-      }
     }
+
+    const where: Prisma.TeamWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
     // Get total count and teams in parallel
     const [total, teams] = await Promise.all([
@@ -326,7 +322,9 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to update this team');
     }
 
-    // If seasonId is being updated, verify new season exists
+    // If seasonId is being updated, verify the new season exists and that the
+    // caller administers its league. Moving a team re-parents it under another
+    // league's admins, so team-level canManageTeam is not enough (audit #13).
     if (data.seasonId && data.seasonId !== team.seasonId) {
       const season = await prisma.season.findUnique({
         where: { id: data.seasonId },
@@ -334,6 +332,13 @@ export class TeamService {
 
       if (!season) {
         throw new NotFoundError('Season not found');
+      }
+
+      const canMoveIntoLeague = await isLeagueAdmin(userId, season.leagueId);
+      if (!canMoveIntoLeague) {
+        throw new ForbiddenError(
+          'You do not have permission to move this team into that season'
+        );
       }
     }
 

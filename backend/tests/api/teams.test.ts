@@ -262,6 +262,27 @@ describe('Teams API', () => {
       );
     });
 
+    it('should filter teams by playerId and still pass the caller id for access scoping', async () => {
+      mockTeamService.listTeams.mockResolvedValue({
+        teams: [],
+        total: 0,
+        limit: 20,
+        offset: 0,
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
+
+      const otherPlayerId = 'b2c3d4e5-f6a7-4901-b345-67890abcdef0';
+      const response = await request(app)
+        .get('/api/v1/teams')
+        .query({ playerId: otherPlayerId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.teams).toEqual([]);
+      expect(mockTeamService.listTeams).toHaveBeenCalledWith(
+        expect.objectContaining({ playerId: otherPlayerId }),
+        TEST_USER_ID
+      );
+    });
+
     it('should filter teams by seasonId', async () => {
       mockTeamService.listTeams.mockResolvedValue({
         teams: [mockTeam],
@@ -308,6 +329,22 @@ describe('Teams API', () => {
       expect(response.status).toBe(403);
       expect(response.body.error).toBe('Access denied');
     });
+
+    it('should pass through a member list without emails unchanged (non-manager view)', async () => {
+      mockTeamService.getTeamById.mockResolvedValue({
+        ...mockTeam,
+        members: [
+          { playerId: 'p-1', jerseyNumber: 7, player: { id: 'p-1', name: 'Player One' } },
+        ],
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.getTeamById>>);
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.getTeamById).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
+      expect(response.body.team.members[0].player).toEqual({ id: 'p-1', name: 'Player One' });
+      expect(response.body.team.members[0].player.email).toBeUndefined();
+    });
   });
 
   describe('PATCH /api/v1/teams/:id', () => {
@@ -350,6 +387,24 @@ describe('Teams API', () => {
         .send({ name: 'New Name' });
 
       expect(response.status).toBe(403);
+    });
+
+    it('should return 403 when moving the team into a season whose league the caller does not administer', async () => {
+      mockTeamService.updateTeam.mockRejectedValue(
+        new ForbiddenError('You do not have permission to move this team into that season')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('You do not have permission to move this team into that season');
+      expect(mockTeamService.updateTeam).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ seasonId: TEST_SEASON_ID }),
+        TEST_USER_ID
+      );
     });
 
     it('should update chatLink', async () => {
