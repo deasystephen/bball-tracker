@@ -12,9 +12,9 @@ the deferral list current, and post a daily summary comment on the rolling
 > by the egress proxy), so it fell back to `npm audit` and over-deferred
 > override-fixable transitives. Moved to GitHub Actions in PR #335 so the job
 > runs where `gh`, `GITHUB_TOKEN`, and a scoped PAT all work. The hosted
-> routine was paused (`enabled: false`) on 2026-08-24 after three green
-> scheduled Actions runs (Aug 21–23); the Actions workflow is now the only
-> scanner.
+> routine was retired on 2026-08-24 — paused after three green scheduled
+> Actions runs (Aug 21–23), then deleted from claude.ai/code/routines; the
+> Actions workflow is now the only scanner.
 
 ## Schedule
 
@@ -78,9 +78,9 @@ are pinned to commit SHAs.
 7. ✅ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan`
    (in place — the alerts snapshot step works; keep a calendar reminder for
    the ≤90-day PAT expiry).
-8. ✅ Hosted routine paused 2026-08-24 (`enabled: false` on
-   `trig_01JNQaGi6W2wGKdKA961kUYT`) after verifying three green scheduled
-   Actions runs (Aug 21–23) and duplicate daily log comments on #276.
+8. ✅ Hosted routine (`trig_01JNQaGi6W2wGKdKA961kUYT`) retired 2026-08-24 —
+   paused after verifying three green scheduled Actions runs (Aug 21–23) and
+   duplicate daily log comments on #276, then deleted in the claude.ai UI.
 
 ## Updating the deferral list
 
