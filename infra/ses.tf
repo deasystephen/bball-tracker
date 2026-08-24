@@ -63,11 +63,21 @@ resource "aws_route53_record" "ses_spf" {
 # IAM policy — allows the ECS task role to send via SES
 # =============================================================================
 
+# While the account is in the SES sandbox, SendEmail is authorized against the
+# recipient's verified identity ARN as well as the sender's, so the resource
+# must cover all identities; the FromAddress condition keeps the grant scoped
+# to our sending domain.
 data "aws_iam_policy_document" "ses_send" {
   statement {
     effect    = "Allow"
     actions   = ["ses:SendEmail", "ses:SendRawEmail"]
-    resources = [aws_sesv2_email_identity.mail.arn]
+    resources = ["arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*"]
+
+    condition {
+      test     = "StringLike"
+      variable = "ses:FromAddress"
+      values   = ["*@mail.${var.domain_name}"]
+    }
   }
 }
 
