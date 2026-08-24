@@ -11,7 +11,10 @@ the deferral list current, and post a daily summary comment on the rolling
 > the Dependabot alerts API (no `gh` on most runs; raw `api.github.com` blocked
 > by the egress proxy), so it fell back to `npm audit` and over-deferred
 > override-fixable transitives. Moved to GitHub Actions in PR #335 so the job
-> runs where `gh`, `GITHUB_TOKEN`, and a scoped PAT all work.
+> runs where `gh`, `GITHUB_TOKEN`, and a scoped PAT all work. The hosted
+> routine was paused (`enabled: false`) on 2026-08-24 after three green
+> scheduled Actions runs (Aug 21–23); the Actions workflow is now the only
+> scanner.
 
 ## Schedule
 
@@ -70,11 +73,14 @@ are pinned to commit SHAs.
 3. ✅ Claude GitHub App installed with contents / issues / pull-requests write.
 4. ✅ Repo Watch with Issues notifications + "Include your own updates".
 5. ✅ `upgrade-scan` Environment exists with branch rule `main` (created 2026-08-20 via API).
-6. ⬜ `CLAUDE_CODE_OAUTH_TOKEN` **environment** secret on `upgrade-scan`.
-7. ⬜ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan` (calendar reminder for expiry).
-8. ⬜ After a few green Actions runs: pause/delete the hosted routine via
-   `/schedule` so the two don't race (both are idempotent against open PRs,
-   but you'd get two log comments a day).
+6. ✅ `CLAUDE_CODE_OAUTH_TOKEN` **environment** secret on `upgrade-scan`
+   (in place — scheduled runs green since 2026-08-21).
+7. ✅ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan`
+   (in place — the alerts snapshot step works; keep a calendar reminder for
+   the ≤90-day PAT expiry).
+8. ✅ Hosted routine paused 2026-08-24 (`enabled: false` on
+   `trig_01JNQaGi6W2wGKdKA961kUYT`) after verifying three green scheduled
+   Actions runs (Aug 21–23) and duplicate daily log comments on #276.
 
 ## Updating the deferral list
 
