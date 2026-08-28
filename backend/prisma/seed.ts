@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType, SubscriptionTier } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -66,6 +67,15 @@ async function createDefaultTeamRoles(teamId: string) {
 }
 
 async function main() {
+  // Seed data includes live bearer secrets (invitation tokens honored by the
+  // UNAUTHENTICATED /invitations/by-token routes in every environment), so
+  // never run against production (pre-landing review, security specialist).
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
+    throw new Error(
+      'Refusing to seed with NODE_ENV=production. Set SEED_ALLOW_PRODUCTION=true only if you really mean it.'
+    );
+  }
+
   console.log('Seeding database...\n');
 
   // =========================================================================
@@ -512,7 +522,6 @@ async function main() {
       jersey: 21,
       status: 'PENDING' as const,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      token: 'seed-token-lakers-invited',
     },
     {
       id: 'managed-lakers-expired',
@@ -521,7 +530,6 @@ async function main() {
       jersey: 22,
       status: 'PENDING' as const,
       expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      token: 'seed-token-lakers-expired',
     },
     {
       id: 'managed-lakers-webaccept',
@@ -530,7 +538,6 @@ async function main() {
       jersey: 24,
       status: 'ACCEPTED' as const,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      token: 'seed-token-lakers-webaccept',
     },
   ];
 
@@ -559,19 +566,29 @@ async function main() {
       },
     });
 
-    await prisma.teamInvitation.upsert({
-      where: { token: fixture.token },
-      update: { status: fixture.status, expiresAt: fixture.expiresAt },
-      create: {
-        teamId: lakers.id,
-        playerId: fixturePlayer.id,
-        invitedById: coachFrank.id,
-        token: fixture.token,
-        status: fixture.status,
-        expiresAt: fixture.expiresAt,
-        ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
-      },
+    // Random token per run — the fixtures are asserted by name/chip, never by
+    // token, and a committed bearer secret must not exist (security review).
+    const existingFixtureInvite = await prisma.teamInvitation.findFirst({
+      where: { teamId: lakers.id, playerId: fixturePlayer.id },
     });
+    if (existingFixtureInvite) {
+      await prisma.teamInvitation.update({
+        where: { id: existingFixtureInvite.id },
+        data: { status: fixture.status, expiresAt: fixture.expiresAt },
+      });
+    } else {
+      await prisma.teamInvitation.create({
+        data: {
+          teamId: lakers.id,
+          playerId: fixturePlayer.id,
+          invitedById: coachFrank.id,
+          token: randomBytes(32).toString('base64url'),
+          status: fixture.status,
+          expiresAt: fixture.expiresAt,
+          ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
+        },
+      });
+    }
     console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
   }
 
