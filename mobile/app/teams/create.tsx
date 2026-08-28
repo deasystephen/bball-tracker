@@ -108,7 +108,9 @@ export default function CreateTeamScreen() {
       });
 
       toast.showToast('Team created successfully', 'success');
-      router.push(`/teams/${team.id}`);
+      // Replace so the spent create form isn't left under the detail screen
+      // (back should return to the Teams tab, matching games/create).
+      router.replace(`/teams/${team.id}`);
     } catch (error) {
       // 402 upgrade_required: FREE-tier team cap (see CLAUDE.md "Usage Metering").
       Alert.alert(
