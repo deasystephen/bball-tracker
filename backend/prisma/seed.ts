@@ -500,6 +500,81 @@ async function main() {
     console.log(`    Added managed player: ${mp.name} (#${mp.jersey}) to Lakers`);
   }
 
+  // Lakers invite-status fixtures (roster/invite unification spec): one
+  // rostered managed player per chip state so Maestro/manual QA can assert
+  // Invited / Invite expired / Active-via-web-accept deterministically.
+  // (Marcus/Ethan above cover "Not invited"; claimed players cover "Active".)
+  const inviteStateFixtures = [
+    {
+      id: 'managed-lakers-invited',
+      name: 'Iris Invited',
+      email: 'iris.invited@example.com',
+      jersey: 21,
+      status: 'PENDING' as const,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      token: 'seed-token-lakers-invited',
+    },
+    {
+      id: 'managed-lakers-expired',
+      name: 'Xander Expired',
+      email: 'xander.expired@example.com',
+      jersey: 22,
+      status: 'PENDING' as const,
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      token: 'seed-token-lakers-expired',
+    },
+    {
+      id: 'managed-lakers-webaccept',
+      name: 'Wendy WebAccept',
+      email: 'wendy.webaccept@example.com',
+      jersey: 24,
+      status: 'ACCEPTED' as const,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      token: 'seed-token-lakers-webaccept',
+    },
+  ];
+
+  for (const fixture of inviteStateFixtures) {
+    const fixturePlayer = await prisma.user.upsert({
+      where: { id: fixture.id },
+      update: {},
+      create: {
+        id: fixture.id,
+        name: fixture.name,
+        email: fixture.email,
+        role: UserRole.PLAYER,
+        // Rostered-at-creation case 2: coach-managed until claimed
+        isManaged: true,
+        managedById: coachFrank.id,
+      },
+    });
+
+    await prisma.teamMember.upsert({
+      where: { teamId_playerId: { teamId: lakers.id, playerId: fixturePlayer.id } },
+      update: {},
+      create: {
+        teamId: lakers.id,
+        playerId: fixturePlayer.id,
+        jerseyNumber: fixture.jersey,
+      },
+    });
+
+    await prisma.teamInvitation.upsert({
+      where: { token: fixture.token },
+      update: { status: fixture.status, expiresAt: fixture.expiresAt },
+      create: {
+        teamId: lakers.id,
+        playerId: fixturePlayer.id,
+        invitedById: coachFrank.id,
+        token: fixture.token,
+        status: fixture.status,
+        expiresAt: fixture.expiresAt,
+        ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
+      },
+    });
+    console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
+  }
+
   // =========================================================================
   // GAMES
   // =========================================================================

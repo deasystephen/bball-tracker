@@ -1,0 +1,64 @@
+appId: com.bballtracker.mobile
+---
+# Roster invite-status chips (roster/invite unification spec): the Lakers
+# roster is seeded with one player per chip state — Iris Invited (live
+# PENDING), Xander Expired (lapsed PENDING), Wendy WebAccept (ACCEPTED,
+# never signed in → Active), Marcus Johnson (no invite → Not invited).
+# Frank Vogel (head coach) sees chips + resend/cancel actions.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers roster
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Add Player"
+- assertVisible: "Roster"
+
+# Chip states, one per seeded fixture
+- scrollUntilVisible:
+    element:
+      text: "Iris Invited"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Invited"
+- scrollUntilVisible:
+    element:
+      text: "Xander Expired"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Invite expired"
+- scrollUntilVisible:
+    element:
+      text: "Wendy WebAccept"
+    direction: DOWN
+    timeout: 10000
+# Accepted via web link, never signed in — must read Active, never Not invited
+- assertVisible: "Active"
+- scrollUntilVisible:
+    element:
+      text: "Marcus Johnson"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Not invited"
+
+# Invite lifecycle actions render only where they apply (accessibility labels)
+- assertVisible: "Resend invitation: Iris Invited"
+- assertVisible: "Cancel invitation: Iris Invited"
+- assertVisible: "Resend invitation: Xander Expired"
+- assertNotVisible: "Cancel invitation: Xander Expired"
+- assertNotVisible: "Cancel invitation: Wendy WebAccept"

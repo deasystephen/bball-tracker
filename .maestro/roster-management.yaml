@@ -1,6 +1,9 @@
 appId: com.bballtracker.mobile
 ---
-# Roster Management: Navigate to team → Add roster player → Verify in roster
+# Roster Management (unified Add Player, roster/invite unification spec):
+# Navigate to team → Add Player (name only) → player visible immediately with
+# a "Not invited" chip. The old two-button split (Create New Player /
+# Add Roster Player) is gone — one form, email decides whether an invite goes.
 - launchApp:
     clearState: true
 - tapOn: "Skip"
@@ -32,27 +35,32 @@ appId: com.bballtracker.mobile
 - assertVisible: "Roster"
 - assertVisible: "Invite Player"
 
-# Switch to Add Roster Player mode
-- tapOn: "Add Roster Player"
-- assertVisible: "Add Roster Player"
-
-# Fill in roster player details - tap to focus each input first
+# Open the unified Add Player form
 - tapOn:
-    id: "roster-player-name-input"
+    id: "add-player-button"
+- assertVisible: "Add Player"
+- assertVisible: "Player Email (optional)"
+- assertVisible: "Parent/Guardian Email (optional)"
+
+# Name-only add (case 1 — roster-only managed player, no invite)
+- tapOn:
+    id: "add-player-name-input"
 - inputText: "E2E Test Player"
 - tapOn:
-    id: "roster-jersey-input"
+    id: "add-player-jersey-input"
 - inputText: "99"
 
-# Dismiss keyboard so the Add to Roster button is tappable
+# Dismiss keyboard so the submit button is tappable
 - hideKeyboard
 
-# Submit the roster player
-- tapOn: "Add to Roster"
+# Submit
+- tapOn:
+    id: "add-player-submit"
 
-# Scroll down to see the player in the Current Players list
+# The player appears on the roster IMMEDIATELY with the "Not invited" chip
 - scrollUntilVisible:
     element:
       text: "E2E Test Player"
     direction: DOWN
     timeout: 10000
+- assertVisible: "Not invited"
