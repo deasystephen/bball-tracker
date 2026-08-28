@@ -34,7 +34,8 @@ export default {
     splash: {
       image: './assets/splash-icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#1A3A5C',
+      // Hooplings brand navy — matches the icon ground (assets/brand/icon.svg)
+      backgroundColor: '#1C2742',
     },
     ios: {
       supportsTablet: true,
@@ -53,7 +54,8 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#ffffff',
+        // Hooplings brand navy — the foreground is the transparent capy sticker
+        backgroundColor: '#1C2742',
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,

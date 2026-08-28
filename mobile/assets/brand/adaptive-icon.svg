@@ -1,0 +1,29 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Android adaptive-icon foreground: the capy sticker scaled 0.72 about the
+       canvas center so all features sit inside the guaranteed-visible safe-zone
+       circle (~61% of the canvas). Background color lives in app.config.js
+       (android.adaptiveIcon.backgroundColor = #1C2742). -->
+  <defs>
+    <clipPath id="ahead">
+      <path d="M192 542 Q192 330 384 330 L640 330 Q832 330 832 542 L832 750 Q832 890 692 890 L332 890 Q192 890 192 750 Z"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(143.36 143.36) scale(0.72)">
+    <circle cx="306" cy="366" r="86" fill="#9C6B47"/>
+    <circle cx="718" cy="366" r="86" fill="#9C6B47"/>
+    <circle cx="306" cy="356" r="42" fill="#7E5233"/>
+    <circle cx="718" cy="356" r="42" fill="#7E5233"/>
+    <path d="M192 542 Q192 330 384 330 L640 330 Q832 330 832 542 L832 750 Q832 890 692 890 L332 890 Q192 890 192 750 Z" fill="#B9885C"/>
+    <g clip-path="url(#ahead)">
+      <rect x="150" y="416" width="724" height="122" fill="#E8702A"/>
+      <rect x="150" y="512" width="724" height="26" fill="#C85F1D"/>
+      <path d="M356 706 Q356 638 452 638 L572 638 Q668 638 668 706 L668 1024 L356 1024 Z" fill="#C99C6E"/>
+    </g>
+    <ellipse cx="352" cy="622" rx="31" ry="38" fill="#2E2015"/>
+    <ellipse cx="672" cy="622" rx="31" ry="38" fill="#2E2015"/>
+    <circle cx="362" cy="608" r="9" fill="#F6EFE6" opacity="0.9"/>
+    <circle cx="682" cy="608" r="9" fill="#F6EFE6" opacity="0.9"/>
+    <ellipse cx="478" cy="768" rx="16" ry="27" fill="#2E2015" transform="rotate(-15 478 768)"/>
+    <ellipse cx="546" cy="768" rx="16" ry="27" fill="#2E2015" transform="rotate(15 546 768)"/>
+  </g>
+</svg>
