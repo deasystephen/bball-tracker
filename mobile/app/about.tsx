@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
+import { requireOptionalNativeModule } from 'expo';
 import { ThemedView, ThemedText, Card, Button } from '../components';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
@@ -28,6 +29,8 @@ export const APP_NAME = 'Basketball Tracker';
 
 export interface AboutInfo {
   appVersion: string;
+  /** Native build number (TestFlight "#28" etc.); null on binaries without expo-application. */
+  buildNumber: string | null;
   runtimeVersion: string | null;
   updateId: string | null;
   updatePublishedAt: Date | null;
@@ -35,7 +38,21 @@ export interface AboutInfo {
   isEmbedded: boolean;
 }
 
-/** Snapshot the expo-constants / expo-updates fields the screen renders. */
+/**
+ * The native build number comes from expo-application, which first ships in
+ * the build cut after 2026-08-28. OTAs on runtime 1.2.0 still reach build #27
+ * (no such module), so probe the native module like `services/secure-storage`
+ * does — never import the JS wrapper, which would crash the older binary.
+ */
+function getNativeBuildNumber(): string | null {
+  const mod = requireOptionalNativeModule<{ nativeBuildVersion?: string | number | null }>(
+    'ExpoApplication'
+  );
+  const build = mod?.nativeBuildVersion;
+  return build == null ? null : String(build);
+}
+
+/** Snapshot the expo-constants / expo-updates / expo-application fields the screen renders. */
 export function getAboutInfo(): AboutInfo {
   const runtime = Updates.runtimeVersion ?? Constants.expoConfig?.version ?? null;
   // In a dev client expo-updates is disabled: no update ever applies, so the
@@ -43,6 +60,7 @@ export function getAboutInfo(): AboutInfo {
   const isEmbedded = !Updates.isEnabled || Updates.isEmbeddedLaunch || !Updates.updateId;
   return {
     appVersion: Constants.expoConfig?.version ?? 'unknown',
+    buildNumber: getNativeBuildNumber(),
     runtimeVersion: runtime,
     updateId: isEmbedded ? null : Updates.updateId,
     updatePublishedAt: isEmbedded ? null : (Updates.createdAt ?? null),
@@ -51,9 +69,13 @@ export function getAboutInfo(): AboutInfo {
   };
 }
 
+export function formatAppVersion(info: AboutInfo): string {
+  return info.buildNumber ? `v${info.appVersion} (build ${info.buildNumber})` : `v${info.appVersion}`;
+}
+
 export function formatAboutDiagnostics(info: AboutInfo): string {
   return [
-    `${APP_NAME} v${info.appVersion}`,
+    `${APP_NAME} ${formatAppVersion(info)}`,
     `Runtime version: ${info.runtimeVersion ?? 'unknown'}`,
     info.isEmbedded
       ? 'Update: embedded build (no OTA applied)'
@@ -78,7 +100,7 @@ export default function AboutScreen() {
   };
 
   const rows: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
-    { icon: 'pricetag', label: 'App version', value: `v${info.appVersion}` },
+    { icon: 'pricetag', label: 'App version', value: formatAppVersion(info) },
     { icon: 'layers', label: 'Runtime version', value: info.runtimeVersion ?? 'unknown' },
     {
       icon: 'cloud-download',
