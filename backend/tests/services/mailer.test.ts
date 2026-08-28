@@ -208,6 +208,43 @@ describe('invitationTemplate', () => {
     expect(html).toContain('Open the CapyHoops app');
   });
 
+  describe("variant: 'added' (roster/invite unification — player rostered at creation)", () => {
+    const addedVars = { ...vars, variant: 'added' };
+
+    it('subject says added, not invited', () => {
+      const subject = invitationTemplate.subject(addedVars);
+      expect(subject).toBe("You've been added to Bulls");
+      expect(subject).not.toContain('invited');
+    });
+
+    it('html uses the added heading, intro and Activate Access CTA', () => {
+      const html = invitationTemplate.html(addedVars);
+      expect(html).toContain("You've been added to Bulls!");
+      expect(html).toContain('added you to the roster');
+      expect(html).toContain('Activate Access');
+      expect(html).not.toContain('invited to join');
+      expect(html).not.toContain('Accept Invitation');
+    });
+
+    it('html escapes the team name inside the added intro', () => {
+      const html = invitationTemplate.html({ ...addedVars, teamName: '<b>Bulls</b>' });
+      expect(html).toContain('&lt;b&gt;Bulls&lt;/b&gt;');
+      expect(html).not.toContain('<b>Bulls</b>');
+    });
+
+    it('text uses the added copy and activate wording', () => {
+      const text = invitationTemplate.text(addedVars);
+      expect(text).toContain("You've been added to Bulls!");
+      expect(text).toContain('Activate your access');
+      expect(text).not.toContain('invited to join');
+    });
+
+    it('default (no variant) keeps the classic invited copy', () => {
+      expect(invitationTemplate.subject(vars)).toContain('invited to join');
+      expect(invitationTemplate.html(vars)).toContain('Accept Invitation');
+    });
+  });
+
   it('text includes all key fields', () => {
     const text = invitationTemplate.text(vars);
     expect(text).toContain('Bulls');

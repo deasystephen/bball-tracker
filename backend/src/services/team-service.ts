@@ -98,6 +98,11 @@ const TEAM_DETAIL_INCLUDE = {
       expiresAt: true,
       createdAt: true,
     },
+    // PENDING is bounded by the partial unique index; ACCEPTED accumulates
+    // over a team's lifetime, so cap the join far above any realistic roster
+    // history (newest first — exactly what the chips need).
+    orderBy: { createdAt: 'desc' as const },
+    take: 200,
   },
 } satisfies Prisma.TeamInclude;
 
@@ -301,7 +306,14 @@ export class TeamService {
     // management information, same rule as emails (audit #80).
     const permissions = await getTeamPermissions(userId, teamId);
     if (permissions.canManageRoster) {
-      return team;
+      // Per the unification spec, the payload carries invite statuses for
+      // ROSTERED players only; case-3 (existing-account, not-yet-member)
+      // invites come from GET /invitations?teamId= client-side (red-team RT7).
+      const memberIds = new Set(team.members.map((m) => m.playerId));
+      return {
+        ...team,
+        invitations: team.invitations.filter((inv) => memberIds.has(inv.playerId)),
+      };
     }
 
     return {

@@ -234,6 +234,7 @@ describe('TeamService', () => {
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
         members: [],
         games: [],
+        invitations: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
@@ -261,6 +262,7 @@ describe('TeamService', () => {
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
         members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
+        invitations: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);

@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { GuardianRelationship } from '@prisma/client';
+import { safeUrlSchema } from '../auth/schemas';
 
 /**
  * Schema for creating a new team
@@ -132,13 +133,7 @@ export const addRosterPlayerSchema = z
       .optional(),
     jerseyNumber: z.number().int().min(0).max(99).optional(),
     position: z.string().max(50).optional(),
-    profilePictureUrl: z
-      .string()
-      .url()
-      .refine((url) => url.startsWith('https://') || url.startsWith('http://'), {
-        message: 'URL must use http or https protocol',
-      })
-      .optional(),
+    profilePictureUrl: safeUrlSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.guardianEmail && !data.guardianRelationship) {

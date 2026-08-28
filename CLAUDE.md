@@ -430,15 +430,33 @@ eng-review amendments recorded there).
   live PENDING row and creates a fresh one (new token — the old link dies) in the same code path
   as create. With `supersede` an existing **member** is allowed (a rostered case-2 player);
   a claimed account that is already a member answers 400 `Player already has access to this team`.
-  Resend/"Invite" actions must only target PENDING rows client-side.
+  Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
+  not one transaction, so a lost create race on the partial unique index (double-tap resend) maps
+  P2002 → 400 `A pending invitation already exists for this player` (`createInvitationRow`), never 500.
 - **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
   (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
   "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,
   audit #58) unchanged.
-- **Reject/cancel strip the unclaimed email (consent, spec T1):** the REJECTED/CANCELLED
-  transition also nulls `User.email` when `workosUserId` is null and no other PENDING invitation
-  references the player — otherwise `syncUser`'s claim-by-email turns a later, unrelated sign-up
-  into silent team membership. The roster entry survives (D1) as a plain managed player.
+- **Rejection strips the unclaimed email (consent, spec T1 as narrowed by ship review):** only
+  the invitee's explicit REJECTED transition nulls `User.email` (guarded: `workosUserId` null and
+  no other PENDING **or ACCEPTED** invitation references the player) — otherwise `syncUser`'s
+  claim-by-email turns a later, unrelated sign-up into silent team membership. The roster entry
+  survives (D1). **Deliberately not stripped** on CANCEL (a coach's action must not destroy
+  coach/admin-entered emails; re-inviting would orphan the row into a duplicate account) or on
+  EXPIRY (resend needs the address; the invite email already informed that mailbox).
+- **Email matching is case-insensitive and new accounts store lowercase** (red-team RT1):
+  WorkOS normalizes to lowercase and `syncUser` claims by exact match, so all invite/add flows
+  look up with `mode: 'insensitive'` and create with `trim().toLowerCase()` — a mixed-case entry
+  must never create an unclaimable duplicate or bypass the case-3 consent branch.
+- **Supersede is atomic** (red-team RT2): `createInvitationRowSuperseding` expires the live
+  PENDING row and creates its replacement in ONE transaction (an ACCEPTED row appearing in the
+  window → 400, never a chip regression); a superseding resend for a rostered case-2 player uses
+  the "added" email variant. The case-2 managed-flags write is claim-guarded
+  (`updateMany WHERE workosUserId IS NULL`; zero rows → the add re-branches to case 3, RT4).
+- The `GET /teams/:id` invitations join carries **rostered players only** (case-3 invites come
+  from `GET /invitations?teamId=` client-side, per the spec), newest-first with a `take: 200`
+  guard. Awaited invite/guardian email sends are bounded at 5s (`utils/promise-timeout.ts`) so
+  routes stay under the mobile client's 10s timeout.
 - The invitation email template branches on `variant`: `'added'` (cases 1-2, "You've been added…
   activate your access") vs default "invited to join" (case 3 + deprecated arm).
 - `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random

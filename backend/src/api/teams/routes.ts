@@ -236,6 +236,9 @@ router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) =
     res.status(201).json({
       success: true,
       ...result,
+      // Defense in depth (audit #14): the service already returns token-free
+      // summaries; strip again at the route like every invitation route.
+      invitation: result.invitation && omitToken(result.invitation),
     });
   } catch (error) {
     logger.error('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });

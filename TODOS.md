@@ -1,7 +1,10 @@
 # TODOS
 
-## Invite-funnel analytics events
+## Mobile / Analytics
 
+### Invite-funnel analytics events
+
+- **Priority:** P3
 - **What:** Emit analytics events from the invitation lifecycle: `invite_sent`, `invite_resent`,
   `invite_accepted`, `invite_claimed_via_login`.
 - **Why:** The roster/invite unification (docs/plans/roster-invite-unification-spec.md) redesigned
@@ -16,3 +19,7 @@
   that linked a pre-provisioned row) — `GET /auth/callback` already knows (`wasManaged`).
 - **Depends on / blocked by:** Nothing; land any time after the unification's mobile PR.
 - **Origin:** /plan-eng-review of the roster-invite unification spec, 2026-08-27.
+
+## Completed
+
+_(none yet)_

@@ -581,6 +581,31 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(403);
     });
+
+    it('maps NotFound to 404, BadRequest to 400 and unknown throws to a generic 500', async () => {
+      mockInvitationService.addRosterPlayer.mockRejectedValueOnce(new NotFoundError('Team not found'));
+      let response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane' });
+      expect(response.status).toBe(404);
+
+      mockInvitationService.addRosterPlayer.mockRejectedValueOnce(
+        new BadRequestError('Player is already on this team')
+      );
+      response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane' });
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Player is already on this team');
+
+      mockInvitationService.addRosterPlayer.mockRejectedValueOnce(new Error('db exploded: secret detail'));
+      response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane' });
+      expect(response.status).toBe(500);
+      // Internal detail never reaches the client
+      expect(response.body.error).toBe('Failed to add player');
+    });
   });
 
   describe('POST /api/v1/teams/:teamId/invitations', () => {

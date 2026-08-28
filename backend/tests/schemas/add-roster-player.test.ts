@@ -80,6 +80,18 @@ describe('addRosterPlayerSchema', () => {
     expect(addRosterPlayerSchema.safeParse({ name: 'Kid', jerseyNumber: 100 }).success).toBe(false);
   });
 
+  it('accepts http/https profile picture URLs and rejects other protocols', () => {
+    expect(
+      addRosterPlayerSchema.safeParse({ name: 'Kid', profilePictureUrl: 'https://cdn.example.com/p.jpg' }).success
+    ).toBe(true);
+    expect(
+      addRosterPlayerSchema.safeParse({ name: 'Kid', profilePictureUrl: 'ftp://example.com/p.jpg' }).success
+    ).toBe(false);
+    expect(
+      addRosterPlayerSchema.safeParse({ name: 'Kid', profilePictureUrl: 'not-a-url' }).success
+    ).toBe(false);
+  });
+
   it('trims the emails and name', () => {
     const result = addRosterPlayerSchema.safeParse({
       name: '  Jane Hooper  ',
