@@ -84,6 +84,21 @@ const TEAM_DETAIL_INCLUDE = {
     },
     take: 10, // Latest 10 games
   },
+  // Invite-status chips (roster/invite unification spec): PENDING drives the
+  // Invited / Invite expired chips, ACCEPTED marks a player who accepted via
+  // the public web link but has never signed in (isManaged is still true for
+  // them, so isManaged alone would read "Not invited"). Never select `token`
+  // here — it is a bearer secret (audit #14).
+  invitations: {
+    where: { status: { in: ['PENDING', 'ACCEPTED'] } },
+    select: {
+      id: true,
+      playerId: true,
+      status: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  },
 } satisfies Prisma.TeamInclude;
 
 const TEAM_LIST_INCLUDE = {
@@ -281,7 +296,9 @@ export class TeamService {
     }
 
     // Roster managers (head/assistant coach, league admin, system admin) see
-    // member emails; everyone else (players, stats-only staff) gets names only.
+    // member emails and invite statuses; everyone else (players, stats-only
+    // staff) gets names only — a teammate's invitation state is roster-
+    // management information, same rule as emails (audit #80).
     const permissions = await getTeamPermissions(userId, teamId);
     if (permissions.canManageRoster) {
       return team;
@@ -289,6 +306,7 @@ export class TeamService {
 
     return {
       ...team,
+      invitations: [],
       members: team.members.map(({ player, ...member }) => ({
         ...member,
         player: { id: player.id, name: player.name, isManaged: player.isManaged },

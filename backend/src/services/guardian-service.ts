@@ -227,7 +227,7 @@ export class GuardianService {
     playerId: string,
     data: InviteGuardianInput,
     userId: string
-  ): Promise<GuardianInvitationSummary> {
+  ): Promise<GuardianInvitationSummary & { emailSent: boolean }> {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
       select: { id: true, name: true },
@@ -317,8 +317,13 @@ export class GuardianService {
 
     const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
     const acceptUrl = `${baseUrl}/invite/${token}`;
-    mailer
-      .send({
+    // Awaited so callers can surface a failed send to the coach (unification
+    // spec: silent email failures were invisible, SES-sandbox incident
+    // 2026-08-28). Failures are logged and reported, never thrown — the
+    // invitation row is committed and usable in-app.
+    let emailSent: boolean;
+    try {
+      await mailer.send({
         template: guardianInvitationTemplate,
         to: email,
         variables: {
@@ -336,15 +341,17 @@ export class GuardianService {
           childId: playerId,
           invitationId: invitation.id,
         },
-      })
-      .catch((err: unknown) => {
-        logger.error('Failed to send guardian invitation email', {
-          error: err instanceof Error ? err.message : String(err),
-          invitationId: invitation.id,
-        });
       });
+      emailSent = true;
+    } catch (err: unknown) {
+      logger.error('Failed to send guardian invitation email', {
+        error: err instanceof Error ? err.message : String(err),
+        invitationId: invitation.id,
+      });
+      emailSent = false;
+    }
 
-    return invitation;
+    return { ...invitation, emailSent };
   }
 
   /**

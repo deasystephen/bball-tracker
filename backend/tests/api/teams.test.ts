@@ -494,14 +494,92 @@ describe('Teams API', () => {
     });
   });
 
-  describe('POST /api/v1/teams/:id/players (deprecated)', () => {
-    it('should return 410 Gone for deprecated endpoint', async () => {
+  describe('POST /api/v1/teams/:teamId/players (unified Add Player)', () => {
+    // The 410 tombstone that lived on this path is gone — the unified Add
+    // Player flow (roster/invite unification spec) reclaims it.
+    const mockAddResult = {
+      rostered: true,
+      invited: false,
+      member: {
+        teamId: TEST_TEAM_ID,
+        playerId: TEST_PLAYER_ID,
+        player: { id: TEST_PLAYER_ID, name: 'Jane Hooper', email: null, isManaged: true, managedById: TEST_USER_ID },
+        team: { id: TEST_TEAM_ID, name: 'Test Team' },
+      },
+      invitation: null,
+      guardianInvited: false,
+      emails: {},
+    };
+
+    it('adds a roster-only player (case 1) and returns 201', async () => {
+      mockInvitationService.addRosterPlayer.mockResolvedValue(
+        mockAddResult as unknown as Awaited<ReturnType<typeof mockInvitationService.addRosterPlayer>>
+      );
+
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
-        .send({ playerId: TEST_PLAYER_ID });
+        .send({ name: 'Jane Hooper', jerseyNumber: 0 });
 
-      expect(response.status).toBe(410);
-      expect(response.body.deprecated).toBe(true);
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(response.body.rostered).toBe(true);
+      expect(response.body.member).toBeDefined();
+      expect(mockInvitationService.addRosterPlayer).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ name: 'Jane Hooper', jerseyNumber: 0 }),
+        TEST_USER_ID
+      );
+    });
+
+    it('never leaks a token in the response, whatever the service returns', async () => {
+      mockInvitationService.addRosterPlayer.mockResolvedValue({
+        ...mockAddResult,
+        invited: true,
+        invitation: { id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234', status: 'PENDING' },
+        emails: { player: true },
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.addRosterPlayer>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane Hooper', playerEmail: 'jane@example.com' });
+
+      expect(response.status).toBe(201);
+      expect(JSON.stringify(response.body)).not.toContain('token');
+    });
+
+    it('rejects a guardian email without a relationship (400)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane', guardianEmail: 'mom@example.com' });
+
+      expect(response.status).toBe(400);
+      expect(mockInvitationService.addRosterPlayer).not.toHaveBeenCalled();
+    });
+
+    it('rejects identical player and guardian emails (400)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({
+          name: 'Jane',
+          playerEmail: 'same@example.com',
+          guardianEmail: 'Same@Example.com',
+          guardianRelationship: 'MOTHER',
+        });
+
+      expect(response.status).toBe(400);
+      expect(mockInvitationService.addRosterPlayer).not.toHaveBeenCalled();
+    });
+
+    it('maps a Forbidden service error to 403', async () => {
+      mockInvitationService.addRosterPlayer.mockRejectedValue(
+        new ForbiddenError("You do not have permission to manage this team's roster")
+      );
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane Hooper' });
+
+      expect(response.status).toBe(403);
     });
   });
 
@@ -519,7 +597,10 @@ describe('Teams API', () => {
     };
 
     it('should create an invitation successfully', async () => {
-      mockInvitationService.createInvitation.mockResolvedValue(mockInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
+      mockInvitationService.createInvitation.mockResolvedValue({
+        invitation: mockInvitation,
+        emailSent: true,
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
@@ -528,9 +609,42 @@ describe('Teams API', () => {
       expect(response.status).toBe(201);
       expect(response.body.success).toBe(true);
       expect(response.body.invitation).toBeDefined();
+      expect(response.body.emailSent).toBe(true);
       // Audit #14: the token only travels in the invitation email.
       expect(response.body.invitation).not.toHaveProperty('token');
       expect(JSON.stringify(response.body)).not.toContain('abc123');
+    });
+
+    it('surfaces a failed invitation email as emailSent: false', async () => {
+      mockInvitationService.createInvitation.mockResolvedValue({
+        invitation: mockInvitation,
+        emailSent: false,
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ playerId: TEST_PLAYER_ID });
+
+      expect(response.status).toBe(201);
+      expect(response.body.emailSent).toBe(false);
+    });
+
+    it('passes supersede through to the service (resend path)', async () => {
+      mockInvitationService.createInvitation.mockResolvedValue({
+        invitation: mockInvitation,
+        emailSent: true,
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ playerId: TEST_PLAYER_ID, supersede: true });
+
+      expect(response.status).toBe(201);
+      expect(mockInvitationService.createInvitation).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        expect.objectContaining({ playerId: TEST_PLAYER_ID, supersede: true }),
+        TEST_USER_ID
+      );
     });
 
     it('should return 400 for missing playerId', async () => {
@@ -542,7 +656,10 @@ describe('Teams API', () => {
     });
 
     it('should create-and-invite a new player with name + email in one call (audit #69)', async () => {
-      mockInvitationService.createInvitation.mockResolvedValue(mockInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
+      mockInvitationService.createInvitation.mockResolvedValue({
+        invitation: mockInvitation,
+        emailSent: true,
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.createInvitation>>);
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
