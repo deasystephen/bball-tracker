@@ -76,6 +76,7 @@ updates:
       # docs/automation/daily-upgrade-scan.md — re-evaluate at each SDK bump.
       - dependency-name: "@react-native-async-storage/async-storage"
       - dependency-name: "@react-native-community/datetimepicker"
+      - dependency-name: "expo-application"
       - dependency-name: "react-native-gesture-handler"
       - dependency-name: "react-native-reanimated"
       - dependency-name: "react-native-safe-area-context"

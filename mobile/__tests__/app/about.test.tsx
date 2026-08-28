@@ -31,8 +31,17 @@ const mockUpdates: {
   runtimeVersion: null,
 };
 
+// Native build number: the screen probes requireOptionalNativeModule
+// ('ExpoApplication') — null models a binary without expo-application (#27).
+let mockNativeApplication: { nativeBuildVersion?: string | number | null } | null = null;
+
 jest.mock('expo-router', () => ({ useRouter: () => mockRouter }));
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
+jest.mock('expo', () => ({
+  ...jest.requireActual('expo'),
+  requireOptionalNativeModule: (name: string) =>
+    name === 'ExpoApplication' ? mockNativeApplication : null,
+}));
 // The factory runs while the test file's imports are still being resolved
 // (before `mockUpdates` is initialized), so it must not touch the object —
 // lazy getters read it at render time instead. `__esModule` makes Babel's
@@ -76,14 +85,21 @@ describe('AboutScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     setOtaApplied();
+    mockNativeApplication = { nativeBuildVersion: '28' };
   });
 
-  it('shows app version, runtime, applied update id and channel', () => {
+  it('shows app version with native build number, runtime, applied update id and channel', () => {
     const { getByText, getByTestId } = render(<AboutScreen />);
-    expect(getByText('v1.2.0')).toBeTruthy();
+    expect(getByText('v1.2.0 (build 28)')).toBeTruthy();
     expect(getByTestId('about-runtime-version').props.children).toBe('1.2.0');
     expect(getByTestId('about-update').props.children).toContain(OTA_ID);
     expect(getByTestId('about-channel').props.children).toBe('production');
+  });
+
+  it('omits the build number on a binary without expo-application (build #27)', () => {
+    mockNativeApplication = null;
+    const { getByTestId } = render(<AboutScreen />);
+    expect(getByTestId('about-app-version').props.children).toBe('v1.2.0');
   });
 
   it('shows "Embedded build" when no OTA has applied', () => {
@@ -108,7 +124,7 @@ describe('AboutScreen', () => {
 
     await waitFor(() => expect(shareSpy).toHaveBeenCalled());
     const message = shareSpy.mock.calls[0][0].message as string;
-    expect(message).toContain('v1.2.0');
+    expect(message).toContain('v1.2.0 (build 28)');
     expect(message).toContain(OTA_ID);
     expect(message).toContain('2026-08-28T22:18:05.218Z');
     expect(message).toContain('Channel: production');

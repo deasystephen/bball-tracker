@@ -198,7 +198,9 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   1. Profile → Settings → About (row caption shows the app version)
   2. Compare the Update row against the latest published OTA group's iOS update ID
   3. Tap "Share diagnostics"
-- **Expected:** App version + runtime version match the installed build (1.2.0); after an OTA has applied
+- **Expected:** App version + runtime version match the installed build (1.2.0); on builds cut after
+  2026-08-28 the App-version row appends the native build number ("v1.2.0 (build 28)") — on build #27 (no
+  `expo-application`) it degrades to the bare version; after an OTA has applied
   (second launch post-download) the Update row shows that update's id + publish time — "Embedded build (no
   OTA applied)" means the binary's bundled JS is running. Channel reads `production` on TestFlight builds.
   Share exports the same fields as text. This screen is how OTA rollout is verified on-device from now on.
