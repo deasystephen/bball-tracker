@@ -66,17 +66,3 @@ export function isRosteredOn(
   if (!user?.id) return false;
   return (team?.members ?? []).some((m) => m.playerId === user.id);
 }
-
-/**
- * Accounts created through a guardian invite get `name = email local part`
- * until the person signs in. Ask once for a real display name when the name
- * still looks like that placeholder.
- */
-export function needsDisplayName(user: GuardianUser | null | undefined): boolean {
-  if (!user || !isGuardian(user)) return false;
-  const email = user.email?.trim().toLowerCase();
-  const name = user.name?.trim().toLowerCase();
-  if (!email || !name) return false;
-  const localPart = email.split('@')[0];
-  return name === localPart;
-}

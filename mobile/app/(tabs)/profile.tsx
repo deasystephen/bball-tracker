@@ -209,6 +209,26 @@ export default function Profile() {
             Account
           </ThemedText>
           <Card variant="default" style={styles.infoCard}>
+            {/* Name row opens the shared display-name screen in edit mode
+                (PATCH /auth/me — see app/onboarding/name.tsx). */}
+            <TouchableOpacity
+              style={styles.infoRow}
+              accessibilityRole="button"
+              accessibilityLabel="Edit name"
+              onPress={() => router.push('/onboarding/name?from=profile')}
+            >
+              <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name="person" size={18} color={colors.primary} />
+              </View>
+              <View style={styles.infoContent}>
+                <ThemedText variant="caption" color="textSecondary">
+                  Name
+                </ThemedText>
+                <ThemedText variant="body">{user?.name || 'Not set'}</ThemedText>
+              </View>
+              <Ionicons name="pencil" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
             <View style={styles.infoRow}>
               <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
                 <Ionicons name="mail" size={18} color={colors.primary} />

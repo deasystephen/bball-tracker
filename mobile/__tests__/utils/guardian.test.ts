@@ -7,7 +7,6 @@ import {
   guardianChildren,
   guardianChildrenOnTeam,
   isRosteredOn,
-  needsDisplayName,
   relationshipLabel,
   GUARDIAN_RELATIONSHIPS,
 } from '../../utils/guardian';
@@ -40,21 +39,6 @@ describe('utils/guardian', () => {
     expect(isRosteredOn({ id: 'dell' }, team)).toBe(false);
     expect(isRosteredOn(null, team)).toBe(false);
     expect(isRosteredOn({ id: 'steph' }, undefined)).toBe(false);
-  });
-
-  describe('needsDisplayName', () => {
-    it('is true for a guardian whose name is still the email local part', () => {
-      expect(
-        needsDisplayName({ name: 'dell.curry', email: 'Dell.Curry@example.com', guardianOf: [steph] })
-      ).toBe(true);
-    });
-
-    it('is false once a real name is set, or for non-guardians', () => {
-      expect(needsDisplayName(dell)).toBe(false);
-      expect(needsDisplayName({ name: 'dell.curry', email: 'dell.curry@example.com' })).toBe(false);
-      expect(needsDisplayName({ name: 'dell.curry', email: null, guardianOf: [steph] })).toBe(false);
-      expect(needsDisplayName(null)).toBe(false);
-    });
   });
 
   it('relationshipLabel maps every relationship and falls back to Guardian', () => {

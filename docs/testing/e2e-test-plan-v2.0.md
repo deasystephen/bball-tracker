@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-25
 **Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:capyhoops.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.capyhoops.com`, Web — not deployed
-**Checkboxes:** 129 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
+**Checkboxes:** 132 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
 
@@ -151,6 +151,30 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   1. Profile tab → tap avatar
   2. Pick an image from camera roll
 - **Expected:** `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`, 5 MB cap enforced by the policy); the app posts the multipart form, then `PATCH /api/v1/auth/me { profilePictureUrl }` (never `PATCH /players/:id`). Avatar updates everywhere within ~3s; the previously uploaded object is deleted from the avatars bucket (audit #61). A failed S3 upload shows an error toast and does **not** persist a dangling URL (audit #39).
+- **Notes:** ___________
+
+### B.2b — Edit display name
+- [ ] Pass / Fail / Skipped
+- **Role:** any logged-in user
+- **Steps:**
+  1. Profile tab → Account card → tap the **Name** row
+  2. Change the name → Save
+- **Expected:** The shared name screen (`/onboarding/name?from=profile`) opens pre-filled with the current
+  name (empty when it is still the email-local-part placeholder), `PATCH /api/v1/auth/me { name }` saves, the
+  screen pops back and the new name shows in the Profile header immediately. Cancel discards. Maestro:
+  `.maestro/profile.yaml` (rename + revert round trip).
+- **Notes:** ___________
+
+### B.2c — One-time name prompt for placeholder-named accounts
+- [ ] Pass / Fail / Skipped
+- **Role:** fresh WorkOS sign-up where AuthKit collected no name, or a guardian-invite account
+- **Steps:**
+  1. Sign in with an account whose `name` equals the email local part (e.g. a fresh AuthKit sign-up)
+  2. Complete the role step if shown
+- **Expected:** After the role step, "What should we call you?" appears once
+  (`utils/role-onboarding.ts#needsNamePrompt`); Continue saves via `PATCH /auth/me { name }` and lands on
+  Home (or a pending invite deep link); Skip keeps the placeholder and the prompt never re-appears for that
+  user on the device (flag `nameAsked:<userId>`). Guardian accounts see the child-specific subtitle.
 - **Notes:** ___________
 
 ### B.3 — Toggle dark mode

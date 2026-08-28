@@ -201,7 +201,7 @@ never inline a role check in a screen:
 - **Guardians (PARENT role, role-matrix decision 1 / `docs/plans/parent-role-spec.md`).** `user.guardianOf?:
   { childId, childName, relationship, isPrimary }[]` is optional on the shared `User` type like `leagueAdminOf`
   (`useSessionRefresh` merges it). Helpers in `utils/guardian.ts` — `isGuardian(user)`, `guardianChildrenOnTeam(user,
-  team)` (children rostered on a `{ members }` shape, works with `game.team`), `isRosteredOn`, `needsDisplayName`,
+  team)` (children rostered on a `{ members }` shape, works with `game.team`), `isRosteredOn`,
   `relationshipLabel`. Guardians have no staff row, so the gates above already hide every manage/track control.
   Screens: Profile → **"My kids"** (each child → `/players/:childId/stats`; "Change account type" is hidden when
   `guardianOf` is non-empty — PARENT is derived, never picked); game detail RSVP shows a **"Responding for"** chip
@@ -217,11 +217,22 @@ never inline a role check in a screen:
   chips, remove; invite/remove-others need `canManageRoster`, a guardian gets **Leave** on their own row). Hooks:
   `hooks/useGuardians.ts` (`usePlayerGuardians`, `useInviteGuardian`, `useRemoveGuardian` — invalidate the guardian
   list + team detail, invites also `invitationKeys.all`). Accounts created by a guardian invite carry
-  `name = email local part`; `postLoginRoute` sends such guardians to `app/onboarding/name.tsx` once
-  (`utils/role-onboarding.ts#needsNamePrompt`, flag `nameAsked:<userId>`) → `PATCH /auth/me { name }`. Tests:
+  `name = email local part` and get the one-time display-name prompt — see "Display names" below (the prompt is
+  no longer guardian-specific). Tests:
   `__tests__/utils/guardian.test.ts`, `__tests__/hooks/useGuardians.runtime.test.tsx`,
   `__tests__/app/{game-detail-rsvp-picker,invitations-guardian,profile-my-kids}.test.tsx`. Maestro:
   `.maestro/guardian-rsvp.yaml` (Sonya Curry = seeded MOTHER of Steph Curry with no staff row, Warriors "vs Lakers" game; Dell Curry is also Steph's FATHER but is seeded as **Warriors Team Manager**, so he sees Start Game / Continue Tracking and is not a pure-guardian fixture).
+- **Display names.** `syncUser` falls back to `name = email local part` when WorkOS supplies no first/last
+  name (plain AuthKit sign-ups as well as guardian-invite accounts), so
+  `utils/role-onboarding.ts#hasPlaceholderName(user)` (name === email local part, case-insensitive) is the
+  placeholder signal — it replaced the guardian-gated `utils/guardian.ts#needsDisplayName`. `postLoginRoute`
+  sends **any** placeholder-named account to `app/onboarding/name.tsx` once (`needsNamePrompt`, flag
+  `nameAsked:<userId>`; the role step, whose `finish` re-resolves `postLoginRoute`, still wins) →
+  `PATCH /auth/me { name }`; Skip keeps the placeholder and never asks again. The same screen doubles as the
+  editor behind Profile → Account → **Name** (`/onboarding/name?from=profile`: pre-fills a non-placeholder
+  name, Save pops back, Cancel discards — same back-vs-replace rule as `onboarding/role`). Tests:
+  `__tests__/utils/role-onboarding.test.ts`, `__tests__/app/onboarding-name.test.tsx`; Maestro
+  `.maestro/profile.yaml` renames Frank Vogel and **reverts** (team-staff.yaml asserts the seeded name).
 
 #### Mobile API errors, permissions & toasts
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh

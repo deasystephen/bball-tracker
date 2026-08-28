@@ -11,7 +11,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserRole } from '../../shared/types';
 import { consumePendingReturnPath } from './return-path';
-import { needsDisplayName } from './guardian';
 
 const KEY_PREFIX = 'roleChosen:';
 
@@ -53,13 +52,30 @@ export function nameAskedKey(userId: string): string {
 }
 
 /**
- * Guardians whose account was created by a coach's invite carry a placeholder
- * name (the email local part) until they pick one. Ask once per user.
+ * True when the user's name is still the placeholder the backend derives from
+ * their email. `syncUser` falls back to the email local part when WorkOS
+ * supplies no first/last name (plain AuthKit sign-ups), and guardian-invite
+ * accounts are created the same way — so "name === email local part" is the
+ * signal that nobody ever chose a display name.
+ */
+export function hasPlaceholderName(
+  user: { name?: string | null; email?: string | null } | null | undefined
+): boolean {
+  const email = user?.email?.trim().toLowerCase();
+  const name = user?.name?.trim().toLowerCase();
+  if (!email || !name) return false;
+  return name === email.split('@')[0];
+}
+
+/**
+ * Accounts provisioned without a real name (guardian invites, WorkOS sign-ups
+ * where AuthKit collected no name) carry the email local part as a placeholder
+ * until the person picks one. Ask once per user.
  */
 export async function needsNamePrompt(
-  user: { id: string; name?: string | null; email?: string | null; guardianOf?: unknown[] | null } | null | undefined
+  user: { id: string; name?: string | null; email?: string | null } | null | undefined
 ): Promise<boolean> {
-  if (!user || !needsDisplayName(user as Parameters<typeof needsDisplayName>[0])) return false;
+  if (!user || !hasPlaceholderName(user)) return false;
   try {
     return (await AsyncStorage.getItem(nameAskedKey(user.id))) !== 'true';
   } catch {
@@ -79,13 +95,13 @@ export async function markNameAsked(userId: string): Promise<void> {
  * Where to send a freshly authenticated user.
  *
  * The role step always wins, then the one-time display-name prompt for
- * guardian-created accounts. Otherwise a pending return path (a deep link such
- * as `/invite/<token>` that sent the user to login — see `utils/return-path`)
- * takes precedence over Home.
+ * accounts still carrying the email-local-part placeholder. Otherwise a
+ * pending return path (a deep link such as `/invite/<token>` that sent the
+ * user to login — see `utils/return-path`) takes precedence over Home.
  */
 export async function postLoginRoute(
   user:
-    | { id: string; role: UserRole | string; name?: string | null; email?: string | null; guardianOf?: unknown[] | null }
+    | { id: string; role: UserRole | string; name?: string | null; email?: string | null }
     | null
     | undefined
 ): Promise<typeof ROLE_ONBOARDING_ROUTE | typeof NAME_ONBOARDING_ROUTE | typeof HOME_ROUTE | string> {
