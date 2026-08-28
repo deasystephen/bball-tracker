@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { teamKeys } from './useTeams';
+import { playerKeys, type PlayersQueryParams } from './query-keys';
 
 export interface Player {
   id: string;
@@ -56,36 +56,16 @@ export interface CreatePlayerInput {
   profilePictureUrl?: string;
 }
 
-export interface CreateManagedPlayerInput {
-  name: string;
-  jerseyNumber?: number;
-  position?: string;
-  profilePictureUrl?: string;
-}
-
 export interface UpdatePlayerInput {
   name?: string;
   email?: string;
   profilePictureUrl?: string;
 }
 
-export interface PlayersQueryParams {
-  search?: string;
-  role?: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN';
-  limit?: number;
-  offset?: number;
-}
-
-/**
- * Query key factory for players
- */
-export const playerKeys = {
-  all: ['players'] as const,
-  lists: () => [...playerKeys.all, 'list'] as const,
-  list: (params?: PlayersQueryParams) => [...playerKeys.lists(), params] as const,
-  details: () => [...playerKeys.all, 'detail'] as const,
-  detail: (id: string) => [...playerKeys.details(), id] as const,
-};
+// Query key factory lives in ./query-keys (dependency-free, cycle-safe) so
+// cross-invalidating hooks never hardcode a ['players'] literal.
+export { playerKeys };
+export type { PlayersQueryParams };
 
 /**
  * Hook to fetch list of players
@@ -182,26 +162,3 @@ export function useDeletePlayer() {
   });
 }
 
-/**
- * Hook to create a managed player (roster-only, no account/email needed)
- */
-export function useCreateManagedPlayer() {
-  const queryClient = useQueryClient();
-
-  return useMutation<
-    { success: boolean; teamMember: { id: string; playerId: string } },
-    Error,
-    { teamId: string; data: CreateManagedPlayerInput }
-  >({
-    mutationFn: async ({ teamId, data }) => {
-      const response = await apiClient.post(
-        `/teams/${teamId}/managed-players`,
-        data
-      );
-      return response.data;
-    },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
-    },
-  });
-}

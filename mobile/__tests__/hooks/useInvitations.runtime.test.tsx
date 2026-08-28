@@ -126,11 +126,14 @@ describe('useInvitations runtime', () => {
     expect(mockedPost).toHaveBeenCalledWith('/teams/t1/invitations', {
       playerId: 'p1',
     });
+    // lists() is the covering key for useTeamInvitations ({teamId, status})
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: invitationKeys.lists(),
     });
+    // The team payload's invite-status join changed — the roster chip refresh
+    // after a Resend depends on THIS invalidation (unification review)
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: invitationKeys.team('t1'),
+      queryKey: ['teams', 'detail', 't1'],
     });
   });
 
@@ -195,7 +198,7 @@ describe('useInvitations runtime', () => {
     });
   });
 
-  it('useCancelInvitation deletes and invalidates all invitations', async () => {
+  it('useCancelInvitation deletes and invalidates scoped to the team', async () => {
     mockedDelete.mockResolvedValueOnce({
       data: { success: true, invitation: { id: 'inv-1' } },
     });
@@ -204,12 +207,19 @@ describe('useInvitations runtime', () => {
     const { result } = renderHook(() => useCancelInvitation(), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync('inv-1');
+      await result.current.mutateAsync({ invitationId: 'inv-1', teamId: 't1' });
     });
 
     expect(mockedDelete).toHaveBeenCalledWith('/invitations/inv-1');
+    // lists() covers useTeamInvitations — the Invited section refresh after a
+    // cancel depends on it
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: invitationKeys.all,
+      queryKey: invitationKeys.lists(),
+    });
+    // Only THIS team's detail refetches (chip join changed) — never an
+    // unscoped ['teams','detail'] that would refetch every cached team
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['teams', 'detail', 't1'],
     });
   });
 });

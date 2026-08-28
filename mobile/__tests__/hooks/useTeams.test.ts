@@ -11,7 +11,7 @@ import {
   Team,
   CreateTeamInput,
   UpdateTeamInput,
-  AddPlayerInput,
+  AddRosterPlayerInput,
   TeamFilters,
 } from '../../hooks/useTeams';
 
@@ -199,42 +199,49 @@ describe('useTeams', () => {
     });
   });
 
-  describe('AddPlayerInput type', () => {
-    it('should accept minimal input with playerId', () => {
-      const input: AddPlayerInput = {
-        playerId: 'player-1',
+  describe('AddRosterPlayerInput type (unified Add Player)', () => {
+    it('accepts a name-only roster player (case 1)', () => {
+      const input: AddRosterPlayerInput = {
+        name: 'Kid Hooper',
       };
 
-      expect(input.playerId).toBe('player-1');
+      expect(input.name).toBe('Kid Hooper');
     });
 
-    it('should accept input with jersey number', () => {
-      const input: AddPlayerInput = {
-        playerId: 'player-1',
-        jerseyNumber: 23,
+    it('accepts a player email (cases 2-3) with jersey 0', () => {
+      const input: AddRosterPlayerInput = {
+        name: 'Jane Hooper',
+        playerEmail: 'jane@example.com',
+        jerseyNumber: 0,
       };
 
-      expect(input.jerseyNumber).toBe(23);
+      expect(input.playerEmail).toBe('jane@example.com');
+      // 0 is a valid jersey number — never truthiness-checked
+      expect(input.jerseyNumber).toBe(0);
     });
 
-    it('should accept input with position', () => {
-      const input: AddPlayerInput = {
-        playerId: 'player-1',
-        position: 'Guard',
+    it('accepts a guardian email + relationship (youth pattern)', () => {
+      const input: AddRosterPlayerInput = {
+        name: 'Kid Hooper',
+        guardianEmail: 'mom@example.com',
+        guardianRelationship: 'MOTHER',
       };
 
-      expect(input.position).toBe('Guard');
+      expect(input.guardianRelationship).toBe('MOTHER');
     });
 
-    it('should accept complete input', () => {
-      const input: AddPlayerInput = {
-        playerId: 'player-1',
+    it('accepts complete input', () => {
+      const input: AddRosterPlayerInput = {
+        name: 'Jane Hooper',
+        playerEmail: 'jane@example.com',
+        guardianEmail: 'mom@example.com',
+        guardianRelationship: 'MOTHER',
         jerseyNumber: 23,
         position: 'Point Guard',
+        profilePictureUrl: 'https://cdn.example.com/p.jpg',
       };
 
-      expect(input.playerId).toBe('player-1');
-      expect(input.jerseyNumber).toBe(23);
+      expect(input.name).toBe('Jane Hooper');
       expect(input.position).toBe('Point Guard');
     });
   });

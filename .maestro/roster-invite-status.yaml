@@ -1,0 +1,81 @@
+appId: com.bballtracker.mobile
+---
+# Roster invite-status chips (roster/invite unification spec): the Lakers
+# roster is seeded with one player per chip state — Iris Invited (live
+# PENDING), Xander Expired (lapsed PENDING), Wendy WebAccept (ACCEPTED,
+# never signed in → Active), Marcus Johnson (no invite → Not invited).
+# Frank Vogel (head coach) sees chips + resend/cancel actions.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers roster
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Add Player"
+- assertVisible: "Roster"
+
+# Chip states, one per seeded fixture. Assertions use the row-anchored chip
+# accessibilityLabel ("<player> status: <label>") — a bare "Active" would
+# false-pass off any neighboring claimed player's chip (red-team review).
+- scrollUntilVisible:
+    element:
+      text: "Iris Invited"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Iris Invited status: Invited"
+- scrollUntilVisible:
+    element:
+      text: "Xander Expired"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Xander Expired status: Invite expired"
+- scrollUntilVisible:
+    element:
+      text: "Wendy WebAccept"
+    direction: DOWN
+    timeout: 10000
+# Accepted via web link, never signed in — must read Active, never Not invited
+- assertVisible: "Wendy WebAccept status: Active"
+- assertNotVisible: "Wendy WebAccept status: Not invited"
+- scrollUntilVisible:
+    element:
+      text: "Marcus Johnson"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Marcus Johnson status: Not invited"
+
+# Invite lifecycle actions live in the per-player overflow menu (design
+# review: 44pt targets, no icon-cluster crowding). Contents are contextual.
+- scrollUntilVisible:
+    element:
+      text: "Iris Invited"
+    direction: UP
+    timeout: 10000
+- tapOn: "Player options: Iris Invited"
+- assertVisible: "Resend invitation"
+- assertVisible: "Cancel invitation"
+- tapOn: "Close"
+- scrollUntilVisible:
+    element:
+      text: "Xander Expired"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Player options: Xander Expired"
+- assertVisible: "Resend invitation"
+- assertNotVisible: "Cancel invitation"
+- tapOn: "Close"

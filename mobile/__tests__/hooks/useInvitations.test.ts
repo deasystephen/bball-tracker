@@ -68,20 +68,18 @@ describe('useInvitations', () => {
       ]);
     });
 
-    it('should generate team key correctly', () => {
-      expect(invitationKeys.team('team-1')).toEqual([
+    it('team-scoped queries key under lists() — the covering invalidation key', () => {
+      // useTeamInvitations keys under list({teamId, status}); there is no
+      // bespoke team()/player() sub-key (removed by red-team review — nothing
+      // subscribed to them, and their existence invited a scoped-invalidation
+      // refactor that would stop refreshing the Invited section).
+      expect(invitationKeys.list({ teamId: 'team-1', status: 'PENDING' })).toEqual([
         'invitations',
-        'team',
-        'team-1',
+        'list',
+        { teamId: 'team-1', status: 'PENDING' },
       ]);
-    });
-
-    it('should generate player key correctly', () => {
-      expect(invitationKeys.player('player-1')).toEqual([
-        'invitations',
-        'player',
-        'player-1',
-      ]);
+      expect('team' in invitationKeys).toBe(false);
+      expect('player' in invitationKeys).toBe(false);
     });
   });
 

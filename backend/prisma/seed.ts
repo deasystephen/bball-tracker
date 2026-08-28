@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType, SubscriptionTier } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -66,6 +67,23 @@ async function createDefaultTeamRoles(teamId: string) {
 }
 
 async function main() {
+  // Seed data includes live bearer secrets (invitation tokens honored by the
+  // UNAUTHENTICATED /invitations/by-token routes in every environment), so
+  // never run against production (pre-landing review, security specialist).
+  // The realistic accident is not NODE_ENV=production — it is a local shell
+  // (NODE_ENV unset) with DATABASE_URL repointed at prod, exactly how the RDS
+  // runbook connects during a restore. Guard both signals (red-team review).
+  const looksLikeProdDb = /rds\.amazonaws\.com/i.test(process.env.DATABASE_URL ?? '');
+  if (
+    (process.env.NODE_ENV === 'production' || looksLikeProdDb) &&
+    process.env.SEED_ALLOW_PRODUCTION !== 'true'
+  ) {
+    throw new Error(
+      'Refusing to seed: NODE_ENV=production or DATABASE_URL points at an RDS host. ' +
+        'Set SEED_ALLOW_PRODUCTION=true only if you really mean it.'
+    );
+  }
+
   console.log('Seeding database...\n');
 
   // =========================================================================
@@ -498,6 +516,85 @@ async function main() {
       },
     });
     console.log(`    Added managed player: ${mp.name} (#${mp.jersey}) to Lakers`);
+  }
+
+  // Lakers invite-status fixtures (roster/invite unification spec): one
+  // rostered managed player per chip state so Maestro/manual QA can assert
+  // Invited / Invite expired / Active-via-web-accept deterministically.
+  // (Marcus/Ethan above cover "Not invited"; claimed players cover "Active".)
+  const inviteStateFixtures = [
+    {
+      id: 'managed-lakers-invited',
+      name: 'Iris Invited',
+      email: 'iris.invited@example.com',
+      jersey: 21,
+      status: 'PENDING' as const,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'managed-lakers-expired',
+      name: 'Xander Expired',
+      email: 'xander.expired@example.com',
+      jersey: 22,
+      status: 'PENDING' as const,
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'managed-lakers-webaccept',
+      name: 'Wendy WebAccept',
+      email: 'wendy.webaccept@example.com',
+      jersey: 24,
+      status: 'ACCEPTED' as const,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  ];
+
+  for (const fixture of inviteStateFixtures) {
+    const fixturePlayer = await prisma.user.upsert({
+      where: { id: fixture.id },
+      update: {},
+      create: {
+        id: fixture.id,
+        name: fixture.name,
+        email: fixture.email,
+        role: UserRole.PLAYER,
+        // Rostered-at-creation case 2: coach-managed until claimed
+        isManaged: true,
+        managedById: coachFrank.id,
+      },
+    });
+
+    await prisma.teamMember.upsert({
+      where: { teamId_playerId: { teamId: lakers.id, playerId: fixturePlayer.id } },
+      update: {},
+      create: {
+        teamId: lakers.id,
+        playerId: fixturePlayer.id,
+        jerseyNumber: fixture.jersey,
+      },
+    });
+
+    // Random token per run — the fixtures are asserted by name/chip, never by
+    // token, and a committed bearer secret must not exist (security review).
+    // Delete-then-create keeps re-seeds deterministic after QA interaction: a
+    // manual Resend (supersede) leaves EXPIRED + PENDING rows, and updating an
+    // arbitrary findFirst row could re-PENDING the old one alongside the live
+    // one — violating the partial unique pending index (red-team review).
+    await prisma.teamInvitation.deleteMany({
+      where: { teamId: lakers.id, playerId: fixturePlayer.id },
+    });
+    await prisma.teamInvitation.create({
+      data: {
+        teamId: lakers.id,
+        playerId: fixturePlayer.id,
+        invitedById: coachFrank.id,
+        token: randomBytes(32).toString('base64url'),
+        status: fixture.status,
+        expiresAt: fixture.expiresAt,
+        ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
+      },
+    });
+    console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
   }
 
   // =========================================================================
