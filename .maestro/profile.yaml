@@ -33,3 +33,11 @@ appId: com.bballtracker.mobile
     end: 50%, 20%
     duration: 500
 - assertVisible: "Toggle dark mode"
+# About screen: version + OTA-update diagnostics (row shows "Version <x>").
+- tapOn: "About"
+- assertVisible: "App version"
+- assertVisible: "Runtime version"
+- assertVisible: "Channel"
+- assertVisible: "Share diagnostics"
+- tapOn: "Go back"
+- assertVisible: "Toggle dark mode"

@@ -156,6 +156,16 @@ Backend API (Node.js/Express)
   renders an `EmptyState` for that case ("No stats yet" for the current user) instead of an error.
 - The Profile "Leagues & Seasons" entry is shown to system `ADMIN`s and to users with at least one league in
   `user.leagueAdminOf` (`utils/team-permissions.ts#canAccessAdmin`). See "Mobile permission gating" below.
+- **About screen** (`app/about.tsx`, Profile → Settings → About): version + OTA diagnostics from
+  `expo-constants` / `expo-updates` — app version, runtime version, applied update id + publish time
+  ("Embedded build" when `!Updates.isEnabled || isEmbeddedLaunch || !updateId`, i.e. dev client or no OTA
+  yet), channel, and a Share-sheet export (`formatAboutDiagnostics`) for OTA verification. This replaced the
+  hardcoded version string in the Profile footer (it had drifted), and is the designated home for Terms of
+  Service / Privacy Policy / open-source-license rows once #25 publishes the documents — don't add those
+  links anywhere else. Native build number needs `expo-application` (native module, not OTA-able) —
+  deliberately omitted until the next native build. Tests `__tests__/app/about.test.tsx` (note the
+  lazy-getter `expo-updates` mock — Babel's `import * as` interop copies plain mock objects); Maestro
+  `.maestro/profile.yaml`.
 
 #### Mobile permission gating (role matrix M3, M8, M9, M12–M18, M27, M4.1, M4.2)
 Every gated control mirrors a backend rule; the API is still the authority (403). Rules live in two helpers —

@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-25
 **Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:capyhoops.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.capyhoops.com`, Web — not deployed
-**Checkboxes:** 132 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
+**Checkboxes:** 133 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
 
@@ -190,6 +190,19 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:** Profile → language picker → select non-English option (if available).
 - **Expected:** UI strings update. Persists across cold start.
 - **Notes:** Verify which languages are bundled (`mobile/i18n/`).
+
+### B.5 — About screen (version / OTA diagnostics)
+- [ ] Pass / Fail / Skipped
+- **Role:** any logged-in user
+- **Steps:**
+  1. Profile → Settings → About (row caption shows the app version)
+  2. Compare the Update row against the latest published OTA group's iOS update ID
+  3. Tap "Share diagnostics"
+- **Expected:** App version + runtime version match the installed build (1.2.0); after an OTA has applied
+  (second launch post-download) the Update row shows that update's id + publish time — "Embedded build (no
+  OTA applied)" means the binary's bundled JS is running. Channel reads `production` on TestFlight builds.
+  Share exports the same fields as text. This screen is how OTA rollout is verified on-device from now on.
+- **Notes:** ___________
 
 ---
 
