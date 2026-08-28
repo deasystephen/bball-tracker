@@ -52,14 +52,15 @@ import {
   rosterStatusLabel,
   rosterStatusColor,
   type RosterStatus,
+  type RosterStatusResult,
 } from '../../../utils/roster-status';
 import { isInvitationExpired } from '../../../utils/invitation-expiry';
-import { GUARDIAN_RELATIONSHIPS, relationshipLabel } from '../../../utils/guardian';
+import { RelationshipChips } from '../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
-import { spacing } from '../../../theme';
+import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
@@ -351,13 +352,62 @@ export default function ManagePlayersScreen() {
   // against members (rostered players get their chip from the team payload).
   const pendingNonMemberInvites = (teamInvitationsData?.invitations || []).filter(
     (inv) =>
+      // status re-check is deliberate defense against a stale cached page from
+      // an unfiltered query (the hook scopes to PENDING, the cache may not)
       inv.status === 'PENDING' &&
       !memberIds.has(inv.playerId) &&
       !isInvitationExpired(inv.expiresAt)
   );
 
+  /**
+   * Per-player actions live behind one 44pt overflow button (design review:
+   * five inline icons crowded the title to nothing on small screens, missed
+   * touch-target minimums, and paired two near-identical mail glyphs with
+   * opposite meanings). Menu contents are contextual to the chip status.
+   */
+  const openPlayerMenu = (
+    member: (typeof members)[number],
+    { status, pendingInvitation }: RosterStatusResult
+  ) => {
+    const playerName = member.player.name;
+    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
+
+    if (status === 'invited' || status === 'invite_expired') {
+      buttons.push({
+        text: 'Resend invitation',
+        onPress: () => handleResendInvite(member.playerId, playerName),
+      });
+    } else if (status === 'not_invited' && member.player.email) {
+      // A never/no-longer-invited player needs an address on file
+      buttons.push({
+        text: 'Send invitation',
+        onPress: () => handleResendInvite(member.playerId, playerName),
+      });
+    }
+    if (status === 'invited' && pendingInvitation) {
+      buttons.push({
+        text: 'Cancel invitation',
+        onPress: () => handleCancelInvite(pendingInvitation.id, playerName),
+      });
+    }
+    if (member.player.isManaged) {
+      buttons.push({
+        text: 'Invite a parent',
+        onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
+      });
+    }
+    buttons.push({
+      text: 'Remove player',
+      style: 'destructive',
+      onPress: () => handleRemovePlayer(member.playerId, playerName),
+    });
+    buttons.push({ text: 'Close', style: 'cancel' });
+
+    Alert.alert(playerName, undefined, buttons);
+  };
+
   const renderMemberRow = (member: (typeof members)[number]) => {
-    const { status, pendingInvitation } = getRosterStatus(
+    const rosterStatus = getRosterStatus(
       member,
       invitationsByPlayer.get(member.playerId),
       statusNow
@@ -369,9 +419,6 @@ export default function ManagePlayersScreen() {
       .filter(Boolean)
       .join(' • ');
     const subtitle = details || member.player.email || undefined;
-    const canResend = status === 'invited' || status === 'invite_expired';
-    // "Invite" for a never/no-longer-invited player needs an address on file
-    const canInvite = status === 'not_invited' && !!member.player.email;
 
     return (
       <ListItem
@@ -385,47 +432,14 @@ export default function ManagePlayersScreen() {
         }
         rightElement={
           <View style={styles.rowActions}>
-            <StatusChip status={status} colors={colors} />
-            {(canResend || canInvite) && (
-              <TouchableOpacity
-                onPress={() => handleResendInvite(member.playerId, member.player.name)}
-                accessibilityRole="button"
-                accessibilityLabel={`${canInvite ? 'Invite' : 'Resend invitation'}: ${member.player.name}`}
-                style={styles.rowButton}
-                disabled={createInvitation.isPending}
-              >
-                <Ionicons name="mail-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-            )}
-            {pendingInvitation && status === 'invited' && (
-              <TouchableOpacity
-                onPress={() => handleCancelInvite(pendingInvitation.id, member.player.name)}
-                accessibilityRole="button"
-                accessibilityLabel={`Cancel invitation: ${member.player.name}`}
-                style={styles.rowButton}
-              >
-                <Ionicons name="mail-unread-outline" size={22} color={colors.warning} />
-              </TouchableOpacity>
-            )}
-            {member.player.isManaged && (
-              <TouchableOpacity
-                onPress={() =>
-                  router.push(`/teams/${id}/players/${member.playerId}/guardians`)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`Invite a parent: ${member.player.name}`}
-                style={styles.rowButton}
-              >
-                <Ionicons name="people-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-            )}
+            <StatusChip status={rosterStatus.status} colors={colors} />
             <TouchableOpacity
-              onPress={() => handleRemovePlayer(member.playerId, member.player.name)}
+              onPress={() => openPlayerMenu(member, rosterStatus)}
               accessibilityRole="button"
-              accessibilityLabel={`Remove player: ${member.player.name}`}
+              accessibilityLabel={`Player options: ${member.player.name}`}
               style={styles.rowButton}
             >
-              <Ionicons name="close-circle" size={22} color={colors.error} />
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         }
@@ -441,7 +455,6 @@ export default function ManagePlayersScreen() {
       leftElement={<Ionicons name="hourglass-outline" size={20} color={colors.textTertiary} />}
       rightElement={
         <View style={styles.rowActions}>
-          <StatusChip status="invited" colors={colors} />
           <TouchableOpacity
             onPress={() => handleResendInvite(invitation.playerId, invitation.player.name)}
             accessibilityRole="button"
@@ -456,8 +469,9 @@ export default function ManagePlayersScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Cancel invitation: ${invitation.player.name}`}
             style={styles.rowButton}
+            disabled={cancelInvitation.isPending}
           >
-            <Ionicons name="mail-unread-outline" size={22} color={colors.warning} />
+            <Ionicons name="close-outline" size={22} color={colors.error} />
           </TouchableOpacity>
         </View>
       }
@@ -684,34 +698,10 @@ export default function ManagePlayersScreen() {
                   <ThemedText variant="captionBold" style={styles.relationshipLabel}>
                     Relationship
                   </ThemedText>
-                  <View style={styles.chipRow}>
-                    {GUARDIAN_RELATIONSHIPS.map((value) => {
-                      const selected = value === guardianRelationship;
-                      return (
-                        <TouchableOpacity
-                          key={value}
-                          onPress={() => setGuardianRelationship(value)}
-                          accessibilityRole="radio"
-                          accessibilityState={{ selected }}
-                          accessibilityLabel={relationshipLabel(value)}
-                          style={[
-                            styles.relationshipChip,
-                            {
-                              backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
-                              borderColor: selected ? colors.primary : colors.border,
-                            },
-                          ]}
-                        >
-                          <ThemedText
-                            variant="captionBold"
-                            style={selected ? styles.chipTextSelected : undefined}
-                          >
-                            {relationshipLabel(value)}
-                          </ThemedText>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                  <RelationshipChips
+                    value={guardianRelationship}
+                    onChange={setGuardianRelationship}
+                  />
                 </>
               )}
 
@@ -814,16 +804,20 @@ const styles = StyleSheet.create({
   rowActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   rowButton: {
-    padding: spacing.xs,
+    // 44pt minimum touch target (WCAG/HIG)
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chip: {
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: spacing.xxs,
   },
   playersCard: {
     marginTop: spacing.sm,
@@ -879,20 +873,5 @@ const styles = StyleSheet.create({
   relationshipLabel: {
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  relationshipChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
   },
 });

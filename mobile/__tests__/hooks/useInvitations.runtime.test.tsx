@@ -132,6 +132,11 @@ describe('useInvitations runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: invitationKeys.team('t1'),
     });
+    // The team payload's invite-status join changed — the roster chip refresh
+    // after a Resend depends on THIS invalidation (unification review)
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['teams', 'detail', 't1'],
+    });
   });
 
   it('useAcceptInvitation invalidates all invitations and teams when teamMember present', async () => {

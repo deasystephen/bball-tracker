@@ -20,6 +20,8 @@
  * invitation id to resend; use a fresh supersede invite instead.
  */
 
+import { isInvitationExpired } from './invitation-expiry';
+
 export type RosterStatus = 'active' | 'invited' | 'invite_expired' | 'not_invited';
 
 /** One row of `team.invitations` on `GET /teams/:id` (roster managers only). */
@@ -57,7 +59,9 @@ export function getRosterStatus(
 
   const pending = rows.find((row) => row.status === 'PENDING');
   if (pending) {
-    const expired = new Date(pending.expiresAt).getTime() <= now.getTime();
+    // Shared rule with the case-3 list (utils/invitation-expiry): notably a
+    // malformed date counts as expired, never as a live invite.
+    const expired = isInvitationExpired(pending.expiresAt, now);
     return { status: expired ? 'invite_expired' : 'invited', pendingInvitation: pending };
   }
 

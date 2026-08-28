@@ -35,11 +35,12 @@ import {
 } from '../../../../../hooks/useGuardians';
 import { useTheme } from '../../../../../hooks/useTheme';
 import { useTranslation } from '../../../../../i18n';
-import { spacing, borderRadius } from '../../../../../theme';
+import { spacing } from '../../../../../theme';
 import { getHorizontalPadding } from '../../../../../utils/responsive';
 import { useAuthUser } from '../../../../../store/auth-store';
 import { getApiErrorMessage } from '../../../../../services/api-client';
-import { GUARDIAN_RELATIONSHIPS, relationshipLabel } from '../../../../../utils/guardian';
+import { relationshipLabel } from '../../../../../utils/guardian';
+import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -190,31 +191,7 @@ export default function PlayerGuardiansScreen() {
                 <ThemedText variant="captionBold" style={styles.relationshipLabel}>
                   Relationship
                 </ThemedText>
-                <View style={styles.chipRow}>
-                  {GUARDIAN_RELATIONSHIPS.map((value) => {
-                    const selected = value === relationship;
-                    return (
-                      <TouchableOpacity
-                        key={value}
-                        onPress={() => setRelationship(value)}
-                        accessibilityRole="radio"
-                        accessibilityState={{ selected }}
-                        accessibilityLabel={relationshipLabel(value)}
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
-                            borderColor: selected ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <ThemedText variant="captionBold" style={selected ? styles.chipTextSelected : undefined}>
-                          {relationshipLabel(value)}
-                        </ThemedText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                <RelationshipChips value={relationship} onChange={setRelationship} />
                 <View style={styles.actionButtons}>
                   <Button
                     title={t('common.cancel')}
@@ -329,14 +306,6 @@ const styles = StyleSheet.create({
   formCard: { marginBottom: spacing.lg },
   formTitle: { marginBottom: spacing.md },
   relationshipLabel: { marginTop: spacing.sm, marginBottom: spacing.xs },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
-  chip: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-  },
-  chipTextSelected: { color: '#FFFFFF' },
   actionButtons: { flexDirection: 'row', gap: spacing.sm },
   actionButton: { flex: 1 },
   sectionHeader: {

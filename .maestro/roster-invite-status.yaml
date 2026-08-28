@@ -56,9 +56,23 @@ appId: com.bballtracker.mobile
     timeout: 10000
 - assertVisible: "Not invited"
 
-# Invite lifecycle actions render only where they apply (accessibility labels)
-- assertVisible: "Resend invitation: Iris Invited"
-- assertVisible: "Cancel invitation: Iris Invited"
-- assertVisible: "Resend invitation: Xander Expired"
-- assertNotVisible: "Cancel invitation: Xander Expired"
-- assertNotVisible: "Cancel invitation: Wendy WebAccept"
+# Invite lifecycle actions live in the per-player overflow menu (design
+# review: 44pt targets, no icon-cluster crowding). Contents are contextual.
+- scrollUntilVisible:
+    element:
+      text: "Iris Invited"
+    direction: UP
+    timeout: 10000
+- tapOn: "Player options: Iris Invited"
+- assertVisible: "Resend invitation"
+- assertVisible: "Cancel invitation"
+- tapOn: "Close"
+- scrollUntilVisible:
+    element:
+      text: "Xander Expired"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Player options: Xander Expired"
+- assertVisible: "Resend invitation"
+- assertNotVisible: "Cancel invitation"
+- tapOn: "Close"

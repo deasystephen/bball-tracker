@@ -5,7 +5,7 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { usageKeys } from './useUsage';
-import { invitationKeys } from './useInvitations';
+import { teamKeys, invitationKeys, type TeamFilters } from './query-keys';
 import type { TeamInvitationStatusRow } from '../utils/roster-status';
 import type { GuardianRelationship } from '../../shared/types';
 
@@ -137,14 +137,6 @@ export interface AddRosterPlayerResponse {
   emails: { player?: boolean; guardian?: boolean };
 }
 
-export interface TeamFilters {
-  seasonId?: string;
-  leagueId?: string;
-  playerId?: string;
-  limit?: number;
-  offset?: number;
-}
-
 export interface TeamsResponse {
   success: boolean;
   teams: Team[];
@@ -153,16 +145,10 @@ export interface TeamsResponse {
   offset: number;
 }
 
-// Query keys
-export const teamKeys = {
-  all: ['teams'] as const,
-  lists: () => [...teamKeys.all, 'list'] as const,
-  list: (filters?: TeamFilters) => [...teamKeys.lists(), filters] as const,
-  infinite: (filters?: Omit<TeamFilters, 'offset'>) =>
-    [...teamKeys.lists(), 'infinite', filters] as const,
-  details: () => [...teamKeys.all, 'detail'] as const,
-  detail: (id: string) => [...teamKeys.details(), id] as const,
-};
+// Query keys live in ./query-keys (dependency-free, cycle-safe); re-exported
+// here so existing imports keep working.
+export { teamKeys };
+export type { TeamFilters };
 
 /** Default page size for paginated team lists (matches the server default). */
 export const TEAMS_PAGE_SIZE = 20;

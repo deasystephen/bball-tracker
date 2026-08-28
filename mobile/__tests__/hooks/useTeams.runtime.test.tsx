@@ -182,7 +182,35 @@ describe('useTeams runtime', () => {
       });
       expect(response).toMatchObject({ rostered: true, emails: { player: true } });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['invitations'] });
+      // An email was sent, so the player-search cache refreshes too
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['players'] });
+    });
+
+    it('useAddRosterPlayer skips invitation/player invalidation for a name-only add', async () => {
+      mockedPost.mockResolvedValueOnce({
+        data: {
+          success: true,
+          rostered: true,
+          invited: false,
+          member: { id: 'm1', playerId: 'p1', player: { id: 'p1', name: 'Kid', isManaged: true } },
+          invitation: null,
+          guardianInvited: false,
+          emails: {},
+        },
+      });
+      const { wrapper, client } = createQueryWrapper();
+      const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useAddRosterPlayer(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ teamId: 't1', data: { name: 'Kid' } });
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['invitations'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['players'] });
     });
 
     it('useAddRosterPlayer surfaces the case-3 not-rostered response', async () => {

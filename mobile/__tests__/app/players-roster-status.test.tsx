@@ -1,9 +1,10 @@
 /**
  * Manage Players screen — unified Add Player + invite-status chips
  * (roster/invite unification spec). Chips derive from the team payload's
- * invitations join; Resend/Invite are the supersede create; cancel targets
- * the PENDING row; case-3 invitees render in their own section, deduped
- * against members.
+ * invitations join; per-player actions live behind a 44pt overflow menu
+ * (Resend/Invite are the supersede create, Cancel targets the PENDING row);
+ * case-3 invitees render in their own section, deduped against members and
+ * filtered to unexpired rows.
  */
 
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
@@ -20,6 +21,7 @@ const mockCreateInvitation = { mutateAsync: jest.fn(), isPending: false };
 const mockCancelInvitation = { mutateAsync: jest.fn(), isPending: false };
 let mockTeam: Team | undefined;
 let mockTeamInvitations: unknown[] = [];
+let mockPlayersList: { id: string; name: string; email?: string | null }[] = [];
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
@@ -45,7 +47,7 @@ jest.mock('../../hooks/useInvitations', () => ({
 }));
 jest.mock('../../hooks/usePlayers', () => ({
   ...jest.requireActual('../../hooks/usePlayers'),
-  usePlayers: () => ({ data: { players: [] }, isLoading: false }),
+  usePlayers: () => ({ data: { players: mockPlayersList }, isLoading: false }),
 }));
 
 const headRole: TeamStaff['role'] = {
@@ -91,6 +93,7 @@ const baseTeam = (): Team => ({
     makeMember('p-invited', 'Cleo Invited', true, 'cleo@example.com'),
     makeMember('p-expired', 'Dot Expired', true, 'dot@example.com'),
     makeMember('p-none', 'Eve RosterOnly', true),
+    makeMember('p-hasmail', 'Fay NotInvited', true, 'fay@example.com'),
   ],
   invitations: [
     { id: 'inv-accepted', playerId: 'p-accepted', status: 'ACCEPTED', expiresAt: PAST, createdAt: PAST },
@@ -99,9 +102,9 @@ const baseTeam = (): Team => ({
   ],
 });
 
-const signInCoach = () => {
+const signIn = (user: { id: string; role: 'PLAYER' | 'COACH' | 'ADMIN' }) => {
   useAuthStore.setState({
-    user: { id: 'coach-1', role: 'COACH', email: 'c@x.y', name: 'Coach' } as never,
+    user: { ...user, email: 'x@y.z', name: 'X' } as never,
     isAuthenticated: true,
     accessToken: 't',
     refreshToken: null,
@@ -109,12 +112,31 @@ const signInCoach = () => {
   });
 };
 
+type AlertButton = { text: string; style?: string; onPress?: () => void | Promise<void> };
+
+/** Open a member's overflow menu and return its buttons (from the Alert spy). */
+const openMenu = (
+  screen: ReturnType<typeof render>,
+  alertSpy: jest.SpyInstance,
+  playerName: string
+): AlertButton[] => {
+  fireEvent.press(screen.getByLabelText(`Player options: ${playerName}`));
+  const call = alertSpy.mock.calls[alertSpy.mock.calls.length - 1];
+  expect(call[0]).toBe(playerName);
+  return call[2] as AlertButton[];
+};
+
 describe('ManagePlayersScreen — roster status and actions', () => {
+  let alertSpy: jest.SpyInstance;
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockTeam = baseTeam();
     mockTeamInvitations = [];
-    signInCoach();
+    mockPlayersList = [];
+    mockAddRosterPlayer.isPending = false;
+    alertSpy = jest.spyOn(Alert, 'alert');
+    signIn({ id: 'coach-1', role: 'COACH' });
   });
 
   it('renders the correct chip for every roster state', () => {
@@ -123,48 +145,128 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     expect(getAllByText('Active')).toHaveLength(2);
     expect(getByText('Invited')).toBeTruthy();
     expect(getByText('Invite expired')).toBeTruthy();
-    expect(getByText('Not invited')).toBeTruthy();
+    // Eve (no email) and Fay (email, never invited) are both Not invited
+    expect(getAllByText('Not invited')).toHaveLength(2);
+  });
+
+  it('menu contents are contextual to the chip status', () => {
+    const screen = render(<ManagePlayersScreen />);
+    const texts = (name: string) => openMenu(screen, alertSpy, name).map((b) => b.text);
+
+    // Invited: resend + cancel; managed → invite a parent
+    expect(texts('Cleo Invited')).toEqual([
+      'Resend invitation',
+      'Cancel invitation',
+      'Invite a parent',
+      'Remove player',
+      'Close',
+    ]);
+    // Expired: resend but NO cancel (lazily-expired rows have no valid id)
+    expect(texts('Dot Expired')).toEqual([
+      'Resend invitation',
+      'Invite a parent',
+      'Remove player',
+      'Close',
+    ]);
+    // No email on file: no send option at all
+    expect(texts('Eve RosterOnly')).toEqual(['Invite a parent', 'Remove player', 'Close']);
+    // Not invited WITH an email: Send invitation appears
+    expect(texts('Fay NotInvited')).toContain('Send invitation');
+    // Active claimed account (not managed): only remove
+    expect(texts('Ada Active')).toEqual(['Remove player', 'Close']);
   });
 
   it('Resend calls the supersede create for an invited player', async () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: true });
-    const { getByLabelText } = render(<ManagePlayersScreen />);
+    const screen = render(<ManagePlayersScreen />);
 
-    fireEvent.press(getByLabelText('Resend invitation: Cleo Invited'));
-
-    await waitFor(() =>
-      expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
-        teamId: 't1',
-        data: { playerId: 'p-invited', supersede: true },
-      })
+    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
+      (b) => b.text === 'Resend invitation'
     );
+    await resend?.onPress?.();
+
+    expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+      teamId: 't1',
+      data: { playerId: 'p-invited', supersede: true },
+    });
     expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to Cleo Invited', 'success');
+  });
+
+  it('Send invitation for a not-invited player with an email uses the same supersede call', async () => {
+    mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: true });
+    const screen = render(<ManagePlayersScreen />);
+
+    const send = openMenu(screen, alertSpy, 'Fay NotInvited').find(
+      (b) => b.text === 'Send invitation'
+    );
+    await send?.onPress?.();
+
+    expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+      teamId: 't1',
+      data: { playerId: 'p-hasmail', supersede: true },
+    });
   });
 
   it('a failed resend email surfaces as an error toast', async () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: false });
-    const { getByLabelText } = render(<ManagePlayersScreen />);
+    const screen = render(<ManagePlayersScreen />);
 
-    fireEvent.press(getByLabelText('Resend invitation: Dot Expired'));
+    const resend = openMenu(screen, alertSpy, 'Dot Expired').find(
+      (b) => b.text === 'Resend invitation'
+    );
+    await resend?.onPress?.();
 
-    await waitFor(() =>
-      expect(mockShowToast).toHaveBeenCalledWith(
-        'Invitation refreshed, but the email to Dot Expired failed to send.',
-        'error'
-      )
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Invitation refreshed, but the email to Dot Expired failed to send.',
+      'error'
     );
   });
 
-  it('Cancel invitation confirms, then deletes the PENDING row by id', async () => {
+  it('emailSent null (no address on file) surfaces as an info toast', async () => {
+    mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: null });
+    const screen = render(<ManagePlayersScreen />);
+
+    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
+      (b) => b.text === 'Resend invitation'
+    );
+    await resend?.onPress?.();
+
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Cleo Invited has no email address on file.',
+      'info'
+    );
+  });
+
+  it('a rejected resend surfaces the API error message', async () => {
+    mockCreateInvitation.mutateAsync.mockRejectedValue(
+      new Error('A pending invitation already exists for this player')
+    );
+    const screen = render(<ManagePlayersScreen />);
+
+    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
+      (b) => b.text === 'Resend invitation'
+    );
+    await resend?.onPress?.();
+
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'A pending invitation already exists for this player',
+      'error'
+    );
+  });
+
+  it('Cancel invitation confirms, then deletes the PENDING row scoped to the team', async () => {
     mockCancelInvitation.mutateAsync.mockResolvedValue({});
-    const alertSpy = jest.spyOn(Alert, 'alert');
-    const { getByLabelText } = render(<ManagePlayersScreen />);
+    const screen = render(<ManagePlayersScreen />);
 
-    fireEvent.press(getByLabelText('Cancel invitation: Cleo Invited'));
+    const cancel = openMenu(screen, alertSpy, 'Cleo Invited').find(
+      (b) => b.text === 'Cancel invitation'
+    );
+    cancel?.onPress?.();
 
-    expect(alertSpy).toHaveBeenCalled();
-    const buttons = alertSpy.mock.calls[0][2] as { text: string; onPress?: () => void }[];
-    const confirm = buttons.find((b) => b.text === 'Cancel invitation');
+    // The action opens its own confirm dialog
+    const confirmCall = alertSpy.mock.calls[alertSpy.mock.calls.length - 1];
+    expect(confirmCall[0]).toBe('Cancel Invitation');
+    const confirm = (confirmCall[2] as AlertButton[]).find((b) => b.text === 'Cancel invitation');
     await confirm?.onPress?.();
 
     expect(mockCancelInvitation.mutateAsync).toHaveBeenCalledWith({
@@ -173,17 +275,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     });
   });
 
-  it('cancel button only renders on Invited rows — never Expired/Not invited/Active', () => {
-    const { getByLabelText, queryByLabelText } = render(<ManagePlayersScreen />);
-    expect(getByLabelText('Cancel invitation: Cleo Invited')).toBeTruthy();
-    expect(queryByLabelText('Cancel invitation: Dot Expired')).toBeNull();
-    expect(queryByLabelText('Cancel invitation: Eve RosterOnly')).toBeNull();
-    expect(queryByLabelText('Cancel invitation: Ada Active')).toBeNull();
-    // Eve has no email on file — no Invite action either
-    expect(queryByLabelText('Invite: Eve RosterOnly')).toBeNull();
-  });
-
-  it('renders case-3 invitees (existing accounts) in their own section, deduped against members', () => {
+  it('renders case-3 invitees deduped against members and filtered to unexpired', () => {
     mockTeamInvitations = [
       {
         id: 'inv-case3',
@@ -200,13 +292,45 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         expiresAt: FUTURE,
         player: { id: 'p-invited', name: 'Cleo Invited', email: 'cleo@example.com' },
       },
+      // Expired non-member invite must be filtered out
+      {
+        id: 'inv-stale',
+        playerId: 'p-stale',
+        status: 'PENDING',
+        expiresAt: PAST,
+        player: { id: 'p-stale', name: 'Stan Stale', email: 'stan@example.com' },
+      },
     ];
-    const { getByText, getAllByText } = render(<ManagePlayersScreen />);
+    const { getByText, getAllByText, queryByText } = render(<ManagePlayersScreen />);
 
     expect(getByText('Invited (1)')).toBeTruthy();
     expect(getByText('Zoe Existing')).toBeTruthy();
+    expect(queryByText('Stan Stale')).toBeNull();
     // Cleo appears exactly once (in the members list), not again as case-3
     expect(getAllByText('Cleo Invited')).toHaveLength(1);
+  });
+
+  it('case-3 row resend uses the direct button with the supersede call', async () => {
+    mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: true });
+    mockTeamInvitations = [
+      {
+        id: 'inv-case3',
+        playerId: 'p-outsider',
+        status: 'PENDING',
+        expiresAt: FUTURE,
+        player: { id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com' },
+      },
+    ];
+    const { getByLabelText } = render(<ManagePlayersScreen />);
+
+    fireEvent.press(getByLabelText('Resend invitation: Zoe Existing'));
+
+    await waitFor(() =>
+      expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        data: { playerId: 'p-outsider', supersede: true },
+      })
+    );
   });
 
   it('unified Add Player posts the form and explains the case-3 outcome', async () => {
@@ -250,7 +374,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     );
   });
 
-  it('a failed player invite email on add surfaces as an error toast', async () => {
+  it('case-2 success toasts "added and invitation sent"; failed player email adds an error toast', async () => {
     mockAddRosterPlayer.mutateAsync.mockResolvedValue({
       success: true,
       rostered: true,
@@ -269,7 +393,37 @@ describe('ManagePlayersScreen — roster status and actions', () => {
 
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(
-        'The invitation email failed to send — use Resend on the roster to retry.',
+        'Player added to roster and invitation sent',
+        'success'
+      )
+    );
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'The invitation email failed to send — use Resend on the roster to retry.',
+      'error'
+    );
+  });
+
+  it('a failed guardian email surfaces as an error toast', async () => {
+    mockAddRosterPlayer.mutateAsync.mockResolvedValue({
+      success: true,
+      rostered: true,
+      invited: true,
+      member: makeMember('p-new', 'New Kid', true, 'new@example.com'),
+      invitation: { id: 'inv-new' },
+      guardianInvited: true,
+      emails: { player: true, guardian: false },
+    });
+    const { getByTestId } = render(<ManagePlayersScreen />);
+
+    fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
+    fireEvent.changeText(getByTestId('add-player-email-input'), 'new@example.com');
+    fireEvent.changeText(getByTestId('add-player-guardian-email-input'), 'mom@example.com');
+    fireEvent.press(getByTestId('add-player-submit'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'The parent invite email failed to send — retry from the player’s Guardians screen.',
         'error'
       )
     );
@@ -298,5 +452,66 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       teamId: 't1',
       data: expect.objectContaining({ name: 'Kid', playerEmail: undefined, guardianEmail: undefined }),
     });
+  });
+
+  it('a rejected add surfaces the error and keeps the form open', async () => {
+    mockAddRosterPlayer.mutateAsync.mockRejectedValue(new Error('Player is already on this team'));
+    const { getByTestId } = render(<ManagePlayersScreen />);
+
+    fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.changeText(getByTestId('add-player-name-input'), 'Dup Kid');
+    fireEvent.press(getByTestId('add-player-submit'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Player is already on this team', 'error')
+    );
+    // Form stays open for correction
+    expect(getByTestId('add-player-name-input')).toBeTruthy();
+  });
+
+  it('submit is inert while the add is pending (double-tap guard)', () => {
+    mockAddRosterPlayer.isPending = true;
+    const { getByTestId } = render(<ManagePlayersScreen />);
+
+    fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.changeText(getByTestId('add-player-name-input'), 'Kid');
+    fireEvent.press(getByTestId('add-player-submit'));
+
+    expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('search → select → Send Invitation flow, including a failed email warning', async () => {
+    mockPlayersList = [{ id: 'p-search', name: 'Searched Sam', email: 'sam@example.com' }];
+    mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: false });
+    const { getByText, getByLabelText } = render(<ManagePlayersScreen />);
+
+    fireEvent.changeText(getByLabelText('Search Players'), 'Sam');
+    fireEvent.press(getByText('Searched Sam'));
+    fireEvent.press(getByText('Send Invitation'));
+
+    await waitFor(() =>
+      expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        data: expect.objectContaining({ playerId: 'p-search' }),
+      })
+    );
+    expect(mockShowToast).toHaveBeenCalledWith('Invitation sent to player', 'success');
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'The invitation email failed to send — use Resend to retry.',
+      'error'
+    );
+  });
+
+  it('denies a non-manager: no roster controls render and the screen bounces', async () => {
+    signIn({ id: 'player-9', role: 'PLAYER' });
+    const { queryByLabelText, queryByTestId } = render(<ManagePlayersScreen />);
+
+    // The real useAccessGuard runs (not mocked): spinner instead of controls,
+    // gated UI never flashes for an unauthorized deep link
+    expect(queryByTestId('add-player-button')).toBeNull();
+    expect(queryByLabelText('Player options: Cleo Invited')).toBeNull();
+    await waitFor(() =>
+      expect(mockRouter.back.mock.calls.length + mockRouter.replace.mock.calls.length).toBeGreaterThan(0)
+    );
   });
 });
