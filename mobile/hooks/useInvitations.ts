@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
+import { teamKeys, invitationKeys, playerKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
@@ -198,14 +198,13 @@ export function useCreateInvitation() {
       return response.data;
     },
     onSuccess: (data, variables) => {
-      // Invalidate invitation lists
+      // lists() covers every invitation query, incl. useTeamInvitations
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: invitationKeys.team(variables.teamId) });
       // The team payload's invite-status join changed (chips)
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
       if (variables.data.email) {
         // A new player account may have been created; refresh player search
-        queryClient.invalidateQueries({ queryKey: ['players'] });
+        queryClient.invalidateQueries({ queryKey: playerKeys.all });
       }
     },
   });
@@ -274,8 +273,8 @@ export function useCancelInvitation() {
       return response.data;
     },
     onSuccess: (_data, variables) => {
+      // lists() covers every invitation query, incl. useTeamInvitations
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: invitationKeys.team(variables.teamId) });
       // Chip flips to "Not invited" — invalidate only THIS team's detail
       // (an unscoped teams-details key would refetch every cached team)
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });

@@ -5,7 +5,7 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { usageKeys } from './useUsage';
-import { teamKeys, invitationKeys, type TeamFilters } from './query-keys';
+import { playerKeys, teamKeys, invitationKeys, type TeamFilters } from './query-keys';
 import type { TeamInvitationStatusRow } from '../utils/roster-status';
 import type { GuardianRelationship } from '../../shared/types';
 
@@ -133,8 +133,12 @@ export interface AddRosterPlayerResponse {
   guardianInvited: boolean;
   /** Why the guardian invite did not happen (case 3, duplicate, ...). */
   guardianReason?: string;
-  /** Per-send delivery flags — false means the email failed; warn the coach. */
-  emails: { player?: boolean; guardian?: boolean };
+  /**
+   * Per-send delivery flags — false means the email failed; warn the coach.
+   * Optional: a backend predating the unification deploy omits it (version
+   * skew during an OTA window), so read it defensively.
+   */
+  emails?: { player?: boolean; guardian?: boolean };
 }
 
 export interface TeamsResponse {
@@ -294,7 +298,7 @@ export function useAddRosterPlayer() {
       }
       if (variables.data.playerEmail || variables.data.guardianEmail) {
         // A new account may have been created; refresh player search
-        queryClient.invalidateQueries({ queryKey: ['players'] });
+        queryClient.invalidateQueries({ queryKey: playerKeys.all });
       }
     },
   });
@@ -309,6 +313,8 @@ export function useRemovePlayerFromTeam() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+      // Team-card member counts (_count.members) live in the list payloads
+      queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
     },
   });
 }

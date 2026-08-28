@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Modal, View, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { Modal, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';

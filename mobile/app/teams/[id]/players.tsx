@@ -75,12 +75,22 @@ interface ChipPalette {
   textSecondary: string;
 }
 
-function StatusChip({ status, colors }: { status: RosterStatus; colors: ChipPalette }) {
+function StatusChip({
+  status,
+  playerName,
+  colors,
+}: {
+  status: RosterStatus;
+  playerName: string;
+  colors: ChipPalette;
+}) {
   const color = rosterStatusColor(status, colors);
   return (
     <View
       style={[styles.chip, { borderColor: color }]}
-      accessibilityLabel={`Status: ${rosterStatusLabel(status)}`}
+      // Row-anchored so an E2E assertion can't false-pass off a neighboring
+      // row's chip (red-team review) — Maestro asserts this exact string.
+      accessibilityLabel={`${playerName} status: ${rosterStatusLabel(status)}`}
     >
       <ThemedText variant="caption" style={{ color }}>
         {rosterStatusLabel(status)}
@@ -130,7 +140,11 @@ export default function ManagePlayersScreen() {
 
   // Existing-account invitees not yet on the roster (case 3) come from the
   // invitations endpoint — the team payload carries rostered players only.
-  const { data: teamInvitationsData } = useTeamInvitations(id, 'PENDING');
+  const {
+    data: teamInvitationsData,
+    error: teamInvitationsError,
+    refetch: refetchTeamInvitations,
+  } = useTeamInvitations(id, 'PENDING');
 
   // Search for players
   const { data: playersData, isLoading: searchingPlayers } = usePlayers({
@@ -164,7 +178,7 @@ export default function ManagePlayersScreen() {
       toast.showToast('Player added to roster', 'success');
     }
 
-    if (result.emails.player === false) {
+    if (result.emails?.player === false) {
       toast.showToast(
         'The invitation email failed to send — use Resend on the roster to retry.',
         'error'
@@ -173,7 +187,7 @@ export default function ManagePlayersScreen() {
     if (hadGuardianEmail) {
       if (!result.guardianInvited && result.guardianReason) {
         toast.showToast(result.guardianReason, 'info');
-      } else if (result.emails.guardian === false) {
+      } else if (result.emails?.guardian === false) {
         toast.showToast('The parent invite email failed to send — retry from the player’s Guardians screen.', 'error');
       }
     }
@@ -360,6 +374,10 @@ export default function ManagePlayersScreen() {
       !memberIds.has(inv.playerId) &&
       !isInvitationExpired(inv.expiresAt)
   );
+  // Players who already have a live invitation must not resurface in search —
+  // re-selecting one there would hit a bare 400 ("pending invitation already
+  // exists"; that path doesn't supersede). Resend lives on their Invited row.
+  const pendingInviteePlayerIds = new Set(pendingNonMemberInvites.map((inv) => inv.playerId));
 
   /**
    * Per-player actions live behind one 44pt overflow button (design review:
@@ -434,7 +452,11 @@ export default function ManagePlayersScreen() {
         }
         rightElement={
           <View style={styles.rowActions}>
-            <StatusChip status={rosterStatus.status} colors={colors} />
+            <StatusChip
+              status={rosterStatus.status}
+              playerName={member.player.name}
+              colors={colors}
+            />
             <TouchableOpacity
               onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
@@ -541,7 +563,7 @@ export default function ManagePlayersScreen() {
                     </ThemedText>
                   ) : players.length > 0 ? (
                     players
-                      .filter((p) => !memberIds.has(p.id))
+                      .filter((p) => !memberIds.has(p.id) && !pendingInviteePlayerIds.has(p.id))
                       .map((player) => (
                         <ListItem
                           key={player.id}
@@ -747,7 +769,32 @@ export default function ManagePlayersScreen() {
           )}
         </View>
 
-        {/* Invited, not yet on the roster (existing accounts, case 3) */}
+        {/* Invited, not yet on the roster (existing accounts, case 3). A
+            failed fetch must not silently drop the section — a coach who
+            can't see a live invite tends to re-invite and hit a 400. */}
+        {teamInvitationsError != null && (
+          <View style={styles.section}>
+            <ThemedText variant="h4" style={styles.sectionTitle}>
+              Invited
+            </ThemedText>
+            <Card variant="default" style={styles.playersCard}>
+              <View style={styles.inviteErrorRow}>
+                <ThemedText variant="caption" color="textSecondary">
+                  Couldn’t load pending invitations.
+                </ThemedText>
+                <TouchableOpacity
+                  onPress={() => refetchTeamInvitations()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading invitations"
+                >
+                  <ThemedText variant="captionBold" style={{ color: colors.primary }}>
+                    Retry
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </Card>
+          </View>
+        )}
         {pendingNonMemberInvites.length > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h4" style={styles.sectionTitle}>
@@ -839,6 +886,12 @@ const styles = StyleSheet.create({
   },
   playersCard: {
     marginTop: spacing.sm,
+  },
+  inviteErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
   },
   emptyCard: {
     padding: spacing.xl,

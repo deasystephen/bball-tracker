@@ -29,32 +29,35 @@ appId: com.bballtracker.mobile
 - tapOn: "Add Player"
 - assertVisible: "Roster"
 
-# Chip states, one per seeded fixture
+# Chip states, one per seeded fixture. Assertions use the row-anchored chip
+# accessibilityLabel ("<player> status: <label>") — a bare "Active" would
+# false-pass off any neighboring claimed player's chip (red-team review).
 - scrollUntilVisible:
     element:
       text: "Iris Invited"
     direction: DOWN
     timeout: 10000
-- assertVisible: "Invited"
+- assertVisible: "Iris Invited status: Invited"
 - scrollUntilVisible:
     element:
       text: "Xander Expired"
     direction: DOWN
     timeout: 10000
-- assertVisible: "Invite expired"
+- assertVisible: "Xander Expired status: Invite expired"
 - scrollUntilVisible:
     element:
       text: "Wendy WebAccept"
     direction: DOWN
     timeout: 10000
 # Accepted via web link, never signed in — must read Active, never Not invited
-- assertVisible: "Active"
+- assertVisible: "Wendy WebAccept status: Active"
+- assertNotVisible: "Wendy WebAccept status: Not invited"
 - scrollUntilVisible:
     element:
       text: "Marcus Johnson"
     direction: DOWN
     timeout: 10000
-- assertVisible: "Not invited"
+- assertVisible: "Marcus Johnson status: Not invited"
 
 # Invite lifecycle actions live in the per-player overflow menu (design
 # review: 44pt targets, no icon-cluster crowding). Contents are contextual.

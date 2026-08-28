@@ -126,11 +126,9 @@ describe('useInvitations runtime', () => {
     expect(mockedPost).toHaveBeenCalledWith('/teams/t1/invitations', {
       playerId: 'p1',
     });
+    // lists() is the covering key for useTeamInvitations ({teamId, status})
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: invitationKeys.lists(),
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: invitationKeys.team('t1'),
     });
     // The team payload's invite-status join changed — the roster chip refresh
     // after a Resend depends on THIS invalidation (unification review)
@@ -213,8 +211,10 @@ describe('useInvitations runtime', () => {
     });
 
     expect(mockedDelete).toHaveBeenCalledWith('/invitations/inv-1');
+    // lists() covers useTeamInvitations — the Invited section refresh after a
+    // cancel depends on it
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: invitationKeys.team('t1'),
+      queryKey: invitationKeys.lists(),
     });
     // Only THIS team's detail refetches (chip join changed) — never an
     // unscoped ['teams','detail'] that would refetch every cached team

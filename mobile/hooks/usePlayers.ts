@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { playerKeys, type PlayersQueryParams } from './query-keys';
 
 export interface Player {
   id: string;
@@ -61,23 +62,10 @@ export interface UpdatePlayerInput {
   profilePictureUrl?: string;
 }
 
-export interface PlayersQueryParams {
-  search?: string;
-  role?: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN';
-  limit?: number;
-  offset?: number;
-}
-
-/**
- * Query key factory for players
- */
-export const playerKeys = {
-  all: ['players'] as const,
-  lists: () => [...playerKeys.all, 'list'] as const,
-  list: (params?: PlayersQueryParams) => [...playerKeys.lists(), params] as const,
-  details: () => [...playerKeys.all, 'detail'] as const,
-  detail: (id: string) => [...playerKeys.details(), id] as const,
-};
+// Query key factory lives in ./query-keys (dependency-free, cycle-safe) so
+// cross-invalidating hooks never hardcode a ['players'] literal.
+export { playerKeys };
+export type { PlayersQueryParams };
 
 /**
  * Hook to fetch list of players

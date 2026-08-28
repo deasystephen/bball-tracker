@@ -21,6 +21,8 @@ const mockCreateInvitation = { mutateAsync: jest.fn(), isPending: false };
 const mockCancelInvitation = { mutateAsync: jest.fn(), isPending: false };
 let mockTeam: Team | undefined;
 let mockTeamInvitations: unknown[] = [];
+let mockTeamInvitationsError: Error | null = null;
+const mockRefetchTeamInvitations = jest.fn();
 let mockPlayersList: { id: string; name: string; email?: string | null }[] = [];
 
 jest.mock('expo-router', () => ({
@@ -41,7 +43,11 @@ jest.mock('../../hooks/useTeams', () => ({
 }));
 jest.mock('../../hooks/useInvitations', () => ({
   ...jest.requireActual('../../hooks/useInvitations'),
-  useTeamInvitations: () => ({ data: { invitations: mockTeamInvitations } }),
+  useTeamInvitations: () => ({
+    data: mockTeamInvitationsError ? undefined : { invitations: mockTeamInvitations },
+    error: mockTeamInvitationsError,
+    refetch: mockRefetchTeamInvitations,
+  }),
   useCreateInvitation: () => mockCreateInvitation,
   useCancelInvitation: () => mockCancelInvitation,
 }));
@@ -142,6 +148,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     jest.clearAllMocks();
     mockTeam = baseTeam();
     mockTeamInvitations = [];
+    mockTeamInvitationsError = null;
     mockPlayersList = [];
     mockAddRosterPlayer.isPending = false;
     alertSpy = jest.spyOn(Alert, 'alert');
@@ -517,6 +524,38 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       'The invitation email failed to send — use Resend to retry.',
       'error'
     );
+  });
+
+  it('a failed invitations fetch renders an inline error with retry, not a vanished section', () => {
+    mockTeamInvitationsError = new Error('network down');
+    const { getByText, getByLabelText } = render(<ManagePlayersScreen />);
+
+    getByText('Couldn\u2019t load pending invitations.');
+    fireEvent.press(getByLabelText('Retry loading invitations'));
+    expect(mockRefetchTeamInvitations).toHaveBeenCalled();
+  });
+
+  it('search results exclude players who already have a live case-3 invitation', () => {
+    mockTeamInvitations = [
+      {
+        id: 'inv-pend',
+        playerId: 'p-pend',
+        status: 'PENDING',
+        expiresAt: FUTURE,
+        player: { id: 'p-pend', name: 'Pending Petra', email: 'petra@example.com' },
+      },
+    ];
+    mockPlayersList = [
+      { id: 'p-pend', name: 'Pending Petra', email: 'petra@example.com' },
+      { id: 'p-search', name: 'Searched Sam', email: 'sam@example.com' },
+    ];
+    const { getByText, getByLabelText, queryAllByText } = render(<ManagePlayersScreen />);
+
+    fireEvent.changeText(getByLabelText('Search Players'), 'Pe');
+    // Petra renders once — her Invited row — never as a selectable search
+    // result (selecting her would hit a bare 400: the pending invite exists)
+    expect(queryAllByText('Pending Petra')).toHaveLength(1);
+    expect(getByText('Searched Sam')).toBeTruthy();
   });
 
   it('denies a non-manager: no roster controls render and the screen bounces', async () => {

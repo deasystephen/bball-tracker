@@ -58,9 +58,10 @@ appId: com.bballtracker.mobile
     id: "add-player-submit"
 
 # The player appears on the roster IMMEDIATELY with the "Not invited" chip
+# (row-anchored label — a bare "Not invited" could match another row's chip)
 - scrollUntilVisible:
     element:
       text: "E2E Test Player"
     direction: DOWN
     timeout: 10000
-- assertVisible: "Not invited"
+- assertVisible: "E2E Test Player status: Not invited"

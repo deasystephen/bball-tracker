@@ -119,7 +119,13 @@ Backend API (Node.js/Express)
   re-adding (which would create a duplicate account).
 - **Case-3 invitees** (existing accounts, not yet members) render in a separate "Invited"
   section from `useTeamInvitations(teamId, 'PENDING')`, filtered to non-members + unexpired
-  (dedupe by `playerId` against `members[]`).
+  (dedupe by `playerId` against `members[]`); search results also exclude them (re-selecting
+  would 400 — Resend lives on the Invited row), and a failed invitations fetch renders an
+  inline error + Retry instead of silently dropping the section.
+- Per-player actions use `components/ActionMenu` (Modal bottom sheet) — never an `Alert`
+  menu: Android caps Alert at three buttons and silently truncates. Chip accessibility
+  labels are row-anchored (`"<player> status: <label>"`) and Maestro asserts that exact
+  string — a bare `assertVisible: "Active"` can false-pass off a neighboring row.
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
   Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).

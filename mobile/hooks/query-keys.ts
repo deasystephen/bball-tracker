@@ -32,12 +32,31 @@ export const teamKeys = {
   detail: (id: string) => [...teamKeys.details(), id] as const,
 };
 
+// Every invitation query keys under lists()/list(params) — including the
+// team-scoped useTeamInvitations — so lists() is the covering invalidation
+// key for team-scoped coherence. (Bespoke team()/player() sub-keys existed
+// once, subscribed to by nothing; red-team review removed them before a
+// "scope it down" refactor could silently stop refreshing the Invited
+// section.)
 export const invitationKeys = {
   all: ['invitations'] as const,
   lists: () => [...invitationKeys.all, 'list'] as const,
   list: (params?: InvitationsQueryParams) => [...invitationKeys.lists(), params] as const,
   details: () => [...invitationKeys.all, 'detail'] as const,
   detail: (id: string) => [...invitationKeys.details(), id] as const,
-  team: (teamId: string) => [...invitationKeys.all, 'team', teamId] as const,
-  player: (playerId: string) => [...invitationKeys.all, 'player', playerId] as const,
+};
+
+export interface PlayersQueryParams {
+  search?: string;
+  role?: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN';
+  limit?: number;
+  offset?: number;
+}
+
+export const playerKeys = {
+  all: ['players'] as const,
+  lists: () => [...playerKeys.all, 'list'] as const,
+  list: (params?: PlayersQueryParams) => [...playerKeys.lists(), params] as const,
+  details: () => [...playerKeys.all, 'detail'] as const,
+  detail: (id: string) => [...playerKeys.details(), id] as const,
 };

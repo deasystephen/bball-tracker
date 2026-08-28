@@ -70,9 +70,17 @@ async function main() {
   // Seed data includes live bearer secrets (invitation tokens honored by the
   // UNAUTHENTICATED /invitations/by-token routes in every environment), so
   // never run against production (pre-landing review, security specialist).
-  if (process.env.NODE_ENV === 'production' && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
+  // The realistic accident is not NODE_ENV=production — it is a local shell
+  // (NODE_ENV unset) with DATABASE_URL repointed at prod, exactly how the RDS
+  // runbook connects during a restore. Guard both signals (red-team review).
+  const looksLikeProdDb = /rds\.amazonaws\.com/i.test(process.env.DATABASE_URL ?? '');
+  if (
+    (process.env.NODE_ENV === 'production' || looksLikeProdDb) &&
+    process.env.SEED_ALLOW_PRODUCTION !== 'true'
+  ) {
     throw new Error(
-      'Refusing to seed with NODE_ENV=production. Set SEED_ALLOW_PRODUCTION=true only if you really mean it.'
+      'Refusing to seed: NODE_ENV=production or DATABASE_URL points at an RDS host. ' +
+        'Set SEED_ALLOW_PRODUCTION=true only if you really mean it.'
     );
   }
 
@@ -568,27 +576,24 @@ async function main() {
 
     // Random token per run — the fixtures are asserted by name/chip, never by
     // token, and a committed bearer secret must not exist (security review).
-    const existingFixtureInvite = await prisma.teamInvitation.findFirst({
+    // Delete-then-create keeps re-seeds deterministic after QA interaction: a
+    // manual Resend (supersede) leaves EXPIRED + PENDING rows, and updating an
+    // arbitrary findFirst row could re-PENDING the old one alongside the live
+    // one — violating the partial unique pending index (red-team review).
+    await prisma.teamInvitation.deleteMany({
       where: { teamId: lakers.id, playerId: fixturePlayer.id },
     });
-    if (existingFixtureInvite) {
-      await prisma.teamInvitation.update({
-        where: { id: existingFixtureInvite.id },
-        data: { status: fixture.status, expiresAt: fixture.expiresAt },
-      });
-    } else {
-      await prisma.teamInvitation.create({
-        data: {
-          teamId: lakers.id,
-          playerId: fixturePlayer.id,
-          invitedById: coachFrank.id,
-          token: randomBytes(32).toString('base64url'),
-          status: fixture.status,
-          expiresAt: fixture.expiresAt,
-          ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
-        },
-      });
-    }
+    await prisma.teamInvitation.create({
+      data: {
+        teamId: lakers.id,
+        playerId: fixturePlayer.id,
+        invitedById: coachFrank.id,
+        token: randomBytes(32).toString('base64url'),
+        status: fixture.status,
+        expiresAt: fixture.expiresAt,
+        ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
+      },
+    });
     console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
   }
 
