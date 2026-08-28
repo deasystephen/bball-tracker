@@ -742,6 +742,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 ## Work Hygiene
 
 - **Before starting new work, ensure prior work is committed.** If there are uncommitted changes from a previous feature, test them (`npm test`, `npx tsc --noEmit`), commit them on an appropriate branch, and verify a clean `git status` before beginning a new task. Mixing unrelated features in the same uncommitted diff makes testing and rollback difficult.
+- **End every task with a wrap-up sweep — unprompted.** Before declaring a task done, check whether the change requires updates to (a) tests — Jest, API integration, Maestro flows; (b) documentation — `CLAUDE.md`, `docs/` (including the E2E test plan), READMEs; (c) open GitHub issues — anything the change closes, unblocks, or contradicts (post a status comment or close as appropriate). Make the updates as part of the same task and report what was updated (or state explicitly that nothing needed updating). The user should never have to ask "what about tests/docs/issues?" after a change.
 
 ## Documentation Hygiene
 
@@ -753,6 +754,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 - Single long-lived branch: `main`. All work happens on short-lived feature branches that merge back into `main` via PR.
 - Feature branches from `main`: `feature/your-feature-name`
+- **Delete feature branches once merged.** After a PR merges, delete the local branch and prune remote-tracking refs: `git branch -D <branch> && git fetch --prune`. PRs are squash-merged, so `git branch -d`/`--merged` won't recognize them as merged — verify the PR state is MERGED (`gh pr list --head <branch> --state all`) before `-D`. Do this as part of landing the PR, not as a later cleanup task.
 - Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
 - **Tagging**: When pushing major changes to GitHub (new features, design overhauls, large refactors), create an annotated tag with `git tag -a vX.Y.Z -m "description"` and push it with `git push origin vX.Y.Z`. Use semantic versioning:
   - **Major** (vX.0.0): Breaking changes or architectural rewrites
