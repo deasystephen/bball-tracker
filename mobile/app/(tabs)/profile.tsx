@@ -7,6 +7,7 @@ import { View, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-nat
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import { useAuthStore } from '../../store/auth-store';
 import { canAccessAdmin } from '../../utils/team-permissions';
 import { guardianChildren, isGuardian, relationshipLabel } from '../../utils/guardian';
@@ -378,6 +379,29 @@ export default function Profile() {
                 />
               </View>
             </TouchableOpacity>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            {/* Version/OTA diagnostics + future ToS/privacy home (#25). The
+                version here comes from the manifest, replacing the hardcoded
+                footer string that had drifted to v1.0.0. */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={() => router.push('/about')}
+              accessibilityRole="button"
+              accessibilityLabel="About"
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="information-circle" size={18} color={colors.primary} />
+                </View>
+                <View style={styles.settingContent}>
+                  <ThemedText variant="body">About</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">
+                    {`Version ${Constants.expoConfig?.version ?? 'unknown'}`}
+                  </ThemedText>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
           </Card>
         </View>
 
@@ -396,11 +420,6 @@ export default function Profile() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.footer}>
-          <ThemedText variant="caption" color="textTertiary">
-            Basketball Tracker v1.0.0
-          </ThemedText>
-        </View>
       </ScrollView>
     </ThemedView>
   );
@@ -507,5 +526,4 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
   },
   logoutText: { fontWeight: '600' },
-  footer: { alignItems: 'center', marginTop: spacing.lg },
 });
