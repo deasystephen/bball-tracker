@@ -1,6 +1,6 @@
 # Roster / Invite Unification Spec (TeamSnap-style Add Player)
 
-**Status:** Draft — decisions locked 2026-08-27, pending eng review
+**Status:** Accepted — decisions locked 2026-08-27; eng review (incl. outside voice) complete, all findings folded
 **Owner:** Stephen Deasy
 **Context:** QA on 2026-08-28 (team "Spartans 5/6", 8 players via "Create New Player") surfaced that
 invited players are invisible until they accept: the roster showed 0 players, pending invitations are
@@ -15,7 +15,7 @@ pattern on exactly the points that confused a real coach.
 ## Goals
 
 1. **One Add Player flow.** Name required; player email optional; parent/guardian email optional;
-   "Send invitation" applies whenever an email is present. Managed-vs-invited becomes an outcome,
+   an invitation goes out whenever an email is present. Managed-vs-invited becomes an outcome,
    not an upfront decision.
 2. **Every added player appears on the roster immediately**, with an inline invite-status chip.
 3. **Coaches can see, resend, and cancel invitations** from the roster screen.
@@ -26,41 +26,79 @@ pattern on exactly the points that confused a real coach.
 
 | # | Decision | Choice |
 |---|----------|--------|
-| D1 | Cancel/reject vs roster entry | **Player stays on roster.** Cancelling (coach) or rejecting (player) only ends the login-access invitation; the roster entry survives as an uninvited/managed player with a "Not invited" chip. Removing a player from the roster remains a separate, existing action. *Nuance:* invites sent to an **existing account** never create a roster entry pre-accept (see Consent model), so a reject there simply removes the "Invited" row. |
-| D2 | Auto-accept for existing accounts | **Deferred.** Explicit accept stays in v1. Auto-accept (TeamSnap behavior) is a consent + account-enumeration question; record it as a follow-up decision when revisited. |
-| D3 | Parent email at creation | **In v1.** The Add Player form takes an optional guardian email + relationship, creating a `GuardianInvitation` via the existing guardian system in the same operation. |
-| D4 | Resend token handling | **Rotate.** Resend generates a new bearer token and fresh `expiresAt`; the old link dies. (Engineering decision, recorded here for the audit trail — tokens are bearer secrets, audit #14.) |
-| D5 | Existing data | **Disposable.** Production contains test data only; no backfill or data migration is required. Reset + reseed is acceptable (see Rollout). |
+| D1 | Cancel/reject vs roster entry | **Player stays on roster** as an uninvited managed player. **Amended (review T1):** the REJECTED/CANCELLED transition also **nulls the managed row's `email`** (only while `workosUserId` is null), because `syncUser` links any unclaimed row by email on first login — without the strip, a rejected invite (or a typo'd address) silently becomes a full membership on later sign-up. Coach re-invites with a corrected email to restore it. Invites to an **existing account** never create a roster entry pre-accept, so reject there just removes the "Invited" row. |
+| D2 | Auto-accept for existing accounts | **Deferred.** Explicit accept stays in v1. |
+| D3 | Parent email at creation | **In v1**, for players who get a roster entry at creation (cases 1–2 below). For an existing-account player (case 3) the guardian system's member requirement (`guardian-service.ts` `requireMember`) makes this impossible pre-accept; the API returns `guardianInvited: false` + reason and the UI hints "add the parent after they accept" (review issue 1A). |
+| D4 | Resend mechanics | ~~In-place token rotation~~ **Amended (review 3A + T5):** resend = supersede — transition the old PENDING row to EXPIRED and create a fresh invitation through the existing create path, in one transaction. Old link dies (original D4 intent), one write path for invitation birth. No dedicated resend endpoint: `POST /teams/:id/invitations` gains `supersede: true` (expire current PENDING + recreate); "Invite" and "Resend" are the same client call. |
+| D5 | Existing data | Disposable in principle, but **no reset is needed or performed** (review T4): legacy pending invitations render correctly under the new model (Invited rows via the invitations endpoint; accept creates the membership). Rollout is pure code. |
 
 ## Consent model (the invariant everything hangs off)
 
-- **New person (no existing account for the email, or no email at all):** create a managed `User`
-  (+ email when given) **and a `TeamMember` row immediately**, in one `$transaction` — exactly the
-  guarantee `addManagedPlayer` and create-and-invite (audit #69/#70) give today. This is safe
-  without consent because a managed user cannot log in; the roster entry only makes them trackable,
-  which is what the coach is asking for. The optional `TeamInvitation` (same transaction) gates
-  *account claim/login*, not roster presence.
-- **Existing account (email matches a `User` with `workosUserId`, or invite-by-playerId from
-  search):** invitation **only** — no `TeamMember` until accept, because membership would grant
-  that real account team access pre-consent (de facto auto-accept, which D2 defers). The roster UI
-  renders these as "Invited" rows sourced from the pending-invitations list.
-- **Claim path unchanged:** `syncUser` already links a pre-provisioned managed row by email on
-  first WorkOS login. The invitation email is therefore a *notification + deep link*; accepting it
-  transitions the invitation and routes the user into the claim flow. Accept must tolerate an
-  already-existing membership (upsert/no-op) instead of inserting.
+- **Case 1 — no email:** managed `User` + `TeamMember` in one `$transaction` (today's
+  `addManagedPlayer`).
+- **Case 2 — email with no claimed account:** managed `User` **with `isManaged: true` +
+  `managedById: <coach>`** + `TeamMember` + `TeamInvitation` + invite email, one transaction.
+  Setting the managed flags is deliberate and is an authz statement (review T2): per B2.10 the
+  managing coach can edit/delete the player until first sign-in — wanted, so typos are fixable
+  pre-claim. The deprecated create-and-invite arm of `POST /teams/:id/invitations` starts setting
+  the same flags (server-side change, invisible to old clients; today it sets neither —
+  `invitation-service.ts:241-249`).
+  - **Middle-case rule (review T3):** an email matching an **unclaimed** row (`workosUserId`
+    null — provisioned by another team's invite, `POST /players`, or a guardian invite) is
+    case 2: reuse the row, add `TeamMember` + invitation, set `managedById` only if null,
+    never touch `name`/`role`. Find-or-create wraps the unique-email race with
+    P2002-catch-and-reuse inside the transaction (the existing create-and-invite arm shares
+    this latent 500 — fix both).
+- **Case 3 — email matches a claimed account (`workosUserId` set), or invite-by-playerId:**
+  invitation **only** — no `TeamMember` until accept (membership would be de facto auto-accept,
+  deferred by D2). Response flags `rostered: false, invited: true` so the UI explains.
+  *Documented residual risk (review T6.2):* this response tells a roster-managing coach whether
+  an email has a claimed account — accepted as a coach-scoped, rate-limited signal; revisit
+  together with D2.
+- **Claim path:** `syncUser` links a pre-provisioned row by email on first WorkOS login and
+  clears `isManaged`. Accepting the invitation is a notification-driven shortcut into that flow;
+  accept must tolerate an already-existing membership (create-if-missing inside
+  `transitionPending()`), since both accept paths currently insert `TeamMember` unconditionally
+  (`invitation-service.ts:511,736`).
+
+### Roster status chip (review T2, supersedes the first two derivation drafts)
+
+Derived server-side per member from two signals, exposed on `GET /teams/:id` members:
+
+```
+isManaged = false  ─────────────────────────────► ACTIVE   (claimed via login)
+isManaged = true ─┬─ latest invitation ACCEPTED ► ACTIVE   (accepted via link, never logged in)
+                  ├─ PENDING, expiresAt future  ► INVITED
+                  ├─ PENDING, expiresAt past    ► INVITE EXPIRED (client computes from expiresAt)
+                  └─ otherwise                  ► NOT INVITED (incl. lazily-flipped EXPIRED,
+                                                  REJECTED, CANCELLED rows)
+```
+
+- The team payload joins invitations with `status IN (PENDING, ACCEPTED)` only — `id`, `status`,
+  `expiresAt`, **no token** (audit #14 class; tests assert absence). Single include, no N+1.
+- **Resend targets only PENDING rows** (review T6.3). "Invite expired"/"Not invited" rows offer
+  a fresh **Invite** action instead — same `supersede` create call — so a lazily-flipped row never
+  400s on a stale invitation id.
+- Existing-account pending invites (case 3) are **not** in the team payload: the roster screen
+  merges them client-side from `GET /invitations?teamId=` (already built and permission-scoped),
+  excluding any `playerId` already present in `members[]` (dedupe, review T6.6).
+- Mobile derivation lives in `utils/roster-status.ts` (project rule: derive via utils, never
+  inline — same pattern as `game-result.ts`), unit-tested across all chip states.
 
 ## Backend changes
 
 ### New unified endpoint
 
 `POST /api/v1/teams/:teamId/players` (gate: `canManageRoster`; supersedes both
-`POST /teams/:id/managed-players` and the `{name,email}` arm of `POST /teams/:id/invitations`):
+`POST /teams/:id/managed-players` and the `{name,email}` arm of `POST /teams/:id/invitations`).
+**Prerequisite (review T6.1):** delete the 410 tombstone already registered on this exact path
+(`api/teams/routes.ts:215`) — left in place it shadows the new route and every call dead-ends.
 
 ```
 {
   name: string,                       // required
-  playerEmail?: string,               // optional; find-or-create semantics
-  guardianEmail?: string,             // optional; requires relationship
+  playerEmail?: string,               // optional; find-or-create per the middle-case rule
+  guardianEmail?: string,             // optional; requires relationship; honoured cases 1-2 only
   guardianRelationship?: GuardianRelationship,
   jerseyNumber?: number,              // 0 is valid — null-check, never truthiness
   position?: string,
@@ -68,127 +106,188 @@ pattern on exactly the points that confused a real coach.
 }
 ```
 
-Behavior (single `$transaction` where rows are created):
+Response: `{ member | invitation, rostered: boolean, invited: boolean, guardianInvited: boolean,
+emails: { player?: boolean, guardian?: boolean } }` — per-send flags (review T6.4) because case 4
+sends two independent best-effort emails; the UI warns specifically about whichever failed.
 
-1. No `playerEmail` → managed `User` + `TeamMember`. (Today's Add Roster Player.)
-2. `playerEmail`, no account match → managed `User` (with email) + `TeamMember` + `TeamInvitation`
-   + invite email. **New:** roster entry exists immediately.
-3. `playerEmail` matches an existing account → **no** `TeamMember`; `TeamInvitation` + email only.
-   Response flags this (`rostered: false, invited: true`) so the UI can explain.
-4. `guardianEmail` present (any of the above) → `GuardianInvitation` for the child via
-   `GuardianService` + guardian email. In case 3 the child id is the existing user's id.
-
-Zod schema: new `addRosterPlayerSchema` (superRefine: `guardianRelationship` iff `guardianEmail`;
-`playerEmail`/`guardianEmail` must differ). Old endpoints stay mounted and functional during the
-transition for old mobile clients, marked deprecated in code comments; remove after the OTA is
-verified adopted.
+Zod: `addRosterPlayerSchema` (superRefine: `guardianRelationship` iff `guardianEmail`;
+`playerEmail !== guardianEmail`). Old endpoints stay mounted and functional during the transition
+(the deprecated create-and-invite arm additionally adopts the case-2 managed flags), removal is a
+follow-up after OTA adoption.
 
 ### Invitation lifecycle
 
-- **Resend:** `POST /api/v1/invitations/:id/resend` (gate: `canManageRoster` on the invitation's
-  team; write rate limit). Only PENDING (incl. lazily-expired → flip to EXPIRED and create a fresh
-  row, reusing the `createInvitation` stale-row pattern) — rotate token + `expiresAt` (D4). Response
-  goes through the `INVITATION_*_SELECT` constants + `omitToken`; **tests must assert token absence**
-  (audit #14 discipline).
-- **Cancel:** existing `DELETE /api/v1/invitations/:id`; semantics per D1 (roster entry untouched).
-- **Accept (token + authenticated):** replace the `TeamMember` insert with create-if-missing inside
-  the existing `transitionPending()` transaction; jersey/position from the invitation apply only on
-  create. Race-safety (partial unique index, 400 for the loser) unchanged.
-- **Reject:** transition only; roster entry untouched (D1).
-- Guardian invitations: same resend treatment via
-  `POST /teams/:teamId/members/:playerId/guardians/:invitationId/resend` (should-have; if it slips,
-  the existing re-invite-after-expiry path remains and v1 ships player-invite resend only).
-
-### Roster payload
-
-- `GET /teams/:id` `members[]` gains `invitationStatus: 'none' | 'pending' | 'expired' | 'accepted'`
-  + `invitationId` (for resend/cancel), derived from the latest `TeamInvitation` per (team, player).
-  Extend the named `TEAM_INCLUDE`/select constants and exported Prisma payload types — no inline
-  includes, and the joined invitation must select **without** `token`.
-- `GET /teams/:id` additionally returns `pendingInvitations[]`: PENDING invites for
-  **existing-account** users not yet on the roster (case 3), `{ invitationId, playerId, name,
-  email?, expiresAt }`, email per the `canManageRoster` visibility rule.
-- Email-visibility rules (role matrix B2.5) apply unchanged to both.
+- **Supersede/resend (D4 as amended):** `POST /teams/:id/invitations { playerId, supersede: true }`
+  expires the current PENDING row and creates a fresh one via the existing create machinery, one
+  transaction; response through the token-free selects + `omitToken`.
+- **Cancel:** existing `DELETE /api/v1/invitations/:id`. **Reject:** existing flow. Both transition
+  via `transitionPending()` and (new, T1) null the managed row's `email` when `workosUserId` is
+  null; roster entry untouched (D1).
+- **Accept (token + authenticated):** membership becomes create-if-missing inside the existing
+  transaction; jersey/position from the invitation apply only on create. Race rules unchanged.
+- Guardian-invite resend uses the same supersede pattern on its own create path (should-have; the
+  expiry-re-invite fallback stands if it slips).
 
 ### Ripple effects to verify (tests, not hope)
 
-- `NotificationService.sendToTeam` now includes never-signed-in members (harmless — no push tokens)
-  and guardians of such members (intended).
-- Player directory scoping ("shares a team with caller") now matches unaccepted members — confirm
-  this is acceptable (they are real roster-mates; yes).
-- Stats: members with no events already render EmptyState (existing 404 path) — no change.
-- Usage metering counts staff, not members — untouched.
-- Game tracker: unaccepted players are `TeamMember`s and therefore trackable — this is the point.
+- `sendToTeam` now reaches guardians of never-signed-in members (intended); push no-ops for them.
+- Player directory scoping now matches unaccepted members (acceptable — real roster-mates).
+- Stats/EmptyState, usage metering (staff-based), tracker eligibility: as analyzed, no change
+  needed; tracker treating unaccepted members as trackable is the point.
 
 ## Mobile changes
 
 - **`app/teams/[id]/players.tsx` rewrite:** single Add Player form (name, player email, parent
-  email + relationship chips, jersey, position, photo). Roster list shows every member with a
-  status chip: **Active** (accepted/claimed), **Invited** (pending), **Invite expired**,
-  **Not invited** (managed, or cancelled/rejected per D1); existing-account pending invites render
-  as "Invited" rows. Per-row actions (gated `canManageRoster`): Resend, Cancel invite, Invite
-  (for not-invited players with an email — creates a fresh invitation), Remove player (existing).
-- Wire the currently-unused `useTeamInvitations` / `useCancelInvitation`; add
-  `useResendInvitation`, `useAddRosterPlayer`. Invalidations: team detail/lists +
-  `invitationKeys`; expiry copy via `utils/invitation-expiry.ts`.
+  email + relationship chips, jersey, position, photo). Roster list: every member with its chip
+  (Active / Invited / Invite expired / Not invited) + case-3 "Invited" rows merged from
+  `useTeamInvitations` (deduped). Row actions gated on `canManageRoster`: Resend (PENDING only),
+  Invite (fresh supersede call), Cancel invite, Remove player (existing). Case-3 add shows the
+  "not on roster until they accept" explanation; `guardianInvited: false` shows the
+  "add the parent after they accept" hint; `emails.player/guardian === false` toasts a specific
+  send-failure warning.
+- Hooks: wire `useTeamInvitations` / `useCancelInvitation`; add `useAddRosterPlayer`,
+  supersede-aware `useCreateInvitation`. Invalidations: team detail/lists + `invitationKeys`.
 - Audit every `team.members` consumer: team detail header/count, game detail roster, RSVP picker,
   tracker player list, stats screens.
-- Guardian entry point from the add form coexists with the existing per-player guardians screen
-  (`…/players/[playerId]/guardians.tsx`), which remains the management surface.
 - i18n strings for all new copy.
 
 ## Email / web
 
-- Invite email copy: "You've been added to <team>" framing (the roster entry now exists);
-  guardian template unchanged. Both templates via the existing `Mailer` abstraction.
-- `web/app/invite/[token]`: copy shift only ("activate your access / confirm you're joining");
-  polymorphic `kind` handling unchanged.
-- **SES production access (#23) is blocking-adjacent:** a visible Resend button that silently
-  fails is worse than none. Either land #23 first, or surface mailer failures to the coach
-  (minimum: the create/resend response includes `emailSent: boolean` and the UI toasts a warning —
-  do this regardless; the send is best-effort post-commit today and invisible).
+- Invite email copy branches (review T6.5): cases 1–2 "You've been added to <team> — activate
+  your access"; case 3 "You've been invited to join <team>". Guardian template unchanged.
+- `web/app/invite/[token]`: copy shift only; polymorphic `kind` handling unchanged.
+- **SES production access (#23) is blocking-adjacent** for the Resend button; the per-send
+  `emails` flags surface failures regardless.
 
 ## Tests
 
-- **Backend API + service:** all four create cases; accept with pre-existing membership; cancel /
-  reject leaving the roster entry; resend (rotation, expiry refresh, rate limit, **token absent
-  from every response**); guardian-invite-at-creation; schema tests for `addRosterPlayerSchema`
-  edge cases (email-less, both emails equal, relationship without email, jersey 0).
-- **Mobile Jest:** form branching, chip derivation, action gating (`canManageRoster` vs player view).
-- **Maestro:** update `roster-management.yaml`; new flow: add without email → player visible
-  immediately; add with email → "Invited" chip. (Required for major mobile functionality.)
-- **E2E plan:** rewrite the roster/invitation sections of `docs/testing/e2e-test-plan-v2.0.md`
-  scripted around the old two-button flow.
-- **Seed (`backend/prisma/seed.ts`):** keep Maestro fixtures valid (Frank Vogel, Steph Curry,
-  Sonya/Dell Curry, Warriors/Lakers); add a fixture in each invite state for chip testing.
+Full matrix (spec review adopted all gaps, issue 4A):
 
-## Docs (same-change requirement)
+- **Backend API + service:** cases 1/2/3 + middle-case reuse + P2002 race retry; case 3 +
+  `guardianEmail` → `guardianInvited: false`; 403 for non-roster-managers; per-send `emails`
+  flags on SES failure; accept create-if-missing (**CRITICAL regression guard**) + concurrent
+  accept loser 400 + accept after coach removed the member; supersede (old EXPIRED, new PENDING,
+  email, rate limit) + supersede-vs-accept race; reject/cancel email-strip (and no-strip once
+  claimed) with roster entry intact; **token absent from the team-payload invitation join and
+  every new response**; schema edges (jersey 0, equal emails, relationship w/o email).
+- **Mobile Jest:** `utils/roster-status.ts` all chip states; form branching; action gating;
+  double-tap Add creates one player; send-failure toast; case-3 Invited row rendering + dedupe.
+- **Maestro:** update `roster-management.yaml`; new flow (add without email → visible at once;
+  add with email → Invited chip). Required for major mobile functionality.
+- **E2E plan:** rewrite the roster/invitation sections of `docs/testing/e2e-test-plan-v2.0.md`.
+- **Seed:** keep Maestro fixtures valid; add one fixture per chip state.
 
-- **CLAUDE.md:** rewrite "Team Invitations", the mobile roster/players sections, and the guardian
-  link-flow paragraph to the new semantics — in the same PRs as the code.
-- This spec: flip Status to Accepted after review; append deviations during implementation.
-- Post-ship: `/document-release` pass; status comments on any issues touched (no premature
-  "Closes #N").
+## Failure modes (review)
 
-## Rollout (simplified by D5 — data is disposable)
+| Path | Failure | Covered by |
+|------|---------|-----------|
+| Unified create | SES send fails silently | `emails` flags + toast + test |
+| Unified create | Unique-email race → 500 | P2002 catch-and-reuse + test |
+| Accept | Membership already exists → P2002 500 | create-if-missing + CRITICAL test |
+| Supersede | Races accept → wrong winner | `transitionPending` 400 + test |
+| Reject → later signup | Silent auto-membership | T1 email strip + test |
+| Chip render | Stale/lying states | T2 derivation + helper unit tests |
+| Team payload | Token leak via new join | select constants + absence tests |
 
-1. **Backend PR** (endpoint + lifecycle + payload + tests + CLAUDE.md). Old mobile clients keep
-   working against the deprecated endpoints. Deploy to ECS.
-2. **DB reset:** no backfill. Wipe app data (truncate user/team/game tables or
-   `prisma migrate reset` + `npx prisma db seed` equivalent against prod) — the 8 Spartans
-   pending invitations vanish with everything else; re-adding them through the new flow is the
-   acceptance test. (Reset procedure per the RDS runbook's access pattern; coordinate with no one —
-   test data only.)
-3. **Mobile PR** (form + chips + actions + Jest + Maestro + e2e plan). JS-only → **OTA** to the
-   production branch (runtime 1.2.0, builds #25+); verify manifest per the OTA checklist. Confirm
-   no native dep sneaks in (validate-in-binary rule) — none is expected.
-4. **Verify:** recreate Spartans 5/6 via the new flow — players visible immediately with chips,
-   emails delivered (verified SES aliases), resend works, guardian invite works.
-5. Remove deprecated endpoints in a follow-up once OTA adoption is confirmed.
+No silent critical gaps remain: every failure path above has error handling, a test, and a
+user-visible outcome.
 
-## Out of scope (recorded so nobody re-litigates)
+## What already exists (reuse map)
 
-- Auto-accept for existing accounts (D2 — deferred, needs consent/enumeration review).
-- Bulk import / CSV roster upload; non-player roster members; roster ordering.
-- Claim-by-code, parent-to-parent invites (guardian spec v1 exclusions stand).
-- Per-invite email delivery tracking beyond `emailSent` (bounce webhooks etc. — future).
+- `TeamService.addManagedPlayer` — case 1 verbatim; transaction pattern for all cases.
+- `InvitationService.createInvitation` — email find-or-create, stale-PENDING flip, token
+  hygiene; gains the supersede option and managed flags.
+- `transitionPending()` — every lifecycle change, including the new email-strip.
+- `GuardianService.inviteGuardian` — guardian-at-creation, called for cases 1–2 only.
+- `syncUser` claim-by-email — the account-linking half of "Active"; untouched.
+- `GET /invitations?teamId=` + unused mobile hooks (`useTeamInvitations`,
+  `useCancelInvitation`) — case-3 rows and cancel, no new API surface.
+- Rebuilt rather than reused: nothing. The 410 tombstone on the target path is deleted.
+
+## NOT in scope (considered and deferred, with rationale)
+
+- **Auto-accept for existing accounts** (D2) — consent/enumeration review pending; revisit with
+  WorkOS production cutover.
+- **Bulk import / CSV roster upload** — separate feature, no interaction with these semantics.
+- **Non-player roster members, roster ordering** — TeamSnap parity items with no current user.
+- **Claim-by-code, parent-to-parent invites** — guardian spec v1 exclusions stand.
+- **Email delivery tracking beyond per-send flags** (bounce webhooks) — needs SES prod access
+  first (#23).
+- **Invite-funnel analytics** — captured in TODOS.md (review decision), post-ship.
+- **Deprecated endpoint removal** — follow-up PR after OTA adoption is confirmed.
+
+## Rollout (no data surgery — T4)
+
+1. **Backend PR:** tombstone deletion, unified endpoint, lifecycle amendments (T1/T2/T3/T5),
+   payload join, tests, CLAUDE.md rewrite of the affected sections. Deploy to ECS.
+2. **Verify against live legacy data:** Spartans 5/6's existing pending invitations must render
+   as Invited rows and accept into memberships — this is the acceptance test; no reset.
+3. **Mobile PR:** form + chips + actions + Jest + Maestro + e2e plan + i18n. JS-only → **OTA**
+   (runtime 1.2.0, builds #25+); verify manifest per the OTA checklist; confirm no native dep.
+4. **Post-ship:** `/document-release` pass; status comments on touched issues; deprecated-endpoint
+   removal follow-up.
+
+## Parallelization
+
+| Step | Modules touched | Depends on |
+|------|-----------------|------------|
+| Backend: endpoint + lifecycle + payload | backend/src/api, backend/src/services, backend/tests | — |
+| Backend: CLAUDE.md + e2e plan docs | CLAUDE.md, docs/testing | endpoint semantics settled (same PR) |
+| Mobile: screen + hooks + utils + tests | mobile/app, mobile/hooks, mobile/utils, mobile/__tests__ | backend response shapes |
+| Maestro + seed fixtures | .maestro, backend/prisma | both PRs' behavior |
+
+Lane A: backend (sequential, one PR). Lane B: mobile (starts once Lane A's response shapes are
+fixed — can develop against the spec in parallel, integration-test after Lane A deploys). Docs
+ride inside their lane's PR. Effectively sequential PRs with overlapping development; no worktree
+fan-out needed.
+
+## Implementation Tasks
+
+Synthesized from review findings. Checkbox as you ship.
+
+- [ ] **T1 (P1, CC: ~20min)** — backend — Strip managed row email on reject/cancel while unclaimed
+  - Surfaced by: outside voice #1 (consent hole via syncUser claim path)
+  - Files: backend/src/services/invitation-service.ts, tests/services+api
+  - Verify: reject → signup with that email → NOT a member; test asserts
+- [ ] **T2 (P1, CC: ~30min)** — backend — Case-2 managed flags (both arms) + PENDING+ACCEPTED chip join
+  - Surfaced by: outside voice #2 (isManaged proxy lies ×3)
+  - Files: invitation-service.ts, team-service.ts (include constants), tests
+  - Verify: web-link accepter renders Active; legacy-arm row not Active while pending
+- [ ] **T3 (P1, CC: ~2h)** — backend — Unified POST /teams/:id/players (4 cases, middle-case rule, P2002 retry, per-send email flags, guardian cases 1-2) + tombstone deletion
+  - Surfaced by: spec core + outside voice #3/#4/#7 + review 1A
+  - Files: api/teams/routes.ts, services, schemas, tests
+  - Verify: full case-matrix API suite green
+- [ ] **T4 (P1, CC: ~30min)** — backend — Accept create-if-missing (both paths) + races (CRITICAL regression guard)
+  - Surfaced by: spec core, regression rule
+  - Files: invitation-service.ts:511,736, tests
+- [ ] **T5 (P2, CC: ~15min)** — backend — `supersede: true` on invitation create (resend)
+  - Surfaced by: review 3A + outside voice #12
+  - Files: invitation-service.ts, api/invitations, tests incl. supersede-vs-accept race
+- [ ] **T6 (P2, CC: ~30min)** — backend — Token-absence tests for the new join + copy branches in mailer templates
+  - Surfaced by: test review gap + outside voice #8
+- [ ] **T7 (P1, CC: ~2h)** — mobile — players.tsx rewrite: form, chips (utils/roster-status.ts), actions, case-3 merge+dedupe, toasts
+  - Surfaced by: spec core + outside voice #11 + T6.3 action rule
+  - Files: mobile/app/teams/[id]/players.tsx, hooks, utils, __tests__
+- [ ] **T8 (P2, CC: ~45min)** — mobile+e2e — Maestro flows, seed fixtures per chip state, e2e-plan rewrite
+  - Surfaced by: test review
+- [ ] **T9 (P2, CC: ~30min)** — docs — CLAUDE.md Team Invitations + roster sections rewrite (same PRs)
+  - Surfaced by: docs-hygiene requirement
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 16 issues, 0 critical gaps open |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **CROSS-MODEL:** Outside voice (Claude subagent, fresh context; Codex not installed) returned
+  12 findings including 2 blockers at the plan's load-bearing joint (consent via the syncUser
+  claim path; isManaged as a status proxy). All 12 verified against code and accepted with fixes
+  (T1–T6 tensions); the in-session review's 4 findings (1A, 2A-as-revised, 3A-as-revised, 4A)
+  are likewise folded. Zero findings rejected.
+- **VERDICT:** ENG CLEARED — ready to implement.
+
+NO UNRESOLVED DECISIONS
