@@ -20,7 +20,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { useUpdateProfile } from '../../hooks/useProfile';
 import { captureException } from '../../services/sentry';
 import { isGuardian } from '../../utils/guardian';
-import { markNameAsked, hasPlaceholderName, HOME_ROUTE } from '../../utils/role-onboarding';
+import { markNameAsked, hasPlaceholderName, postLoginRoute, HOME_ROUTE } from '../../utils/role-onboarding';
 import { spacing } from '../../theme';
 
 export default function NamePromptScreen() {
@@ -37,18 +37,24 @@ export default function NamePromptScreen() {
   const [error, setError] = useState<string | undefined>();
 
   // Only the Profile path may pop back: on the first-login path the previous
-  // stack entry is the login screen (same rule as onboarding/role).
-  const close = () => {
-    if (fromProfile && router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace(HOME_ROUTE);
+  // stack entry is the login screen (same rule as onboarding/role). The
+  // onboarding path re-resolves postLoginRoute (the nameAsked flag is set by
+  // then) so a pending invite deep link is honoured instead of dropped.
+  const close = async () => {
+    if (fromProfile) {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace(HOME_ROUTE);
+      }
+      return;
     }
+    router.replace(await postLoginRoute(user));
   };
 
   const finish = async () => {
     if (user) await markNameAsked(user.id);
-    close();
+    await close();
   };
 
   const handleSave = async () => {

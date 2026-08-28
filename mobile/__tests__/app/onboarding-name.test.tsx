@@ -14,6 +14,7 @@ import NamePromptScreen from '../../app/onboarding/name';
 import { useAuthStore } from '../../store/auth-store';
 import { createQueryWrapper } from '../utils/queryWrapper';
 import { nameAskedKey } from '../../utils/role-onboarding';
+import { setPendingReturnPath } from '../../utils/return-path';
 
 const mockParams: { from?: string } = {};
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -80,6 +81,15 @@ describe('NamePromptScreen', () => {
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/home'));
     expect(mockPatch).not.toHaveBeenCalled();
     await expect(AsyncStorage.getItem(nameAskedKey('u1'))).resolves.toBe('true');
+  });
+
+  it('onboarding: honours a pending deep link instead of forcing Home', async () => {
+    await setPendingReturnPath('/invite/tok123');
+    const { getByText, getByTestId } = renderScreen();
+    fireEvent.changeText(getByTestId('name-onboarding-input'), 'Frank Vogel');
+    fireEvent.press(getByText('Continue'));
+
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/invite/tok123'));
   });
 
   it('onboarding: rejects a blank name inline', async () => {
