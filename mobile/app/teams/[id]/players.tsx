@@ -66,8 +66,15 @@ import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
 
-function StatusChip({ status, colors }: { status: RosterStatus; colors: Record<string, string> }) {
-  const color = rosterStatusColor(status, colors as never);
+interface ChipPalette {
+  success: string;
+  primary: string;
+  warning: string;
+  textSecondary: string;
+}
+
+function StatusChip({ status, colors }: { status: RosterStatus; colors: ChipPalette }) {
+  const color = rosterStatusColor(status, colors);
   return (
     <View
       style={[styles.chip, { borderColor: color }]}
@@ -363,7 +370,7 @@ export default function ManagePlayersScreen() {
         }
         rightElement={
           <View style={styles.rowActions}>
-            <StatusChip status={status} colors={colors as never} />
+            <StatusChip status={status} colors={colors} />
             {(canResend || canInvite) && (
               <TouchableOpacity
                 onPress={() => handleResendInvite(member.playerId, member.player.name)}
@@ -419,7 +426,7 @@ export default function ManagePlayersScreen() {
       leftElement={<Ionicons name="hourglass-outline" size={20} color={colors.textTertiary} />}
       rightElement={
         <View style={styles.rowActions}>
-          <StatusChip status="invited" colors={colors as never} />
+          <StatusChip status="invited" colors={colors} />
           <TouchableOpacity
             onPress={() => handleResendInvite(invitation.playerId, invitation.player.name)}
             accessibilityRole="button"
