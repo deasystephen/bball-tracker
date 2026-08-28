@@ -214,7 +214,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Teams tab → "Create new team"
   2. Name `Test Team`, link to the Spring 2026 season
-- **Expected:** Team appears. Creator is auto-assigned the `HEAD_COACH` staff row and the three default roles (Head Coach / Assistant Coach / Team Manager) exist. FREE tier: a 4th distinct team → 402 `upgrade_required` toast (Profile `UsageMeter` shows `1 / 3`). Maestro: `.maestro/create-team.yaml`.
+- **Expected:** Team appears. Back from the new team's detail returns to the Teams list — never the spent create form (create is `replace`d, #421, matching games/create). Creator is auto-assigned the `HEAD_COACH` staff row and the three default roles (Head Coach / Assistant Coach / Team Manager) exist. FREE tier: a 4th distinct team → 402 `upgrade_required` toast (Profile `UsageMeter` shows `1 / 3`). Maestro: `.maestro/create-team.yaml`.
 - **Notes:** ___________
 
 ### D.2 — View team detail
