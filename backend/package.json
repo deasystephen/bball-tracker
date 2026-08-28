@@ -27,13 +27,13 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1116.0",
-    "@aws-sdk/client-sesv2": "^3.1116.0",
-    "@aws-sdk/s3-presigned-post": "^3.1116.0",
-    "@aws-sdk/s3-request-presigner": "^3.1116.0",
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.1",
-    "@sentry/node": "^10.70.0",
+    "@aws-sdk/client-s3": "^3.1118.0",
+    "@aws-sdk/client-sesv2": "^3.1118.0",
+    "@aws-sdk/s3-presigned-post": "^3.1118.0",
+    "@aws-sdk/s3-request-presigner": "^3.1118.0",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "@sentry/node": "^10.71.0",
     "@workos-inc/node": "^8.13.0",
     "cors": "^2.8.5",
     "csv-stringify": "^6.8.3",
@@ -46,9 +46,9 @@
     "ioredis": "^5.11.1",
     "jose": "^5.10.0",
     "kafkajs": "^2.2.4",
-    "pdfkit": "^0.19.1",
+    "pdfkit": "^0.20.1",
     "pg": "^8.23.0",
-    "prisma": "^7.9.1",
+    "prisma": "^7.10.0",
     "socket.io": "^4.6.1",
     "zod": "^4.4.3"
   },
@@ -90,6 +90,6 @@
     "ts-jest": "^29.4.12",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.68.0"
   }
 }
