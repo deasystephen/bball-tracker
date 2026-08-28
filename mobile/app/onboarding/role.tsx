@@ -18,7 +18,7 @@ import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { useTranslation } from '../../i18n';
 import { UserRole } from '../../../shared/types';
-import { markRoleChosen, HOME_ROUTE } from '../../utils/role-onboarding';
+import { markRoleChosen, postLoginRoute, HOME_ROUTE } from '../../utils/role-onboarding';
 import { spacing, borderRadius } from '../../theme';
 
 type Choice = UserRole.PLAYER | UserRole.COACH;
@@ -38,13 +38,20 @@ export default function RoleSelectScreen() {
 
   // Only the Profile → "Change account type" path should pop back. On the
   // first-login path the previous stack entry is the login screen, so
-  // `router.back()` would strand a freshly signed-in coach on it.
-  const finish = () => {
-    if (from === 'profile' && router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace(HOME_ROUTE);
+  // `router.back()` would strand a freshly signed-in coach on it. The
+  // first-login path re-resolves `postLoginRoute` (the role flag is already
+  // set by then) so a placeholder-named account continues to the name prompt
+  // and a pending deep link is honoured, instead of always landing on Home.
+  const finish = async () => {
+    if (from === 'profile') {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace(HOME_ROUTE);
+      }
+      return;
     }
+    router.replace(await postLoginRoute(user));
   };
 
   const handleContinue = async () => {
@@ -56,7 +63,7 @@ export default function RoleSelectScreen() {
         updateUser({ role: response.data.user.role });
       }
       await markRoleChosen(user.id);
-      finish();
+      await finish();
     } catch (err) {
       captureException(err, { flow: 'role-onboarding' });
       Alert.alert(t('roleOnboarding.errorTitle'), t('roleOnboarding.errorBody'));

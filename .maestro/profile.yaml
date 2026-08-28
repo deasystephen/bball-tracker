@@ -10,6 +10,24 @@ appId: com.bballtracker.mobile
 - tapOn: "Profile tab"
 - assertVisible: "Account"
 - assertVisible: "Settings"
+# Edit name round trip (Profile → Account → Name → shared name screen).
+# Rename, assert it everywhere, then revert so other flows still find the
+# seeded "Frank Vogel" (team-staff.yaml asserts that exact name).
+- tapOn: "Edit name"
+- assertVisible: "Edit your name"
+- tapOn:
+    id: "name-onboarding-input"
+- eraseText
+- inputText: "Frank Renamed"
+- tapOn: "Save"
+- assertVisible: "Frank Renamed"
+- tapOn: "Edit name"
+- tapOn:
+    id: "name-onboarding-input"
+- eraseText
+- inputText: "Frank Vogel"
+- tapOn: "Save"
+- assertVisible: "Frank Vogel"
 - swipe:
     start: 50%, 60%
     end: 50%, 20%

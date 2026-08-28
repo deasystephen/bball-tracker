@@ -9,6 +9,7 @@ import {
   markRoleChosen,
   postLoginRoute,
   roleChosenKey,
+  hasPlaceholderName,
   needsNamePrompt,
   markNameAsked,
   nameAskedKey,
@@ -24,13 +25,36 @@ describe('role-onboarding', () => {
     jest.restoreAllMocks();
   });
 
-  describe('display-name prompt for guardian-created accounts (PARENT role)', () => {
+  describe('hasPlaceholderName', () => {
+    it('matches the email local part case-insensitively, trimmed', () => {
+      expect(hasPlaceholderName({ name: 'dell.curry', email: 'Dell.Curry@example.com' })).toBe(true);
+      expect(hasPlaceholderName({ name: ' Dell.Curry ', email: 'dell.curry@example.com' })).toBe(true);
+      expect(hasPlaceholderName({ name: 'Dell Curry', email: 'dell.curry@example.com' })).toBe(false);
+    });
+
+    it('is false when name or email is missing', () => {
+      expect(hasPlaceholderName({ name: 'dell.curry', email: null })).toBe(false);
+      expect(hasPlaceholderName({ name: null, email: 'dell.curry@example.com' })).toBe(false);
+      expect(hasPlaceholderName(null)).toBe(false);
+      expect(hasPlaceholderName(undefined)).toBe(false);
+    });
+  });
+
+  describe('display-name prompt for placeholder-named accounts', () => {
+    // Guardian-invite account (PARENT) — the original case.
     const placeholderParent = {
       id: 'p1',
       role: UserRole.PARENT,
       name: 'dell.curry',
       email: 'dell.curry@example.com',
-      guardianOf: [{ childId: 'c1', childName: 'Steph', relationship: 'FATHER', isPrimary: true }],
+    };
+    // Plain WorkOS sign-up where AuthKit collected no name (e.g. a coach):
+    // syncUser falls back to the email local part.
+    const placeholderCoach = {
+      id: 'c1',
+      role: UserRole.COACH,
+      name: 'frank.vogel',
+      email: 'frank.vogel@example.com',
     };
 
     it('routes a guardian whose name is still the email local part to the name step once', async () => {
@@ -43,9 +67,16 @@ describe('role-onboarding', () => {
       await expect(postLoginRoute(placeholderParent)).resolves.toBe(HOME_ROUTE);
     });
 
-    it('does not prompt when the name is real, or when the user is not a guardian', async () => {
+    it('prompts any placeholder-named account, not only guardians', async () => {
+      await expect(needsNamePrompt(placeholderCoach)).resolves.toBe(true);
+      await expect(postLoginRoute(placeholderCoach)).resolves.toBe(NAME_ONBOARDING_ROUTE);
+
+      await markNameAsked('c1');
+      await expect(postLoginRoute(placeholderCoach)).resolves.toBe(HOME_ROUTE);
+    });
+
+    it('does not prompt when the name is real', async () => {
       await expect(needsNamePrompt({ ...placeholderParent, name: 'Dell Curry' })).resolves.toBe(false);
-      await expect(needsNamePrompt({ ...placeholderParent, guardianOf: [] })).resolves.toBe(false);
       await expect(postLoginRoute({ ...placeholderParent, name: 'Dell Curry' })).resolves.toBe(HOME_ROUTE);
     });
 

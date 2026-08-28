@@ -7,6 +7,7 @@
  */
 
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import RoleSelectScreen from '../../app/onboarding/role';
 import { useAuthStore } from '../../store/auth-store';
@@ -22,20 +23,23 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('../../services/api-client', () => ({ apiClient: { patch: (...a: unknown[]) => mockPatch(...a) } }));
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
-jest.mock('../../utils/role-onboarding', () => ({
-  ...jest.requireActual('../../utils/role-onboarding'),
-  markRoleChosen: jest.fn(() => Promise.resolve()),
-}));
+jest.mock('../../utils/role-onboarding', () => {
+  const actual = jest.requireActual('../../utils/role-onboarding');
+  // Spy that still writes the flag: `finish()` re-resolves postLoginRoute,
+  // which must see the role step as done.
+  return { ...actual, markRoleChosen: jest.fn((id: string) => actual.markRoleChosen(id)) };
+});
 jest.mock('../../i18n', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
-const player = { id: 'u1', email: 'a@b.c', name: 'A', role: 'PLAYER' as const };
+const player = { id: 'u1', email: 'a@b.c', name: 'Alice', role: 'PLAYER' as const };
 
 describe('RoleSelectScreen navigation after Continue', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    await AsyncStorage.clear();
     delete mockParams.from;
     mockRouter.canGoBack.mockReturnValue(true);
     mockPatch.mockResolvedValue({ data: { user: { ...player, role: 'COACH' } } });
@@ -52,6 +56,17 @@ describe('RoleSelectScreen navigation after Continue', () => {
     expect(mockPatch).toHaveBeenCalledWith('/auth/me/role', { role: 'COACH' });
     expect(markRoleChosen).toHaveBeenCalledWith('u1');
     expect(useAuthStore.getState().user?.role).toBe('COACH');
+  });
+
+  it('continues to the name prompt when the account still has the placeholder name', async () => {
+    // syncUser fallback: name = email local part (no name from AuthKit).
+    useAuthStore.setState({ user: { ...player, name: 'a' } as never });
+    const { getByText } = render(<RoleSelectScreen />);
+    fireEvent.press(getByText('roleOnboarding.coachTitle'));
+    fireEvent.press(getByText('roleOnboarding.continue'));
+
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/onboarding/name'));
+    expect(mockRouter.back).not.toHaveBeenCalled();
   });
 
   it('pops back when opened from Profile', async () => {
