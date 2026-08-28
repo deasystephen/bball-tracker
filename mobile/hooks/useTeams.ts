@@ -5,6 +5,9 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { usageKeys } from './useUsage';
+import { invitationKeys } from './useInvitations';
+import type { TeamInvitationStatusRow } from '../utils/roster-status';
+import type { GuardianRelationship } from '../../shared/types';
 
 // Types
 export interface TeamStaff {
@@ -60,6 +63,13 @@ export interface Team {
   };
   staff?: TeamStaff[];
   members?: TeamMember[];
+  /**
+   * Invite-status rows for ROSTERED players (unification spec). Present only
+   * for callers with `canManageRoster` (others get `[]`); PENDING + ACCEPTED
+   * only, never the token. Case-3 invites (existing accounts not yet on the
+   * roster) come from `GET /invitations?teamId=` instead — dedupe by playerId.
+   */
+  invitations?: TeamInvitationStatusRow[];
   _count?: {
     members: number;
     staff: number;
@@ -90,10 +100,41 @@ export interface UpdateTeamInput {
   chatLink?: string | null;
 }
 
-export interface AddPlayerInput {
-  playerId: string;
+/**
+ * Unified Add Player — `POST /teams/:teamId/players` (unification spec).
+ * Name required; `playerEmail` decides whether an invitation goes out;
+ * `guardianEmail` + `guardianRelationship` additionally invite a parent for
+ * players who get a roster entry at creation (cases 1-2 — refused with a
+ * reason for existing-account invitees, case 3).
+ */
+export interface AddRosterPlayerInput {
+  name: string;
+  playerEmail?: string;
+  guardianEmail?: string;
+  guardianRelationship?: GuardianRelationship;
   jerseyNumber?: number;
   position?: string;
+  profilePictureUrl?: string;
+}
+
+export interface AddRosterPlayerResponse {
+  success: boolean;
+  /** false = case 3 (existing account) — roster entry appears on accept. */
+  rostered: boolean;
+  invited: boolean;
+  member: TeamMember | null;
+  invitation: {
+    id: string;
+    teamId: string;
+    playerId: string;
+    status: string;
+    expiresAt: string;
+  } | null;
+  guardianInvited: boolean;
+  /** Why the guardian invite did not happen (case 3, duplicate, ...). */
+  guardianReason?: string;
+  /** Per-send delivery flags — false means the email failed; warn the coach. */
+  emails: { player?: boolean; guardian?: boolean };
 }
 
 export interface TeamFilters {
@@ -243,16 +284,32 @@ export function useDeleteTeam() {
   });
 }
 
-export function useAddPlayerToTeam() {
+/**
+ * Unified Add Player (replaces the dead `useAddPlayerToTeam`, which targeted
+ * the pre-2026 endpoint shape, and the managed-player / create-and-invite
+ * two-button split — unification spec).
+ */
+export function useAddRosterPlayer() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ teamId, data }: { teamId: string; data: AddPlayerInput }) => {
-      const response = await apiClient.post(`/teams/${teamId}/players`, data);
-      return response.data.teamMember;
+    mutationFn: async ({ teamId, data }: { teamId: string; data: AddRosterPlayerInput }) => {
+      const response = await apiClient.post<AddRosterPlayerResponse>(
+        `/teams/${teamId}/players`,
+        data
+      );
+      return response.data;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+      queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      if (result.invited) {
+        queryClient.invalidateQueries({ queryKey: invitationKeys.all });
+      }
+      if (variables.data.playerEmail || variables.data.guardianEmail) {
+        // A new account may have been created; refresh player search
+        queryClient.invalidateQueries({ queryKey: ['players'] });
+      }
     },
   });
 }

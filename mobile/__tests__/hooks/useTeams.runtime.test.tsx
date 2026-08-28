@@ -14,7 +14,7 @@ import {
   useCreateTeam,
   useUpdateTeam,
   useDeleteTeam,
-  useAddPlayerToTeam,
+  useAddRosterPlayer,
   useRemovePlayerFromTeam,
   hasTeamPermission,
   isHeadCoach,
@@ -152,18 +152,64 @@ describe('useTeams runtime', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
     });
 
-    it('useAddPlayerToTeam posts and invalidates the team detail', async () => {
-      mockedPost.mockResolvedValueOnce({ data: { teamMember: { id: 'm1' } } });
+    it('useAddRosterPlayer posts the unified payload and invalidates team + invitations', async () => {
+      mockedPost.mockResolvedValueOnce({
+        data: {
+          success: true,
+          rostered: true,
+          invited: true,
+          member: { id: 'm1', playerId: 'p1', player: { id: 'p1', name: 'Jane', isManaged: true } },
+          invitation: { id: 'inv1' },
+          guardianInvited: false,
+          emails: { player: true },
+        },
+      });
       const { wrapper, client } = createQueryWrapper();
       const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
-      const { result } = renderHook(() => useAddPlayerToTeam(), { wrapper });
+      const { result } = renderHook(() => useAddRosterPlayer(), { wrapper });
 
+      let response;
       await act(async () => {
-        await result.current.mutateAsync({ teamId: 't1', data: { playerId: 'p1' } });
+        response = await result.current.mutateAsync({
+          teamId: 't1',
+          data: { name: 'Jane', playerEmail: 'jane@example.com' },
+        });
       });
 
-      expect(mockedPost).toHaveBeenCalledWith('/teams/t1/players', { playerId: 'p1' });
+      expect(mockedPost).toHaveBeenCalledWith('/teams/t1/players', {
+        name: 'Jane',
+        playerEmail: 'jane@example.com',
+      });
+      expect(response).toMatchObject({ rostered: true, emails: { player: true } });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['invitations'] });
+    });
+
+    it('useAddRosterPlayer surfaces the case-3 not-rostered response', async () => {
+      mockedPost.mockResolvedValueOnce({
+        data: {
+          success: true,
+          rostered: false,
+          invited: true,
+          member: null,
+          invitation: { id: 'inv1' },
+          guardianInvited: false,
+          guardianReason: 'Guardians can be added after the player accepts the invitation',
+          emails: { player: true },
+        },
+      });
+      const { wrapper } = createQueryWrapper();
+      const { result } = renderHook(() => useAddRosterPlayer(), { wrapper });
+
+      let response;
+      await act(async () => {
+        response = await result.current.mutateAsync({
+          teamId: 't1',
+          data: { name: 'Jane', playerEmail: 'existing@example.com', guardianEmail: 'mom@example.com', guardianRelationship: 'MOTHER' },
+        });
+      });
+
+      expect(response).toMatchObject({ rostered: false, member: null, guardianInvited: false });
     });
 
     it('useRemovePlayerFromTeam deletes and invalidates the team detail', async () => {

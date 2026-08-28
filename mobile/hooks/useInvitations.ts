@@ -101,6 +101,12 @@ export interface InvitationResponse {
     position?: string | null;
   };
   message?: string;
+  /**
+   * Whether the invitation email was delivered to the mailer. `false` = the
+   * send failed (warn the coach — the invite still exists in-app); `null` =
+   * the player has no email address. Older API builds omit it.
+   */
+  emailSent?: boolean | null;
 }
 
 /**
@@ -114,6 +120,12 @@ export type CreateInvitationInput = {
   position?: string;
   message?: string;
   expiresInDays?: number;
+  /**
+   * Resend: expire the player's live PENDING invitation and create a fresh one
+   * (new token, old link dies) in one server-side transaction. "Resend" and
+   * "Invite" on the roster are both this call with `supersede: true`.
+   */
+  supersede?: boolean;
 } & (
   | { playerId: string; name?: never; email?: never; profilePictureUrl?: never }
   | { playerId?: never; name: string; email: string; profilePictureUrl?: string }
@@ -205,6 +217,8 @@ export function useCreateInvitation() {
       // Invalidate invitation lists
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
       queryClient.invalidateQueries({ queryKey: invitationKeys.team(variables.teamId) });
+      // The team payload's invite-status join changed (chips)
+      queryClient.invalidateQueries({ queryKey: ['teams', 'detail', variables.teamId] });
       if (variables.data.email) {
         // A new player account may have been created; refresh player search
         queryClient.invalidateQueries({ queryKey: ['players'] });
@@ -278,6 +292,8 @@ export function useCancelInvitation() {
     onSuccess: () => {
       // Invalidate all invitation queries
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
+      // Chip flips to "Not invited" on the roster (team payload join)
+      queryClient.invalidateQueries({ queryKey: ['teams', 'detail'] });
     },
   });
 }

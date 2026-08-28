@@ -1,5 +1,15 @@
 /**
- * Manage Players screen - Add/remove players from team
+ * Manage Players screen — unified Add Player + roster with invite-status chips
+ * (roster/invite unification spec, docs/plans/roster-invite-unification-spec.md).
+ *
+ * One form adds any player: name only → roster-only managed player; with a
+ * player email → rostered immediately + invited ("added" email); an email that
+ * already has an account → invitation only (appears in the "Invited" section
+ * until they accept). An optional parent email invites a guardian in the same
+ * step (rostered cases only — the server refuses it for existing accounts).
+ *
+ * Chips derive via utils/roster-status.ts (never inline). Resend targets only
+ * PENDING rows; "Invite"/"Resend" are the same supersede create call.
  */
 
 import React, { useState } from 'react';
@@ -26,16 +36,26 @@ import {
 import {
   useTeam,
   useRemovePlayerFromTeam,
+  useAddRosterPlayer,
   hasTeamPermission,
+  type AddRosterPlayerResponse,
 } from '../../../hooks/useTeams';
 import {
   useCreateInvitation,
+  useCancelInvitation,
+  useTeamInvitations,
+  type TeamInvitation,
 } from '../../../hooks/useInvitations';
+import { usePlayers, type Player } from '../../../hooks/usePlayers';
 import {
-  usePlayers,
-  useCreateManagedPlayer,
-  type Player,
-} from '../../../hooks/usePlayers';
+  getRosterStatus,
+  rosterStatusLabel,
+  rosterStatusColor,
+  type RosterStatus,
+} from '../../../utils/roster-status';
+import { isInvitationExpired } from '../../../utils/invitation-expiry';
+import { GUARDIAN_RELATIONSHIPS, relationshipLabel } from '../../../utils/guardian';
+import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
@@ -45,6 +65,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
+
+function StatusChip({ status, colors }: { status: RosterStatus; colors: Record<string, string> }) {
+  const color = rosterStatusColor(status, colors as never);
+  return (
+    <View
+      style={[styles.chip, { borderColor: color }]}
+      accessibilityLabel={`Status: ${rosterStatusLabel(status)}`}
+    >
+      <ThemedText variant="caption" style={{ color }}>
+        {rosterStatusLabel(status)}
+      </ThemedText>
+    </View>
+  );
+}
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
@@ -56,23 +90,22 @@ export default function ManagePlayersScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showRosterForm, setShowRosterForm] = useState(false);
-  const [newPlayerName, setNewPlayerName] = useState('');
-  const [newPlayerEmail, setNewPlayerEmail] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [name, setName] = useState('');
+  const [playerEmail, setPlayerEmail] = useState('');
+  const [guardianEmail, setGuardianEmail] = useState('');
+  const [guardianRelationship, setGuardianRelationship] =
+    useState<GuardianRelationship>('GUARDIAN');
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [position, setPosition] = useState('');
-  const [rosterPlayerName, setRosterPlayerName] = useState('');
-  const [rosterJerseyNumber, setRosterJerseyNumber] = useState('');
-  const [rosterPosition, setRosterPosition] = useState('');
-  const [rosterAvatarUri, setRosterAvatarUri] = useState<string | null>(null);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
+  const addRosterPlayer = useAddRosterPlayer();
   const createInvitation = useCreateInvitation();
-  const createManagedPlayer = useCreateManagedPlayer();
+  const cancelInvitation = useCancelInvitation();
   const toast = useToast();
 
   // Roster changes need `canManageRoster` (backend team-service); guard the
@@ -85,6 +118,10 @@ export default function ManagePlayersScreen() {
     { fallback: `/teams/${id}` }
   );
 
+  // Existing-account invitees not yet on the roster (case 3) come from the
+  // invitations endpoint — the team payload carries rostered players only.
+  const { data: teamInvitationsData } = useTeamInvitations(id, 'PENDING');
+
   // Search for players
   const { data: playersData, isLoading: searchingPlayers } = usePlayers({
     search: searchQuery || undefined,
@@ -94,11 +131,50 @@ export default function ManagePlayersScreen() {
 
   const players = playersData?.players || [];
 
-  const handleCreateAndInvitePlayer = async () => {
-    if (!newPlayerName.trim() || !newPlayerEmail.trim()) {
-      Alert.alert('Error', 'Name and email are required');
+  const resetAddForm = () => {
+    setName('');
+    setPlayerEmail('');
+    setGuardianEmail('');
+    setGuardianRelationship('GUARDIAN');
+    setJerseyNumber('');
+    setPosition('');
+    setAvatarUri(null);
+    setShowAddForm(false);
+  };
+
+  const toastAddResult = (result: AddRosterPlayerResponse, hadGuardianEmail: boolean) => {
+    if (!result.rostered && result.invited) {
+      toast.showToast(
+        "This email already has an account — invitation sent. They'll appear on the roster once they accept.",
+        'info'
+      );
+    } else if (result.invited) {
+      toast.showToast('Player added to roster and invitation sent', 'success');
+    } else {
+      toast.showToast('Player added to roster', 'success');
+    }
+
+    if (result.emails.player === false) {
+      toast.showToast(
+        'The invitation email failed to send — use Resend on the roster to retry.',
+        'error'
+      );
+    }
+    if (hadGuardianEmail) {
+      if (!result.guardianInvited && result.guardianReason) {
+        toast.showToast(result.guardianReason, 'info');
+      } else if (result.emails.guardian === false) {
+        toast.showToast('The parent invite email failed to send — retry from the player’s Guardians screen.', 'error');
+      }
+    }
+  };
+
+  const handleAddPlayer = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Player name is required');
       return;
     }
+    const trimmedGuardianEmail = guardianEmail.trim();
 
     try {
       let profilePictureUrl: string | undefined;
@@ -108,72 +184,27 @@ export default function ManagePlayersScreen() {
         setUploadingAvatar(false);
       }
 
-      // Create the player and send the invitation in one backend call so a
-      // failed invite can't leave an orphan player behind (audit #69).
-      await createInvitation.mutateAsync({
+      const result = await addRosterPlayer.mutateAsync({
         teamId: id,
         data: {
-          name: newPlayerName.trim(),
-          email: newPlayerEmail.trim(),
-          profilePictureUrl,
+          name: name.trim(),
+          playerEmail: playerEmail.trim() || undefined,
+          guardianEmail: trimmedGuardianEmail || undefined,
+          guardianRelationship: trimmedGuardianEmail ? guardianRelationship : undefined,
           jerseyNumber: jerseyNumber ? parseInt(jerseyNumber, 10) : undefined,
           position: position.trim() || undefined,
-        },
-      });
-
-      // Reset form
-      setNewPlayerName('');
-      setNewPlayerEmail('');
-      setJerseyNumber('');
-      setPosition('');
-      setAvatarUri(null);
-      setShowCreateForm(false);
-      setSearchQuery('');
-      setSelectedPlayer(null);
-      toast.showToast('Player created and invitation sent', 'success');
-    } catch (error) {
-      setUploadingAvatar(false);
-      toast.showToast(
-        error instanceof Error ? error.message : 'Failed to create player and send invitation',
-        'error'
-      );
-    }
-  };
-
-  const handleCreateRosterPlayer = async () => {
-    if (!rosterPlayerName.trim()) {
-      Alert.alert('Error', 'Player name is required');
-      return;
-    }
-
-    try {
-      let profilePictureUrl: string | undefined;
-      if (rosterAvatarUri) {
-        setUploadingAvatar(true);
-        profilePictureUrl = await uploadAvatar(rosterAvatarUri);
-        setUploadingAvatar(false);
-      }
-
-      await createManagedPlayer.mutateAsync({
-        teamId: id,
-        data: {
-          name: rosterPlayerName.trim(),
-          jerseyNumber: rosterJerseyNumber ? parseInt(rosterJerseyNumber, 10) : undefined,
-          position: rosterPosition.trim() || undefined,
           profilePictureUrl,
         },
       });
 
-      setRosterPlayerName('');
-      setRosterJerseyNumber('');
-      setRosterPosition('');
-      setRosterAvatarUri(null);
-      setShowRosterForm(false);
-      toast.showToast('Player added to roster', 'success');
+      resetAddForm();
+      setSearchQuery('');
+      setSelectedPlayer(null);
+      toastAddResult(result, !!trimmedGuardianEmail);
     } catch (err) {
       setUploadingAvatar(false);
       toast.showToast(
-        err instanceof Error ? err.message : 'Failed to add roster player',
+        err instanceof Error ? err.message : 'Failed to add player',
         'error'
       );
     }
@@ -186,7 +217,7 @@ export default function ManagePlayersScreen() {
     }
 
     try {
-      await createInvitation.mutateAsync({
+      const response = await createInvitation.mutateAsync({
         teamId: id,
         data: {
           playerId: selectedPlayer.id,
@@ -200,12 +231,62 @@ export default function ManagePlayersScreen() {
       setSelectedPlayer(null);
       setSearchQuery('');
       toast.showToast('Invitation sent to player', 'success');
-    } catch (error) {
+      if (response.emailSent === false) {
+        toast.showToast('The invitation email failed to send — use Resend to retry.', 'error');
+      }
+    } catch (err) {
       toast.showToast(
-        error instanceof Error ? error.message : 'Failed to send invitation',
+        err instanceof Error ? err.message : 'Failed to send invitation',
         'error'
       );
     }
+  };
+
+  /** "Resend" and "Invite" are the same supersede create (fresh token). */
+  const handleResendInvite = async (playerId: string, playerName: string) => {
+    try {
+      const response = await createInvitation.mutateAsync({
+        teamId: id,
+        data: { playerId, supersede: true },
+      });
+      if (response.emailSent === false) {
+        toast.showToast(`Invitation refreshed, but the email to ${playerName} failed to send.`, 'error');
+      } else if (response.emailSent === null) {
+        toast.showToast(`${playerName} has no email address on file.`, 'info');
+      } else {
+        toast.showToast(`Invitation re-sent to ${playerName}`, 'success');
+      }
+    } catch (err) {
+      toast.showToast(
+        err instanceof Error ? err.message : 'Failed to resend invitation',
+        'error'
+      );
+    }
+  };
+
+  const handleCancelInvite = (invitationId: string, playerName: string) => {
+    Alert.alert(
+      'Cancel Invitation',
+      `Cancel the pending invitation for ${playerName}? They stay on the roster and can be re-invited later.`,
+      [
+        { text: 'Keep invitation', style: 'cancel' },
+        {
+          text: 'Cancel invitation',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await cancelInvitation.mutateAsync(invitationId);
+              toast.showToast('Invitation cancelled', 'success');
+            } catch (err) {
+              toast.showToast(
+                err instanceof Error ? err.message : 'Failed to cancel invitation',
+                'error'
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleRemovePlayer = (playerId: string, playerName: string) => {
@@ -221,9 +302,9 @@ export default function ManagePlayersScreen() {
             try {
               await removePlayer.mutateAsync({ teamId: id, playerId });
               toast.showToast('Player removed from team', 'success');
-            } catch (error) {
+            } catch (err) {
               toast.showToast(
-                error instanceof Error ? error.message : 'Failed to remove player',
+                err instanceof Error ? err.message : 'Failed to remove player',
                 'error'
               );
             }
@@ -247,6 +328,119 @@ export default function ManagePlayersScreen() {
   }
 
   const members = team.members || [];
+  const memberIds = new Set(members.map((m) => m.playerId));
+  // Case-3 rows: pending invites for accounts not yet rostered, deduped
+  // against members (rostered players get their chip from the team payload).
+  const pendingNonMemberInvites = (teamInvitationsData?.invitations || []).filter(
+    (inv) =>
+      inv.status === 'PENDING' &&
+      !memberIds.has(inv.playerId) &&
+      !isInvitationExpired(inv.expiresAt)
+  );
+
+  const renderMemberRow = (member: (typeof members)[number]) => {
+    const { status, pendingInvitation } = getRosterStatus(member, team.invitations);
+    const details = [
+      member.jerseyNumber != null && `#${member.jerseyNumber}`,
+      member.position,
+    ]
+      .filter(Boolean)
+      .join(' • ');
+    const subtitle = details || member.player.email || undefined;
+    const canResend = status === 'invited' || status === 'invite_expired';
+    // "Invite" for a never/no-longer-invited player needs an address on file
+    const canInvite = status === 'not_invited' && !!member.player.email;
+
+    return (
+      <ListItem
+        key={member.id}
+        title={member.player.name}
+        subtitle={subtitle}
+        leftElement={
+          member.player.isManaged ? (
+            <Ionicons name="person-outline" size={20} color={colors.textTertiary} />
+          ) : undefined
+        }
+        rightElement={
+          <View style={styles.rowActions}>
+            <StatusChip status={status} colors={colors as never} />
+            {(canResend || canInvite) && (
+              <TouchableOpacity
+                onPress={() => handleResendInvite(member.playerId, member.player.name)}
+                accessibilityRole="button"
+                accessibilityLabel={`${canInvite ? 'Invite' : 'Resend invitation'}: ${member.player.name}`}
+                style={styles.rowButton}
+                disabled={createInvitation.isPending}
+              >
+                <Ionicons name="mail-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+            {pendingInvitation && status === 'invited' && (
+              <TouchableOpacity
+                onPress={() => handleCancelInvite(pendingInvitation.id, member.player.name)}
+                accessibilityRole="button"
+                accessibilityLabel={`Cancel invitation: ${member.player.name}`}
+                style={styles.rowButton}
+              >
+                <Ionicons name="mail-unread-outline" size={22} color={colors.warning} />
+              </TouchableOpacity>
+            )}
+            {member.player.isManaged && (
+              <TouchableOpacity
+                onPress={() =>
+                  router.push(`/teams/${id}/players/${member.playerId}/guardians`)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Invite a parent: ${member.player.name}`}
+                style={styles.rowButton}
+              >
+                <Ionicons name="people-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => handleRemovePlayer(member.playerId, member.player.name)}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove player: ${member.player.name}`}
+              style={styles.rowButton}
+            >
+              <Ionicons name="close-circle" size={22} color={colors.error} />
+            </TouchableOpacity>
+          </View>
+        }
+      />
+    );
+  };
+
+  const renderPendingInviteRow = (invitation: TeamInvitation) => (
+    <ListItem
+      key={invitation.id}
+      title={invitation.player.name}
+      subtitle={invitation.player.email || undefined}
+      leftElement={<Ionicons name="hourglass-outline" size={20} color={colors.textTertiary} />}
+      rightElement={
+        <View style={styles.rowActions}>
+          <StatusChip status="invited" colors={colors as never} />
+          <TouchableOpacity
+            onPress={() => handleResendInvite(invitation.playerId, invitation.player.name)}
+            accessibilityRole="button"
+            accessibilityLabel={`Resend invitation: ${invitation.player.name}`}
+            style={styles.rowButton}
+            disabled={createInvitation.isPending}
+          >
+            <Ionicons name="mail-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => handleCancelInvite(invitation.id, invitation.player.name)}
+            accessibilityRole="button"
+            accessibilityLabel={`Cancel invitation: ${invitation.player.name}`}
+            style={styles.rowButton}
+          >
+            <Ionicons name="mail-unread-outline" size={22} color={colors.warning} />
+          </TouchableOpacity>
+        </View>
+      }
+    />
+  );
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -283,76 +477,15 @@ export default function ManagePlayersScreen() {
         keyboardShouldPersistTaps="handled"
       >
 
-        {/* Invite Player Form */}
+        {/* Add Player card */}
         <Card variant="elevated" style={styles.formCard}>
           <ThemedText variant="h4" style={styles.formTitle}>
-            {showRosterForm ? 'Add Roster Player' : 'Invite Player'}
+            {showAddForm ? 'Add Player' : 'Invite Player'}
           </ThemedText>
 
-          {showRosterForm ? (
+          {!showAddForm ? (
             <>
-              {/* Add Roster Player form - no email needed */}
-              <View style={styles.avatarRow}>
-                <AvatarPicker
-                  uri={rosterAvatarUri}
-                  name={rosterPlayerName}
-                  onImageSelected={setRosterAvatarUri}
-                />
-              </View>
-
-              <Input
-                label="Player Name"
-                placeholder="Enter player name"
-                value={rosterPlayerName}
-                onChangeText={setRosterPlayerName}
-                autoCapitalize="words"
-                testID="roster-player-name-input"
-              />
-
-              <Input
-                label={t('players.jerseyNumber')}
-                placeholder="e.g., 23"
-                value={rosterJerseyNumber}
-                onChangeText={(text) => setRosterJerseyNumber(text.replace(/[^0-9]/g, ''))}
-                keyboardType="number-pad"
-                maxLength={2}
-                testID="roster-jersey-input"
-              />
-
-              <Input
-                label={t('players.position')}
-                placeholder="e.g., Forward, Guard"
-                value={rosterPosition}
-                onChangeText={setRosterPosition}
-                autoCapitalize="words"
-              />
-
-              <View style={styles.actionButtons}>
-                <Button
-                  title={uploadingAvatar ? 'Uploading photo...' : 'Add to Roster'}
-                  onPress={handleCreateRosterPlayer}
-                  loading={createManagedPlayer.isPending || uploadingAvatar}
-                  disabled={!rosterPlayerName.trim()}
-                  fullWidth
-                />
-                <Button
-                  title="Cancel"
-                  variant="outline"
-                  onPress={() => {
-                    setShowRosterForm(false);
-                    setRosterPlayerName('');
-                    setRosterJerseyNumber('');
-                    setRosterPosition('');
-                    setRosterAvatarUri(null);
-                  }}
-                  style={styles.cancelButton}
-                  fullWidth
-                />
-              </View>
-            </>
-          ) : !showCreateForm ? (
-            <>
-              {/* Search for existing player */}
+              {/* Search for an existing account */}
               <Input
                 label="Search Players"
                 placeholder="Search by name or email..."
@@ -362,7 +495,6 @@ export default function ManagePlayersScreen() {
                 leftIcon={<Ionicons name="search-outline" size={20} color={colors.textTertiary} />}
               />
 
-              {/* Player search results */}
               {searchQuery && (
                 <View style={styles.searchResults}>
                   {searchingPlayers ? (
@@ -371,10 +503,7 @@ export default function ManagePlayersScreen() {
                     </ThemedText>
                   ) : players.length > 0 ? (
                     players
-                      .filter((p) => {
-                        // Filter out players already on the team
-                        return !members.some((m) => m.playerId === p.id);
-                      })
+                      .filter((p) => !members.some((m) => m.playerId === p.id))
                       .map((player) => (
                         <ListItem
                           key={player.id}
@@ -407,7 +536,6 @@ export default function ManagePlayersScreen() {
                 </View>
               )}
 
-              {/* Selected player info */}
               {selectedPlayer && (
                 <Card variant="default" style={styles.selectedPlayerCard}>
                   <View style={styles.selectedPlayerInfo}>
@@ -428,8 +556,7 @@ export default function ManagePlayersScreen() {
                 </Card>
               )}
 
-              {/* Jersey and Position (shown when player selected or creating) */}
-              {(selectedPlayer || showCreateForm) && (
+              {selectedPlayer && (
                 <>
                   <Input
                     label={t('players.jerseyNumber')}
@@ -450,7 +577,6 @@ export default function ManagePlayersScreen() {
                 </>
               )}
 
-              {/* Action buttons */}
               <View style={styles.actionButtons}>
                 {selectedPlayer ? (
                   <Button
@@ -460,30 +586,24 @@ export default function ManagePlayersScreen() {
                     fullWidth
                   />
                 ) : (
-                  <>
-                    <Button
-                      title="Create New Player"
-                      variant="outline"
-                      onPress={() => setShowCreateForm(true)}
-                      fullWidth
-                    />
-                    <Button
-                      title="Add Roster Player"
-                      variant="outline"
-                      onPress={() => setShowRosterForm(true)}
-                      fullWidth
-                    />
-                  </>
+                  <Button
+                    title="Add Player"
+                    variant="outline"
+                    onPress={() => setShowAddForm(true)}
+                    fullWidth
+                    testID="add-player-button"
+                  />
                 )}
               </View>
             </>
           ) : (
             <>
-              {/* Create new player form */}
+              {/* Unified Add Player form — email decides whether an invite
+                  goes out; the player is on the roster either way. */}
               <View style={styles.avatarRow}>
                 <AvatarPicker
                   uri={avatarUri}
-                  name={newPlayerName}
+                  name={name}
                   onImageSelected={setAvatarUri}
                 />
               </View>
@@ -491,18 +611,21 @@ export default function ManagePlayersScreen() {
               <Input
                 label="Player Name"
                 placeholder="Enter player name"
-                value={newPlayerName}
-                onChangeText={setNewPlayerName}
+                value={name}
+                onChangeText={setName}
                 autoCapitalize="words"
+                testID="add-player-name-input"
               />
 
               <Input
-                label="Email"
-                placeholder="Enter email address"
-                value={newPlayerEmail}
-                onChangeText={setNewPlayerEmail}
+                label="Player Email (optional)"
+                placeholder="Invitation is emailed when provided"
+                value={playerEmail}
+                onChangeText={setPlayerEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
+                testID="add-player-email-input"
               />
 
               <Input
@@ -512,6 +635,7 @@ export default function ManagePlayersScreen() {
                 onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
                 maxLength={2}
+                testID="add-player-jersey-input"
               />
 
               <Input
@@ -522,25 +646,66 @@ export default function ManagePlayersScreen() {
                 autoCapitalize="words"
               />
 
+              <Input
+                label="Parent/Guardian Email (optional)"
+                placeholder="Invite a parent to follow this player"
+                value={guardianEmail}
+                onChangeText={setGuardianEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="add-player-guardian-email-input"
+              />
+
+              {guardianEmail.trim() !== '' && (
+                <>
+                  <ThemedText variant="captionBold" style={styles.relationshipLabel}>
+                    Relationship
+                  </ThemedText>
+                  <View style={styles.chipRow}>
+                    {GUARDIAN_RELATIONSHIPS.map((value) => {
+                      const selected = value === guardianRelationship;
+                      return (
+                        <TouchableOpacity
+                          key={value}
+                          onPress={() => setGuardianRelationship(value)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={relationshipLabel(value)}
+                          style={[
+                            styles.relationshipChip,
+                            {
+                              backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
+                              borderColor: selected ? colors.primary : colors.border,
+                            },
+                          ]}
+                        >
+                          <ThemedText
+                            variant="captionBold"
+                            style={selected ? styles.chipTextSelected : undefined}
+                          >
+                            {relationshipLabel(value)}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
               <View style={styles.actionButtons}>
                 <Button
-                  title={uploadingAvatar ? 'Uploading photo...' : 'Create & Send Invitation'}
-                  onPress={handleCreateAndInvitePlayer}
-                  loading={createInvitation.isPending || uploadingAvatar}
-                  disabled={!newPlayerName.trim() || !newPlayerEmail.trim()}
+                  title={uploadingAvatar ? 'Uploading photo...' : 'Add Player'}
+                  onPress={handleAddPlayer}
+                  loading={addRosterPlayer.isPending || uploadingAvatar}
+                  disabled={!name.trim()}
                   fullWidth
+                  testID="add-player-submit"
                 />
                 <Button
                   title="Cancel"
                   variant="outline"
-                  onPress={() => {
-                    setShowCreateForm(false);
-                    setNewPlayerName('');
-                    setNewPlayerEmail('');
-                    setJerseyNumber('');
-                    setPosition('');
-                    setAvatarUri(null);
-                  }}
+                  onPress={resetAddForm}
                   style={styles.cancelButton}
                   fullWidth
                 />
@@ -563,58 +728,25 @@ export default function ManagePlayersScreen() {
             </Card>
           ) : (
             <Card variant="default" style={styles.playersCard}>
-              {members.map((member) => {
-                const details = [
-                  member.jerseyNumber != null && `#${member.jerseyNumber}`,
-                  member.position,
-                ].filter(Boolean).join(' • ');
-
-                const subtitle = member.player.isManaged
-                  ? details ? `${details} • Roster player` : 'Roster player'
-                  : details || member.player.email || undefined;
-
-                return (
-                  <ListItem
-                    key={member.id}
-                    title={member.player.name}
-                    subtitle={subtitle}
-                    leftElement={
-                      member.player.isManaged ? (
-                        <Ionicons name="person-outline" size={20} color={colors.textTertiary} />
-                      ) : undefined
-                    }
-                    rightElement={
-                      <View style={styles.rowActions}>
-                        {member.player.isManaged && (
-                          <TouchableOpacity
-                            onPress={() =>
-                              router.push(`/teams/${id}/players/${member.playerId}/guardians`)
-                            }
-                            accessibilityRole="button"
-                            accessibilityLabel={`Invite a parent: ${member.player.name}`}
-                            style={styles.rowButton}
-                          >
-                            <Ionicons name="people-outline" size={24} color={colors.primary} />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                          onPress={() =>
-                            handleRemovePlayer(member.playerId, member.player.name)
-                          }
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove player: ${member.player.name}`}
-                          style={styles.rowButton}
-                        >
-                          <Ionicons name="close-circle" size={24} color={colors.error} />
-                        </TouchableOpacity>
-                      </View>
-                    }
-                  />
-                );
-              })}
+              {members.map(renderMemberRow)}
             </Card>
           )}
         </View>
+
+        {/* Invited, not yet on the roster (existing accounts, case 3) */}
+        {pendingNonMemberInvites.length > 0 && (
+          <View style={styles.section}>
+            <ThemedText variant="h4" style={styles.sectionTitle}>
+              Invited ({pendingNonMemberInvites.length})
+            </ThemedText>
+            <ThemedText variant="caption" color="textTertiary" style={styles.sectionHint}>
+              These players already have accounts and join the roster when they accept.
+            </ThemedText>
+            <Card variant="default" style={styles.playersCard}>
+              {pendingNonMemberInvites.map(renderPendingInviteRow)}
+            </Card>
+          </View>
+        )}
       </ScrollView>
     </ThemedView>
   );
@@ -652,6 +784,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   sectionTitle: {
+    marginBottom: spacing.xs,
+  },
+  sectionHint: {
     marginBottom: spacing.md,
   },
   rowActions: {
@@ -661,6 +796,12 @@ const styles = StyleSheet.create({
   },
   rowButton: {
     padding: spacing.xs,
+  },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
   },
   playersCard: {
     marginTop: spacing.sm,
@@ -712,5 +853,24 @@ const styles = StyleSheet.create({
   avatarRow: {
     alignItems: 'center',
     marginBottom: spacing.md,
+  },
+  relationshipLabel: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  relationshipChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  chipTextSelected: {
+    color: '#FFFFFF',
   },
 });
