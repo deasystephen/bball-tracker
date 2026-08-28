@@ -2242,6 +2242,44 @@ describe('InvitationService', () => {
       }
     );
 
+    it('re-branches to case 3 when the reuse target is claimed mid-transaction (RT4)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
+      routeUserLookups(() => unclaimed);
+      // The claim-guarded write hits zero rows: the player finished WorkOS
+      // signup between the read and the transaction.
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          teamMember: { findUnique: jest.fn(), create: jest.fn() },
+          teamInvitation: { updateMany: jest.fn(), create: jest.fn() },
+        })
+      );
+      // Case-3 fallback path (outside the aborted transaction)
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+      const fresh = createInvitation({ teamId: team.id, playerId: unclaimed.id, invitedById: coach.id });
+      (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue(
+        relationRow(fresh, team, { id: unclaimed.id, name: unclaimed.name, email: unclaimed.email }, coach)
+      );
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com' },
+        coach.id
+      );
+
+      // A freshly claimed account must never be flipped back to coach-managed;
+      // it gets a consent-gated invitation instead (rostered on accept).
+      expect(result.rostered).toBe(false);
+      expect(result.member).toBeNull();
+      expect(result.invited).toBe(true);
+      expect(result.invitation).toHaveProperty('playerId', unclaimed.id);
+      expect(mockedMailerSend).toHaveBeenCalledWith(
+        expect.objectContaining({ variables: expect.objectContaining({ variant: 'invited' }) })
+      );
+    });
+
     it('addRosterPlayer answers 404 when the team does not exist', async () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
 
