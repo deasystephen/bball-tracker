@@ -114,16 +114,25 @@ const signIn = (user: { id: string; role: 'PLAYER' | 'COACH' | 'ADMIN' }) => {
 
 type AlertButton = { text: string; style?: string; onPress?: () => void | Promise<void> };
 
-/** Open a member's overflow menu and return its buttons (from the Alert spy). */
-const openMenu = (
-  screen: ReturnType<typeof render>,
-  alertSpy: jest.SpyInstance,
-  playerName: string
-): AlertButton[] => {
+/** Open a member's overflow menu (an ActionMenu bottom sheet, not an Alert —
+ * Android caps Alert at three buttons). Items are real pressables. */
+const openMenu = (screen: ReturnType<typeof render>, playerName: string): void => {
   fireEvent.press(screen.getByLabelText(`Player options: ${playerName}`));
-  const call = alertSpy.mock.calls[alertSpy.mock.calls.length - 1];
-  expect(call[0]).toBe(playerName);
-  return call[2] as AlertButton[];
+};
+
+const MENU_LABELS = [
+  'Resend invitation',
+  'Send invitation',
+  'Cancel invitation',
+  'Invite a parent',
+  'Remove player',
+];
+
+const visibleMenuItems = (screen: ReturnType<typeof render>): string[] =>
+  MENU_LABELS.filter((label) => screen.queryByText(label) !== null);
+
+const closeMenu = (screen: ReturnType<typeof render>): void => {
+  fireEvent.press(screen.getByLabelText('Close'));
 };
 
 describe('ManagePlayersScreen — roster status and actions', () => {
@@ -151,44 +160,54 @@ describe('ManagePlayersScreen — roster status and actions', () => {
 
   it('menu contents are contextual to the chip status', () => {
     const screen = render(<ManagePlayersScreen />);
-    const texts = (name: string) => openMenu(screen, alertSpy, name).map((b) => b.text);
 
     // Invited: resend + cancel; managed → invite a parent
-    expect(texts('Cleo Invited')).toEqual([
+    openMenu(screen, 'Cleo Invited');
+    expect(visibleMenuItems(screen)).toEqual([
       'Resend invitation',
       'Cancel invitation',
       'Invite a parent',
       'Remove player',
-      'Close',
     ]);
+    closeMenu(screen);
+
     // Expired: resend but NO cancel (lazily-expired rows have no valid id)
-    expect(texts('Dot Expired')).toEqual([
+    openMenu(screen, 'Dot Expired');
+    expect(visibleMenuItems(screen)).toEqual([
       'Resend invitation',
       'Invite a parent',
       'Remove player',
-      'Close',
     ]);
+    closeMenu(screen);
+
     // No email on file: no send option at all
-    expect(texts('Eve RosterOnly')).toEqual(['Invite a parent', 'Remove player', 'Close']);
+    openMenu(screen, 'Eve RosterOnly');
+    expect(visibleMenuItems(screen)).toEqual(['Invite a parent', 'Remove player']);
+    closeMenu(screen);
+
     // Not invited WITH an email: Send invitation appears
-    expect(texts('Fay NotInvited')).toContain('Send invitation');
+    openMenu(screen, 'Fay NotInvited');
+    expect(visibleMenuItems(screen)).toContain('Send invitation');
+    closeMenu(screen);
+
     // Active claimed account (not managed): only remove
-    expect(texts('Ada Active')).toEqual(['Remove player', 'Close']);
+    openMenu(screen, 'Ada Active');
+    expect(visibleMenuItems(screen)).toEqual(['Remove player']);
   });
 
   it('Resend calls the supersede create for an invited player', async () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: true });
     const screen = render(<ManagePlayersScreen />);
 
-    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
-      (b) => b.text === 'Resend invitation'
-    );
-    await resend?.onPress?.();
+    openMenu(screen, 'Cleo Invited');
+    fireEvent.press(screen.getByText('Resend invitation'));
 
-    expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
-      teamId: 't1',
-      data: { playerId: 'p-invited', supersede: true },
-    });
+    await waitFor(() =>
+      expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        data: { playerId: 'p-invited', supersede: true },
+      })
+    );
     expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to Cleo Invited', 'success');
   });
 
@@ -196,29 +215,29 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: true });
     const screen = render(<ManagePlayersScreen />);
 
-    const send = openMenu(screen, alertSpy, 'Fay NotInvited').find(
-      (b) => b.text === 'Send invitation'
-    );
-    await send?.onPress?.();
+    openMenu(screen, 'Fay NotInvited');
+    fireEvent.press(screen.getByText('Send invitation'));
 
-    expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
-      teamId: 't1',
-      data: { playerId: 'p-hasmail', supersede: true },
-    });
+    await waitFor(() =>
+      expect(mockCreateInvitation.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        data: { playerId: 'p-hasmail', supersede: true },
+      })
+    );
   });
 
   it('a failed resend email surfaces as an error toast', async () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: false });
     const screen = render(<ManagePlayersScreen />);
 
-    const resend = openMenu(screen, alertSpy, 'Dot Expired').find(
-      (b) => b.text === 'Resend invitation'
-    );
-    await resend?.onPress?.();
+    openMenu(screen, 'Dot Expired');
+    fireEvent.press(screen.getByText('Resend invitation'));
 
-    expect(mockShowToast).toHaveBeenCalledWith(
-      'Invitation refreshed, but the email to Dot Expired failed to send.',
-      'error'
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Invitation refreshed, but the email to Dot Expired failed to send.',
+        'error'
+      )
     );
   });
 
@@ -226,14 +245,14 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     mockCreateInvitation.mutateAsync.mockResolvedValue({ emailSent: null });
     const screen = render(<ManagePlayersScreen />);
 
-    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
-      (b) => b.text === 'Resend invitation'
-    );
-    await resend?.onPress?.();
+    openMenu(screen, 'Cleo Invited');
+    fireEvent.press(screen.getByText('Resend invitation'));
 
-    expect(mockShowToast).toHaveBeenCalledWith(
-      'Cleo Invited has no email address on file.',
-      'info'
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Cleo Invited has no email address on file.',
+        'info'
+      )
     );
   });
 
@@ -243,14 +262,14 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     );
     const screen = render(<ManagePlayersScreen />);
 
-    const resend = openMenu(screen, alertSpy, 'Cleo Invited').find(
-      (b) => b.text === 'Resend invitation'
-    );
-    await resend?.onPress?.();
+    openMenu(screen, 'Cleo Invited');
+    fireEvent.press(screen.getByText('Resend invitation'));
 
-    expect(mockShowToast).toHaveBeenCalledWith(
-      'A pending invitation already exists for this player',
-      'error'
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'A pending invitation already exists for this player',
+        'error'
+      )
     );
   });
 
@@ -258,12 +277,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     mockCancelInvitation.mutateAsync.mockResolvedValue({});
     const screen = render(<ManagePlayersScreen />);
 
-    const cancel = openMenu(screen, alertSpy, 'Cleo Invited').find(
-      (b) => b.text === 'Cancel invitation'
-    );
-    cancel?.onPress?.();
+    openMenu(screen, 'Cleo Invited');
+    fireEvent.press(screen.getByText('Cancel invitation'));
 
-    // The action opens its own confirm dialog
+    // The action opens its own confirm dialog (Alert, 2 buttons — Android-safe)
     const confirmCall = alertSpy.mock.calls[alertSpy.mock.calls.length - 1];
     expect(confirmCall[0]).toBe('Cancel Invitation');
     const confirm = (confirmCall[2] as AlertButton[]).find((b) => b.text === 'Cancel invitation');

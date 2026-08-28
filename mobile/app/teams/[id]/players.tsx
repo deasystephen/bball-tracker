@@ -56,6 +56,7 @@ import {
 } from '../../../utils/roster-status';
 import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
+import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
@@ -108,6 +109,7 @@ export default function ManagePlayersScreen() {
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [menuForPlayerId, setMenuForPlayerId] = useState<string | null>(null);
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
@@ -363,47 +365,47 @@ export default function ManagePlayersScreen() {
    * Per-player actions live behind one 44pt overflow button (design review:
    * five inline icons crowded the title to nothing on small screens, missed
    * touch-target minimums, and paired two near-identical mail glyphs with
-   * opposite meanings). Menu contents are contextual to the chip status.
+   * opposite meanings). Rendered as an ActionMenu bottom sheet — Android caps
+   * Alert at three buttons, which would truncate this menu. Items derive from
+   * LIVE state at render time (no stale snapshot in a callback).
    */
-  const openPlayerMenu = (
+  const menuItemsFor = (
     member: (typeof members)[number],
     { status, pendingInvitation }: RosterStatusResult
-  ) => {
+  ): ActionMenuItem[] => {
     const playerName = member.player.name;
-    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
+    const items: ActionMenuItem[] = [];
 
     if (status === 'invited' || status === 'invite_expired') {
-      buttons.push({
-        text: 'Resend invitation',
+      items.push({
+        label: 'Resend invitation',
         onPress: () => handleResendInvite(member.playerId, playerName),
       });
     } else if (status === 'not_invited' && member.player.email) {
       // A never/no-longer-invited player needs an address on file
-      buttons.push({
-        text: 'Send invitation',
+      items.push({
+        label: 'Send invitation',
         onPress: () => handleResendInvite(member.playerId, playerName),
       });
     }
     if (status === 'invited' && pendingInvitation) {
-      buttons.push({
-        text: 'Cancel invitation',
+      items.push({
+        label: 'Cancel invitation',
         onPress: () => handleCancelInvite(pendingInvitation.id, playerName),
       });
     }
     if (member.player.isManaged) {
-      buttons.push({
-        text: 'Invite a parent',
+      items.push({
+        label: 'Invite a parent',
         onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
       });
     }
-    buttons.push({
-      text: 'Remove player',
-      style: 'destructive',
+    items.push({
+      label: 'Remove player',
+      destructive: true,
       onPress: () => handleRemovePlayer(member.playerId, playerName),
     });
-    buttons.push({ text: 'Close', style: 'cancel' });
-
-    Alert.alert(playerName, undefined, buttons);
+    return items;
   };
 
   const renderMemberRow = (member: (typeof members)[number]) => {
@@ -434,7 +436,7 @@ export default function ManagePlayersScreen() {
           <View style={styles.rowActions}>
             <StatusChip status={rosterStatus.status} colors={colors} />
             <TouchableOpacity
-              onPress={() => openPlayerMenu(member, rosterStatus)}
+              onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
               accessibilityLabel={`Player options: ${member.player.name}`}
               style={styles.rowButton}
@@ -760,6 +762,22 @@ export default function ManagePlayersScreen() {
           </View>
         )}
       </ScrollView>
+
+      {(() => {
+        const menuMember = members.find((m) => m.playerId === menuForPlayerId);
+        if (!menuMember) return null;
+        return (
+          <ActionMenu
+            visible
+            title={menuMember.player.name}
+            items={menuItemsFor(
+              menuMember,
+              getRosterStatus(menuMember, invitationsByPlayer.get(menuMember.playerId), statusNow)
+            )}
+            onClose={() => setMenuForPlayerId(null)}
+          />
+        );
+      })()}
     </ThemedView>
   );
 }
