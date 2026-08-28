@@ -12,6 +12,7 @@ import {
   updateTeamMemberSchema,
   teamQuerySchema,
   createManagedPlayerSchema,
+  addRosterPlayerSchema,
   createAnnouncementSchema,
   announcementQuerySchema,
   addStaffSchema,
@@ -208,15 +209,49 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
 });
 
 /**
- * POST /api/v1/teams/:id/players
- * DEPRECATED: Use POST /api/v1/teams/:id/invitations instead
- * Players must be invited and accept invitations to join teams
+ * POST /api/v1/teams/:teamId/players
+ * Unified Add Player (roster/invite unification spec). Name required; player
+ * email optional (invitation goes out when present); guardian email optional.
+ * Supersedes POST /teams/:id/managed-players and the {name,email} arm of
+ * POST /teams/:id/invitations (both stay mounted for old clients).
+ *
+ * (This path previously answered 410 — the pre-2026 direct roster-add was
+ * removed in favor of invitations. The unified flow deliberately reclaims it.)
  */
-router.post('/:id/players', async (_req, res) => {
-  res.status(410).json({
-    error: 'This endpoint has been removed. Please use the invitation system: POST /api/v1/teams/:id/invitations',
-    deprecated: true,
-  });
+router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const validationResult = addRosterPlayerSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const result = await InvitationService.addRosterPlayer(
+      req.params.teamId as string,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(201).json({
+      success: true,
+      ...result,
+      // Defense in depth (audit #14): the service already returns token-free
+      // summaries; strip again at the route like every invitation route.
+      invitation: result.invitation && omitToken(result.invitation),
+    });
+  } catch (error) {
+    logger.error('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
+    if (
+      error instanceof BadRequestError ||
+      error instanceof NotFoundError ||
+      error instanceof ForbiddenError
+    ) {
+      res.status(error.statusCode).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to add player' });
+    }
+  }
 });
 
 /**
@@ -271,7 +306,7 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
       );
     }
 
-    const invitation = await InvitationService.createInvitation(
+    const { invitation, emailSent } = await InvitationService.createInvitation(
       req.params.teamId as string,
       validationResult.data,
       req.user!.id
@@ -280,6 +315,9 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
     res.status(201).json({
       success: true,
       invitation: omitToken(invitation),
+      // null when the invited player has no email; false = send failed (the
+      // client should warn the coach — unification spec, SES incident 2026-08-28)
+      emailSent,
     });
   } catch (error) {
     logger.error('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
@@ -312,14 +350,16 @@ router.post(
         );
       }
 
-      const invitation = await GuardianService.inviteGuardian(
+      const { emailSent, ...invitation } = await GuardianService.inviteGuardian(
         req.params.teamId as string,
         req.params.playerId as string,
         validationResult.data,
         req.user!.id
       );
 
-      res.status(201).json({ success: true, invitation: omitToken(invitation) });
+      // emailSent: false = the invite exists but the email failed (client
+      // should warn the coach — unification spec, SES incident 2026-08-28)
+      res.status(201).json({ success: true, invitation: omitToken(invitation), emailSent });
     } catch (error) {
       logger.error('Error inviting guardian', { error: error instanceof Error ? error.message : String(error) });
       if (

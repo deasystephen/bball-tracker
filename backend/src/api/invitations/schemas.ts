@@ -28,6 +28,10 @@ export const createInvitationSchema = z
     position: z.string().max(50).optional(),
     message: z.string().max(500).optional(),
     expiresInDays: z.number().int().min(1).max(30).default(7),
+    // Resend: expire the player's current live PENDING invitation (if any) and
+    // create a fresh one through this same path, in one transaction. Without
+    // it a live PENDING invitation is a 400 (dedupe).
+    supersede: z.boolean().default(false),
   })
   .superRefine((data, ctx) => {
     const hasPlayerId = data.playerId !== undefined;
@@ -70,5 +74,7 @@ export const inviteGuardianSchema = z.object({
 });
 
 export type InviteGuardianInput = z.infer<typeof inviteGuardianSchema>;
-export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
+// Input shape (defaults optional) so service callers — tests included — can
+// omit `supersede`/`expiresInDays`; the route always passes parsed output.
+export type CreateInvitationInput = z.input<typeof createInvitationSchema>;
 export type InvitationQueryParams = z.infer<typeof invitationQuerySchema>;

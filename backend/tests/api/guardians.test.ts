@@ -57,6 +57,7 @@ describe('Guardians API', () => {
       mockGuardianService.inviteGuardian.mockResolvedValue({
         ...mockInvitation,
         token: 'SECRET',
+        emailSent: true,
       } as unknown as Awaited<ReturnType<typeof mockGuardianService.inviteGuardian>>);
 
       const res = await request(app)
@@ -67,12 +68,30 @@ describe('Guardians API', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.invitation.invitedEmail).toBe('parent@example.com');
       expect(res.body.invitation).not.toHaveProperty('token');
+      // emailSent is a sibling of invitation, not nested inside it (the route
+      // destructures it off the service result — unification spec)
+      expect(res.body.emailSent).toBe(true);
+      expect(res.body.invitation).not.toHaveProperty('emailSent');
       expect(mockGuardianService.inviteGuardian).toHaveBeenCalledWith(
         TEST_TEAM_ID,
         TEST_PLAYER_ID,
         { email: 'parent@example.com', relationship: 'MOTHER' },
         TEST_USER_ID
       );
+    });
+
+    it('surfaces a failed guardian email as emailSent: false', async () => {
+      mockGuardianService.inviteGuardian.mockResolvedValue({
+        ...mockInvitation,
+        emailSent: false,
+      } as unknown as Awaited<ReturnType<typeof mockGuardianService.inviteGuardian>>);
+
+      const res = await request(app)
+        .post(base)
+        .send({ email: 'parent@example.com', relationship: 'MOTHER' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.emailSent).toBe(false);
     });
 
     it('returns 400 for an invalid email', async () => {

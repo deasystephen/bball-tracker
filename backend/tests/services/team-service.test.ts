@@ -234,6 +234,7 @@ describe('TeamService', () => {
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
         members: [],
         games: [],
+        invitations: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
@@ -261,6 +262,7 @@ describe('TeamService', () => {
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
         members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
+        invitations: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
@@ -313,6 +315,89 @@ describe('TeamService', () => {
       }
       // jersey etc. preserved
       expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
+    });
+
+    it('joins invite statuses without the token and only PENDING/ACCEPTED rows (unification spec)', async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [],
+        games: [],
+        invitations: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...coachStaff, role: headCoachRole },
+      ]);
+
+      await TeamService.getTeamById(team.id, coach.id);
+
+      const args = (mockPrisma.team.findUnique as jest.Mock).mock.calls[0][0];
+      const invitationsInclude = args.include.invitations;
+      expect(invitationsInclude).toBeDefined();
+      // Chip states need PENDING (invited/expired) + ACCEPTED (web-link
+      // accepters who never signed in); history rows stay out of the payload.
+      expect(invitationsInclude.where).toEqual({ status: { in: ['PENDING', 'ACCEPTED'] } });
+      // The token is a bearer secret (audit #14) — never joined here.
+      expect(invitationsInclude.select).not.toHaveProperty('token');
+      expect(invitationsInclude.select).toHaveProperty('playerId', true);
+      expect(invitationsInclude.select).toHaveProperty('expiresAt', true);
+    });
+
+    it('returns only rostered players\' invitations to managers — case-3 rows are filtered out (RT7)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 1 });
+      const player = members[0].player;
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
+        games: [],
+        invitations: [
+          // Rostered case-2 player: stays in the payload (drives the chip)
+          { id: 'inv-member', playerId: player.id, status: 'PENDING', expiresAt: new Date(), createdAt: new Date() },
+          // Case-3 existing-account invitee (not a member): comes from
+          // GET /invitations?teamId= client-side per the spec — filtered here
+          { id: 'inv-case3', playerId: 'not-a-member', status: 'PENDING', expiresAt: new Date(), createdAt: new Date() },
+        ],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...coachStaff, role: headCoachRole },
+      ]);
+
+      const result = await TeamService.getTeamById(team.id, coach.id);
+
+      expect(result.invitations).toHaveLength(1);
+      expect(result.invitations[0]).toHaveProperty('id', 'inv-member');
+    });
+
+    it('strips invitations for callers without canManageRoster (same rule as emails)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 1 });
+      const player = members[0].player;
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
+        games: [],
+        invitations: [{ id: 'inv-1', playerId: player.id, status: 'PENDING', expiresAt: new Date(), createdAt: new Date() }],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(members[0].member);
+
+      const result = await TeamService.getTeamById(team.id, player.id);
+
+      expect(result.invitations).toEqual([]);
     });
 
     it('should return team for team member', async () => {

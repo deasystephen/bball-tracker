@@ -58,7 +58,8 @@ export const callbackQuerySchema = z
  * Self-service profile edits (audit #10). Email and role are deliberately not
  * editable here: email is owned by WorkOS, role has its own endpoint.
  */
-const safeUrlSchema = z
+/** http/https-only URL — shared by every profilePictureUrl-style field. */
+export const safeUrlSchema = z
   .string()
   .url('Invalid URL format')
   .refine((url) => /^https?:\/\//i.test(url), { message: 'URL must use http or https protocol' });

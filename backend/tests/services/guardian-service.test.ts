@@ -154,9 +154,10 @@ describe('GuardianService', () => {
     function setHappyPath(options: { existingParent?: ReturnType<typeof createUser> | null } = {}): void {
       (mockPrisma.user.findUnique as jest.Mock).mockImplementation(async (args: { where: { id?: string; email?: string } }) => {
         if (args.where.id === coach.id) return coach;
-        if (args.where.email) return options.existingParent ?? null;
         return null;
       });
+      // Parent lookup is case-insensitive (findFirst) since red-team RT1/RT8
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(options.existingParent ?? null);
       setStaffPermission(true);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ player: child() });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'parent-1', name: 'parent', email: 'parent@test.com' });
@@ -305,12 +306,24 @@ describe('GuardianService', () => {
       expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledTimes(1);
     });
 
-    it('logs and does not throw when the email fails to send', async () => {
+    it('reports emailSent: false when the email fails to send — invitation still committed', async () => {
       setHappyPath();
       mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
 
-      await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id)).resolves.toBeDefined();
-      await new Promise((r) => setImmediate(r));
+      const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id);
+
+      // The SES-incident fix: a failed send is reported, never thrown and
+      // never silent (unification spec).
+      expect(result.emailSent).toBe(false);
+      expect(result).toHaveProperty('id');
+    });
+
+    it('reports emailSent: true on a successful send', async () => {
+      setHappyPath();
+
+      const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id);
+
+      expect(result.emailSent).toBe(true);
     });
   });
 

@@ -390,8 +390,75 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   with `canManageRoster` (RSVP keeps the caller's own row intact); staff emails stay. `listGames` uses
   `GAME_LIST_INCLUDE` (no people at all).
 
-### Team Invitations
+### Team Invitations & Unified Add Player (roster/invite unification)
 
+Spec: `docs/plans/roster-invite-unification-spec.md` (TeamSnap-style Add Player; decisions D1–D5 +
+eng-review amendments recorded there).
+
+- **`POST /teams/:teamId/players`** (gate `canManageRoster`) is the unified Add Player call —
+  name required, `playerEmail?`, `guardianEmail?` + `guardianRelationship?`, jersey/position/photo.
+  It supersedes both `POST /teams/:id/managed-players` and the `{name,email}` arm of
+  `POST /teams/:id/invitations` (both stay mounted for old clients; remove after OTA adoption).
+  The path previously answered 410 — that tombstone was deleted deliberately. Consent model:
+  - **Case 1** (no email): managed `User` + `TeamMember`, one transaction. `rostered: true`.
+  - **Case 2** (email with no *claimed* account — includes reusing an **unclaimed** pre-provisioned
+    row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
+    `User` (`isManaged: true`, `managedById` = coach — deliberate authz statement, B2.10 edit
+    rights until claim) + `TeamMember` + `TeamInvitation` in one transaction, "added" email copy.
+    **The player is on the roster immediately**; accept only activates their login.
+  - **Case 3** (email belongs to a claimed account, `workosUserId` set): invitation **only** —
+    membership on accept (pre-consent membership = de facto auto-accept, deferred by D2).
+    `rostered: false` in the response; `guardianEmail` is refused with `guardianInvited: false` +
+    reason (guardian system requires membership).
+  - Unique-email races: `user.create` P2002 is caught and retried once against the winner row
+    (both the unified endpoint and the deprecated create-and-invite arm, which also sets the
+    managed flags now).
+  - Response: `{ rostered, invited, member, invitation, guardianInvited, guardianReason?, emails:
+    { player?, guardian? } }` — **per-send email flags**; a failed SES send returns `false` and the
+    client must warn the coach (silent failures were invisible — SES-sandbox incident 2026-08-28).
+    `POST /teams/:id/invitations` and the guardian invite route likewise return `emailSent`
+    (`null` = no address). Invitation emails are **awaited** (logged + reported, never thrown).
+- **Invite-status chips:** `GET /teams/:id` joins `invitations` with `status IN (PENDING,
+  ACCEPTED)` (`id, playerId, status, expiresAt, createdAt` — never `token`), stripped to `[]` for
+  callers without `canManageRoster` (same rule as member emails). Chip derivation: Active =
+  `player.isManaged === false` (claimed via login) **or** latest invitation ACCEPTED (web-link
+  accepters never clear `isManaged`); Invited = PENDING unexpired; Invite expired = PENDING past
+  `expiresAt` (client-computed); Not invited = everything else. Existing-account pending invites
+  (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
+  `members[]` by `playerId`.
+- **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the
+  live PENDING row and creates a fresh one (new token — the old link dies) in the same code path
+  as create. With `supersede` an existing **member** is allowed (a rostered case-2 player);
+  a claimed account that is already a member answers 400 `Player already has access to this team`.
+  Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
+  not one transaction, so a lost create race on the partial unique index (double-tap resend) maps
+  P2002 → 400 `A pending invitation already exists for this player` (`createInvitationRow`), never 500.
+- **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
+  (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
+  "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,
+  audit #58) unchanged.
+- **Rejection strips the unclaimed email (consent, spec T1 as narrowed by ship review):** only
+  the invitee's explicit REJECTED transition nulls `User.email` (guarded: `workosUserId` null and
+  no other PENDING **or ACCEPTED** invitation references the player) — otherwise `syncUser`'s
+  claim-by-email turns a later, unrelated sign-up into silent team membership. The roster entry
+  survives (D1). **Deliberately not stripped** on CANCEL (a coach's action must not destroy
+  coach/admin-entered emails; re-inviting would orphan the row into a duplicate account) or on
+  EXPIRY (resend needs the address; the invite email already informed that mailbox).
+- **Email matching is case-insensitive and new accounts store lowercase** (red-team RT1):
+  WorkOS normalizes to lowercase and `syncUser` claims by exact match, so all invite/add flows
+  look up with `mode: 'insensitive'` and create with `trim().toLowerCase()` — a mixed-case entry
+  must never create an unclaimable duplicate or bypass the case-3 consent branch.
+- **Supersede is atomic** (red-team RT2): `createInvitationRowSuperseding` expires the live
+  PENDING row and creates its replacement in ONE transaction (an ACCEPTED row appearing in the
+  window → 400, never a chip regression); a superseding resend for a rostered case-2 player uses
+  the "added" email variant. The case-2 managed-flags write is claim-guarded
+  (`updateMany WHERE workosUserId IS NULL`; zero rows → the add re-branches to case 3, RT4).
+- The `GET /teams/:id` invitations join carries **rostered players only** (case-3 invites come
+  from `GET /invitations?teamId=` client-side, per the spec), newest-first with a `take: 200`
+  guard. Awaited invite/guardian email sends are bounded at 5s (`utils/promise-timeout.ts`) so
+  routes stay under the mobile client's 10s timeout.
+- The invitation email template branches on `variant`: `'added'` (cases 1-2, "You've been added…
+  activate your access") vs default "invited to join" (case 3 + deprecated arm).
 - `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random
   `token` and emails the player a `capyhoops.com/invite/<token>` link. The token is a **bearer secret**:
   `POST /invitations/by-token/:token/accept` is unauthenticated and accepts on behalf of the invited player.

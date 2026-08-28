@@ -18,8 +18,13 @@ import { mailer } from './mailer';
 import { guardianInvitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
+import { withTimeout } from '../utils/promise-timeout';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
+
+/** Same bound as invitation-service: an awaited send must stay well under
+ * the mobile client's 10s request timeout. */
+const EMAIL_SEND_TIMEOUT_MS = 5_000;
 
 /** Scalar fields safe to return on authenticated responses (no `token`). */
 const GUARDIAN_INVITATION_SELECT = {
@@ -227,7 +232,7 @@ export class GuardianService {
     playerId: string,
     data: InviteGuardianInput,
     userId: string
-  ): Promise<GuardianInvitationSummary> {
+  ): Promise<GuardianInvitationSummary & { emailSent: boolean }> {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
       select: { id: true, name: true },
@@ -252,21 +257,37 @@ export class GuardianService {
     // Find or create the adult's account. A brand-new account created through
     // a guardian invite is PARENT; an existing account keeps its role (a coach
     // who is also a parent stays COACH).
-    let parent = await prisma.user.findUnique({
-      where: { email },
+    let parent = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
       select: { id: true, name: true, email: true },
     });
 
     if (!parent) {
-      parent = await prisma.user.create({
-        data: {
-          name: email.split('@')[0],
-          email,
-          role: 'PARENT',
-          emailVerified: false,
-        },
-        select: { id: true, name: true, email: true },
-      });
+      try {
+        parent = await prisma.user.create({
+          data: {
+            name: email.split('@')[0],
+            email,
+            role: 'PARENT',
+            emailVerified: false,
+          },
+          select: { id: true, name: true, email: true },
+        });
+      } catch (err) {
+        // Two concurrent invites for the same new guardian email: the loser
+        // reuses the winner's row instead of surfacing a 500 (red-team RT8 —
+        // same catch-and-reuse as invitation-service).
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+          throw err;
+        }
+        parent = await prisma.user.findFirst({
+          where: { email: { equals: email, mode: 'insensitive' } },
+          select: { id: true, name: true, email: true },
+        });
+        if (!parent) {
+          throw err;
+        }
+      }
     }
 
     const alreadyLinked = await prisma.guardian.findUnique({
@@ -317,8 +338,13 @@ export class GuardianService {
 
     const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
     const acceptUrl = `${baseUrl}/invite/${token}`;
-    mailer
-      .send({
+    // Awaited so callers can surface a failed send to the coach (unification
+    // spec: silent email failures were invisible, SES-sandbox incident
+    // 2026-08-28). Failures are logged and reported, never thrown — the
+    // invitation row is committed and usable in-app.
+    let emailSent: boolean;
+    try {
+      await withTimeout(mailer.send({
         template: guardianInvitationTemplate,
         to: email,
         variables: {
@@ -336,15 +362,17 @@ export class GuardianService {
           childId: playerId,
           invitationId: invitation.id,
         },
-      })
-      .catch((err: unknown) => {
-        logger.error('Failed to send guardian invitation email', {
-          error: err instanceof Error ? err.message : String(err),
-          invitationId: invitation.id,
-        });
+      }), EMAIL_SEND_TIMEOUT_MS, 'guardian invitation email send');
+      emailSent = true;
+    } catch (err: unknown) {
+      logger.error('Failed to send guardian invitation email', {
+        error: err instanceof Error ? err.message : String(err),
+        invitationId: invitation.id,
       });
+      emailSent = false;
+    }
 
-    return invitation;
+    return { ...invitation, emailSent };
   }
 
   /**
