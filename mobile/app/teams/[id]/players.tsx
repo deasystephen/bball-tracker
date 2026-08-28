@@ -282,7 +282,7 @@ export default function ManagePlayersScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await cancelInvitation.mutateAsync(invitationId);
+              await cancelInvitation.mutateAsync({ invitationId, teamId: id });
               toast.showToast('Invitation cancelled', 'success');
             } catch (err) {
               toast.showToast(
@@ -336,6 +336,17 @@ export default function ManagePlayersScreen() {
 
   const members = team.members || [];
   const memberIds = new Set(members.map((m) => m.playerId));
+  // Group invitation rows once per render (not per row) and share one clock
+  const invitationsByPlayer = new Map<string, NonNullable<typeof team.invitations>>();
+  for (const row of team.invitations ?? []) {
+    const bucket = invitationsByPlayer.get(row.playerId);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      invitationsByPlayer.set(row.playerId, [row]);
+    }
+  }
+  const statusNow = new Date();
   // Case-3 rows: pending invites for accounts not yet rostered, deduped
   // against members (rostered players get their chip from the team payload).
   const pendingNonMemberInvites = (teamInvitationsData?.invitations || []).filter(
@@ -346,7 +357,11 @@ export default function ManagePlayersScreen() {
   );
 
   const renderMemberRow = (member: (typeof members)[number]) => {
-    const { status, pendingInvitation } = getRosterStatus(member, team.invitations);
+    const { status, pendingInvitation } = getRosterStatus(
+      member,
+      invitationsByPlayer.get(member.playerId),
+      statusNow
+    );
     const details = [
       member.jerseyNumber != null && `#${member.jerseyNumber}`,
       member.position,
@@ -510,7 +525,7 @@ export default function ManagePlayersScreen() {
                     </ThemedText>
                   ) : players.length > 0 ? (
                     players
-                      .filter((p) => !members.some((m) => m.playerId === p.id))
+                      .filter((p) => !memberIds.has(p.id))
                       .map((player) => (
                         <ListItem
                           key={player.id}

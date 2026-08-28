@@ -195,7 +195,7 @@ describe('useInvitations runtime', () => {
     });
   });
 
-  it('useCancelInvitation deletes and invalidates all invitations', async () => {
+  it('useCancelInvitation deletes and invalidates scoped to the team', async () => {
     mockedDelete.mockResolvedValueOnce({
       data: { success: true, invitation: { id: 'inv-1' } },
     });
@@ -204,12 +204,17 @@ describe('useInvitations runtime', () => {
     const { result } = renderHook(() => useCancelInvitation(), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync('inv-1');
+      await result.current.mutateAsync({ invitationId: 'inv-1', teamId: 't1' });
     });
 
     expect(mockedDelete).toHaveBeenCalledWith('/invitations/inv-1');
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: invitationKeys.all,
+      queryKey: invitationKeys.team('t1'),
+    });
+    // Only THIS team's detail refetches (chip join changed) — never an
+    // unscoped ['teams','detail'] that would refetch every cached team
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['teams', 'detail', 't1'],
     });
   });
 });

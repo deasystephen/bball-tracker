@@ -167,7 +167,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     const confirm = buttons.find((b) => b.text === 'Cancel invitation');
     await confirm?.onPress?.();
 
-    expect(mockCancelInvitation.mutateAsync).toHaveBeenCalledWith('inv-invited');
+    expect(mockCancelInvitation.mutateAsync).toHaveBeenCalledWith({
+      invitationId: 'inv-invited',
+      teamId: 't1',
+    });
   });
 
   it('cancel button only renders on Invited rows — never Expired/Not invited/Active', () => {

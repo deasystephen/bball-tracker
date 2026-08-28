@@ -282,18 +282,19 @@ export function useRejectInvitation() {
 export function useCancelInvitation() {
   const queryClient = useQueryClient();
 
-  return useMutation<InvitationResponse, Error, string>({
-    mutationFn: async (invitationId) => {
+  return useMutation<InvitationResponse, Error, { invitationId: string; teamId: string }>({
+    mutationFn: async ({ invitationId }) => {
       const response = await apiClient.delete<InvitationResponse>(
         `/invitations/${invitationId}`
       );
       return response.data;
     },
-    onSuccess: () => {
-      // Invalidate all invitation queries
-      queryClient.invalidateQueries({ queryKey: invitationKeys.all });
-      // Chip flips to "Not invited" on the roster (team payload join)
-      queryClient.invalidateQueries({ queryKey: ['teams', 'detail'] });
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: invitationKeys.team(variables.teamId) });
+      // Chip flips to "Not invited" — invalidate only THIS team's detail
+      // (an unscoped ['teams','detail'] would refetch every cached team)
+      queryClient.invalidateQueries({ queryKey: ['teams', 'detail', variables.teamId] });
     },
   });
 }
