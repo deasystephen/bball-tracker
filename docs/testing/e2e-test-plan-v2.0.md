@@ -224,14 +224,42 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Shows team name, league/season, empty roster with "Add Player", the **Staff** card (head coach name + count → staff screen), "Announcements", "View Team Stats". Maestro: `.maestro/team-detail.yaml`.
 - **Notes:** ___________
 
-### D.3 — Add a roster player (managed)
+### D.3 — Add a player (unified form — roster/invite unification)
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageRoster`
 - **Steps:**
-  1. Team detail → "Add Player" → tap "Add Roster Player"
-  2. Enter name `Test Player 1`, jersey `99` → "Add to Roster"
-- **Expected:** Player added to roster (managed account — no email required). Visible in roster list, badged "Roster player"; the roster card offers "Invite a parent" (E.12a). Maestro: `.maestro/roster-management.yaml`.
-- **Notes:** Per `POST /api/v1/teams/:teamId/managed-players` (creates the managed `User` + `TeamMember` in one transaction).
+  1. Team detail → "Add Player" → tap "Add Player" (the single form — the old
+     "Create New Player" / "Add Roster Player" split is gone)
+  2. **Name only:** enter `Test Player 1`, jersey `99` → "Add Player"
+  3. **With email:** repeat with name + a verified sandbox email
+  4. **With parent email:** repeat with a parent email + relationship chip
+- **Expected:**
+  - Every added player appears on the roster **immediately** (2) with a
+    "Not invited" chip; (3) shows "Invited"; the invite email uses the
+    "You've been added — Activate Access" copy. A failed send toasts an
+    error (per-send `emails` flags) — never silent.
+  - (3) with an email that already has an account: toast explains, player
+    appears in the separate "Invited" section (not the roster) until accept.
+  - (4) parent gets a guardian invitation in the same step (rostered cases
+    only; for an existing-account player the toast explains the deferral).
+  - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
+- **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the
+  old managed-players and create-and-invite arms stay mounted for old builds).
+
+### D.3a — Invite-status chips, resend & cancel (NEW)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageRoster`
+- **Steps:** Lakers roster (seeded fixtures: Iris Invited / Xander Expired /
+  Wendy WebAccept / Marcus Johnson).
+- **Expected:**
+  - Chips: Invited (live PENDING), Invite expired (lapsed PENDING), Active
+    (ACCEPTED via web link, never signed in — must NOT read "Not invited"),
+    Not invited (no invitation). Non-managers see no chips (join stripped).
+  - Resend (mail icon) on Invited/Expired → fresh invitation, old link dead
+    (supersede); toast reports the email result.
+  - Cancel (on Invited only) → confirm dialog → chip flips to "Not invited",
+    the player STAYS on the roster, and their email survives (rejection-only
+    strip — re-invite works without creating a duplicate account).
 
 ### D.4 — Edit team name
 - [ ] Pass / Fail / Skipped
@@ -292,10 +320,10 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canManageRoster`
 - **Prereq:** Team from D.1, ECS rev 133+ deployed
 - **Steps:**
-  1. Team detail → "Add Player" → (stay on "Invite Player") → "Create New Player"
-  2. Enter name + `deasystephen+player@gmail.com` (a verified sandbox recipient) → "Create & Send Invitation". (For a user already visible in the player search, select them and tap "Send Invitation" instead.)
+  1. Team detail → "Add Player" → "Add Player" (unified form)
+  2. Enter name + `deasystephen+player@gmail.com` (a verified sandbox recipient) → "Add Player". (For a user already visible in the player search, select them and tap "Send Invitation" instead.)
 - **Expected:**
-  - One HTTP 201 from `POST /api/v1/teams/:teamId/invitations { name, email }` (create-and-invite, audit #69 — there is no separate `POST /players` call; an existing account with that email is reused). The response carries **no** `token` (audit #14).
+  - One HTTP 201 from `POST /api/v1/teams/:teamId/players { name, playerEmail }` (unified Add Player — the player is rostered immediately for a new/unclaimed email, invitation-only for a claimed account; an existing account with that email is reused). The response carries **no** `token` (audit #14) and reports `emails.player` delivery.
   - Invitation appears in the coach's pending list (`GET /invitations?teamId=`) and on the invitee's Invitations tab
   - Within ~10s an email arrives at that address
 - **Notes:** ___________

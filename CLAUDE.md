@@ -96,6 +96,34 @@ Backend API (Node.js/Express)
 - **hooks/**: Custom React hooks
 - **i18n/**: Internationalization
 
+#### Mobile roster & invite-status chips (roster/invite unification)
+
+- `app/teams/[id]/players.tsx` has ONE **Add Player** form (`useAddRosterPlayer` →
+  `POST /teams/:teamId/players`): name required, optional player email (invite goes out when
+  present), optional parent email + relationship chips (guardian invite in the same step,
+  rostered cases only). The old "Create New Player" / "Add Roster Player" split and
+  `useAddPlayerToTeam` are gone. Result handling: `rostered: false` (existing account) toasts an
+  explanation; `emails.player/guardian === false` toasts an error (never silent);
+  `guardianReason` surfaces as info.
+- **Chips derive ONLY via `utils/roster-status.ts#getRosterStatus(member, team.invitations)`**
+  (same never-inline rule as `game-result.ts`): Active = `player.isManaged === false` OR an
+  ACCEPTED row; Invited/Invite expired from the PENDING row (expiry client-computed); else Not
+  invited. `team.invitations` exists only for `canManageRoster` callers (stripped to `[]`
+  otherwise) and carries rostered players only.
+- **Resend and Invite are the same call**: `useCreateInvitation` with
+  `{ playerId, supersede: true }` (fresh token server-side, old link dies). Resend renders on
+  Invited/Expired rows; Invite on Not-invited rows **with an email on file**; Cancel
+  (`useCancelInvitation`, confirm dialog) only on Invited rows — a lazily-expired row has no
+  valid id to cancel. Cancel keeps the player rostered AND keeps their email (rejection-only
+  strip) — recovery from a wrong email is `PATCH /players/:id { email }` then Resend, never
+  re-adding (which would create a duplicate account).
+- **Case-3 invitees** (existing accounts, not yet members) render in a separate "Invited"
+  section from `useTeamInvitations(teamId, 'PENDING')`, filtered to non-members + unexpired
+  (dedupe by `playerId` against `members[]`).
+- Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
+  Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
+  roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
+
 #### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
   (`useInfiniteGames`, `useInfiniteTeams`, `useInfiniteAnnouncements`) wired to `FlatList.onEndReached`; the
@@ -490,8 +518,8 @@ eng-review amendments recorded there).
   `{ name, email, profilePictureUrl? }` (never both — `createInvitationSchema` `superRefine`). With an email:
   an existing account with that email is reused (so a retry or a self-signed-up player just works);
   otherwise the `User` (`role: PLAYER`, unverified) and the `TeamInvitation` are created in **one
-  `$transaction`**, so a failed invite never leaves an orphan player. Mobile `app/teams/[id]/players.tsx`
-  uses this single call (the old `POST /players` → `POST /invitations` two-step is gone).
+  `$transaction`**, so a failed invite never leaves an orphan player. Mobile now uses the unified
+  `POST /teams/:teamId/players` instead (this arm stays mounted for pre-unification builds).
 - **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
   (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `capyhoops.com/invite/<token>` is
   rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
