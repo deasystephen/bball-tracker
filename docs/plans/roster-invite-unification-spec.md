@@ -1,6 +1,6 @@
 # Roster / Invite Unification Spec (TeamSnap-style Add Player)
 
-**Status:** Accepted — decisions locked 2026-08-27; eng review (incl. outside voice) complete, all findings folded
+**Status:** Shipped 2026-08-28 — backend in PR #416 (deployed, ECS :252), mobile in PR #417 (production OTA group `27d9d5d9`, runtime 1.2.0); on-device acceptance passed (Spartans 5/6 legacy invitations render as Invited rows). Decisions locked 2026-08-27; eng review (incl. outside voice) complete, all findings folded
 **Owner:** Stephen Deasy
 **Context:** QA on 2026-08-28 (team "Spartans 5/6", 8 players via "Create New Player") surfaced that
 invited players are invisible until they accept: the roster showed 0 players, pending invitations are
