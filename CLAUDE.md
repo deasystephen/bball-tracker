@@ -174,8 +174,8 @@ Backend API (Node.js/Express)
   Service / Privacy Policy / open-source-license rows once #25 publishes the documents — don't add those
   links anywhere else. The App-version row appends the native build number ("v1.2.0 (build 28)") read via
   `requireOptionalNativeModule('ExpoApplication')` — never the `expo-application` JS wrapper, which would
-  crash binaries without the module: `expo-application` first ships in the build cut after 2026-08-28, and
-  1.2.0 OTAs still reach build #27, where the row degrades to the bare version (same guard pattern as
+  crash binaries without the module: `expo-application` first shipped in build #28 (cut 2026-08-28), and
+  1.2.0 OTAs still reach builds #25–#27, where the row degrades to the bare version (same guard pattern as
   `services/secure-storage.ts`). `expo-application` is Expo-SDK-pinned and dependabot-ignored like the other
   native modules. Tests `__tests__/app/about.test.tsx` (note the
   lazy-getter `expo-updates` mock — Babel's `import * as` interop copies plain mock objects); Maestro
