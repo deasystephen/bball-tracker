@@ -92,16 +92,22 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const activeVisualIndex = visualIndex >= 0 ? visualIndex : 0;
 
   return (
-    <View style={[styles.tabBarOuter, { paddingBottom: insets.bottom }]}>
+    <View style={styles.tabBarOuter}>
       <BlurView
         intensity={80}
         tint={colorScheme === 'dark' ? 'dark' : 'light'}
         style={styles.blurContainer}
       >
+        {/* The safe-area inset lives INSIDE the blurred surface so the bar
+            runs to the physical bottom edge — padding it outside left a
+            transparent strip under the bar where content showed through
+            un-blurred. */}
         <View
           style={[
             styles.tabBarInner,
             {
+              height: TAB_BAR_HEIGHT + insets.bottom,
+              paddingBottom: insets.bottom,
               backgroundColor:
                 colorScheme === 'dark'
                   ? 'rgba(13, 17, 23, 0.85)'
@@ -233,7 +239,6 @@ const styles = StyleSheet.create({
   tabBarInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: TAB_BAR_HEIGHT,
     borderTopWidth: StyleSheet.hairlineWidth,
     position: 'relative',
   },
