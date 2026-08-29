@@ -2,7 +2,7 @@
  * Team details screen with hero header
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -29,6 +29,13 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 import { getTeamColor } from '../../utils/team-colors';
+import { RosterSortKey, sortRosterMembers } from '../../utils/roster-sort';
+import { useRosterSortPreference } from '../../hooks/useRosterSortPreference';
+
+const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
+  { key: 'jersey', label: 'Jersey #' },
+  { key: 'name', label: 'Name' },
+];
 
 export default function TeamDetailsScreen() {
   const router = useRouter();
@@ -41,6 +48,13 @@ export default function TeamDetailsScreen() {
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
+  const [rosterSort, setRosterSort] = useRosterSortPreference(user?.id);
+  // The backend already returns jersey order; sorting client-side too keeps
+  // cached/pre-deploy data consistent and drives the Name option.
+  const sortedMembers = useMemo(
+    () => sortRosterMembers(team?.members ?? [], rosterSort),
+    [team?.members, rosterSort]
+  );
 
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
@@ -249,9 +263,39 @@ export default function TeamDetailsScreen() {
             />
           )}
 
-          {team.members && team.members.length > 0 ? (
+          {memberCount > 1 && (
+            <View style={styles.sortOptions}>
+              {ROSTER_SORT_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  onPress={() => setRosterSort(option.key)}
+                  style={[
+                    styles.sortButton,
+                    {
+                      backgroundColor:
+                        rosterSort === option.key ? colors.primary + '20' : 'transparent',
+                      borderColor:
+                        rosterSort === option.key ? colors.primary : colors.border,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sort by ${option.label}`}
+                  accessibilityState={{ selected: rosterSort === option.key }}
+                >
+                  <ThemedText
+                    variant="caption"
+                    color={rosterSort === option.key ? 'primary' : 'textSecondary'}
+                  >
+                    {option.label}
+                  </ThemedText>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {sortedMembers.length > 0 ? (
             <View style={styles.rosterGrid}>
-              {team.members.map((member) => (
+              {sortedMembers.map((member) => (
                 <TouchableOpacity
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
@@ -336,6 +380,19 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   addButton: { marginBottom: spacing.md },
+  sortOptions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  sortButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
   rosterGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

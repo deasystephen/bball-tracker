@@ -20,7 +20,17 @@ appId: com.bballtracker.mobile
 # Verify team detail page content
 - assertVisible: "Lakers"
 
-# Scroll until players are visible (hero header + stats push them far down)
+# Roster sort pills (server default = jersey order; Name pill reorders).
+# Pills sit above the roster grid, below the hero header + stats cards.
+- scrollUntilVisible:
+    element:
+      text: "Sort by Name"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Sort by Jersey #"
+- tapOn: "Sort by Name"
+
+# Roster still renders after the reorder
 - scrollUntilVisible:
     element:
       text: "LeBron James"

@@ -72,6 +72,12 @@ const TEAM_INCLUDE = {
     include: {
       player: { select: USER_SUMMARY_SELECT },
     },
+    // Roster order: jersey number asc (0 is valid, nulls last), name tiebreak.
+    // GAME_DETAIL_INCLUDE.team.members in game-service.ts mirrors this.
+    orderBy: [
+      { jerseyNumber: { sort: 'asc', nulls: 'last' } },
+      { player: { name: 'asc' } },
+    ],
   },
 } satisfies Prisma.TeamInclude;
 

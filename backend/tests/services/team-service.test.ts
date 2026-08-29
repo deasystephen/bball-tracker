@@ -248,6 +248,16 @@ describe('TeamService', () => {
       expect(mockPrisma.team.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
+          include: expect.objectContaining({
+            // Roster order: jersey asc (nulls last), name tiebreak. Prisma is
+            // mocked here, so this include assertion is the only guard.
+            members: expect.objectContaining({
+              orderBy: [
+                { jerseyNumber: { sort: 'asc', nulls: 'last' } },
+                { player: { name: 'asc' } },
+              ],
+            }),
+          }),
         })
       );
     });

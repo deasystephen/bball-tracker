@@ -139,6 +139,14 @@ Backend API (Node.js/Express)
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
   Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
+- **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak
+  (`orderBy` on `TEAM_INCLUDE.members` in `team-service.ts`, mirrored in
+  `GAME_DETAIL_INCLUDE.team.members`), so every roster view inherits the order. The team
+  overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle: comparisons go ONLY
+  through `utils/roster-sort.ts#sortRosterMembers` (never inline; jersey 0 is valid, no
+  number sorts last), and the choice persists per user via
+  `hooks/useRosterSortPreference.ts` (AsyncStorage `rosterSort:<userId>`, best-effort like
+  `role-onboarding.ts`). Maestro coverage lives in `.maestro/team-detail.yaml`.
 
 #### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks

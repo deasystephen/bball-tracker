@@ -51,6 +51,11 @@ const GAME_DETAIL_INCLUDE = {
             },
           },
         },
+        // Same roster order as team-service TEAM_INCLUDE.members.
+        orderBy: [
+          { jerseyNumber: { sort: 'asc', nulls: 'last' } },
+          { player: { name: 'asc' } },
+        ],
       },
     },
   },
