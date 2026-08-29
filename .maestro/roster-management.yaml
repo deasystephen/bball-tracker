@@ -65,3 +65,21 @@ appId: com.bballtracker.mobile
     direction: DOWN
     timeout: 10000
 - assertVisible: "E2E Test Player status: Not invited"
+
+# Edit jersey & position from the row's overflow menu (jersey-loss follow-up:
+# coaches can correct a number after the fact)
+- tapOn: "Player options: E2E Test Player"
+- tapOn: "Edit jersey & position"
+- tapOn:
+    id: "edit-member-jersey-input"
+- eraseText
+- inputText: "12"
+- tapOn:
+    id: "edit-member-position-input"
+- inputText: "Guard"
+- hideKeyboard
+- tapOn:
+    id: "edit-member-save"
+
+# The row subtitle re-renders with the new jersey and position
+- assertVisible: "#12 • Guard"

@@ -800,6 +800,24 @@ describe('Teams API', () => {
       expect(response.body.teamMember.jerseyNumber).toBe(99);
     });
 
+    it('should accept null jersey number and position (clears the fields)', async () => {
+      const clearedMember = { ...mockTeamMember, jerseyNumber: null, position: null };
+      mockTeamService.updateTeamMember.mockResolvedValue(clearedMember as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeamMember>>);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: null, position: null });
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.updateTeamMember).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        TEST_PLAYER_ID,
+        { jerseyNumber: null, position: null },
+        expect.any(String)
+      );
+      expect(response.body.teamMember.jerseyNumber).toBeNull();
+    });
+
     it('should reject jersey number 100 (out of range)', async () => {
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)

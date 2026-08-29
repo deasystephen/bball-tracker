@@ -955,5 +955,14 @@ describe('Schema Validation', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('should accept null jersey number and position (clears the field)', () => {
+      const result = updateTeamMemberSchema.safeParse({
+        jerseyNumber: null,
+        position: null,
+      });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ jerseyNumber: null, position: null });
+    });
   });
 });

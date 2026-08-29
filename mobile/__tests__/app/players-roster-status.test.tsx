@@ -19,6 +19,7 @@ const mockShowToast = jest.fn();
 const mockAddRosterPlayer = { mutateAsync: jest.fn(), isPending: false };
 const mockCreateInvitation = { mutateAsync: jest.fn(), isPending: false };
 const mockCancelInvitation = { mutateAsync: jest.fn(), isPending: false };
+const mockUpdateTeamMember = { mutateAsync: jest.fn(), isPending: false };
 let mockTeam: Team | undefined;
 let mockTeamInvitations: unknown[] = [];
 let mockTeamInvitationsError: Error | null = null;
@@ -40,6 +41,7 @@ jest.mock('../../hooks/useTeams', () => ({
   useTeam: () => ({ data: mockTeam, isLoading: false, error: null, refetch: jest.fn() }),
   useAddRosterPlayer: () => mockAddRosterPlayer,
   useRemovePlayerFromTeam: () => ({ mutateAsync: jest.fn(), isPending: false }),
+  useUpdateTeamMember: () => mockUpdateTeamMember,
 }));
 jest.mock('../../hooks/useInvitations', () => ({
   ...jest.requireActual('../../hooks/useInvitations'),
@@ -131,6 +133,7 @@ const MENU_LABELS = [
   'Send invitation',
   'Cancel invitation',
   'Invite a parent',
+  'Edit jersey & position',
   'Remove player',
 ];
 
@@ -174,6 +177,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       'Resend invitation',
       'Cancel invitation',
       'Invite a parent',
+      'Edit jersey & position',
       'Remove player',
     ]);
     closeMenu(screen);
@@ -183,13 +187,18 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     expect(visibleMenuItems(screen)).toEqual([
       'Resend invitation',
       'Invite a parent',
+      'Edit jersey & position',
       'Remove player',
     ]);
     closeMenu(screen);
 
     // No email on file: no send option at all
     openMenu(screen, 'Eve RosterOnly');
-    expect(visibleMenuItems(screen)).toEqual(['Invite a parent', 'Remove player']);
+    expect(visibleMenuItems(screen)).toEqual([
+      'Invite a parent',
+      'Edit jersey & position',
+      'Remove player',
+    ]);
     closeMenu(screen);
 
     // Not invited WITH an email: Send invitation appears
@@ -197,9 +206,9 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     expect(visibleMenuItems(screen)).toContain('Send invitation');
     closeMenu(screen);
 
-    // Active claimed account (not managed): only remove
+    // Active claimed account (not managed): edit + remove only
     openMenu(screen, 'Ada Active');
-    expect(visibleMenuItems(screen)).toEqual(['Remove player']);
+    expect(visibleMenuItems(screen)).toEqual(['Edit jersey & position', 'Remove player']);
   });
 
   it('Resend calls the supersede create for an invited player', async () => {
@@ -556,6 +565,81 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     // result (selecting her would hit a bare 400: the pending invite exists)
     expect(queryAllByText('Pending Petra')).toHaveLength(1);
     expect(getByText('Searched Sam')).toBeTruthy();
+  });
+
+  it('Edit jersey & position opens a prefilled sheet — jersey 0 renders as "0" — and saves parsed values', async () => {
+    mockTeam!.members![0] = {
+      ...makeMember('p-active', 'Ada Active', false, 'ada@example.com'),
+      jerseyNumber: 0,
+      position: 'Guard',
+    };
+    mockUpdateTeamMember.mutateAsync.mockResolvedValue({});
+    const screen = render(<ManagePlayersScreen />);
+
+    openMenu(screen, 'Ada Active');
+    fireEvent.press(screen.getByText('Edit jersey & position'));
+
+    // Prefill uses `!= null` — jersey 0 must not read as "no number"
+    expect(screen.getByTestId('edit-member-jersey-input').props.value).toBe('0');
+    expect(screen.getByTestId('edit-member-position-input').props.value).toBe('Guard');
+
+    fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '23');
+    fireEvent.changeText(screen.getByTestId('edit-member-position-input'), 'Center');
+    fireEvent.press(screen.getByTestId('edit-member-save'));
+
+    await waitFor(() =>
+      expect(mockUpdateTeamMember.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        playerId: 'p-active',
+        data: { jerseyNumber: 23, position: 'Center' },
+      })
+    );
+    expect(mockShowToast).toHaveBeenCalledWith('Player details updated', 'success');
+  });
+
+  it('clearing the edit inputs saves nulls (clears jersey and position)', async () => {
+    mockTeam!.members![0] = {
+      ...makeMember('p-active', 'Ada Active', false, 'ada@example.com'),
+      jerseyNumber: 23,
+      position: 'Guard',
+    };
+    mockUpdateTeamMember.mutateAsync.mockResolvedValue({});
+    const screen = render(<ManagePlayersScreen />);
+
+    openMenu(screen, 'Ada Active');
+    fireEvent.press(screen.getByText('Edit jersey & position'));
+    fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '');
+    fireEvent.changeText(screen.getByTestId('edit-member-position-input'), '');
+    fireEvent.press(screen.getByTestId('edit-member-save'));
+
+    await waitFor(() =>
+      expect(mockUpdateTeamMember.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        playerId: 'p-active',
+        data: { jerseyNumber: null, position: null },
+      })
+    );
+  });
+
+  it('a rejected member update surfaces the API error and keeps the sheet open', async () => {
+    mockUpdateTeamMember.mutateAsync.mockRejectedValue(
+      new Error('You do not have permission to update team members')
+    );
+    const screen = render(<ManagePlayersScreen />);
+
+    openMenu(screen, 'Ada Active');
+    fireEvent.press(screen.getByText('Edit jersey & position'));
+    fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '7');
+    fireEvent.press(screen.getByTestId('edit-member-save'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'You do not have permission to update team members',
+        'error'
+      )
+    );
+    // Sheet stays open for correction/retry
+    expect(screen.getByTestId('edit-member-save')).toBeTruthy();
   });
 
   it('denies a non-manager: no roster controls render and the screen bounces', async () => {

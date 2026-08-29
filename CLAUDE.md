@@ -131,6 +131,11 @@ Backend API (Node.js/Express)
   menu: Android caps Alert at three buttons and silently truncates. Chip accessibility
   labels are row-anchored (`"<player> status: <label>"`) and Maestro asserts that exact
   string — a bare `assertVisible: "Active"` can false-pass off a neighboring row.
+- Every roster row's menu has **Edit jersey & position** (bottom-sheet form, prefilled with the
+  `!= null` rule so jersey 0 renders) → `useUpdateTeamMember` →
+  `PATCH /teams/:id/players/:playerId`; an emptied input sends `null`, which clears the stored
+  value (`updateTeamMemberSchema` is `.nullable()` for both fields). This is the recovery path for
+  members rostered without a number (e.g. pre-fix resend-superseded invites).
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
   Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
@@ -497,7 +502,10 @@ eng-review amendments recorded there).
   `members[]` by `playerId`.
 - **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the
   live PENDING row and creates a fresh one (new token — the old link dies) in the same code path
-  as create. With `supersede` an existing **member** is allowed (a rostered case-2 player);
+  as create. The superseding row **inherits `jerseyNumber`/`position`/`message` from the row it
+  expires** when the request omits them (mobile Resend sends only `{ playerId, supersede }`) —
+  a case-3 accept creates the member row from the live invitation, so a bare resend must not wipe
+  the coach-set jersey (jersey-loss fix 2026-08-29); explicit values still win. With `supersede` an existing **member** is allowed (a rostered case-2 player);
   a claimed account that is already a member answers 400 `Player already has access to this team`.
   Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
   not one transaction, so a lost create race on the partial unique index (double-tap resend) maps

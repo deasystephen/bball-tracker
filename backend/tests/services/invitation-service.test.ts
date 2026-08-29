@@ -1969,6 +1969,115 @@ describe('InvitationService', () => {
       expect(txCreate).toHaveBeenCalled();
     });
 
+    it('a bare resend inherits jersey/position/message from the superseded row (jersey-loss fix)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const managedPlayer = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null };
+      const fresh = createInvitation({
+        teamId: team.id,
+        playerId: managedPlayer.id,
+        jerseyNumber: 23,
+        position: 'Guard',
+      });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(managedPlayer);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
+        createTeamMember({ teamId: team.id, playerId: managedPlayer.id })
+      );
+      // First tx findFirst = ACCEPTED-row guard; second = the superseded
+      // PENDING row whose coach-set fields the replacement must inherit.
+      const txFindFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ jerseyNumber: 23, position: 'Guard', message: 'Welcome!' });
+      const txExpire = jest.fn().mockResolvedValue({ count: 1 });
+      const txCreate = jest.fn().mockResolvedValue({
+        ...fresh,
+        team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+        player: { id: managedPlayer.id, name: managedPlayer.name, email: managedPlayer.email },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+      });
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({ teamInvitation: { findFirst: txFindFirst, updateMany: txExpire, create: txCreate } })
+      );
+
+      await InvitationService.createInvitation(
+        team.id,
+        { playerId: managedPlayer.id, supersede: true },
+        coach.id
+      );
+
+      expect(txCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            jerseyNumber: 23,
+            position: 'Guard',
+            message: 'Welcome!',
+          }),
+        })
+      );
+    });
+
+    it('explicit jersey/position on a superseding create still win over the old row', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const managedPlayer = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null };
+      const fresh = createInvitation({
+        teamId: team.id,
+        playerId: managedPlayer.id,
+        jerseyNumber: 8,
+        position: 'Center',
+      });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(managedPlayer);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
+        createTeamMember({ teamId: team.id, playerId: managedPlayer.id })
+      );
+      const txFindFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ jerseyNumber: 23, position: 'Guard', message: null });
+      const txCreate = jest.fn().mockResolvedValue({
+        ...fresh,
+        team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
+        player: { id: managedPlayer.id, name: managedPlayer.name, email: managedPlayer.email },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+      });
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          teamInvitation: {
+            findFirst: txFindFirst,
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            create: txCreate,
+          },
+        })
+      );
+
+      await InvitationService.createInvitation(
+        team.id,
+        { playerId: managedPlayer.id, supersede: true, jerseyNumber: 8, position: 'Center' },
+        coach.id
+      );
+
+      expect(txCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ jerseyNumber: 8, position: 'Center' }),
+        })
+      );
+    });
+
     it('refuses to supersede when the player accepted in the race window (RT2)', async () => {
       const coach = createCoach();
       const league = createLeague();
