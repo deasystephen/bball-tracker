@@ -95,6 +95,11 @@ Backend API (Node.js/Express)
 - **store/**: Zustand stores (auth, user state)
 - **hooks/**: Custom React hooks
 - **i18n/**: Internationalization
+- **assets/brand/**: Hooplings icon SVG masters ("Courtside Capy" capybara mark) + `render-icons.mjs`,
+  which regenerates `assets/{icon,adaptive-icon,splash-icon,favicon}.png` (`node assets/brand/render-icons.mjs`
+  from `mobile/`). Edit the SVGs, never the PNGs. Icon/splash changes are baked into the native binary —
+  they ship with the next `eas build`, not an OTA. Brand navy `#1C2742` is also the splash and
+  adaptive-icon background in `app.config.js`.
 
 #### Mobile roster & invite-status chips (roster/invite unification)
 
