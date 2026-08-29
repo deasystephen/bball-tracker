@@ -42,9 +42,11 @@ export const addPlayerSchema = z.object({
 /**
  * Schema for updating a team member
  */
+// `null` clears the field (the mobile jersey-edit sheet sends null for an
+// emptied input); absent leaves it unchanged.
 export const updateTeamMemberSchema = z.object({
-  jerseyNumber: z.number().int().min(0).max(99).optional(),
-  position: z.string().max(50).optional(),
+  jerseyNumber: z.number().int().min(0).max(99).nullable().optional(),
+  position: z.string().max(50).nullable().optional(),
 });
 
 /**

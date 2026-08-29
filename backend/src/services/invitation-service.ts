@@ -492,13 +492,31 @@ export class InvitationService {
           throw new BadRequestError('Player already has access to this team');
         }
 
+        // A bare resend ({ playerId, supersede: true }) must not wipe the
+        // jersey/position/message the coach set at add time: for invite-only
+        // players (case 3) the roster row is born from the live invitation at
+        // accept, so a superseding row created without them would roster the
+        // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
+        // caller omits inherit from the row being superseded; explicitly
+        // provided values still win.
+        const superseded = await tx.teamInvitation.findFirst({
+          where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
+          select: { jerseyNumber: true, position: true, message: true },
+        });
+
         await tx.teamInvitation.updateMany({
           where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
           data: { status: 'EXPIRED' },
         });
 
         return tx.teamInvitation.create({
-          data,
+          data: {
+            ...data,
+            jerseyNumber:
+              data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
+            position: data.position === undefined ? superseded?.position : data.position,
+            message: data.message === undefined ? superseded?.message : data.message,
+          },
           select: INVITATION_SELECT,
         });
       });

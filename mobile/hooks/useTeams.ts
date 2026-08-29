@@ -304,6 +304,41 @@ export function useAddRosterPlayer() {
   });
 }
 
+/**
+ * Edit a roster entry's jersey number / position —
+ * `PATCH /teams/:teamId/players/:playerId`. `null` clears a field; an absent
+ * field is left unchanged (matches `updateTeamMemberSchema`).
+ */
+export interface UpdateTeamMemberInput {
+  jerseyNumber?: number | null;
+  position?: string | null;
+}
+
+export function useUpdateTeamMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      teamId,
+      playerId,
+      data,
+    }: {
+      teamId: string;
+      playerId: string;
+      data: UpdateTeamMemberInput;
+    }) => {
+      const response = await apiClient.patch<{ success: boolean; teamMember: TeamMember }>(
+        `/teams/${teamId}/players/${playerId}`,
+        data
+      );
+      return response.data.teamMember;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+    },
+  });
+}
+
 export function useRemovePlayerFromTeam() {
   const queryClient = useQueryClient();
 

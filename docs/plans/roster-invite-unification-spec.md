@@ -119,7 +119,11 @@ follow-up after OTA adoption.
 
 - **Supersede/resend (D4 as amended):** `POST /teams/:id/invitations { playerId, supersede: true }`
   expires the current PENDING row and creates a fresh one via the existing create machinery, one
-  transaction; response through the token-free selects + `omitToken`.
+  transaction; response through the token-free selects + `omitToken`. **Amended (jersey-loss fix,
+  2026-08-29):** the superseding create inherits `jerseyNumber`/`position`/`message` from the row it
+  expires whenever the request omits them (the mobile Resend sends only `{ playerId, supersede }`).
+  Without this, a case-3 accept after a resend rostered the player with a null jersey — the member
+  row is born from the live invitation. Explicitly provided values still win.
 - **Cancel:** existing `DELETE /api/v1/invitations/:id`. **Reject:** existing flow. Both transition
   via `transitionPending()` and (new, T1) null the managed row's `email` when `workosUserId` is
   null; roster entry untouched (D1).

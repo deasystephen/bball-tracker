@@ -19,6 +19,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,8 +41,10 @@ import {
   useTeam,
   useRemovePlayerFromTeam,
   useAddRosterPlayer,
+  useUpdateTeamMember,
   hasTeamPermission,
   type AddRosterPlayerResponse,
+  type TeamMember,
 } from '../../../hooks/useTeams';
 import {
   useCreateInvitation,
@@ -120,9 +126,14 @@ export default function ManagePlayersScreen() {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [menuForPlayerId, setMenuForPlayerId] = useState<string | null>(null);
+  // Jersey/position edit sheet (opened from the row's ActionMenu)
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [editJersey, setEditJersey] = useState('');
+  const [editPosition, setEditPosition] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
+  const updateTeamMember = useUpdateTeamMember();
   const addRosterPlayer = useAddRosterPlayer();
   const createInvitation = useCreateInvitation();
   const cancelInvitation = useCancelInvitation();
@@ -313,6 +324,39 @@ export default function ManagePlayersScreen() {
     );
   };
 
+  const openMemberEdit = (member: TeamMember) => {
+    // `!= null` — 0 is a valid jersey number
+    setEditJersey(member.jerseyNumber != null ? String(member.jerseyNumber) : '');
+    setEditPosition(member.position ?? '');
+    setEditingMember(member);
+  };
+
+  const handleSaveMemberEdit = async () => {
+    if (!editingMember) return;
+    const trimmedJersey = editJersey.trim();
+    // Empty input clears the number (the API takes null); the input is
+    // digit-only with maxLength 2, so parsed is always 0-99 when present.
+    const parsedJersey = trimmedJersey === '' ? null : parseInt(trimmedJersey, 10);
+
+    try {
+      await updateTeamMember.mutateAsync({
+        teamId: id,
+        playerId: editingMember.playerId,
+        data: {
+          jerseyNumber: parsedJersey,
+          position: editPosition.trim() || null,
+        },
+      });
+      setEditingMember(null);
+      toast.showToast('Player details updated', 'success');
+    } catch (err) {
+      toast.showToast(
+        err instanceof Error ? err.message : 'Failed to update player',
+        'error'
+      );
+    }
+  };
+
   const handleRemovePlayer = (playerId: string, playerName: string) => {
     Alert.alert(
       'Remove Player',
@@ -418,6 +462,10 @@ export default function ManagePlayersScreen() {
         onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
       });
     }
+    items.push({
+      label: 'Edit jersey & position',
+      onPress: () => openMemberEdit(member),
+    });
     items.push({
       label: 'Remove player',
       destructive: true,
@@ -825,6 +873,70 @@ export default function ManagePlayersScreen() {
           />
         );
       })()}
+
+      {/* Jersey/position edit sheet (same bottom-sheet idiom as ActionMenu).
+          Clearing an input clears the stored value — the API takes null. */}
+      <Modal
+        visible={editingMember != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingMember(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.editBackdropContainer}
+        >
+          <Pressable
+            style={styles.editBackdrop}
+            onPress={() => setEditingMember(null)}
+            accessibilityLabel="Close edit"
+          />
+          <View
+            style={[
+              styles.editSheet,
+              {
+                backgroundColor: colors.background,
+                paddingBottom: insets.bottom + spacing.md,
+              },
+            ]}
+          >
+            <ThemedText variant="h4" style={styles.editTitle}>
+              {editingMember ? `Edit ${editingMember.player.name}` : ''}
+            </ThemedText>
+            <Input
+              label={t('players.jerseyNumber')}
+              placeholder="e.g., 23 (leave empty to clear)"
+              value={editJersey}
+              onChangeText={(text) => setEditJersey(text.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              maxLength={2}
+              testID="edit-member-jersey-input"
+            />
+            <Input
+              label={t('players.position')}
+              placeholder="e.g., Forward, Guard"
+              value={editPosition}
+              onChangeText={setEditPosition}
+              autoCapitalize="words"
+              testID="edit-member-position-input"
+            />
+            <Button
+              title="Save"
+              onPress={handleSaveMemberEdit}
+              loading={updateTeamMember.isPending}
+              fullWidth
+              testID="edit-member-save"
+            />
+            <Button
+              title="Cancel"
+              variant="outline"
+              onPress={() => setEditingMember(null)}
+              style={styles.cancelButton}
+              fullWidth
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ThemedView>
   );
 }
@@ -944,5 +1056,22 @@ const styles = StyleSheet.create({
   relationshipLabel: {
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+  },
+  editBackdropContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  editBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  editSheet: {
+    borderTopLeftRadius: borderRadius.lg,
+    borderTopRightRadius: borderRadius.lg,
+    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+  },
+  editTitle: {
+    marginBottom: spacing.md,
   },
 });
