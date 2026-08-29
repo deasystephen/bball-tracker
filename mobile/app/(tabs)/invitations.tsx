@@ -23,6 +23,7 @@ import { relationshipLabel } from '../../utils/guardian';
 import { apiClient } from '../../services/api-client';
 import type { User } from '../../../shared/types';
 import { useTheme } from '../../hooks/useTheme';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -34,6 +35,7 @@ export default function InvitationsScreen() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
+  const tabBarPadding = useTabBarPadding();
   const { user, accessToken, updateUser } = useAuthStore();
 
   const {
@@ -463,13 +465,11 @@ export default function InvitationsScreen() {
         ListHeaderComponent={
           guardianInvitations.length > 0 ? <View>{guardianInvitations.map(renderGuardianInvitation)}</View> : null
         }
-        contentContainerStyle={[
-          styles.listContent,
-          {
-            paddingHorizontal: padding,
-            paddingTop: spacing.md,
-          },
-        ]}
+        contentContainerStyle={{
+          paddingHorizontal: padding,
+          paddingTop: spacing.md,
+          paddingBottom: tabBarPadding,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
@@ -489,9 +489,6 @@ const styles = StyleSheet.create({
   header: {
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
-  },
-  listContent: {
-    paddingBottom: spacing.xl,
   },
   debugCard: {
     marginTop: spacing.sm,

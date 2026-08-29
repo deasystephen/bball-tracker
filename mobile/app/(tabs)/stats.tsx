@@ -18,6 +18,7 @@ import { SeasonAverages } from '../../components/stats';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../hooks/useStats';
 import { useTheme } from '../../hooks/useTheme';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { getResultColor } from '../../utils/game-result';
@@ -27,6 +28,7 @@ export default function Stats() {
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = useTabBarPadding();
 
   const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
   // Only the user's explicit choice lives in state; default to the first team during render
@@ -96,7 +98,7 @@ export default function Stats() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingHorizontal: padding, paddingBottom: insets.bottom + spacing.xxl },
+          { paddingHorizontal: padding, paddingBottom: tabBarPadding },
         ]}
         showsVerticalScrollIndicator={false}
       >

@@ -21,6 +21,7 @@ import {
 } from '../../components';
 import { useInfiniteTeams, type Team } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -35,6 +36,7 @@ export default function TeamsScreen() {
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = useTabBarPadding();
   const user = useAuthUser();
   const canCreate = canCreateTeams(user);
 
@@ -183,10 +185,11 @@ export default function TeamsScreen() {
         data={dataWithCreate}
         renderItem={renderTeam}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingHorizontal: padding, paddingTop: spacing.md },
-        ]}
+        contentContainerStyle={{
+          paddingHorizontal: padding,
+          paddingTop: spacing.md,
+          paddingBottom: tabBarPadding,
+        }}
         numColumns={2}
         columnWrapperStyle={styles.row}
         onEndReached={handleEndReached}
@@ -210,7 +213,6 @@ export default function TeamsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingBottom: spacing.sm },
-  listContent: { paddingBottom: spacing.xxl * 2 },
   row: { justifyContent: 'space-between', marginBottom: spacing.md },
   teamCard: { width: '48%', borderRadius: borderRadius.md, overflow: 'hidden' },
   teamColorHeader: {
