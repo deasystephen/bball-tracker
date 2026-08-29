@@ -11,7 +11,7 @@
 
 1. After logging in, you'll be in the WorkOS Dashboard
 2. Click **"Create Project"** or **"New Project"**
-3. Enter project name: `Basketball Tracker` (or any name you prefer)
+3. Enter project name: `Hooplings` (or any name you prefer)
 4. Click **"Create"**
 
 ## Step 3: Get Your API Key
@@ -69,7 +69,7 @@ If you want to use specific authentication methods like Magic Link or OTP:
    - **"Email Magic Link"** - Passwordless, sends magic link to email
    - **"Email OTP"** - Passwordless, sends one-time code to email  
    - **"Email/Password"** - Traditional email and password (if available)
-5. Give it a name (e.g., "Basketball Tracker Email Auth")
+5. Give it a name (e.g., "Hooplings Email Auth")
 6. Click **"Create"** or **"Save"**
 7. **Copy the Connection ID** - it will start with `conn_` (e.g., `conn_01ABC123...`)
 8. Add `WORKOS_CONNECTION_ID="conn_..."` to your `.env` file

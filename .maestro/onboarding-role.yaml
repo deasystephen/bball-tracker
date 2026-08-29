@@ -6,7 +6,7 @@ appId: com.bballtracker.mobile
 - launchApp:
     clearState: true
 - tapOn: "Skip"
-- assertVisible: "Basketball Tracker"
+- assertVisible: "Hooplings"
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
 - tapOn: "Steph Curry.*"

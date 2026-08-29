@@ -140,7 +140,7 @@ export default function Login() {
       colors={[colors.primary, colors.primaryDark]}
       style={styles.container}
     >
-      <Text style={styles.title}>Basketball Tracker</Text>
+      <Text style={styles.title}>Hooplings</Text>
       <Text style={styles.subtitle}>Sign in to continue</Text>
 
       {isLoading ? (

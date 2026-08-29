@@ -14,7 +14,7 @@ appId: com.bballtracker.mobile
 # Dismiss the intro carousel first: with hasOnboarded unset, app/index.tsx
 # replaces to /onboarding ~150 ms after mount and would clobber the deep link.
 - tapOn: "Skip"
-- assertVisible: "Basketball Tracker"
+- assertVisible: "Hooplings"
 # Deep-link straight into the callback route with an OAuth error param.
 - openLink: "bball-tracker://auth/callback?error=access_denied"
 # The route resolved and rendered our error UI (not Expo Router's fallback).
@@ -22,4 +22,4 @@ appId: com.bballtracker.mobile
 - assertNotVisible: "Unmatched Route"
 # The recovery action returns the user to the sign-in screen.
 - tapOn: "Back to Sign In"
-- assertVisible: "Basketball Tracker"
+- assertVisible: "Hooplings"

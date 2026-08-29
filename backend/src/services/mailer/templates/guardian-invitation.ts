@@ -28,7 +28,7 @@ export const guardianInvitationTemplate: EmailTemplate = {
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
   ${ctaBlock}
   <hr>
-  <p style="color:#999;font-size:12px;">CapyHoops — Basketball Tracker</p>
+  <p style="color:#999;font-size:12px;">Hooplings</p>
 </body>
 </html>`;
   },
@@ -48,6 +48,6 @@ This invitation expires on ${vars.expiresAt}.
 
 ${ctaBlock}
 
-CapyHoops — Basketball Tracker`;
+Hooplings`;
   },
 };

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Basketball Tracker mobile app includes a comprehensive design system with:
+The Hooplings mobile app includes a comprehensive design system with:
 - **Dark Mode Support**: Automatic system detection + user preference
 - **Internationalization**: Multi-language support (English, Spanish)
 - **Responsive Design**: Optimized for both iPhone and iPad

@@ -1,6 +1,6 @@
 # AWS Deployment Guide
 
-This guide covers setting up and deploying the Basketball Tracker application on AWS.
+This guide covers setting up and deploying the Hooplings application on AWS.
 
 ## Prerequisites
 

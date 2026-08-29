@@ -34,7 +34,7 @@ export const rsvpConfirmationTemplate: EmailTemplate = {
   </table>
   <p>You can update your RSVP at any time in the CapyHoops app.</p>
   <hr>
-  <p style="color:#999;font-size:12px;">CapyHoops — Basketball Tracker</p>
+  <p style="color:#999;font-size:12px;">Hooplings</p>
 </body>
 </html>`;
   },
@@ -58,6 +58,6 @@ Your RSVP for the following game has been recorded:
 
 You can update your RSVP at any time in the CapyHoops app.
 
-CapyHoops — Basketball Tracker`;
+Hooplings`;
   },
 };

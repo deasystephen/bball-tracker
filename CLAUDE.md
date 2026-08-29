@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Basketball Tracker is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). It uses event-driven architecture with Kafka and Flink for real-time game tracking and statistics.
+Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker://` scheme, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). It uses event-driven architecture with Kafka and Flink for real-time game tracking and statistics.
 
 ## Common Commands
 
