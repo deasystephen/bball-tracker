@@ -1,8 +1,9 @@
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing } from '../theme';
 
-// Bar height excluding the bottom safe-area inset — the tab bar in
-// app/(tabs)/_layout.tsx renders this tall and pads the inset below itself.
+// Content height of the bar excluding the bottom safe-area inset — the tab
+// bar in app/(tabs)/_layout.tsx extends its blurred surface through the inset
+// to the physical bottom edge, so its full footprint is this plus the inset.
 export const TAB_BAR_HEIGHT = 60;
 
 // Bottom content padding for scrollable tab screens. The tab bar is an
