@@ -11,6 +11,7 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 import { useTheme } from '../../hooks/useTheme';
+import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { borderRadius } from '../../theme';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
@@ -232,7 +233,7 @@ const styles = StyleSheet.create({
   tabBarInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 60,
+    height: TAB_BAR_HEIGHT,
     borderTopWidth: StyleSheet.hairlineWidth,
     position: 'relative',
   },
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 60,
+    height: TAB_BAR_HEIGHT,
   },
   iconContainer: {
     alignItems: 'center',

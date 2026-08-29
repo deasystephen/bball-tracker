@@ -26,6 +26,7 @@ import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useAuthUser } from '../../store/auth-store';
 import { canManageAnyTeam } from '../../utils/game-permissions';
 import { spacing, borderRadius } from '../../theme';
@@ -49,6 +50,7 @@ export default function Games() {
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = useTabBarPadding();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
 
   // Status filtering is server-side so a long backlog of scheduled games can't
@@ -314,10 +316,10 @@ export default function Games() {
           data={filteredGames}
           renderItem={renderGame}
           keyExtractor={keyExtractor}
-          contentContainerStyle={[
-            styles.listContent,
-            { paddingHorizontal: padding },
-          ]}
+          contentContainerStyle={{
+            paddingHorizontal: padding,
+            paddingBottom: tabBarPadding,
+          }}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           maxToRenderPerBatch={10}
@@ -376,7 +378,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     borderWidth: 1,
   },
-  listContent: { paddingBottom: spacing.xxl * 2 },
   liveGameCard: {
     borderRadius: borderRadius.lg,
     padding: spacing.lg,

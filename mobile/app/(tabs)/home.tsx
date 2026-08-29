@@ -18,6 +18,7 @@ import { useInfiniteTeams } from '../../hooks/useTeams';
 import { useGames, useGamesPage, useLiveGames } from '../../hooks/useGames';
 import { useInvitations } from '../../hooks/useInvitations';
 import { useTheme } from '../../hooks/useTheme';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import {
   ThemedView,
   ThemedText,
@@ -38,6 +39,7 @@ export default function Home() {
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = useTabBarPadding();
 
   const {
     data: teamsData,
@@ -125,13 +127,11 @@ export default function Home() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingHorizontal: padding,
-            paddingTop: insets.top + spacing.sm,
-          },
-        ]}
+        contentContainerStyle={{
+          paddingHorizontal: padding,
+          paddingTop: insets.top + spacing.sm,
+          paddingBottom: tabBarPadding,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
@@ -497,7 +497,6 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingBottom: spacing.xxl * 2 },
   greetingBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',

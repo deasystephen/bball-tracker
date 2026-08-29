@@ -16,6 +16,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useUpdateProfile } from '../../hooks/useProfile';
 import { useUsage } from '../../hooks/useUsage';
+import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -30,6 +31,7 @@ export default function Profile() {
   const { toggleColorScheme } = useThemeStore();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = useTabBarPadding();
   const { data: teams } = useTeams({ limit: TEAMS_MAX_LIMIT });
   const { data: usage } = useUsage();
   const updateProfile = useUpdateProfile();
@@ -94,10 +96,11 @@ export default function Profile() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingHorizontal: padding, paddingTop: insets.top + spacing.lg },
-        ]}
+        contentContainerStyle={{
+          paddingHorizontal: padding,
+          paddingTop: insets.top + spacing.lg,
+          paddingBottom: tabBarPadding,
+        }}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Header with ring */}
@@ -427,7 +430,6 @@ export default function Profile() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingBottom: spacing.xl * 2 },
   header: { alignItems: 'center', marginBottom: spacing.xl },
   avatarContainer: {
     alignItems: 'center',

@@ -148,6 +148,11 @@ Backend API (Node.js/Express)
 - Infinite keys nest under the list root (`gameKeys.lists()`, `teamKeys.lists()`, `announcementKeys.team(id)`)
   so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
   becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the FREE-tier meter).
+- The tab bar (`app/(tabs)/_layout.tsx`) is an absolutely-positioned translucent blur overlay — content
+  deliberately scrolls behind it. Every scrollable tab screen therefore sets its scroll-content
+  `paddingBottom` from `hooks/useTabBarPadding.ts#useTabBarPadding()` (= `TAB_BAR_HEIGHT` 60 + bottom
+  safe-area inset + `spacing.lg`); never hand-roll that padding — a too-small value leaves the last rows
+  permanently trapped under the bar (the pre-fix Profile bug).
 
 #### Mobile routing & guards
 - The `(tabs)` shell has no auth guard of its own. Screens reachable while logged out (the `/invite/<token>`
