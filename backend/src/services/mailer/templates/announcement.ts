@@ -19,7 +19,7 @@ export const announcementTemplate: EmailTemplate = {
   </div>
   <p style="color:#555;font-size:14px;">Posted by ${e(vars.authorName)}</p>
   <hr>
-  <p style="color:#999;font-size:12px;">CapyHoops — Basketball Tracker</p>
+  <p style="color:#999;font-size:12px;">Hooplings</p>
 </body>
 </html>`;
   },
@@ -32,6 +32,6 @@ ${vars.body}
 
 Posted by ${vars.authorName}
 
-CapyHoops — Basketball Tracker`;
+Hooplings`;
   },
 };

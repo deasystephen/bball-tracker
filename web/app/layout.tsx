@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Basketball Tracker',
+  title: 'Hooplings',
   description: 'Basketball team management app',
   // Invitation tokens appear in URLs (/invite/<token>). Suppress the Referer
   // header on outbound navigation so the token never leaks to third parties.

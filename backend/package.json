@@ -1,7 +1,7 @@
 {
   "name": "bball-tracker-backend",
   "version": "0.1.0",
-  "description": "Basketball Tracker Backend API",
+  "description": "Hooplings Backend API",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

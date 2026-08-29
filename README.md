@@ -1,4 +1,4 @@
-# Basketball Tracker
+# Hooplings
 
 A basketball tracking app for youth leagues, featuring real-time game tracking, player statistics, and team management. Built with React Native/Expo for iOS, a Node.js/TypeScript backend, and event-driven architecture using Kafka and Flink.
 

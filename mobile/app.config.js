@@ -14,7 +14,7 @@ const getAmplitudeApiKey = () => {
 
 export default {
   expo: {
-    name: IS_PRODUCTION ? 'Basketball Tracker' : `Basketball Tracker (${process.env.APP_ENV || 'dev'})`,
+    name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
     // 1.2.0 = first binary with expo-secure-store (audit #52). runtimeVersion
     // policy is appVersion, so OTAs published from here on target 1.2.0

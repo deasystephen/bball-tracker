@@ -268,10 +268,10 @@ Use this when the restore in Procedure A turned out to be the wrong snapshot
 Replace the bracketed parts. Send via the most-active channel for users, plus
 status page if/when one exists.
 
-> **Subject:** Basketball Tracker — temporary data issue, currently restoring
+> **Subject:** Hooplings — temporary data issue, currently restoring
 >
 > Hi all — at approximately **[HH:MM TZ]** we identified that some data in
-> Basketball Tracker was incorrect / unreachable due to **[one-line
+> Hooplings was incorrect / unreachable due to **[one-line
 > description]**. We have stopped the cause and are restoring the database
 > from this morning's automated backup, taken at **[backup timestamp]**.
 >
@@ -288,7 +288,7 @@ status page if/when one exists.
 > within 48 hours covering what happened and what we're changing so it doesn't
 > happen again.
 >
-> — Basketball Tracker team
+> — Hooplings team
 
 ## Drill log
 

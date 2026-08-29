@@ -1,4 +1,4 @@
-# Basketball Tracker Web
+# Hooplings Web
 
 Next.js web app served at `https://capyhoops.com`. Hosts the public invitation accept flow (`/invite/<token>`) that emails link to and the `.well-known/` Universal Link assets that route into the mobile app when installed.
 

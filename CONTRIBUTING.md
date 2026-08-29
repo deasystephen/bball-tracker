@@ -1,6 +1,6 @@
-# Contributing to Basketball Tracker
+# Contributing to Hooplings
 
-Thank you for your interest in contributing to Basketball Tracker! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Hooplings! This document provides guidelines and instructions for contributing to the project.
 
 ## Code of Conduct
 

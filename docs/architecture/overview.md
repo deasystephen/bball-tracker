@@ -2,7 +2,7 @@
 
 ## System Architecture
 
-The Basketball Tracker application uses a microservices architecture with an event-driven design, leveraging Apache Kafka for event streaming and Apache Flink for real-time stream processing.
+The Hooplings application uses a microservices architecture with an event-driven design, leveraging Apache Kafka for event streaming and Apache Flink for real-time stream processing.
 
 ## High-Level Architecture
 

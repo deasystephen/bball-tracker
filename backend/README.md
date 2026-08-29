@@ -1,6 +1,6 @@
-# Basketball Tracker Backend
+# Hooplings Backend
 
-Node.js/TypeScript backend API for the Basketball Tracker application.
+Node.js/TypeScript backend API for the Hooplings application.
 
 ## Tech Stack
 

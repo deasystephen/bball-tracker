@@ -1,6 +1,6 @@
 # Roadmap
 
-Strategy document for Capy Hoops / Basketball Tracker. Narrative lives here;
+Strategy document for Hooplings (formerly Capy Hoops / Basketball Tracker). Narrative lives here;
 execution lives in GitHub Issues and Milestones. Each phase below maps to a
 milestone; each checklist item maps to an issue.
 

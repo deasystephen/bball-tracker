@@ -1,4 +1,4 @@
-# Basketball Tracker Mobile App
+# Hooplings Mobile App
 
 React Native mobile application built with Expo for iOS and Android.
 

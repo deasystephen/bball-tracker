@@ -25,7 +25,7 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { getHorizontalPadding } from '../utils/responsive';
 
-export const APP_NAME = 'Basketball Tracker';
+export const APP_NAME = 'Hooplings';
 
 export interface AboutInfo {
   appVersion: string;

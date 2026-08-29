@@ -28,7 +28,7 @@ appId: com.bballtracker.mobile
     index: 1
 
 # Verify we're back on the login screen
-- assertVisible: "Basketball Tracker"
+- assertVisible: "Hooplings"
 
 # Re-login to verify session was properly cleared
 - tapOn: "Developer login with test users"
