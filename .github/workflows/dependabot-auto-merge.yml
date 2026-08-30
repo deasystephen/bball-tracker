@@ -37,7 +37,17 @@ jobs:
         run: |
           set -euo pipefail
           ok=false
-          if [ "$ECOSYSTEM" = "npm" ]; then
+          # fetch-metadata emits the NORMALIZED ecosystem name, which for npm
+          # is "npm_and_yarn" -- NOT the "npm" key used in dependabot.yml.
+          # Matching only "npm" silently disabled this workflow for ~10 days:
+          # every npm PR fell through to ok=false while the job stayed green.
+          # Fail loudly on an unrecognized ecosystem so a future rename of
+          # these strings surfaces as a red job instead of silent no-merge.
+          case "$ECOSYSTEM" in
+            npm_and_yarn|npm|github_actions|github-actions) ;;
+            *) echo "::error::Unrecognized ecosystem '$ECOSYSTEM' -- auto-merge gate may be stale"; exit 1 ;;
+          esac
+          if [ "$ECOSYSTEM" = "npm_and_yarn" ] || [ "$ECOSYSTEM" = "npm" ]; then
             case "$DIRECTORY:$UPDATE_TYPE" in
               /backend:version-update:semver-patch|/backend:version-update:semver-minor) ok=true ;;
               /web:version-update:semver-patch|/web:version-update:semver-minor)         ok=true ;;
