@@ -325,10 +325,6 @@ export async function isLeagueAdmin(userId: string, leagueId: string): Promise<b
  *   read  = league admin | personal owner | staff | member | guardian-of-member
  *   write = league admin | personal owner | staff
  *
- * Only the WRITE side ships here (#442). `getReadableLeagueIds` and
- * `canReadLeague`, which the list and detail endpoints need, land with #443 so
- * this change carries no unused code.
- *
  * A member or guardian is deliberately NOT a writer: they are members of teams
  * inside a coach's personal league, and granting write there would let them
  * plant a team in somebody else's container.
@@ -368,6 +364,39 @@ export function teamAccessWhere(userId: string, childIds: string[]): Prisma.Team
   };
 }
 
+/**
+ * League ids the caller may READ, for the list endpoints (#443).
+ *
+ * Resolved from the TEAM side rather than by scanning `League` with nested
+ * `some` clauses: after #442 the League table grows one row per coach, whereas
+ * this query is bounded by the caller's own teams. Three indexed queries,
+ * unioned in JS.
+ *
+ * System ADMINs are unscoped and must not call this — the list services skip
+ * it entirely for them.
+ */
+export async function getReadableLeagueIds(userId: string): Promise<string[]> {
+  const childIds = await getGuardianChildIds(userId);
+
+  const [adminRows, personalLeague, teamRows] = await Promise.all([
+    prisma.leagueAdmin.findMany({ where: { userId }, select: { leagueId: true } }),
+    prisma.league.findUnique({ where: { personalOwnerId: userId }, select: { id: true } }),
+    prisma.team.findMany({
+      where: teamAccessWhere(userId, childIds),
+      select: { season: { select: { leagueId: true } } },
+    }),
+  ]);
+
+  // No cap. Truncating an authorization set would silently drop leagues from
+  // both `count` and `findMany`, making `total` lie; the union is naturally
+  // bounded by the caller's team count.
+  const ids = new Set<string>(adminRows.map((r) => r.leagueId));
+  if (personalLeague) ids.add(personalLeague.id);
+  for (const t of teamRows) ids.add(t.season.leagueId);
+
+  return [...ids];
+}
+
 /** Whether the caller owns this league as their auto-provisioned container. */
 async function isPersonalLeagueOwner(userId: string, leagueId: string): Promise<boolean> {
   const league = await prisma.league.findUnique({
@@ -396,6 +425,25 @@ export async function canWriteLeague(userId: string, leagueId: string): Promise<
   if (await isLeagueAdmin(userId, leagueId)) return true; // covers system ADMIN
   if (await isPersonalLeagueOwner(userId, leagueId)) return true;
   return isStaffInLeague(userId, leagueId);
+}
+
+/**
+ * May the caller see this league at all? The write set, plus members of a team
+ * in it and guardians of those members.
+ *
+ * An existence check on one known league id, not membership in a materialized
+ * set — `getLeagueById` / `getSeasonById` ask a boolean question.
+ */
+export async function canReadLeague(userId: string, leagueId: string): Promise<boolean> {
+  if (await canWriteLeague(userId, leagueId)) return true;
+
+  const childIds = await getGuardianChildIds(userId);
+  const playerIds = [userId, ...childIds];
+
+  const count = await prisma.team.count({
+    where: { season: { leagueId }, members: { some: { playerId: { in: playerIds } } } },
+  });
+  return count > 0;
 }
 
 /**

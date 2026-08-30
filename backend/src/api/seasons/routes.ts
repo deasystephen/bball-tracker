@@ -62,7 +62,10 @@ router.get('/', async (req, res) => {
       );
     }
 
-    const result = await SeasonService.listSeasons(validationResult.data);
+    const result = await SeasonService.listSeasons(validationResult.data, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
 
     res.json({
       success: true,

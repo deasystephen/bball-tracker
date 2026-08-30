@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
-import { isSystemAdmin, isLeagueAdmin } from '../utils/permissions';
+import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -207,6 +207,22 @@ export class LeagueService {
     leagueId: string,
     userId: string
   ): Promise<LeagueDetail | LeaguePublicDetail> {
+    // #443 deviation, deliberate and recorded in the PR: that issue says detail
+    // authorization "is already correct" and not to touch it. It was written
+    // before personal leagues existed. There was in fact NO access check here —
+    // `isLeagueAdmin` only selected which `include` to use, so any authenticated
+    // caller got every season and every team name of any league they could name
+    // an id for. And the id is not a secret: `TEAM_INCLUDE` is
+    // `season: { include: { league } }` (team-service.ts), so every member and
+    // guardian already holds it from the happy path. For a personal league that
+    // is the coach's whole portfolio, readable by any parent on any one team.
+    //
+    // 404 rather than 403, matching `PlayerService.getPlayerById`, so ids can't
+    // be probed.
+    if (!(await canReadLeague(userId, leagueId))) {
+      throw new NotFoundError('League not found');
+    }
+
     const canManage = await isLeagueAdmin(userId, leagueId);
 
     const league = canManage
@@ -229,19 +245,46 @@ export class LeagueService {
   }
 
   /**
-   * List leagues with filters
+   * List leagues the caller may see (#443).
+   *
+   * Before this, the `where` was built from query filters only — every
+   * authenticated user could enumerate every organisation's leagues, and the
+   * create-team picker rendered that global list. The access clause is ANDed
+   * with the filters, never substituted for them, so `search` can't be used as
+   * a scoping bypass, and the SAME `where` object feeds `count` and
+   * `findMany` so `total` is the scoped count rather than the global one.
+   *
    * @param query Query parameters
+   * @param caller Authenticated caller; `role` comes from the freshly-loaded
+   *   DB row on `req.user`, so no extra `isSystemAdmin` query is needed.
    */
-  static async listLeagues(query: LeagueQueryParams): Promise<LeagueList> {
-    // Build where clause
-    const where: Prisma.LeagueWhereInput = {};
+  static async listLeagues(
+    query: LeagueQueryParams,
+    caller: { id: string; role: string }
+  ): Promise<LeagueList> {
+    const isAdmin = caller.role === 'ADMIN';
+    const conditions: Prisma.LeagueWhereInput[] = [];
 
     if (query.search) {
-      where.name = {
-        contains: query.search,
-        mode: 'insensitive',
-      };
+      conditions.push({ name: { contains: query.search, mode: 'insensitive' } });
     }
+
+    if (isAdmin) {
+      // Admins are unscoped, but personal containers would otherwise pile up
+      // one per coach in the admin screens. Opt back in with
+      // `includePersonal=true`.
+      if (!query.includePersonal) {
+        conditions.push({ personalOwnerId: null });
+      }
+    } else {
+      const ids = await getReadableLeagueIds(caller.id);
+      if (ids.length === 0) {
+        return { leagues: [], total: 0, limit: query.limit, offset: query.offset };
+      }
+      conditions.push({ id: { in: ids } });
+    }
+
+    const where: Prisma.LeagueWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
     // Get total count and leagues in parallel
     const [total, rows] = await Promise.all([

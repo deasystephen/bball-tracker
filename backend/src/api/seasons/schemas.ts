@@ -36,6 +36,12 @@ export const seasonQuerySchema = z.object({
     .transform((val) => val === 'true')
     .optional(),
   search: z.string().optional(),
+  // ADMIN-only escape hatch: personal leagues (#442) are excluded from admin
+  // listings by default so they do not accumulate one row per coach.
+  includePersonal: z
+    .string()
+    .transform((val) => val === 'true')
+    .optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
 });

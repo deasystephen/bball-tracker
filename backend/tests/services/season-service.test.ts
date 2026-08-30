@@ -129,7 +129,7 @@ describe('SeasonService', () => {
   });
 
   describe('getSeasonById', () => {
-    it('returns metadata + team names only for a user who is not a league admin', async () => {
+    it('returns metadata + team names only for an affiliated non-league-admin', async () => {
       const player = createPlayer();
       const season = createSeason();
       const summary = {
@@ -141,6 +141,10 @@ describe('SeasonService', () => {
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(summary);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      // Affiliated (#443): `canReadLeague` finds a team of theirs in the league.
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: null });
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
 
       const result = await SeasonService.getSeasonById(season.id, player.id);
 
@@ -150,6 +154,29 @@ describe('SeasonService', () => {
       expect(mockPrisma.season.findUnique).toHaveBeenCalledTimes(1);
       const call = (mockPrisma.season.findUnique as jest.Mock).mock.calls[0][0];
       expect(call.include.teams).toEqual({ select: { id: true, name: true } });
+    });
+
+    // #443 deviation, same as LeagueService.getLeagueById: there was no access
+    // check here at all. 404 not 403 so ids can't be probed.
+    it('404s for a caller with no affiliation to the season\'s league', async () => {
+      const player = createPlayer();
+      const season = createSeason();
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+        ...season,
+        league: { id: season.leagueId, name: 'L' },
+        teams: [],
+        _count: { teams: 0 },
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: null });
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+
+      await expect(SeasonService.getSeasonById(season.id, player.id)).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Season not found',
+      });
     });
 
     it('returns full detail (staff + members) for a league admin', async () => {
@@ -225,45 +252,89 @@ describe('SeasonService', () => {
     });
   });
 
-  describe('listSeasons', () => {
-    it('applies leagueId, isActive, and search filters; returns pagination envelope', async () => {
+  describe('listSeasons (#443 caller scoping)', () => {
+    const ADMIN = { id: 'admin-1', role: 'ADMIN' };
+    const COACH = { id: 'user-1', role: 'COACH' };
+
+    /** Make `getReadableLeagueIds` resolve to the given league ids. */
+    function readable(ids: string[]): void {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue(
+        ids.map((leagueId) => ({ leagueId }))
+      );
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
+    }
+
+    it('ANDs every filter with the access clause and returns the envelope', async () => {
       const seasons = [createSeason(), createSeason()];
+      readable(['league-1', 'league-2']);
       (mockPrisma.season.count as jest.Mock).mockResolvedValue(2);
       (mockPrisma.season.findMany as jest.Mock).mockResolvedValue(seasons);
 
-      const result = await SeasonService.listSeasons({
-        leagueId: 'league-1',
-        isActive: true,
-        search: 'spring',
-        limit: 10,
-        offset: 5,
-      });
+      const result = await SeasonService.listSeasons(
+        { leagueId: 'league-1', isActive: true, search: 'spring', limit: 10, offset: 5 },
+        COACH
+      );
 
-      expect(result).toEqual({
-        seasons,
-        total: 2,
-        limit: 10,
-        offset: 5,
-      });
+      expect(result).toEqual({ seasons, total: 2, limit: 10, offset: 5 });
 
       const findArgs = (mockPrisma.season.findMany as jest.Mock).mock.calls[0][0];
       expect(findArgs.where).toEqual({
-        leagueId: 'league-1',
-        isActive: true,
-        name: { contains: 'spring', mode: 'insensitive' },
+        AND: [
+          { leagueId: 'league-1' },
+          { isActive: true },
+          { name: { contains: 'spring', mode: 'insensitive' } },
+          { leagueId: { in: ['league-1', 'league-2'] } },
+        ],
       });
       expect(findArgs.take).toBe(10);
       expect(findArgs.skip).toBe(5);
+      // Same clause on both queries, or `total` leaks the global count.
+      expect((mockPrisma.season.count as jest.Mock).mock.calls[0][0].where).toEqual(findArgs.where);
     });
 
-    it('omits filters when not provided', async () => {
+    // A leagueId filter naming a league the caller cannot read must not widen
+    // the result: the access clause still applies.
+    it('does not let a leagueId filter bypass scoping', async () => {
+      readable(['league-mine']);
       (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);
 
-      await SeasonService.listSeasons({ limit: 20, offset: 0 });
+      await SeasonService.listSeasons({ leagueId: 'league-theirs', limit: 20, offset: 0 }, COACH);
 
-      const findArgs = (mockPrisma.season.findMany as jest.Mock).mock.calls[0][0];
-      expect(findArgs.where).toEqual({});
+      expect((mockPrisma.season.findMany as jest.Mock).mock.calls[0][0].where).toEqual({
+        AND: [{ leagueId: 'league-theirs' }, { leagueId: { in: ['league-mine'] } }],
+      });
+    });
+
+    it('short-circuits when the caller can read no leagues', async () => {
+      readable([]);
+
+      const result = await SeasonService.listSeasons({ limit: 20, offset: 0 }, COACH);
+
+      expect(result).toEqual({ seasons: [], total: 0, limit: 20, offset: 0 });
+      expect(mockPrisma.season.findMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves a system ADMIN unscoped but hides personal-league seasons by default', async () => {
+      (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);
+
+      await SeasonService.listSeasons({ limit: 20, offset: 0 }, ADMIN);
+
+      expect((mockPrisma.season.findMany as jest.Mock).mock.calls[0][0].where).toEqual({
+        AND: [{ league: { personalOwnerId: null } }],
+      });
+    });
+
+    it('lets an ADMIN opt into personal-league seasons', async () => {
+      (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);
+
+      await SeasonService.listSeasons({ includePersonal: true, limit: 20, offset: 0 }, ADMIN);
+
+      expect((mockPrisma.season.findMany as jest.Mock).mock.calls[0][0].where).toEqual({});
     });
   });
 

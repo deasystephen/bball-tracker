@@ -447,12 +447,36 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
 `canAccessTeam`, `getTeamPermissions`). Rules enforced in the services (audit fix plan
 `docs/plans/audit-fix-plan-2026-08-22.md`, lane B):
 
-- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): `getLeagueById(id, userId)` /
-  `getSeasonById(id, userId)` return the **full detail** (league admins with emails, team staff with
-  emails, rosters) only to system ADMINs and admins of that league. Everyone else gets league/season
-  metadata plus team `{ id, name }` — no staff, no member lists, no emails. Authorization denials throw
-  `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
-  `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
+- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): **both the list and the detail
+  endpoints are caller-scoped (#443).**
+  - `GET /leagues` / `GET /seasons` AND a caller-access clause into the `where`. The clause is an id
+    set from `utils/permissions.ts#getReadableLeagueIds(userId)` = league admin OR personal owner OR
+    staff/member of a team in it OR guardian of such a member. The **same `where` object feeds `count`
+    and `findMany`**, so `total` is the scoped count and never the global one, and `search` /
+    `leagueId` / `isActive` are ANDed alongside it, never substituted for it — search must not be a
+    scoping bypass. An empty id set short-circuits to `{ total: 0 }` with no query. System ADMINs are
+    unscoped, except that personal leagues (#442) are excluded by default so admin listings do not
+    accumulate one row per coach; `?includePersonal=true` opts back in.
+  - The id set is resolved from the **Team** side (`team.findMany` filtered by the shared
+    `teamAccessWhere`, selecting `season.leagueId`), not by scanning `League` with nested `some`
+    clauses: after #442 the League table grows one row per coach, while this query is bounded by the
+    caller's own teams. There is deliberately **no cap** — truncating an authorization set would make
+    `total` lie.
+  - `getLeagueById(id, userId)` / `getSeasonById(id, userId)` **404 for a caller with no affiliation**
+    (`canReadLeague`), 404 rather than 403 so ids cannot be probed, matching
+    `PlayerService.getPlayerById`. Before #443 these performed *no* access check at all: `isLeagueAdmin`
+    only chose which `include` to use, so any authenticated caller who knew an id got every season and
+    team name — and the id is not secret, since `TEAM_INCLUDE` hands it to every member and guardian.
+    An affiliated non-admin still gets the stripped payload (metadata plus team `{ id, name }`); full
+    detail with emails and rosters stays limited to system ADMINs and admins of that league.
+  - Authorization denials elsewhere throw `ForbiddenError` (**403**, not 400); the league/season routes
+    map any `AppError` to its `statusCode`. `PATCH /leagues/:id` enforces the same name-uniqueness rule
+    as create (400 on duplicate).
+  - **Tested against a real database.** `backend/tests/integration/league-access.db.test.ts` unmocks
+    Prisma and runs against Postgres (CI already provides one). It uses one fixture user per access
+    branch, each qualifying through exactly one — a negative-only test cannot catch a *dropped* branch,
+    which is verified by mutation: removing the `members` branch fails only the positive test while
+    every "sees none of org B" assertion stays green.
 - **League admins (decision 3)**: `POST /leagues/:id/admins { userId }` (201, `userId` must be a UUID)
   and `DELETE /leagues/:id/admins/:userId` (404 if not an admin) are **system-ADMIN-only** — an existing
   league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
@@ -529,8 +553,9 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
   `.maestro/coach-onboarding.yaml` exercises the real funnel including picking Coach (every WorkOS
   sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, since the
   FREE-tier cap would otherwise turn a re-run into a 402.
-- **Still open:** `GET /leagues` and `GET /seasons` remain globally unscoped (#443) — that lands next and
-  is what makes the picker show only the caller's own leagues.
+- The picker only ever renders the name-only path once #443's list scoping is in: `areAllLeaguesPersonal`
+  reads `GET /leagues`, so while that list is global a new coach still sees a real league. #442 and #443
+  are therefore one release in two commits, and `.maestro/coach-onboarding.yaml` is the gate for the pair.
 
 - **Games** (`game-service.ts`): `updateGame` runs `canAccessTeam` **before** any field-specific branch
   (403 `You do not have access to this game` for unaffiliated users, regardless of body) and rejects a
