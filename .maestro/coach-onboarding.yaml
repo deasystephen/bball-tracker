@@ -118,13 +118,12 @@ appId: com.bballtracker.mobile
     visible: "Jordan Fixture status: Not invited"
     timeout: 10000
 
-# Back out to the Teams tab. The roster screen's back arrow carries no
-# accessibility label, so use the platform back gesture; team detail's does.
-- back
-- extendedWaitUntil:
-    visible: "Go back"
-    timeout: 10000
-- tapOn: "Go back"
+# Back out to the Teams tab via the tab bar, NOT the back arrow. The arrow on
+# team detail is a no-op after `router.replace` (#464), which would hang this
+# flow on a bug that has nothing to do with the funnel under test. The tab bar
+# is also how a real user gets back. Back-arrow behaviour is covered by
+# create-team.yaml, which owns that assertion.
+- tapOn: "Teams tab"
 - assertVisible: "Teams"
 
 # ---------------------------------------------------------------------------
