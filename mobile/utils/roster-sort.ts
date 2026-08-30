@@ -2,8 +2,9 @@
  * Roster ordering helpers.
  *
  * The backend returns team members jersey-sorted (asc, nulls last, name
- * tiebreak — `TEAM_INCLUDE.members` in team-service.ts and the game-detail
- * mirror in game-service.ts), so most screens inherit the order for free.
+ * tiebreak, then `id` — `TEAM_INCLUDE.members` in team-service.ts and the
+ * game-detail mirror in game-service.ts), so screens fed by those two
+ * payloads inherit the order; other roster queries are still unordered.
  * Screens that offer a sort choice derive it ONLY through
  * `sortRosterMembers` — same never-inline rule as `utils/game-result.ts`.
  */

@@ -141,13 +141,15 @@ Backend API (Node.js/Express)
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
 - **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
   then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
-  `GAME_DETAIL_INCLUDE.team.members`), so every roster view inherits a deterministic order.
-  Known, accepted divergence: the team overview's client-side Name sort uses device-locale
-  `localeCompare` (`sensitivity: 'base'`), while other screens show raw Postgres-collation
-  order — only jersey-tied names differing in case/accents can order differently. The team
-  overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle: comparisons go ONLY
-  through `utils/roster-sort.ts#sortRosterMembers` (never inline; jersey 0 is valid, no
-  number sorts last), and the choice persists per user via
+  `GAME_DETAIL_INCLUDE.team.members`), so the team-detail and game-detail rosters carry a
+  deterministic order; other roster-bearing queries (stats/season/league services) are still
+  unordered. Known, accepted divergence: the team overview always re-sorts client-side via
+  `sortRosterMembers` (both modes), whose name comparisons use device-locale `localeCompare`
+  (`sensitivity: 'base'`), while server-ordered screens show raw Postgres-collation order —
+  rows whose names differ only in case/accents can order differently between screens. The
+  team overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle (pills render only
+  with 2+ members): comparisons go ONLY through `utils/roster-sort.ts#sortRosterMembers`
+  (never inline; jersey 0 is valid, no number sorts last), and the choice persists per user via
   `hooks/useRosterSortPreference.ts` (AsyncStorage `rosterSort:<userId>`, best-effort like
   `role-onboarding.ts`; hydration resets on userId change and never overwrites a tap).
   Sort pill rows are the shared `components/SortPills` (44pt targets, "Sort by <label>"

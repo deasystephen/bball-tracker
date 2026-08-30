@@ -213,7 +213,9 @@ user-visible outcome.
 - **Auto-accept for existing accounts** (D2) — consent/enumeration review pending; revisit with
   WorkOS production cutover.
 - **Bulk import / CSV roster upload** — separate feature, no interaction with these semantics.
-- **Non-player roster members, roster ordering** — TeamSnap parity items with no current user.
+- **Non-player roster members** — TeamSnap parity item with no current user. (Roster ordering
+  was co-deferred here but has since shipped — server jersey-asc order + team-overview
+  Jersey #/Name sort toggle, 2026-08-29; see CLAUDE.md "Roster ordering".)
 - **Claim-by-code, parent-to-parent invites** — guardian spec v1 exclusions stand.
 - **Email delivery tracking beyond per-send flags** (bounce webhooks) — needs SES prod access
   first (#23).
