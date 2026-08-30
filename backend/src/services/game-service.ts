@@ -19,7 +19,7 @@ const GAME_INCLUDE = {
     include: {
       season: {
         include: {
-          league: true,
+          league: { omit: { personalOwnerId: true } },
         },
       },
       staff: {

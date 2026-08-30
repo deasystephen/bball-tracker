@@ -313,6 +313,91 @@ export async function isLeagueAdmin(userId: string, leagueId: string): Promise<b
   return !!leagueAdmin;
 }
 
+/* ===========================================================================
+ * League access (#442 / #443)
+ *
+ * Two named entry points per level, never one function with a `level`
+ * argument. The read set is a strict SUPERSET of the write set, so calling the
+ * wrong one at a write site is a silent privilege escalation with no type
+ * error and no crash, while the reverse is a loud reported bug. Named
+ * functions keep the dangerous call greppable.
+ *
+ *   read  = league admin | personal owner | staff | member | guardian-of-member
+ *   write = league admin | personal owner | staff
+ *
+ * Only the WRITE side ships here (#442). `getReadableLeagueIds` and
+ * `canReadLeague`, which the list and detail endpoints need, land with #443 so
+ * this change carries no unused code.
+ *
+ * A member or guardian is deliberately NOT a writer: they are members of teams
+ * inside a coach's personal league, and granting write there would let them
+ * plant a team in somebody else's container.
+ * ======================================================================== */
+
+/**
+ * Child player ids for a guardian.
+ *
+ * Lives here rather than in `GuardianService` so the predicates below can use
+ * it without a service -> util -> service cycle (`guardian-service.ts` already
+ * imports this module). `GuardianService.getChildIds` delegates here so there
+ * is exactly one implementation.
+ */
+export async function getGuardianChildIds(userId: string): Promise<string[]> {
+  const links = await prisma.guardian.findMany({
+    where: { parentId: userId },
+    select: { childId: true },
+  });
+  // `?? []` retained from the original GuardianService implementation: test
+  // doubles and a mocked client can return undefined here.
+  return (links ?? []).map((l) => l.childId);
+}
+
+/**
+ * The caller-access clause for teams: staff OR member OR league admin OR
+ * guardian of a member. Exported so `TeamService.listTeams` and the league
+ * predicates below share ONE definition and can never drift apart.
+ */
+export function teamAccessWhere(userId: string, childIds: string[]): Prisma.TeamWhereInput {
+  return {
+    OR: [
+      { staff: { some: { userId } } },
+      { members: { some: { playerId: userId } } },
+      { season: { league: { admins: { some: { userId } } } } },
+      ...(childIds.length > 0 ? [{ members: { some: { playerId: { in: childIds } } } }] : []),
+    ],
+  };
+}
+
+/** Whether the caller owns this league as their auto-provisioned container. */
+async function isPersonalLeagueOwner(userId: string, leagueId: string): Promise<boolean> {
+  const league = await prisma.league.findUnique({
+    where: { id: leagueId },
+    select: { personalOwnerId: true },
+  });
+  return league?.personalOwnerId === userId;
+}
+
+/** Whether the caller holds a staff row on any team in this league. */
+async function isStaffInLeague(userId: string, leagueId: string): Promise<boolean> {
+  const count = await prisma.team.count({
+    where: { season: { leagueId }, staff: { some: { userId } } },
+  });
+  return count > 0;
+}
+
+/**
+ * May the caller create or move a team into this league?
+ *
+ * An existence check on one known league id, not membership in a materialized
+ * set — the callers ask a boolean question, so each branch is a single indexed
+ * probe and they short-circuit.
+ */
+export async function canWriteLeague(userId: string, leagueId: string): Promise<boolean> {
+  if (await isLeagueAdmin(userId, leagueId)) return true; // covers system ADMIN
+  if (await isPersonalLeagueOwner(userId, leagueId)) return true;
+  return isStaffInLeague(userId, leagueId);
+}
+
 /**
  * Whether the user holds a HEAD_COACH-type staff row on the team.
  *

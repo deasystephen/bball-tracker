@@ -22,6 +22,12 @@ export interface League {
   name: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * True when the league is somebody's auto-provisioned personal container
+   * (#442). Optional: a backend predating #442 omits it. Never read it
+   * directly in a screen — go through `utils/league-scope.ts`.
+   */
+  isPersonal?: boolean;
   seasons?: {
     id: string;
     name: string;

@@ -1,0 +1,155 @@
+appId: com.bballtracker.mobile
+---
+# !! THIS FLOW REQUIRES BOTH #442 AND #443 TO BE MERGED. !!
+#
+# It asserts the league/season disclosure is absent, which depends on
+# `areAllLeaguesPersonal` being true. That reads `GET /leagues`, which #443
+# scopes to the caller. Until #443 lands the list is global, a brand-new coach
+# still sees the seeded "Downtown Youth Basketball League" (isPersonal: false),
+# and the disclosure renders — so this flow FAILS on #442 alone. That is
+# expected, not a regression.
+#
+# #442 alone still satisfies its acceptance criterion: the "My teams" default
+# inside the disclosure carries the coach through to a created team with no
+# admin intervention, and the "No leagues available" dead end is gone. What
+# #443 adds is the coach never seeing the picker at all.
+# Coach onboarding — the GA blocker #442 funnel, end to end.
+#
+# A brand-new coach with NO team, NO league and NO season must be able to
+# create a team without ever meeting a league/season picker: the backend
+# auto-provisions a personal league + season when `seasonId` is omitted.
+# Dana Whitfield is the seeded fixture for exactly this (backend/prisma/seed.ts
+# — no TeamStaff, no TeamMember, no LeagueAdmin row). Every other seeded coach
+# is already rostered and admin@ is a league admin, so none of them can prove
+# this path works.
+#
+# The flow creates TWO teams on purpose. The first exercises "no league exists
+# yet" (provision), the second exercises "the personal league already exists"
+# (reuse) — the branch the create screen must still render picker-free.
+#
+# Re-run `cd backend && npx prisma db seed` before re-running this flow: Dana
+# is on the FREE tier (3-team cap) and the seed deletes the teams a previous
+# run left behind.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+# The dev-user list is ordered by role (PLAYER, PARENT, COACH, ADMIN). Dana is
+# seeded PLAYER (see seed.ts: every WorkOS sign-up starts as PLAYER, and #442's
+# AC is that the coach PICKS Coach), so she sits among the players. Scrolling
+# rather than assuming a position keeps this working if the fixture set grows.
+- scrollUntilVisible:
+    element:
+      text: "Dana Whitfield.*"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Dana Whitfield.*"
+
+# Role step. The fixture is seeded PLAYER on purpose (every WorkOS sign-up is
+# created as PLAYER), so this screen ALWAYS shows and picking Coach is a real
+# step of the journey #442 is measured by — not an optional branch. Asserting
+# it hard means a regression in role onboarding fails this flow instead of
+# being silently skipped.
+- assertVisible: "How will you use Capyhoops?"
+- tapOn: "I coach a team"
+- tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible: "Your Teams"
+    timeout: 10000
+
+# ---------------------------------------------------------------------------
+# Team 1 — no personal league exists yet, the backend provisions one
+# ---------------------------------------------------------------------------
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+# Two different labels reach the same screen: the empty-state action
+# ("Create New Team", `teams.createNew`) with no teams yet, and the grid card
+# (accessibilityLabel "Create new team") once she has one. Match both.
+- extendedWaitUntil:
+    visible: "Create [Nn]ew [Tt]eam"
+    timeout: 10000
+- tapOn: "Create [Nn]ew [Tt]eam"
+- assertVisible:
+    id: "team-name-input"
+
+# The whole point of #442: name-only form. No disclosure, no pickers, and
+# above all not the old dead end.
+- assertNotVisible:
+    id: "league-season-disclosure"
+- assertNotVisible: "No leagues available.*"
+
+# inputText has no `id` key in Maestro — focus the field first, then type.
+- tapOn:
+    id: "team-name-input"
+- inputText: "Coach Onboarding Team"
+- hideKeyboard
+- tapOn: "Create"
+
+# Lands on the team detail for the freshly provisioned team.
+- extendedWaitUntil:
+    visible: "Coach Onboarding Team"
+    timeout: 10000
+- assertVisible: "Players"
+
+# ---------------------------------------------------------------------------
+# Add a player to the new team
+# ---------------------------------------------------------------------------
+# An empty roster renders "Add Player" twice (section button + empty card),
+# so pin the first one.
+- tapOn:
+    text: "Add Player"
+    index: 0
+- assertVisible: "Roster"
+- tapOn:
+    id: "add-player-button"
+- tapOn:
+    id: "add-player-name-input"
+- inputText: "Jordan Fixture"
+- hideKeyboard
+- tapOn:
+    id: "add-player-submit"
+# Rostered immediately (case 1, no email = no invite). The chip label is
+# row-anchored — a bare "Not invited" could match a neighbouring row.
+- extendedWaitUntil:
+    visible: "Jordan Fixture status: Not invited"
+    timeout: 10000
+
+# Back out to the Teams tab. The roster screen's back arrow carries no
+# accessibility label, so use the platform back gesture; team detail's does.
+- back
+- extendedWaitUntil:
+    visible: "Go back"
+    timeout: 10000
+- tapOn: "Go back"
+- assertVisible: "Teams"
+
+# ---------------------------------------------------------------------------
+# Team 2 — the personal league now exists and must still be invisible
+# ---------------------------------------------------------------------------
+- extendedWaitUntil:
+    visible: "Coach Onboarding Team"
+    timeout: 10000
+- tapOn: "Create [Nn]ew [Tt]eam"
+- assertVisible:
+    id: "team-name-input"
+# The reuse branch: one league exists now and it is hers, so the screen must
+# still offer no league/season choice at all.
+- assertNotVisible:
+    id: "league-season-disclosure"
+- assertNotVisible: "No leagues available.*"
+- assertNotVisible: "Ask a league admin to create a season first.*"
+
+- tapOn:
+    id: "team-name-input"
+- inputText: "Coach Onboarding Team 2"
+- hideKeyboard
+- tapOn: "Create"
+
+- extendedWaitUntil:
+    visible: "Coach Onboarding Team 2"
+    timeout: 10000
+- assertVisible: "Players"

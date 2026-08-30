@@ -987,7 +987,7 @@ export class StatsService {
             include: {
               season: {
                 include: {
-                  league: true,
+                  league: { omit: { personalOwnerId: true } },
                 },
               },
             },

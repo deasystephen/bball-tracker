@@ -247,8 +247,13 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.user.leagueAdminOf).toEqual(['downtown-youth-league', 'spring-league']);
+      // Personal leagues (#442) are excluded: the owner IS a LeagueAdmin of
+      // their auto-provisioned container, but listing it here would turn on
+      // `canAccessAdmin` and show "Leagues & Seasons" to every coach.
       expect(mockPrisma.leagueAdmin.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-1' } })
+        expect.objectContaining({
+          where: { userId: 'user-1', league: { personalOwnerId: null } },
+        })
       );
     });
 

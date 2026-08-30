@@ -279,9 +279,19 @@ describe('Schema Validation', () => {
         expect(result.success).toBe(false);
       });
 
-      it('should require seasonId', () => {
+      // Optional since #442: an omitted seasonId means "my own teams" and the
+      // service resolves the caller's personal league.
+      it('should allow seasonId to be omitted', () => {
         const result = createTeamSchema.safeParse({
           name: 'Lakers',
+        });
+        expect(result.success).toBe(true);
+      });
+
+      it('should still reject a seasonId that is not a UUID', () => {
+        const result = createTeamSchema.safeParse({
+          name: 'Lakers',
+          seasonId: 'not-a-uuid',
         });
         expect(result.success).toBe(false);
       });

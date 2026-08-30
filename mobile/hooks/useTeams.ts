@@ -90,7 +90,12 @@ export interface Team {
 
 export interface CreateTeamInput {
   name: string;
-  seasonId: string;
+  /**
+   * Optional since #442: omitting it makes the backend resolve (or create) the
+   * caller's personal league + season. Send it only when the user explicitly
+   * picked a league they can write to.
+   */
+  seasonId?: string;
   chatLink?: string;
 }
 

@@ -13,7 +13,7 @@ import { GuardianRelationship, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
-import { hasTeamPermission, isGuardianOf } from '../utils/permissions';
+import { getGuardianChildIds, hasTeamPermission, isGuardianOf } from '../utils/permissions';
 import { mailer } from './mailer';
 import { guardianInvitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -154,11 +154,10 @@ export class GuardianService {
 
   /** Ids of the user's children (for scoping list queries). */
   static async getChildIds(userId: string): Promise<string[]> {
-    const links = await prisma.guardian.findMany({
-      where: { parentId: userId },
-      select: { childId: true },
-    });
-    return (links ?? []).map((l) => l.childId);
+    // Delegates so there is ONE implementation: `utils/permissions` needs the
+    // same lookup for the league-access predicates and cannot import this
+    // service (guardian-service already imports permissions).
+    return getGuardianChildIds(userId);
   }
 
   /**

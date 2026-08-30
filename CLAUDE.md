@@ -471,13 +471,67 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   rostered on, or — so create-then-edit works — the player is on no team yet and was created < 24h ago
   (`MANAGED_PLAYER_GRACE_MS`). A creator who has left the roster loses edit/delete/email rights; system
   ADMINs are unaffected. Consequence: deleting an un-rostered managed player older than 24h is admin-only.
-- **Teams** (`team-service.ts`): `listTeams` always ANDs the caller's access clause (staff OR member OR
-  league admin of the team's league) with any `seasonId` / `leagueId` / `playerId` filter — only system
-  ADMINs skip it. `PATCH /teams/:id { seasonId }` moving a team into a different season requires
+- **Teams** (`team-service.ts`): `listTeams` always ANDs the caller's access clause with any
+  `seasonId` / `leagueId` / `playerId` filter — only system ADMINs skip it. That clause is
+  `utils/permissions.ts#teamAccessWhere(userId, childIds)` (staff OR member OR league admin OR guardian
+  of a member); it lives there, not inline, so the league-access predicates share one definition with it
+  and the two can never drift. `PATCH /teams/:id { seasonId }` moving a team into a different season requires
   `isLeagueAdmin` on the **target** season's league (in addition to `canManageTeam`), otherwise 403.
   `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
   (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.
   Staff emails stay in the payload for every team member (coach contact info).
+
+#### Self-serve team creation and personal leagues (#442)
+
+`POST /teams` authorization is **two independent checks**, and they must stay separate:
+
+- **WHO may create a team at all** — system ADMIN, `role === 'COACH'`, or an admin of any league.
+  Unchanged from the pre-#442 rule.
+- **WHERE they may create it** — only when `seasonId` is supplied:
+  `utils/permissions.ts#canWriteLeague(userId, leagueId)` = league admin OR personal owner OR staff on
+  some team in that league. This replaces the old `!canCreate && role !== 'COACH'` escape hatch, which
+  let **any** COACH plant a team in **any** league (whose admin then got that roster, minors' emails
+  included).
+
+They are separate because the no-`seasonId` path has no target league to check. Folding WHO into WHERE
+leaves that path ungated and any authenticated PLAYER or guardian can create a team and become its Head
+Coach with all five flags. **Never use a read predicate as the write gate**: a player or guardian
+rostered on a coach's team is a *member* of a team in that coach's personal league.
+
+`createTeamSchema.seasonId` is **optional**. Omitted means "my own teams":
+`TeamService.createTeam` resolves (creating on first use) the caller's personal league and its
+current-year season, inside the **existing** `$transaction`, after the `SELECT … FOR UPDATE` and
+**after** the FREE-tier cap check so a capped user provisions nothing.
+
+- `League.personalOwnerId String? @unique` marks the container (migration
+  `20260830000000_league_personal_owner`, `onDelete: SetNull` so deleting a user never cascades into
+  seasons, teams and games). It is an **internal marker and never appears in a payload** — every
+  `LEAGUE_*` read carries `omit: LEAGUE_OMIT` and every nested `league:` include omits it. The
+  client-facing form is the derived `isPersonal` boolean on the league list (`personalOwnerId !== null`,
+  not `=== caller.id`, so an ADMIN still sees another coach's container labelled personal).
+- **There is no P2002 retry and none is needed.** The transaction opens by locking the caller's `User`
+  row; `personalOwnerId` is unique per user and the season lives only in that user's own league, so the
+  only writer that can contend is the same `userId` and it is serialized. Do not remove the lock
+  believing a retry covers it. The three writes use `upsert` with a non-empty `update` that rewrites the
+  unique key to itself — writing any other field would clobber a coach's later rename.
+- The owner **does** get a real `LeagueAdmin` row (so they can rename the league and add next year's
+  season, which unblocks rollover, #461), but personal leagues are filtered out of the `leagueAdminOf`
+  array in `getLeagueAdminOf` (`api/auth/routes.ts`). So `canAccessAdmin` stays false and no
+  "Leagues & Seasons" entry appears. Deliberate client/server divergence: backend rules are unchanged,
+  only the client hint list is filtered.
+- Season naming is the year of creation and **does not roll over** on its own (#461).
+- Mobile branches on "every visible league is personal" (`mobile/utils/league-scope.ts`), never on league
+  count — after the first team the personal league exists, so a count test would show team #2 a picker
+  for a concept the coach never chose. The create and edit screens hide the league/season pickers in that
+  case; the disclosure always offers a "My teams" default so a member-of-someone-else's-league who
+  switches to COACH still has a valid choice.
+- Fixture: `dana.whitfield@example.com` is seeded **PLAYER** with no team, staff or league admin row, so
+  `.maestro/coach-onboarding.yaml` exercises the real funnel including picking Coach (every WorkOS
+  sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, since the
+  FREE-tier cap would otherwise turn a re-run into a 402.
+- **Still open:** `GET /leagues` and `GET /seasons` remain globally unscoped (#443) — that lands next and
+  is what makes the picker show only the caller's own leagues.
+
 - **Games** (`game-service.ts`): `updateGame` runs `canAccessTeam` **before** any field-specific branch
   (403 `You do not have access to this game` for unaffiliated users, regardless of body) and rejects a
   body with no updatable fields (`updateGameSchema` `.refine` → 400 `At least one field must be provided`;
