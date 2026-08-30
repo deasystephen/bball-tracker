@@ -183,7 +183,9 @@ export default function GameDetailScreen() {
   const handleDelete = () => {
     Alert.alert(
       'Delete Game',
-      'Are you sure you want to delete this game? This action cannot be undone.',
+      game?.status === 'FINISHED'
+        ? 'This permanently deletes the game and removes all of its recorded stats from player and team season totals. This action cannot be undone.'
+        : 'Are you sure you want to delete this game? This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -243,7 +245,10 @@ export default function GameDetailScreen() {
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerSpacer} />
-          {isScheduled && permissions.canManage && (
+          {/* Scheduled or finished only — deleting mid-tracking is more likely a
+              mis-tap than intent (end the game first). Finished-game deletion
+              cascades events + stats server-side; season totals recompute. */}
+          {(isScheduled || isFinished) && permissions.canManage && (
             <TouchableOpacity
               onPress={handleDelete}
               style={styles.iconButton}

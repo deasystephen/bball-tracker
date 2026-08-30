@@ -546,8 +546,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### F.5 — Delete game
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageTeam`
-- **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game). Rendered only with `canManage` (`canManageTeam`).
-- **Expected:** Removed from list. Stats removed.
+- **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game, then repeat with a throwaway FINISHED game that has tracked stats). Rendered only with `canManage` (`canManageTeam`), on SCHEDULED and FINISHED games — never while IN_PROGRESS.
+- **Expected:** Removed from list. For the finished game the confirm warns that recorded stats are removed from player and team season totals; after delete the Stats tab reflects the removal without a manual refresh.
 - **Notes:** ___________
 
 ---

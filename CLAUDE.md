@@ -218,7 +218,9 @@ never inline a role check in a screen:
 - `user.leagueAdminOf?: string[]` is an **optional** field on the shared `User` type (populated by
   `GET /auth/me` / `GET /auth/callback` once the backend ships it); `undefined` means "admin of no leagues".
 - Screens: Games tab FAB + `games/create` (teams the user can manage; bounce if none); `games/[id]` shows
-  Start/End only with `canChangeStatus`, Delete with `canManage`, Continue Tracking with `canTrack` (players keep
+  Start/End only with `canChangeStatus`, Delete with `canManage` on SCHEDULED and FINISHED games (hidden while
+  IN_PROGRESS — end the game first; a finished-game confirm warns that the cascade removes the game's stats from
+  season totals, and `useDeleteGame` invalidates `statsKeys.all`), Continue Tracking with `canTrack` (players keep
   Watch Live / RSVP / box score); `games/[id]/track` guards itself (toast + `replace` to the game detail) because
   it is deep-linkable. Admin screens (`admin/*`), `teams/[id]/edit` (`canManageTeam`) and `teams/[id]/players`
   (`canManageRoster`) use `hooks/useAccessGuard.ts` (toast + `back()`, `replace(fallback)` when there is no

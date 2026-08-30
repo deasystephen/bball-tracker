@@ -185,9 +185,14 @@ export function useDeleteGame() {
     mutationFn: async (gameId: string) => {
       await apiClient.delete(`/games/${gameId}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, gameId) => {
       trackEvent(AnalyticsEvents.GAME_DELETED);
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+      queryClient.removeQueries({ queryKey: gameKeys.detail(gameId) });
+      // Deleting a game cascades away its PlayerStats/TeamStats rows, and
+      // season aggregates are recomputed from those at read time — drop the
+      // stats caches so the Stats tab doesn't show the deleted game's numbers.
+      queryClient.invalidateQueries({ queryKey: statsKeys.all });
     },
   });
 }
