@@ -1,5 +1,19 @@
 appId: com.bballtracker.mobile
 ---
+# !! RE-SEED BEFORE EVERY RUN:  cd backend && npx prisma db seed  !!
+#
+# `clearState: true` wipes AsyncStorage, NOT the database. This flow changes
+# Dana's role to COACH and creates teams for her, so a second run without a
+# re-seed skips the role step (needsRoleChoice is false for a non-PLAYER) and
+# fails at the very first assertion. `npx prisma db seed` is the reset: it
+# puts her back to PLAYER and deletes her teams and personal league.
+#
+# The role step is asserted HARD rather than wrapped in a conditional
+# `runFlow`. A conditional would make the flow re-runnable, but it would also
+# silently skip the first step of the journey #442 is measured by — and
+# silently skipping is exactly how this flow shipped untested in the first
+# place.
+#
 # !! THIS FLOW REQUIRES BOTH #442 AND #443 TO BE MERGED. !!
 #
 # It asserts the league/season disclosure is absent, which depends on

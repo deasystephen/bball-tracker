@@ -186,6 +186,19 @@ async function main() {
     console.log(`    Removed ${staleFixtureTeams.length} team(s) left over from a previous E2E run`);
   }
 
+  // Also drop her auto-provisioned personal league (#442), so a re-seed
+  // restores a genuinely brand-new coach and the flow exercises
+  // provision-then-reuse rather than reuse-then-reuse. Cascades to its seasons
+  // and any teams inside it. Together with `role: PLAYER` above this makes the
+  // fixture fully idempotent: `npx prisma db seed` is the reset, and the E2E
+  // flow can assert the role step HARD instead of tolerating its absence.
+  const stalePersonalLeagues = await prisma.league.deleteMany({
+    where: { personalOwnerId: coachDana.id },
+  });
+  if (stalePersonalLeagues.count > 0) {
+    console.log(`    Removed ${stalePersonalLeagues.count} personal league(s) from a previous run`);
+  }
+
   // Players
   const playerData = [
     { email: 'steph.curry@example.com', name: 'Steph Curry' },
