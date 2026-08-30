@@ -57,7 +57,8 @@ export interface Game {
 
 export interface ShotMetadata {
   made: boolean;
-  points: 2 | 3;
+  /** 1 = free throw, 2 = field goal, 3 = three-pointer. */
+  points: 1 | 2 | 3;
 }
 
 export interface ReboundMetadata {

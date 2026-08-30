@@ -27,6 +27,7 @@ import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
+import { formatShotDescription } from '../../../utils/shot-label';
 import type { ShotMetadata } from '../../../types/game';
 
 const UNDO_DURATION = 5; // seconds
@@ -156,7 +157,7 @@ export default function TrackGameScreen() {
 
   // Handle shot recording
   const handleShot = useCallback(
-    async (points: 2 | 3, made: boolean) => {
+    async (points: 1 | 2 | 3, made: boolean) => {
       if (!selectedPlayerId) {
         Alert.alert('Select Player', 'Please select a player before recording a shot.');
         return;
@@ -437,10 +438,8 @@ export default function TrackGameScreen() {
     const playerName = lastEvent.playerName || 'Player';
 
     switch (lastEvent.eventType) {
-      case 'SHOT': {
-        const meta = lastEvent.metadata as ShotMetadata;
-        return `${playerName} - ${meta?.points || 2}pt ${meta?.made ? 'made' : 'miss'}`;
-      }
+      case 'SHOT':
+        return `${playerName} - ${formatShotDescription(lastEvent.metadata as ShotMetadata)}`;
       case 'REBOUND': {
         const meta = lastEvent.metadata as { type?: string };
         const type = meta?.type === 'offensive' ? 'Off' : 'Def';

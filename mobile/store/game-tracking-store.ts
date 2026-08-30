@@ -61,13 +61,20 @@ export function applyEventToCounters(
 
   switch (event.eventType) {
     case 'SHOT': {
+      // Free throws (points === 1) never touch playerStreaks in either
+      // direction: a made FT does not extend a hot streak and a missed FT
+      // does not reset one. FT points still count toward playerPoints, so
+      // 10/20-point milestones and double-double math include them.
       const meta = shotMeta(event);
+      const isFreeThrow = meta?.points === 1;
       const streaks = { ...counters.playerStreaks };
       const points = { ...counters.playerPoints };
       if (meta?.made) {
-        streaks[pid] = (streaks[pid] || 0) + 1;
+        if (!isFreeThrow) {
+          streaks[pid] = (streaks[pid] || 0) + 1;
+        }
         points[pid] = (points[pid] || 0) + meta.points;
-      } else {
+      } else if (!isFreeThrow) {
         streaks[pid] = 0;
       }
       return { ...counters, playerStreaks: streaks, playerPoints: points };
