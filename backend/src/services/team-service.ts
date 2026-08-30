@@ -61,6 +61,16 @@ const TEAM_STAFF_INCLUDE = {
   role: true,
 } satisfies Prisma.TeamStaffInclude;
 
+/**
+ * Roster order: jersey number asc (0 is valid, nulls last), name tiebreak.
+ * Single source of truth — game-service's GAME_DETAIL_INCLUDE.team.members
+ * and both services' tests import this rather than restating the literal.
+ */
+export const ROSTER_MEMBERS_ORDER_BY = [
+  { jerseyNumber: { sort: 'asc', nulls: 'last' } },
+  { player: { name: 'asc' } },
+] satisfies Prisma.TeamMemberOrderByWithRelationInput[];
+
 const TEAM_INCLUDE = {
   season: {
     include: {
@@ -72,12 +82,7 @@ const TEAM_INCLUDE = {
     include: {
       player: { select: USER_SUMMARY_SELECT },
     },
-    // Roster order: jersey number asc (0 is valid, nulls last), name tiebreak.
-    // GAME_DETAIL_INCLUDE.team.members in game-service.ts mirrors this.
-    orderBy: [
-      { jerseyNumber: { sort: 'asc', nulls: 'last' } },
-      { player: { name: 'asc' } },
-    ],
+    orderBy: ROSTER_MEMBERS_ORDER_BY,
   },
 } satisfies Prisma.TeamInclude;
 
