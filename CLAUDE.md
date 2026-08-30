@@ -139,6 +139,22 @@ Backend API (Node.js/Express)
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
   Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
+- **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
+  then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
+  `GAME_DETAIL_INCLUDE.team.members`), so the team-detail and game-detail rosters carry a
+  deterministic order; other roster-bearing queries (stats/season/league services) are still
+  unordered. Known, accepted divergence: the team overview always re-sorts client-side via
+  `sortRosterMembers` (both modes), whose name comparisons use device-locale `localeCompare`
+  (`sensitivity: 'base'`), while server-ordered screens show raw Postgres-collation order —
+  rows whose names differ only in case/accents can order differently between screens. The
+  team overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle (pills render only
+  with 2+ members): comparisons go ONLY through `utils/roster-sort.ts#sortRosterMembers`
+  (never inline; jersey 0 is valid, no number sorts last), and the choice persists per user via
+  `hooks/useRosterSortPreference.ts` (AsyncStorage `rosterSort:<userId>`, best-effort like
+  `role-onboarding.ts`; hydration resets on userId change and never overwrites a tap).
+  Sort pill rows are the shared `components/SortPills` (44pt targets, "Sort by <label>"
+  a11y + selected state) — used by the team overview and team stats screens; don't
+  hand-roll new pill rows. Maestro coverage lives in `.maestro/team-detail.yaml`.
 
 #### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks

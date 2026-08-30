@@ -3,6 +3,7 @@
  */
 
 import { GameService } from '../../src/services/game-service';
+import { ROSTER_MEMBERS_ORDER_BY } from '../../src/services/team-service';
 import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
 import {
@@ -176,6 +177,52 @@ describe('GameService', () => {
       expect(result).toHaveProperty('id', game.id);
       expect(result.team.members[0].player).toEqual({ id: player.id, name: player.name, email: 'kid@test.com' });
       expect(result.team.staff[0].user.email).toBe(coach.email);
+    });
+
+    it('queries the roster jersey-sorted (asc, nulls last, name tiebreak)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: {
+          ...team,
+          season: { ...season, league },
+          staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+          members: [],
+        },
+        events: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+
+      await GameService.getGameById(game.id, coach.id);
+
+      // Prisma is mocked here, so this include assertion is the only guard
+      // that GAME_DETAIL_INCLUDE mirrors team-service TEAM_INCLUDE.members.
+      expect(mockPrisma.game.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            team: expect.objectContaining({
+              include: expect.objectContaining({
+                members: expect.objectContaining({
+                  orderBy: ROSTER_MEMBERS_ORDER_BY,
+                }),
+              }),
+            }),
+          }),
+        })
+      );
     });
 
     it('should return game for team member without other members\' emails (role matrix B2.5)', async () => {

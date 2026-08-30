@@ -8,6 +8,7 @@ import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
 import { GuardianService } from './guardian-service';
+import { ROSTER_MEMBERS_ORDER_BY } from './team-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
@@ -51,6 +52,8 @@ const GAME_DETAIL_INCLUDE = {
             },
           },
         },
+        // Same roster order as team-service TEAM_INCLUDE.members.
+        orderBy: ROSTER_MEMBERS_ORDER_BY,
       },
     },
   },

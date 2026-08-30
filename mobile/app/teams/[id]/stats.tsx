@@ -19,13 +19,14 @@ import {
   ListItem,
   LoadingSpinner,
   ErrorState,
+  SortPills,
 } from '../../../components';
 import { SeasonAverages, PlayerStatsCard } from '../../../components/stats';
 import { PrintButton } from '../../../components/PrintButton';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../../hooks/useStats';
 import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
-import { spacing, borderRadius } from '../../../theme';
+import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getResultColor } from '../../../utils/game-result';
 
@@ -229,37 +230,7 @@ export default function TeamStatsScreen() {
           <View style={styles.section}>
             <View style={styles.rosterHeader}>
               <ThemedText variant="h3">Roster Stats</ThemedText>
-              <View style={styles.sortOptions}>
-                {sortOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option.key}
-                    onPress={() => setSortBy(option.key)}
-                    style={[
-                      styles.sortButton,
-                      {
-                        backgroundColor:
-                          sortBy === option.key
-                            ? colors.primary + '20'
-                            : 'transparent',
-                        borderColor:
-                          sortBy === option.key
-                            ? colors.primary
-                            : colors.border,
-                      },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Sort by ${option.label}`}
-                    accessibilityState={{ selected: sortBy === option.key }}
-                  >
-                    <ThemedText
-                      variant="caption"
-                      color={sortBy === option.key ? 'primary' : 'textSecondary'}
-                    >
-                      {option.label}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <SortPills options={sortOptions} selected={sortBy} onSelect={setSortBy} />
             </View>
 
             {sortedRoster.map((player) => (
@@ -352,18 +323,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  sortOptions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  sortButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    minHeight: 36,
-    justifyContent: 'center',
   },
   emptyCard: {
     alignItems: 'center',

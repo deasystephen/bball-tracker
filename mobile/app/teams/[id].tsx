@@ -2,7 +2,7 @@
  * Team details screen with hero header
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -20,6 +20,7 @@ import {
   LoadingSpinner,
   ErrorState,
   Button,
+  SortPills,
 } from '../../components';
 import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
@@ -29,6 +30,13 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 import { getTeamColor } from '../../utils/team-colors';
+import { RosterSortKey, sortRosterMembers } from '../../utils/roster-sort';
+import { useRosterSortPreference } from '../../hooks/useRosterSortPreference';
+
+const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
+  { key: 'jersey', label: 'Jersey #' },
+  { key: 'name', label: 'Name' },
+];
 
 export default function TeamDetailsScreen() {
   const router = useRouter();
@@ -41,6 +49,13 @@ export default function TeamDetailsScreen() {
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
+  const [rosterSort, setRosterSort] = useRosterSortPreference(user?.id);
+  // The backend already returns jersey order; sorting client-side too keeps
+  // cached/pre-deploy data consistent and drives the Name option.
+  const sortedMembers = useMemo(
+    () => sortRosterMembers(team?.members ?? [], rosterSort),
+    [team?.members, rosterSort]
+  );
 
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
@@ -249,9 +264,18 @@ export default function TeamDetailsScreen() {
             />
           )}
 
-          {team.members && team.members.length > 0 ? (
+          {memberCount > 1 && (
+            <SortPills
+              options={ROSTER_SORT_OPTIONS}
+              selected={rosterSort}
+              onSelect={setRosterSort}
+              style={styles.sortPills}
+            />
+          )}
+
+          {sortedMembers.length > 0 ? (
             <View style={styles.rosterGrid}>
-              {team.members.map((member) => (
+              {sortedMembers.map((member) => (
                 <TouchableOpacity
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
@@ -336,6 +360,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   addButton: { marginBottom: spacing.md },
+  sortPills: { marginBottom: spacing.md },
   rosterGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

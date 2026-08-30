@@ -2,7 +2,7 @@
  * Unit tests for TeamService
  */
 
-import { TeamService } from '../../src/services/team-service';
+import { TeamService, ROSTER_MEMBERS_ORDER_BY } from '../../src/services/team-service';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -248,6 +248,13 @@ describe('TeamService', () => {
       expect(mockPrisma.team.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
+          include: expect.objectContaining({
+            // Roster order: jersey asc (nulls last), name tiebreak. Prisma is
+            // mocked here, so this include assertion is the only guard.
+            members: expect.objectContaining({
+              orderBy: ROSTER_MEMBERS_ORDER_BY,
+            }),
+          }),
         })
       );
     });
