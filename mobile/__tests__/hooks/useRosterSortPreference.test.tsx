@@ -104,6 +104,24 @@ describe('useRosterSortPreference', () => {
     });
   });
 
+  it('keeps a tap made while userId was still undefined once the id arrives', async () => {
+    // Cold-start deep link: pills can render before auth-store rehydration
+    // resolves. A tap in that window must survive the arriving hydration.
+    const { result, rerender } = renderHook(
+      ({ uid }: { uid: string | undefined }) => useRosterSortPreference(uid),
+      { initialProps: { uid: undefined as string | undefined } }
+    );
+
+    act(() => {
+      result.current[1]('name');
+    });
+    expect(result.current[0]).toBe('name');
+
+    rerender({ uid: 'u1' });
+    await act(async () => {});
+    expect(result.current[0]).toBe('name');
+  });
+
   it('keeps the default when the storage read fails', async () => {
     jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('disk full'));
     const { result } = renderHook(() => useRosterSortPreference('u1'));

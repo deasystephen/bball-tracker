@@ -139,9 +139,12 @@ Backend API (Node.js/Express)
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
   Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
   roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
-- **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak
-  (`orderBy` on `TEAM_INCLUDE.members` in `team-service.ts`, mirrored in
-  `GAME_DETAIL_INCLUDE.team.members`), so every roster view inherits the order. The team
+- **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
+  then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
+  `GAME_DETAIL_INCLUDE.team.members`), so every roster view inherits a deterministic order.
+  Known, accepted divergence: the team overview's client-side Name sort uses device-locale
+  `localeCompare` (`sensitivity: 'base'`), while other screens show raw Postgres-collation
+  order — only jersey-tied names differing in case/accents can order differently. The team
   overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle: comparisons go ONLY
   through `utils/roster-sort.ts#sortRosterMembers` (never inline; jersey 0 is valid, no
   number sorts last), and the choice persists per user via

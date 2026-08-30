@@ -69,6 +69,9 @@ const TEAM_STAFF_INCLUDE = {
 export const ROSTER_MEMBERS_ORDER_BY = [
   { jerseyNumber: { sort: 'asc', nulls: 'last' } },
   { player: { name: 'asc' } },
+  // Final tiebreak: duplicate jersey+name rows (two "Alex Smith"s) would
+  // otherwise have unspecified order and visibly swap between fetches.
+  { id: 'asc' },
 ] satisfies Prisma.TeamMemberOrderByWithRelationInput[];
 
 const TEAM_INCLUDE = {

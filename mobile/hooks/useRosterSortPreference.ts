@@ -25,13 +25,21 @@ export function useRosterSortPreference(
   // True once the user has picked a sort since the current userId's hydration
   // began — a late-resolving hydration must never stomp an explicit tap.
   const userChoseRef = useRef(false);
+  const prevUserIdRef = useRef(userId);
 
   useEffect(() => {
     // Hydration always lands on a definite value: the stored choice when it
     // is valid, otherwise the default. Re-running on a userId change (account
     // switch, logout) therefore resets the state too — one user's stored
-    // choice never bleeds into another's view.
-    userChoseRef.current = false;
+    // choice never bleeds into another's view. The tap guard is kept across
+    // the undefined→id transition (auth-store rehydration): a tap made in
+    // that window is an explicit choice for the arriving user, and hydration
+    // must not revert it.
+    const prevUserId = prevUserIdRef.current;
+    prevUserIdRef.current = userId;
+    if (prevUserId !== undefined && prevUserId !== userId) {
+      userChoseRef.current = false;
+    }
     let cancelled = false;
     const hydrate = async (): Promise<RosterSortKey> => {
       if (!userId) return DEFAULT_ROSTER_SORT;
