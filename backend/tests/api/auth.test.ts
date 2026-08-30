@@ -599,7 +599,9 @@ describe('Auth API', () => {
         .set('Authorization', 'Bearer valid-token');
 
       expect(response.status).toBe(500);
-      expect(response.body.error).toBe('Failed to get user information');
+      // Auth now runs in the shared `authenticate` middleware, so an
+      // unexpected verifyToken error reaches the central error handler.
+      expect(response.body.error).toBe('Internal server error');
     });
   });
 

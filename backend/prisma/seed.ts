@@ -451,19 +451,26 @@ async function main() {
   // =========================================================================
   console.log('\nCreating managed players...');
 
+  // Managed-player ids must be REAL UUIDs (fixed, like SEED_IDS): the API
+  // validates playerId with z.string().uuid(), so the old `managed-lakers-7`
+  // style ids made every game event / RSVP for these players 400 — a seed-only
+  // bug (production rows get uuid() defaults). Clean up legacy string-id rows
+  // so pre-existing dev DBs don't keep duplicates alongside the UUID rows.
+  await prisma.user.deleteMany({ where: { id: { startsWith: 'managed-' } } });
+
   // Warriors managed players (managed by Coach Steve Kerr)
   const managedWarriorsPlayers = [
-    { name: 'Tommy Wilson', jersey: 5, position: 'PG' },
-    { name: 'Jake Martinez', jersey: 12, position: 'SF' },
-    { name: 'Ryan Chen', jersey: 8, position: 'C' },
+    { id: '40000000-0000-4000-a000-000000000005', name: 'Tommy Wilson', jersey: 5, position: 'PG' },
+    { id: '40000000-0000-4000-a000-000000000012', name: 'Jake Martinez', jersey: 12, position: 'SF' },
+    { id: '40000000-0000-4000-a000-000000000008', name: 'Ryan Chen', jersey: 8, position: 'C' },
   ];
 
   for (const mp of managedWarriorsPlayers) {
     const managedPlayer = await prisma.user.upsert({
-      where: { id: `managed-warriors-${mp.jersey}` },
+      where: { id: mp.id },
       update: {},
       create: {
-        id: `managed-warriors-${mp.jersey}`,
+        id: mp.id,
         name: mp.name,
         role: UserRole.PLAYER,
         isManaged: true,
@@ -487,16 +494,16 @@ async function main() {
 
   // Lakers managed players (managed by Coach Frank Vogel)
   const managedLakersPlayers = [
-    { name: 'Marcus Johnson', jersey: 7, position: 'SG' },
-    { name: 'Ethan Williams', jersey: 14, position: 'PF' },
+    { id: '40000000-0000-4000-a000-000000000107', name: 'Marcus Johnson', jersey: 7, position: 'SG' },
+    { id: '40000000-0000-4000-a000-000000000114', name: 'Ethan Williams', jersey: 14, position: 'PF' },
   ];
 
   for (const mp of managedLakersPlayers) {
     const managedPlayer = await prisma.user.upsert({
-      where: { id: `managed-lakers-${mp.jersey}` },
+      where: { id: mp.id },
       update: {},
       create: {
-        id: `managed-lakers-${mp.jersey}`,
+        id: mp.id,
         name: mp.name,
         role: UserRole.PLAYER,
         isManaged: true,
@@ -524,7 +531,7 @@ async function main() {
   // (Marcus/Ethan above cover "Not invited"; claimed players cover "Active".)
   const inviteStateFixtures = [
     {
-      id: 'managed-lakers-invited',
+      id: '40000000-0000-4000-a000-000000000221',
       name: 'Iris Invited',
       email: 'iris.invited@example.com',
       jersey: 21,
@@ -532,7 +539,7 @@ async function main() {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
     {
-      id: 'managed-lakers-expired',
+      id: '40000000-0000-4000-a000-000000000222',
       name: 'Xander Expired',
       email: 'xander.expired@example.com',
       jersey: 22,
@@ -540,7 +547,7 @@ async function main() {
       expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
     },
     {
-      id: 'managed-lakers-webaccept',
+      id: '40000000-0000-4000-a000-000000000224',
       name: 'Wendy WebAccept',
       email: 'wendy.webaccept@example.com',
       jersey: 24,

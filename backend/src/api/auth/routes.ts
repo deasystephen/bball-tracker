@@ -360,23 +360,14 @@ router.post('/refresh', async (req, res) => {
  * Get current user information
  * Requires: Authorization header with Bearer token
  */
-router.get('/me', async (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedError('Authorization token required');
-    }
-
-    const token = authHeader.substring(7);
-    const workosUser = await WorkOSService.verifyToken(token);
-
-    if (!workosUser) {
-      throw new UnauthorizedError('Invalid or expired token');
-    }
-
-    // Get user from our database
+    // `authenticate` resolved the token (including dev_ tokens in
+    // development — an inline WorkOS-only verify here rejected dev-login
+    // sessions after #349). Re-read by id for the profile fields the
+    // middleware's select omits.
     const user = await prisma.user.findUnique({
-      where: { workosUserId: workosUser.id },
+      where: { id: req.user!.id },
       select: {
         id: true,
         email: true,
