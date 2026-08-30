@@ -8,7 +8,7 @@ Terraform manages all AWS infrastructure.
 | File | Purpose |
 |------|---------|
 | `main.tf` | Provider config, locals, backend |
-| `ecs.tf` | Fargate cluster, task definition, IAM roles, ALB, auto-scaling |
+| `ecs.tf` | Fargate cluster, service, IAM roles, ALB, auto-scaling (**not** the task definition) |
 | `rds.tf` | PostgreSQL RDS instance |
 | `elasticache.tf` | Redis ElastiCache |
 | `s3.tf` | S3 buckets (profile picture avatars) |
@@ -17,6 +17,40 @@ Terraform manages all AWS infrastructure.
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
+| `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
+
+---
+
+## Who owns the ECS task definition
+
+`infra/task-definition.json` is the single source of truth, and CI deploys it. The "Build & Deploy
+to ECS" job (`.github/workflows/ci.yml`) renders it with the freshly built image tag, registers a
+new revision and updates the service. Terraform manages the cluster, service, IAM roles, log group,
+ALB and auto-scaling, but registers **no** task definition of its own (#53).
+
+So:
+
+- **To change an env var, a secret reference, or task cpu/memory** - edit `task-definition.json` and
+  merge to main. Putting it in `ecs.tf` instead deploys nothing, silently.
+- **New Secrets Manager ARNs** to reference from the JSON come from `terraform output`.
+- `aws_ecs_service.app` is configured with the bare family name and carries
+  `ignore_changes = [task_definition]`, so `terraform apply` never disturbs the revision CI chose.
+- **Bootstrapping a fresh environment:** at least one revision of the family must exist before the
+  service can be created. Register `task-definition.json` once with
+  `aws ecs register-task-definition --cli-input-json file://task-definition.json` (after filling in
+  the account-specific ARNs), then `terraform apply`.
+
+**The tradeoff:** values Terraform used to interpolate (the Redis endpoint, the avatars bucket,
+Secrets Manager ARNs, the IAM role ARNs) are now literal strings in the JSON. If one of those
+resources is ever replaced, the JSON does not follow automatically — re-read it from Terraform and
+update the file:
+
+```bash
+terraform output redis_url s3_avatars_bucket_name sentry_dsn_secret_arn
+```
+
+That is the accepted cost of having one source of truth; a stale literal fails loudly at task
+start, whereas the previous split silently deployed neither copy.
 
 ---
 

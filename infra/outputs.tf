@@ -72,7 +72,7 @@ output "ecs_service_name" {
 
 output "ecs_task_definition_family" {
   description = "ECS task definition family name"
-  value       = aws_ecs_task_definition.app.family
+  value       = local.task_definition_family
 }
 
 output "sentry_dsn_secret_arn" {

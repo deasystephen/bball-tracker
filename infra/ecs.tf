@@ -179,73 +179,29 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
 }
 
 # =============================================================================
-# ECS Task Definition
+# ECS Task Definition - deliberately NOT managed by Terraform (#53)
 # =============================================================================
+#
+# `infra/task-definition.json` is the single source of truth for the container
+# definition: image, environment variables, Secrets Manager references, health
+# check and task sizing. The "Build & Deploy to ECS" job in
+# .github/workflows/ci.yml renders it with the freshly built image tag,
+# registers a new revision and points the service at it.
+#
+# Terraform owns everything around the task: cluster, service, IAM roles, log
+# group, ALB, auto-scaling. It registers no revision of its own on purpose -
+# a second definition here drifts from the deployed one, and anything written
+# to it (a credential, a new env var) silently never reaches production.
+#
+# To change an env var, a secret reference or task cpu/memory: edit
+# infra/task-definition.json and merge to main. The Secrets Manager ARNs to
+# reference there are Terraform outputs (see infra/outputs.tf).
 
-resource "aws_ecs_task_definition" "app" {
-  family                   = "${local.name_prefix}-api"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = var.task_cpu
-  memory                   = var.task_memory
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
-
-  container_definitions = jsonencode([{
-    name  = "api"
-    image = var.container_image
-
-    portMappings = [{
-      containerPort = var.container_port
-      protocol      = "tcp"
-    }]
-
-    environment = [
-      { name = "NODE_ENV", value = "production" },
-      { name = "PORT", value = tostring(var.container_port) },
-      { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:${aws_elasticache_cluster.main.cache_nodes[0].port}" },
-      { name = "WORKOS_REDIRECT_URI", value = "https://api.${var.domain_name}/api/v1/auth/callback" },
-      { name = "CORS_ORIGIN", value = "https://api.${var.domain_name}" },
-      { name = "API_BASE_URL", value = "https://api.${var.domain_name}" },
-      { name = "PUBLIC_APP_URL", value = "https://${var.domain_name}" },
-      { name = "DEFAULT_TIMEZONE", value = "America/Los_Angeles" },
-      { name = "ADMIN_EMAIL", value = var.admin_email },
-      { name = "ADMIN_EMAILS", value = var.admin_emails },
-      { name = "S3_AVATARS_BUCKET", value = aws_s3_bucket.avatars.id },
-      { name = "AWS_REGION", value = var.aws_region },
-    ]
-
-    secrets = [
-      { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
-      { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn },
-      { name = "WORKOS_API_KEY", valueFrom = aws_secretsmanager_secret.workos_api_key.arn },
-      { name = "WORKOS_CLIENT_ID", valueFrom = aws_secretsmanager_secret.workos_client_id.arn },
-    ]
-
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.app.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "api"
-      }
-    }
-
-    # Health check at the container level
-    healthCheck = {
-      command     = ["CMD-SHELL", "wget -q --spider http://localhost:${var.container_port}/health || exit 1"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 60
-    }
-
-    essential = true
-  }])
-
-  tags = {
-    Name = "${local.name_prefix}-task-def"
-  }
+locals {
+  # Family that CI registers revisions into. The service below is configured
+  # with the bare family name, which ECS resolves to the latest ACTIVE
+  # revision; `ignore_changes` then leaves CI's choice alone on every apply.
+  task_definition_family = "${local.name_prefix}-api"
 }
 
 # =============================================================================
@@ -325,7 +281,7 @@ resource "aws_lb_listener" "https" {
 resource "aws_ecs_service" "app" {
   name            = "${local.name_prefix}-api"
   cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.app.arn
+  task_definition = local.task_definition_family
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 

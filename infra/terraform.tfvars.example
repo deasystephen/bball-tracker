@@ -4,9 +4,6 @@
 aws_region  = "us-east-1"
 environment = "staging"
 
-# ECR image URI - updated by CI/CD pipeline
-container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/bball-tracker-backend:latest"
-
 # Database credentials
 db_username = "bball_admin"
 db_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"
@@ -19,5 +16,5 @@ workos_client_id = ""
 # Domain (ACM certificate is managed automatically via dns.tf)
 domain_name = "capyhoops.com"
 
-# Admin allowlist — comma-separated emails granted ADMIN role on first sign-up
-admin_emails = "owner@example.com,helper@example.com"
+# NOTE: application env vars (ADMIN_EMAILS, SENTRY_*, SES_*, ...) are NOT set here.
+# They live in infra/task-definition.json, which CI deploys. See infra/README.md.
