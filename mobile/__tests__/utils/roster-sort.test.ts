@@ -57,6 +57,14 @@ describe('sortRosterMembers', () => {
     expect(sorted[1].jerseyNumber).toBe(4);
   });
 
+  it('treats accented and unaccented names as equal under base sensitivity', () => {
+    // 'base' sensitivity compares Álvarez/Alvarez equal in every ICU build,
+    // so the jersey tiebreak decides — deterministic across Jest and Hermes.
+    const roster = [member('Álvarez', 2), member('Alvarez', 1)];
+    const sorted = sortRosterMembers(roster, 'name');
+    expect(sorted.map((m) => m.jerseyNumber)).toEqual([1, 2]);
+  });
+
   it('does not mutate the input array', () => {
     const roster = [member('B', 2), member('A', 1)];
     const before = [...roster];

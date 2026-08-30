@@ -76,12 +76,17 @@ const signIn = () => {
   });
 };
 
-/** Names in on-screen order, derived from the rendered tree. */
+/** Names in on-screen order, derived from the rendered tree. Every name must
+ * actually render — a missing name (indexOf -1) would otherwise sort first
+ * and false-pass the order assertions. */
 const renderedOrder = (screen: ReturnType<typeof render>): string[] => {
   const json = JSON.stringify(screen.toJSON());
-  return ['Bob NoNumber', 'Amy Five', 'Zed Zero'].sort(
-    (a, b) => json.indexOf(a) - json.indexOf(b)
-  );
+  const entries = ['Bob NoNumber', 'Amy Five', 'Zed Zero'].map((name) => {
+    const index = json.indexOf(name);
+    expect(index).toBeGreaterThanOrEqual(0);
+    return { name, index };
+  });
+  return entries.sort((a, b) => a.index - b.index).map((e) => e.name);
 };
 
 describe('TeamDetailsScreen — roster sort', () => {
@@ -123,6 +128,13 @@ describe('TeamDetailsScreen — roster sort', () => {
     await AsyncStorage.setItem(rosterSortStorageKey('coach-1'), 'ppg');
     const screen = render(<TeamDetailsScreen />);
 
+    // Flush hydration, then prove the garbage value was rejected (Jersey pill
+    // still selected) — the order alone matches the default and proves nothing.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Sort by Jersey #')).toHaveProp('accessibilityState', {
+        selected: true,
+      });
+    });
     expect(renderedOrder(screen)).toEqual(['Zed Zero', 'Amy Five', 'Bob NoNumber']);
   });
 

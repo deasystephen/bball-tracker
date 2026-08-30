@@ -30,6 +30,11 @@ appId: com.bballtracker.mobile
 - assertVisible: "Sort by Jersey #"
 - tapOn: "Sort by Name"
 
+# The tap actually took effect (Name pill now carries the selected state)
+- assertVisible:
+    text: "Sort by Name"
+    selected: true
+
 # Roster still renders after the reorder
 - scrollUntilVisible:
     element:
