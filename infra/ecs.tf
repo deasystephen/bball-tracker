@@ -345,6 +345,18 @@ resource "aws_ecs_service" "app" {
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 50
 
+  # Auto-roll-back a rollout that never reaches a steady state. The CI deploy job
+  # (aws-actions/amazon-ecs-deploy-task-definition) calls UpdateService, so this
+  # service-level setting covers every deploy, including unattended ones from an
+  # auto-merged dependency bump. Without it a crash-looping image is an outage:
+  # desired_count is 1 and minimum_healthy_percent is 50, so ECS may stop the old
+  # task before the new one is healthy, and CI just waits out its 10-minute
+  # stability window. See #73.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   # desired_count is managed by ECS auto-scaling.
   # task_definition is managed by the CI/CD deploy job (Build & Deploy to ECS),
   # which registers a new revision and updates the service out-of-band from Terraform.

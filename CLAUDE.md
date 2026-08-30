@@ -850,6 +850,24 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
 
 - **[RDS backup & restore](docs/runbooks/rds-backup-restore.md)** — verify automated backups, restore from snapshot, repoint the app via Secrets Manager, rollback path, and a user-facing comms template. The app reaches RDS via the endpoint baked into `bball-tracker-production/database-url` in Secrets Manager (not via Route53), so a restore is: new instance → new secret version → `--force-new-deployment` on the ECS service.
 
+### ECS deploy safety
+
+`infra/ecs.tf` enables `deployment_circuit_breaker { enable = true, rollback = true }` on the
+production service (#73). A rollout that never reaches a steady state is rolled back to the last
+good task-definition revision automatically, and the CI deploy job
+(`aws-actions/amazon-ecs-deploy-task-definition`, `wait-for-service-stability: true`) then fails —
+so a bad deploy shows up as a red **Build & Deploy to ECS** job, not a silent outage. This matters
+because `desired_count` is 1 at `deployment_minimum_healthy_percent = 50`: ECS may stop the old
+task before the new one is healthy, so without the breaker a crash-looping image takes production
+down until someone notices.
+
+**It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
+a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
+
+**Terraform is not in CI.** Any `infra/*.tf` change needs a manual `terraform apply` from `infra/`;
+merging the file alone changes nothing in AWS. Verify a service-level change landed with:
+`aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-api --query 'services[0].deploymentConfiguration'`
+
 ## Local Development Setup
 
 1. Start services: `docker-compose up -d`
