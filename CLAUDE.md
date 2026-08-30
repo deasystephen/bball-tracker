@@ -811,6 +811,15 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 ## Work Hygiene
 
+- **GitHub issues are the only source of truth for what is left to do.** Four stores hold project
+  information and each has one job: **GitHub issues + milestones + the GA board** own work with
+  state; **repo docs** (`ROADMAP.md`, `docs/`, this file) own durable truth that versions with the
+  code and is reviewed in PRs; **Claude memory** owns cross-session facts and gotchas that are not
+  derivable from the repo; **artifacts** are dated analysis snapshots. Never track a task in memory,
+  a doc, or an artifact — file an issue and reference it. When an audit or assessment produces
+  findings, the deliverable is *issues*; the document is provenance, linked from them, and is not
+  maintained afterwards. `ROADMAP.md` carries the narrative for each milestone and links to it;
+  status belongs on the issues, not in the roadmap prose.
 - **Before starting new work, ensure prior work is committed.** If there are uncommitted changes from a previous feature, test them (`npm test`, `npx tsc --noEmit`), commit them on an appropriate branch, and verify a clean `git status` before beginning a new task. Mixing unrelated features in the same uncommitted diff makes testing and rollback difficult.
 - **End every task with a wrap-up sweep — unprompted.** Before declaring a task done, check whether the change requires updates to (a) tests — Jest, API integration, Maestro flows; (b) documentation — `CLAUDE.md`, `docs/` (including the E2E test plan), READMEs; (c) open GitHub issues — anything the change closes, unblocks, or contradicts (post a status comment or close as appropriate). Make the updates as part of the same task and report what was updated (or state explicitly that nothing needed updating). The user should never have to ask "what about tests/docs/issues?" after a change.
 
