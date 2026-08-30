@@ -89,6 +89,47 @@ describe('StatsService', () => {
       expect(player2Stats!.fouls).toBe(1);
     });
 
+    it('should count free throws (points: 1) as FTA/FTM, add 1 point, and exclude them from field goals', async () => {
+      const team = createTeam();
+      const player = createPlayer({ id: 'player-1', name: 'John Doe' });
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id, jerseyNumber: 23, position: 'Guard' });
+
+      const events = [
+        // Made free throw
+        createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 1 } }),
+        // Missed free throw
+        createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made: false, points: 1 } }),
+        // Made 2-pointer (the only field goal)
+        createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } }),
+      ];
+      const eventsWithPlayers = events.map(e => ({
+        ...e,
+        player: { id: player.id, name: player.name },
+      }));
+
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue(eventsWithPlayers);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [member] },
+      });
+
+      const result = await StatsService.calculatePlayerStats(game.id);
+
+      expect(result).toHaveLength(1);
+      const stats = result[0];
+      // 1 FT point + 2-pointer = 3 points
+      expect(stats.points).toBe(3);
+      expect(stats.freeThrowsMade).toBe(1);
+      expect(stats.freeThrowsAttempted).toBe(2);
+      expect(stats.freeThrowPercentage).toBe(50);
+      // Free throws never count toward field goals — FG% stays 100 (1/1)
+      expect(stats.fieldGoalsMade).toBe(1);
+      expect(stats.fieldGoalsAttempted).toBe(1);
+      expect(stats.fieldGoalPercentage).toBe(100);
+      expect(stats.threePointersAttempted).toBe(0);
+    });
+
     it('should throw NotFoundError if game does not exist', async () => {
       (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(null);

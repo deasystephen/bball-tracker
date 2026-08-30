@@ -32,7 +32,8 @@ const getEventDescription = (event: GameEvent): string => {
       const metadata = event.metadata as ShotMetadata;
       const points = metadata?.points || 2;
       const made = metadata?.made ?? false;
-      return `${points}pt ${made ? 'made' : 'miss'}`;
+      const shotLabel = points === 1 ? 'FT' : `${points}pt`;
+      return `${shotLabel} ${made ? 'made' : 'miss'}`;
     }
     case 'REBOUND': {
       const metadata = event.metadata as unknown as ReboundMetadata;

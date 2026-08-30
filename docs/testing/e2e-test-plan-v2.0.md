@@ -566,8 +566,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### G.2 — Record other event types
 - [ ] Pass / Fail / Skipped
-- **Steps:** Record at least one of each: 3pt made, 3pt missed, offensive rebound, defensive rebound, assist, steal, block, foul, turnover, free throw made/missed.
-- **Expected:** Each event posts. Stats aggregate correctly.
+- **Steps:** Record at least one of each: 3pt made, 3pt missed, offensive rebound, defensive rebound, assist, steal, block, foul, turnover, free throw made/missed (the "FT" make/miss row on the tracker).
+- **Expected:** Each event posts. Stats aggregate correctly. A made FT adds exactly 1 to the home score and counts as FTM/FTA in the box score, never toward FG%. Maestro: `.maestro/game-tracking.yaml` covers the made-FT score increment.
 - **Notes:** ___________
 
 ### G.3 — Undo last event
@@ -579,7 +579,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### G.4 — Hot-streak milestone
 - [ ] Pass / Fail / Skipped
 - **Steps:** Have one player make 3 shots in a row. Then: undo the 3rd (flame should clear), re-record it, leave the tracker with "Leave" and re-open it via Continue Tracking, and make one more shot (flame should still be on — counters are seeded from the server's events on open, audit #75).
-- **Expected:** Hot-player indicator appears. (Per memory: 3+ promotes to hot list.)
+- **Expected:** Hot-player indicator appears. (Per memory: 3+ promotes to hot list.) Free throws are neutral: a made FT does not extend the streak and a missed FT does not clear the flame.
 - **Notes:** ___________
 
 ### G.5 — Double-double detection

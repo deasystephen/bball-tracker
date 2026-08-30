@@ -32,6 +32,13 @@ appId: com.bballtracker.mobile
 # Player gets deselected after shot, re-select for next stat
 - tapOn: "LeBron James.*"
 
+# Record a made free throw — score goes 2 → 3 (+1, server-derived)
+- tapOn: "free throw made"
+- assertVisible: "Score: Lakers 3, Tracking Rival 0"
+
+# Re-select player
+- tapOn: "LeBron James.*"
+
 # Record a rebound (label is "Off Reb")
 - tapOn: "Record Off Reb"
 

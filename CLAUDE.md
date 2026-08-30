@@ -404,6 +404,10 @@ current score so a client can drop events and still converge.
   `undoLast`/`discardEvent` re-fold, so undoing a miss restores the streak
   and undoing a rebound/assist reverts the double-double math. Seeding never
   toasts. The seed is bounded by the 100-event page the tracker loads.
+  **Free throws** (SHOT with `points: 1`, the "FT" row in `ShotButtons`) never
+  touch `playerStreaks` in either direction — a made FT doesn't extend a hot
+  streak, a missed FT doesn't reset one — but made-FT points do count toward
+  `playerPoints` (10/20-point milestones and double-doubles include them).
 
 ### Entitlements / Feature Gating
 

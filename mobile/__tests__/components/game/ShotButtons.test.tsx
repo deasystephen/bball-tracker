@@ -1,8 +1,8 @@
 /**
  * Tests for ShotButtons.
  *
- * Verifies the 2x2 grid of made/missed buttons for 2pt and 3pt:
- *   - all four buttons are rendered with correct accessibility labels
+ * Verifies the grid of made/missed buttons for 2pt, 3pt and free throws:
+ *   - all six buttons are rendered with correct accessibility labels
  *   - each button calls onShot with the right (points, made) tuple
  *   - haptics fire (medium for made, light for miss)
  *   - disabled blocks presses and shows the "Select a player first" hint
@@ -31,20 +31,23 @@ describe('ShotButtons', () => {
     jest.clearAllMocks();
   });
 
-  it('renders all four shot buttons with their accessibility labels', () => {
+  it('renders all six shot buttons with their accessibility labels', () => {
     const { getByLabelText } = render(<ShotButtons onShot={jest.fn()} />);
     expect(getByLabelText('2-point shot made')).toBeTruthy();
     expect(getByLabelText('2-point shot missed')).toBeTruthy();
     expect(getByLabelText('3-point shot made')).toBeTruthy();
     expect(getByLabelText('3-point shot missed')).toBeTruthy();
+    expect(getByLabelText('free throw made')).toBeTruthy();
+    expect(getByLabelText('free throw missed')).toBeTruthy();
   });
 
   it('renders MADE/MISS labels and point values on the buttons', () => {
     const { getAllByText } = render(<ShotButtons onShot={jest.fn()} />);
-    expect(getAllByText('MADE').length).toBe(2);
-    expect(getAllByText('MISS').length).toBe(2);
+    expect(getAllByText('MADE').length).toBe(3);
+    expect(getAllByText('MISS').length).toBe(3);
     expect(getAllByText('2PT').length).toBe(2);
     expect(getAllByText('3PT').length).toBe(2);
+    expect(getAllByText('FT').length).toBe(2);
   });
 
   it('calls onShot with (2, true) when the 2-point made button is pressed', () => {
@@ -82,6 +85,24 @@ describe('ShotButtons', () => {
     fireEvent.press(getByLabelText('3-point shot missed'));
 
     expect(onShot).toHaveBeenCalledWith(3, false);
+  });
+
+  it('calls onShot with (1, true) when the free throw made button is pressed', () => {
+    const onShot = jest.fn();
+    const { getByLabelText } = render(<ShotButtons onShot={onShot} />);
+
+    fireEvent.press(getByLabelText('free throw made'));
+
+    expect(onShot).toHaveBeenCalledWith(1, true);
+  });
+
+  it('calls onShot with (1, false) when the free throw missed button is pressed', () => {
+    const onShot = jest.fn();
+    const { getByLabelText } = render(<ShotButtons onShot={onShot} />);
+
+    fireEvent.press(getByLabelText('free throw missed'));
+
+    expect(onShot).toHaveBeenCalledWith(1, false);
   });
 
   it('triggers Medium haptic for a made shot and Light haptic for a miss', () => {

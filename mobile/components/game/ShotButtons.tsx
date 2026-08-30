@@ -1,5 +1,6 @@
 /**
- * 2x2 grid of shot buttons for stat tracking
+ * Grid of shot buttons for stat tracking: make/miss rows for 2PT, 3PT and
+ * free throws (points: 1, rendered as "FT").
  */
 
 import React, { useCallback } from 'react';
@@ -16,7 +17,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 
 interface ShotButtonsProps {
-  onShot: (points: 2 | 3, made: boolean) => void;
+  onShot: (points: 1 | 2 | 3, made: boolean) => void;
   disabled?: boolean;
 }
 
@@ -25,12 +26,12 @@ const BUTTON_HEIGHT = 60;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface ShotButtonProps {
-  points: 2 | 3;
+  points: 1 | 2 | 3;
   made: boolean;
   color: string;
   disabled: boolean;
   width: number;
-  onPress: (points: 2 | 3, made: boolean) => void;
+  onPress: (points: 1 | 2 | 3, made: boolean) => void;
 }
 
 const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, width, onPress }) => {
@@ -56,8 +57,12 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
     onPress(points, made);
   };
 
+  const isFreeThrow = points === 1;
   const label = made ? 'MADE' : 'MISS';
-  const accessibilityLabel = `${points}-point shot ${made ? 'made' : 'missed'}`;
+  const pointsText = isFreeThrow ? 'FT' : `${points}PT`;
+  const accessibilityLabel = isFreeThrow
+    ? `free throw ${made ? 'made' : 'missed'}`
+    : `${points}-point shot ${made ? 'made' : 'missed'}`;
 
   return (
     <AnimatedPressable
@@ -79,7 +84,7 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
       accessibilityState={{ disabled }}
     >
       <ThemedText variant="body" style={styles.pointsText}>
-        {points}PT
+        {pointsText}
       </ThemedText>
       <ThemedText variant="caption" style={styles.madeText}>
         {label}
@@ -99,7 +104,7 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
   const { width: windowWidth } = useWindowDimensions();
   const buttonWidth = (windowWidth - spacing.md * 3) / 2;
 
-  const handlePress = useCallback((points: 2 | 3, made: boolean) => {
+  const handlePress = useCallback((points: 1 | 2 | 3, made: boolean) => {
     if (!disabled) {
       onShot(points, made);
     }
@@ -137,6 +142,25 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
         />
         <ShotButton
           points={3}
+          made={false}
+          color={colors.error}
+          disabled={disabled}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+      </View>
+
+      <View style={styles.row}>
+        <ShotButton
+          points={1}
+          made={true}
+          color={colors.success}
+          disabled={disabled}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+        <ShotButton
+          points={1}
           made={false}
           color={colors.error}
           disabled={disabled}

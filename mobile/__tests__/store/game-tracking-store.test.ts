@@ -37,6 +37,16 @@ const missedTwo: Omit<CreateGameEventInput, 'playerId'> = {
   metadata: { made: false, points: 2 },
 };
 
+const madeFT: Omit<CreateGameEventInput, 'playerId'> = {
+  eventType: 'SHOT',
+  metadata: { made: true, points: 1 },
+};
+
+const missedFT: Omit<CreateGameEventInput, 'playerId'> = {
+  eventType: 'SHOT',
+  metadata: { made: false, points: 1 },
+};
+
 const rebound: Omit<CreateGameEventInput, 'playerId'> = {
   eventType: 'REBOUND',
   metadata: { type: 'defensive' },
@@ -105,6 +115,54 @@ describe('game-tracking-store', () => {
     s = useGameTrackingStore.getState();
     expect(s.playerStreaks.p1).toBe(0);
     expect(s.hotPlayers.p1).toBeUndefined();
+  });
+
+  describe('free throws never touch streaks (points === 1)', () => {
+    it('a made FT adds 1 point but does not extend the streak', () => {
+      recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', madeTwo, 'Alice');
+      expect(useGameTrackingStore.getState().playerStreaks.p1).toBe(2);
+
+      recordForPlayer('p1', madeFT, 'Alice');
+      const s = useGameTrackingStore.getState();
+      expect(s.playerPoints.p1).toBe(5);
+      expect(s.playerStreaks.p1).toBe(2);
+      expect(s.hotPlayers.p1).toBeUndefined();
+    });
+
+    it('a missed FT does not reset an active hot streak', () => {
+      for (let i = 0; i < 3; i++) recordForPlayer('p1', madeTwo, 'Alice');
+      expect(useGameTrackingStore.getState().hotPlayers.p1).toBe(3);
+
+      recordForPlayer('p1', missedFT, 'Alice');
+      const s = useGameTrackingStore.getState();
+      expect(s.playerStreaks.p1).toBe(3);
+      expect(s.hotPlayers.p1).toBe(3);
+      expect(s.playerPoints.p1).toBe(6);
+    });
+
+    it('FT points count toward the 10pt milestone', () => {
+      // Four made 2s = 8 points; two made FTs cross 10.
+      for (let i = 0; i < 4; i++) recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', madeFT, 'Alice');
+      expect(useGameTrackingStore.getState().lastMilestone).toBeNull();
+
+      recordForPlayer('p1', madeFT, 'Alice');
+      const s = useGameTrackingStore.getState();
+      expect(s.playerPoints.p1).toBe(10);
+      expect(s.lastMilestone).toMatch(/Alice hit 10 points/);
+    });
+
+    it('undoing a made FT re-folds counters: point reverts, streak untouched', () => {
+      recordForPlayer('p1', madeTwo, 'Alice');
+      recordForPlayer('p1', madeFT, 'Alice');
+      expect(useGameTrackingStore.getState().playerPoints.p1).toBe(3);
+
+      useGameTrackingStore.getState().undoLast();
+      const s = useGameTrackingStore.getState();
+      expect(s.playerPoints.p1).toBe(2);
+      expect(s.playerStreaks.p1).toBe(1);
+    });
   });
 
   it('tracks cumulative points and fires 10pt milestone once crossed', () => {

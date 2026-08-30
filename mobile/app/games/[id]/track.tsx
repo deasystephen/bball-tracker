@@ -156,7 +156,7 @@ export default function TrackGameScreen() {
 
   // Handle shot recording
   const handleShot = useCallback(
-    async (points: 2 | 3, made: boolean) => {
+    async (points: 1 | 2 | 3, made: boolean) => {
       if (!selectedPlayerId) {
         Alert.alert('Select Player', 'Please select a player before recording a shot.');
         return;
@@ -439,7 +439,9 @@ export default function TrackGameScreen() {
     switch (lastEvent.eventType) {
       case 'SHOT': {
         const meta = lastEvent.metadata as ShotMetadata;
-        return `${playerName} - ${meta?.points || 2}pt ${meta?.made ? 'made' : 'miss'}`;
+        const points = meta?.points || 2;
+        const shotLabel = points === 1 ? 'FT' : `${points}pt`;
+        return `${playerName} - ${shotLabel} ${meta?.made ? 'made' : 'miss'}`;
       }
       case 'REBOUND': {
         const meta = lastEvent.metadata as { type?: string };
