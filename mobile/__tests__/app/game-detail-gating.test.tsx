@@ -156,5 +156,29 @@ describe('GameDetailScreen permission gating', () => {
       expect(getByText('End Game')).toBeTruthy();
       expect(queryByText('Continue Tracking')).toBeNull();
     });
+
+    it('coach: no Delete while tracking is live (end the game first)', () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      const { queryByLabelText } = render(<GameDetailScreen />);
+      expect(queryByLabelText('Delete game')).toBeNull();
+    });
+  });
+
+  describe('FINISHED game', () => {
+    beforeEach(() => {
+      mockGame = { ...baseGame, status: 'FINISHED', homeScore: 50, awayScore: 40 };
+    });
+
+    it('coach: Delete available (cascade removes stats server-side)', () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      const { getByLabelText } = render(<GameDetailScreen />);
+      expect(getByLabelText('Delete game')).toBeTruthy();
+    });
+
+    it('player (team member, not staff): no Delete', () => {
+      signIn({ id: 'player-1', role: 'PLAYER' });
+      const { queryByLabelText } = render(<GameDetailScreen />);
+      expect(queryByLabelText('Delete game')).toBeNull();
+    });
   });
 });

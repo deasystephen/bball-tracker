@@ -20,6 +20,7 @@ import {
   gameKeys,
   rsvpKeys,
 } from '../../hooks/useGames';
+import { statsKeys } from '../../hooks/useStats';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -156,10 +157,11 @@ describe('useGames runtime', () => {
   });
 
   describe('useDeleteGame mutation', () => {
-    it('deletes and invalidates games list', async () => {
+    it('deletes, invalidates games list + stats, and drops the detail cache', async () => {
       mockedDelete.mockResolvedValueOnce({ data: {} });
       const { wrapper, client } = createQueryWrapper();
       const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const removeSpy = jest.spyOn(client, 'removeQueries');
       const { result } = renderHook(() => useDeleteGame(), { wrapper });
 
       await act(async () => {
@@ -168,6 +170,10 @@ describe('useGames runtime', () => {
 
       expect(mockedDelete).toHaveBeenCalledWith('/games/g1');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+      // Deleting a finished game cascades away its stats rows server-side;
+      // the season aggregates on the Stats tab must refetch, not stay stale.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: statsKeys.all });
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: gameKeys.detail('g1') });
     });
   });
 
