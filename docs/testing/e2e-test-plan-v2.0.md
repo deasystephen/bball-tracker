@@ -260,7 +260,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH (creator)
 - **Steps:** Teams tab → tap `Test Team`.
-- **Expected:** Shows team name, league/season, empty roster with "Add Player", the **Staff** card (head coach name + count → staff screen), "Announcements", "View Team Stats". Maestro: `.maestro/team-detail.yaml`.
+- **Expected:** Shows team name, league/season, empty roster with "Add Player", the **Staff** card (head coach name + count → staff screen), "Announcements", "View Team Stats". Once the roster has 2+ players, **sort pills** ("Sort by Jersey #" / "Sort by Name") appear above the roster grid: jersey order is the default (server-provided — jersey asc, 0 valid, no-number last, name tiebreak), tapping **Name** reorders and the choice persists per user across app restarts (AsyncStorage). Verify on the seeded Lakers if `Test Team` is still empty. Maestro: `.maestro/team-detail.yaml` (asserts both pills + the Name pill's selected state after tap).
 - **Notes:** ___________
 
 ### D.3 — Add a player (unified form — roster/invite unification)
