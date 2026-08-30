@@ -671,7 +671,7 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
 
 ### Environment URLs & time zone
-- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.capyhoops.com` in prod via `infra/ecs.tf` + `infra/task-definition.json`; default `http://localhost:3000`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://capyhoops.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API.
+- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.capyhoops.com` in prod via `infra/task-definition.json`; default `http://localhost:3000`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://capyhoops.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API.
 - `DEFAULT_TIMEZONE` — IANA zone used to format dates in outbound email (`utils/format-date.ts#formatEmailDate/formatEmailDateTime`; default `America/Los_Angeles`). Never call `toLocaleDateString()` bare in a template variable — ECS runs in UTC (audit #57). Teams/leagues have no time-zone column yet; pass one through the helper's `timeZone` arg once they do.
 
 ### Calendar feed (`services/calendar-service.ts`, `api/teams/calendar.ts`)
@@ -849,6 +849,26 @@ Dependency and security updates are split between **Dependabot** (mechanical pat
 Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs/runbooks/):
 
 - **[RDS backup & restore](docs/runbooks/rds-backup-restore.md)** — verify automated backups, restore from snapshot, repoint the app via Secrets Manager, rollback path, and a user-facing comms template. The app reaches RDS via the endpoint baked into `bball-tracker-production/database-url` in Secrets Manager (not via Route53), so a restore is: new instance → new secret version → `--force-new-deployment` on the ECS service.
+
+### The ECS task definition lives in ONE file (#53)
+
+`infra/task-definition.json` is the **single source of truth** for the API task definition — image,
+environment variables, Secrets Manager references, health check, cpu/memory. CI's **Build & Deploy
+to ECS** job renders it with the new image tag, registers a revision and updates the service.
+
+**Terraform does not manage the task definition.** `infra/ecs.tf` owns the cluster, service, IAM
+roles, log group, ALB and auto-scaling, and deliberately declares no `aws_ecs_task_definition` —
+the two copies had drifted by 20 revisions and 7 environment variables before this was fixed.
+
+So: **to add or change an env var or secret reference, edit `infra/task-definition.json` and merge
+it.** Writing the value into `infra/ecs.tf` or a `.tfvars` file changes nothing and fails silently —
+this is how a WorkOS or SES credential ends up "configured" while production keeps using the old
+one. Terraform declares no `container_image` / `task_cpu` / `task_memory` / `admin_emails`
+variables any more, precisely so there is nowhere wrong to put them. Secrets Manager ARNs to
+reference from the JSON come from `terraform output` (`infra/outputs.tf`).
+
+`aws_ecs_service.app` is configured with the bare family name plus
+`ignore_changes = [task_definition]`, so `terraform apply` never disturbs the revision CI chose.
 
 ### ECS deploy safety
 

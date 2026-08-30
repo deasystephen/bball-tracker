@@ -113,10 +113,13 @@ aws ecs create-service \
 
 ## Environment Variables
 
-Set these in your ECS task definition or use Secrets Manager:
+`infra/task-definition.json` is the **single source of truth** for the API task - plain values and
+Secrets Manager references alike. Edit it and merge to main; the "Build & Deploy to ECS" job renders
+it with the new image tag and registers a revision. Terraform does **not** manage the task definition
+(#53), so a value written to `infra/ecs.tf` deploys nothing. New Secrets Manager ARNs to reference
+come from `terraform output` (see `infra/outputs.tf`).
 
-The source of truth is `infra/task-definition.json` (plain values) + `infra/ecs.tf` (Secrets Manager
-references). As of 2026-08-23 the API task carries:
+As of 2026-08-30 the API task carries:
 
 - `DATABASE_URL` (secret): PostgreSQL connection string; TLS to RDS uses `certs/rds-global-bundle.pem`
   (override with `RDS_CA_BUNDLE_PATH`)

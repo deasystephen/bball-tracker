@@ -175,8 +175,10 @@ ADMIN is granted **only at first sign-up** to emails on `ADMIN_EMAILS`. There is
 "make admin" action, and re-login never changes an existing user's role.
 
 1. **If they have NOT signed up yet** — add their email to `ADMIN_EMAILS` and deploy *before*
-   they sign up. Set it in `infra/task-definition.json` (and `admin_emails` in your Terraform
-   vars / `infra/ecs.tf`), then roll the ECS service.
+   they sign up. Set it in `infra/task-definition.json` **only** — that file is the single source
+   of truth for task env vars and merging it to main deploys it. Terraform does not manage the
+   task definition (#53), so putting the value in `infra/ecs.tf` or a `.tfvars` file changes
+   nothing.
 2. **If they have ALREADY signed up** — the allowlist won't retroactively promote them. This is
    the one remaining case that needs a DB write (point at
    `bball-tracker-production/database-url` from Secrets Manager):

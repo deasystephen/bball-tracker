@@ -32,27 +32,10 @@ variable "availability_zones" {
 }
 
 # ECS / Fargate
-variable "container_image" {
-  description = "Full ECR image URI (registry/repo:tag)"
-  type        = string
-}
-
 variable "container_port" {
   description = "Port the backend container listens on"
   type        = number
   default     = 3000
-}
-
-variable "task_cpu" {
-  description = "Fargate task CPU units (256 = 0.25 vCPU)"
-  type        = number
-  default     = 256
-}
-
-variable "task_memory" {
-  description = "Fargate task memory in MiB"
-  type        = number
-  default     = 512
 }
 
 variable "desired_count" {
@@ -138,19 +121,6 @@ variable "domain_name" {
   description = "Root domain name (e.g., capyhoops.com). The API will be served at api.<domain_name>."
   type        = string
   default     = "capyhoops.com"
-}
-
-# Admin
-variable "admin_email" {
-  description = "Single email that gets ADMIN role on first sign-up (legacy; prefer admin_emails)"
-  type        = string
-  default     = ""
-}
-
-variable "admin_emails" {
-  description = "Comma-separated allowlist of emails that get ADMIN role on first sign-up"
-  type        = string
-  default     = ""
 }
 
 # Tags
