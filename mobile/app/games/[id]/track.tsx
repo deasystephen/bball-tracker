@@ -27,6 +27,7 @@ import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
+import { formatShotDescription } from '../../../utils/shot-label';
 import type { ShotMetadata } from '../../../types/game';
 
 const UNDO_DURATION = 5; // seconds
@@ -437,12 +438,8 @@ export default function TrackGameScreen() {
     const playerName = lastEvent.playerName || 'Player';
 
     switch (lastEvent.eventType) {
-      case 'SHOT': {
-        const meta = lastEvent.metadata as ShotMetadata;
-        const points = meta?.points || 2;
-        const shotLabel = points === 1 ? 'FT' : `${points}pt`;
-        return `${playerName} - ${shotLabel} ${meta?.made ? 'made' : 'miss'}`;
-      }
+      case 'SHOT':
+        return `${playerName} - ${formatShotDescription(lastEvent.metadata as ShotMetadata)}`;
       case 'REBOUND': {
         const meta = lastEvent.metadata as { type?: string };
         const type = meta?.type === 'offensive' ? 'Off' : 'Def';

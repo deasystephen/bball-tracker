@@ -10,6 +10,7 @@ import { ThemedText } from '../ThemedText';
 import { ThemedView } from '../ThemedView';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
+import { formatShotDescription } from '../../utils/shot-label';
 import type { GameEvent, ShotMetadata, ReboundMetadata } from '../../types/game';
 
 interface EventTimelineProps {
@@ -28,13 +29,8 @@ const formatTime = (timestamp: string): string => {
 
 const getEventDescription = (event: GameEvent): string => {
   switch (event.eventType) {
-    case 'SHOT': {
-      const metadata = event.metadata as ShotMetadata;
-      const points = metadata?.points || 2;
-      const made = metadata?.made ?? false;
-      const shotLabel = points === 1 ? 'FT' : `${points}pt`;
-      return `${shotLabel} ${made ? 'made' : 'miss'}`;
-    }
+    case 'SHOT':
+      return formatShotDescription(event.metadata as ShotMetadata);
     case 'REBOUND': {
       const metadata = event.metadata as unknown as ReboundMetadata;
       const type = metadata?.type === 'offensive' ? 'Offensive' : 'Defensive';

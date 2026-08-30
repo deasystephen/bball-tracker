@@ -1,6 +1,9 @@
 /**
- * Grid of shot buttons for stat tracking: make/miss rows for 2PT, 3PT and
- * free throws (points: 1, rendered as "FT").
+ * Grid of shot buttons for stat tracking: a MADE row and a MISS row, each
+ * with 2PT, 3PT and free-throw (points: 1, rendered as "FT") columns.
+ * Two rows of three (not three rows of two) keeps the grid at the height it
+ * had before free throws shipped, so on 667pt-class devices the FT buttons
+ * and the StatButtons below stay reachable without scrolling mid-play.
  */
 
 import React, { useCallback } from 'react';
@@ -102,7 +105,7 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
 }) {
   const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
-  const buttonWidth = (windowWidth - spacing.md * 3) / 2;
+  const buttonWidth = (windowWidth - spacing.md * 4) / 3;
 
   const handlePress = useCallback((points: 1 | 2 | 3, made: boolean) => {
     if (!disabled) {
@@ -122,6 +125,25 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
           onPress={handlePress}
         />
         <ShotButton
+          points={3}
+          made={true}
+          color={colors.success}
+          disabled={disabled}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+        <ShotButton
+          points={1}
+          made={true}
+          color={colors.success}
+          disabled={disabled}
+          width={buttonWidth}
+          onPress={handlePress}
+        />
+      </View>
+
+      <View style={styles.row}>
+        <ShotButton
           points={2}
           made={false}
           color={colors.error}
@@ -129,32 +151,10 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
           width={buttonWidth}
           onPress={handlePress}
         />
-      </View>
-
-      <View style={styles.row}>
-        <ShotButton
-          points={3}
-          made={true}
-          color={colors.success}
-          disabled={disabled}
-          width={buttonWidth}
-          onPress={handlePress}
-        />
         <ShotButton
           points={3}
           made={false}
           color={colors.error}
-          disabled={disabled}
-          width={buttonWidth}
-          onPress={handlePress}
-        />
-      </View>
-
-      <View style={styles.row}>
-        <ShotButton
-          points={1}
-          made={true}
-          color={colors.success}
           disabled={disabled}
           width={buttonWidth}
           onPress={handlePress}

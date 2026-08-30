@@ -566,7 +566,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### G.2 — Record other event types
 - [ ] Pass / Fail / Skipped
-- **Steps:** Record at least one of each: 3pt made, 3pt missed, offensive rebound, defensive rebound, assist, steal, block, foul, turnover, free throw made/missed (the "FT" make/miss row on the tracker).
+- **Steps:** Record at least one of each: 3pt made, 3pt missed, offensive rebound, defensive rebound, assist, steal, block, foul, turnover, free throw made/missed (the "FT" column in the tracker's MADE/MISS shot rows).
 - **Expected:** Each event posts. Stats aggregate correctly. A made FT adds exactly 1 to the home score and counts as FTM/FTA in the box score, never toward FG%. Maestro: `.maestro/game-tracking.yaml` covers the made-FT score increment.
 - **Notes:** ___________
 
