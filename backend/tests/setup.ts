@@ -4,6 +4,16 @@
  */
 
 import { beforeEach, afterAll } from '@jest/globals';
+import { config as loadEnv } from 'dotenv';
+
+// Load backend/.env for the tests that talk to a real database
+// (`tests/integration/*.db.test.ts`). Everything else mocks Prisma and does
+// not care. dotenv does NOT override variables that are already set, so CI —
+// which exports DATABASE_URL explicitly for its postgres service — is
+// unaffected. Without this, DATABASE_URL is undefined locally, `isLocalDb` in
+// src/models fails to match, TLS gets enabled against local Postgres and the
+// failure reads "The server does not support SSL connections".
+loadEnv();
 
 // Create mock Prisma client first (before mocking)
 export const mockPrisma = {

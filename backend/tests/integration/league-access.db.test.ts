@@ -57,6 +57,20 @@ async function mkUser(key: string, role: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN'
 }
 
 beforeAll(async () => {
+  // Fail with something actionable rather than a raw Prisma error if there is
+  // no database. Never skip: a silently skipped test is worse than none for a
+  // cross-tenant boundary.
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (err) {
+    throw new Error(
+      'This suite needs a real Postgres. Start one and apply migrations:\n' +
+        '  docker-compose up -d && cd backend && npx prisma migrate deploy\n' +
+        `DATABASE_URL=${process.env.DATABASE_URL ?? '(unset)'}`,
+      { cause: err }
+    );
+  }
+
   // --- Org A: a league with one season and one team -------------------------
   const la = await prisma.league.create({ data: { name: LEAGUE_A }, select: { id: true } });
   leagues.a = la.id;
