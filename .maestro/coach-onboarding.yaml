@@ -105,14 +105,14 @@ appId: com.bballtracker.mobile
 # inputText has no `id` key in Maestro — focus the field first, then type.
 - tapOn:
     id: "team-name-input"
-- inputText: "Coach Onboarding Team"
+- inputText: "Fixture One"
 - hideKeyboard
 - tapOn:
     id: "create-team-submit"
 
 # Lands on the team detail for the freshly provisioned team.
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team"
+    visible: "Fixture One"
     timeout: 10000
 - assertVisible: "Players"
 
@@ -139,11 +139,24 @@ appId: com.bballtracker.mobile
     visible: "Jordan Fixture status: Not invited"
     timeout: 10000
 
-# Back out to the Teams tab via the tab bar, NOT the back arrow. The arrow on
-# team detail is a no-op after `router.replace` (#464), which would hang this
-# flow on a bug that has nothing to do with the funnel under test. The tab bar
-# is also how a real user gets back. Back-arrow behaviour is covered by
-# create-team.yaml, which owns that assertion.
+# Get back to the tabs by relaunching, NOT by navigating back.
+#
+# Neither the Roster screen nor team detail is inside the (tabs) navigator, so
+# there is no tab bar to tap on either of them — both are pushed routes. And
+# popping twice would land on team detail's back arrow, which is a no-op after
+# `router.replace` (#464): the GA gate must not hang on a bug unrelated to the
+# funnel it measures. Back-arrow behaviour is create-team.yaml's assertion.
+#
+# `launchApp` without clearState keeps the session (tokens live in SecureStore),
+# so cold-start routing lands on Home with the tab bar present. It also
+# incidentally proves the session survives a restart.
+- launchApp
+# Wait on the section heading, not a team name: cards use numberOfLines={1}
+# (teams.tsx / home.tsx) and "Your Teams" only renders once she has a team, so
+# it doubles as proof the first team persisted across the restart.
+- extendedWaitUntil:
+    visible: "Your Teams"
+    timeout: 15000
 - tapOn: "Teams tab"
 - assertVisible: "Teams"
 
@@ -151,7 +164,7 @@ appId: com.bballtracker.mobile
 # Team 2 — the personal league now exists and must still be invisible
 # ---------------------------------------------------------------------------
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team"
+    visible: "Fixture One"
     timeout: 10000
 - tapOn: "Create [Nn]ew [Tt]eam"
 - assertVisible:
@@ -165,12 +178,12 @@ appId: com.bballtracker.mobile
 
 - tapOn:
     id: "team-name-input"
-- inputText: "Coach Onboarding Team 2"
+- inputText: "Fixture Two"
 - hideKeyboard
 - tapOn:
     id: "create-team-submit"
 
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team 2"
+    visible: "Fixture Two"
     timeout: 10000
 - assertVisible: "Players"
