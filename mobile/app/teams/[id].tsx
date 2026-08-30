@@ -20,6 +20,7 @@ import {
   LoadingSpinner,
   ErrorState,
   Button,
+  SortPills,
 } from '../../components';
 import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
@@ -264,33 +265,12 @@ export default function TeamDetailsScreen() {
           )}
 
           {memberCount > 1 && (
-            <View style={styles.sortOptions}>
-              {ROSTER_SORT_OPTIONS.map((option) => (
-                <TouchableOpacity
-                  key={option.key}
-                  onPress={() => setRosterSort(option.key)}
-                  style={[
-                    styles.sortButton,
-                    {
-                      backgroundColor:
-                        rosterSort === option.key ? colors.primary + '20' : 'transparent',
-                      borderColor:
-                        rosterSort === option.key ? colors.primary : colors.border,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Sort by ${option.label}`}
-                  accessibilityState={{ selected: rosterSort === option.key }}
-                >
-                  <ThemedText
-                    variant="caption"
-                    color={rosterSort === option.key ? 'primary' : 'textSecondary'}
-                  >
-                    {option.label}
-                  </ThemedText>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <SortPills
+              options={ROSTER_SORT_OPTIONS}
+              selected={rosterSort}
+              onSelect={setRosterSort}
+              style={styles.sortPills}
+            />
           )}
 
           {sortedMembers.length > 0 ? (
@@ -380,19 +360,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   addButton: { marginBottom: spacing.md },
-  sortOptions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  sortButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
+  sortPills: { marginBottom: spacing.md },
   rosterGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

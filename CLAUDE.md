@@ -146,7 +146,10 @@ Backend API (Node.js/Express)
   through `utils/roster-sort.ts#sortRosterMembers` (never inline; jersey 0 is valid, no
   number sorts last), and the choice persists per user via
   `hooks/useRosterSortPreference.ts` (AsyncStorage `rosterSort:<userId>`, best-effort like
-  `role-onboarding.ts`). Maestro coverage lives in `.maestro/team-detail.yaml`.
+  `role-onboarding.ts`; hydration resets on userId change and never overwrites a tap).
+  Sort pill rows are the shared `components/SortPills` (44pt targets, "Sort by <label>"
+  a11y + selected state) — used by the team overview and team stats screens; don't
+  hand-roll new pill rows. Maestro coverage lives in `.maestro/team-detail.yaml`.
 
 #### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
