@@ -864,8 +864,25 @@ down until someone notices.
 **It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
 a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
 
-**Terraform is not in CI.** Any `infra/*.tf` change needs a manual `terraform apply` from `infra/`;
-merging the file alone changes nothing in AWS. Verify a service-level change landed with:
+**Terraform is not in CI, but merging a `.tf` file still deploys.** These are two separate
+mechanisms and it is easy to conflate them:
+
+- **Terraform is never applied by CI.** An `infra/*.tf` change needs a manual `terraform apply`
+  from `infra/` (S3 remote state, DynamoDB lock). Merging the file does *not* apply it.
+- **Merging it does trigger a full ECS deploy anyway.** `detect-changes` in `ci.yml` filters on
+  `{backend/**,infra/**,docker/**,.github/workflows/ci.yml}` minus `**/*.md`, so any non-markdown
+  file under `infra/` rebuilds the image and rolls a new task-definition revision — applying none
+  of your Terraform changes.
+
+So a `.tf`-only merge causes a production rollout that does *not* contain the infra change you
+made. Apply first, then commit, and expect the merge to redeploy. (A `terraform apply` on its own
+does **not** redeploy: `aws_ecs_service.app` has `lifecycle { ignore_changes = [task_definition] }`,
+per #53.)
+
+Note `Detect backend changes: skipping` on a **pull request** proves nothing about whether the
+merge will deploy — that job is gated on `github.event_name == 'push' && github.ref ==
+'refs/heads/main'`, so it skips on every PR regardless of paths. Read the path filter, not the PR
+check. Verify a service-level change landed with:
 `aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-api --query 'services[0].deploymentConfiguration'`
 
 ## Local Development Setup
