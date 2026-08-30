@@ -57,9 +57,15 @@ appId: com.bballtracker.mobile
 - tapOn: "I coach a team"
 - tapOn: "Continue"
 
+# Home, for a coach with nothing yet. Deliberately NOT "Your Teams": that
+# heading is gated on `teams.length > 0` (home.tsx), and having zero teams is
+# the entire point of this fixture. The empty state is a stronger assertion
+# anyway — "Create Team" only renders when `canCreateTeams(user)` is true, so
+# it also proves the role switch to COACH actually took effect.
 - extendedWaitUntil:
-    visible: "Your Teams"
+    visible: "No teams yet"
     timeout: 10000
+- assertVisible: "Create Team"
 
 # ---------------------------------------------------------------------------
 # Team 1 — no personal league exists yet, the backend provisions one
@@ -87,7 +93,8 @@ appId: com.bballtracker.mobile
     id: "team-name-input"
 - inputText: "Coach Onboarding Team"
 - hideKeyboard
-- tapOn: "Create"
+- tapOn:
+    id: "create-team-submit"
 
 # Lands on the team detail for the freshly provisioned team.
 - extendedWaitUntil:
@@ -146,7 +153,8 @@ appId: com.bballtracker.mobile
     id: "team-name-input"
 - inputText: "Coach Onboarding Team 2"
 - hideKeyboard
-- tapOn: "Create"
+- tapOn:
+    id: "create-team-submit"
 
 - extendedWaitUntil:
     visible: "Coach Onboarding Team 2"

@@ -35,7 +35,8 @@ appId: com.bballtracker.mobile
       text: "Create"
     direction: DOWN
     timeout: 10000
-- tapOn: "Create"
+- tapOn:
+    id: "create-team-submit"
 - assertVisible: "Test Team"
 # Create screen is replaced (not pushed under) the detail screen, so back
 # returns to the Teams list — never the spent create form.
