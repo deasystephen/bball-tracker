@@ -55,12 +55,18 @@ appId: com.bballtracker.mobile
 # seeded PLAYER (see seed.ts: every WorkOS sign-up starts as PLAYER, and #442's
 # AC is that the coach PICKS Coach), so she sits among the players. Scrolling
 # rather than assuming a position keeps this working if the fixture set grows.
+# Match the email, not the name: it is unique in the list, it is its own Text
+# node, and it cannot collide with a future fixture whose name also starts
+# with "Dana". visibilityPercentage is relaxed from 100 so a card that is
+# merely mostly on screen still counts.
 - scrollUntilVisible:
     element:
-      text: "Dana Whitfield.*"
+      text: "dana.whitfield@example.com"
     direction: DOWN
-    timeout: 10000
-- tapOn: "Dana Whitfield.*"
+    timeout: 20000
+    visibilityPercentage: 60
+    centerElement: true
+- tapOn: "dana.whitfield@example.com"
 
 # Role step. The fixture is seeded PLAYER on purpose (every WorkOS sign-up is
 # created as PLAYER), so this screen ALWAYS shows and picking Coach is a real

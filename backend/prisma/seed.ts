@@ -199,6 +199,18 @@ async function main() {
     console.log(`    Removed ${stalePersonalLeagues.count} personal league(s) from a previous run`);
   }
 
+  // ...and the managed players she rostered. Deleting her teams cascades the
+  // TeamMember rows but leaves the managed User behind, so without this the
+  // dev-login list grows by one account per E2E run. That is not cosmetic: it
+  // pushes Dana further down the list until `scrollUntilVisible` times out and
+  // the flow fails somewhere unrelated to what it tests.
+  const staleManagedPlayers = await prisma.user.deleteMany({
+    where: { managedById: coachDana.id, isManaged: true },
+  });
+  if (staleManagedPlayers.count > 0) {
+    console.log(`    Removed ${staleManagedPlayers.count} managed player(s) from a previous run`);
+  }
+
   // Players
   const playerData = [
     { email: 'steph.curry@example.com', name: 'Steph Curry' },
