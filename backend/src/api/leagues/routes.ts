@@ -64,7 +64,10 @@ router.get('/', async (req, res) => {
       );
     }
 
-    const result = await LeagueService.listLeagues(validationResult.data);
+    const result = await LeagueService.listLeagues(validationResult.data, {
+      id: req.user!.id,
+      role: req.user!.role,
+    });
 
     res.json({
       success: true,

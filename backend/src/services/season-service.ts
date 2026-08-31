@@ -6,7 +6,12 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
-import { isLeagueAdmin, isSystemAdmin } from '../utils/permissions';
+import {
+  isLeagueAdmin,
+  isSystemAdmin,
+  getReadableLeagueIds,
+  canReadLeague,
+} from '../utils/permissions';
 
 const LEAGUE_SUMMARY_SELECT = {
   id: true,
@@ -170,6 +175,13 @@ export class SeasonService {
       throw new NotFoundError('Season not found');
     }
 
+    // Same rule and the same deviation note as `LeagueService.getLeagueById`:
+    // there was no access check here at all. 404, not 403, so ids can't be
+    // probed.
+    if (!(await canReadLeague(userId, season.leagueId))) {
+      throw new NotFoundError('Season not found');
+    }
+
     const canManage = await isLeagueAdmin(userId, season.leagueId);
     if (!canManage) {
       return season;
@@ -191,24 +203,45 @@ export class SeasonService {
    * List seasons with filters
    * @param query Query parameters
    */
-  static async listSeasons(query: SeasonQueryParams): Promise<SeasonList> {
-    // Build where clause
-    const where: Prisma.SeasonWhereInput = {};
+  static async listSeasons(
+    query: SeasonQueryParams,
+    caller: { id: string; role: string }
+  ): Promise<SeasonList> {
+    // Scoped through the season's league (#443) — see `listLeagues` for the
+    // reasoning. Filters are ANDed with the access clause, and the same `where`
+    // feeds `count` and `findMany` so `total` is the scoped count.
+    //
+    // Deliberately WIDE: the id set means a member of one team sees every
+    // season of that league, not only the seasons their team plays in. That
+    // matches what `getLeagueById`'s public branch already returns.
+    const isAdmin = caller.role === 'ADMIN';
+    const conditions: Prisma.SeasonWhereInput[] = [];
 
     if (query.leagueId) {
-      where.leagueId = query.leagueId;
+      conditions.push({ leagueId: query.leagueId });
     }
 
     if (query.isActive !== undefined) {
-      where.isActive = query.isActive;
+      conditions.push({ isActive: query.isActive });
     }
 
     if (query.search) {
-      where.name = {
-        contains: query.search,
-        mode: 'insensitive',
-      };
+      conditions.push({ name: { contains: query.search, mode: 'insensitive' } });
     }
+
+    if (isAdmin) {
+      if (!query.includePersonal) {
+        conditions.push({ league: { personalOwnerId: null } });
+      }
+    } else {
+      const ids = await getReadableLeagueIds(caller.id);
+      if (ids.length === 0) {
+        return { seasons: [], total: 0, limit: query.limit, offset: query.offset };
+      }
+      conditions.push({ leagueId: { in: ids } });
+    }
+
+    const where: Prisma.SeasonWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
     // Get total count and seasons in parallel
     const [total, seasons] = await Promise.all([

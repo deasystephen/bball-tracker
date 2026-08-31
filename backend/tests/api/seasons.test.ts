@@ -250,7 +250,8 @@ describe('Seasons API', () => {
 
       expect(response.status).toBe(200);
       expect(mockSeasonService.listSeasons).toHaveBeenCalledWith(
-        expect.objectContaining({ leagueId: TEST_LEAGUE_ID_UUID })
+        expect.objectContaining({ leagueId: TEST_LEAGUE_ID_UUID }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'ADMIN' }
       );
     });
 
@@ -266,7 +267,8 @@ describe('Seasons API', () => {
 
       expect(response.status).toBe(200);
       expect(mockSeasonService.listSeasons).toHaveBeenCalledWith(
-        expect.objectContaining({ leagueId: TEST_LEAGUE_ID_CUSTOM })
+        expect.objectContaining({ leagueId: TEST_LEAGUE_ID_CUSTOM }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'ADMIN' }
       );
     });
 
@@ -282,7 +284,8 @@ describe('Seasons API', () => {
 
       expect(response.status).toBe(200);
       expect(mockSeasonService.listSeasons).toHaveBeenCalledWith(
-        expect.objectContaining({ isActive: true })
+        expect.objectContaining({ isActive: true }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'ADMIN' }
       );
     });
 
@@ -298,7 +301,8 @@ describe('Seasons API', () => {
 
       expect(response.status).toBe(200);
       expect(mockSeasonService.listSeasons).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 10, offset: 20 })
+        expect.objectContaining({ limit: 10, offset: 20 }),
+        { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'ADMIN' }
       );
     });
   });

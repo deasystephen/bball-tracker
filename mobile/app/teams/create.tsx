@@ -374,6 +374,10 @@ export default function CreateTeamScreen() {
               loading={createTeam.isPending}
               disabled={!name.trim() || (!usesPersonalLeague && !seasonId)}
               fullWidth
+              // Tapped by id in Maestro: the button label is `common.create`
+              // ("Create") while the screen header is `teams.create`
+              // ("Create Team"), so a text match on "Create" is ambiguous.
+              testID="create-team-submit"
             />
             <Button
               title={t('common.cancel')}

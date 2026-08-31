@@ -1,5 +1,19 @@
 appId: com.bballtracker.mobile
 ---
+# !! RE-SEED BEFORE EVERY RUN:  cd backend && npx prisma db seed  !!
+#
+# `clearState: true` wipes AsyncStorage, NOT the database. This flow changes
+# Dana's role to COACH and creates teams for her, so a second run without a
+# re-seed skips the role step (needsRoleChoice is false for a non-PLAYER) and
+# fails at the very first assertion. `npx prisma db seed` is the reset: it
+# puts her back to PLAYER and deletes her teams and personal league.
+#
+# The role step is asserted HARD rather than wrapped in a conditional
+# `runFlow`. A conditional would make the flow re-runnable, but it would also
+# silently skip the first step of the journey #442 is measured by — and
+# silently skipping is exactly how this flow shipped untested in the first
+# place.
+#
 # !! THIS FLOW REQUIRES BOTH #442 AND #443 TO BE MERGED. !!
 #
 # It asserts the league/season disclosure is absent, which depends on
@@ -41,12 +55,27 @@ appId: com.bballtracker.mobile
 # seeded PLAYER (see seed.ts: every WorkOS sign-up starts as PLAYER, and #442's
 # AC is that the coach PICKS Coach), so she sits among the players. Scrolling
 # rather than assuming a position keeps this working if the fixture set grows.
+# Maestro `text` is a FULL-MATCH regex against the element's accessibility
+# text, and a dev-user card is ONE element whose label concatenates its fields:
+#
+#     "Dana Whitfield, dana.whitfield@example.com, PLAYER"
+#
+# so a bare "dana.whitfield@example.com" matches nothing. Hence the leading and
+# trailing `.*` — the same reason every selector in these flows carries one
+# (`"Frank Vogel.*"` and friends). Keyed on the email because it is unique and
+# cannot collide with a future fixture whose name also begins with "Dana".
+#
+# visibilityPercentage is relaxed from the default 100: the card sits at the
+# bottom edge mid-scroll, and requiring it to be *fully* on screen was timing
+# out while it was plainly visible.
 - scrollUntilVisible:
     element:
-      text: "Dana Whitfield.*"
+      text: ".*dana.whitfield@example.com.*"
     direction: DOWN
-    timeout: 10000
-- tapOn: "Dana Whitfield.*"
+    timeout: 20000
+    visibilityPercentage: 60
+    centerElement: true
+- tapOn: ".*dana.whitfield@example.com.*"
 
 # Role step. The fixture is seeded PLAYER on purpose (every WorkOS sign-up is
 # created as PLAYER), so this screen ALWAYS shows and picking Coach is a real
@@ -57,9 +86,15 @@ appId: com.bballtracker.mobile
 - tapOn: "I coach a team"
 - tapOn: "Continue"
 
+# Home, for a coach with nothing yet. Deliberately NOT "Your Teams": that
+# heading is gated on `teams.length > 0` (home.tsx), and having zero teams is
+# the entire point of this fixture. The empty state is a stronger assertion
+# anyway — "Create Team" only renders when `canCreateTeams(user)` is true, so
+# it also proves the role switch to COACH actually took effect.
 - extendedWaitUntil:
-    visible: "Your Teams"
+    visible: "No teams yet"
     timeout: 10000
+- assertVisible: "Create Team"
 
 # ---------------------------------------------------------------------------
 # Team 1 — no personal league exists yet, the backend provisions one
@@ -85,13 +120,14 @@ appId: com.bballtracker.mobile
 # inputText has no `id` key in Maestro — focus the field first, then type.
 - tapOn:
     id: "team-name-input"
-- inputText: "Coach Onboarding Team"
+- inputText: "Fixture One"
 - hideKeyboard
-- tapOn: "Create"
+- tapOn:
+    id: "create-team-submit"
 
 # Lands on the team detail for the freshly provisioned team.
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team"
+    visible: "Fixture One"
     timeout: 10000
 - assertVisible: "Players"
 
@@ -118,20 +154,41 @@ appId: com.bballtracker.mobile
     visible: "Jordan Fixture status: Not invited"
     timeout: 10000
 
-# Back out to the Teams tab. The roster screen's back arrow carries no
-# accessibility label, so use the platform back gesture; team detail's does.
-- back
+# Get back to the Teams tab by deep link.
+#
+# Three other routes were tried and each is blocked:
+#   - `tapOn: "Teams tab"` — the root layout is a Stack with (tabs) as ONE
+#     screen, and Roster and team detail are pushed ABOVE it, so neither has a
+#     tab bar to tap.
+#   - popping twice — the second pop lands on team detail's back arrow, a
+#     no-op after `router.replace` (#464). The GA gate must not hang on a bug
+#     unrelated to the funnel it measures.
+#   - `launchApp` — verified on device: a cold start drops the session and
+#     lands on the sign-in screen, so the flow cannot continue.
+#
+# openLink navigates the running app without touching the stack or the
+# session. Same mechanism auth-callback.yaml already relies on.
+- openLink: "bball-tracker://teams"
+# iOS puts up a system confirmation ("Open in <app>?") before handing a
+# custom-scheme URL to an app — even the app's own scheme — and that modal
+# blocks every subsequent command. Conditional because the simulator may
+# remember the choice, so it is not guaranteed on later opens. This is a
+# platform artifact, not app behaviour: nothing about the product is asserted
+# here, the dialog is only being cleared out of the way.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - extendedWaitUntil:
-    visible: "Go back"
-    timeout: 10000
-- tapOn: "Go back"
-- assertVisible: "Teams"
+    visible: "Teams"
+    timeout: 15000
 
 # ---------------------------------------------------------------------------
 # Team 2 — the personal league now exists and must still be invisible
 # ---------------------------------------------------------------------------
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team"
+    visible: "Fixture One"
     timeout: 10000
 - tapOn: "Create [Nn]ew [Tt]eam"
 - assertVisible:
@@ -145,11 +202,12 @@ appId: com.bballtracker.mobile
 
 - tapOn:
     id: "team-name-input"
-- inputText: "Coach Onboarding Team 2"
+- inputText: "Fixture Two"
 - hideKeyboard
-- tapOn: "Create"
+- tapOn:
+    id: "create-team-submit"
 
 - extendedWaitUntil:
-    visible: "Coach Onboarding Team 2"
+    visible: "Fixture Two"
     timeout: 10000
 - assertVisible: "Players"

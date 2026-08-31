@@ -447,12 +447,36 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
 `canAccessTeam`, `getTeamPermissions`). Rules enforced in the services (audit fix plan
 `docs/plans/audit-fix-plan-2026-08-22.md`, lane B):
 
-- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): `getLeagueById(id, userId)` /
-  `getSeasonById(id, userId)` return the **full detail** (league admins with emails, team staff with
-  emails, rosters) only to system ADMINs and admins of that league. Everyone else gets league/season
-  metadata plus team `{ id, name }` — no staff, no member lists, no emails. Authorization denials throw
-  `ForbiddenError` (**403**, not 400); the league/season routes map any `AppError` to its `statusCode`.
-  `PATCH /leagues/:id` enforces the same name-uniqueness rule as create (400 on duplicate).
+- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): **both the list and the detail
+  endpoints are caller-scoped (#443).**
+  - `GET /leagues` / `GET /seasons` AND a caller-access clause into the `where`. The clause is an id
+    set from `utils/permissions.ts#getReadableLeagueIds(userId)` = league admin OR personal owner OR
+    staff/member of a team in it OR guardian of such a member. The **same `where` object feeds `count`
+    and `findMany`**, so `total` is the scoped count and never the global one, and `search` /
+    `leagueId` / `isActive` are ANDed alongside it, never substituted for it — search must not be a
+    scoping bypass. An empty id set short-circuits to `{ total: 0 }` with no query. System ADMINs are
+    unscoped, except that personal leagues (#442) are excluded by default so admin listings do not
+    accumulate one row per coach; `?includePersonal=true` opts back in.
+  - The id set is resolved from the **Team** side (`team.findMany` filtered by the shared
+    `teamAccessWhere`, selecting `season.leagueId`), not by scanning `League` with nested `some`
+    clauses: after #442 the League table grows one row per coach, while this query is bounded by the
+    caller's own teams. There is deliberately **no cap** — truncating an authorization set would make
+    `total` lie.
+  - `getLeagueById(id, userId)` / `getSeasonById(id, userId)` **404 for a caller with no affiliation**
+    (`canReadLeague`), 404 rather than 403 so ids cannot be probed, matching
+    `PlayerService.getPlayerById`. Before #443 these performed *no* access check at all: `isLeagueAdmin`
+    only chose which `include` to use, so any authenticated caller who knew an id got every season and
+    team name — and the id is not secret, since `TEAM_INCLUDE` hands it to every member and guardian.
+    An affiliated non-admin still gets the stripped payload (metadata plus team `{ id, name }`); full
+    detail with emails and rosters stays limited to system ADMINs and admins of that league.
+  - Authorization denials elsewhere throw `ForbiddenError` (**403**, not 400); the league/season routes
+    map any `AppError` to its `statusCode`. `PATCH /leagues/:id` enforces the same name-uniqueness rule
+    as create (400 on duplicate).
+  - **Tested against a real database.** `backend/tests/integration/league-access.db.test.ts` unmocks
+    Prisma and runs against Postgres (CI already provides one). It uses one fixture user per access
+    branch, each qualifying through exactly one — a negative-only test cannot catch a *dropped* branch,
+    which is verified by mutation: removing the `members` branch fails only the positive test while
+    every "sees none of org B" assertion stays green.
 - **League admins (decision 3)**: `POST /leagues/:id/admins { userId }` (201, `userId` must be a UUID)
   and `DELETE /leagues/:id/admins/:userId` (404 if not an admin) are **system-ADMIN-only** — an existing
   league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
@@ -529,8 +553,9 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
   `.maestro/coach-onboarding.yaml` exercises the real funnel including picking Coach (every WorkOS
   sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, since the
   FREE-tier cap would otherwise turn a re-run into a 402.
-- **Still open:** `GET /leagues` and `GET /seasons` remain globally unscoped (#443) — that lands next and
-  is what makes the picker show only the caller's own leagues.
+- The picker only ever renders the name-only path once #443's list scoping is in: `areAllLeaguesPersonal`
+  reads `GET /leagues`, so while that list is global a new coach still sees a real league. #442 and #443
+  are therefore one release in two commits, and `.maestro/coach-onboarding.yaml` is the gate for the pair.
 
 - **Games** (`game-service.ts`): `updateGame` runs `canAccessTeam` **before** any field-specific branch
   (403 `You do not have access to this game` for unaffiliated users, regardless of body) and rejects a
@@ -860,6 +885,36 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
 - Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
 - When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
+- **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**
+  A composite row is ONE element whose label concatenates its fields with `", "` — a dev-user card
+  reads `"Dana Whitfield, dana.whitfield@example.com, PLAYER"`, so `text: "dana.whitfield@example.com"`
+  matches **nothing** while `".*dana.whitfield@example.com.*"` matches. That is why selectors here
+  carry a trailing `.*` (`"Frank Vogel.*"`, `"Downtown Youth Basketball League.*"`). Do not add `.*`
+  reflexively though: it widens the match, and `"Teams.*"` would also hit `"Teams tab"`. Exact strings
+  are right for standalone labels (`"Roster"`, `"No teams yet"`); wildcards are for rows that
+  concatenate.
+- **`openLink` triggers an iOS system dialog.** Opening a custom scheme puts up
+  *Open in "<app>"?* (Cancel / Open) — even for the app's own scheme — and that modal blocks every
+  subsequent command, so the flow fails on whatever comes next with no hint of the cause. Follow every
+  `openLink` with a conditional `runFlow: { when: { visible: "Open" }, commands: [ tapOn: "Open" ] }`;
+  conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml` does
+  this; `.maestro/auth-callback.yaml` does **not** and is expected to fail for this reason.
+- There is no tab bar on pushed routes. `app/_layout.tsx` is a `Stack` with `(tabs)` as one screen, so
+  `teams/[id]`, its roster, `games/[id]` and friends render **above** the tabs — `tapOn: "Teams tab"`
+  cannot work there. Reaching a tab from a pushed screen means popping back, or a deep link.
+- `launchApp` mid-flow drops the session and lands on the sign-in screen. Do not use it to reset
+  navigation.
+- Prefer `testID` over text whenever a label is ambiguous. The create-team submit button is
+  `common.create` ("Create") while the screen header is `teams.create` ("Create Team"), so a text tap
+  on `"Create"` is ambiguous — it taps `id: create-team-submit` instead.
+- `visibilityPercentage` defaults to 100 on `scrollUntilVisible`, which fails on a row resting at the
+  screen edge even though it is plainly readable. Relax it (60 is fine) for list hunting.
+- **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
+  role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
+  must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts
+  Dana back to `PLAYER` and deletes her teams, personal league and managed players. Miss one and the
+  fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
+  step timed out.
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
 

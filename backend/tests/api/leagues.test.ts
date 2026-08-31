@@ -248,8 +248,11 @@ describe('Leagues API', () => {
         .query({ search: 'Spring' });
 
       expect(response.status).toBe(200);
+      // #443: the route now passes the authenticated caller so the service can
+      // scope the list.
       expect(mockLeagueService.listLeagues).toHaveBeenCalledWith(
-        expect.objectContaining({ search: 'Spring' })
+        expect.objectContaining({ search: 'Spring' }),
+        { id: 'test-user-id', role: 'COACH' }
       );
     });
 
