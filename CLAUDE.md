@@ -893,6 +893,17 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   reflexively though: it widens the match, and `"Teams.*"` would also hit `"Teams tab"`. Exact strings
   are right for standalone labels (`"Roster"`, `"No teams yet"`); wildcards are for rows that
   concatenate.
+- **`openLink` triggers an iOS system dialog.** Opening a custom scheme puts up
+  *Open in "<app>"?* (Cancel / Open) — even for the app's own scheme — and that modal blocks every
+  subsequent command, so the flow fails on whatever comes next with no hint of the cause. Follow every
+  `openLink` with a conditional `runFlow: { when: { visible: "Open" }, commands: [ tapOn: "Open" ] }`;
+  conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml` does
+  this; `.maestro/auth-callback.yaml` does **not** and is expected to fail for this reason.
+- There is no tab bar on pushed routes. `app/_layout.tsx` is a `Stack` with `(tabs)` as one screen, so
+  `teams/[id]`, its roster, `games/[id]` and friends render **above** the tabs — `tapOn: "Teams tab"`
+  cannot work there. Reaching a tab from a pushed screen means popping back, or a deep link.
+- `launchApp` mid-flow drops the session and lands on the sign-in screen. Do not use it to reset
+  navigation.
 - Prefer `testID` over text whenever a label is ambiguous. The create-team submit button is
   `common.create` ("Create") while the screen header is `teams.create` ("Create Team"), so a text tap
   on `"Create"` is ambiguous — it taps `id: create-team-submit` instead.

@@ -169,6 +169,17 @@ appId: com.bballtracker.mobile
 # openLink navigates the running app without touching the stack or the
 # session. Same mechanism auth-callback.yaml already relies on.
 - openLink: "bball-tracker://teams"
+# iOS puts up a system confirmation ("Open in <app>?") before handing a
+# custom-scheme URL to an app — even the app's own scheme — and that modal
+# blocks every subsequent command. Conditional because the simulator may
+# remember the choice, so it is not guaranteed on later opens. This is a
+# platform artifact, not app behaviour: nothing about the product is asserted
+# here, the dialog is only being cleared out of the way.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 - extendedWaitUntil:
     visible: "Teams"
     timeout: 15000
