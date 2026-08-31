@@ -885,6 +885,25 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
 - Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
 - When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
+- **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**
+  A composite row is ONE element whose label concatenates its fields with `", "` — a dev-user card
+  reads `"Dana Whitfield, dana.whitfield@example.com, PLAYER"`, so `text: "dana.whitfield@example.com"`
+  matches **nothing** while `".*dana.whitfield@example.com.*"` matches. That is why selectors here
+  carry a trailing `.*` (`"Frank Vogel.*"`, `"Downtown Youth Basketball League.*"`). Do not add `.*`
+  reflexively though: it widens the match, and `"Teams.*"` would also hit `"Teams tab"`. Exact strings
+  are right for standalone labels (`"Roster"`, `"No teams yet"`); wildcards are for rows that
+  concatenate.
+- Prefer `testID` over text whenever a label is ambiguous. The create-team submit button is
+  `common.create` ("Create") while the screen header is `teams.create` ("Create Team"), so a text tap
+  on `"Create"` is ambiguous — it taps `id: create-team-submit` instead.
+- `visibilityPercentage` defaults to 100 on `scrollUntilVisible`, which fails on a row resting at the
+  screen edge even though it is plainly readable. Relax it (60 is fine) for list hunting.
+- **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
+  role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
+  must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts
+  Dana back to `PLAYER` and deletes her teams, personal league and managed players. Miss one and the
+  fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
+  step timed out.
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
 
