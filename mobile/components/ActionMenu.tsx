@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Modal, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { Modal, TouchableOpacity, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
@@ -31,11 +31,18 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityLabel="Close menu"
-      >
+      {/* The backdrop and the sheet MUST be siblings, never parent/child: a
+          Pressable with an accessibilityLabel becomes a single accessibility
+          element on iOS and swallows its entire subtree — with the sheet
+          nested inside, VoiceOver (and Maestro) saw one "Close menu" element
+          and none of the menu items. */}
+      <View style={styles.container}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close menu"
+        />
         <Pressable
           style={[
             styles.sheet,
@@ -44,8 +51,12 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
               paddingBottom: insets.bottom + spacing.md,
             },
           ]}
-          // Swallow taps inside the sheet so they don't close the menu
+          // Claim taps inside the sheet: an unhandled touch would fall
+          // through RN hit-testing to the backdrop sibling and close the
+          // menu. accessible={false} keeps this wrapper from grouping the
+          // items the way the old nested backdrop did.
           onPress={() => undefined}
+          accessible={false}
         >
           <ThemedText variant="h4" style={styles.title}>
             {title}
@@ -78,16 +89,19 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
             <ThemedText variant="bodyBold">Close</ThemedText>
           </TouchableOpacity>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  container: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   sheet: {
     borderTopLeftRadius: borderRadius.lg,
