@@ -39,12 +39,9 @@ appId: com.bballtracker.mobile
     id: "create-team-submit"
 - assertVisible: "Test Team"
 # Create screen is replaced (not pushed under) the detail screen, so back
-# returns to the Teams list — never the spent create form.
-#
-# KNOWN FAILING: these last three steps fail today. The back arrow is a no-op
-# after `router.replace` — #421 shipped the replace and this assertion in the
-# same commit and the assertion was never run. Tracked in #464, which owns the
-# diagnosis and fix. Everything above this line passes.
+# returns to the Teams list — never the spent create form. The success toast
+# briefly covers the hero back arrow; since #464 toasts pass taps through, so
+# this tap works no matter where it lands inside the toast's 3s lifetime.
 - tapOn: "Go back"
 - assertVisible: "Create new team"
 - assertNotVisible:

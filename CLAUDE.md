@@ -297,6 +297,10 @@ never inline a role check in a screen:
 - Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
+  Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the
+  column overlays the top-left hero back arrow and top-right hero actions, and an interactive card swallowed
+  taps meant for them for its whole 3s lifetime (#464 — surfaced as "back is a no-op after creating a team").
+  Don't add touch handlers to a toast; anything tappable belongs elsewhere.
 
 ### Socket.io (Live Game Broadcast)
 

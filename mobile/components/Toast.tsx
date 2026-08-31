@@ -1,5 +1,10 @@
 /**
- * Toast notification system with slide-in animation and swipe-to-dismiss
+ * Toast notification system with slide-in animation and auto-dismiss.
+ *
+ * Toasts are deliberately non-interactive (`pointerEvents="none"`): the stack
+ * renders over the top of the screen, where it covers hero back/edit/delete
+ * controls, and an interactive card swallows taps meant for them for its whole
+ * 3s lifetime (#464). Taps must pass through; dismissal is time-based only.
  */
 
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
@@ -15,10 +20,6 @@ import Animated, {
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
-import {
-  Gesture,
-  GestureDetector,
-} from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
@@ -67,7 +68,6 @@ function ToastItem({
 }) {
   const { colors } = useTheme();
   const translateY = useSharedValue(-100);
-  const translateX = useSharedValue(0);
   const opacity = useSharedValue(0);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -112,69 +112,44 @@ function ToastItem({
     };
   }, [dismiss, toast.duration, translateY, opacity]);
 
-  const panGesture = Gesture.Pan()
-    .onUpdate((event) => {
-      if (event.translationY < 0) {
-        translateY.set(event.translationY);
-      }
-      translateX.set(event.translationX);
-    })
-    .onEnd((event) => {
-      if (event.translationY < -50 || Math.abs(event.translationX) > 100) {
-        translateY.set(withTiming(-200, { duration: 200 }));
-        opacity.set(
-          withTiming(0, { duration: 200 }, () => {
-            runOnJS(onDismiss)(toast.id);
-          })
-        );
-      } else {
-        translateY.set(withTiming(0, { duration: 200 }));
-        translateX.set(withTiming(0, { duration: 200 }));
-      }
-    });
-
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: translateY.value },
-      { translateX: translateX.value },
-    ],
+    transform: [{ translateY: translateY.value }],
     opacity: opacity.value,
   }));
 
   const toastColor = getToastColor();
 
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View
-        testID={`toast-${toast.type}`}
-        accessibilityRole="alert"
+    <Animated.View
+      testID={`toast-${toast.type}`}
+      accessibilityRole="alert"
+      pointerEvents="none"
+      style={[
+        styles.toast,
+        {
+          backgroundColor: colors.card,
+          borderLeftColor: toastColor,
+          ...shadows.lg,
+        },
+        animatedStyle,
+      ]}
+    >
+      <Ionicons
+        name={TOAST_ICON[toast.type]}
+        size={22}
+        color={toastColor}
+        style={styles.icon}
+      />
+      <Text
         style={[
-          styles.toast,
-          {
-            backgroundColor: colors.card,
-            borderLeftColor: toastColor,
-            ...shadows.lg,
-          },
-          animatedStyle,
+          styles.message,
+          { color: colors.text },
         ]}
+        numberOfLines={2}
       >
-        <Ionicons
-          name={TOAST_ICON[toast.type]}
-          size={22}
-          color={toastColor}
-          style={styles.icon}
-        />
-        <Text
-          style={[
-            styles.message,
-            { color: colors.text },
-          ]}
-          numberOfLines={2}
-        >
-          {toast.message}
-        </Text>
-      </Animated.View>
-    </GestureDetector>
+        {toast.message}
+      </Text>
+    </Animated.View>
   );
 }
 

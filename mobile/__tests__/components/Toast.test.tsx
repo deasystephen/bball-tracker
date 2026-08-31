@@ -1,6 +1,8 @@
 /**
  * Tests for the Toast provider — concurrent toasts must stack (all visible,
- * in order) instead of overlapping at the same offset (audit #82).
+ * in order) instead of overlapping at the same offset (audit #82), and the
+ * whole stack must be transparent to touches so it never blocks the nav
+ * controls it renders over (#464).
  */
 
 import React from 'react';
@@ -8,16 +10,6 @@ import { Text, TouchableOpacity } from 'react-native';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 import { ToastProvider, useToast, MAX_VISIBLE_TOASTS } from '../../components/Toast';
-
-jest.mock('react-native-gesture-handler', () => ({
-  Gesture: {
-    Pan: () => {
-      const g = { onUpdate: () => g, onEnd: () => g };
-      return g;
-    },
-  },
-  GestureDetector: ({ children }: { children: unknown }) => children,
-}));
 
 function Trigger({ messages }: { messages: string[] }) {
   const { showToast } = useToast();
@@ -74,6 +66,24 @@ describe('ToastProvider', () => {
     expect(getAllByTestId('toast-info')).toHaveLength(MAX_VISIBLE_TOASTS);
     expect(queryByText('one')).toBeNull();
     expect(queryByText('five')).toBeTruthy();
+  });
+
+  it('toast cards pass touches through (pointerEvents none, #464)', () => {
+    // The stack renders over hero back/edit/delete controls; an interactive
+    // card swallows taps meant for them for its whole 3s lifetime.
+    const { getByTestId, getAllByTestId } = render(
+      <ToastProvider>
+        <Trigger messages={['Team created successfully']} />
+      </ToastProvider>
+    );
+
+    act(() => {
+      fireEvent.press(getByTestId('fire'));
+    });
+
+    for (const node of getAllByTestId('toast-info')) {
+      expect(node.props.pointerEvents).toBe('none');
+    }
   });
 
   it('useToast throws outside a provider', () => {
