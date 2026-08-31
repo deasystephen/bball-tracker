@@ -154,26 +154,24 @@ appId: com.bballtracker.mobile
     visible: "Jordan Fixture status: Not invited"
     timeout: 10000
 
-# Get back to the tabs by relaunching, NOT by navigating back.
+# Get back to the Teams tab by deep link.
 #
-# Neither the Roster screen nor team detail is inside the (tabs) navigator, so
-# there is no tab bar to tap on either of them — both are pushed routes. And
-# popping twice would land on team detail's back arrow, which is a no-op after
-# `router.replace` (#464): the GA gate must not hang on a bug unrelated to the
-# funnel it measures. Back-arrow behaviour is create-team.yaml's assertion.
+# Three other routes were tried and each is blocked:
+#   - `tapOn: "Teams tab"` — the root layout is a Stack with (tabs) as ONE
+#     screen, and Roster and team detail are pushed ABOVE it, so neither has a
+#     tab bar to tap.
+#   - popping twice — the second pop lands on team detail's back arrow, a
+#     no-op after `router.replace` (#464). The GA gate must not hang on a bug
+#     unrelated to the funnel it measures.
+#   - `launchApp` — verified on device: a cold start drops the session and
+#     lands on the sign-in screen, so the flow cannot continue.
 #
-# `launchApp` without clearState keeps the session (tokens live in SecureStore),
-# so cold-start routing lands on Home with the tab bar present. It also
-# incidentally proves the session survives a restart.
-- launchApp
-# Wait on the section heading, not a team name: cards use numberOfLines={1}
-# (teams.tsx / home.tsx) and "Your Teams" only renders once she has a team, so
-# it doubles as proof the first team persisted across the restart.
+# openLink navigates the running app without touching the stack or the
+# session. Same mechanism auth-callback.yaml already relies on.
+- openLink: "bball-tracker://teams"
 - extendedWaitUntil:
-    visible: "Your Teams"
+    visible: "Teams"
     timeout: 15000
-- tapOn: "Teams tab"
-- assertVisible: "Teams"
 
 # ---------------------------------------------------------------------------
 # Team 2 — the personal league now exists and must still be invisible
