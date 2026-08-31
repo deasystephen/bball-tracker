@@ -102,6 +102,7 @@ model User {
   sentInvitations            TeamInvitation[]     @relation("SentInvitations")
   receivedInvitations        TeamInvitation[]     @relation("PlayerInvitations")
   leagueAdmins               LeagueAdmin[]
+  personalLeague             League?
   guardiansAsParent          Guardian[]           @relation("GuardianParent")
   guardiansAsChild           Guardian[]           @relation("GuardianChild")
   guardianInvitationsAsChild GuardianInvitation[] @relation("GuardianInvitationChild")
@@ -157,13 +158,21 @@ model Guardian {
 // =============================================================================
 
 model League {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id   String @id @default(uuid())
+  name String
+  // Set when this league is a coach's auto-provisioned personal container
+  // (#442 self-serve team creation). `@unique` gives one personal league per
+  // user and is what makes the find-or-create in `TeamService.createTeam`
+  // safe. `SetNull` rather than `Cascade`: deleting a user must never cascade
+  // into seasons, teams and games. Never expose this column in an API payload
+  // -- the LEAGUE_* selects omit it deliberately.
+  personalOwnerId String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  seasons Season[]
-  admins  LeagueAdmin[]
+  seasons       Season[]
+  admins        LeagueAdmin[]
+  personalOwner User?         @relation(fields: [personalOwnerId], references: [id], onDelete: SetNull)
 
   @@index([name])
 }

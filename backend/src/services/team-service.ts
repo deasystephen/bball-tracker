@@ -41,6 +41,8 @@ import {
   assignTeamRole,
   canManageStaff,
   countDistinctStaffTeams,
+  teamAccessWhere,
+  canWriteLeague,
 } from '../utils/permissions';
 
 const USER_SUMMARY_SELECT = {
@@ -77,7 +79,7 @@ export const ROSTER_MEMBERS_ORDER_BY = [
 const TEAM_INCLUDE = {
   season: {
     include: {
-      league: true,
+      league: { omit: { personalOwnerId: true } },
     },
   },
   staff: { include: TEAM_STAFF_INCLUDE },
@@ -212,37 +214,139 @@ export interface TeamList {
   offset: number;
 }
 
+/**
+ * Resolve (creating if needed) the caller's personal league and its
+ * current-year season, for a team create that supplied no `seasonId` (#442).
+ *
+ * WHY THERE IS NO P2002 RETRY. This runs inside `createTeam`'s transaction,
+ * AFTER the `SELECT ... FOR UPDATE` on the caller's own User row. That lock is
+ * what makes it safe: `League.personalOwnerId` is unique per user and the
+ * season lives only inside that user's own league, so the only writer that can
+ * ever contend for either constraint is the same `userId`, and it is
+ * serialized. Do NOT remove the lock on the belief that a retry covers this --
+ * there is no retry. (A system ADMIN creating a same-named season in someone's
+ * personal league via `POST /seasons` is the one theoretical contender; it is
+ * not defended against.)
+ *
+ * Each `update` writes the unique key back to itself. A non-empty `update` is
+ * what gives Prisma a chance at the native `INSERT ... ON CONFLICT` path
+ * (prisma/prisma#9972), and writing any other field would clobber a later
+ * rename of the coach's own league -- the ability to rename being the whole
+ * reason the owner gets a `LeagueAdmin` row.
+ */
+async function resolvePersonalSeasonId(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  userName: string
+): Promise<string> {
+  const league = await tx.league.upsert({
+    where: { personalOwnerId: userId },
+    create: { name: `${userName}'s Teams`, personalOwnerId: userId },
+    update: { personalOwnerId: userId },
+    select: { id: true },
+  });
+
+  // Not nested inside the league upsert above: a nested write would disable
+  // the native ON CONFLICT path. The owner gets a real LeagueAdmin row so they
+  // can rename the league and add next year's season; it is filtered out of
+  // the `leagueAdminOf` session payload so no admin UI appears.
+  await tx.leagueAdmin.upsert({
+    where: { leagueId_userId: { leagueId: league.id, userId } },
+    create: { leagueId: league.id, userId },
+    update: { userId },
+    select: { id: true },
+  });
+
+  // Named for the year of creation. This does NOT roll over on its own --
+  // carrying a roster into a new season is #461.
+  const name = String(new Date().getFullYear());
+  const season = await tx.season.upsert({
+    where: { leagueId_name: { leagueId: league.id, name } },
+    // Explicit rather than relying on the schema default: the mobile season
+    // picker filters on isActive.
+    create: { leagueId: league.id, name, isActive: true },
+    update: { name },
+    select: { id: true },
+  });
+
+  // The #442 signal. Note "resolved", not "provisioned": `upsert` cannot
+  // distinguish a create from a reuse, so this fires on EVERY seasonId-less
+  // create, not only the first. The metric is therefore distinct `userId` over
+  // a window ("how many coaches self-served"), not a raw event count.
+  logger.info('Resolved personal league for team create', {
+    userId,
+    leagueId: league.id,
+    seasonId: season.id,
+  });
+
+  return season.id;
+}
+
 export class TeamService {
   /**
-   * Create a new team
-   * @param data Team creation data
-   * @param userId ID of the user creating the team (will be assigned as Head Coach)
+   * Create a new team.
+   *
+   * Authorization is TWO independent checks (#442):
+   *
+   *   WHO  -- may this caller create a team at all?  ADMIN / COACH / any
+   *           league admin. Unchanged from the pre-#442 rule.
+   *   WHERE -- may they create it in THIS league?    Only when a seasonId is
+   *           supplied; see `canWriteLeague`.
+   *
+   * They are separate because the no-seasonId path has no target league to
+   * check. Folding WHO into WHERE would leave that path ungated, and any
+   * authenticated PLAYER or guardian could create a team and become its Head
+   * Coach with all five permission flags.
+   *
+   * @param data Team creation data (`seasonId` optional -- omitted means "my
+   *   own teams", which auto-provisions a personal league)
+   * @param userId ID of the user creating the team (assigned as Head Coach)
    */
   static async createTeam(
     data: CreateTeamInput,
     userId: string
   ): Promise<TeamWithRelations | null> {
-    // Verify season exists
-    const season = await prisma.season.findUnique({
-      where: { id: data.seasonId },
-      include: { league: true },
-    });
-
-    if (!season) {
-      throw new NotFoundError('Season not found');
-    }
-
-    // Check if user can create teams in this league (league admin or system admin)
-    const canCreate = await isLeagueAdmin(userId, season.leagueId);
-
-    // For now, also allow any coach to create a team
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, subscriptionTier: true, subscriptionExpiresAt: true },
+      select: { name: true, role: true, subscriptionTier: true, subscriptionExpiresAt: true },
     });
 
-    if (!canCreate && user?.role !== 'COACH') {
-      throw new ForbiddenError('You do not have permission to create teams in this league');
+    // WHO. A missing user falls through to the same Forbidden. The
+    // league-admin lookup is last so the two common cases (ADMIN, COACH) cost
+    // no extra query.
+    if (user?.role !== 'ADMIN' && user?.role !== 'COACH') {
+      const administersALeague =
+        !!user && (await prisma.leagueAdmin.count({ where: { userId } })) > 0;
+      if (!administersALeague) {
+        throw new ForbiddenError('You do not have permission to create teams');
+      }
+    }
+
+    // WHERE. Never use the READ set here: a player or guardian rostered on a
+    // coach's team is a *member* of a team in that coach's personal league, so
+    // the read set would let them plant a team inside someone else's
+    // container.
+    if (data.seasonId) {
+      const season = await prisma.season.findUnique({
+        where: { id: data.seasonId },
+        select: { id: true, leagueId: true },
+      });
+
+      if (!season) {
+        throw new NotFoundError('Season not found');
+      }
+
+      if (!(await canWriteLeague(userId, season.leagueId))) {
+        // The tightened write scope is this change's main regression risk, so a
+        // denial is logged: a coach wrongly locked out would otherwise be
+        // completely silent.
+        logger.warn('Team create denied: caller cannot write to that league', {
+          userId,
+          seasonId: data.seasonId,
+          leagueId: season.leagueId,
+        });
+        throw new ForbiddenError('You do not have permission to create teams in this league');
+      }
     }
 
     // Team + default roles + Head Coach staff row are created atomically so a
@@ -251,6 +355,9 @@ export class TeamService {
     // behind a row lock on the user, so concurrent creates serialize and the
     // check-then-act race in the route middleware can't exceed the cap
     // (audit #49). Admins bypass; unlimited tiers skip the count.
+    //
+    // Personal-league provisioning happens inside this same transaction and
+    // AFTER the cap check, so a capped user never leaves a stray league behind.
     const team = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
 
@@ -271,10 +378,13 @@ export class TeamService {
         }
       }
 
+      const seasonId =
+        data.seasonId ?? (await resolvePersonalSeasonId(tx, userId, user?.name ?? 'My'));
+
       const created = await tx.team.create({
         data: {
           name: data.name,
-          seasonId: data.seasonId,
+          seasonId,
           chatLink: data.chatLink,
         },
       });
@@ -369,14 +479,9 @@ export class TeamService {
       // Guardians (PARENT role) see the teams their children play on — the
       // same read set `canAccessTeam` grants (docs/plans/parent-role-spec.md).
       const childIds = await GuardianService.getChildIds(userId);
-      conditions.push({
-        OR: [
-          { staff: { some: { userId } } },
-          { members: { some: { playerId: userId } } },
-          { season: { league: { admins: { some: { userId } } } } },
-          ...(childIds.length > 0 ? [{ members: { some: { playerId: { in: childIds } } } }] : []),
-        ],
-      });
+      // Shared with the league-access predicates in `utils/permissions` so the
+      // two definitions of "teams this caller may see" can never drift.
+      conditions.push(teamAccessWhere(userId, childIds));
     }
 
     const where: Prisma.TeamWhereInput = conditions.length > 0 ? { AND: conditions } : {};

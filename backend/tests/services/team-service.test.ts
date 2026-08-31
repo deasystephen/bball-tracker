@@ -44,6 +44,10 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      // Since #442 a COACH may only create INTO a league they are affiliated
+      // with. `team.count > 0` is `isStaffInLeague` finding a staff row on some
+      // team in that league. Before #442 any COACH could write into any league.
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
       (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
@@ -93,6 +97,9 @@ describe('TeamService', () => {
         (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, league, teams: [] });
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        // Affiliated with the target league, so the #442 WHERE gate passes and
+        // these tests still exercise the cap rather than authorization.
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
         (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
         (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -205,6 +212,8 @@ describe('TeamService', () => {
     });
 
     it('should throw ForbiddenError if user does not exist or is not a coach', async () => {
+      // The WHO gate fires before any season lookup now, so the message is the
+      // league-agnostic one.
       const league = createLeague();
       const season = createSeason({ leagueId: league.id });
 
@@ -219,8 +228,162 @@ describe('TeamService', () => {
       try {
         await TeamService.createTeam({ name: 'Test Team', seasonId: season.id }, 'non-existent');
       } catch (error) {
-        expectForbiddenError(error, 'You do not have permission to create teams in this league');
+        expectForbiddenError(error, 'You do not have permission to create teams');
       }
+    });
+
+    // ---------------------------------------------------------------------
+    // #442: WHO may create x WHERE they may create
+    // ---------------------------------------------------------------------
+    describe('authorization (#442)', () => {
+      function personalProvisionMocks(user: { id: string; name: string }): { id: string; name: string; seasonId: string } {
+        const team = createTeam({ seasonId: 'season-personal' });
+        const headCoachRole = createTeamRole({
+          teamId: team.id,
+          type: 'HEAD_COACH',
+          name: 'Head Coach',
+        });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(user);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: 'league-personal' });
+        (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
+        (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: 'season-personal' });
+        (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue(
+          createTeamStaff({ teamId: team.id, userId: user.id, roleId: headCoachRole.id })
+        );
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+          ...team,
+          staff: [],
+          roles: [],
+          members: [],
+        });
+        return team;
+      }
+
+      it('auto-provisions a personal league and season when no seasonId is given', async () => {
+        const coach = { ...createCoach(), name: 'Dana Whitfield' };
+        const team = personalProvisionMocks(coach);
+
+        const result = await TeamService.createTeam({ name: team.name }, coach.id);
+
+        expect(result).toHaveProperty('id', team.id);
+        // No season lookup at all on this path -- findUnique({ id: undefined })
+        // would throw.
+        expect(mockPrisma.season.findUnique).not.toHaveBeenCalled();
+        expect(mockPrisma.league.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { personalOwnerId: coach.id },
+            create: expect.objectContaining({ name: "Dana Whitfield's Teams" }),
+          })
+        );
+        // The owner gets a real LeagueAdmin row so they can rename the league
+        // and add next year's season.
+        expect(mockPrisma.leagueAdmin.upsert).toHaveBeenCalled();
+        expect(mockPrisma.season.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({ create: expect.objectContaining({ isActive: true }) })
+        );
+        expect(mockPrisma.team.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ seasonId: 'season-personal' }),
+          })
+        );
+      });
+
+      it('reuses the existing personal league on a second create', async () => {
+        const coach = { ...createCoach(), name: 'Dana Whitfield' };
+        personalProvisionMocks(coach);
+
+        await TeamService.createTeam({ name: 'Second team' }, coach.id);
+
+        // upsert is find-or-create: one call, no branch on existence.
+        expect(mockPrisma.league.upsert).toHaveBeenCalledTimes(1);
+      });
+
+      // REGRESSION: this works today via team-service.ts:244. An early draft of
+      // #442 replaced the role check with an affiliation check, which left the
+      // no-seasonId path with no gate at all -- any PLAYER or guardian could
+      // create a team and become its Head Coach with all five flags.
+      it('rejects a PLAYER creating a team with no seasonId', async () => {
+        const player = createPlayer();
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+        (mockPrisma.leagueAdmin.count as jest.Mock).mockResolvedValue(0);
+
+        await expect(TeamService.createTeam({ name: 'Sneaky' }, player.id)).rejects.toThrow(
+          'You do not have permission to create teams'
+        );
+        expect(mockPrisma.league.upsert).not.toHaveBeenCalled();
+        expect(mockPrisma.team.create).not.toHaveBeenCalled();
+      });
+
+      it('allows a PLAYER who administers a league', async () => {
+        const player = { ...createPlayer(), name: 'League Boss' };
+        personalProvisionMocks(player);
+        (mockPrisma.leagueAdmin.count as jest.Mock).mockResolvedValue(1);
+
+        await expect(TeamService.createTeam({ name: 'Ok' }, player.id)).resolves.toBeDefined();
+      });
+
+      it('rejects a COACH creating into a league they are not affiliated with', async () => {
+        const coach = createCoach();
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+          id: season.id,
+          leagueId: league.id,
+        });
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: null });
+        // Not staff on any team in that league.
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+
+        await expect(
+          TeamService.createTeam({ name: 'Trespass', seasonId: season.id }, coach.id)
+        ).rejects.toThrow('You do not have permission to create teams in this league');
+        expect(mockPrisma.team.create).not.toHaveBeenCalled();
+      });
+
+      it('allows the personal-league owner to create into their own league', async () => {
+        const coach = createCoach();
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id });
+        const headCoachRole = createTeamRole({
+          teamId: team.id,
+          type: 'HEAD_COACH',
+          name: 'Head Coach',
+        });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+          id: season.id,
+          leagueId: league.id,
+        });
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({
+          personalOwnerId: coach.id,
+        });
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue(
+          createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id })
+        );
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+          ...team,
+          staff: [],
+          roles: [],
+          members: [],
+        });
+
+        await expect(
+          TeamService.createTeam({ name: 'Mine', seasonId: season.id }, coach.id)
+        ).resolves.toBeDefined();
+      });
     });
   });
 

@@ -25,6 +25,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { areAllLeaguesPersonal } from '../../../utils/league-scope';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function EditTeamScreen() {
@@ -80,8 +81,17 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
   const [chatLink, setChatLink] = useState(team.chatLink || '');
   const [errors, setErrors] = useState<{ name?: string; seasonId?: string }>({});
 
+  /**
+   * Hide the league/season picker when the coach sees no league of their own
+   * (#442): `team-service.updateTeam` gates a `seasonId` change on
+   * `isLeagueAdmin` of the *target* league, which a personal-league coach
+   * never is, so offering the picker only ever produces a 403. The team keeps
+   * the season it already has — `seasonId` below is still submitted unchanged.
+   */
+  const showLeaguePicker = !areAllLeaguesPersonal(leagues);
+
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(
-    leagueId ? { leagueId, isActive: true } : undefined
+    showLeaguePicker && leagueId ? { leagueId, isActive: true } : undefined
   );
   const updateTeam = useUpdateTeam();
   const toast = useToast();
@@ -205,11 +215,11 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
           />
 
           {/* League Selection */}
-          <View style={styles.selectionSection}>
-            <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-              {t('teams.league')}
-            </ThemedText>
-            {leagues.length > 0 ? (
+          {showLeaguePicker && (
+            <View style={styles.selectionSection}>
+              <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
+                {t('teams.league')}
+              </ThemedText>
               <View style={[styles.selectionList, { borderColor: colors.border }]}>
                 {leagues.map((league, index) => {
                   const isSelected = leagueId === league.id;
@@ -248,15 +258,11 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                   );
                 })}
               </View>
-            ) : (
-              <ThemedText variant="caption" color="textTertiary" style={styles.noItems}>
-                No leagues available
-              </ThemedText>
-            )}
-          </View>
+            </View>
+          )}
 
           {/* Season Selection - Only show when league is selected */}
-          {leagueId && (
+          {showLeaguePicker && leagueId && (
             <View style={styles.selectionSection}>
               <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
                 Season
@@ -386,10 +392,6 @@ const styles = StyleSheet.create({
   },
   lastItem: {
     borderBottomWidth: 0,
-  },
-  noItems: {
-    marginTop: spacing.sm,
-    fontStyle: 'italic',
   },
   loadingContainer: {
     paddingVertical: spacing.lg,

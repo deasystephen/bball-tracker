@@ -13,6 +13,9 @@ import {
   getTeamPermissions,
   isGuardianOf,
   isGuardianOfTeamMember,
+  teamAccessWhere,
+  canWriteLeague,
+  getGuardianChildIds,
 } from '../../src/utils/permissions';
 import { mockPrisma } from '../setup';
 import {
@@ -315,6 +318,101 @@ describe('permissions — guardian branches', () => {
 
       expect(perms.canTrackStats).toBe(true);
       expect(mockPrisma.guardian.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // League write access (#442). The READ side ships with #443.
+  // -----------------------------------------------------------------------
+  describe('getGuardianChildIds', () => {
+    it('maps the guardian links to child ids', async () => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([
+        { childId: 'kid-1' },
+        { childId: 'kid-2' },
+      ]);
+
+      await expect(getGuardianChildIds('parent-1')).resolves.toEqual(['kid-1', 'kid-2']);
+    });
+
+    it('tolerates a client that returns undefined', async () => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue(undefined);
+
+      await expect(getGuardianChildIds('parent-1')).resolves.toEqual([]);
+    });
+  });
+
+  describe('teamAccessWhere', () => {
+    it('covers staff, member and league admin, and omits the guardian branch when there are no children', () => {
+      const where = teamAccessWhere('user-1', []);
+
+      expect(where.OR).toHaveLength(3);
+      expect(where.OR).toEqual([
+        { staff: { some: { userId: 'user-1' } } },
+        { members: { some: { playerId: 'user-1' } } },
+        { season: { league: { admins: { some: { userId: 'user-1' } } } } },
+      ]);
+    });
+
+    it('adds the guardian branch when the caller has children', () => {
+      const where = teamAccessWhere('parent-1', ['kid-1']);
+
+      expect(where.OR).toHaveLength(4);
+      expect(where.OR?.[3]).toEqual({ members: { some: { playerId: { in: ['kid-1'] } } } });
+    });
+  });
+
+  describe('canWriteLeague', () => {
+    function notAdmin(): void {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createCoach());
+    }
+
+    it('is true for an admin of that league', async () => {
+      notAdmin();
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ id: 'la-1' });
+
+      await expect(canWriteLeague('user-1', 'league-1')).resolves.toBe(true);
+      // Short-circuits: no further probes.
+      expect(mockPrisma.league.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.team.count).not.toHaveBeenCalled();
+    });
+
+    it('is true for a system ADMIN', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createAdmin());
+
+      await expect(canWriteLeague('admin-1', 'league-1')).resolves.toBe(true);
+    });
+
+    it('is true for the personal-league owner', async () => {
+      notAdmin();
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: 'user-1' });
+
+      await expect(canWriteLeague('user-1', 'league-1')).resolves.toBe(true);
+      expect(mockPrisma.team.count).not.toHaveBeenCalled();
+    });
+
+    it('is true for staff on a team in the league', async () => {
+      notAdmin();
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: null });
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
+
+      await expect(canWriteLeague('user-1', 'league-1')).resolves.toBe(true);
+      expect(mockPrisma.team.count).toHaveBeenCalledWith({
+        where: { season: { leagueId: 'league-1' }, staff: { some: { userId: 'user-1' } } },
+      });
+    });
+
+    // The load-bearing case: a MEMBER of a team inside somebody's personal
+    // league must not be able to plant a team in it. This is why the write set
+    // is not the read set.
+    it('is false for a mere member of a team in the league', async () => {
+      notAdmin();
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ personalOwnerId: 'someone-else' });
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+
+      await expect(canWriteLeague('member-1', 'league-1')).resolves.toBe(false);
     });
   });
 });

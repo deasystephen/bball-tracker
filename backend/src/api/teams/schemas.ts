@@ -11,7 +11,11 @@ import { safeUrlSchema } from '../auth/schemas';
  */
 export const createTeamSchema = z.object({
   name: z.string().min(1, 'Team name is required').max(100, 'Team name too long'),
-  seasonId: z.string().uuid('Invalid season ID format'),
+  // Optional since #442: omitted means "my own teams", and the service
+  // resolves (creating on first use) the caller's personal league and its
+  // current-year season. A supplied value still has to pass the WHERE check in
+  // `TeamService.createTeam`.
+  seasonId: z.string().uuid('Invalid season ID format').optional(),
   chatLink: z.string().url().refine(
     (url) => url.startsWith('https://') || url.startsWith('http://'),
     { message: 'Chat link must use http or https protocol' }

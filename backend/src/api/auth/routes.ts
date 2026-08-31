@@ -29,7 +29,14 @@ const router = Router();
  */
 async function getLeagueAdminOf(userId: string): Promise<string[]> {
   const rows = await prisma.leagueAdmin.findMany({
-    where: { userId },
+    // Auto-provisioned personal leagues (#442) are excluded. The owner really
+    // is a LeagueAdmin of their own container -- so they can rename it and add
+    // next year's season -- but surfacing it here would make
+    // `canAccessAdmin(user)` true on mobile and pop a "Leagues & Seasons"
+    // entry into every coach's Profile, which is exactly the jargon
+    // auto-provisioning exists to hide. Deliberate client/server divergence:
+    // the backend rules are unchanged, only this client hint list is filtered.
+    where: { userId, league: { personalOwnerId: null } },
     select: { leagueId: true },
     orderBy: { leagueId: 'asc' },
   });

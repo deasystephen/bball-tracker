@@ -104,10 +104,12 @@ describe('Teams API', () => {
       );
     });
 
-    it('should return 400 for missing required fields', async () => {
+    it('should return 400 when the name is missing', async () => {
+      // `seasonId` is optional since #442, so `name` is the only required
+      // field left on this body.
       const response = await request(app)
         .post('/api/v1/teams')
-        .send({ name: 'Lakers' }); // Missing seasonId
+        .send({ seasonId: '550e8400-e29b-41d4-a716-446655440000' });
 
       expect(response.status).toBe(400);
       expect(response.body.error).toBeDefined();

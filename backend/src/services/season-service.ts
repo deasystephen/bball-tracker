@@ -249,7 +249,7 @@ export class SeasonService {
     const season = await prisma.season.findUnique({
       where: { id: seasonId },
       include: {
-        league: true,
+        league: { omit: { personalOwnerId: true } },
       },
     });
 

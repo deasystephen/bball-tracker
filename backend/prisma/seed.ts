@@ -146,6 +146,46 @@ async function main() {
   });
   console.log(`  Created assistant coach: ${assistantMike.email}`);
 
+  // Brand-new-signup fixture (#442, .maestro/coach-onboarding.yaml).
+  // Deliberately has NO TeamStaff row, NO TeamMember row and NO LeagueAdmin
+  // row — every other seeded coach is already rostered on a team and admin@
+  // is a league admin, so before this there was no fixture for the funnel the
+  // GA blocker is measured by. Do not add her to a team, a league or a season:
+  // that is the whole point of the fixture.
+  //
+  // Seeded PLAYER, not COACH, on purpose. Every WorkOS sign-up is created as
+  // PLAYER and #442's acceptance criterion is "signs up, PICKS Coach, and taps
+  // Create Team". A COACH-seeded fixture would skip `onboarding/role`
+  // entirely (`needsRoleChoice` is false for a non-PLAYER) and the flow would
+  // silently stop testing the first step of the journey.
+  const coachDana = await prisma.user.upsert({
+    where: { email: 'dana.whitfield@example.com' },
+    update: { role: UserRole.PLAYER },
+    create: {
+      email: 'dana.whitfield@example.com',
+      name: 'Dana Whitfield',
+      role: UserRole.PLAYER,
+      emailVerified: true,
+    },
+  });
+  console.log(`  Created unaffiliated new signup: ${coachDana.email}`);
+
+  // Reset the fixture: delete any teams a previous E2E run created for her.
+  // She stays on the FREE tier (3-team cap), so without this a re-seed would
+  // not restore the "brand-new coach" state and coach-onboarding.yaml would
+  // eventually hit a 402 instead of a team-detail screen. Team deletes cascade
+  // to members / staff / roles; her auto-provisioned personal league (if the
+  // #442 backend has run) is left in place — reusing it is the second-team
+  // branch the flow exercises.
+  const staleFixtureTeams = await prisma.team.findMany({
+    where: { staff: { some: { userId: coachDana.id } } },
+    select: { id: true },
+  });
+  if (staleFixtureTeams.length > 0) {
+    await prisma.team.deleteMany({ where: { id: { in: staleFixtureTeams.map((t) => t.id) } } });
+    console.log(`    Removed ${staleFixtureTeams.length} team(s) left over from a previous E2E run`);
+  }
+
   // Players
   const playerData = [
     { email: 'steph.curry@example.com', name: 'Steph Curry' },
@@ -1236,6 +1276,7 @@ async function main() {
   console.log('  Coach (Warriors): steve.kerr@example.com');
   console.log('  Coach (Lakers): frank.vogel@example.com');
   console.log('  Assistant Coach: mike.brown@example.com');
+  console.log('  New signup, PLAYER, no team/league (#442 fixture): dana.whitfield@example.com');
   console.log('  Parent (Team Manager): dell.curry@example.com');
   console.log('  Parent: sonya.curry@example.com, gloria.james@example.com');
   console.log('  Players: steph.curry@example.com, lebron.james@example.com, etc.');

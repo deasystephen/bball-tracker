@@ -8,6 +8,15 @@ import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { isSystemAdmin, isLeagueAdmin } from '../utils/permissions';
 
+/**
+ * `League.personalOwnerId` marks a coach's auto-provisioned personal container
+ * (#442). It is an internal marker and never belongs in an API payload, so
+ * every League read here omits it. The client-facing form is the derived
+ * `isPersonal` boolean on the list. The access helpers in `utils/permissions`
+ * select the column explicitly when they need it.
+ */
+const LEAGUE_OMIT = { personalOwnerId: true } satisfies Prisma.LeagueOmit;
+
 const LEAGUE_ADMIN_INCLUDE = {
   user: {
     select: {
@@ -112,14 +121,31 @@ const LEAGUE_LIST_INCLUDE = {
 } satisfies Prisma.LeagueInclude;
 
 const SEASON_INCLUDE = {
-  league: true,
+  league: { omit: { personalOwnerId: true } },
   teams: true,
 } satisfies Prisma.SeasonInclude;
 
-export type LeagueWithSeasons = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_INCLUDE }>;
-export type LeagueDetail = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_DETAIL_INCLUDE }>;
-export type LeaguePublicDetail = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_PUBLIC_INCLUDE }>;
-export type LeagueListItem = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_LIST_INCLUDE }>;
+export type LeagueWithSeasons = Prisma.LeagueGetPayload<{
+  include: typeof LEAGUE_INCLUDE;
+  omit: typeof LEAGUE_OMIT;
+}>;
+export type LeagueDetail = Prisma.LeagueGetPayload<{
+  include: typeof LEAGUE_DETAIL_INCLUDE;
+  omit: typeof LEAGUE_OMIT;
+}>;
+export type LeaguePublicDetail = Prisma.LeagueGetPayload<{
+  include: typeof LEAGUE_PUBLIC_INCLUDE;
+  omit: typeof LEAGUE_OMIT;
+}>;
+type LeagueListRow = Prisma.LeagueGetPayload<{ include: typeof LEAGUE_LIST_INCLUDE }>;
+
+/**
+ * A list row as clients see it: `personalOwnerId` replaced by the derived
+ * `isPersonal` flag. Mobile branches its create-team UI on this (#442) — when
+ * every visible league is personal the league/season pickers are hidden
+ * entirely, so the coach never meets the words "league" or "season".
+ */
+export type LeagueListItem = Omit<LeagueListRow, 'personalOwnerId'> & { isPersonal: boolean };
 export type LeagueAdminWithUser = Prisma.LeagueAdminGetPayload<{
   include: typeof LEAGUE_ADMIN_INCLUDE;
 }>;
@@ -162,6 +188,7 @@ export class LeagueService {
         name: data.name,
       },
       include: LEAGUE_INCLUDE,
+      omit: LEAGUE_OMIT,
     });
 
     return league;
@@ -186,10 +213,12 @@ export class LeagueService {
       ? await prisma.league.findUnique({
           where: { id: leagueId },
           include: LEAGUE_DETAIL_INCLUDE,
+          omit: LEAGUE_OMIT,
         })
       : await prisma.league.findUnique({
           where: { id: leagueId },
           include: LEAGUE_PUBLIC_INCLUDE,
+          omit: LEAGUE_OMIT,
         });
 
     if (!league) {
@@ -215,7 +244,7 @@ export class LeagueService {
     }
 
     // Get total count and leagues in parallel
-    const [total, leagues] = await Promise.all([
+    const [total, rows] = await Promise.all([
       prisma.league.count({ where }),
       prisma.league.findMany({
         where,
@@ -227,6 +256,14 @@ export class LeagueService {
         skip: query.offset,
       }),
     ]);
+
+    // `personalOwnerId` never leaves the server; clients get the derived flag.
+    // Note it is `!== null`, not `=== caller.id`: an ADMIN listing everyone's
+    // leagues must still see another coach's container labelled personal.
+    const leagues: LeagueListItem[] = rows.map(({ personalOwnerId, ...rest }) => ({
+      ...rest,
+      isPersonal: personalOwnerId !== null,
+    }));
 
     return {
       leagues,
@@ -286,6 +323,7 @@ export class LeagueService {
       where: { id: leagueId },
       data: updateData,
       include: LEAGUE_INCLUDE,
+      omit: LEAGUE_OMIT,
     });
 
     return updatedLeague;

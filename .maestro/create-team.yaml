@@ -14,15 +14,36 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "team-name-input"
 - inputText: "Test Team"
-# The Create button stays disabled until a league AND season are picked
+- hideKeyboard
+# Frank Vogel belongs to a real league, so the screen offers the league/season
+# pickers — but since #442 they sit behind a collapsed "League & season"
+# disclosure whose default is "My teams" (create in the coach's own personal
+# league, no picker needed). Expand it to exercise the real-league path.
+# Tap by id: the disclosure carries an accessibilityLabel ("League and season:
+# <summary>"), which Maestro matches instead of the inner text.
+- tapOn:
+    id: "league-season-disclosure"
+# The Create button stays disabled until a season is picked for a real league
 # (seeded: Downtown Youth Basketball League → Spring 2024).
 - tapOn: "Downtown Youth Basketball League.*"
 - tapOn: "Spring 2024.*"
-- hideKeyboard
+# The expanded disclosure pushes the submit button further down than it used
+# to be, so scroll it into view before tapping ("Create" full-matches the
+# button; the header reads "Create Team").
+- scrollUntilVisible:
+    element:
+      text: "Create"
+    direction: DOWN
+    timeout: 10000
 - tapOn: "Create"
 - assertVisible: "Test Team"
 # Create screen is replaced (not pushed under) the detail screen, so back
 # returns to the Teams list — never the spent create form.
+#
+# KNOWN FAILING: these last three steps fail today. The back arrow is a no-op
+# after `router.replace` — #421 shipped the replace and this assertion in the
+# same commit and the assertion was never run. Tracked in #464, which owns the
+# diagnosis and fix. Everything above this line passes.
 - tapOn: "Go back"
 - assertVisible: "Create new team"
 - assertNotVisible:
