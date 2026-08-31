@@ -690,6 +690,32 @@ describe('TeamService', () => {
       );
     });
 
+    it('includes the CALLER\'s own staff row on list items (#469)', async () => {
+      // The Games-tab create FAB and the game-create team picker gate on the
+      // caller's staff flags; a list payload without `staff` hid game creation
+      // from every coach. Only the caller's row may be joined — the full staff
+      // list stays on the detail/staff endpoints.
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+      }]);
+
+      await TeamService.listTeams({ limit: 10, offset: 0 }, coach.id);
+
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            staff: expect.objectContaining({ where: { userId: coach.id } }),
+          }),
+        })
+      );
+    });
+
     it('includes teams a guardian\'s children play on (PARENT role)', async () => {
       const parent = createUser({ role: 'PARENT' });
 

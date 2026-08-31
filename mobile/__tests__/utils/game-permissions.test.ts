@@ -118,4 +118,34 @@ describe('canManageAnyTeam', () => {
     expect(canManageAnyTeam([other], la)).toBe(false);
     expect(canManageAnyTeam([other, team], la)).toBe(true);
   });
+
+  it('works on GET /teams LIST items — the payload the Games FAB actually gates on (#469)', () => {
+    // The list payload carries the CALLER's own staff row only (backend
+    // teamListInclude). Before #469 it carried no `staff` at all, which made
+    // this gate false for every coach and hid game creation app-wide. This
+    // test pins the contract from the consumer side: the list shape (with
+    // `_count`, without `members`) must satisfy the gate when the caller's
+    // row is present, and the pre-fix shape must fail it — if the backend
+    // ever drops the caller-scoped staff join again, this documents what
+    // breaks.
+    const coach = { id: 'frank', role: 'COACH' };
+    const listItem = {
+      id: 't1',
+      name: 'Lakers',
+      season: { id: 's1', name: 'Spring', league: { id: 'league-1', name: 'Downtown' } },
+      staff: [staff('frank', { canManageTeam: true, canManageRoster: true })],
+      _count: { members: 12, staff: 1, games: 3 },
+    };
+    const preFixListItem = {
+      id: 't1',
+      name: 'Lakers',
+      season: { id: 's1', name: 'Spring', league: { id: 'league-1', name: 'Downtown' } },
+      _count: { members: 12, staff: 1, games: 3 },
+    };
+
+    expect(canManageAnyTeam([listItem], coach)).toBe(true);
+    expect(canManageAnyTeam([preFixListItem], coach)).toBe(false);
+    // A rostered player's list items carry an empty staff join — still gated.
+    expect(canManageAnyTeam([{ ...listItem, staff: [] }], { id: 'steph', role: 'PLAYER' })).toBe(false);
+  });
 });

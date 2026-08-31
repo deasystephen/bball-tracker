@@ -508,6 +508,12 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
   (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.
   Staff emails stay in the payload for every team member (coach contact info).
+  **`GET /teams` list items carry the CALLER's own staff row** (`teamListInclude(userId)` — at most one
+  per team, same shape as detail rows, nobody else's). The mobile permission helpers gate the Games-tab
+  create FAB and the game-create team picker on it (`canManageAnyTeam` → `hasTeamPermission` needs
+  `team.staff`); #396 shipped that gate against a staff-less list payload, which hid game creation from
+  every coach for a week (#469) — self-serve coaches worst of all, since personal leagues are filtered
+  out of `leagueAdminOf` (#442). Don't remove the join without changing the client gate.
 
 #### Self-serve team creation and personal leagues (#442)
 

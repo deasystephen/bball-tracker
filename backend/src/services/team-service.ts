@@ -122,6 +122,15 @@ const TEAM_DETAIL_INCLUDE = {
   },
 } satisfies Prisma.TeamInclude;
 
+/**
+ * List items carry the CALLER's own staff row only (at most one per team,
+ * same shape as the detail payload's rows). The client permission helpers
+ * (mobile `hasTeamPermission` / `canManageAnyTeam`) need it: the Games-tab
+ * create FAB and the game-create team picker are gated on the caller's staff
+ * flags, and gating on a payload without `staff` hid game creation from every
+ * coach (#469 — a #396 regression). Everyone else's staff rows stay out of
+ * the list; the full staff comes from `GET /teams/:id` or `/teams/:id/staff`.
+ */
 const TEAM_LIST_INCLUDE = {
   season: {
     select: {
@@ -135,6 +144,10 @@ const TEAM_LIST_INCLUDE = {
       },
     },
   },
+  staff: {
+    where: { userId: '' }, // placeholder — teamListInclude() narrows to the caller
+    include: TEAM_STAFF_INCLUDE,
+  },
   _count: {
     select: {
       members: true,
@@ -143,6 +156,11 @@ const TEAM_LIST_INCLUDE = {
     },
   },
 } satisfies Prisma.TeamInclude;
+
+const teamListInclude = (userId: string): typeof TEAM_LIST_INCLUDE => ({
+  ...TEAM_LIST_INCLUDE,
+  staff: { where: { userId }, include: TEAM_STAFF_INCLUDE },
+});
 
 const TEAM_MEMBER_INCLUDE = {
   player: { select: USER_SUMMARY_SELECT },
@@ -491,7 +509,7 @@ export class TeamService {
       prisma.team.count({ where }),
       prisma.team.findMany({
         where,
-        include: TEAM_LIST_INCLUDE,
+        include: teamListInclude(userId),
         orderBy: {
           createdAt: 'desc',
         },

@@ -211,3 +211,37 @@ appId: com.bballtracker.mobile
     visible: "Fixture Two"
     timeout: 10000
 - assertVisible: "Players"
+
+# ---------------------------------------------------------------------------
+# Schedule a game — the next step of the same funnel (#469)
+# ---------------------------------------------------------------------------
+# The Games-tab create FAB is the ONLY entry to game creation, and it gates on
+# the caller's staff row in the GET /teams LIST payload (canManageAnyTeam).
+# #396 shipped that gate against a payload that carried no staff at all, which
+# hid game creation from every coach for a week — and a self-serve coach is
+# the worst case, because personal leagues are deliberately filtered out of
+# leagueAdminOf (#442), closing the one other branch of the check. The FAB
+# appearing for Dana at all IS the #469 assertion; the rest proves the create
+# screen's team picker (same gate, same payload) works through to a game.
+- openLink: "bball-tracker://games"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Create new game"
+    timeout: 15000
+- tapOn: "Create new game"
+- assertVisible: "New Game"
+- tapOn:
+    id: "opponent-name-input"
+- inputText: "Fixture Rival"
+- hideKeyboard
+- tapOn: "Fixture Two.*"
+- tapOn: "Create Game"
+# Lands on the game detail via router.replace, same pattern as team create.
+- extendedWaitUntil:
+    visible: "Fixture Rival"
+    timeout: 10000
+- assertVisible: "Scheduled"
