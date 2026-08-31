@@ -37,7 +37,15 @@ appId: com.bballtracker.mobile
 # Now on game detail with IN_PROGRESS status
 - assertVisible: "Continue Tracking"
 
-# End game from detail screen
+# End game from detail screen. The button renders below Continue Tracking and
+# sits under the fold on 874pt-class devices — scroll it into view first (60%
+# visibility per the Maestro edge-resting rule in CLAUDE.md).
+- scrollUntilVisible:
+    element:
+      text: "End Game"
+    direction: DOWN
+    visibilityPercentage: 60
+    timeout: 10000
 - tapOn: "End Game"
 # Tap alert button (index 1 skips the on-screen button behind the alert)
 - tapOn:
