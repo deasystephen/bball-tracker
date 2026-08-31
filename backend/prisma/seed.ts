@@ -134,6 +134,34 @@ async function main() {
   });
   console.log(`  Created coach: ${coachFrank.email}`);
 
+  // Reset the fixture: `.maestro/create-team.yaml` creates a "Test Team" for
+  // Frank on every run and nothing else deletes it. He is FREE tier, so the
+  // leftovers march him toward the 3-team cap — after two runs the flow's
+  // create step answers 402 instead of a team-detail screen (found live while
+  // diagnosing #464). Same idempotence rule as Dana's block below: everything
+  // but his seeded Lakers goes. Team deletes cascade to members/staff/roles.
+  const staleFrankTeams = await prisma.team.findMany({
+    where: {
+      staff: { some: { userId: coachFrank.id } },
+      id: { not: SEED_IDS.LAKERS_TEAM },
+    },
+    select: { id: true },
+  });
+  if (staleFrankTeams.length > 0) {
+    await prisma.team.deleteMany({ where: { id: { in: staleFrankTeams.map((t) => t.id) } } });
+    console.log(`    Removed ${staleFrankTeams.length} team(s) left over from a previous E2E run`);
+  }
+
+  // ...and the "Test Rival" games `.maestro/game-lifecycle.yaml` creates on his
+  // Lakers. No cap at stake, but they accumulate one per run and pollute the
+  // Games tab. Game deletes cascade to events/RSVPs/stats rows.
+  const staleFixtureGames = await prisma.game.deleteMany({
+    where: { opponent: 'Test Rival' },
+  });
+  if (staleFixtureGames.count > 0) {
+    console.log(`    Removed ${staleFixtureGames.count} Test Rival game(s) from a previous E2E run`);
+  }
+
   const assistantMike = await prisma.user.upsert({
     where: { email: 'mike.brown@example.com' },
     update: {},
