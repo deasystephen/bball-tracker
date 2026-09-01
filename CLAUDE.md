@@ -943,7 +943,8 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   (18/18, 2026-08-31) when run sequentially with a fresh `npx prisma db seed` before every flow** — the
   seed is a complete per-flow reset (it restores mutated fixture names/roles and deletes flow-created
   teams/games/players), so never run two flows back-to-back without it. Nightly CI for the suite was
-  attempted and parked (#441 has the full state + a WIP branch); flows remain manual-only.
+  attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
+  be revived); flows are deliberately manual-only.
 
 ## Work Hygiene
 
