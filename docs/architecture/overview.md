@@ -2,7 +2,7 @@
 
 ## System Architecture
 
-The Hooplings application uses a microservices architecture with an event-driven design, leveraging Apache Kafka for event streaming and Apache Flink for real-time stream processing.
+The Hooplings application is a single containerized API backed by PostgreSQL, with Socket.io broadcasting live game updates over WebSocket and Redis providing best-effort caching.
 
 ## High-Level Architecture
 
@@ -30,29 +30,6 @@ The Hooplings application uses a microservices architecture with an event-driven
 │   RDS    │  │ElastiCache│  │   S3     │
 │PostgreSQL│  │  Redis   │  │  Storage │
 └──────────┘  └──────────┘  └──────────┘
-       │
-       │ Events
-       ▼
-┌─────────────────────────────────┐
-│   Confluent Cloud Kafka         │
-│   - game-events                 │
-│   - player-actions              │
-│   - statistics-updates          │
-└──────┬──────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────┐
-│   Apache Flink                  │
-│   - Stream Processing           │
-│   - Statistics Aggregation      │
-│   - Analytics                   │
-└──────┬──────────────────────────┘
-       │
-       ▼
-┌──────────┐  ┌──────────┐
-│   RDS    │  │ElastiCache│
-│PostgreSQL│  │  Redis   │
-└──────────┘  └──────────┘
 ```
 
 ## Components
@@ -70,30 +47,12 @@ The Hooplings application uses a microservices architecture with an event-driven
 - **Real-time**: Socket.io for WebSocket connections
 - **Deployment**: AWS ECS Fargate (containerized)
 
-### Event Streaming
-- **Kafka**: Confluent Cloud (managed service)
-- **Topics**:
-  - `game-events`: Raw play-by-play events
-  - `player-actions`: Individual player actions
-  - `statistics-updates`: Processed statistics from Flink
-  - `game-state`: Current game state updates
-
-### Stream Processing
-- **Technology**: Apache Flink
-- **Functions**:
-  - Real-time statistics aggregation
-  - Event enrichment
-  - Analytics calculations
-- **Output**: Writes aggregated data to PostgreSQL and Redis
-
 ### Data Storage
 - **PostgreSQL (AWS RDS)**: Primary relational database
   - User data, teams, leagues, games
   - Historical statistics
-- **Redis (AWS ElastiCache)**: Caching and real-time data
-  - Session storage
-  - Real-time game state
-  - Cached statistics
+- **Redis (AWS ElastiCache)**: Best-effort caching (fails open)
+  - Usage-metering counts (60s TTL, see `services/usage-service.ts`)
 
 ### File Storage
 - **AWS S3**: Object storage for images, videos, documents
@@ -104,13 +63,14 @@ The Hooplings application uses a microservices architecture with an event-driven
 ### Game Event Flow
 1. Coach tracks event in mobile app
 2. App sends event to backend API via HTTP
-3. Backend validates and stores in PostgreSQL
-4. Backend publishes event to Kafka `game-events` topic
-5. Flink consumes event and processes it
-6. Flink aggregates statistics and publishes to `statistics-updates` topic
-7. Backend consumes statistics updates and stores in PostgreSQL/Redis
-8. Backend broadcasts update via WebSocket to connected clients
-9. Mobile apps receive real-time update
+3. Backend validates and stores it in PostgreSQL, deriving the game score
+   from the event log inside the same transaction
+4. Backend broadcasts the event and post-change score via Socket.io to
+   clients in the game's room
+5. Mobile apps receive the real-time update
+6. When the game is marked FINISHED, `StatsService.finalizeGameStats`
+   recomputes the box score from the event log and upserts per-player and
+   per-team stats rows (re-run on any post-finish event edit)
 
 ### Real-time Updates
 1. Backend maintains WebSocket connections with mobile apps

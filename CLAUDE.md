@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker://` scheme, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). It uses event-driven architecture with Kafka and Flink for real-time game tracking and statistics.
+Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker://` scheme, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). Real-time game tracking uses Socket.io broadcasts backed by PostgreSQL; statistics are computed by the stats service when games finish.
 
 ## Common Commands
 
@@ -55,7 +55,7 @@ npx eas-cli update --branch production --environment production --platform ios -
 
 ### Infrastructure
 ```bash
-docker-compose up -d   # Start local services (PostgreSQL, Redis, Kafka, Zookeeper)
+docker-compose up -d   # Start local services (PostgreSQL, Redis)
 docker-compose down    # Stop local services
 ```
 
@@ -67,14 +67,12 @@ iOS App (Expo/React Native)
     ↓ HTTP/WebSocket
 Backend API (Node.js/Express)
     ├── PostgreSQL (Prisma ORM)
-    ├── Redis (caching)
-    └── Kafka → Flink (event streaming/aggregation)
+    └── Redis (caching)
 ```
 
 ### Backend Structure (`/backend/src/`)
 - **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, middleware). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
 - **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131 and `usage-service.ts` (usage metering, #43)
-- **kafka/**: Kafka producers/consumers for event streaming
 - **websocket/**: Socket.io handlers for real-time updates
 - **models/**: Prisma ORM models
 - **utils/**: Helpers (logger, errors, workos-client, redis caching helpers)
@@ -775,7 +773,6 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
-- Event-driven: Kafka for game events, Flink for real-time aggregation
 - Real-time: Socket.io WebSocket for live game updates
 - State management: Zustand (client) + TanStack Query (server state) in mobile
 - Authentication: WorkOS (AuthKit). JWT is the session token format — WorkOS is the identity provider.
