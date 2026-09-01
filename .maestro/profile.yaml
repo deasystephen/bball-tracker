@@ -9,7 +9,9 @@ appId: com.bballtracker.mobile
 - assertVisible: "Your Teams"
 - tapOn: "Profile tab"
 - assertVisible: "Account"
-- assertVisible: "Settings"
+# No bare "Settings" assert here: the section header sits below the fold on
+# 874pt-class devices and assertVisible needs it on-screen. The section is
+# proven further down anyway (swipe → "Toggle dark mode" → About).
 # Edit name round trip (Profile → Account → Name → shared name screen).
 # Rename, assert it everywhere, then revert so other flows still find the
 # seeded "Frank Vogel" (team-staff.yaml asserts that exact name).
@@ -19,6 +21,11 @@ appId: com.bballtracker.mobile
     id: "name-onboarding-input"
 - eraseText
 - inputText: "Frank Renamed"
+# Save sits behind the keyboard: without dismissing it the tap lands on a
+# keyboard key and appends a stray character to the name. hideKeyboard is
+# unreliable on the iOS simulator (verified: keyboard still up afterwards);
+# Enter is deterministic — the single-line input blurs on submit.
+- pressKey: Enter
 - tapOn: "Save"
 - assertVisible: "Frank Renamed"
 - tapOn: "Edit name"
@@ -26,6 +33,7 @@ appId: com.bballtracker.mobile
     id: "name-onboarding-input"
 - eraseText
 - inputText: "Frank Vogel"
+- pressKey: Enter
 - tapOn: "Save"
 - assertVisible: "Frank Vogel"
 - swipe:

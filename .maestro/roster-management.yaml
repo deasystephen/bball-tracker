@@ -50,8 +50,14 @@ appId: com.bballtracker.mobile
     id: "add-player-jersey-input"
 - inputText: "99"
 
-# Dismiss keyboard so the submit button is tappable
+# Dismiss the keyboard so the submit button is tappable. hideKeyboard is
+# best-effort on iOS and silently fails against the jersey field's NUMBER PAD
+# (no return key) — the submit tap then lands on the keyboard and the flow
+# dies asserting a roster that never changed. The form's ScrollView has
+# keyboardShouldPersistTaps="handled", so tapping any non-interactive text
+# (the field's own label) dismisses the keyboard deterministically.
 - hideKeyboard
+- tapOn: "Jersey Number"
 
 # Submit
 - tapOn:

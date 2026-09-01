@@ -52,8 +52,16 @@ appId: com.bballtracker.mobile
 - tapOn: "Go back"
 - tapOn: "Leave"
 
-# End game from detail screen
+# End game from detail screen. Same fold issue as game-lifecycle.yaml: the
+# button renders below Continue Tracking and sits off-screen on 874pt-class
+# devices, so scroll it into view first (60% visibility per CLAUDE.md).
 - assertVisible: "Continue Tracking"
+- scrollUntilVisible:
+    element:
+      text: "End Game"
+    direction: DOWN
+    visibilityPercentage: 60
+    timeout: 10000
 - tapOn: "End Game"
 # Tap alert button (index 1 skips the on-screen button)
 - tapOn:

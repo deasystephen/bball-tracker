@@ -22,13 +22,16 @@ appId: com.bballtracker.mobile
 - tapOn: "Lakers"
 - assertVisible: "Lakers"
 
-# The Staff card on team detail shows the head coach and links to the staff screen
+# The Staff card on team detail shows the head coach and links to the staff screen.
+# The card is ONE element whose accessibility label concatenates its children
+# ("Staff · 1 staff, Frank Vogel"), so a bare full-match "Frank Vogel" matches
+# nothing — composite-row rule from CLAUDE.md.
 - scrollUntilVisible:
     element:
       id: "team-staff-card"
     direction: DOWN
     timeout: 10000
-- assertVisible: "Frank Vogel"
+- assertVisible: ".*Frank Vogel.*"
 - tapOn:
     id: "team-staff-card"
 

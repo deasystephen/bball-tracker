@@ -17,6 +17,16 @@ appId: com.bballtracker.mobile
 - assertVisible: "Hooplings"
 # Deep-link straight into the callback route with an OAuth error param.
 - openLink: "bball-tracker://auth/callback?error=access_denied"
+# iOS raises a system confirmation ("Open in <app>?") for custom-scheme URLs —
+# even the app's own scheme — and the modal blocks every later command.
+# Conditional because the simulator may remember the choice. Same handling as
+# coach-onboarding.yaml; this flow predates the rule in CLAUDE.md and was the
+# documented expected-failure until now.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 # The route resolved and rendered our error UI (not Expo Router's fallback).
 - assertVisible: "Sign In Failed"
 - assertNotVisible: "Unmatched Route"
