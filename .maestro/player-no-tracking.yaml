@@ -14,6 +14,18 @@ appId: com.bballtracker.mobile
 - tapOn: "Skip"
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
+# The dev-user list has outgrown one screen (guardian/parent fixtures, #442's
+# Dana) and Steph sits below the fold — scroll like coach-onboarding does for
+# Dana (60% visibility per the CLAUDE.md edge-resting rule).
+# No centerElement: Steph sits near the END of the list, where centering can
+# never be satisfied and the scroll spins until timeout with him plainly
+# visible (observed). 60% visibility alone is the stop condition.
+- scrollUntilVisible:
+    element:
+      text: "Steph Curry.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
 - tapOn: "Steph Curry.*"
 # Seeded PLAYERs get the one-time account-type step on first sign-in (clearState
 # wipes the roleChosen flag) — keep PLAYER so the gating below is exercised.
@@ -28,7 +40,7 @@ appId: com.bballtracker.mobile
 - assertNotVisible: "Create new game"
 
 # Open a scheduled Warriors game (opponent "Lakers")
-- tapOn: "vs Lakers"
+- tapOn: ".*vs Lakers.*"
 - assertVisible: "Scheduled"
 
 # Spectator / member controls are present…

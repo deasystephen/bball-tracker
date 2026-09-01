@@ -1066,7 +1066,7 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 
 ### S.4 — ⚠ Spectator live-update assertion (no automated coverage)
 - [ ] Verified-broken / Notes
-- **Issue:** #114 — Maestro doesn't run in CI; no synthetic against prod yet.
+- **Issue:** #114 — Maestro now runs nightly in CI (#441, gated to change-days); no synthetic against prod yet.
 - **Expected fail mode:** This is automation-gap, not user-visible. Won't surface during manual testing.
 
 ### S.5 — ⚠ Spectator game clock / period display
@@ -1140,7 +1140,7 @@ After testing, optionally tear down:
 - Architecture: `docs/architecture/overview.md` (stale per audit — see B-deferred)
 - Runbooks: `docs/runbooks/` (RDS backup/restore, etc.)
 - Automation: `docs/automation/daily-upgrade-scan.md`
-- Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend; **not** run in CI). All flows dev-login and skip the intro carousel:
+- Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend, **and nightly in CI** via `.github/workflows/nightly-maestro-e2e.yml` on a macOS runner, gated to nights where `main` gained non-dependabot code changes since the last green run; trigger on demand from the Actions tab, failures land on the rolling "Nightly Maestro E2E log" issue — #441). All flows dev-login and skip the intro carousel:
   - `login.yaml`, `logout.yaml`, `navigation.yaml`, `profile.yaml` — session + tab smoke (Frank Vogel)
   - `auth-callback.yaml` — `bball-tracker://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
   - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)

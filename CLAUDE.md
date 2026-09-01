@@ -926,7 +926,31 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
   step timed out.
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
+- **`hideKeyboard` is unreliable on the iOS simulator** — it regularly no-ops (number pads AND text
+  keyboards), after which a tap on a button behind the keyboard lands on a keyboard key instead (the
+  profile.yaml rename kept typing a stray "v" from tapping Save). Deterministic dismissals: `pressKey:
+  Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
+  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own label.
+- **`assertVisible` passes on rows behind the translucent tab-bar overlay; taps there silently no-op**
+  (content deliberately scrolls behind the bar). Before tapping anything near the bottom of a tab
+  screen, `scrollUntilVisible` with `centerElement: true` so the tap point clears the bar.
+- **Don't use `centerElement: true` for elements near the END of a list** — centering can never be
+  satisfied there and the scroll spins until timeout with the element plainly visible. Plain
+  `visibilityPercentage: 60` is the stop condition that works.
+- A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
+  top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
+- **Nightly CI (#441):** `.github/workflows/nightly-maestro-e2e.yml` runs the full suite on a GitHub-hosted
+  macOS runner (09:30 UTC) — Postgres + migrated/seeded backend (`NODE_ENV=development`) + Debug dev-client
+  + Metro, all on the runner; nothing runs on anyone's laptop. A cheap Linux **gate job** skips the night
+  unless `main` gained a non-dependabot commit touching `backend/`, `mobile/`, `shared/`, `.maestro/` or the
+  workflow itself **since the last successful run's SHA** (so red/skipped nights retry until green covers the
+  newest changes; markdown-only commits never count). Force a run any time from the Actions tab
+  (`workflow_dispatch` bypasses the gate). Deliberately **never a required PR check**. Failures comment on the
+  rolling **"Nightly Maestro E2E log"** issue and upload Maestro screenshots/logs as run artifacts; green
+  nights stay silent. The build must stay **Debug** — the dev-login button is `__DEV__`-gated, so a Release
+  app cannot authenticate. The native `.app` is cached on `mobile/package-lock.json` + `app.config.js`;
+  never widen that key (stale native + new JS is the "Metro export ≠ runtime" failure class).
 
 ## Work Hygiene
 

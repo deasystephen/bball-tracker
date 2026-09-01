@@ -1,0 +1,286 @@
+# Nightly Maestro E2E (#441)
+#
+# Runs the full .maestro/ suite against a real iOS simulator on a GitHub-hosted
+# macOS runner: Postgres + seeded backend + Metro all live on the runner, and
+# every flow dev-logs-in against http://127.0.0.1:3000 exactly like a local run.
+#
+# COST GATE: macOS runners bill at 10x, so a cheap Linux `gate` job runs first
+# and skips the night entirely unless main gained at least one non-dependabot
+# commit touching code the suite exercises since the LAST SUCCESSFUL run of
+# this workflow. Comparing against the last green SHA (not "last 24h") means a
+# red or skipped night never lets a change slip through untested — the suite
+# keeps retrying nightly until it has passed on top of the newest changes.
+# `workflow_dispatch` always runs (that's the "force a run" lever).
+#
+# Deliberately NOT a required PR check and never wired into branch protection
+# (decision on #441): this is a nightly safety net, not a merge gate.
+#
+# Build strategy (documented per #441): a DEBUG dev-client build with Metro
+# running in the background. A Release build is not an option — the dev-login
+# button every flow depends on is `__DEV__`-gated (mobile/app/login.tsx), so a
+# Release app has no way to authenticate. Debug also matches how the flows are
+# authored and run locally (`npx expo run:ios`). The simulator shares the host
+# network, so the app's dev-default apiUrl (http://127.0.0.1:3000) and Metro on
+# :8081 both resolve to this runner. The built .app is cached on the native
+# fingerprint (lockfile + app.config.js) so JS-only nights skip the ~25-min
+# native build; Metro serves the current JS either way.
+
+name: Nightly Maestro E2E
+
+on:
+  schedule:
+    # 09:30 UTC = 2:30am PT. Keep distinct from the daily upgrade scan (15:00).
+    - cron: '30 9 * * *'
+  workflow_dispatch:
+  # TEMP while iterating on this branch — remove before merge.
+  push:
+    branches: [feat/441-nightly-maestro-ci]
+
+permissions:
+  contents: read
+  issues: write # rolling "Nightly Maestro E2E log" issue
+  actions: read # gate reads this workflow's own run history
+
+concurrency:
+  group: nightly-maestro-e2e
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Should tonight run?
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Compare main against the last successful run
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+            echo "Manual/branch trigger — always run."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly-maestro-e2e.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty' || true)
+
+          if [ -z "$last" ] || ! git cat-file -e "$last" 2>/dev/null || ! git merge-base --is-ancestor "$last" HEAD; then
+            echo "No prior successful run to compare against (or its SHA is gone) — run."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$last" = "$(git rev-parse HEAD)" ]; then
+            echo "HEAD already passed E2E ($last) — skip."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A commit counts when it is NOT authored by dependabot and touches
+          # something the suite exercises: backend, mobile, shared types, the
+          # flows themselves, or this workflow. Markdown-only commits never
+          # count. (Squash-merged dependabot PRs keep dependabot as author —
+          # that's what the auto-merge workflow produces.)
+          should_run=false
+          for c in $(git rev-list "$last"..HEAD); do
+            author=$(git show -s --format='%an <%ae>' "$c")
+            case "$author" in
+              *dependabot*) echo "skip (dependabot): $c $author"; continue ;;
+            esac
+            if git show --format= --name-only "$c" \
+              | grep -vE '\.md$' \
+              | grep -qE '^(backend/|mobile/|shared/|\.maestro/|\.github/workflows/nightly-maestro-e2e\.yml)'; then
+              echo "counts: $c $author"
+              should_run=true
+              break
+            fi
+          done
+
+          if [ "$should_run" = "false" ]; then
+            echo "No non-dependabot code changes since last green run ($last) — skip."
+          fi
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+
+  e2e:
+    name: Maestro E2E (iOS simulator)
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bball_tracker
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            mobile/package-lock.json
+
+      - name: Start Postgres
+        run: |
+          set -euo pipefail
+          # The macOS image ships a postgres via Homebrew but it is not
+          # running; fall back to installing if the image drops it.
+          if ! command -v initdb >/dev/null 2>&1; then
+            brew install postgresql@17
+            pgbin="$(brew --prefix postgresql@17)/bin"
+            echo "$pgbin" >> "$GITHUB_PATH"
+            export PATH="$pgbin:$PATH"
+          fi
+          PGDATA="$RUNNER_TEMP/pgdata"
+          initdb -D "$PGDATA" -U postgres --auth=trust
+          pg_ctl -D "$PGDATA" -l "$RUNNER_TEMP/postgres.log" start
+          for _ in $(seq 1 30); do pg_isready -h localhost -U postgres && break; sleep 1; done
+          createdb -h localhost -U postgres bball_tracker
+
+      - name: Backend — install, migrate, seed, start
+        working-directory: backend
+        env:
+          NODE_ENV: development # dev-login endpoint requires it
+        run: |
+          set -euo pipefail
+          npm ci
+          npx prisma migrate deploy
+          npx prisma db seed
+          npm run build
+          nohup node dist/index.js > "$RUNNER_TEMP/backend.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3000/health && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:3000/health | grep '"db":"ok"'
+
+      - name: Mobile — install
+        working-directory: mobile
+        run: npm ci # .npmrc carries legacy-peer-deps
+
+      - name: Boot a simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # First available iPhone on the image's newest iOS runtime.
+          udid=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; phones=[(rt,dev) for rt in sorted(d, reverse=True) for dev in d[rt] if 'iPhone' in dev['name']]; print(phones[0][1]['udid'])")
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Restore native app cache
+        id: app-cache
+        uses: actions/cache@v4
+        with:
+          path: mobile/e2e-app-cache
+          # Conservative key: any dependency or config change rebuilds native.
+          # A stale native binary with newer JS is the "Metro export != runtime"
+          # failure class — never widen this key to skip more rebuilds.
+          key: maestro-app-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json', 'mobile/app.config.js') }}
+
+      - name: Build dev client (cache miss)
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          # --no-bundler: Metro is started separately in the next step.
+          # (No --no-install: a fresh runner needs the prebuild + pod install.)
+          npx expo run:ios --no-bundler \
+            --device "${{ steps.sim.outputs.udid }}"
+          app=$(find "$HOME/Library/Developer/Xcode/DerivedData" \
+            -path '*Build/Products/Debug-iphonesimulator/*.app' -maxdepth 6 -type d | head -1)
+          test -n "$app"
+          mkdir -p e2e-app-cache
+          cp -R "$app" e2e-app-cache/
+
+      - name: Install app on simulator
+        run: |
+          set -euo pipefail
+          app=$(find mobile/e2e-app-cache -maxdepth 1 -name '*.app' -type d | head -1)
+          test -n "$app"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
+
+      - name: Start Metro and pre-bundle
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          nohup npx expo start --dev-client --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8081/status && break
+            sleep 2
+          done
+          # Warm the bundle so the first launchApp isn't spent compiling JS.
+          curl -sf "http://127.0.0.1:8081/index.ts.bundle?platform=ios&dev=true" -o /dev/null
+          # Point the dev client at Metro once; debug simulator builds also
+          # auto-resolve localhost:8081, matching local `expo run:ios` usage.
+          xcrun simctl openurl "${{ steps.sim.outputs.udid }}" \
+            "com.bballtracker.mobile://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081" || true
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=${JAVA_HOME_17_arm64:-$JAVA_HOME}" >> "$GITHUB_ENV"
+
+      - name: Run Maestro suite (fresh seed per flow)
+        run: |
+          set -uo pipefail
+          # CLAUDE.md rule: flows mutate the database and every one assumes
+          # seeded state — re-seed between flows so no flow inherits another's
+          # leftovers (created teams/games shift lists, a mid-flow failure in
+          # profile.yaml leaves Frank renamed, etc.). Seeding takes seconds;
+          # chasing cross-flow pollution costs CI iterations. Keep running on
+          # failure so one red flow doesn't hide the rest of the night.
+          failed=()
+          for f in .maestro/*.yaml; do
+            name=$(basename "$f" .yaml)
+            [ "$name" = "config" ] && continue
+            echo "::group::$name"
+            (cd backend && npx prisma db seed > /dev/null)
+            maestro test "$f" || failed+=("$name")
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed flows: ${failed[*]}"
+            exit 1
+          fi
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-artifacts-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ~/.maestro/tests
+            ${{ runner.temp }}/backend.log
+            ${{ runner.temp }}/metro.log
+
+      - name: Report failure on the rolling log issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Nightly Maestro E2E log"
+          num=$(gh issue list --state open --search "in:title \"$title\"" \
+            --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)
+          if [ -z "$num" ]; then
+            num=$(gh issue create --title "$title" \
+              --body "Rolling log for the nightly Maestro E2E job (#441). Failed nights are commented here; green nights stay silent." \
+              --label automation | grep -oE '[0-9]+$')
+          fi
+          gh issue comment "$num" --body "## $(date -u +%F) nightly — ❌ FAILED
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Commit: ${GITHUB_SHA}
+          Maestro screenshots/logs are attached to the run as artifacts (14-day retention)."
