@@ -140,8 +140,8 @@ As of 2026-08-30 the API task carries:
   at startup in production without it. Keep `desiredCount = 1` until a Redis adapter is wired up
   (issue #26)
 
-Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs), `S3_BUCKET`, and the
-Kafka credentials (`backend/src/kafka/index.ts` is a config stub).
+Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs) and `S3_BUCKET`.
+(Kafka was removed entirely — the config stub, `kafkajs` dependency, and local containers are gone.)
 
 ## Load Balancer Setup
 

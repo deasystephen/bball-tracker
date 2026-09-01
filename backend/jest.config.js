@@ -13,8 +13,6 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/index.ts',
     '!src/config/**',
-    '!src/kafka/**',
-    '!src/flink/**',
     '!src/websocket/**',
   ],
   // Coverage thresholds — floors, not aspirations. CI enforces these via

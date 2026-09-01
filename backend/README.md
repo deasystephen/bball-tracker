@@ -9,7 +9,6 @@ Node.js/TypeScript backend API for the Hooplings application.
 - **Language**: TypeScript
 - **Database**: PostgreSQL (via Prisma ORM)
 - **Cache**: Redis (ioredis)
-- **Event Streaming**: Kafka (kafkajs)
 - **Real-time**: Socket.io
 - **Validation**: Zod
 - **Authentication**: WorkOS (AuthKit) — JWT is the session token format only
@@ -73,7 +72,6 @@ backend/
 │   ├── api/          # API routes
 │   ├── services/     # Business logic
 │   ├── models/       # Database models (Prisma)
-│   ├── kafka/        # Kafka producers/consumers
 │   ├── websocket/    # WebSocket handlers
 │   └── utils/        # Utility functions
 ├── prisma/           # Prisma schema and migrations

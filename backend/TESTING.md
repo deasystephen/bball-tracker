@@ -46,7 +46,7 @@ CORS_ORIGIN="http://localhost:19006"
 From the project root directory:
 
 ```bash
-# Start PostgreSQL, Redis, and Kafka
+# Start PostgreSQL and Redis
 docker-compose up -d
 
 # Verify services are running
@@ -56,8 +56,6 @@ docker-compose ps
 You should see:
 - `bball-tracker-postgres` (PostgreSQL on port 5432)
 - `bball-tracker-redis` (Redis on port 6379)
-- `bball-tracker-zookeeper` (Zookeeper on port 2181)
-- `bball-tracker-kafka` (Kafka on port 9092)
 
 ### 4. Set Up Database
 
@@ -227,14 +225,12 @@ When everything is working correctly:
 
 Once verification is complete, you can:
 1. Start building API endpoints (auth, games, etc.)
-2. Set up Kafka producers/consumers
-3. Implement WebSocket event handlers
-4. Add more comprehensive tests
+2. Implement WebSocket event handlers
+3. Add more comprehensive tests
 
 ## Additional Testing Tools
 
 - **Postman/Insomnia**: For API endpoint testing
 - **Prisma Studio**: For database inspection
 - **Redis CLI**: For Redis testing (`docker exec -it bball-tracker-redis redis-cli`)
-- **Kafka Console Consumer**: For testing Kafka topics
 

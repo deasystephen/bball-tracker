@@ -1,6 +1,6 @@
 # Hooplings
 
-A basketball tracking app for youth leagues, featuring real-time game tracking, player statistics, and team management. Built with React Native/Expo for iOS, a Node.js/TypeScript backend, and event-driven architecture using Kafka and Flink.
+A basketball tracking app for youth leagues, featuring real-time game tracking, player statistics, and team management. Built with React Native/Expo for iOS and a Node.js/TypeScript backend, with Socket.io pushing live game updates to spectators.
 
 ## Features
 
@@ -41,13 +41,11 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - Prisma ORM (PostgreSQL)
 - WorkOS (authentication)
 - Socket.io (real-time WebSocket)
-- Kafka + Flink (event streaming)
 
 ### Infrastructure
 - **Compute**: AWS ECS Fargate
 - **Database**: AWS RDS PostgreSQL
 - **Cache**: AWS ElastiCache Redis
-- **Streaming**: Confluent Cloud Kafka + Apache Flink
 - **CI/CD**: GitHub Actions → Docker → ECR → ECS (Node 22 image)
 - **Domain**: `api.capyhoops.com` with HTTPS (ACM cert)
 - **Observability**: Datadog (logs/metrics via CloudWatch Forwarder) + Sentry (errors)
@@ -72,7 +70,7 @@ git clone https://github.com/deasystephen/bball-tracker.git
 cd bball-tracker
 ```
 
-2. Start local services (PostgreSQL, Redis, Kafka, Zookeeper):
+2. Start local services (PostgreSQL, Redis):
 ```bash
 docker-compose up -d
 ```
@@ -111,7 +109,6 @@ bball-tracker/
 ├── backend/             # Node.js API server
 │   ├── src/api/         #   Route handlers (auth, games, teams, players, etc.)
 │   ├── src/services/    #   Business logic layer (includes mailer/ for SES)
-│   ├── src/kafka/       #   Kafka producers/consumers
 │   ├── src/websocket/   #   Socket.io handlers
 │   ├── prisma/          #   Schema, migrations, seed data
 │   └── tests/           #   Jest test suites
@@ -119,7 +116,6 @@ bball-tracker/
 ├── .maestro/            # Maestro E2E test flows
 ├── infra/               # Terraform (ECS, RDS, ElastiCache)
 ├── docker/              # Dockerfile and entrypoint
-├── streaming/           # Kafka/Flink configurations
 ├── shared/              # Shared types
 └── docs/                # Documentation
     └── automation/      #   Routine prompts (Daily Upgrade Scan, etc.)
@@ -168,11 +164,10 @@ iOS App (Expo/React Native)
 Backend API (Express + TypeScript)
     ├── PostgreSQL (Prisma ORM) — persistent data
     ├── Redis — caching
-    ├── Kafka → Flink — event streaming & aggregation
     └── WorkOS — authentication
 ```
 
-Game events flow through Kafka for real-time processing. Flink aggregates statistics as events stream in. Socket.io pushes live updates to connected clients during active games.
+Game events are persisted to PostgreSQL and the score is derived from the event log in the same transaction. Socket.io pushes live updates to connected clients during active games, and finalized box scores / season aggregates are computed by the stats service when a game finishes.
 
 ## Deployment
 

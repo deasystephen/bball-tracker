@@ -76,7 +76,6 @@ See the [README.md](README.md) for setup instructions.
 
 - `mobile/` - React Native/Expo mobile application
 - `backend/` - Node.js API server
-- `streaming/` - Kafka and Flink configurations
 - `shared/` - Shared types and utilities
 - `docs/` - Documentation
 
