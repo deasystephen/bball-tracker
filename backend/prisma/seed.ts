@@ -124,7 +124,10 @@ async function main() {
 
   const coachFrank = await prisma.user.upsert({
     where: { email: 'frank.vogel@example.com' },
-    update: {},
+    // Reset the name: profile.yaml renames him mid-flow and reverts at the
+    // end, but a run that dies between the two leaves "Frank Renamed" behind
+    // — and every other flow selects him by the seeded name.
+    update: { name: 'Frank Vogel' },
     create: {
       email: 'frank.vogel@example.com',
       name: 'Frank Vogel',
@@ -152,14 +155,31 @@ async function main() {
     console.log(`    Removed ${staleFrankTeams.length} team(s) left over from a previous E2E run`);
   }
 
-  // ...and the "Test Rival" games `.maestro/game-lifecycle.yaml` creates on his
-  // Lakers. No cap at stake, but they accumulate one per run and pollute the
-  // Games tab. Game deletes cascade to events/RSVPs/stats rows.
+  // ...and the games the game flows create on his Lakers ("Test Rival" from
+  // game-lifecycle.yaml, "Tracking Rival" from game-tracking.yaml). No cap at
+  // stake, but they accumulate one per run, pollute the Games tab and push
+  // seeded games (e.g. guardian-rsvp.yaml's "vs Lakers") down the list until
+  // assertions time out. Game deletes cascade to events/RSVPs/stats rows.
   const staleFixtureGames = await prisma.game.deleteMany({
-    where: { opponent: 'Test Rival' },
+    where: { opponent: { in: ['Test Rival', 'Tracking Rival'] } },
   });
   if (staleFixtureGames.count > 0) {
-    console.log(`    Removed ${staleFixtureGames.count} Test Rival game(s) from a previous E2E run`);
+    console.log(`    Removed ${staleFixtureGames.count} fixture game(s) from a previous E2E run`);
+  }
+
+  // ...and the managed players roster flows add to his Lakers (E2E Test
+  // Player from roster-management.yaml). Guarded to flow-created rows: the
+  // SEEDED Lakers managed players all carry ids starting 'managed-' and are
+  // recreated below — never widen this to all of Frank's managed players.
+  const staleFrankManaged = await prisma.user.deleteMany({
+    where: {
+      managedById: coachFrank.id,
+      isManaged: true,
+      NOT: { id: { startsWith: 'managed-' } },
+    },
+  });
+  if (staleFrankManaged.count > 0) {
+    console.log(`    Removed ${staleFrankManaged.count} flow-created managed player(s) from a previous E2E run`);
   }
 
   const assistantMike = await prisma.user.upsert({
@@ -257,7 +277,12 @@ async function main() {
   for (const data of playerData) {
     const player = await prisma.user.upsert({
       where: { email: data.email },
-      update: {},
+      // Reset role and name: onboarding-role.yaml flips Steph Curry to COACH
+      // and back via "Change account type" — a run that dies between the two
+      // leaves him COACH, which suppresses the role screen this flow asserts
+      // and un-gates the tracking controls player-no-tracking.yaml asserts
+      // absent. Same idempotence rule as Frank's name.
+      update: { role: UserRole.PLAYER, name: data.name },
       create: {
         email: data.email,
         name: data.name,

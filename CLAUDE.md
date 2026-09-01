@@ -926,7 +926,24 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
   step timed out.
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
-- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`
+- **`hideKeyboard` is unreliable on the iOS simulator** — it regularly no-ops (number pads AND text
+  keyboards), after which a tap on a button behind the keyboard lands on a keyboard key instead (the
+  profile.yaml rename kept typing a stray "v" from tapping Save). Deterministic dismissals: `pressKey:
+  Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
+  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own label.
+- **`assertVisible` passes on rows behind the translucent tab-bar overlay; taps there silently no-op**
+  (content deliberately scrolls behind the bar). Before tapping anything near the bottom of a tab
+  screen, `scrollUntilVisible` with `centerElement: true` so the tap point clears the bar.
+- **Don't use `centerElement: true` for elements near the END of a list** — centering can never be
+  satisfied there and the scroll spins until timeout with the element plainly visible. Plain
+  `visibilityPercentage: 60` is the stop condition that works.
+- A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
+  top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
+- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **The full suite is green
+  (18/18, 2026-08-31) when run sequentially with a fresh `npx prisma db seed` before every flow** — the
+  seed is a complete per-flow reset (it restores mutated fixture names/roles and deletes flow-created
+  teams/games/players), so never run two flows back-to-back without it. Nightly CI for the suite was
+  attempted and parked (#441 has the full state + a WIP branch); flows remain manual-only.
 
 ## Work Hygiene
 

@@ -9,6 +9,18 @@ appId: com.bballtracker.mobile
 - assertVisible: "Hooplings"
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
+# The dev-user list has outgrown one screen (guardian/parent fixtures, #442's
+# Dana) and Steph sits below the fold — scroll like coach-onboarding does for
+# Dana (60% visibility per the CLAUDE.md edge-resting rule).
+# No centerElement: Steph sits near the END of the list, where centering can
+# never be satisfied and the scroll spins until timeout with him plainly
+# visible (observed). 60% visibility alone is the stop condition.
+- scrollUntilVisible:
+    element:
+      text: "Steph Curry.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
 - tapOn: "Steph Curry.*"
 # Role step
 - assertVisible: "How will you use Capyhoops?"
@@ -18,10 +30,28 @@ appId: com.bballtracker.mobile
 - assertVisible: "Your Teams"
 - tapOn: "Profile tab"
 - assertVisible: "COACH"
-- assertVisible: "Change account type"
+# The row can sit BEHIND the translucent tab-bar overlay (content deliberately
+# scrolls behind it): assertVisible passes there, but a tap lands on the
+# BlurView and silently does nothing. Center the row before tapping.
+- scrollUntilVisible:
+    element:
+      text: "Change account type"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+    centerElement: true
 # Switch back to player from Profile
 - tapOn: "Change account type"
 - assertVisible: "How will you use Capyhoops?"
 - tapOn: "I play on a team"
 - tapOn: "Continue"
+# Continue pops back to Profile at the previous scroll offset (we scrolled
+# down to reach Change account type), so the role badge in the header is
+# off-screen ABOVE — scroll back up before asserting it.
+- scrollUntilVisible:
+    element:
+      text: "PLAYER"
+    direction: UP
+    visibilityPercentage: 60
+    timeout: 10000
 - assertVisible: "PLAYER"

@@ -25,10 +25,13 @@ appId: com.bballtracker.mobile
 - assertVisible: "Steph Curry, Mother"
 - assertNotVisible: "Change account type"
 
-# Open the child's scheduled game
+# Open the child's scheduled game. The game card is ONE element whose
+# accessibility label concatenates its fields ("FEB 8, vs Lakers, Warriors"),
+# so a bare full-match "vs Lakers" matches nothing — composite-row rule from
+# CLAUDE.md. Only this card contains "vs Lakers", so the wildcard is safe.
 - tapOn: "Track game tab"
 - assertVisible: "Games"
-- tapOn: "vs Lakers"
+- tapOn: ".*vs Lakers.*"
 - assertVisible: "Scheduled"
 
 # RSVP for the child — guardians get no lifecycle / tracking controls
