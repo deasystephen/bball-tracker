@@ -116,6 +116,12 @@ jobs:
     timeout-minutes: 120
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bball_tracker
+      # Placeholders, not secrets (#441: no cloud credentials on the runner).
+      # utils/workos-client.ts throws at import without them, but every flow
+      # authenticates via dev-login (dev_ tokens skip WorkOS entirely), so the
+      # client is constructed and never called.
+      WORKOS_API_KEY: sk_test_ci_placeholder
+      WORKOS_CLIENT_ID: client_ci_placeholder
     steps:
       - uses: actions/checkout@v7
 
