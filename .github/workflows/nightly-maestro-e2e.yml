@@ -155,12 +155,19 @@ jobs:
           npx prisma migrate deploy
           npx prisma db seed
           npm run build
-          nohup node dist/index.js > "$RUNNER_TEMP/backend.log" 2>&1 &
+          # dist/src/index.js, not dist/index.js: tsconfig includes tests/**,
+          # so rootDir is the package root. Same path docker/entrypoint.sh
+          # execs in production (package.json's `start` script is stale).
+          nohup node dist/src/index.js > "$RUNNER_TEMP/backend.log" 2>&1 &
           for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:3000/health && break
             sleep 2
           done
-          curl -sf http://127.0.0.1:3000/health | grep '"db":"ok"'
+          if ! curl -sf http://127.0.0.1:3000/health | grep '"db":"ok"'; then
+            echo "::error::Backend never became healthy; log follows"
+            tail -50 "$RUNNER_TEMP/backend.log"
+            exit 1
+          fi
 
       - name: Mobile — install
         working-directory: mobile
