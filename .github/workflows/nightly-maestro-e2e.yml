@@ -179,6 +179,17 @@ jobs:
         working-directory: mobile
         run: npm ci # .npmrc carries legacy-peer-deps
 
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          # The image's default Xcode is older than expo-modules-core's Swift
+          # needs (Swift-concurrency compile errors); pick the newest installed.
+          # Runs before any simctl/xcodebuild step — simctl follows xcode-select.
+          latest=$(find /Applications -maxdepth 1 -name 'Xcode*.app' | sort -V | tail -1)
+          echo "Selecting $latest (available: $(find /Applications -maxdepth 1 -name 'Xcode*.app' | tr '\n' ' '))"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
+
       - name: Boot a simulator
         id: sim
         run: |
