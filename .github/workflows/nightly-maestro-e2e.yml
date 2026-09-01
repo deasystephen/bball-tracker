@@ -205,12 +205,20 @@ jobs:
         working-directory: mobile
         run: |
           set -euo pipefail
-          # --no-bundler: Metro is started separately in the next step.
-          # (No --no-install: a fresh runner needs the prebuild + pod install.)
-          npx expo run:ios --no-bundler \
-            --device "${{ steps.sim.outputs.udid }}"
-          app=$(find "$HOME/Library/Developer/Xcode/DerivedData" \
-            -path '*Build/Products/Debug-iphonesimulator/*.app' -maxdepth 6 -type d | head -1)
+          # prebuild generates ios/ (untracked in git) and runs pod install.
+          # Then xcodebuild directly: `expo run:ios --device <udid>`
+          # misclassified the CI simulator as a physical device and demanded
+          # code signing; simulator builds need none (CODE_SIGNING_ALLOWED=NO).
+          npx expo prebuild --platform ios
+          workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild -workspace "$workspace" -scheme "$scheme" \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+          app=$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" \
+            -maxdepth 1 -name '*.app' -type d | head -1)
           test -n "$app"
           mkdir -p e2e-app-cache
           cp -R "$app" e2e-app-cache/
