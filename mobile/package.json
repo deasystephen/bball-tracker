@@ -89,6 +89,7 @@
   "overrides": {
     "expo-modules-core": "~55.0.22",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "browserslist": "^4.28.7",
     "diff": "8.0.3",
     "node-forge": "^1.4.0",
     "tar": "^7.5.8",
