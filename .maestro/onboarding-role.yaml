@@ -23,7 +23,7 @@ appId: com.bballtracker.mobile
     visibilityPercentage: 60
 - tapOn: "Steph Curry.*"
 # Role step
-- assertVisible: "How will you use Capyhoops?"
+- assertVisible: "How will you use Hooplings?"
 - tapOn: "I coach a team"
 - tapOn: "Continue"
 # Lands on home as a coach
@@ -42,7 +42,7 @@ appId: com.bballtracker.mobile
     centerElement: true
 # Switch back to player from Profile
 - tapOn: "Change account type"
-- assertVisible: "How will you use Capyhoops?"
+- assertVisible: "How will you use Hooplings?"
 - tapOn: "I play on a team"
 - tapOn: "Continue"
 # Continue pops back to Profile at the previous scroll offset (we scrolled

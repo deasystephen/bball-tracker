@@ -82,7 +82,7 @@ appId: com.bballtracker.mobile
 # step of the journey #442 is measured by — not an optional branch. Asserting
 # it hard means a regression in role onboarding fails this flow instead of
 # being silently skipped.
-- assertVisible: "How will you use Capyhoops?"
+- assertVisible: "How will you use Hooplings?"
 - tapOn: "I coach a team"
 - tapOn: "Continue"
 

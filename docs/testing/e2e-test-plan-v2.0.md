@@ -61,7 +61,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   2. Skip the intro carousel (`app/onboarding/index.tsx`, shown before login) → tap the sign-in button → the system browser opens the WorkOS AuthKit page (the app sent `state` + `code_challenge`, PKCE audit #5)
   3. Choose "Sign up" → enter a fresh email + password
   4. Complete email verification if prompted
-- **Expected:** Browser redirects to `bball-tracker://auth/callback?code=…&state=…`; the app exchanges the code (with `code_verifier`) and lands on the **"How will you use Capyhoops?"** account-type screen (A.1b) because every new sign-up is created as `PLAYER`. `GET /auth/me` → `role: PLAYER`, `leagueAdminOf: []`, `guardianOf: []`. Access + refresh tokens persisted; returning to the app shows the logged-in state.
+- **Expected:** Browser redirects to `bball-tracker://auth/callback?code=…&state=…`; the app exchanges the code (with `code_verifier`) and lands on the **"How will you use Hooplings?"** account-type screen (A.1b) because every new sign-up is created as `PLAYER`. `GET /auth/me` → `role: PLAYER`, `leagueAdminOf: []`, `guardianOf: []`. Access + refresh tokens persisted; returning to the app shows the logged-in state.
 - **Notes:** ___________
 
 ### A.1b — Account type selection after first sign-in
@@ -69,7 +69,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Role:** new user (created as PLAYER)
 - **Steps:**
   1. Complete A.1 sign-up
-  2. After the callback, the "How will you use Capyhoops?" screen appears
+  2. After the callback, the "How will you use Hooplings?" screen appears
   3. Choose "I coach a team" → Continue
   4. Profile tab → role badge reads COACH; Teams tab → Create Team succeeds (no 403)
   5. Logout, log in again → screen does NOT reappear

@@ -29,7 +29,7 @@ appId: com.bballtracker.mobile
 - tapOn: "Steph Curry.*"
 # Seeded PLAYERs get the one-time account-type step on first sign-in (clearState
 # wipes the roleChosen flag) — keep PLAYER so the gating below is exercised.
-- assertVisible: "How will you use Capyhoops?"
+- assertVisible: "How will you use Hooplings?"
 - tapOn: "I play on a team"
 - tapOn: "Continue"
 - assertVisible: "Your Teams"
