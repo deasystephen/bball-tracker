@@ -223,6 +223,40 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
    `aws rds modify-db-instance --no-deletion-protection` immediately before the
    delete call if AWS rejects the delete.
 
+### Variant — rehearse a schema migration on a restored copy (no repoint)
+
+CI applies migrations to an **empty** database (`ci.yml` starts a bare `postgres:15`), so a
+migration that backfills data (`UPDATE … SET`, `INSERT … SELECT`, then `SET NOT NULL`) first
+meets real rows at the production container start. Rehearse it here before merging; the
+permanent CI guard is #493. Steps 1–4 of Procedure A apply unchanged, except restore
+**single-AZ, no deletion protection** (`--no-multi-az --no-deletion-protection`) so the
+copy is cheap and deletable in one call. Then, instead of step 5:
+
+1. **Run the migration from inside the VPC.** The restored instance is private, so run it as
+   a one-off Fargate task in the service's subnets and security group. Two gotchas, both hit
+   on 2026-09-06:
+   - `ecs run-task` **cannot override `entryPoint`**, and the image's `ENTRYPOINT
+     ["./entrypoint.sh"]` ignores a `command` override (it runs `migrate deploy` against the
+     real `DATABASE_URL` secret, then the server). So register a **throwaway task-definition
+     revision**: `describe-task-definition` the live revision, strip the read-only fields,
+     set `entryPoint: ["sh","-c"]` and `command: [<script>]`, keep image and secrets, drop
+     `healthCheck`, and `register-task-definition`. The service is pinned to its own revision
+     (`ignore_changes`), so an extra revision changes nothing; deregister it afterwards.
+   - The script must **rewrite the host** in `$DATABASE_URL` to the restored endpoint
+     (`sed -E "s#@[^/@]+/#@${NEW_HOST}:5432/#"`), so no password ever appears in the task
+     definition. Apply the SQL with `DATABASE_URL="$URL" ./node_modules/.bin/prisma db execute
+     --file <migration.sql>` (Prisma 7's `db execute` reads the URL from `prisma.config.ts`,
+     there is no `--url` flag) — the live image does not contain the unmerged migration, so
+     embed the file's contents in the script via a heredoc. For before/after counts use
+     `NODE_PATH=/app/node_modules node <script>` with `pg` and the pinned CA bundle at
+     `certs/rds-global-bundle.pem`.
+2. **Read the result** from CloudWatch: log group `/ecs/bball-tracker-production`, stream
+   `api/api/<task id>`. Assert the migration's own invariant (for #462:
+   `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0).
+3. **Tear down.** `aws rds delete-db-instance --skip-final-snapshot --delete-automated-backups`
+   and `aws ecs deregister-task-definition` for each throwaway revision. Record the run in the
+   [Drill log](#drill-log).
+
 ## Procedure B — Rollback to the previous instance
 
 Use this when the restore in Procedure A turned out to be the wrong snapshot
@@ -298,4 +332,4 @@ quarterly and record the actual wall-clock here.
 
 | Date (UTC) | Operator | Snapshot ID | New instance ID | Time-to-restore | Notes |
 | --- | --- | --- | --- | --- | --- |
-| _pending_ | | | | | First drill — see issue #29 acceptance criteria |
+| 2026-09-06 | sdeasy (Claude Code session) | `rds:bball-tracker-production-postgres-2026-09-06-03-14` | `bball-tracker-production-postgres-drill-202609061747` | **5 min 57 s** to `available` (single-AZ `db.t3.micro`, 20 GB); migration applied in 10 s | First drill, run as the migration rehearsal for #497 (`TeamLineage` backfill, #462). Procedure A steps 1–4 only (no repoint); the migration ran from a one-off ECS task per the variant below. Before: 4 teams, no `lineageId`. After: 4 teams, 4 lineages, 0 nulls, unique index present. Instance deleted and throwaway task-definition revisions 271–273 deregistered afterwards. Closes #29. |
