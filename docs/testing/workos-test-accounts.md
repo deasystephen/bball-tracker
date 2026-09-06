@@ -15,7 +15,7 @@ the app/API:
 |---|---|
 | `PLAYER` (system role) | Default for every WorkOS sign-up (`WorkOSService.syncUser`). |
 | `ADMIN` (system role) | Granted **at first sign-up only** to emails on the `ADMIN_EMAILS` allowlist (comma-separated, case-insensitive; legacy single `ADMIN_EMAIL` still honoured — `backend/src/utils/admin-emails.ts`). Re-login never changes an existing user's role. Can never be self-selected. |
-| `COACH` (system role) | **Self-selected.** After the first sign-in the app shows "How will you use Capyhoops?" (`app/onboarding/role.tsx`); pick "I coach a team". Later: Profile → "Change account type". API: `PATCH /api/v1/auth/me/role { "role": "COACH" \| "PLAYER" }` (ADMIN / PARENT → 403). Team creation (`POST /teams`) requires COACH, ADMIN or a league admin. |
+| `COACH` (system role) | **Self-selected.** After the first sign-in the app shows "How will you use Hooplings?" (`app/onboarding/role.tsx`); pick "I coach a team". Later: Profile → "Change account type". API: `PATCH /api/v1/auth/me/role { "role": "COACH" \| "PLAYER" }` (ADMIN / PARENT → 403). Team creation (`POST /teams`) requires COACH, ADMIN or a league admin. |
 | `PARENT` (system role) | **Derived, never self-selected.** A coach invites a guardian for a rostered managed player (roster card → "Invite a parent", or `POST /teams/:teamId/members/:playerId/guardians { email, relationship }`). A brand-new account created by that invite is `PARENT`; an existing bare `PLAYER` (no team/staff rows) is promoted to `PARENT` on accept; a COACH stays COACH. |
 | Head Coach (team staff) | Auto-assigned to whoever creates the team. |
 | Assistant Coach / Team Manager (team staff) | Head coach (or league admin / ADMIN) adds an **existing** account: team detail → Staff card → "Add staff" (email + role chips), or `POST /teams/:teamId/staff { email \| userId, roleType }`. The target must have signed in once — the endpoint never creates users (404 otherwise). |
@@ -94,7 +94,7 @@ Order matters because later steps need data from earlier ones:
 
 1. **ADMIN** signs in (must be on `ADMIN_EMAILS` *before* first sign-up — see below) and
    creates the League + Season (Profile → "Leagues & Seasons"; tests C.1–C.2).
-2. **`+headcoach`** signs in → on the "How will you use Capyhoops?" screen picks
+2. **`+headcoach`** signs in → on the "How will you use Hooplings?" screen picks
    **"I coach a team"** (A.1b) → Teams tab → Create Team `Test Team` in that season (D.1).
    Creator becomes Head Coach; the team's default roles (Head Coach / Assistant Coach / Team
    Manager) are created with it.

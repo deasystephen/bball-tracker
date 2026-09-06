@@ -886,6 +886,17 @@ A bug where the API rejected valid league IDs (`downtown-youth-league`) wasn't c
 
 The fix: Add API integration tests AND schema validation tests for every endpoint.
 
+### Mobile copy & i18n
+- **Screen tests render the real i18n instance.** Never stub `useTranslation` to return the key
+  (`t: (k) => k`): that is how the #431 rebrand missed `roleOnboarding.title` for a week (#474) —
+  Jest pressed `roleOnboarding.coachTitle` and never saw a locale value. `jest.setup.js` pins
+  `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
+- `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (`Capyhoops`,
+  `Basketball Tracker`) in any `en.json`/`es.json` value or any `.maestro/*.yaml` line, after
+  stripping the live `capyhoops.com` domain (`ALLOWED_DOMAINS`). When the domain moves to
+  hooplings.*, delete that entry and the guard starts flagging leftover links. Scope is mobile
+  only — backend mailer templates are not covered.
+
 ### Maestro E2E Tests
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
 - Flows test full user journeys: login → navigate → perform action → assert result

@@ -4,6 +4,10 @@
  * Regression: on first login the previous stack entry is the login screen, so
  * `router.back()` dumped a freshly signed-in coach on the sign-in page. Only
  * the Profile → "Change account type" path (`?from=profile`) may pop back.
+ *
+ * Renders the REAL i18n instance (no `useTranslation` stub): a key-returning
+ * stub is how the #474 rebrand miss in `roleOnboarding.title` stayed invisible
+ * to Jest. `jest.setup.js` pins expo-localization to `en`.
  */
 
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
@@ -29,12 +33,23 @@ jest.mock('../../utils/role-onboarding', () => {
   // which must see the role step as done.
   return { ...actual, markRoleChosen: jest.fn((id: string) => actual.markRoleChosen(id)) };
 });
-jest.mock('../../i18n', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
 const player = { id: 'u1', email: 'a@b.c', name: 'Alice', role: 'PLAYER' as const };
+
+describe('RoleSelectScreen copy (#474)', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ user: player as never, isAuthenticated: true, accessToken: 't', refreshToken: null, isLoading: false });
+  });
+
+  it('renders the Hooplings title, not the retired brand', () => {
+    const { getByText, queryByText } = render(<RoleSelectScreen />);
+    expect(getByText('How will you use Hooplings?')).toBeTruthy();
+    expect(queryByText(/capyhoops/i)).toBeNull();
+  });
+});
 
 describe('RoleSelectScreen navigation after Continue', () => {
   beforeEach(async () => {
@@ -48,8 +63,8 @@ describe('RoleSelectScreen navigation after Continue', () => {
 
   it('replaces to Home on the first-login path even when the stack can go back', async () => {
     const { getByText } = render(<RoleSelectScreen />);
-    fireEvent.press(getByText('roleOnboarding.coachTitle'));
-    fireEvent.press(getByText('roleOnboarding.continue'));
+    fireEvent.press(getByText('I coach a team'));
+    fireEvent.press(getByText('Continue'));
 
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/home'));
     expect(mockRouter.back).not.toHaveBeenCalled();
@@ -62,8 +77,8 @@ describe('RoleSelectScreen navigation after Continue', () => {
     // syncUser fallback: name = email local part (no name from AuthKit).
     useAuthStore.setState({ user: { ...player, name: 'a' } as never });
     const { getByText } = render(<RoleSelectScreen />);
-    fireEvent.press(getByText('roleOnboarding.coachTitle'));
-    fireEvent.press(getByText('roleOnboarding.continue'));
+    fireEvent.press(getByText('I coach a team'));
+    fireEvent.press(getByText('Continue'));
 
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/onboarding/name'));
     expect(mockRouter.back).not.toHaveBeenCalled();
@@ -72,8 +87,8 @@ describe('RoleSelectScreen navigation after Continue', () => {
   it('pops back when opened from Profile', async () => {
     mockParams.from = 'profile';
     const { getByText } = render(<RoleSelectScreen />);
-    fireEvent.press(getByText('roleOnboarding.coachTitle'));
-    fireEvent.press(getByText('roleOnboarding.continue'));
+    fireEvent.press(getByText('I coach a team'));
+    fireEvent.press(getByText('Continue'));
 
     await waitFor(() => expect(mockRouter.back).toHaveBeenCalled());
     expect(mockRouter.replace).not.toHaveBeenCalled();
@@ -83,8 +98,8 @@ describe('RoleSelectScreen navigation after Continue', () => {
     mockParams.from = 'profile';
     mockRouter.canGoBack.mockReturnValue(false);
     const { getByText } = render(<RoleSelectScreen />);
-    fireEvent.press(getByText('roleOnboarding.playerTitle'));
-    fireEvent.press(getByText('roleOnboarding.continue'));
+    fireEvent.press(getByText('I play on a team'));
+    fireEvent.press(getByText('Continue'));
 
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/home'));
     // Same role as current → no API call.
