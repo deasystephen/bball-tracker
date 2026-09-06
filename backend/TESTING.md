@@ -38,7 +38,7 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5432/bball_tracker?schema
 REDIS_URL="redis://localhost:6379"
 JWT_SECRET="test-secret-key"
 JWT_REFRESH_SECRET="test-refresh-secret"
-CORS_ORIGIN="http://localhost:19006"
+CORS_ORIGIN="http://localhost:19006"   # comma-separated exact origins; see env.example
 ```
 
 ### 3. Start Docker Services

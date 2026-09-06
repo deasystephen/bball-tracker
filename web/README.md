@@ -41,7 +41,14 @@ npm run build   # production build
 
 ## Configuration
 
-No env vars required for local dev. In production:
+Two API-host variables, both defaulting to `http://localhost:3000`:
+- `API_URL` — read server-side by `app/invite/[token]/page.tsx` for the invitation lookup (`GET /invitations/by-token/:token`).
+- `NEXT_PUBLIC_API_URL` — inlined into the browser bundle **at build time** for the Accept button in `invite-client.tsx` (`POST …/accept`). Set it before `npm run build`; a runtime env change does not reach the client.
+
+If `API_URL` is wrong the page swallows the fetch failure and renders "Invitation Not Found" for every token, so check it first when debugging. Running against a local backend also needs the web dev origin in the backend's `CORS_ORIGIN` (see `backend/env.example`).
+
+In production both point at `https://api.capyhoops.com`, and:
+- The backend's `CORS_ORIGIN` must list this site's origin(s) (`https://capyhoops.com`, `https://www.capyhoops.com`) or the Accept button fails its CORS preflight (#447) — see `infra/task-definition.json`.
 - The backend's `PUBLIC_APP_URL` must point at this site (`https://capyhoops.com`) so invitation emails embed the right CTA URL — see `backend/env.example`.
 
 ## Tests

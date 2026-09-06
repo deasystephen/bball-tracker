@@ -135,7 +135,13 @@ As of 2026-08-30 the API task carries:
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
 - `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.capyhoops.com`): SES mailer
 - `SENTRY_DSN` (secret), `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` (injected by CI from the git SHA)
-- `CORS_ORIGIN`, `PORT`, `NODE_ENV=production`
+- `CORS_ORIGIN`: comma-separated list of exact browser origins allowed to call the API
+  (`https://api.capyhoops.com,https://capyhoops.com,https://www.capyhoops.com`). The apex + www
+  entries exist for the web invite page, whose Accept button `POST`s cross-origin from
+  `capyhoops.com` (#447). No wildcard. This is browser hygiene, not access control — the public
+  accept route is an unauthenticated bearer-token endpoint; `tests/api/cors.test.ts` reads the
+  value from `infra/task-definition.json`, so dropping the apex fails CI
+- `PORT`, `NODE_ENV=production`
 - `REDIS_SOCKET_ADAPTER_URL`: not set — Socket.io is single-replica; the server logs a `FATAL-WARN`
   at startup in production without it. Keep `desiredCount = 1` until a Redis adapter is wired up
   (issue #26)

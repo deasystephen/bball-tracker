@@ -18,7 +18,12 @@ import { logger } from './utils/logger';
 
 const app = express();
 const httpServer = createServer(app);
-// Support multiple origins for mobile (Expo) and web
+// CORS_ORIGIN is a comma-separated list of exact browser origins (scheme + host).
+// Always hand cors() the ARRAY: given a plain string the library stamps that value
+// on every response regardless of the request Origin, whereas an array reflects the
+// request Origin only when it is listed and omits the header otherwise. Passing the
+// array even for a single entry keeps the behaviour independent of how many origins
+// are configured (#447). Native mobile sends no Origin header and is unaffected.
 const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(',').map(o => o.trim());
 
 // Socket.io currently uses the in-memory adapter. Rooms are local to a single
@@ -28,7 +33,7 @@ const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(
 // production without a Redis adapter URL configured.
 const io = new SocketServer(httpServer, {
   cors: {
-    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+    origin: corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
@@ -54,7 +59,7 @@ app.set('trust proxy', 1);
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+  origin: corsOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
