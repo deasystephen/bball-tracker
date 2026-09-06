@@ -906,8 +906,10 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
 - `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (`Capyhoops`,
   `Basketball Tracker`, separators tolerated) in any `en.json`/`es.json` value, any line of any
-  `.maestro/**/*.yaml`, or any line of mobile source (`.ts/.tsx/.js/.json` under `mobile/`, minus
-  native/build dirs) — comment lines included, so reword historical notes instead of quoting
+  `.maestro/**/*.{yaml,yml}` (nested directories included), or any line of mobile source
+  (`.ts/.tsx/.js/.jsx/.mjs/.cjs/.json` under `mobile/`, minus native/build dirs,
+  `package-lock.json`, and `__tests__/`, whose negative fixtures quote the old names) — comment
+  lines included, so reword historical notes instead of quoting
   the old name. A hostname ending in a live domain (`ALLOWED_DOMAINS`, currently
   `capyhoops.com`, any subdomain) is stripped first; the match is anchored, so
   `capyhoops.community` still fails. When the domain moves to hooplings.*, delete that entry
