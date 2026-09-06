@@ -905,10 +905,14 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   Jest pressed `roleOnboarding.coachTitle` and never saw a locale value. `jest.setup.js` pins
   `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
 - `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (`Capyhoops`,
-  `Basketball Tracker`) in any `en.json`/`es.json` value or any `.maestro/*.yaml` line, after
-  stripping the live `capyhoops.com` domain (`ALLOWED_DOMAINS`). When the domain moves to
-  hooplings.*, delete that entry and the guard starts flagging leftover links. Scope is mobile
-  only — backend mailer templates are not covered.
+  `Basketball Tracker`, separators tolerated) in any `en.json`/`es.json` value, any line of any
+  `.maestro/**/*.yaml`, or any line of mobile source (`.ts/.tsx/.js/.json` under `mobile/`, minus
+  native/build dirs) — comment lines included, so reword historical notes instead of quoting
+  the old name. A hostname ending in a live domain (`ALLOWED_DOMAINS`, currently
+  `capyhoops.com`, any subdomain) is stripped first; the match is anchored, so
+  `capyhoops.community` still fails. When the domain moves to hooplings.*, delete that entry
+  and the guard starts flagging leftover links (the allowlist self-test derives from the array).
+  Scope is mobile only — backend mailer templates are not covered.
 
 ### Maestro E2E Tests
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
