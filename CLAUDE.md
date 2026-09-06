@@ -760,6 +760,19 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 ### Environment URLs & time zone
 - `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.capyhoops.com` in prod via `infra/task-definition.json`; default `http://localhost:3000`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://capyhoops.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API.
 - `DEFAULT_TIMEZONE` — IANA zone used to format dates in outbound email (`utils/format-date.ts#formatEmailDate/formatEmailDateTime`; default `America/Los_Angeles`). Never call `toLocaleDateString()` bare in a template variable — ECS runs in UTC (audit #57). Teams/leagues have no time-zone column yet; pass one through the helper's `timeZone` arg once they do.
+- `CORS_ORIGIN` — comma-separated list of **exact** browser origins (scheme + host, no wildcard) that
+  `backend/src/index.ts` hands to both `cors()` and Socket.io. Production
+  (`infra/task-definition.json`) lists `https://api.capyhoops.com,https://capyhoops.com,https://www.capyhoops.com`;
+  the apex + www entries exist because the web invite page (`web/app/invite/[token]/invite-client.tsx`)
+  `POST`s the accept cross-origin from `capyhoops.com`, which is a preflighted request (#447). The list
+  is always passed as an **array** — `cors` stamps a plain-string origin on every response regardless
+  of the request `Origin`, while an array reflects only listed origins — so behaviour never depends on
+  how many entries are configured. CORS here is browser hygiene, not access control: the accept route is
+  an unauthenticated bearer-token endpoint reachable from any curl. `tests/api/cors.test.ts` reads the
+  production value out of `task-definition.json` and asserts the apex preflight, so dropping the apex
+  from the deploy file fails CI. The mobile app sends no `Origin` header and is unaffected. The web
+  deploy (#30) separately needs `API_URL` (server-side GET) **and** `NEXT_PUBLIC_API_URL` (browser
+  POST, baked at build time) pointed at the API host.
 
 ### Calendar feed (`services/calendar-service.ts`, `api/teams/calendar.ts`)
 - `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass) — a downgraded/expired subscription stops the feed with 403 instead of serving forever (audit #43).
