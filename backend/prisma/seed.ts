@@ -15,6 +15,10 @@ const SEED_IDS = {
   LEAGUE: '10000000-0000-4000-a000-000000000001',
   WARRIORS_TEAM: '20000000-0000-4000-a000-000000000001',
   LAKERS_TEAM: '20000000-0000-4000-a000-000000000002',
+  // Persistent identities (#462). Fixed ids so re-runs are idempotent; an
+  // existing dev DB keeps the lineage the migration backfilled plus this one.
+  WARRIORS_LINEAGE: '21000000-0000-4000-a000-000000000001',
+  LAKERS_LINEAGE: '21000000-0000-4000-a000-000000000002',
   WARRIORS_VS_LAKERS_GAME: '30000000-0000-4000-a000-000000000001',
   WARRIORS_VS_CELTICS_GAME: '30000000-0000-4000-a000-000000000002',
   WARRIORS_VS_HEAT_GAME: '30000000-0000-4000-a000-000000000003',
@@ -417,13 +421,21 @@ async function main() {
   console.log('\nCreating teams...');
 
   // Warriors
+  await prisma.teamLineage.upsert({
+    where: { id: SEED_IDS.WARRIORS_LINEAGE },
+    update: {},
+    create: { id: SEED_IDS.WARRIORS_LINEAGE },
+  });
   const warriors = await prisma.team.upsert({
     where: { id: SEED_IDS.WARRIORS_TEAM },
-    update: {},
+    update: { lineageId: SEED_IDS.WARRIORS_LINEAGE },
     create: {
       id: SEED_IDS.WARRIORS_TEAM,
       name: 'Warriors',
       seasonId: season.id,
+      lineageId: SEED_IDS.WARRIORS_LINEAGE,
+      ageGroup: 'U14',
+      gender: 'BOYS',
       chatLink: 'https://chat.whatsapp.com/warriors-team-chat',
     },
   });
@@ -508,14 +520,20 @@ async function main() {
     console.log(`    Added player: ${players[p.email].name} (#${p.jersey})`);
   }
 
-  // Lakers
+  // Lakers (no age group / gender on purpose: the empty-field path)
+  await prisma.teamLineage.upsert({
+    where: { id: SEED_IDS.LAKERS_LINEAGE },
+    update: {},
+    create: { id: SEED_IDS.LAKERS_LINEAGE },
+  });
   const lakers = await prisma.team.upsert({
     where: { id: SEED_IDS.LAKERS_TEAM },
-    update: {},
+    update: { lineageId: SEED_IDS.LAKERS_LINEAGE },
     create: {
       id: SEED_IDS.LAKERS_TEAM,
       name: 'Lakers',
       seasonId: season.id,
+      lineageId: SEED_IDS.LAKERS_LINEAGE,
     },
   });
   console.log(`  Created team: ${lakers.name}`);

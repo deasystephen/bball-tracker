@@ -35,6 +35,8 @@ import {
   canWriteLeague,
 } from '../../src/utils/permissions';
 import { LeagueService } from '../../src/services/league-service';
+import { TeamService, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { Prisma } from '@prisma/client';
 
 const RUN = randomUUID().slice(0, 8);
 const LEAGUE_A = `ZZ-OrgA-${RUN}`;
@@ -46,6 +48,10 @@ jest.setTimeout(30000);
 type Ids = Record<string, string>;
 const users: Ids = {};
 const leagues: Ids = {};
+const teams: Ids = {};
+const seasons: Ids = {};
+/** Lineages survive the league cascade (Restrict on the child side), so they are removed by hand. */
+const lineageIds: string[] = [];
 
 async function mkUser(key: string, role: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN'): Promise<string> {
   const u = await prisma.user.create({
@@ -79,9 +85,12 @@ beforeAll(async () => {
     select: { id: true },
   });
   const ta = await prisma.team.create({
-    data: { name: `TeamA-${RUN}`, seasonId: sa.id },
-    select: { id: true },
+    data: { name: `TeamA-${RUN}`, season: { connect: { id: sa.id } }, lineage: { create: {} } },
+    select: { id: true, lineageId: true },
   });
+  teams.a = ta.id;
+  seasons.a = sa.id;
+  lineageIds.push(ta.lineageId);
   const role = await prisma.teamRole.create({
     data: { teamId: ta.id, type: 'HEAD_COACH', name: 'Head Coach', canManageTeam: true },
     select: { id: true },
@@ -95,9 +104,10 @@ beforeAll(async () => {
     select: { id: true },
   });
   const tb = await prisma.team.create({
-    data: { name: `TeamB-${RUN}`, seasonId: sb.id },
-    select: { id: true },
+    data: { name: `TeamB-${RUN}`, season: { connect: { id: sb.id } }, lineage: { create: {} } },
+    select: { id: true, lineageId: true },
   });
+  lineageIds.push(tb.lineageId);
   const roleB = await prisma.teamRole.create({
     data: { teamId: tb.id, type: 'HEAD_COACH', name: 'Head Coach', canManageTeam: true },
     select: { id: true },
@@ -147,8 +157,59 @@ beforeAll(async () => {
 afterAll(async () => {
   // League deletes cascade to seasons -> teams -> staff/members/roles.
   await prisma.league.deleteMany({ where: { name: { in: [LEAGUE_A, LEAGUE_B, LEAGUE_P] } } });
+  await prisma.teamLineage.deleteMany({ where: { id: { in: lineageIds } } });
   await prisma.user.deleteMany({ where: { id: { in: Object.values(users) } } });
   await prisma.$disconnect();
+});
+
+describe('team lineage against a real database (#462)', () => {
+  it('every team carries a lineage after migrate deploy (the backfill left no nulls)', async () => {
+    const [{ count }] = await prisma.$queryRaw<[{ count: number }]>`
+      SELECT count(*)::int AS "count" FROM "Team" WHERE "lineageId" IS NULL
+    `;
+    expect(count).toBe(0);
+  });
+
+  it('rejects a second row of one lineage in the same season (unique index)', async () => {
+    const ta = await prisma.team.findUniqueOrThrow({
+      where: { id: teams.a },
+      select: { lineageId: true, seasonId: true },
+    });
+
+    const err = await prisma.team
+      .create({ data: { name: `Dup-${RUN}`, seasonId: ta.seasonId, lineageId: ta.lineageId } })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    expect((err as Prisma.PrismaClientKnownRequestError).code).toBe('P2002');
+  });
+
+  it('updateTeam refuses to move a row into a season that already holds its sibling (400, not 500)', async () => {
+    const sysadmin = await mkUser('sysadmin', 'ADMIN');
+    const ta = await prisma.team.findUniqueOrThrow({
+      where: { id: teams.a },
+      select: { lineageId: true },
+    });
+    // Next season in league A, holding this lineage's rollover row.
+    const s2 = await prisma.season.create({
+      data: { leagueId: leagues.a, name: `S2-${RUN}`, isActive: true },
+      select: { id: true },
+    });
+    await prisma.team.create({
+      data: { name: `TeamA-next-${RUN}`, seasonId: s2.id, lineageId: ta.lineageId },
+    });
+
+    const err = await TeamService.updateTeam(teams.a, { seasonId: s2.id }, sysadmin).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toMatchObject({ statusCode: 400, message: SEASON_SIBLING_MESSAGE });
+    const unchanged = await prisma.team.findUniqueOrThrow({
+      where: { id: teams.a },
+      select: { seasonId: true },
+    });
+    expect(unchanged.seasonId).toBe(seasons.a);
+  });
 });
 
 describe('league access against a real database (#443)', () => {

@@ -34,6 +34,17 @@ enum TeamRoleType {
   CUSTOM
 }
 
+/**
+ * Team gender bracket. An enum because the domain is closed; age group stays a
+ * bounded free-text string because conventions differ by region (U14 / 14U /
+ * Grade 7) — see docs/plans/team-lineage-and-competition.md decision 10.
+ */
+enum TeamGender {
+  BOYS
+  GIRLS
+  COED
+}
+
 enum GameStatus {
   SCHEDULED
   IN_PROGRESS
@@ -214,15 +225,53 @@ model LeagueAdmin {
 // TEAM & ROLES
 // =============================================================================
 
+/**
+ * Persistent team identity across seasons (#462).
+ *
+ *   League (club) ─< Season ─< Team (= team-season: name, ageGroup, gender)
+ *                                  │
+ *                                  └── lineageId ──> TeamLineage (this)
+ *
+ * A `Team` row IS a team-season: every roster, staff, game and stats table
+ * hangs off it and none carries a seasonId. This table is the identity that
+ * links one season's row to the next, and nothing more — everything a coach
+ * can change season to season (name, ageGroup, gender) lives on Team.
+ * Rollover (#461) and adoption (#459) create a NEW Team row with the same
+ * lineageId; they never move Team.seasonId on a row with history.
+ *
+ * Deliberately carries no club: a team's club is the league of the season it
+ * plays in (one access path, `permissions.ts#getTeamPermissions`).
+ *
+ * Created by the migration `20260906120000_team_lineage`, which backfilled one
+ * lineage per existing team (hand-written: Prisma would emit a NOT NULL add
+ * that fails on a populated table). `deleteTeam` removes a lineage when its
+ * last team-season goes; Season/League cascades bypass that and leave harmless
+ * orphan rows.
+ */
+model TeamLineage {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teams Team[]
+}
+
 model Team {
   id        String   @id @default(uuid())
   name      String
   seasonId  String
+  lineageId String
   chatLink  String?
+  // Per-season attributes (a U12 team is U13 next year): free text, trimmed,
+  // max 20 chars, enforced by `createTeamSchema` / `updateTeamSchema`.
+  ageGroup  String?
+  gender    TeamGender?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   season              Season               @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  // Restrict: a lineage is only removed once no team-season references it.
+  lineage             TeamLineage          @relation(fields: [lineageId], references: [id], onDelete: Restrict)
   members             TeamMember[]
   staff               TeamStaff[]
   roles               TeamRole[]
@@ -233,7 +282,11 @@ model Team {
   announcements       Announcement[]
   calendarFeedTokens  CalendarFeedToken[]
 
+  // A lineage appears at most once per season; `updateTeam`'s season move
+  // pre-checks this and maps a lost race (P2002) to 400.
+  @@unique([lineageId, seasonId])
   @@index([seasonId])
+  @@index([lineageId])
   @@index([name])
   @@index([createdAt])
 }

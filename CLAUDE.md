@@ -370,6 +370,42 @@ current score so a client can drop events and still converge.
   (`getGameResult`, `getResultColor` — T is neutral `textSecondary`, `formatRecord`); never compare
   `homeScore > awayScore` inline in a screen. Screens show the tie count only when it is non-zero.
 
+### Team lineage (#462, `docs/plans/team-lineage-and-competition.md`)
+
+- **A `Team` row IS a team-season.** No game or stats table carries a `seasonId`; `Team.seasonId` is a
+  single required FK, so every roster, staff, game and stats row is already per-season. Persistent
+  identity across seasons is the additive `TeamLineage` parent (`Team.lineageId`, required,
+  `@@unique([lineageId, seasonId])`), **not** a `Team`/`TeamSeason` split — the split would re-point
+  nine FK tables and break `/teams` for the binaries in the field for no capability. The lineage is a
+  pure identity (id + timestamps) and carries no club: a team's club is the league of the season it
+  plays in, so `permissions.ts` keeps one access path. Rollover (#461) and adoption (#459) create a
+  **new `Team` row with the same `lineageId`** and copy the per-season tables; they never move
+  `seasonId` on a row with history.
+- `createTeam` creates the lineage inside its existing `$transaction`, after the cap check (two
+  statements — Prisma won't mix the scalar `seasonId` with a nested relation write). `deleteTeam` runs
+  in a `$transaction` and deletes the lineage when no other team-season references it; `Season`/`League`
+  cascades bypass that and leave harmless orphan lineages. `PATCH /teams/:id { seasonId }` pre-checks
+  for a sibling of the lineage in the target season and answers **400** (`SEASON_SIBLING_MESSAGE`); a
+  lost race on the unique index maps P2002 to the same 400.
+- **`ageGroup` / `gender` live on `Team`** (per-season: a U12 team is U13 next year). `gender` is the
+  Prisma enum `TeamGender { BOYS, GIRLS, COED }`; `ageGroup` is trimmed free text, max 20 (U14 / 14U /
+  Grade 7 — conventions differ by region, so no enum). On update `null` clears, absent leaves unchanged
+  (same rule as jersey/position). Mobile derives labels ONLY via `utils/team-labels.ts`
+  (`formatTeamBracket` → "U14 · Boys", `genderOptions`); the gender pills reuse `components/SortPills`
+  with `labelPrefix="Gender: "` (a11y "Gender: Boys", asserted by `.maestro/create-team.yaml`).
+- **Migration `20260906120000_team_lineage` is hand-written** (enum → table → nullable column →
+  `UPDATE … gen_random_uuid()` → `INSERT … SELECT` → `SET NOT NULL` → FK → unique index). Prisma would
+  emit `ADD COLUMN … NOT NULL`, which fails on a populated table and crash-loops the API at container
+  start. **CI applies migrations to an empty database**, so a backfill's data statements first run on
+  real rows in production unless rehearsed: restore a snapshot per `docs/runbooks/rds-backup-restore.md`
+  (stop before the Secrets Manager repoint), `migrate deploy` from the branch, assert
+  `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. The permanent CI guard is #493.
+- Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
+  plan and not built** (#492, gated on #494 opponent linkage and an organizer persona). Tests:
+  `tests/schemas/teams.test.ts`, lineage blocks in `tests/services/team-service.test.ts` and
+  `tests/api/teams.test.ts`, real-Postgres assertions in `tests/integration/league-access.db.test.ts`;
+  mobile `__tests__/app/team-bracket-fields.test.tsx`, `__tests__/utils/team-labels.test.ts`.
+
 ### Game score (server-derived, audit #6/#8/#38)
 
 - `Game.homeScore` is **derived from the event log**: `GameEventService.createEvent`

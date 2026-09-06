@@ -2,7 +2,8 @@
  * Unit tests for TeamService
  */
 
-import { TeamService, ROSTER_MEMBERS_ORDER_BY } from '../../src/services/team-service';
+import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -29,6 +30,12 @@ function staffTeams(n: number): Array<{ teamId: string }> {
 }
 
 describe('TeamService', () => {
+  beforeEach(() => {
+    // Every create now mints a lineage inside the transaction (#462); the
+    // pre-lineage tests never stubbed it, so give it a default id.
+    (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: 'lineage-default' });
+  });
+
   describe('createTeam', () => {
     it('should create a team successfully', async () => {
       const coach = createCoach();
@@ -2113,6 +2120,193 @@ describe('TeamService', () => {
         expectForbiddenError(err, "You do not have permission to manage this team's roster");
       }
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('team lineage (#462)', () => {
+    describe('createTeam', () => {
+      it('creates a lineage inside the transaction and stores lineageId, ageGroup and gender on the team', async () => {
+        const coach = createCoach();
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+        const team = createTeam({ seasonId: season.id, lineageId: 'lineage-new' });
+        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH', name: 'Head Coach' });
+
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, league, teams: [] });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: 'lineage-new' });
+        (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+        (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue(
+          createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id })
+        );
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, staff: [], roles: [], members: [] });
+
+        await TeamService.createTeam(
+          { name: team.name, seasonId: season.id, ageGroup: 'U14', gender: 'BOYS' },
+          coach.id
+        );
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.teamLineage.create).toHaveBeenCalledWith({ data: {}, select: { id: true } });
+        expect(mockPrisma.team.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            name: team.name,
+            seasonId: season.id,
+            lineageId: 'lineage-new',
+            ageGroup: 'U14',
+            gender: 'BOYS',
+          }),
+        });
+      });
+
+      it('creates no lineage when the FREE-tier cap rejects the create (cap check runs first)', async () => {
+        const coach = { ...createCoach(), subscriptionTier: 'FREE', subscriptionExpiresAt: null };
+        const league = createLeague();
+        const season = createSeason({ leagueId: league.id });
+
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, league, teams: [] });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+
+        await expect(
+          TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
+        ).rejects.toMatchObject({ statusCode: 402 });
+
+        expect(mockPrisma.teamLineage.create).not.toHaveBeenCalled();
+        expect(mockPrisma.team.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('updateTeam', () => {
+      function mockRenamePath(): ReturnType<typeof createFullTeam> {
+        const full = createFullTeam();
+        const { team, coach, season, league, headCoachRole, coachStaff } = full;
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.team.update as jest.Mock).mockResolvedValue({
+          ...team, season: { ...season, league }, staff: [], members: [],
+        });
+        return full;
+      }
+
+      it('sets ageGroup and gender', async () => {
+        const { team, coach } = mockRenamePath();
+
+        await TeamService.updateTeam(team.id, { ageGroup: 'U14', gender: 'GIRLS' }, coach.id);
+
+        expect(mockPrisma.team.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: { ageGroup: 'U14', gender: 'GIRLS' } })
+        );
+      });
+
+      it('clears ageGroup and gender with null, and leaves absent fields alone', async () => {
+        const { team, coach } = mockRenamePath();
+
+        await TeamService.updateTeam(team.id, { ageGroup: null, gender: null }, coach.id);
+
+        expect(mockPrisma.team.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: { ageGroup: null, gender: null } })
+        );
+      });
+
+      it('answers 400 when the target season already holds a row of this lineage', async () => {
+        const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+        const otherLeague = createLeague();
+        const otherSeason = createSeason({ leagueId: otherLeague.id });
+
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });
+        (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue({ id: 'sibling-row' });
+
+        const error = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id).catch((e) => e);
+
+        expectBadRequestError(error, SEASON_SIBLING_MESSAGE);
+        expect(mockPrisma.team.findFirst).toHaveBeenCalledWith({
+          where: { lineageId: team.lineageId, seasonId: otherSeason.id, NOT: { id: team.id } },
+          select: { id: true },
+        });
+        expect(mockPrisma.team.update).not.toHaveBeenCalled();
+      });
+
+      it('maps a lost race on the (lineageId, seasonId) unique index to the same 400', async () => {
+        const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+        const otherLeague = createLeague();
+        const otherSeason = createSeason({ leagueId: otherLeague.id });
+
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+        (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });
+        (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.team.update as jest.Mock).mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002',
+            clientVersion: 'test',
+            meta: { target: ['lineageId', 'seasonId'] },
+          })
+        );
+
+        const error = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id).catch((e) => e);
+
+        expectBadRequestError(error, SEASON_SIBLING_MESSAGE);
+      });
+
+      it('does not run the sibling check when seasonId is unchanged', async () => {
+        const { team, coach } = mockRenamePath();
+
+        await TeamService.updateTeam(team.id, { seasonId: team.seasonId, name: 'Same season' }, coach.id);
+
+        expect(mockPrisma.team.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('deleteTeam', () => {
+      function mockHeadCoachDelete(): ReturnType<typeof createFullTeam> {
+        const full = createFullTeam();
+        const { team, coach, coachStaff } = full;
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+        (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
+        return full;
+      }
+
+      it('deletes the team and its lineage in one transaction when it was the last team-season', async () => {
+        const { team, coach } = mockHeadCoachDelete();
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
+
+        await expect(TeamService.deleteTeam(team.id, coach.id)).resolves.toEqual({ success: true });
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.team.delete).toHaveBeenCalledWith({ where: { id: team.id } });
+        expect(mockPrisma.team.count).toHaveBeenCalledWith({ where: { lineageId: team.lineageId } });
+        expect(mockPrisma.teamLineage.delete).toHaveBeenCalledWith({ where: { id: team.lineageId } });
+      });
+
+      it('keeps the lineage when another team-season still references it', async () => {
+        const { team, coach } = mockHeadCoachDelete();
+        (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
+
+        await TeamService.deleteTeam(team.id, coach.id);
+
+        expect(mockPrisma.team.delete).toHaveBeenCalled();
+        expect(mockPrisma.teamLineage.delete).not.toHaveBeenCalled();
+      });
     });
   });
 });

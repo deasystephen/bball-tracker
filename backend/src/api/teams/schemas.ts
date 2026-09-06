@@ -3,8 +3,22 @@
  */
 
 import { z } from 'zod';
-import { GuardianRelationship } from '@prisma/client';
+import { GuardianRelationship, TeamGender } from '@prisma/client';
 import { safeUrlSchema } from '../auth/schemas';
+
+/**
+ * Per-season team attributes (#462). Age group is deliberately free text
+ * (U14 / 14U / Grade 7 — conventions differ by region), trimmed and bounded;
+ * gender is a closed enum. On update `null` clears, absent leaves unchanged.
+ */
+const teamAgeGroupSchema = z
+  .string()
+  .trim()
+  .min(1, 'Age group cannot be empty')
+  .max(20, 'Age group too long');
+const teamGenderSchema = z.nativeEnum(TeamGender, {
+  message: 'gender must be one of BOYS, GIRLS, COED',
+});
 
 /**
  * Schema for creating a new team
@@ -20,6 +34,8 @@ export const createTeamSchema = z.object({
     (url) => url.startsWith('https://') || url.startsWith('http://'),
     { message: 'Chat link must use http or https protocol' }
   ).optional(),
+  ageGroup: teamAgeGroupSchema.optional(),
+  gender: teamGenderSchema.optional(),
 });
 
 /**
@@ -32,6 +48,8 @@ export const updateTeamSchema = z.object({
     (url) => url.startsWith('https://') || url.startsWith('http://'),
     { message: 'Chat link must use http or https protocol' }
   ).nullable().optional(),
+  ageGroup: teamAgeGroupSchema.nullable().optional(),
+  gender: teamGenderSchema.nullable().optional(),
 });
 
 /**

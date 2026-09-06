@@ -14,7 +14,17 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "team-name-input"
 - inputText: "Test Team"
-- hideKeyboard
+# Age group + gender (#462). `hideKeyboard` is unreliable on the simulator, so
+# the keyboard is dismissed by tapping the non-interactive "Gender" label
+# (ScrollView has keyboardShouldPersistTaps="handled").
+- tapOn:
+    id: "team-age-group-input"
+- inputText: "U14"
+- tapOn: "Gender"
+- tapOn: "Gender: Boys"
+- assertVisible:
+    text: "Gender: Boys"
+    selected: true
 # Frank Vogel belongs to a real league, so the screen offers the league/season
 # pickers — but since #442 they sit behind a collapsed "League & season"
 # disclosure whose default is "My teams" (create in the coach's own personal
@@ -38,6 +48,8 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "create-team-submit"
 - assertVisible: "Test Team"
+# The bracket card renders "U14 · Boys" from the saved fields.
+- assertVisible: "U14 · Boys"
 # Create screen is replaced (not pushed under) the detail screen, so back
 # returns to the Teams list — never the spent create form. The success toast
 # briefly covers the hero back arrow; since #464 toasts pass taps through, so

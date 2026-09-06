@@ -71,7 +71,14 @@
     "you": "Tú",
     "roleHeadCoach": "Entrenador principal",
     "roleAssistantCoach": "Entrenador asistente",
-    "roleTeamManager": "Gerente del equipo"
+    "roleTeamManager": "Gerente del equipo",
+    "ageGroup": "Categoría de edad",
+    "ageGroupPlaceholder": "p. ej. U14, Sub-14",
+    "gender": "Género",
+    "genderBoys": "Niños",
+    "genderGirls": "Niñas",
+    "genderCoed": "Mixto",
+    "bracket": "Categoría y género"
   },
   "players": {
     "title": "Jugadores",

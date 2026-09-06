@@ -22,6 +22,9 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ListItem } from '../../components';
+import { SortPills } from '../../components/SortPills';
+import type { TeamGender } from '../../hooks/useTeams';
+import { genderOptions } from '../../utils/team-labels';
 import { useToast } from '../../components/Toast';
 import { useCreateTeam } from '../../hooks/useTeams';
 import { isUpgradeRequiredError, getApiErrorMessage } from '../../services/api-client';
@@ -54,6 +57,9 @@ export default function CreateTeamScreen() {
   const insets = useSafeAreaInsets();
 
   const [name, setName] = useState('');
+  // Per-season bracket (#462); both optional, sent only when set.
+  const [ageGroup, setAgeGroup] = useState('');
+  const [gender, setGender] = useState<TeamGender | null>(null);
   const [leagueId, setLeagueId] = useState(MY_TEAMS_OPTION);
   const [seasonId, setSeasonId] = useState('');
   const [pickerExpanded, setPickerExpanded] = useState(false);
@@ -126,8 +132,14 @@ export default function CreateTeamScreen() {
     try {
       // Omitting `seasonId` tells the backend to resolve the caller's personal
       // league + season (#442).
+      const bracket = {
+        ...(ageGroup.trim() ? { ageGroup: ageGroup.trim() } : {}),
+        ...(gender ? { gender } : {}),
+      };
       const team = await createTeam.mutateAsync(
-        usesPersonalLeague ? { name: name.trim() } : { name: name.trim(), seasonId }
+        usesPersonalLeague
+          ? { name: name.trim(), ...bracket }
+          : { name: name.trim(), seasonId, ...bracket }
       );
 
       toast.showToast('Team created successfully', 'success');
@@ -212,6 +224,29 @@ export default function CreateTeamScreen() {
             autoFocus
             testID="team-name-input"
           />
+
+          <Input
+            label={t('teams.ageGroup')}
+            placeholder={t('teams.ageGroupPlaceholder')}
+            value={ageGroup}
+            onChangeText={setAgeGroup}
+            maxLength={20}
+            autoCapitalize="characters"
+            testID="team-age-group-input"
+          />
+
+          <View style={styles.selectionSection}>
+            <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
+              {t('teams.gender')}
+            </ThemedText>
+            {/* Tapping the selected pill clears it — gender is optional. */}
+            <SortPills
+              options={genderOptions(t)}
+              selected={gender}
+              onSelect={(key) => setGender(gender === key ? null : key)}
+              labelPrefix={`${t('teams.gender')}: `}
+            />
+          </View>
 
           {/*
             Nothing but the name for a coach with no league of their own — the

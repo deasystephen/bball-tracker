@@ -25,6 +25,7 @@ import {
 import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
+import { formatTeamBracket } from '../../utils/team-labels';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
@@ -105,6 +106,7 @@ export default function TeamDetailsScreen() {
   }
 
   const memberCount = team.members?.length || 0;
+  const bracket = formatTeamBracket(team, t);
   const teamColor = getTeamColor(team.name);
 
   return (
@@ -218,6 +220,21 @@ export default function TeamDetailsScreen() {
                     <ThemedText variant="caption" color="success"> (Active)</ThemedText>
                   )}
                 </ThemedText>
+              </View>
+            </View>
+          </Card>
+        )}
+
+        {/* Age group & gender (#462) — only when the team carries either */}
+        {bracket && (
+          <Card variant="elevated" style={styles.card}>
+            <View style={styles.infoRow}>
+              <Ionicons name="people-circle-outline" size={20} color={colors.primary} />
+              <View style={styles.infoContent}>
+                <ThemedText variant="caption" color="textSecondary">
+                  {t('teams.bracket')}
+                </ThemedText>
+                <ThemedText variant="bodyBold" testID="team-bracket">{bracket}</ThemedText>
               </View>
             </View>
           </Card>
