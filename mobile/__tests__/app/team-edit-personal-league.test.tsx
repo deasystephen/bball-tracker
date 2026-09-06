@@ -108,7 +108,7 @@ describe('EditTeamScreen — personal-league branch', () => {
     await waitFor(() => expect(mockUpdateTeam.mutateAsync).toHaveBeenCalledTimes(1));
     expect(mockUpdateTeam.mutateAsync).toHaveBeenCalledWith({
       teamId: 't1',
-      data: { name: 'Warriors', seasonId: 'se-personal', chatLink: null },
+      data: { name: 'Warriors', seasonId: 'se-personal', chatLink: null, ageGroup: null, gender: null },
     });
   });
 

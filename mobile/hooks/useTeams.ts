@@ -45,11 +45,23 @@ export interface TeamMember {
   };
 }
 
+/** Closed enum on the backend (`TeamGender`); age group is free text by design (#462). */
+export type TeamGender = 'BOYS' | 'GIRLS' | 'COED';
+
 export interface Team {
   id: string;
   name: string;
   seasonId: string;
   chatLink?: string | null;
+  /**
+   * Persistent identity across seasons (#462). Optional: a backend predating
+   * the lineage migration omits it. Rollover (#461) creates a new Team row
+   * with the same lineageId; screens never move a team's seasonId on history.
+   */
+  lineageId?: string;
+  /** Per-season bracket (#462): trimmed free text, max 20 chars. */
+  ageGroup?: string | null;
+  gender?: TeamGender | null;
   createdAt: string;
   updatedAt: string;
   season?: {
@@ -97,12 +109,17 @@ export interface CreateTeamInput {
    */
   seasonId?: string;
   chatLink?: string;
+  ageGroup?: string;
+  gender?: TeamGender;
 }
 
 export interface UpdateTeamInput {
   name?: string;
   seasonId?: string;
   chatLink?: string | null;
+  /** `null` clears (server rule shared with jersey/position). */
+  ageGroup?: string | null;
+  gender?: TeamGender | null;
 }
 
 /**

@@ -74,7 +74,14 @@
     "you": "You",
     "roleHeadCoach": "Head Coach",
     "roleAssistantCoach": "Assistant Coach",
-    "roleTeamManager": "Team Manager"
+    "roleTeamManager": "Team Manager",
+    "ageGroup": "Age group",
+    "ageGroupPlaceholder": "e.g. U14, 14U, Grade 7",
+    "gender": "Gender",
+    "genderBoys": "Boys",
+    "genderGirls": "Girls",
+    "genderCoed": "Coed",
+    "bracket": "Age group & gender"
   },
   "players": {
     "title": "Players",

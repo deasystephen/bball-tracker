@@ -468,6 +468,69 @@ describe('Teams API', () => {
     });
   });
 
+  describe('team lineage fields (#462)', () => {
+    const teamWithFields = { ...mockTeam, lineageId: 'lineage-1', ageGroup: 'U14', gender: 'BOYS' };
+
+    it('POST passes ageGroup and gender through to the service', async () => {
+      mockTeamService.createTeam.mockResolvedValue(teamWithFields as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Lakers', ageGroup: ' U14 ', gender: 'BOYS' });
+
+      expect(response.status).toBe(201);
+      expect(response.body.team).toMatchObject({ lineageId: 'lineage-1', ageGroup: 'U14', gender: 'BOYS' });
+      expect(mockTeamService.createTeam).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Lakers', ageGroup: 'U14', gender: 'BOYS' }),
+        TEST_USER_ID
+      );
+    });
+
+    it('POST rejects an unknown gender with 400 and never calls the service', async () => {
+      const response = await request(app).post('/api/v1/teams').send({ name: 'Lakers', gender: 'MIXED' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('gender must be one of BOYS, GIRLS, COED');
+      expect(mockTeamService.createTeam).not.toHaveBeenCalled();
+    });
+
+    it('PATCH sets and clears the fields (null clears)', async () => {
+      mockTeamService.updateTeam.mockResolvedValue({ ...teamWithFields, ageGroup: null, gender: null } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ ageGroup: null, gender: null });
+
+      expect(response.status).toBe(200);
+      expect(mockTeamService.updateTeam).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        { ageGroup: null, gender: null },
+        TEST_USER_ID
+      );
+    });
+
+    it('PATCH rejects an over-long age group with 400', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ ageGroup: 'x'.repeat(21) });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Age group too long');
+      expect(mockTeamService.updateTeam).not.toHaveBeenCalled();
+    });
+
+    it('PATCH surfaces the season-sibling 400 from the service', async () => {
+      mockTeamService.updateTeam.mockRejectedValue(new BadRequestError('This team already has a row in that season'));
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('This team already has a row in that season');
+    });
+  });
+
   describe('DELETE /api/v1/teams/:id', () => {
     it('should delete a team successfully', async () => {
       mockTeamService.deleteTeam.mockResolvedValue({ success: true });

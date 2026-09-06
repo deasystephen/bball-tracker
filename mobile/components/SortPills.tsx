@@ -18,9 +18,15 @@ export interface SortPillOption<K extends string> {
 
 interface SortPillsProps<K extends string> {
   options: readonly SortPillOption<K>[];
-  selected: K;
+  /** `null` = nothing selected (single-choice pickers that allow clearing). */
+  selected: K | null;
   onSelect: (key: K) => void;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Accessibility-label prefix. Defaults to the sort wording Maestro asserts
+   * ("Sort by <label>"); other single-choice rows (team gender) pass their own.
+   */
+  labelPrefix?: string;
 }
 
 export function SortPills<K extends string>({
@@ -28,6 +34,7 @@ export function SortPills<K extends string>({
   selected,
   onSelect,
   style,
+  labelPrefix = 'Sort by ',
 }: SortPillsProps<K>) {
   const { colors } = useTheme();
 
@@ -47,7 +54,7 @@ export function SortPills<K extends string>({
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`Sort by ${option.label}`}
+            accessibilityLabel={`${labelPrefix}${option.label}`}
             accessibilityState={{ selected: isSelected }}
           >
             <ThemedText variant="caption" color={isSelected ? 'primary' : 'textSecondary'}>

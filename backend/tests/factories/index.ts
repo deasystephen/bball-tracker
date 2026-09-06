@@ -153,6 +153,7 @@ export interface TeamData {
   id: string;
   name: string;
   seasonId: string;
+  lineageId: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -161,6 +162,7 @@ export interface CreateTeamOptions {
   id?: string;
   name?: string;
   seasonId?: string;
+  lineageId?: string;
 }
 
 export function createTeam(options: CreateTeamOptions = {}): TeamData {
@@ -171,6 +173,7 @@ export function createTeam(options: CreateTeamOptions = {}): TeamData {
     id,
     name: options.name || `Test Team ${id}`,
     seasonId: options.seasonId || generateId('season'),
+    lineageId: options.lineageId || generateId('lineage'),
     createdAt: now,
     updatedAt: now,
   };

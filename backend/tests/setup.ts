@@ -35,6 +35,16 @@ export const mockPrisma = {
     delete: jest.fn(),
     count: jest.fn(),
   },
+  teamLineage: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    upsert: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
+  },
   teamMember: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),

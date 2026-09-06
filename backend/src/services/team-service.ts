@@ -300,6 +300,9 @@ async function resolvePersonalSeasonId(
   return season.id;
 }
 
+/** 400 body for a season move that would put two rows of one lineage in one season. */
+export const SEASON_SIBLING_MESSAGE = 'This team already has a row in that season';
+
 export class TeamService {
   /**
    * Create a new team.
@@ -399,11 +402,21 @@ export class TeamService {
       const seasonId =
         data.seasonId ?? (await resolvePersonalSeasonId(tx, userId, user?.name ?? 'My'));
 
+      // Persistent identity across seasons (#462): every new team starts its
+      // own lineage. Rollover (#461) / adoption (#459) reuse an existing one.
+      // Two statements rather than a nested create so the team insert can keep
+      // its unchecked scalar `seasonId` (Prisma won't mix scalar FKs with
+      // nested relation writes in one payload).
+      const lineage = await tx.teamLineage.create({ data: {}, select: { id: true } });
+
       const created = await tx.team.create({
         data: {
           name: data.name,
           seasonId,
+          lineageId: lineage.id,
           chatLink: data.chatLink,
+          ageGroup: data.ageGroup,
+          gender: data.gender,
         },
       });
 
@@ -577,6 +590,19 @@ export class TeamService {
           'You do not have permission to move this team into that season'
         );
       }
+
+      // A lineage appears at most once per season (`@@unique([lineageId,
+      // seasonId])`, what makes rollover idempotent). After #461 a lineage has
+      // one row per season, so moving this row into a season that already
+      // holds its sibling must be a 400, not a P2002 500. The insert below
+      // maps a lost race to the same message.
+      const sibling = await prisma.team.findFirst({
+        where: { lineageId: team.lineageId, seasonId: data.seasonId, NOT: { id: teamId } },
+        select: { id: true },
+      });
+      if (sibling) {
+        throw new BadRequestError(SEASON_SIBLING_MESSAGE);
+      }
     }
 
     // Build update data
@@ -594,14 +620,29 @@ export class TeamService {
       updateData.chatLink = data.chatLink;
     }
 
-    // Update the team
-    const updatedTeam = await prisma.team.update({
-      where: { id: teamId },
-      data: updateData,
-      include: TEAM_INCLUDE,
-    });
+    // Per-season attributes; `null` clears (same rule as jersey/position on
+    // `updateTeamMemberSchema`), absent leaves unchanged.
+    if (data.ageGroup !== undefined) {
+      updateData.ageGroup = data.ageGroup;
+    }
 
-    return updatedTeam;
+    if (data.gender !== undefined) {
+      updateData.gender = data.gender;
+    }
+
+    // Update the team
+    try {
+      return await prisma.team.update({
+        where: { id: teamId },
+        data: updateData,
+        include: TEAM_INCLUDE,
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestError(SEASON_SIBLING_MESSAGE);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -626,9 +667,19 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to delete this team');
     }
 
-    // Delete the team (cascade will handle members, staff, roles, and games)
-    await prisma.team.delete({
-      where: { id: teamId },
+    // Delete the team (cascade handles members, staff, roles and games), then
+    // its lineage if this was the last team-season on it. Season/League
+    // cascades bypass this path and leave harmless orphan lineages; this is
+    // the only cleanup (#462).
+    await prisma.$transaction(async (tx) => {
+      await tx.team.delete({
+        where: { id: teamId },
+      });
+
+      const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
+      if (remaining === 0) {
+        await tx.teamLineage.delete({ where: { id: team.lineageId } });
+      }
     });
 
     return { success: true };
