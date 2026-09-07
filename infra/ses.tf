@@ -132,27 +132,3 @@ resource "aws_iam_role_policy_attachment" "ecs_task_ses" {
   role       = aws_iam_role.ecs_task.name
   policy_arn = aws_iam_policy.ses_send.arn
 }
-
-# =============================================================================
-# State moves — the pre-2026-09 single-domain resources keep their objects
-# =============================================================================
-
-moved {
-  from = aws_sesv2_email_identity.mail
-  to   = aws_sesv2_email_identity.mail["capyhoops.com"]
-}
-
-moved {
-  from = aws_route53_record.ses_dkim[0]
-  to   = aws_route53_record.ses_dkim["capyhoops.com-0"]
-}
-
-moved {
-  from = aws_route53_record.ses_dkim[1]
-  to   = aws_route53_record.ses_dkim["capyhoops.com-1"]
-}
-
-moved {
-  from = aws_route53_record.ses_dkim[2]
-  to   = aws_route53_record.ses_dkim["capyhoops.com-2"]
-}

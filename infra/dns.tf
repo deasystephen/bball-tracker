@@ -117,27 +117,3 @@ resource "aws_route53_record" "api" {
     evaluate_target_health = true
   }
 }
-
-# =============================================================================
-# State moves — the pre-2026-09 single-domain resources keep their objects
-# =============================================================================
-
-moved {
-  from = aws_route53_zone.main
-  to   = aws_route53_zone.main["capyhoops.com"]
-}
-
-moved {
-  from = aws_acm_certificate.main
-  to   = aws_acm_certificate.main["capyhoops.com"]
-}
-
-moved {
-  from = aws_acm_certificate_validation.main
-  to   = aws_acm_certificate_validation.main["capyhoops.com"]
-}
-
-moved {
-  from = aws_route53_record.api
-  to   = aws_route53_record.api["capyhoops.com"]
-}
