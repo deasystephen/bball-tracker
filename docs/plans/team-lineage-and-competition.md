@@ -333,11 +333,12 @@ PR 1  TeamLineage + ageGroup/gender + updateTeam guard   (backend, seed, mobile 
       ↳ migration rehearsed on a restored snapshot first (T2) → closes #29
 PR 2  omitSecret refactor                                 (tiny, invitations only)
 ──────── build stops here for now ────────
-#492  competition build (this design, verbatim) — gated on #494 and an organizer persona
+#492  competition build (this design, verbatim) — trigger 1 (#494) decided 2026-09-07 in
+      docs/plans/game-opponent-linkage.md; still gated on an organizer persona
 #493  CI seeded-migration guard (seed teams, then migrate deploy the newest migration)
-#494  Game.opponentTeamId — one row or two (also unblocks fixtures and standings)
+#494  opponent linkage — DECIDED (two rows + Matchup parent; see docs/plans/game-opponent-linkage.md)
 #495  League → Club rename (keep /leagues mounted as an alias for old builds), after #492
-#462  stays open as the parent until #492 and #494 close; PR 1 references it without "Closes".
+#462  stays open as the parent until #492 closes; PR 1 references it without "Closes".
 #461 rollover and #459 adoption can start after PR 1 lands.
 ```
 

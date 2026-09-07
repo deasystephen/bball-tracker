@@ -409,7 +409,11 @@ current score so a client can drop events and still converge.
   (stop before the Secrets Manager repoint), `migrate deploy` from the branch, assert
   `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. The permanent CI guard is #493.
 - Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
-  plan and not built** (#492, gated on #494 opponent linkage and an organizer persona). Tests:
+  plan and not built** (#492, gated on an organizer persona; the opponent-linkage half was
+  **decided** on 2026-09-07 in `docs/plans/game-opponent-linkage.md`: two `Game` rows under a
+  `Matchup` parent, `competitionId` required, opponent name and score **projected at read** from
+  the linked row — never written across rows — and coach proposals count in standings only when
+  both sides agree; built inside #492 PR 2/3). Tests:
   `tests/schemas/teams.test.ts`, lineage blocks in `tests/services/team-service.test.ts` and
   `tests/api/teams.test.ts`, real-Postgres assertions in `tests/integration/league-access.db.test.ts`;
   mobile `__tests__/app/team-bracket-fields.test.tsx`, `__tests__/utils/team-labels.test.ts`.
