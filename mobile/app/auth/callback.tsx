@@ -1,5 +1,5 @@
 /**
- * OAuth callback route for bball-tracker://auth/callback?code=<code>&state=<state>
+ * OAuth callback route for hooplings://auth/callback?code=<code>&state=<state>
  *
  * WorkOS redirects the browser back to this deep link after the user signs in.
  * Expo Router matches the path to this screen, which exchanges the authorization
@@ -33,7 +33,7 @@ import { consumePendingLogin } from '../../utils/pkce';
  * Only the async token-exchange failure has to live in state.
  *
  * The `error` query param is attacker-controllable (anyone can open
- * bball-tracker://auth/callback?error=…), so it is never rendered verbatim —
+ * hooplings://auth/callback?error=…), so it is never rendered verbatim —
  * known OAuth codes map to our own copy and everything else gets a generic
  * message (audit #74).
  */

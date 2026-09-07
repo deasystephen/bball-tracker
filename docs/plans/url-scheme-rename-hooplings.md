@@ -267,8 +267,14 @@ Mobile `__tests__/i18n/brand-guard.test.ts` (PR B):
 - `__tests__/utils/return-path.test.ts:44` fixture → `hooplings://x` (same assertion).
 - `__tests__/app/about.test.tsx` fixtures → `1.3.0` / build 31.
 
-Maestro (manual, `npx prisma db seed` before each; requires `npx expo run:ios` from PR B's branch
-because the scheme is native — an older dev client does not register `hooplings://`):
+Maestro (manual, `npx prisma db seed` before each; the scheme is native, so the dev client must be
+rebuilt from PR B's branch: `npx expo prebuild --platform ios --clean` first — `expo run:ios` alone
+reuses the stale gitignored `ios/` project — and, because the regenerated project carries the
+`applinks:` entitlement, Expo then demands a signing certificate even for the simulator; build with
+`xcodebuild … -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`, `simctl install`,
+and `npx expo start --dev-client` for Metro. Verified 2026-09-07: auth-callback.yaml green on
+`hooplings://`, and a `bball-tracker://auth/callback?error=…` link on the same build rendered
+"Sign In Failed", proving the array entry routes):
 - `.maestro/auth-callback.yaml` with `hooplings://auth/callback?error=access_denied`.
 - `.maestro/coach-onboarding.yaml` with `hooplings://teams` and `hooplings://games`.
 - Old-link check on the **rebuilt dev client** (a TestFlight binary cannot run on a simulator):

@@ -61,7 +61,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   2. Skip the intro carousel (`app/onboarding/index.tsx`, shown before login) → tap the sign-in button → the system browser opens the WorkOS AuthKit page (the app sent `state` + `code_challenge`, PKCE audit #5)
   3. Choose "Sign up" → enter a fresh email + password
   4. Complete email verification if prompted
-- **Expected:** Browser redirects to `bball-tracker://auth/callback?code=…&state=…`; the app exchanges the code (with `code_verifier`) and lands on the **"How will you use Hooplings?"** account-type screen (A.1b) because every new sign-up is created as `PLAYER`. `GET /auth/me` → `role: PLAYER`, `leagueAdminOf: []`, `guardianOf: []`. Access + refresh tokens persisted; returning to the app shows the logged-in state.
+- **Expected:** Browser redirects to `hooplings://auth/callback?code=…&state=…`; the app exchanges the code (with `code_verifier`) and lands on the **"How will you use Hooplings?"** account-type screen (A.1b) because every new sign-up is created as `PLAYER`. `GET /auth/me` → `role: PLAYER`, `leagueAdminOf: []`, `guardianOf: []`. Access + refresh tokens persisted; returning to the app shows the logged-in state.
 - **Notes:** ___________
 
 ### A.1b — Account type selection after first sign-in
@@ -86,10 +86,10 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Skips onboarding, lands on home tab. Session persists across cold start (force-quit and relaunch → still on home tab, no login screen). On a 1.2.0+ build the tokens are read back from the Keychain (`expo-secure-store`, audit #52), not AsyncStorage.
 - **Upgrade path (audit #52):** install build #24 (1.1.0) signed in, then install build #25+ (1.2.0) over it without signing out → first launch lands on the home tab still signed in (the legacy AsyncStorage tokens are migrated into the Keychain, not lost). Logout afterwards → relaunch shows the login screen (keychain entries wiped).
 - **Regression checks (fixed since v1 of this plan):**
-  - The WorkOS redirect `bball-tracker://auth/callback?code=…` must resolve to the callback screen — **not** an Expo Router "Unmatched Route" page (fixed in #213 via `app/auth/callback.tsx`).
+  - The WorkOS redirect `hooplings://auth/callback?code=…` must resolve to the callback screen — **not** an Expo Router "Unmatched Route" page (fixed in #213 via `app/auth/callback.tsx`).
   - The callback screen must not hang or crash with "Maximum update depth exceeded" (Zustand v5 `useShallow` fix, #218).
-  - Also try the error branch: `xcrun simctl openurl booted "bball-tracker://auth/callback?error=access_denied"` (or the `.maestro/auth-callback.yaml` flow) → "Sign In Failed" screen renders.
-  - PKCE/CSRF (audit #5): open `bball-tracker://auth/callback?code=bogus&state=wrong` while no sign-in is pending → "Sign In Failed" with **no** network call to `/auth/callback` (the `state` must match the pending login stored on the device).
+  - Also try the error branch: `xcrun simctl openurl booted "hooplings://auth/callback?error=access_denied"` (or the `.maestro/auth-callback.yaml` flow) → "Sign In Failed" screen renders.
+  - PKCE/CSRF (audit #5): open `hooplings://auth/callback?code=bogus&state=wrong` while no sign-in is pending → "Sign In Failed" with **no** network call to `/auth/callback` (the `state` must match the pending login stored on the device).
 - **Notes:** ___________
 
 ### A.3 — Session persistence across cold start
@@ -395,7 +395,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### E.5 — Accept invitation from in-app screen
 - [ ] Pass / Fail / Skipped
 - **Role:** invited user (signed in)
-- **Prereq:** E.4 successful OR navigate to `bball-tracker://invite/<token>` directly
+- **Prereq:** E.4 successful OR navigate to `hooplings://invite/<token>` directly
 - **Steps:** On the invite screen, tap "Accept Invitation" → confirm alert.
 - **Expected:** Toast confirmation. Navigates to the Invitations tab. The invitation moves from PENDING to ACCEPTED (`POST /invitations/by-token/:token/accept` when opened from the link while signed out, or the authenticated `POST /invitations/:id/accept`). User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
 - **Notes:** ___________
@@ -410,7 +410,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### E.7 — Invitation token via direct deep-link (cold start)
 - [ ] Pass / Fail / Skipped
 - **Role:** signed-in user
-- **Steps:** Force-quit the app. From terminal or Notes app, paste `bball-tracker://invite/<token>` and tap.
+- **Steps:** Force-quit the app. From terminal or Notes app, paste `hooplings://invite/<token>` and tap.
 - **Expected:** App cold-starts and lands directly on the invite screen (not on home tab).
 - **Notes:** Per `mobile/app/invite/[token].tsx` + Expo deep-link config.
 
@@ -424,7 +424,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### E.9 — Invalid (garbage) token
 - [ ] Pass / Fail / Skipped
-- **Steps:** Open `bball-tracker://invite/totally-fake-token-12345`.
+- **Steps:** Open `hooplings://invite/totally-fake-token-12345`.
 - **Expected:** "Invitation Not Found" or 404-style screen. Does NOT crash.
 - **Notes:** ___________
 
@@ -607,7 +607,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:**
   1. Sign in as the player. Open the Games tab.
   2. Open a SCHEDULED team game, then (after a coach starts one) an IN_PROGRESS team game.
-  3. Deep-link straight to `bball-tracker://games/<inProgressGameId>/track`.
+  3. Deep-link straight to `hooplings://games/<inProgressGameId>/track`.
   4. Open Profile.
 - **Expected:**
   - Games tab has no "Create new game" FAB; the empty state does not say "Create your first game".
@@ -1142,7 +1142,7 @@ After testing, optionally tear down:
 - Automation: `docs/automation/daily-upgrade-scan.md`
 - Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend; **not** run in CI). All flows dev-login and skip the intro carousel:
   - `login.yaml`, `logout.yaml`, `navigation.yaml`, `profile.yaml` — session + tab smoke (Frank Vogel)
-  - `auth-callback.yaml` — `bball-tracker://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
+  - `auth-callback.yaml` — `hooplings://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
   - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)
   - `create-team.yaml`, `team-detail.yaml`, `roster-management.yaml` — D.1 / D.2 / D.3 (`team-detail.yaml` also asserts the roster sort pills: both pills visible, Name pill selected after tap)
   - `team-staff.yaml` — staff screen + "Add staff" form for the head coach, read-only (D.8)

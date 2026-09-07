@@ -20,14 +20,25 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.2.0 = first binary with expo-secure-store (audit #52). runtimeVersion
-    // policy is appVersion, so OTAs published from here on target 1.2.0
-    // builds only; build #24 stays on the last 1.1.0 OTA.
-    version: '1.2.0',
+    // 1.3.0 = OTA runtime boundary for the URL scheme rename (#504). The
+    // sign-in redirect scheme is resolved from the OTA MANIFEST (expo-linking
+    // reads Constants.expoConfig.scheme), while the schemes a binary answers
+    // are baked into Info.plist at build time. A manifest naming `hooplings`
+    // must therefore never reach a binary that registers only the old scheme:
+    // runtimeVersion policy is appVersion, so bumping this keeps every OTA
+    // from here on to 1.3.0 builds (#31+); builds #25-#30 stay on the last
+    // 1.2.0 OTA. (1.2.0 was the expo-secure-store boundary, audit #52.)
+    version: '1.3.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
-    scheme: 'bball-tracker',
+    // Both schemes are registered natively during the rename overlap (#504):
+    // build #31+ still opens old `bball-tracker` deep links (expo-router
+    // strips the scheme before routing). Sign-in asks for APP_URL_SCHEME
+    // explicitly (config/env.ts), so the order here only decides the dev-only
+    // "multiple schemes" warning. The second entry leaves with the first native
+    // build cut after 2026-12-01 (dated follow-up).
+    scheme: ['hooplings', 'bball-tracker'],
     owner: 'deasystephen',
     runtimeVersion: {
       policy: 'appVersion',

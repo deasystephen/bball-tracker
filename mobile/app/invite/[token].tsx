@@ -1,5 +1,5 @@
 /**
- * Deep-link handler for bball-tracker://invite/<token>
+ * Deep-link handler for hooplings://invite/<token>
  * Also handles Universal Link https://hooplings.com/invite/<token> when the app is installed.
  */
 

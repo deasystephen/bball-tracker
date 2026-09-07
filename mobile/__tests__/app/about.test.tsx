@@ -56,7 +56,7 @@ jest.mock('expo-updates', () => ({
   get channel() { return mockUpdates.channel; },
   get runtimeVersion() { return mockUpdates.runtimeVersion; },
 }));
-jest.mock('expo-constants', () => ({ expoConfig: { version: '1.2.0' } }));
+jest.mock('expo-constants', () => ({ expoConfig: { version: '1.3.0' } }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -69,7 +69,7 @@ function setOtaApplied() {
   mockUpdates.updateId = OTA_ID;
   mockUpdates.createdAt = new Date('2026-08-28T22:18:05.218Z');
   mockUpdates.channel = 'production';
-  mockUpdates.runtimeVersion = '1.2.0';
+  mockUpdates.runtimeVersion = '1.3.0';
 }
 
 function setEmbedded() {
@@ -78,20 +78,20 @@ function setEmbedded() {
   mockUpdates.updateId = null;
   mockUpdates.createdAt = null;
   mockUpdates.channel = 'production';
-  mockUpdates.runtimeVersion = '1.2.0';
+  mockUpdates.runtimeVersion = '1.3.0';
 }
 
 describe('AboutScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     setOtaApplied();
-    mockNativeApplication = { nativeBuildVersion: '28' };
+    mockNativeApplication = { nativeBuildVersion: '31' };
   });
 
   it('shows app version with native build number, runtime, applied update id and channel', () => {
     const { getByText, getByTestId } = render(<AboutScreen />);
-    expect(getByText('v1.2.0 (build 28)')).toBeTruthy();
-    expect(getByTestId('about-runtime-version').props.children).toBe('1.2.0');
+    expect(getByText('v1.3.0 (build 31)')).toBeTruthy();
+    expect(getByTestId('about-runtime-version').props.children).toBe('1.3.0');
     expect(getByTestId('about-update').props.children).toContain(OTA_ID);
     expect(getByTestId('about-channel').props.children).toBe('production');
   });
@@ -99,7 +99,7 @@ describe('AboutScreen', () => {
   it('omits the build number on a binary without expo-application (build #27)', () => {
     mockNativeApplication = null;
     const { getByTestId } = render(<AboutScreen />);
-    expect(getByTestId('about-app-version').props.children).toBe('v1.2.0');
+    expect(getByTestId('about-app-version').props.children).toBe('v1.3.0');
   });
 
   it('shows "Embedded build" when no OTA has applied', () => {
@@ -124,7 +124,7 @@ describe('AboutScreen', () => {
 
     await waitFor(() => expect(shareSpy).toHaveBeenCalled());
     const message = shareSpy.mock.calls[0][0].message as string;
-    expect(message).toContain('v1.2.0 (build 28)');
+    expect(message).toContain('v1.3.0 (build 31)');
     expect(message).toContain(OTA_ID);
     expect(message).toContain('2026-08-28T22:18:05.218Z');
     expect(message).toContain('Channel: production');
@@ -147,7 +147,7 @@ describe('AboutScreen', () => {
 
     it('falls back to the app version when runtimeVersion is missing', () => {
       mockUpdates.runtimeVersion = null;
-      expect(getAboutInfo().runtimeVersion).toBe('1.2.0');
+      expect(getAboutInfo().runtimeVersion).toBe('1.3.0');
     });
   });
 });

@@ -7,7 +7,7 @@ export default function Home() {
         <p>Track your team&apos;s stats, games, and performance in real time.</p>
         <div className="actions" style={{ marginTop: 24 }}>
           <a
-            href="https://apps.apple.com/app/basketball-tracker/id000000000"
+            href="https://apps.apple.com/app/id6758903514"
             className="btn btn-primary"
           >
             Download on the App Store

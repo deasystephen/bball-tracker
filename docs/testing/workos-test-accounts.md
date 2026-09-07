@@ -117,10 +117,10 @@ Verify any account with `GET /api/v1/auth/me` → `user.role`, `user.leagueAdmin
 
 1. `app/login.tsx` calls `beginPkceLogin()` → stores `{ state, verifier }` in AsyncStorage
    (`auth:pending-login`, 10-min TTL) and calls `GET /auth/login?format=json&redirect_uri=
-   bball-tracker://auth/callback&state=…&code_challenge=…` (S256).
+   hooplings://auth/callback&state=…&code_challenge=…` (S256).
 2. The app opens the returned WorkOS AuthKit URL in the system browser; the user signs up /
    signs in (email + password, email verification if prompted).
-3. WorkOS redirects to `bball-tracker://auth/callback?code=…&state=…`; `app/auth/callback.tsx`
+3. WorkOS redirects to `hooplings://auth/callback?code=…&state=…`; `app/auth/callback.tsx`
    consumes the pending login (state must match, single use) **before** any network call, then
    calls `GET /auth/callback?code=…&state=…&code_verifier=…`.
 4. The backend exchanges the code with the verifier (WorkOS refuses a mismatch) and returns

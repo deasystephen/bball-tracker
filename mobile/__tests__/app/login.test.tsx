@@ -15,7 +15,7 @@ import Login from '../../app/login';
 import { apiClient } from '../../services/api-client';
 
 jest.mock('expo-linking', () => ({
-  createURL: jest.fn((path: string) => `bball-tracker://${path}`),
+  createURL: jest.fn((path: string, options?: { scheme?: string }) => `${options?.scheme ?? 'exp'}://${path}`),
   canOpenURL: jest.fn(() => Promise.resolve(true)),
   openURL: jest.fn(() => Promise.resolve()),
 }));
@@ -55,11 +55,14 @@ describe('Login screen', () => {
     fireEvent.press(getByLabelText('Sign in'));
 
     await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith('https://auth.example.test/authorize'));
+    // The redirect scheme is passed explicitly (#504): the manifest scheme is
+    // the OTA payload, not what the binary registers.
+    expect(Linking.createURL).toHaveBeenCalledWith('auth/callback', { scheme: 'hooplings' });
     // PKCE + state (audit #5) travel with the authorization request.
     expect(mockedGet).toHaveBeenCalledWith('/auth/login', {
       params: {
         format: 'json',
-        redirect_uri: 'bball-tracker://auth/callback',
+        redirect_uri: 'hooplings://auth/callback',
         state: 'state-123',
         code_challenge: 'challenge-abc',
       },
