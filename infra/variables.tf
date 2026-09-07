@@ -127,7 +127,10 @@ variable "domains" {
   type        = map(object({ serve = bool }))
   default = {
     "hooplings.com" = { serve = true }
-    "capyhoops.com" = { serve = true } # retire (PR4, #503): serve = false once every device has the OTA
+    # Retired 2026-09-07 (PR4, #503) once every TestFlight device had taken the
+    # hooplings OTA: certificate, api record, SES identity and mail records are
+    # gone; the zone stays so the registrar delegation never goes lame.
+    "capyhoops.com" = { serve = false }
   }
 }
 

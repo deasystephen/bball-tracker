@@ -18,7 +18,7 @@ workos_client_id = ""
 # api.<domain> record and mail identity. Flip serve to false to retire a domain.
 domains = {
   "hooplings.com" = { serve = true }
-  "capyhoops.com" = { serve = true }
+  "capyhoops.com" = { serve = false } # zone only — retired 2026-09-07
 }
 primary_domain = "hooplings.com"
 
