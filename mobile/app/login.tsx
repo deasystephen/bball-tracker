@@ -12,6 +12,7 @@ import { borderRadius } from '../theme/border-radius';
 import { typography } from '../theme/typography';
 import { postLoginRoute } from '../utils/role-onboarding';
 import { beginPkceLogin } from '../utils/pkce';
+import { APP_URL_SCHEME } from '../config/env';
 
 interface DevUser {
   id: string;
@@ -46,7 +47,7 @@ export default function Login() {
     return () => subscription.remove();
   }, []);
 
-  // The OAuth redirect (bball-tracker://auth/callback?code=…) is handled by the
+  // The OAuth redirect (hooplings://auth/callback?code=…) is handled by the
   // dedicated `app/auth/callback.tsx` route, which Expo Router matches on the
   // incoming deep link and which exchanges the code for a session token.
 
@@ -54,8 +55,10 @@ export default function Login() {
     try {
       setIsLoading(true);
       // Get authorization URL from backend (request JSON format for mobile)
-      // Use mobile redirect URI that deep links back to app
-      const mobileRedirectUri = Linking.createURL('auth/callback', {});
+      // Use mobile redirect URI that deep links back to app. The scheme is
+      // passed explicitly (#504): without it expo-linking picks the first
+      // manifest scheme, and the manifest is the OTA payload, not the binary.
+      const mobileRedirectUri = Linking.createURL('auth/callback', { scheme: APP_URL_SCHEME });
       // PKCE + state (audit #5): the verifier/state pair is persisted on the
       // device and checked by app/auth/callback.tsx before the code exchange.
       const { state, codeChallenge } = await beginPkceLogin();

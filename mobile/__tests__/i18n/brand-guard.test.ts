@@ -22,10 +22,13 @@ import es from '../../i18n/locales/es.json';
 
 /**
  * Names that must never appear in user-facing copy again. Separators are tolerated so
- * "Capy Hoops", "capy-hoops" and "BasketballTracker" fail too. `bball` is deliberately
- * NOT retired: `bball-tracker://` and `com.bballtracker.mobile` are kept identifiers.
+ * "Capy Hoops", "capy-hoops" and "BasketballTracker" fail too. The URL scheme was renamed
+ * to `hooplings://` (#504), so the old scheme's LINK form is retired as well: nothing may
+ * build a deep link with it. The bare word `bball-tracker` (EAS slug, and the second entry
+ * of the `scheme` array that keeps old links opening during the overlap) and
+ * `com.bballtracker.mobile` (bundle id) are kept identifiers and stay allowed.
  */
-const RETIRED_BRAND_PATTERNS: RegExp[] = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i];
+const RETIRED_BRAND_PATTERNS: RegExp[] = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i, /bball-tracker:\/\//i];
 
 /**
  * Hostnames that are live and would otherwise trip the retired-name patterns. A
@@ -45,6 +48,13 @@ const MOBILE_ROOT = resolve(__dirname, '../..');
 const MAESTRO_DIR = resolve(MOBILE_ROOT, '../.maestro');
 /** A flow that must exist; proves the walker found the real directory, not just config.yaml. */
 const MAESTRO_ANCHOR_FLOW = 'onboarding-role.yaml';
+/**
+ * The Next.js invite page is the one file that emits a custom-scheme link to real
+ * browsers (`hooplings://invite/<token>`), and `web/` has no test runner of its own
+ * (#510), so the source scan covers it from here. `test-mobile` runs on every push.
+ */
+const WEB_APP_DIR = resolve(MOBILE_ROOT, '../web/app');
+const WEB_ANCHOR_FILE = 'invite/[token]/invite-client.tsx';
 
 const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|json)$/;
 /** Tests quote retired names as negative fixtures, so `__tests__` is not user-facing surface. */
@@ -130,6 +140,10 @@ function maestroFlows(dir: string): string[] {
   return walkFiles(dir, new Set()).filter((file) => /\.ya?ml$/.test(file));
 }
 
+function webSourceFiles(): string[] {
+  return walkFiles(WEB_APP_DIR, SOURCE_SKIP_DIRS).filter((file) => SOURCE_EXTENSIONS.test(file));
+}
+
 function mobileSourceFiles(): string[] {
   const self = relative(MOBILE_ROOT, __filename);
   return walkFiles(MOBILE_ROOT, SOURCE_SKIP_DIRS).filter(
@@ -161,6 +175,12 @@ describe('brand guard (#474)', () => {
     expect(files).toContain('app/login.tsx');
     expect(files).not.toContain(relative(MOBILE_ROOT, __filename));
     expect(lineOffenders(MOBILE_ROOT, files, 'mobile')).toEqual([]);
+  });
+
+  it('web app source contains no retired brand name or old-scheme link', () => {
+    const files = webSourceFiles();
+    expect(files).toContain(WEB_ANCHOR_FILE);
+    expect(lineOffenders(WEB_APP_DIR, files, 'web/app')).toEqual([]);
   });
 
   it('allows an allowlisted domain as a hostname but nothing that merely contains it', () => {
@@ -196,8 +216,14 @@ describe('brand guard (#474)', () => {
     ]) {
       expect(findRetiredBrand(text)).toBeDefined();
     }
-    expect(findRetiredBrand('bball-tracker://auth/callback')).toBeUndefined();
+    // The old scheme's link form is retired (#504); the bare slug / array entry and
+    // the bundle id are kept identifiers.
+    expect(findRetiredBrand('bball-tracker://auth/callback')).toBeDefined();
+    expect(findRetiredBrand('openLink: "bball-tracker://teams"')).toBeDefined();
+    expect(findRetiredBrand("scheme: ['hooplings', 'bball-tracker']")).toBeUndefined();
+    expect(findRetiredBrand("slug: 'bball-tracker'")).toBeUndefined();
     expect(findRetiredBrand('com.bballtracker.mobile')).toBeUndefined();
+    expect(findRetiredBrand('hooplings://auth/callback')).toBeUndefined();
     expect(findRetiredBrand('Hooplings')).toBeUndefined();
   });
 

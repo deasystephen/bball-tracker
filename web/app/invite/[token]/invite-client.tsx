@@ -37,7 +37,9 @@ interface Props {
   token: string;
 }
 
-const APP_STORE_URL = 'https://apps.apple.com/app/basketball-tracker/id000000000';
+// App Store Connect app id (mobile/eas.json submit.production.ios.ascAppId). Apple
+// resolves the id-only form; it shows "not available" until the app is released.
+const APP_STORE_URL = 'https://apps.apple.com/app/id6758903514';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.bballtracker.mobile';
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -77,7 +79,7 @@ export function InviteClient({ invitation, token }: Props) {
   const preposition = guardian ? 'for' : 'to';
 
   function openInApp() {
-    const deepLink = `bball-tracker://invite/${token}`;
+    const deepLink = `hooplings://invite/${token}`;
     const ua = navigator.userAgent;
     const isAndroid = /android/i.test(ua);
     const isIos = /iphone|ipad|ipod/i.test(ua);

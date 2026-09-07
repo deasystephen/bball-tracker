@@ -5,12 +5,26 @@
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */
+import { APP_URL_SCHEME } from '../config/env';
+
 type ExpoConfig = {
   expo: {
+    version: string;
+    scheme: string | string[];
     ios: { associatedDomains: string[] };
     extra: { apiUrl: string; appEnv: string };
   };
 };
+
+/** [major, minor, patch] compare; true when `version` >= `floor`. */
+function atLeast(version: string, floor: string): boolean {
+  const a = version.split('.').map(Number);
+  const b = floor.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return true;
+}
 
 const ENV_KEYS = ['APP_ENV', 'API_URL'] as const;
 
@@ -59,5 +73,24 @@ describe('app.config.js', () => {
 
   it('Universal Links entitlement names the current apex', async () => {
     expect((await loadConfig({ APP_ENV: 'production' })).expo.ios.associatedDomains).toEqual(['applinks:hooplings.com']);
+  });
+
+  // URL scheme rename (#504). The binary registers both schemes during the
+  // overlap; the sign-in redirect asks for APP_URL_SCHEME explicitly.
+  it('registers the current scheme first and keeps the pre-rename scheme during the overlap', async () => {
+    expect((await loadConfig({ APP_ENV: 'production' })).expo.scheme).toEqual(['hooplings', 'bball-tracker']);
+  });
+
+  it('registers the scheme the sign-in redirect asks for (config/env APP_URL_SCHEME)', async () => {
+    const { scheme } = (await loadConfig({ APP_ENV: 'production' })).expo;
+    expect(Array.isArray(scheme) ? scheme : [scheme]).toContain(APP_URL_SCHEME);
+  });
+
+  it('keeps the OTA runtime at or past the 1.3.0 scheme boundary', async () => {
+    // expo-linking resolves the redirect scheme from the OTA manifest. Every
+    // manifest that names `hooplings` must stay unreachable from the 1.2.0
+    // binaries (#25-#30), which register only the old scheme: runtimeVersion
+    // policy is appVersion, so the version can never drop below 1.3.0 again.
+    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.3.0')).toBe(true);
   });
 });

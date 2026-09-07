@@ -39,10 +39,11 @@ export interface AboutInfo {
 }
 
 /**
- * The native build number comes from expo-application, which first ships in
- * the build cut after 2026-08-28. OTAs on runtime 1.2.0 still reach build #27
- * (no such module), so probe the native module like `services/secure-storage`
- * does — never import the JS wrapper, which would crash the older binary.
+ * The native build number comes from expo-application, which first shipped in
+ * build #28 (2026-08-28). Since the 1.3.0 runtime boundary (#504) every binary
+ * an OTA can reach has the module, but the probe stays: it costs nothing and
+ * keeps the same guard shape as `services/secure-storage` — never import the
+ * JS wrapper, which would crash a binary without the module.
  */
 function getNativeBuildNumber(): string | null {
   const mod = requireOptionalNativeModule<{ nativeBuildVersion?: string | number | null }>(

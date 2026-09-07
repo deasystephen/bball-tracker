@@ -1,7 +1,7 @@
 /**
  * PKCE (RFC 7636) + OAuth `state` for the WorkOS sign-in flow (audit #5).
  *
- * The app's redirect URI is a custom scheme (`bball-tracker://auth/callback`)
+ * The app's redirect URI is a custom scheme (`hooplings://auth/callback`)
  * which any app on the device can claim. Without PKCE an app that intercepts
  * the redirect could exchange the authorization code for our user's session;
  * without `state`, a crafted deep link could log the victim into an

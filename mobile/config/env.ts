@@ -14,6 +14,16 @@ import Constants from 'expo-constants';
  *   2. Otherwise the dev server when `__DEV__`, else the production API.
  */
 export const PRODUCTION_API_URL = 'https://api.hooplings.com';
+
+/**
+ * The custom URL scheme the app asks WorkOS to redirect sign-in to
+ * (`hooplings://auth/callback`, #504). Passed explicitly to
+ * `Linking.createURL` so the redirect never depends on the order of the
+ * `scheme` array in app.config.js; `__tests__/app-config.test.ts` pins that
+ * the binary registers it. The backend allowlist (`ALLOWED_REDIRECT_SCHEMES`)
+ * and the WorkOS dashboard must list the same value.
+ */
+export const APP_URL_SCHEME = 'hooplings';
 export const DEV_API_URL = 'http://127.0.0.1:3000';
 
 export function getApiUrl(): string {

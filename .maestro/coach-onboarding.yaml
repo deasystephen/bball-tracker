@@ -168,7 +168,7 @@ appId: com.bballtracker.mobile
 #
 # openLink navigates the running app without touching the stack or the
 # session. Same mechanism auth-callback.yaml already relies on.
-- openLink: "bball-tracker://teams"
+- openLink: "hooplings://teams"
 # iOS puts up a system confirmation ("Open in <app>?") before handing a
 # custom-scheme URL to an app — even the app's own scheme — and that modal
 # blocks every subsequent command. Conditional because the simulator may
@@ -223,7 +223,7 @@ appId: com.bballtracker.mobile
 # leagueAdminOf (#442), closing the one other branch of the check. The FAB
 # appearing for Dana at all IS the #469 assertion; the rest proves the create
 # screen's team picker (same gate, same payload) works through to a game.
-- openLink: "bball-tracker://games"
+- openLink: "hooplings://games"
 - runFlow:
     when:
       visible: "Open"

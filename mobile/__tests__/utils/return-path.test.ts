@@ -41,7 +41,7 @@ describe('return-path', () => {
 
     await AsyncStorage.setItem(
       RETURN_PATH_KEY,
-      JSON.stringify({ path: 'bball-tracker://x', savedAt: Date.now() })
+      JSON.stringify({ path: 'hooplings://x', savedAt: Date.now() })
     );
     expect(await consumePendingReturnPath()).toBeNull();
     expect(isSafeReturnPath('/teams')).toBe(true);

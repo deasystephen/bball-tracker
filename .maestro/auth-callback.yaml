@@ -2,7 +2,7 @@ appId: com.bballtracker.mobile
 ---
 # Regression guard for the WorkOS OAuth callback deep link.
 #
-# The redirect bball-tracker://auth/callback?code=… must resolve to the
+# The redirect hooplings://auth/callback?code=… must resolve to the
 # app/auth/callback.tsx route. Before that route existed, the deep link fell
 # through to Expo Router's "Unmatched Route" screen (see the fix in
 # app/auth/callback.tsx). A full success run needs a live WorkOS code exchange,
@@ -16,7 +16,9 @@ appId: com.bballtracker.mobile
 - tapOn: "Skip"
 - assertVisible: "Hooplings"
 # Deep-link straight into the callback route with an OAuth error param.
-- openLink: "bball-tracker://auth/callback?error=access_denied"
+# Needs a dev client built from a branch that registers `hooplings` (#504):
+# the scheme is native, `npx expo run:ios` after checkout.
+- openLink: "hooplings://auth/callback?error=access_denied"
 # iOS raises a system confirmation ("Open in <app>?") for custom-scheme URLs —
 # even the app's own scheme — and the modal blocks every later command.
 # Conditional because the simulator may remember the choice. Same handling as
