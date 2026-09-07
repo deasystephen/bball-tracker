@@ -3,6 +3,8 @@
  */
 
 import request from 'supertest';
+import { readFileSync } from 'fs';
+import path from 'path';
 import { ServiceUnavailableError, ConflictError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
@@ -127,6 +129,82 @@ describe('Auth API', () => {
       expect(response.body.error).toContain('redirect_uri');
     });
 
+    // Scheme allowlist (#504). ALLOWED_REDIRECT_SCHEMES is read inside the handler
+    // on every request, so each case sets it and the afterEach restores it.
+    //
+    //   redirect_uri ──▶ new URL() ──▶ protocol ∈ allowedSchemes? ──▶ WorkOS
+    //        │                │                 │
+    //        │                └── malformed ────┴── 400 ...malformed URL
+    //        └── scheme not listed / host not listed ───── 400 ...host not allowed
+    describe('redirect_uri scheme allowlist', () => {
+      const savedSchemes = process.env.ALLOWED_REDIRECT_SCHEMES;
+      const taskDefinitionPath = path.resolve(__dirname, '../../../infra/task-definition.json');
+
+      function productionSchemes(): string {
+        const td = JSON.parse(readFileSync(taskDefinitionPath, 'utf8')) as {
+          containerDefinitions: Array<{ environment?: Array<{ name: string; value: string }> }>;
+        };
+        const entry = td.containerDefinitions
+          .flatMap((c) => c.environment ?? [])
+          .find((e) => e.name === 'ALLOWED_REDIRECT_SCHEMES');
+        if (!entry) throw new Error('ALLOWED_REDIRECT_SCHEMES missing from infra/task-definition.json');
+        return entry.value;
+      }
+
+      async function login(redirectUri: string): Promise<request.Response> {
+        mockWorkOSService.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize?...');
+        return request(app).get('/api/v1/auth/login').query({ redirect_uri: redirectUri, format: 'json' });
+      }
+
+      afterEach(() => {
+        if (savedSchemes === undefined) delete process.env.ALLOWED_REDIRECT_SCHEMES;
+        else process.env.ALLOWED_REDIRECT_SCHEMES = savedSchemes;
+      });
+
+      it('accepts the current scheme with the code default (env unset)', async () => {
+        delete process.env.ALLOWED_REDIRECT_SCHEMES;
+        const response = await login('hooplings://auth/callback');
+        expect(response.status).toBe(200);
+        expect(mockWorkOSService.getAuthorizationUrl).toHaveBeenCalledWith(
+          undefined,
+          'hooplings://auth/callback',
+          undefined
+        );
+      });
+
+      it('rejects the pre-rename scheme with the code default (env unset)', async () => {
+        // The overlap is a production concern and lives ONLY in the task definition.
+        delete process.env.ALLOWED_REDIRECT_SCHEMES;
+        const response = await login('bball-tracker://auth/callback');
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('host not allowed');
+        expect(mockWorkOSService.getAuthorizationUrl).not.toHaveBeenCalled();
+      });
+
+      it('accepts both schemes with the production value from infra/task-definition.json', async () => {
+        // Binaries built before #504 (TestFlight #25-#30) still redirect to
+        // bball-tracker://auth/callback; the deploy file must keep accepting them
+        // until the dated follow-up. Same deploy-file binding as cors.test.ts.
+        process.env.ALLOWED_REDIRECT_SCHEMES = productionSchemes();
+        expect((await login('hooplings://auth/callback')).status).toBe(200);
+        expect((await login('bball-tracker://auth/callback')).status).toBe(200);
+        expect((await login('myapp://callback')).status).toBe(400);
+      });
+
+      it('trims whitespace around comma-separated entries', async () => {
+        process.env.ALLOWED_REDIRECT_SCHEMES = ' hooplings , bball-tracker ';
+        expect((await login('hooplings://auth/callback')).status).toBe(200);
+        expect((await login('bball-tracker://auth/callback')).status).toBe(200);
+      });
+
+      it('rejects a malformed redirect_uri', async () => {
+        const response = await login('not a url');
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('malformed');
+        expect(mockWorkOSService.getAuthorizationUrl).not.toHaveBeenCalled();
+      });
+    });
+
     it('should pass valid custom redirect_uri to WorkOS', async () => {
       mockWorkOSService.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize?...'
@@ -154,12 +232,12 @@ describe('Auth API', () => {
 
         const response = await request(app)
           .get('/api/v1/auth/login')
-          .query({ format: 'json', redirect_uri: 'bball-tracker://auth/callback', state, code_challenge: challenge });
+          .query({ format: 'json', redirect_uri: 'hooplings://auth/callback', state, code_challenge: challenge });
 
         expect(response.status).toBe(200);
         expect(mockWorkOSService.getAuthorizationUrl).toHaveBeenCalledWith(
           state,
-          'bball-tracker://auth/callback',
+          'hooplings://auth/callback',
           challenge
         );
       });
