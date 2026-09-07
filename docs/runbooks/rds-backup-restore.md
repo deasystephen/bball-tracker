@@ -319,9 +319,9 @@ tokens) can mis-order silently until `REINDEX DATABASE` + `ALTER DATABASE … RE
 VERSION`. `backend/scripts/pg-upgrade-checks.mjs` reports AWS's pre-upgrade blockers, core-table
 row counts and the recorded-vs-actual collation version as JSON; run it before and after (with
 `--compare before.json`) on the rehearsal copy and on production. The API image has no `psql`
-and `prisma db execute` prints no rows, so it runs as `NODE_PATH=/app/node_modules node
+and `prisma db execute` prints no rows, so it runs as `cd /app && node
 /tmp/pg-upgrade-checks.mjs` inside the one-off task from the variant above (embed the script
-via heredoc; it reads `DATABASE_URL` and the pinned CA bundle like the API).
+via heredoc and run it with `/app` as the working directory; it reads `DATABASE_URL` and the pinned CA bundle like the API, and resolves `pg` from the cwd because ESM ignores `NODE_PATH`).
 
 **Do not choose `engine_lifecycle_support = "…-disabled"` to "fail loudly".** With it
 disabled RDS auto-upgrades the major *unattended* at end of standard support; with the default

@@ -27,12 +27,22 @@
  *
  * Connection rules mirror src/models/index.ts: TLS with the pinned RDS CA
  * bundle for anything that is not localhost (`RDS_CA_BUNDLE_PATH` overrides the
- * path). Inside the one-off ECS task (runbook variant) run it as
- * `NODE_PATH=/app/node_modules node /tmp/pg-upgrade-checks.mjs`.
+ * path). `pg` is resolved from the current working directory's node_modules
+ * (ESM ignores NODE_PATH), so inside the one-off ECS task (runbook variant)
+ * run it from /app: `cd /app && node /tmp/pg-upgrade-checks.mjs`.
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import pg from 'pg';
+
+const require = createRequire(join(process.cwd(), 'package.json'));
+let pg;
+try {
+  pg = require('pg');
+} catch {
+  console.error(`pg-upgrade-checks: cannot resolve "pg" from ${process.cwd()} — run from backend/ (or /app in the container)`);
+  process.exit(1);
+}
 
 const CORE_TABLES = ['User', 'Team', 'TeamLineage', 'Game', 'GameEvent', 'PlayerStats', 'TeamInvitation'];
 
