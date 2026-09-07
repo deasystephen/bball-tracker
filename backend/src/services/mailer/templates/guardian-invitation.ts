@@ -1,5 +1,6 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
+import { APP_NAME } from './brand';
 
 /**
  * Sent when a roster manager invites an adult to be a player's guardian
@@ -16,7 +17,7 @@ export const guardianInvitationTemplate: EmailTemplate = {
     <a href="${e(vars.acceptUrl)}" style="display:inline-block;background:#1A3A5C;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Accept Invitation</a>
   </p>
   <p style="color:#999;font-size:12px;">Or open this link: <a href="${e(vars.acceptUrl)}">${e(vars.acceptUrl)}</a></p>`
-      : '<p>Open the CapyHoops app to accept or decline your invitation.</p>';
+      : `<p>Open the ${APP_NAME} app to accept or decline your invitation.</p>`;
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -28,14 +29,14 @@ export const guardianInvitationTemplate: EmailTemplate = {
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
   ${ctaBlock}
   <hr>
-  <p style="color:#999;font-size:12px;">Hooplings</p>
+  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
 </body>
 </html>`;
   },
   text(vars) {
     const ctaBlock = vars.acceptUrl
       ? `Accept your invitation: ${vars.acceptUrl}`
-      : 'Open the CapyHoops app to accept or decline your invitation.';
+      : `Open the ${APP_NAME} app to accept or decline your invitation.`;
     return `You've been invited as ${vars.childName}'s guardian
 
 Hi ${vars.guardianName},
@@ -48,6 +49,6 @@ This invitation expires on ${vars.expiresAt}.
 
 ${ctaBlock}
 
-Hooplings`;
+${APP_NAME}`;
   },
 };

@@ -272,8 +272,8 @@ describe('authenticate is scoped to calendar management routes (audit #71)', () 
   it('still authenticates the calendar subscribe route', async () => {
     mockCalendarService.subscribe.mockResolvedValue({
       token: 'abc123',
-      feedUrl: `https://api.capyhoops.com/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
-      webcalUrl: `webcal://api.capyhoops.com/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+      feedUrl: `https://api.example.test/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+      webcalUrl: `webcal://api.example.test/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
     });
 
     const res = await request(app).post(`/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`);

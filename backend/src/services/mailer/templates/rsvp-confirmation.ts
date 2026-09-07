@@ -1,5 +1,6 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
+import { APP_NAME } from './brand';
 
 export const rsvpConfirmationTemplate: EmailTemplate = {
   name: 'rsvp-confirmation',
@@ -32,9 +33,9 @@ export const rsvpConfirmationTemplate: EmailTemplate = {
     <tr><td style="padding:8px;font-weight:bold;">Date</td><td style="padding:8px;">${e(vars.gameDate)}</td></tr>
     <tr><td style="padding:8px;font-weight:bold;">Your RSVP</td><td style="padding:8px;">${e(label)}</td></tr>
   </table>
-  <p>You can update your RSVP at any time in the CapyHoops app.</p>
+  <p>You can update your RSVP at any time in the ${APP_NAME} app.</p>
   <hr>
-  <p style="color:#999;font-size:12px;">Hooplings</p>
+  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
 </body>
 </html>`;
   },
@@ -56,8 +57,8 @@ Your RSVP for the following game has been recorded:
   Date:     ${vars.gameDate}
   RSVP:     ${label}
 
-You can update your RSVP at any time in the CapyHoops app.
+You can update your RSVP at any time in the ${APP_NAME} app.
 
-Hooplings`;
+${APP_NAME}`;
   },
 };

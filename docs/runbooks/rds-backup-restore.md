@@ -22,7 +22,7 @@ instance. Required reading before any data-loss incident response.
 | Final snapshot on delete | `bball-tracker-production-final-snapshot` |
 | Connection string source | Secrets Manager: `bball-tracker-production/database-url` |
 | ECS cluster / service | `bball-tracker-production-cluster` / `bball-tracker-production-api` |
-| Public DNS | App reaches RDS via the **endpoint string baked into the secret**, not via Route53. The `api.capyhoops.com` Route53 record points at the ALB, not the database. |
+| Public DNS | App reaches RDS via the **endpoint string baked into the secret**, not via Route53. The `api.hooplings.com` Route53 record points at the ALB, not the database. |
 
 All of the above is enforced by Terraform in `infra/rds.tf` and `infra/ecs.tf`.
 Do not hand-edit the instance in the AWS console.
@@ -189,7 +189,7 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
 7. **Verify.** Hit the health endpoint and watch error rates:
 
    ```bash
-   curl -fsS https://api.capyhoops.com/health
+   curl -fsS https://api.hooplings.com/health
    ```
 
    In Sentry, watch the `prod` environment for new error spikes. In CloudWatch,

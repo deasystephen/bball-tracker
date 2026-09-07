@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker://` scheme, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `capyhoops.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). Real-time game tracking uses Socket.io broadcasts backed by PostgreSQL; statistics are computed by the stats service when games finish.
+Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker://` scheme, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `hooplings.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). Real-time game tracking uses Socket.io broadcasts backed by PostgreSQL; statistics are computed by the stats service when games finish.
 
 ## Common Commands
 
@@ -49,7 +49,7 @@ eas update --environment preview --message "description" # OTA update to preview
 npx eas-cli update --branch production --environment production --platform ios --non-interactive --message "description" # production OTA
 ```
 **OTA env gotcha:** `eas update` evaluates `app.config.js` on *your* machine. `getApiUrl()` keys off `APP_ENV`; if it is unset the update ships `apiUrl: http://127.0.0.1:3000` (plus no Sentry DSN) and every device that takes it shows "Network error" on all API-backed tabs. The EAS `production` environment now provides `APP_ENV`, `SENTRY_ENVIRONMENT` and `SENTRY_DSN` (visibility *sensitive*, not *secret* — secret vars are builder-only and invisible to `eas update`). Always use `--environment production` and check the CLI line "Environment variables … loaded from the production environment" lists `APP_ENV`. (`AMPLITUDE_API_KEY` is *sensitive* too.) Remember an update runs on the **second** launch after it is downloaded.
-**Universal Links need a native build:** `app.config.js` sets `ios.associatedDomains: ['applinks:capyhoops.com']` (audit #37) so iOS trusts the AASA file and `capyhoops.com/invite/<token>` opens the app. Entitlements are baked into the binary at build time — an `eas update` (OTA) cannot add or change them, so any change here means cutting a new `eas build` and going through TestFlight again. The `capyhoops.com` web deploy must also be serving `/.well-known/apple-app-site-association` for the link to resolve.
+**Universal Links need a native build:** `app.config.js` sets `ios.associatedDomains: ['applinks:hooplings.com']` (audit #37) so iOS trusts the AASA file and `hooplings.com/invite/<token>` opens the app. Entitlements are baked into the binary at build time — an `eas update` (OTA) cannot add or change them, so any change here means cutting a new `eas build` and going through TestFlight again. The `hooplings.com` web deploy must also be serving `/.well-known/apple-app-site-association` for the link to resolve.
 **Runtime version 1.2.0 (audit #52):** `app.config.js` uses `runtimeVersion: { policy: 'appVersion' }`, so bumping `version` moves the OTA target. `1.1.0` → `1.2.0` happened when `expo-secure-store` (native) landed; every `eas update` from then on reaches **1.2.0 builds only** (build #25+). Build #24 keeps the last 1.1.0 OTA and gets nothing further — ship a native build before publishing OTAs that assume the keychain. Native-module additions are also dependabot-ignored (`.github/dependabot.yml`, `expo-secure-store` included) because the Expo SDK pins them.
 **eas-cli pinning:** `mobile/package.json` pins `eas-cli ^22` and `eas.json` enforces `cli.version >= 22.2.0`. The `overrides` block must keep `@oclif/core > minimatch ^10` scoped to **@oclif/core only** — eas-cli itself needs the v5 default export, and giving it v9+ makes every credentials step fail with a misleading "Provisioning Profile is malformed" (#343).
 
@@ -687,7 +687,7 @@ eng-review amendments recorded there).
 - The invitation email template branches on `variant`: `'added'` (cases 1-2, "You've been added…
   activate your access") vs default "invited to join" (case 3 + deprecated arm).
 - `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random
-  `token` and emails the player a `capyhoops.com/invite/<token>` link. The token is a **bearer secret**:
+  `token` and emails the player a `hooplings.com/invite/<token>` link. The token is a **bearer secret**:
   `POST /invitations/by-token/:token/accept` is unauthenticated and accepts on behalf of the invited player.
 - **The token is never returned on an authenticated response** (audit #14). `invitation-service.ts` reads
   invitations back through explicit `select` constants (`INVITATION_SCALAR_SELECT` / `INVITATION_SELECT` /
@@ -720,7 +720,7 @@ eng-review amendments recorded there).
   `$transaction`**, so a failed invite never leaves an orphan player. Mobile now uses the unified
   `POST /teams/:teamId/players` instead (this arm stays mounted for pre-unification builds).
 - **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
-  (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `capyhoops.com/invite/<token>` is
+  (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `hooplings.com/invite/<token>` is
   rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
   stays on the IP-keyed `writeRateLimit` (the browser calls it directly).
 - Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
@@ -794,19 +794,20 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
 
 ### Environment URLs & time zone
-- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.capyhoops.com` in prod via `infra/task-definition.json`; default `http://localhost:3000`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://capyhoops.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API.
+- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.hooplings.com` in prod via `infra/task-definition.json`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://hooplings.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API. **Both are read ONLY via `utils/urls.ts`** (`publicAppUrl()` / `apiBaseUrl()`, trailing slash stripped) — never `process.env.PUBLIC_APP_URL` inline. The fallback for both is `http://localhost:3000` on purpose: a localhost link in a production email is obviously broken, whereas the old per-service brand-domain fallbacks emitted plausible links to the wrong host with nothing in the logs; `warnMissingUrlConfig()` runs at boot and warns in production when either is unset (domain migration #501). The iCal `uid` domain / `productId` are the exported `ICAL_UID_DOMAIN` / `ICAL_PRODUCT_ID` in `calendar-service.ts` — frozen once anyone subscribes (changing a UID duplicates every event in a subscriber's calendar). Email copy names the product only through `mailer/templates/brand.ts#APP_NAME`; `tests/services/mailer.test.ts` fails on any retired brand name in a rendered template.
 - `DEFAULT_TIMEZONE` — IANA zone used to format dates in outbound email (`utils/format-date.ts#formatEmailDate/formatEmailDateTime`; default `America/Los_Angeles`). Never call `toLocaleDateString()` bare in a template variable — ECS runs in UTC (audit #57). Teams/leagues have no time-zone column yet; pass one through the helper's `timeZone` arg once they do.
 - `CORS_ORIGIN` — comma-separated list of **exact** browser origins (scheme + host, no wildcard) that
   `backend/src/index.ts` hands to both `cors()` and Socket.io. Production
-  (`infra/task-definition.json`) lists `https://api.capyhoops.com,https://capyhoops.com,https://www.capyhoops.com`;
+  (`infra/task-definition.json`) lists `https://api.hooplings.com,https://hooplings.com,https://www.hooplings.com`;
   the apex + www entries exist because the web invite page (`web/app/invite/[token]/invite-client.tsx`)
-  `POST`s the accept cross-origin from `capyhoops.com`, which is a preflighted request (#447). The list
+  `POST`s the accept cross-origin from `hooplings.com`, which is a preflighted request (#447). No old-domain origins were carried through the domain migration: no browser ever sent one, because nothing has ever served that host (#501). The list
   is always passed as an **array** — `cors` stamps a plain-string origin on every response regardless
   of the request `Origin`, while an array reflects only listed origins — so behaviour never depends on
   how many entries are configured. CORS here is browser hygiene, not access control: the accept route is
   an unauthenticated bearer-token endpoint reachable from any curl. `tests/api/cors.test.ts` reads the
   production value out of `task-definition.json` and asserts the apex preflight, so dropping the apex
-  from the deploy file fails CI. The mobile app sends no `Origin` header and is unaffected. The web
+  from the deploy file fails CI; `tests/infra/task-definition.test.ts` does the same for every other
+  domain-bearing env value (`PUBLIC_APP_URL`, `API_BASE_URL`, `SES_FROM_ADDRESS`, `WORKOS_REDIRECT_URI`). The mobile app sends no `Origin` header and is unaffected. The web
   deploy (#30) separately needs `API_URL` (server-side GET) **and** `NEXT_PUBLIC_API_URL` (browser
   POST, baked at build time) pointed at the API host.
 

@@ -19,6 +19,7 @@ import { guardianInvitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
+import { publicAppUrl } from '../utils/urls';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -335,8 +336,7 @@ export class GuardianService {
       select: GUARDIAN_INVITATION_SELECT,
     });
 
-    const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
-    const acceptUrl = `${baseUrl}/invite/${token}`;
+    const acceptUrl = `${publicAppUrl()}/invite/${token}`;
     // Awaited so callers can surface a failed send to the coach (unification
     // spec: silent email failures were invisible, SES-sandbox incident
     // 2026-08-28). Failures are logged and reported, never thrown — the

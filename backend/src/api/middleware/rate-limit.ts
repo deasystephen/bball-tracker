@@ -73,7 +73,7 @@ export const writeRateLimit = rateLimit({
 /**
  * Key for the public invitation-token routes: the token itself, not the IP.
  *
- * `capyhoops.com/invite/<token>` is rendered server-side, so every lookup
+ * `hooplings.com/invite/<token>` is rendered server-side, so every lookup
  * reaches the API from the web server's single egress IP; an IP-keyed limit
  * would start returning 429 ("Invitation Not Found") for everyone after a
  * handful of views (audit #36). Keying on the token still bounds per-token

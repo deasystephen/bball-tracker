@@ -15,6 +15,7 @@ import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
+import { warnMissingUrlConfig } from './utils/urls';
 
 const app = express();
 const httpServer = createServer(app);
@@ -152,6 +153,7 @@ app.use((_req, res) => {
 
 // Only start server if this file is run directly (not when imported)
 if (require.main === module) {
+  warnMissingUrlConfig();
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
   });

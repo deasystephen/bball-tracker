@@ -24,7 +24,7 @@ respond on behalf of** those children — never manage a team.
   1. **Coach invites a guardian** from a managed player's roster card: `POST /teams/:id/members/:playerId/guardians
      { email, relationship }` → creates (or reuses) the adult's `User` row (unverified email, same rules as
      `POST /players`), a `PENDING` `GuardianInvitation` token emailed via the mailer (reuse the invitation
-     template family), accepted through `capyhoops.com/invite/<token>` like team invites. Acceptance creates the
+     template family), accepted through `hooplings.com/invite/<token>` like team invites. Acceptance creates the
      `Guardian` row. Requires `canManageRoster`.
   2. **Parent claims a child by code** (later; not in v1).
 - A child can have several guardians; exactly one `isPrimary` (first link). Removing the last guardian does

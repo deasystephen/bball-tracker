@@ -1,7 +1,7 @@
 /**
  * CORS contract for the public web invite flow (#447).
  *
- * The web invite page at capyhoops.com POSTs the accept cross-origin to the API
+ * The web invite page at hooplings.com POSTs the accept cross-origin to the API
  * (web/app/invite/[token]/invite-client.tsx), which is a preflighted request. The
  * allowlist lives ONLY in infra/task-definition.json (CORS_ORIGIN), so this suite
  * reads that value out of the deploy file and boots the app with it: dropping the
@@ -28,8 +28,8 @@ jest.mock('../../src/services/guardian-service');
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
 
 const TASK_DEFINITION_PATH = path.resolve(__dirname, '../../../infra/task-definition.json');
-const APEX_ORIGIN = 'https://capyhoops.com';
-const WWW_ORIGIN = 'https://www.capyhoops.com';
+const APEX_ORIGIN = 'https://hooplings.com';
+const WWW_ORIGIN = 'https://www.hooplings.com';
 const FOREIGN_ORIGIN = 'https://evil.example';
 const ACCEPT_PATH = '/api/v1/invitations/by-token/abc123defghijklmnop/accept';
 

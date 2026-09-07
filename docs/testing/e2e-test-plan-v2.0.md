@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:capyhoops.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.capyhoops.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:hooplings.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
 **Checkboxes:** 133 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
@@ -26,8 +26,8 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Steps:**
   1. On iPhone, confirm the **latest** TestFlight build (v1.2.0) is installed. (iOS build numbers are auto-incremented by EAS on each production build and aren't tracked in-repo, so there's no fixed number to match — always take the newest TestFlight build.) **Do not test on #24 or older** — `expo-secure-store` (audit #52, runtime 1.2.0) and the `ios.associatedDomains` entitlement (Universal Links, audit #37) are native changes that landed after #24; OTA updates cannot carry them, so an older binary would not reflect `main`.
-  2. From terminal: `curl -s https://api.capyhoops.com/health` → expect 200
-  3. From terminal: `aws sesv2 get-email-identity --email-identity mail.capyhoops.com --region us-east-1 | jq '.VerifiedForSendingStatus'` → expect `true`
+  2. From terminal: `curl -s https://api.hooplings.com/health` → expect 200
+  3. From terminal: `aws sesv2 get-email-identity --email-identity mail.hooplings.com --region us-east-1 | jq '.VerifiedForSendingStatus'` → expect `true`
 - **Notes:** ___________
 
 ### P.2 — Test data prerequisites
@@ -129,7 +129,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ### A.7 — 🔒 Unauthenticated request to protected endpoint rejected
 - [ ] Pass / Fail / Skipped
-- **Steps:** `curl -i https://api.capyhoops.com/api/v1/teams` (no auth header)
+- **Steps:** `curl -i https://api.hooplings.com/api/v1/teams` (no auth header)
 - **Expected:** 401 Unauthorized.
 - **Notes:** ___________
 
@@ -372,16 +372,16 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:** Open the email from E.1.
 - **Expected:**
   - Subject: `You've been invited to join Test Team`
-  - From: `noreply@mail.capyhoops.com`
+  - From: `noreply@mail.hooplings.com`
   - HTML body has team name, inviter name, optional message, expiration date, **a styled "Accept Invitation" button**, and a plaintext fallback link
-  - Both button and plaintext link target `https://capyhoops.com/invite/<token>`
+  - Both button and plaintext link target `https://hooplings.com/invite/<token>`
   - Plain-text version (view source / view raw) also has the URL
 - **Notes:** ___________
 
 ### E.3 — DKIM / SPF passes (deliverability sanity)
 - [ ] Pass / Fail / Skipped
 - **Steps:** View the email's full headers in Gmail (3-dot menu → Show original).
-- **Expected:** `DKIM=PASS`, `SPF=PASS` for `mail.capyhoops.com`. No `dmarc=fail`.
+- **Expected:** `DKIM=PASS`; `SPF=PASS` for the envelope sender `bounce.mail.hooplings.com` (custom MAIL FROM, #506) so it **aligns** with the From domain; `dmarc=pass`. `Return-Path` must be `@bounce.mail.hooplings.com`, not `@amazonses.com`.
 - **Notes:** If failing, check Route53 has the DKIM CNAMEs + SPF TXT that Terraform created today.
 
 ### E.4 — iOS Universal Link opens the app (app installed)
@@ -390,7 +390,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:**
   1. On iPhone with the latest TestFlight build, tap the "Accept Invitation" button in Gmail
 - **Expected:** Safari/Mail does NOT open. Instead the app opens to `mobile/app/invite/[token].tsx` and shows "Team Invitation" with team name, inviter, accept/decline buttons.
-- **Notes:** If it opens in Safari instead, AASA isn't being served correctly — but note that AASA is served from `capyhoops.com` which has no web deploy yet (see S.2). The fallback this triggers is the expected-broken path. Also requires a build that carries the `applinks:capyhoops.com` associated-domains entitlement (added to `app.config.js` in audit #37 — builds ≤ #24 do **not** have it; test on build #25 or later).
+- **Notes:** If it opens in Safari instead, AASA isn't being served correctly — but note that AASA is served from `hooplings.com` which has no web deploy yet (see S.2). The fallback this triggers is the expected-broken path. Also requires a build that carries the `applinks:hooplings.com` associated-domains entitlement (added to `app.config.js` in audit #37 — builds ≤ #24 do **not** have it; test on build #25 or later).
 
 ### E.5 — Accept invitation from in-app screen
 - [ ] Pass / Fail / Skipped
@@ -455,7 +455,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH (canManageRoster)
 - **Prereq:** D.3 (a managed player on the roster)
 - **Steps:** Team detail → "Add Player" roster screen → on `Test Player 1`'s card tap **"Invite a parent"** → `/teams/<id>/players/<playerId>/guardians` → email `deasystephen+parent@gmail.com`, relationship chip **Mother** → Invite. API: `POST /api/v1/teams/<teamId>/members/<managedPlayerId>/guardians { email, relationship: "MOTHER" }` (#398/#399).
-- **Expected:** 201 with `invitation` (`status: PENDING`, `invitedEmail`, `relationship`, no `token`). A `User` row with `role: PARENT` is created for the email (not `isManaged`). 📧 Email "You've been invited as <child>'s guardian on <team>" with a `capyhoops.com/invite/<token>` link. `GET …/guardians` lists it under `pendingInvitations`.
+- **Expected:** 201 with `invitation` (`status: PENDING`, `invitedEmail`, `relationship`, no `token`). A `User` row with `role: PARENT` is created for the email (not `isManaged`). 📧 Email "You've been invited as <child>'s guardian on <team>" with a `hooplings.com/invite/<token>` link. `GET …/guardians` lists it under `pendingInvitations`.
 - **Notes:** ___________
 
 ### E.12b — Guardian accepts the invite link
@@ -494,8 +494,8 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### E.15 — 🔒 Public invite endpoint accepts ONLY valid token (no auth bypass)
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  - `curl -i https://api.capyhoops.com/api/v1/invitations/by-token/abc` (token too short)
-  - `curl -i https://api.capyhoops.com/api/v1/invitations/by-token/<valid-token>`
+  - `curl -i https://api.hooplings.com/api/v1/invitations/by-token/abc` (token too short)
+  - `curl -i https://api.hooplings.com/api/v1/invitations/by-token/<valid-token>`
 - **Expected:** Short/invalid token → 400 or 404; valid token → 200 with `invitation.kind: "team"` (or `"guardian"`) and never the token itself. No auth header required for either. The lookup is limited to 30 requests / 15 min **per token** (audit #36); the accept `POST` uses the IP-keyed write limiter.
 - **Notes:** ___________
 
@@ -797,7 +797,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### L.1 — Get team calendar URL
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN (bypasses entitlements) or a PREMIUM user — `CALENDAR_SYNC` is PREMIUM-gated; a FREE coach gets 402 `upgrade_required`
-- **Steps:** The app has no calendar UI. `curl -X POST -H "Authorization: Bearer $TOKEN" https://api.capyhoops.com/api/v1/teams/:id/calendar/subscribe` → copy the returned URL (format `https://api.capyhoops.com/api/v1/teams/:id/calendar.ics?token=...`; the host comes from `API_BASE_URL`, audit #24 — never `capyhoops.com`).
+- **Steps:** The app has no calendar UI. `curl -X POST -H "Authorization: Bearer $TOKEN" https://api.hooplings.com/api/v1/teams/:id/calendar/subscribe` → copy the returned URL (format `https://api.hooplings.com/api/v1/teams/:id/calendar.ics?token=...`; the host comes from `API_BASE_URL`, audit #24 — never `hooplings.com`).
 - **Expected:** URL includes an opaque token and uses the API host. As a FREE-tier coach → 402.
 - **Notes:** ___________
 
@@ -809,7 +809,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### L.3 — Rate-limit honored
 - [ ] Pass / Fail / Skipped
-- **Steps:** From terminal, hammer the URL: `for i in {1..70}; do curl -s -o /dev/null -w "%{http_code} " https://api.capyhoops.com/api/v1/teams/<id>/calendar.ics?token=<token>; done`
+- **Steps:** From terminal, hammer the URL: `for i in {1..70}; do curl -s -o /dev/null -w "%{http_code} " https://api.hooplings.com/api/v1/teams/<id>/calendar.ics?token=<token>; done`
 - **Expected:** After 60 requests in an hour, returns 429 `Too many calendar feed requests`.
 - **Notes:** `calendarFeedRateLimit` — 60 req / 60 min / IP.
 
@@ -821,7 +821,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### L.5 — 🔒 Calendar URL without token
 - [ ] Pass / Fail / Skipped
-- **Steps:** `curl https://api.capyhoops.com/api/v1/teams/:id/calendar.ics` (no token).
+- **Steps:** `curl https://api.hooplings.com/api/v1/teams/:id/calendar.ics` (no token).
 - **Expected:** 401.
 - **Notes:** ___________
 
@@ -832,7 +832,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### M.1 — Per-game CSV export
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canShareStats` (or higher)
-- **Steps:** The app has no export UI (entitlement UI removed in #392) — `curl -H "Authorization: Bearer $TOKEN" https://api.capyhoops.com/api/v1/games/:gameId/export.csv -o game.csv`.
+- **Steps:** The app has no export UI (entitlement UI removed in #392) — `curl -H "Authorization: Bearer $TOKEN" https://api.hooplings.com/api/v1/games/:gameId/export.csv -o game.csv`.
 - **Expected:** CSV download. Columns: timestamp, player, event_type, points, etc. User-controlled string cells prefixed with `'` if they start with `=`, `+`, `-`, `@`.
 - **Notes:** Per memory: cursor-paginated, escapeCsvCell for formula triggers.
 
@@ -888,10 +888,10 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 Cross-cuts E, I, J — but worth aggregating here.
 
-### O.1 — Email sent uses `noreply@mail.capyhoops.com` as From
+### O.1 — Email sent uses `noreply@mail.hooplings.com` as From
 - [ ] Pass / Fail / Skipped
 - **Steps:** Inspect any received email.
-- **Expected:** `From: noreply@mail.capyhoops.com`. Matches `SES_FROM_ADDRESS` env var.
+- **Expected:** `From: noreply@mail.hooplings.com`. Matches `SES_FROM_ADDRESS` env var.
 - **Notes:** ___________
 
 ### O.2 — HTML escaping defends against template injection
@@ -909,10 +909,10 @@ Cross-cuts E, I, J — but worth aggregating here.
 - **Expected:** `POST /invitations` still returns 201. Backend logs an error. No 500.
 - **Notes:** Per `invitation-service.ts:171` catch block.
 
-### O.4 — Per `vars.acceptUrl`: link uses `https://capyhoops.com` not localhost
+### O.4 — Per `vars.acceptUrl`: link uses `https://hooplings.com` not localhost
 - [ ] Pass / Fail / Skipped
 - **Steps:** Inspect E.2 email's link.
-- **Expected:** Starts with `https://capyhoops.com/invite/`. Token is base64url, 43 chars (32 bytes encoded).
+- **Expected:** Starts with `https://hooplings.com/invite/`. Token is base64url, 43 chars (32 bytes encoded).
 - **Notes:** ___________
 
 ---
@@ -922,7 +922,7 @@ Cross-cuts E, I, J — but worth aggregating here.
 ### P.4 — Error tracking (Sentry)
 - [ ] Pass / Fail / Skipped
 - **Steps:**
-  1. Trigger a backend error: `curl https://api.capyhoops.com/api/v1/teams/nonexistent-deadbeef -H "Authorization: Bearer $TOKEN"` (assuming 404)
+  1. Trigger a backend error: `curl https://api.hooplings.com/api/v1/teams/nonexistent-deadbeef -H "Authorization: Bearer $TOKEN"` (assuming 404)
   2. Check Sentry project for the event
 - **Expected:** Event appears in Sentry within ~30s. Release tag matches the current git SHA. PII fields (email, name) scrubbed per memory.
 - **Notes:** Per `project_sentry_wiring_2026_04.md`.
@@ -941,7 +941,7 @@ Cross-cuts E, I, J — but worth aggregating here.
 
 ### P.7 — Health endpoint
 - [ ] Pass / Fail / Skipped
-- **Steps:** `curl https://api.capyhoops.com/health` (there is no `/api/v1/health`).
+- **Steps:** `curl https://api.hooplings.com/health` (there is no `/api/v1/health`).
 - **Expected:** 200 `{"status":"ok","db":"ok","timestamp":…}`; 503 `{"status":"degraded","db":"down"}` if the DB ping fails.
 - **Notes:** Used by ECS health check.
 
@@ -1049,13 +1049,13 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 ### S.1 — ⚠ Android Universal Link
 - [ ] Verified-broken / Notes
 - **Issue:** #139 — production Android signing not set up; `assetlinks.json` has placeholder fingerprint
-- **Expected fail mode:** On Android, tapping the invite link opens Chrome and tries to load `capyhoops.com/invite/<token>` → goes to S.2 (web not deployed).
+- **Expected fail mode:** On Android, tapping the invite link opens Chrome and tries to load `hooplings.com/invite/<token>` → goes to S.2 (web not deployed).
 - **Notes:** ___________
 
-### S.2 — ⚠ Web fallback page (capyhoops.com not deployed)
+### S.2 — ⚠ Web fallback page (hooplings.com not deployed)
 - [ ] Verified-broken / Notes
 - **Issue:** No web deploy target configured. `web/` Next.js app exists in code but not hosted.
-- **Expected fail mode:** Browser to `https://capyhoops.com/invite/<token>` returns DNS-routes-to-nothing OR a default Route53 / hosting-not-configured error. Not the Next.js invite page yet.
+- **Expected fail mode:** Browser to `https://hooplings.com/invite/<token>` returns DNS-routes-to-nothing OR a default Route53 / hosting-not-configured error. Not the Next.js invite page yet.
 - **Notes:** ___________
 
 ### S.3 — ⚠ SES production access (sandbox-only)

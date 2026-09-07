@@ -218,7 +218,7 @@ describe('GuardianService', () => {
 
     it('creates a PARENT user for a new email, the invitation, and emails the accept link', async () => {
       setHappyPath();
-      process.env.PUBLIC_APP_URL = 'https://capyhoops.com';
+      process.env.PUBLIC_APP_URL = 'https://app.example.test';
 
       const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id);
 
@@ -248,7 +248,7 @@ describe('GuardianService', () => {
       expect(sendArgs.to).toBe('parent@test.com');
       expect(sendArgs.template.name).toBe('guardian-invitation');
       expect(sendArgs.variables.childName).toBe('Kid Smith');
-      expect(sendArgs.variables.acceptUrl).toMatch(/^https:\/\/capyhoops\.com\/invite\/[A-Za-z0-9_-]+$/);
+      expect(sendArgs.variables.acceptUrl).toMatch(/^https:\/\/app\.example\.test\/invite\/[A-Za-z0-9_-]+$/);
       expect(sendArgs.metadata.event_type).toBe('guardian_invitation.created');
     });
 

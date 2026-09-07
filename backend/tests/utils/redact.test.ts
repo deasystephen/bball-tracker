@@ -82,8 +82,8 @@ describe('redactPath', () => {
 describe('redactUrl', () => {
   it('redacts absolute URLs: path segments, query values, drops fragment', () => {
     expect(
-      redactUrl('https://api.capyhoops.com/api/v1/invitations/by-token/abcdef0123456789?code=c1&page=3#frag')
-    ).toBe(`https://api.capyhoops.com/api/v1/invitations/by-token/${REDACTED}?code=${REDACTED}&page=3`);
+      redactUrl('https://api.example.test/api/v1/invitations/by-token/abcdef0123456789?code=c1&page=3#frag')
+    ).toBe(`https://api.example.test/api/v1/invitations/by-token/${REDACTED}?code=${REDACTED}&page=3`);
   });
   it('redacts path-only URLs', () => {
     expect(redactUrl('/api/v1/auth/callback?code=abc&state=s')).toBe(
@@ -94,8 +94,8 @@ describe('redactUrl', () => {
     );
   });
   it('leaves clean URLs untouched', () => {
-    expect(redactUrl('https://api.capyhoops.com/api/v1/games?page=1')).toBe(
-      'https://api.capyhoops.com/api/v1/games?page=1'
+    expect(redactUrl('https://api.example.test/api/v1/games?page=1')).toBe(
+      'https://api.example.test/api/v1/games?page=1'
     );
     expect(redactUrl('')).toBe('');
   });

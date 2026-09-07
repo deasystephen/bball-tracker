@@ -5,6 +5,7 @@ import { invitationTemplate } from '../../src/services/mailer/templates/invitati
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
 import { guardianInvitationTemplate } from '../../src/services/mailer/templates/guardian-invitation';
+import { APP_NAME } from '../../src/services/mailer/templates/brand';
 
 // Mock the AWS SES SDK so SesMailer tests don't make real network calls
 jest.mock('@aws-sdk/client-sesv2', () => {
@@ -78,7 +79,7 @@ describe('createMailer', () => {
 
   it('returns SesMailer when both env vars are set', () => {
     process.env.AWS_SES_REGION = 'us-east-1';
-    process.env.SES_FROM_ADDRESS = 'noreply@mail.capyhoops.com';
+    process.env.SES_FROM_ADDRESS = 'noreply@mail.example.test';
     const m = createMailer();
     expect(m).toBeInstanceOf(SesMailer);
   });
@@ -100,7 +101,7 @@ describe('SesMailer', () => {
   it('calls SES SendEmailCommand with rendered subject, html, text', async () => {
     const mailerInstance = new SesMailer({
       region: 'us-east-1',
-      fromAddress: 'noreply@mail.capyhoops.com',
+      fromAddress: 'noreply@mail.example.test',
     });
 
     const result = await mailerInstance.send({
@@ -120,7 +121,7 @@ describe('SesMailer', () => {
     expect(sesModule.SendEmailCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         Destination: { ToAddresses: ['player@example.com'] },
-        FromEmailAddress: 'noreply@mail.capyhoops.com',
+        FromEmailAddress: 'noreply@mail.example.test',
         Content: expect.objectContaining({
           Simple: expect.objectContaining({
             Subject: expect.objectContaining({ Data: expect.stringContaining('Bulls') }),
@@ -178,7 +179,7 @@ describe('invitationTemplate', () => {
     inviterName: 'Phil',
     message: 'Welcome aboard!',
     expiresAt: '2026-07-01',
-    acceptUrl: 'https://capyhoops.com/invite/abc123',
+    acceptUrl: 'https://app.example.test/invite/abc123',
   };
 
   it('subject includes team name', () => {
@@ -198,14 +199,14 @@ describe('invitationTemplate', () => {
 
   it('html includes acceptUrl as CTA button and plaintext fallback', () => {
     const html = invitationTemplate.html(vars);
-    expect(html).toContain('https://capyhoops.com/invite/abc123');
+    expect(html).toContain('https://app.example.test/invite/abc123');
     expect(html).toContain('Accept Invitation');
   });
 
   it('html falls back to generic copy when acceptUrl is missing', () => {
     const html = invitationTemplate.html({ ...vars, acceptUrl: '' });
     expect(html).not.toContain('Accept Invitation');
-    expect(html).toContain('Open the CapyHoops app');
+    expect(html).toContain(`Open the ${APP_NAME} app`);
   });
 
   describe("variant: 'added' (roster/invite unification — player rostered at creation)", () => {
@@ -259,13 +260,13 @@ describe('invitationTemplate', () => {
 
   it('text includes acceptUrl when provided', () => {
     const text = invitationTemplate.text(vars);
-    expect(text).toContain('https://capyhoops.com/invite/abc123');
+    expect(text).toContain('https://app.example.test/invite/abc123');
   });
 
   it('text falls back to generic copy when acceptUrl is missing', () => {
     const text = invitationTemplate.text({ ...vars, acceptUrl: '' });
     expect(text).not.toContain('https://');
-    expect(text).toContain('Open the CapyHoops app');
+    expect(text).toContain(`Open the ${APP_NAME} app`);
   });
 });
 
@@ -276,7 +277,7 @@ describe('guardianInvitationTemplate', () => {
     teamName: 'Bulls',
     inviterName: 'Phil',
     expiresAt: '2026-09-01',
-    acceptUrl: 'https://capyhoops.com/invite/xyz789',
+    acceptUrl: 'https://app.example.test/invite/xyz789',
   };
 
   it('has a distinct template name', () => {
@@ -295,7 +296,7 @@ describe('guardianInvitationTemplate', () => {
     expect(html).toContain('Kid Smith');
     expect(html).toContain('Bulls');
     expect(html).toContain('Phil');
-    expect(html).toContain('https://capyhoops.com/invite/xyz789');
+    expect(html).toContain('https://app.example.test/invite/xyz789');
     expect(html).toContain('Accept Invitation');
     expect(html).toContain('2026-09-01');
   });
@@ -303,19 +304,19 @@ describe('guardianInvitationTemplate', () => {
   it('html falls back to generic copy when acceptUrl is missing', () => {
     const html = guardianInvitationTemplate.html({ ...vars, acceptUrl: '' });
     expect(html).not.toContain('Accept Invitation');
-    expect(html).toContain('Open the CapyHoops app');
+    expect(html).toContain(`Open the ${APP_NAME} app`);
   });
 
   it('text mirrors the html content', () => {
     const text = guardianInvitationTemplate.text(vars);
     expect(text).toContain('Kid Smith');
     expect(text).toContain('Bulls');
-    expect(text).toContain('Accept your invitation: https://capyhoops.com/invite/xyz789');
+    expect(text).toContain('Accept your invitation: https://app.example.test/invite/xyz789');
   });
 
   it('text falls back to generic copy when acceptUrl is missing', () => {
     const text = guardianInvitationTemplate.text({ ...vars, acceptUrl: '' });
-    expect(text).toContain('Open the CapyHoops app');
+    expect(text).toContain(`Open the ${APP_NAME} app`);
   });
 
   it('escapes HTML in the child name', () => {
@@ -442,5 +443,40 @@ describe('HTML escaping (template injection defense)', () => {
       expiresAt: '2026-07-01',
     });
     expect(html).not.toContain('font-style:italic');
+  });
+});
+
+describe('brand copy (domain migration PR2, D12)', () => {
+  // Same retired-name patterns as mobile/__tests__/i18n/brand-guard.test.ts.
+  const RETIRED_BRAND_PATTERNS = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i];
+  const renders: Array<[string, string]> = [];
+  const invitationVars = {
+    playerName: 'Jordan', teamName: 'Bulls', inviterName: 'Phil', message: 'Hi', expiresAt: '2026-07-01', acceptUrl: '',
+  };
+  const guardianVars = {
+    guardianName: 'Pat', childName: 'Kid', teamName: 'Bulls', inviterName: 'Phil', expiresAt: '2026-09-01', acceptUrl: '',
+  };
+  const rsvpVars = { playerName: 'Jordan', teamName: 'Bulls', opponent: 'Celtics', gameDate: 'Sat', rsvpStatus: 'YES' };
+  const announcementVars = { teamName: 'Bulls', title: 'Practice', body: 'Gym 6pm', recipientName: 'Jordan', authorName: 'Phil' };
+  for (const [tpl, vars] of [
+    [invitationTemplate, invitationVars],
+    [invitationTemplate, { ...invitationVars, variant: 'added' }],
+    [guardianInvitationTemplate, guardianVars],
+    [rsvpConfirmationTemplate, rsvpVars],
+    [announcementTemplate, announcementVars],
+  ] as const) {
+    renders.push([`${tpl.name} subject`, tpl.subject(vars as Record<string, string>)]);
+    renders.push([`${tpl.name} html`, tpl.html(vars as Record<string, string>)]);
+    renders.push([`${tpl.name} text`, tpl.text(vars as Record<string, string>)]);
+  }
+
+  it.each(renders)('%s names the product via APP_NAME and never a retired brand', (_label, out) => {
+    for (const pattern of RETIRED_BRAND_PATTERNS) {
+      expect(out).not.toMatch(pattern);
+    }
+  });
+
+  it.each(renders.filter(([label]) => !label.endsWith('subject')))('%s carries the brand footer or copy', (_label, out) => {
+    expect(out).toContain(APP_NAME);
   });
 });

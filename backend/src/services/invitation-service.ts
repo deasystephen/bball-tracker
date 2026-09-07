@@ -29,6 +29,7 @@ import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
+import { publicAppUrl } from '../utils/urls';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -418,8 +419,7 @@ export class InvitationService {
       return null;
     }
 
-    const baseUrl = process.env.PUBLIC_APP_URL || 'https://capyhoops.com';
-    const acceptUrl = `${baseUrl}/invite/${token}`;
+    const acceptUrl = `${publicAppUrl()}/invite/${token}`;
     try {
       await withTimeout(mailer.send({
         template: invitationTemplate,
