@@ -1,4 +1,4 @@
-# Infrastructure — CapyHoops / bball-tracker
+# Infrastructure — Hooplings / bball-tracker
 
 Terraform manages all AWS infrastructure.  
 **Never run `terraform apply` without reviewing the plan output first.**
@@ -12,8 +12,8 @@ Terraform manages all AWS infrastructure.
 | `rds.tf` | PostgreSQL RDS instance |
 | `elasticache.tf` | Redis ElastiCache |
 | `s3.tf` | S3 buckets (profile picture avatars) |
-| `dns.tf` | Route53 hosted zone, ACM certificate |
-| `ses.tf` | SES domain identity, DKIM/SPF, IAM policy for ECS task |
+| `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records |
+| `ses.tf` | SES domain identities, DKIM, custom MAIL FROM (MX/SPF), DMARC, IAM policy for ECS task |
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
@@ -54,43 +54,81 @@ start, whereas the previous split silently deployed neither copy.
 
 ---
 
-## Email — SES, DKIM, and SPF
+## DNS — zones, certificates, domains
 
-Transactional email is sent from `noreply@mail.capyhoops.com` via AWS SES v2.
+`var.domains` (variables.tf) is the list of registered domains, each with a `serve` flag:
 
-### How `ses.tf` works
-
-1. **SES domain identity** is created for `mail.capyhoops.com` with Easy DKIM
-   (RSA-2048).  SES generates three CNAME tokens.
-2. **Three DKIM CNAME records** are added to the Route53 hosted zone so SES
-   can sign outbound mail.  The records look like:
-   ```
-   <token>._domainkey.mail.capyhoops.com  CNAME  <token>.dkim.amazonses.com
-   ```
-3. **SPF TXT record** tells receiving servers that Amazon SES is authorised to
-   send on behalf of `mail.capyhoops.com`:
-   ```
-   mail.capyhoops.com  TXT  "v=spf1 include:amazonses.com ~all"
-   ```
-4. **MX record** routes bounces and complaints back to the SES feedback
-   endpoint (required for bounce/complaint handling; the region in the host
-   below is derived from `var.aws_region` in `ses.tf`):
-   ```
-   mail.capyhoops.com  MX  10 feedback-smtp.us-east-1.amazonses.com
-   ```
-5. **IAM policy** (`ses_send`) grants the ECS task role `ses:SendEmail` /
-   `ses:SendRawEmail` on the identity ARN only (least-privilege).
-
-### DMARC (recommended follow-up)
-
-Add a DMARC policy TXT record at `_dmarc.mail.capyhoops.com` once you have
-confirmed DKIM and SPF are passing:
-
-```
-_dmarc.mail.capyhoops.com  TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc@capyhoops.com; pct=100"
+```hcl
+domains = {
+  "hooplings.com" = { serve = true }
+  "capyhoops.com" = { serve = true }   # retire (PR4, #503): serve = false
+}
+primary_domain = "hooplings.com"
 ```
 
-Start with `p=none` (monitor mode) before moving to `p=quarantine`.
+- **Every key gets a Route53 hosted zone.** `serve = true` additionally provisions an ACM
+  certificate for `api.<domain>`, `*.<domain>` **and the bare apex** (the wildcard does not
+  match the apex; a future web deploy on AWS needs no cert change), its DNS validation records,
+  the `api.<domain>` alias to the ALB, and the SES identity + mail records below.
+- **The primary domain's certificate is the HTTPS listener default**; every other served
+  domain's certificate attaches via `aws_lb_listener_certificate` and is selected by SNI, so
+  `api.<old-domain>` keeps answering for app binaries that have not taken the OTA yet.
+- **Domains bought through Route53 Domains already have a hosted zone**, created by Amazon
+  Registrar at purchase with live NS delegation. **Import it** (`import { to =
+  aws_route53_zone.main["<domain>"] id = "<zone id>" }`, then delete the block after the apply)
+  — never let Terraform create a second zone for such a domain. capyhoops.com had exactly that
+  twin-zone split until 2026-09-06: Terraform created a zone, the registrar was hand-repointed
+  to it, and the registrar-created zone sat orphaned. `terraform output name_servers` lists the
+  delegation per zone; only a domain registered *elsewhere* needs its registrar pointed at them.
+- **Retiring a domain = `serve = false`**, not removing the key. The certificate, API record,
+  SES identity and mail records are destroyed; the zone stays so the registrar's NS delegation
+  never points at a deleted zone (the orphan-zone shape again). The domain stays registered.
+- **Reading a plan for a domain change:** an in-place tag/comment update on zones is expected;
+  a certificate replace must show as `+/-` (create-before-destroy); the `cert_validation`
+  records and the `aws_acm_certificate_validation` waiter may replace (their values come from
+  the new certificate — ACM's validation CNAMEs are stable per account, so the records come
+  back identical). **Any destroy of a zone, `api` record or SES identity that you did not
+  intend is a stop.**
+
+---
+
+## Email — SES, DKIM, MAIL FROM, and DMARC
+
+Transactional email is sent from `noreply@mail.<primary_domain>` via AWS SES v2. `ses.tf`
+provisions the same set for every served domain:
+
+1. **SES domain identity** `mail.<domain>` with Easy DKIM (RSA-2048). SES generates three
+   CNAME tokens; the **three DKIM CNAME records** go into that domain's hosted zone:
+   ```
+   <token>._domainkey.mail.<domain>  CNAME  <token>.dkim.amazonses.com
+   ```
+2. **Custom MAIL FROM domain** `bounce.mail.<domain>`
+   (`aws_sesv2_email_identity_mail_from_attributes`). SES requires the MAIL FROM to be a
+   *subdomain* of the identity. Without it SES uses an `amazonses.com` envelope sender, SPF
+   passes for Amazon's domain and is DMARC-unaligned, and the MX/SPF records are inert — that
+   was the pre-2026-09 configuration. `behavior_on_mx_failure = USE_DEFAULT_VALUE` falls back
+   to the SES default rather than failing sends if the MX ever disappears.
+3. **MX + SPF at the MAIL FROM domain** (both required for MAIL FROM verification):
+   ```
+   bounce.mail.<domain>  MX   10 feedback-smtp.<region>.amazonses.com
+   bounce.mail.<domain>  TXT  "v=spf1 include:amazonses.com ~all"
+   ```
+4. **DMARC** for the sending subdomain, monitor mode:
+   ```
+   _dmarc.mail.<domain>  TXT  "v=DMARC1; p=none"
+   ```
+   No `rua` yet: no mailbox exists to receive aggregate reports, and an external address
+   (Gmail) would need an authorization record the receiving domain will not publish. **#449**
+   owns the report receiver, the `rua` tag and the later tightening to `p=quarantine`.
+5. **IAM policy** (`ses_send`) grants the ECS task role `ses:SendEmail` / `ses:SendRawEmail`
+   with a `ses:FromAddress` condition covering `*@mail.<domain>` for every served domain.
+
+**After apply**, per identity: `VerifiedForSendingStatus` must be `true` and
+`MailFromAttributes.MailFromDomainStatus` must be `SUCCESS`:
+```bash
+aws sesv2 get-email-identity --email-identity mail.hooplings.com \
+  --query '[VerifiedForSendingStatus,MailFromAttributes.MailFromDomainStatus]'
+```
 
 ### SES sandbox → production
 

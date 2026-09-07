@@ -37,23 +37,33 @@ output "alb_arn" {
 }
 
 output "api_url" {
-  description = "API URL using the custom domain"
-  value       = "https://api.${var.domain_name}"
+  description = "API URL on the primary domain"
+  value       = "https://api.${var.primary_domain}"
 }
 
 output "domain_name" {
-  description = "Root domain name"
-  value       = var.domain_name
+  description = "Primary domain"
+  value       = var.primary_domain
+}
+
+output "served_domains" {
+  description = "Domains that carry the API, a certificate and a mail identity"
+  value       = sort(keys(local.served_domains))
 }
 
 output "name_servers" {
-  description = "Route53 name servers — update these at your domain registrar"
-  value       = aws_route53_zone.main.name_servers
+  description = "Route53 name servers per hosted zone. Domains registered through Route53 Domains are already delegated to these; any other registrar must be pointed at them."
+  value       = { for d, z in aws_route53_zone.main : d => z.name_servers }
 }
 
 output "certificate_arn" {
-  description = "ACM certificate ARN"
-  value       = aws_acm_certificate.main.arn
+  description = "ACM certificate ARN for the primary domain (HTTPS listener default)"
+  value       = aws_acm_certificate.main[var.primary_domain].arn
+}
+
+output "certificate_arns" {
+  description = "ACM certificate ARN per served domain"
+  value       = { for d, c in aws_acm_certificate.main : d => c.arn }
 }
 
 # =============================================================================

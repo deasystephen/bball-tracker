@@ -121,6 +121,32 @@ jobs:
         working-directory: mobile
         run: npx expo export --platform ios
 
+  terraform-validate:
+    name: Terraform fmt & validate
+    runs-on: ubuntu-latest
+    # Static check only — no AWS credentials, no state, no plan. `terraform plan`
+    # and `apply` stay manual (infra/README.md). Catches syntax, type and
+    # reference errors in infra/*.tf before they can merge, since merging any
+    # non-markdown file under infra/ also triggers a full ECS rollout.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.7'
+
+      - name: terraform fmt
+        working-directory: infra
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform init (no backend)
+        working-directory: infra
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: infra
+        run: terraform validate -no-color
+
   detect-changes:
     name: Detect backend changes
     runs-on: ubuntu-latest

@@ -260,18 +260,34 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# HTTPS listener - uses ACM-managed certificate
+# HTTPS listener - the primary domain's ACM certificate is the default; every
+# other served domain's certificate attaches below and is selected by SNI, so
+# api.<old-domain> keeps answering for binaries that have not taken the OTA.
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.main.certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.main[var.primary_domain].certificate_arn
 
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
+
+  lifecycle {
+    precondition {
+      condition     = contains(keys(local.served_domains), var.primary_domain)
+      error_message = "var.primary_domain must be a key of var.domains with serve = true."
+    }
+  }
+}
+
+resource "aws_lb_listener_certificate" "extra" {
+  for_each = { for d, cfg in local.served_domains : d => cfg if d != var.primary_domain }
+
+  listener_arn    = aws_lb_listener.https.arn
+  certificate_arn = aws_acm_certificate_validation.main[each.key].certificate_arn
 }
 
 # =============================================================================
