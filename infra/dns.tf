@@ -35,13 +35,10 @@ resource "aws_route53_zone" "main" {
   }
 }
 
-# hooplings.com: adopt the zone Amazon Registrar created at purchase (its NS
-# delegation is already live). One-shot instruction — delete this block after
-# the apply that performs the import.
-import {
-  to = aws_route53_zone.main["hooplings.com"]
-  id = "Z0154069130H854Y9T0WZ"
-}
+# hooplings.com (Z0154069130H854Y9T0WZ) was IMPORTED on 2026-09-07 — the zone
+# Amazon Registrar created at purchase, NS delegation already live. Adopt any
+# future Route53-registered domain the same way (one-shot `import` block,
+# deleted after the apply) rather than letting Terraform create a twin zone.
 
 # =============================================================================
 # ACM Certificates — api.<domain> + *.<domain> + <domain>
