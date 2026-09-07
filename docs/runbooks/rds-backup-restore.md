@@ -11,7 +11,7 @@ instance. Required reading before any data-loss incident response.
 | Item | Value |
 | --- | --- |
 | Instance identifier | `bball-tracker-production-postgres` |
-| Engine | PostgreSQL 15.15 |
+| Engine | PostgreSQL 18 (RDS applies minors in the maintenance window; the major is pinned in `infra/rds.tf` and cross-checked by `backend/tests/infra/postgres-version.test.ts`) |
 | Region | `us-east-1` |
 | Multi-AZ | Yes (production only) |
 | Storage | gp3, 20–100 GiB autoscaling, encrypted at rest |
@@ -29,7 +29,7 @@ Do not hand-edit the instance in the AWS console.
 
 ## TLS / CA bundle
 
-RDS requires TLS (`rds.force_ssl = 1`, the Postgres 15 default). The backend
+RDS requires TLS (`rds.force_ssl = 1`, the default parameter-group value since Postgres 15). The backend
 connects via the `@prisma/adapter-pg` (node-postgres) driver, which only
 negotiates TLS when explicitly configured — see `backend/src/models/index.ts`.
 The server certificate is verified against the **pinned Amazon RDS global CA
@@ -53,11 +53,13 @@ image by `docker/Dockerfile`, overridable at runtime via `RDS_CA_BUNDLE_PATH`).
 ```bash
 aws rds describe-db-instances \
   --db-instance-identifier bball-tracker-production-postgres \
-  --query 'DBInstances[0].{Retention:BackupRetentionPeriod,Window:PreferredBackupWindow,Latest:LatestRestorableTime}'
+  --query 'DBInstances[0].{Retention:BackupRetentionPeriod,Window:PreferredBackupWindow,Latest:LatestRestorableTime,Engine:EngineVersion}'
 ```
 
-Expect `Retention: 7`, a recent `Latest` (within the last few minutes), and the
-configured backup window. If retention is below 7 or `Latest` is stale by more
+Expect `Retention: 7`, a recent `Latest` (within the last few minutes), the
+configured backup window, and an `Engine` whose major matches `engine_version`
+in `infra/rds.tf` (the parity test cannot see production, so this monthly
+check is where a live divergence would show). If retention is below 7 or `Latest` is stale by more
 than 24 hours, file a P1 — backups are silently broken.
 
 List the most recent automated snapshots:
@@ -225,7 +227,7 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
 
 ### Variant — rehearse a schema migration on a restored copy (no repoint)
 
-CI applies migrations to an **empty** database (`ci.yml` starts a bare `postgres:15`), so a
+CI applies migrations to an **empty** database (`ci.yml` starts a bare `postgres:18`), so a
 migration that backfills data (`UPDATE … SET`, `INSERT … SELECT`, then `SET NOT NULL`) first
 meets real rows at the production container start. Rehearse it here before merging; the
 permanent CI guard is #493. Steps 1–4 of Procedure A apply unchanged, except restore
@@ -297,6 +299,136 @@ Use this when the restore in Procedure A turned out to be the wrong snapshot
      --skip-final-snapshot
    ```
 
+## Major version upgrade
+
+First run: PostgreSQL 15.17 → 18.6, #521, 2026-09. Reuse this section for every major; the
+engineering-review decision trail is on the issue.
+
+**Why it is a CLI operation, not a `terraform apply`.** A bare major (`--engine-version 18`,
+or `engine_version = "18"` in Terraform) resolves to the RDS *default* minor for that major
+(18 → 18.3), not the newest, and no 18.x minor is auto-upgrade flagged, so it would sit there.
+`apply_immediately` defaults to false in the provider, so a Terraform-driven upgrade would also
+queue for the Sunday window unattended. So: upgrade with the exact minor from the CLI while
+watching, then bump the major-only pin in `infra/rds.tf`; `terraform plan` must print
+**No changes**. `allow_major_version_upgrade` is deliberately absent from `rds.tf`.
+
+**What actually breaks.** `pg_upgrade` preserves rows and indexes but carries no planner
+statistics (run `ANALYZE`), and an OS update bundled with the upgrade can move the glibc
+**collation version**, after which every text index (`User.email`, `Team.name`, invitation
+tokens) can mis-order silently until `REINDEX DATABASE` + `ALTER DATABASE … REFRESH COLLATION
+VERSION`. `backend/scripts/pg-upgrade-checks.mjs` reports AWS's pre-upgrade blockers, core-table
+row counts and the recorded-vs-actual collation version as JSON; run it before and after (with
+`--compare before.json`) on the rehearsal copy and on production. The API image has no `psql`
+and `prisma db execute` prints no rows, so it runs as `cd /app && node
+/tmp/pg-upgrade-checks.mjs` inside the one-off task from the variant above (embed the script
+via heredoc and run it with `/app` as the working directory; it reads `DATABASE_URL` and the pinned CA bundle like the API, and resolves `pg` from the cwd because ESM ignores `NODE_PATH`).
+
+**Do not choose `engine_lifecycle_support = "…-disabled"` to "fail loudly".** With it
+disabled RDS auto-upgrades the major *unattended* at end of standard support; with the default
+it silently bills. Neither warns — `backend/tests/infra/postgres-version.test.ts` turns CI red
+six months before the pinned major's date instead. If downtime matters by the next major, use
+RDS Blue/Green (logical replication to a green instance, switchover in seconds) rather than
+this in-place procedure.
+
+### 1. Open the PR first, merge it last
+
+Bump `docker-compose.yml` (image **and** mount: the `postgres:18` image moved `PGDATA` to
+`/var/lib/postgresql/18/docker` and its `VOLUME` to `/var/lib/postgresql`), `ci.yml`, and
+`infra/rds.tf`; add the new major's end-of-support date to the parity test. Open the PR: its CI
+run is the whole backend suite on the new major, including the real-database
+`league-access.db.test.ts`. **Merge only after production is upgraded** — merging first makes
+CI validate migrations against an engine production does not run (dependabot deploys
+`backend/**` merges unattended).
+
+### 2. Rehearse on a Multi-AZ restored copy
+
+Procedure A steps 1–4 with `--multi-az` (single-AZ under-reports the timing), no deletion
+protection. From the one-off task:
+
+1. `pg-upgrade-checks.mjs > before.json` — prechecks must be clean.
+2. `aws rds modify-db-instance --db-instance-identifier "$COPY" --engine-version 18.6
+   --allow-major-version-upgrade --apply-immediately`; poll `describe-db-instances` and
+   `describe-events --source-type db-instance --source-identifier "$COPY"`; **record the
+   wall-clock from `upgrading` to `available`** — that is the production window.
+3. `./node_modules/.bin/prisma migrate deploy` → "No pending migrations".
+4. `pg-upgrade-checks.mjs --compare before.json` → exit 0 (counts equal, collation versions
+   equal). On a collation mismatch: `REINDEX DATABASE`, `ALTER DATABASE … REFRESH COLLATION
+   VERSION`, time it, and plan the same for production.
+5. `ANALYZE VERBOSE;` timed.
+6. Tear down; record the run in the Drill log.
+
+### 3. Production window (about 30 minutes, watched)
+
+Measured on the 2026-09-07 Multi-AZ rehearsal (drill log): `modify-db-instance` → `available`
+10 min 52 s, database unavailable ~4 min 20 s of that (the pre-upgrade snapshot dominates;
+`pg_upgrade` took 23 s on 20 GB), ANALYZE 7 s. Budget the rest of the window for the manual
+snapshot, scaling ECS down and up, and the checks. The production run the same day
+(15.17 → 18.6, 2026-09-07): manual snapshot 3 min; **pending OS update + engine patch 20 min**
+(22:22 → 22:42, the OS patch alone 11 min — apply pending maintenance well before the window
+next time, or budget for it); upgrade 7 min 9 s modify → `available`, database unavailable
+4 min 00 s; checks + `migrate deploy` + ANALYZE 1 min; scale-up to `/health` `db: ok` 71 s.
+API down 22:21:55 → 22:54:14 (32 min).
+
+**Preconditions:** rehearsal done; the PR is open and green; no other change is about to
+merge — `aws ecs describe-services … deployments[0].rolloutState` is `COMPLETED`, and nothing
+merges to `main` until the window closes. A merge mid-window either rolls back red (service
+up, health check fails against the unavailable DB) or passes green while running nothing
+(service scaled to 0 — 0/0 is "stable"). Both mislead whoever merged.
+
+1. **Snapshot**: `aws rds create-db-snapshot --db-instance-identifier
+   bball-tracker-production-postgres --db-snapshot-identifier
+   bball-tracker-production-pre-pg18-$(date -u +%Y%m%d%H%M)`; `aws rds wait
+   db-snapshot-completed`. (RDS also snapshots before and after because retention > 0.)
+2. **Scale the API to 0.** The autoscaling target has `min_capacity = 1`, so a bare
+   `--desired-count 0` is scaled straight back; lower the minimum first:
+   ```bash
+   aws application-autoscaling register-scalable-target --service-namespace ecs \
+     --scalable-dimension ecs:service:DesiredCount \
+     --resource-id service/bball-tracker-production-cluster/bball-tracker-production-api \
+     --min-capacity 0
+   aws ecs update-service --cluster bball-tracker-production-cluster \
+     --service bball-tracker-production-api --desired-count 0
+   ```
+   Wait for `runningCount` 0. Otherwise the task crash-loops on `prisma migrate deploy`
+   against a database that refuses connections for the whole window — harmless but it buries
+   the one start you want to read.
+3. **Apply pending maintenance** (OS update, engine patch) now that nothing is connected, so
+   the major upgrade is the only remaining variable: `aws rds describe-pending-maintenance-actions`,
+   then `aws rds apply-pending-maintenance-action --resource-identifier <arn> --apply-action
+   system-update --opt-in-type immediate` (and `db-upgrade`); `aws rds wait db-instance-available`.
+4. **Upgrade**: the same `modify-db-instance … --engine-version 18.6
+   --allow-major-version-upgrade --apply-immediately` as the rehearsal; poll. If the precheck
+   fails the instance stays on the old version — read `pg_upgrade_precheck.log` via
+   `aws rds describe-db-log-files` / `download-db-log-file-portion`.
+5. **Checks + ANALYZE** from the one-off task: `pg-upgrade-checks.mjs --compare before.json`,
+   REINDEX if it says so, then `ANALYZE VERBOSE;`.
+6. **Scale back**: `--desired-count 1`, then `--min-capacity 1`. The single task start on the
+   new engine is the smoke result: `runningCount` 1, `curl -fsS https://api.hooplings.com/health`
+   reports `db: ok`, then sign in on a device and load Teams / Games / Stats.
+7. `aws rds describe-db-instances … --query 'DBInstances[0].EngineVersion'` → `18.6`; the
+   parameter group is now `default.postgres18`.
+8. **Patch the Terraform state, then prove the pin.** The provider keeps the configured
+   major-only value in state only while `"<stored>."` is a prefix of the live version
+   (`compareActualEngineVersion` in the AWS provider). The first refresh after a major upgrade
+   finds `"15."` is not a prefix of `18.6`, stores the full `18.6`, and from then on config
+   `"18"` plans as `"18.6" -> "18"` forever — and an `apply` would send `EngineVersion=18`,
+   which RDS resolves to its default minor (18.3) and rejects as a downgrade. Fix it once:
+   ```bash
+   cd infra && terraform state pull > /tmp/tfstate.json
+   jq '.serial += 1 | (.resources[] | select(.type=="aws_db_instance" and .name=="main")
+       | .instances[0].attributes.engine_version) = "18"' /tmp/tfstate.json > /tmp/tfstate-patched.json
+   terraform state push /tmp/tfstate-patched.json
+   terraform plan   # must print "No changes"
+   ```
+   (`terraform import` does not help — an import reads with an empty stored value and stores
+   the full version too.) Verified 2026-09-07: plan showed the `"18.6" -> "18"` diff until the
+   patch, No changes after it.
+9. **Merge the PR**; close the issue with the measured timings.
+
+**Rollback:** restore the pre-upgrade snapshot per Procedure A (including step 8's Terraform
+reconcile) and repoint the secret; writes made after the upgrade are lost; a restored 18
+instance cannot be downgraded in place. Do not merge the PR on that branch.
+
 ## Communication template
 
 Replace the bracketed parts. Send via the most-active channel for users, plus
@@ -333,3 +465,4 @@ quarterly and record the actual wall-clock here.
 | Date (UTC) | Operator | Snapshot ID | New instance ID | Time-to-restore | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-06 | sdeasy (Claude Code session) | `rds:bball-tracker-production-postgres-2026-09-06-03-14` | `bball-tracker-production-postgres-drill-202609061747` | **5 min 57 s** to `available` (single-AZ `db.t3.micro`, 20 GB); migration applied in 10 s | First drill, run as the migration rehearsal for #497 (`TeamLineage` backfill, #462). Procedure A steps 1–4 only (no repoint); the migration ran from a one-off ECS task per the variant below. Before: 4 teams, no `lineageId`. After: 4 teams, 4 lineages, 0 nulls, unique index present. Instance deleted and throwaway task-definition revisions 271–273 deregistered afterwards. Closes #29. |
+| 2026-09-07 | sdeasy (Claude Code session) | `rds:bball-tracker-production-postgres-2026-09-07-03-14` | `bball-tracker-production-postgres-pg18-rehearsal-202609072133` | **~12 min** to `available` (Multi-AZ `db.t3.micro`, 20 GB, incl. Multi-AZ conversion + initial backup); major upgrade 15.17 → 18.6: **10 min 52 s** from `modify-db-instance` to `available`, of which the database was unavailable **~4 min 20 s** (shutdown 21:48:45 → "upgrade complete" 21:53:07; the pre-upgrade snapshot was most of it, `pg_upgrade` itself 23 s); ANALYZE 7 s | Major-version rehearsal for #521 (section "Major version upgrade"). `pg-upgrade-checks.mjs` before/after from throwaway revisions 281–282: prechecks clean, row counts identical (23 users / 4 teams / 94 events / 32 invitations), collation version `2.26-59.amzn2` unchanged on 18.6 so no REINDEX; `migrate deploy` → no pending migrations; parameter group flipped to `default.postgres18`; previous version reported as `15.17.R2`, so the pending engine patch is absorbed by the upgrade. Copy deleted, revisions deregistered. |
