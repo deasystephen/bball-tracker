@@ -280,6 +280,13 @@ never inline a role check in a screen:
   `.maestro/profile.yaml` renames Frank Vogel and **reverts** (team-staff.yaml asserts the seeded name).
 
 #### Mobile API errors, permissions & toasts
+- **The API host is decided in ONE place: `config/env.ts#getApiUrl()`** (`extra.apiUrl` from
+  `app.config.js`, else `http://127.0.0.1:3000` under `__DEV__`, else `https://api.hooplings.com`).
+  `services/api-client.ts` and `services/socket.ts` import it; never read
+  `Constants.expoConfig.extra.apiUrl` elsewhere. `__tests__/config/env.test.ts` pins the resolution
+  order and `__tests__/app-config.test.ts` pins the `APP_ENV` → `apiUrl` mapping plus the
+  `applinks:` entitlement (an OTA published with `APP_ENV` unset ships the dev host — see the OTA env
+  gotcha above). Domain migration #502.
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
   interceptor. For any response with a JSON body it copies the server's `error` (or `message`) onto
   `error.message`, the server `code` onto `error.code`, and the whole body + `status` onto `error.apiError`.
@@ -941,17 +948,17 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   (`t: (k) => k`): that is how the #431 rebrand missed `roleOnboarding.title` for a week (#474) —
   Jest pressed `roleOnboarding.coachTitle` and never saw a locale value. `jest.setup.js` pins
   `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
-- `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (`Capyhoops`,
-  `Basketball Tracker`, separators tolerated) in any `en.json`/`es.json` value, any line of any
-  `.maestro/**/*.{yaml,yml}` (nested directories included), or any line of mobile source
-  (`.ts/.tsx/.js/.jsx/.mjs/.cjs/.json` under `mobile/`, minus native/build dirs,
+- `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (the pre-rename product
+  name and the pre-migration domain name; separators tolerated) in any `en.json`/`es.json` value,
+  any line of any `.maestro/**/*.{yaml,yml}` (nested directories included), or any line of mobile
+  source (`.ts/.tsx/.js/.jsx/.mjs/.cjs/.json` under `mobile/`, minus native/build dirs,
   `package-lock.json`, and `__tests__/`, whose negative fixtures quote the old names) — comment
-  lines included, so reword historical notes instead of quoting
-  the old name. A hostname ending in a live domain (`ALLOWED_DOMAINS`, currently
-  `capyhoops.com`, any subdomain) is stripped first; the match is anchored, so
-  `capyhoops.community` still fails. When the domain moves to hooplings.*, delete that entry
-  and the guard starts flagging leftover links (the allowlist self-test derives from the array).
-  Scope is mobile only — backend mailer templates are not covered.
+  lines included, so reword historical notes instead of quoting the old name. `ALLOWED_DOMAINS`
+  (hostnames stripped before matching) has been **empty since the 2026-09 domain migration
+  (#502)**: the old domain used to be allowlisted while it was live in mobile source; now any
+  leftover link to it fails CI, and the stripping logic is covered by a synthetic entry in the
+  self-test. Scope is mobile only — `backend/tests/services/mailer.test.ts` runs the same retired
+  patterns over every rendered email template.
 
 ### Maestro E2E Tests
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`

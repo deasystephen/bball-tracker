@@ -1,9 +1,13 @@
 const IS_PRODUCTION = process.env.APP_ENV === 'production';
 const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
+// Evaluated on the PUBLISHING machine for `eas update`: an unset APP_ENV ships
+// the dev host to every device (CLAUDE.md "OTA env gotcha"). The EAS production
+// environment provides APP_ENV; `__tests__/app-config.test.ts` pins this mapping.
+const PRODUCTION_API_URL = 'https://api.hooplings.com';
 const getApiUrl = () => {
-  if (IS_PRODUCTION) return process.env.API_URL || 'https://api.capyhoops.com';
-  if (IS_PREVIEW) return process.env.API_URL || 'https://api.capyhoops.com';
+  if (IS_PRODUCTION) return process.env.API_URL || PRODUCTION_API_URL;
+  if (IS_PREVIEW) return process.env.API_URL || PRODUCTION_API_URL;
   return 'http://127.0.0.1:3000';
 };
 
@@ -41,12 +45,13 @@ export default {
       supportsTablet: true,
       bundleIdentifier: 'com.bballtracker.mobile',
       // Universal Links: pairs with the AASA file served at
-      // https://capyhoops.com/.well-known/apple-app-site-association (#138).
+      // https://hooplings.com/.well-known/apple-app-site-association (#138).
       // Without this entitlement the AASA is inert and
-      // capyhoops.com/invite/<token> opens Safari instead of the app
-      // (audit #37). Entitlements are native — this needs a new EAS build,
-      // an OTA update cannot add it.
-      associatedDomains: ['applinks:capyhoops.com'],
+      // hooplings.com/invite/<token> opens Safari instead of the app
+      // (audit #37). Entitlements are native — this rides the next EAS build,
+      // an OTA update cannot change it; and it stays inert until the web
+      // deploy (#30) serves the apex.
+      associatedDomains: ['applinks:hooplings.com'],
       config: {
         usesNonExemptEncryption: false,
       },

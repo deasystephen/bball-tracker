@@ -21,17 +21,13 @@
  * on iOS/Android and adds latency.
  */
 
-import Constants from 'expo-constants';
 import { io, type Socket } from 'socket.io-client';
 import { useAuthStore } from '../store/auth-store';
 import { refreshAccessToken } from './api-client';
+import { getApiUrl } from '../config/env';
 
-const getBaseURL = (): string => {
-  return (
-    Constants.expoConfig?.extra?.apiUrl ||
-    (__DEV__ ? 'http://127.0.0.1:3000' : 'https://api.capyhoops.com')
-  );
-};
+// Same host as the REST client — decided once in config/env.ts.
+const getBaseURL = (): string => getApiUrl();
 
 export const UNAUTHORIZED_MESSAGE = 'Unauthorized';
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service unavailable';

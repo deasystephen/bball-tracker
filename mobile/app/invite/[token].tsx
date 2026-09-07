@@ -1,6 +1,6 @@
 /**
  * Deep-link handler for bball-tracker://invite/<token>
- * Also handles Universal Link https://capyhoops.com/invite/<token> when the app is installed.
+ * Also handles Universal Link https://hooplings.com/invite/<token> when the app is installed.
  */
 
 import React from 'react';
