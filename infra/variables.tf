@@ -116,11 +116,25 @@ variable "sentry_dsn" {
   default     = ""
 }
 
-# Domain
-variable "domain_name" {
-  description = "Root domain name (e.g., capyhoops.com). The API will be served at api.<domain_name>."
+# Domains
+#
+# Every registered domain gets a Route53 hosted zone. `serve = true` additionally
+# provisions the ACM certificate, the api.<domain> record and the SES identity
+# (see dns.tf / ses.tf). Retire a domain by flipping `serve` to false — the zone
+# stays so the registrar delegation never dangles.
+variable "domains" {
+  description = "Registered domains → { serve = bool }. Served domains carry the API, certificate and mail identity."
+  type        = map(object({ serve = bool }))
+  default = {
+    "hooplings.com" = { serve = true }
+    "capyhoops.com" = { serve = true } # retire (PR4, #503): serve = false once every device has the OTA
+  }
+}
+
+variable "primary_domain" {
+  description = "Served domain whose certificate is the HTTPS listener default and whose URLs the outputs report."
   type        = string
-  default     = "capyhoops.com"
+  default     = "hooplings.com"
 }
 
 # Tags

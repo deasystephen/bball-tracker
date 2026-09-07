@@ -13,8 +13,14 @@ jwt_secret     = "CHANGE_ME_TO_A_RANDOM_SECRET"
 workos_api_key = ""
 workos_client_id = ""
 
-# Domain (ACM certificate is managed automatically via dns.tf)
-domain_name = "capyhoops.com"
+# Domains (zones, ACM certificates and SES identities are managed in dns.tf / ses.tf).
+# Every key gets a hosted zone; `serve = true` also provisions the API certificate,
+# api.<domain> record and mail identity. Flip serve to false to retire a domain.
+domains = {
+  "hooplings.com" = { serve = true }
+  "capyhoops.com" = { serve = true }
+}
+primary_domain = "hooplings.com"
 
 # NOTE: application env vars (ADMIN_EMAILS, SENTRY_*, SES_*, ...) are NOT set here.
 # They live in infra/task-definition.json, which CI deploys. See infra/README.md.

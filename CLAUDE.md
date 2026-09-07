@@ -1084,11 +1084,13 @@ down until someone notices.
 **It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
 a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
 
-**Terraform is not in CI, but merging a `.tf` file still deploys.** These are two separate
-mechanisms and it is easy to conflate them:
+**Terraform is never applied by CI, but merging a `.tf` file still deploys.** These are two
+separate mechanisms and it is easy to conflate them:
 
-- **Terraform is never applied by CI.** An `infra/*.tf` change needs a manual `terraform apply`
-  from `infra/` (S3 remote state, DynamoDB lock). Merging the file does *not* apply it.
+- **CI only runs `terraform fmt -check` and `terraform validate`** (`terraform-validate` job in
+  `ci.yml`, `init -backend=false`, no credentials). A `.tf` change still needs a manual
+  `terraform apply` from `infra/` (S3 remote state, DynamoDB lock) — **apply first, then merge**
+  (#500). Merging the file does *not* apply it.
 - **Merging it does trigger a full ECS deploy anyway.** `detect-changes` in `ci.yml` filters on
   `{backend/**,infra/**,docker/**,.github/workflows/ci.yml}` minus `**/*.md`, so any non-markdown
   file under `infra/` rebuilds the image and rolls a new task-definition revision — applying none

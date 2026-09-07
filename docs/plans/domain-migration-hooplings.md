@@ -43,7 +43,7 @@ WorkOS production keys (#24). Each of those, done first, would be one more surfa
 | D18 | DMARC receiver / tightening | **On #449**, not a new issue |
 | D19 | Outside voice vs D4 (additive PR1 + flip in PR4) | **D4 kept**: no destroy of a live cert/zone in any apply; the loop is the home for the other hooplings TLDs |
 | D20 | Cert coverage | **Add the apex SAN** to every cert in the loop (`*.<d>` + `<d>`); the capyhoops cert re-issues create-before-destroy — one deliberate replace in Gate 1 |
-| D21 | Custom MAIL FROM | **Add `aws_sesv2_email_identity_mail_from_attributes`** per domain so the existing MX/SPF records work and SPF aligns |
+| D21 | Custom MAIL FROM | **Add `aws_sesv2_email_identity_mail_from_attributes`** per domain so SPF aligns. Implementation note (PR1): SES requires the MAIL FROM to be a *subdomain* of the identity, so it is `bounce.mail.<domain>` and the MX/SPF records **move** there (the `mail.<domain>` MX/TXT are destroyed and recreated at the new name — two record destroys in the plan, expected) |
 | D22 | capyhoops after retire | **Zone-only entry** (`serve = false`): cert, api record, SES identity and mail records go; the zone stays so the registrar delegation never goes lame |
 | D23 | Transition CORS | **Drop capyhoops origins in PR2**; no `TRANSITION_HOSTS`; the deploy-file test is hooplings-only from day one |
 | D24 | DMARC `rua` | **Omit `rua`** (`v=DMARC1; p=none`) until #449 builds the receiver |
