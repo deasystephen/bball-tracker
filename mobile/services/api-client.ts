@@ -1,16 +1,13 @@
 import { create as createAxiosInstance, AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
-import Constants from 'expo-constants';
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
+import { getApiUrl } from '../config/env';
 
 /**
- * API client configuration
- * Base URL comes from app.config.js which sets it per build profile:
- *   development: http://127.0.0.1:3000
- *   preview/production: https://api.capyhoops.com (or API_URL env var)
+ * API client configuration. The base URL is decided in one place,
+ * `config/env.ts#getApiUrl()` (extra.apiUrl from app.config.js, else the dev
+ * server under __DEV__, else the production API).
  */
-const getBaseURL = (): string => {
-  return Constants.expoConfig?.extra?.apiUrl || (__DEV__ ? 'http://127.0.0.1:3000' : 'https://api.capyhoops.com');
-};
+const getBaseURL = (): string => getApiUrl();
 
 /**
  * Auth endpoints whose own 401 means "re-login required" — never try to

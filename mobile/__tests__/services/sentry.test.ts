@@ -209,14 +209,14 @@ describe('services/sentry', () => {
           {
             category: 'xhr',
             data: {
-              url: 'https://api.capyhoops.com/api/v1/auth/callback?code=OAUTHCODE&state=ST',
+              url: 'https://api.example.test/api/v1/auth/callback?code=OAUTHCODE&state=ST',
               method: 'GET',
               status_code: 200,
             },
           },
           {
             category: 'xhr',
-            data: { url: 'https://api.capyhoops.com/api/v1/invitations/by-token/abcdef0123456789' },
+            data: { url: 'https://api.example.test/api/v1/invitations/by-token/abcdef0123456789' },
           },
           {
             category: 'navigation',
@@ -226,11 +226,11 @@ describe('services/sentry', () => {
       } as unknown as Parameters<typeof beforeSend>[0]);
 
       expect(out.breadcrumbs?.[0].data?.url).toBe(
-        'https://api.capyhoops.com/api/v1/auth/callback?code=[scrubbed]&state=[scrubbed]'
+        'https://api.example.test/api/v1/auth/callback?code=[scrubbed]&state=[scrubbed]'
       );
       expect(out.breadcrumbs?.[0].data?.method).toBe('GET');
       expect(out.breadcrumbs?.[1].data?.url).toBe(
-        'https://api.capyhoops.com/api/v1/invitations/by-token/[scrubbed]'
+        'https://api.example.test/api/v1/invitations/by-token/[scrubbed]'
       );
       expect(out.breadcrumbs?.[2].data?.from).toBe('/invite/[scrubbed]');
       expect(out.breadcrumbs?.[2].data?.to).toBe('/login');
@@ -242,12 +242,12 @@ describe('services/sentry', () => {
       const out = beforeSend({
         transaction: '/api/v1/teams/t1/calendar.ics?token=CALTOKEN',
         request: {
-          url: 'https://api.capyhoops.com/api/v1/teams/t1/calendar/abcdef0123456789?token=CALTOKEN',
+          url: 'https://api.example.test/api/v1/teams/t1/calendar/abcdef0123456789?token=CALTOKEN',
           query_string: 'token=CALTOKEN&page=1',
         },
       } as unknown as Parameters<typeof beforeSend>[0]);
       expect(out.request?.url).toBe(
-        'https://api.capyhoops.com/api/v1/teams/t1/calendar/[scrubbed]?token=[scrubbed]'
+        'https://api.example.test/api/v1/teams/t1/calendar/[scrubbed]?token=[scrubbed]'
       );
       expect(out.request?.query_string).toBe('token=[scrubbed]&page=1');
       expect(out.transaction).toBe('/api/v1/teams/t1/calendar.ics?token=[scrubbed]');
@@ -292,8 +292,8 @@ describe('services/sentry', () => {
       expect(redactUrl('/api/v1/games?page=1&status=LIVE')).toBe('/api/v1/games?page=1&status=LIVE');
       expect(redactUrl('/api/v1/auth/refresh?refresh_token=R')).toBe('/api/v1/auth/refresh?refresh_token=[scrubbed]');
       expect(redactUrl('/api/v1/teams/t1/calendar/subscribe')).toBe('/api/v1/teams/t1/calendar/subscribe');
-      expect(redactUrl('https://capyhoops.com/invite/abcdef0123456789#x')).toBe(
-        'https://capyhoops.com/invite/[scrubbed]'
+      expect(redactUrl('https://app.example.test/invite/abcdef0123456789#x')).toBe(
+        'https://app.example.test/invite/[scrubbed]'
       );
       expect(redactUrl('')).toBe('');
     });

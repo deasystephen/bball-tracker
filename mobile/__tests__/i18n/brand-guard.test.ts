@@ -28,14 +28,17 @@ import es from '../../i18n/locales/es.json';
 const RETIRED_BRAND_PATTERNS: RegExp[] = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i];
 
 /**
- * Hostnames that are still live and legitimately contain a retired name. A hostname
- * ending in one of these (with any subdomain prefix, e.g. api.) is stripped from each
- * string BEFORE matching. The match is anchored to hostname boundaries, so
- * "capyhoops.community", "capyhoops.com.evil" and "notcapyhoops.com" still fail.
- * When the domain moves to hooplings.*, delete the entry here and this guard starts
- * flagging every leftover link; the allowlist self-test below derives from this array.
+ * Hostnames that are live and would otherwise trip the retired-name patterns. A
+ * hostname ending in one of these (with any subdomain prefix, e.g. api.) is stripped
+ * from each string BEFORE matching. The match is anchored to hostname boundaries, so
+ * "<retired>.community", "<retired>.com.evil" and "not<retired>.com" still fail.
+ * The old domain left this list in the 2026-09 domain migration (PR3, #502), so every
+ * leftover old-domain link in mobile source, locales or .maestro now fails CI. The
+ * current domain contains no retired name, so the list is empty; the allowlist
+ * self-test below derives from this array and covers the stripping logic with a
+ * synthetic entry.
  */
-const ALLOWED_DOMAINS = ['capyhoops.com'];
+const ALLOWED_DOMAINS: string[] = [];
 
 const MOBILE_ROOT = resolve(__dirname, '../..');
 /** `.maestro/` lives at the repo root, one level above `mobile/`. */
@@ -67,12 +70,12 @@ function allowedHostPattern(domain: string): RegExp {
   return new RegExp(`(?<![a-z0-9-])(?:[a-z0-9-]+\\.)*${escapeRegExp(domain)}(?![a-z0-9-]|\\.[a-z0-9])`, 'gi');
 }
 
-function stripAllowedDomains(text: string): string {
-  return ALLOWED_DOMAINS.reduce((acc, domain) => acc.replace(allowedHostPattern(domain), ''), text);
+function stripAllowedDomains(text: string, allowed: readonly string[] = ALLOWED_DOMAINS): string {
+  return allowed.reduce((acc, domain) => acc.replace(allowedHostPattern(domain), ''), text);
 }
 
-function findRetiredBrand(text: string): RegExp | undefined {
-  const candidate = stripAllowedDomains(text);
+function findRetiredBrand(text: string, allowed: readonly string[] = ALLOWED_DOMAINS): RegExp | undefined {
+  const candidate = stripAllowedDomains(text, allowed);
   return RETIRED_BRAND_PATTERNS.find((pattern) => pattern.test(candidate));
 }
 
@@ -160,15 +163,26 @@ describe('brand guard (#474)', () => {
     expect(lineOffenders(MOBILE_ROOT, files, 'mobile')).toEqual([]);
   });
 
-  it('allows every live domain as a hostname but nothing that merely contains it', () => {
-    for (const domain of ALLOWED_DOMAINS) {
-      expect(findRetiredBrand(`Open https://${domain}/invite/abc`)).toBeUndefined();
-      expect(findRetiredBrand(`api.${domain}`)).toBeUndefined();
-      expect(findRetiredBrand(`applinks:${domain}`)).toBeUndefined();
-      expect(findRetiredBrand(`${domain}munity`)).toBeDefined();
-      expect(findRetiredBrand(`https://${domain}.evil/x`)).toBeDefined();
-      expect(findRetiredBrand(`not${domain}`)).toBeDefined();
-    }
+  it('allows an allowlisted domain as a hostname but nothing that merely contains it', () => {
+    // Synthetic allowlist: a hostname built from a retired name, so the stripping
+    // logic stays covered now that the real list is empty.
+    const domain = 'capyhoops.com';
+    const allowed = [domain];
+    expect(findRetiredBrand(`Open https://${domain}/invite/abc`, allowed)).toBeUndefined();
+    expect(findRetiredBrand(`api.${domain}`, allowed)).toBeUndefined();
+    expect(findRetiredBrand(`applinks:${domain}`, allowed)).toBeUndefined();
+    expect(findRetiredBrand(`${domain}munity`, allowed)).toBeDefined();
+    expect(findRetiredBrand(`https://${domain}.evil/x`, allowed)).toBeDefined();
+    expect(findRetiredBrand(`not${domain}`, allowed)).toBeDefined();
+  });
+
+  it('flags the retired domain itself now that it left the allowlist (2026-09 migration)', () => {
+    expect(ALLOWED_DOMAINS).toEqual([]);
+    expect(findRetiredBrand('Open https://capyhoops.com/invite/abc')).toBeDefined();
+    expect(findRetiredBrand('api.capyhoops.com')).toBeDefined();
+    expect(findRetiredBrand('applinks:capyhoops.com')).toBeDefined();
+    expect(findRetiredBrand('https://api.hooplings.com/api/v1')).toBeUndefined();
+    expect(findRetiredBrand('applinks:hooplings.com')).toBeUndefined();
   });
 
   it('rejects retired names with any separator', () => {
@@ -189,7 +203,11 @@ describe('brand guard (#474)', () => {
 
   it('reports a nested or array offender with its key path', () => {
     const fixture = { a: { b: ['fine', 'Welcome to Capyhoops'] }, c: 'Visit https://capyhoops.com', d: 3 };
-    expect(localeOffenders('fixture', fixture)).toEqual([{ location: 'fixture:a.b.1', text: 'Welcome to Capyhoops' }]);
+    expect(localeOffenders('fixture', fixture)).toEqual([
+      { location: 'fixture:a.b.1', text: 'Welcome to Capyhoops' },
+      // the old domain is no longer allowlisted (2026-09 migration), so a link to it is an offender too
+      { location: 'fixture:c', text: 'Visit https://capyhoops.com' },
+    ]);
   });
 
   it('reports a flow offender by file and 1-based line, including nested directories', () => {
