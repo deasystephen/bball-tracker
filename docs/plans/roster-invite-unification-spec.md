@@ -1,15 +1,12 @@
-# Roster / Invite Unification Spec (TeamSnap-style Add Player)
+# Roster / Invite Unification Spec (unified Add Player)
 
 **Status:** Shipped 2026-08-28 — backend in PR #416 (deployed, ECS :252), mobile in PR #417 (production OTA group `27d9d5d9`, runtime 1.2.0); on-device acceptance passed (Spartans 5/6 legacy invitations render as Invited rows). Decisions locked 2026-08-27; eng review (incl. outside voice) complete, all findings folded
 **Owner:** Stephen Deasy
 **Context:** QA on 2026-08-28 (team "Spartans 5/6", 8 players via "Create New Player") surfaced that
 invited players are invisible until they accept: the roster showed 0 players, pending invitations are
 not rendered anywhere coach-facing, there is no resend/cancel UI, and invite emails failed silently
-(SES sandbox). Comparison against TeamSnap's documented flow
-([Add and Invite Roster Members](https://helpme.teamsnap.com/article/460-add-and-invite-roster-members),
-[All About the Invitation Process](https://helpme.teamsnap.com/article/281-all-about-the-invitation-process),
-[Add Family or Contacts to a Profile](https://helpme.teamsnap.com/article/108-add-family-or-contacts-to-a-profile))
-showed our two-button model ("Create New Player" vs "Add Roster Player") diverges from the market
+(SES sandbox). Comparison against the documented add-and-invite flows of the incumbent
+team-management apps showed our two-button model ("Create New Player" vs "Add Roster Player") diverges from the market
 pattern on exactly the points that confused a real coach.
 
 ## Goals
@@ -213,7 +210,7 @@ user-visible outcome.
 - **Auto-accept for existing accounts** (D2) — consent/enumeration review pending; revisit with
   WorkOS production cutover.
 - **Bulk import / CSV roster upload** — separate feature, no interaction with these semantics.
-- **Non-player roster members** — TeamSnap parity item with no current user. (Roster ordering
+- **Non-player roster members** — incumbent-app parity item with no current user. (Roster ordering
   was co-deferred here but has since shipped — server jersey-asc order + team-overview
   Jersey #/Name sort toggle, 2026-08-29; see CLAUDE.md "Roster ordering".)
 - **Claim-by-code, parent-to-parent invites** — guardian spec v1 exclusions stand.

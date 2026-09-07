@@ -6,8 +6,8 @@ milestone; each checklist item maps to an issue.
 
 ## Positioning
 
-A hybrid of GameChanger (live stat tracking, box scores) and TeamSnap-lite
-(teams, games, RSVPs, announcements). The app tracks live games *and* manages
+A hybrid of GameChanger (live stat tracking, box scores) and a lightweight
+team-management app (teams, games, RSVPs, announcements). The app tracks live games *and* manages
 the team around them — most competitors do one or the other well.
 
 **Differentiators**
@@ -17,7 +17,7 @@ the team around them — most competitors do one or the other well.
 
 **Non-goals (for now)**
 - Full video/clip platform (GameChanger territory)
-- Full league-ops / registration platform (TeamSnap Pro territory) — see v2.2
+- Full league-ops / registration platform (incumbent team-management suites) — see v2.2
 - Multi-sport expansion
 
 ## Phases
@@ -76,7 +76,7 @@ Shipped so far:
 
 ### v2.1 — Parity
 
-Reach feature parity with TeamSnap on the team-management surface so we don't
+Reach feature parity with the incumbent team-management apps so we don't
 lose deals on "does it have an iCal feed?" or "can I export stats?"
 
 Focus: calendar sync, recurring events, photo gallery, stats export, SMS.
@@ -94,7 +94,7 @@ Shipped so far:
 
 Turn on revenue. Stripe subscriptions first (Coach Premium, League), then
 Stripe Connect for registration/dues payments (take-rate revenue is where
-TeamSnap makes its money).
+the incumbent team-management apps make their money).
 
 Milestone: [`v2.2 Monetization`](../../milestone/3)
 
