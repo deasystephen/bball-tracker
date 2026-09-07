@@ -9,7 +9,7 @@
  * assumed, or NULL semantics on a nullable column.
  *
  * So this file unmocks Prisma and runs against Postgres. CI already provides
- * one: `.github/workflows/ci.yml` runs a `postgres:15` service, applies
+ * one: `.github/workflows/ci.yml` runs a `postgres:18` service, applies
  * `prisma migrate deploy`, and sets `DATABASE_URL` for `npm test`. Locally it
  * uses whatever `DATABASE_URL` points at (docker-compose), so every row it
  * creates is namespaced by a per-run id and removed in `afterAll`.

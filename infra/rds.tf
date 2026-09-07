@@ -30,7 +30,21 @@ resource "aws_db_instance" "main" {
   # made `terraform apply` fail with "Cannot upgrade postgres from 15.17 to
   # 15.15" once AWS had moved ahead. The provider suppresses the diff when the
   # config is a prefix of the running version.
-  engine_version             = "15"
+  #
+  # MAJOR upgrades are NOT driven from here (#521, 15 -> 18 on 2026-09). A bare
+  # major in a modify call resolves to the RDS *default* minor (18 -> 18.3, not
+  # the newest), apply_immediately defaults to false so the change would queue
+  # for the Sunday window unattended, and no 18.x minor is auto-upgrade
+  # flagged. So a major is a watched CLI operation with the exact minor:
+  #   aws rds modify-db-instance --engine-version 18.6 \
+  #     --allow-major-version-upgrade --apply-immediately
+  # then this pin is bumped to the new major and `terraform plan` must show
+  # "No changes". Full procedure: docs/runbooks/rds-backup-restore.md, "Major
+  # version upgrade". allow_major_version_upgrade is deliberately absent, so an
+  # accidental major bump here fails loudly at apply instead of upgrading.
+  # backend/tests/infra/postgres-version.test.ts pins this major to the
+  # docker-compose and CI images and to the RDS end-of-standard-support date.
+  engine_version             = "18"
   auto_minor_version_upgrade = true
   instance_class             = var.db_instance_class
 

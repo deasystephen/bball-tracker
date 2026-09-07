@@ -46,7 +46,7 @@ export default tseslint.config(
 
   // Config for JS config files (jest.config.js, etc.)
   {
-    files: ['*.js', '*.mjs'],
+    files: ['*.js', '*.mjs', 'scripts/**/*.mjs'],
     languageOptions: {
       globals: {
         ...globals.node,

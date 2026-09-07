@@ -1068,6 +1068,14 @@ Dependency and security updates are split between **Dependabot** (mechanical pat
 Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs/runbooks/):
 
 - **[RDS backup & restore](docs/runbooks/rds-backup-restore.md)** — verify automated backups, restore from snapshot, repoint the app via Secrets Manager, rollback path, and a user-facing comms template. The app reaches RDS via the endpoint baked into `bball-tracker-production/database-url` in Secrets Manager (not via Route53), so a restore is: new instance → new secret version → `--force-new-deployment` on the ECS service.
+  Its **"Major version upgrade"** section is the procedure for PostgreSQL majors (#521, 15 → 18):
+  a watched CLI `modify-db-instance` with the exact minor (a bare major resolves to the RDS
+  *default* minor, and `apply_immediately` defaults to false in Terraform), ECS scaled to 0 for
+  the window (lower the autoscaling minimum first), `backend/scripts/pg-upgrade-checks.mjs`
+  before/after (prechecks, row counts, collation version), then the major-only pin in
+  `infra/rds.tf` catches up with `terraform plan` = No changes. `backend/tests/infra/postgres-version.test.ts`
+  pins that major to the compose and CI images and fails CI six months before RDS ends standard
+  support for it (a deliberate dated assertion — the fix is the next upgrade, not a wider window).
 
 ### The ECS task definition lives in ONE file (#53)
 
@@ -1128,7 +1136,11 @@ check. Verify a service-level change landed with:
 
 ## Local Development Setup
 
-1. Start services: `docker-compose up -d`
+1. Start services: `docker-compose up -d` (PostgreSQL 18). **After the PG 15 → 18 bump (#521)** an
+   existing local volume refuses to start ("database files are incompatible with server"): run
+   `docker-compose down -v && docker-compose up -d`, then the migrate + seed steps below. The compose
+   volume is mounted at `/var/lib/postgresql` (not `…/data`) because the `postgres:18` image moved
+   its data directory; a `/data` mount would silently stop persisting.
 2. Backend setup:
    ```bash
    cd backend && npm install
