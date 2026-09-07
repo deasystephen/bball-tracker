@@ -359,6 +359,11 @@ protection. From the one-off task:
 
 ### 3. Production window (about 30 minutes, watched)
 
+Measured on the 2026-09-07 Multi-AZ rehearsal (drill log): `modify-db-instance` → `available`
+10 min 52 s, database unavailable ~4 min 20 s of that (the pre-upgrade snapshot dominates;
+`pg_upgrade` took 23 s on 20 GB), ANALYZE 7 s. Budget the rest of the window for the manual
+snapshot, scaling ECS down and up, and the checks.
+
 **Preconditions:** rehearsal done; the PR is open and green; no other change is about to
 merge — `aws ecs describe-services … deployments[0].rolloutState` is `COMPLETED`, and nothing
 merges to `main` until the window closes. A merge mid-window either rolls back red (service
@@ -439,3 +444,4 @@ quarterly and record the actual wall-clock here.
 | Date (UTC) | Operator | Snapshot ID | New instance ID | Time-to-restore | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-06 | sdeasy (Claude Code session) | `rds:bball-tracker-production-postgres-2026-09-06-03-14` | `bball-tracker-production-postgres-drill-202609061747` | **5 min 57 s** to `available` (single-AZ `db.t3.micro`, 20 GB); migration applied in 10 s | First drill, run as the migration rehearsal for #497 (`TeamLineage` backfill, #462). Procedure A steps 1–4 only (no repoint); the migration ran from a one-off ECS task per the variant below. Before: 4 teams, no `lineageId`. After: 4 teams, 4 lineages, 0 nulls, unique index present. Instance deleted and throwaway task-definition revisions 271–273 deregistered afterwards. Closes #29. |
+| 2026-09-07 | sdeasy (Claude Code session) | `rds:bball-tracker-production-postgres-2026-09-07-03-14` | `bball-tracker-production-postgres-pg18-rehearsal-202609072133` | **~12 min** to `available` (Multi-AZ `db.t3.micro`, 20 GB, incl. Multi-AZ conversion + initial backup); major upgrade 15.17 → 18.6: **10 min 52 s** from `modify-db-instance` to `available`, of which the database was unavailable **~4 min 20 s** (shutdown 21:48:45 → "upgrade complete" 21:53:07; the pre-upgrade snapshot was most of it, `pg_upgrade` itself 23 s); ANALYZE 7 s | Major-version rehearsal for #521 (section "Major version upgrade"). `pg-upgrade-checks.mjs` before/after from throwaway revisions 281–282: prechecks clean, row counts identical (23 users / 4 teams / 94 events / 32 invitations), collation version `2.26-59.amzn2` unchanged on 18.6 so no REINDEX; `migrate deploy` → no pending migrations; parameter group flipped to `default.postgres18`; previous version reported as `15.17.R2`, so the pending engine patch is absorbed by the upgrade. Copy deleted, revisions deregistered. |
