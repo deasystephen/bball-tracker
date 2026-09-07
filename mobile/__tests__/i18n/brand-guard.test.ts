@@ -24,9 +24,8 @@ import es from '../../i18n/locales/es.json';
  * Names that must never appear in user-facing copy again. Separators are tolerated so
  * "Capy Hoops", "capy-hoops" and "BasketballTracker" fail too. The URL scheme was renamed
  * to `hooplings://` (#504), so the old scheme's LINK form is retired as well: nothing may
- * build a deep link with it. The bare word `bball-tracker` (EAS slug, and the second entry
- * of the `scheme` array that keeps old links opening during the overlap) and
- * `com.bballtracker.mobile` (bundle id) are kept identifiers and stay allowed.
+ * build a deep link with it. The bare word `bball-tracker` (EAS slug, AWS resource prefix)
+ * and `com.bballtracker.mobile` (bundle id) are kept identifiers and stay allowed.
  */
 const RETIRED_BRAND_PATTERNS: RegExp[] = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i, /bball-tracker:\/\//i];
 
@@ -216,11 +215,11 @@ describe('brand guard (#474)', () => {
     ]) {
       expect(findRetiredBrand(text)).toBeDefined();
     }
-    // The old scheme's link form is retired (#504); the bare slug / array entry and
-    // the bundle id are kept identifiers.
+    // The old scheme's link form is retired (#504); the bare slug, AWS resource
+    // names and the bundle id are kept identifiers.
     expect(findRetiredBrand('bball-tracker://auth/callback')).toBeDefined();
     expect(findRetiredBrand('openLink: "bball-tracker://teams"')).toBeDefined();
-    expect(findRetiredBrand("scheme: ['hooplings', 'bball-tracker']")).toBeUndefined();
+    expect(findRetiredBrand('bball-tracker-production/database-url')).toBeUndefined();
     expect(findRetiredBrand("slug: 'bball-tracker'")).toBeUndefined();
     expect(findRetiredBrand('com.bballtracker.mobile')).toBeUndefined();
     expect(findRetiredBrand('hooplings://auth/callback')).toBeUndefined();

@@ -32,13 +32,12 @@ export default {
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
-    // Both schemes are registered natively during the rename overlap (#504):
-    // build #31+ still opens old `bball-tracker` deep links (expo-router
-    // strips the scheme before routing). Sign-in asks for APP_URL_SCHEME
-    // explicitly (config/env.ts), so the order here only decides the dev-only
-    // "multiple schemes" warning. The second entry leaves with the first native
-    // build cut after 2026-12-01 (dated follow-up).
-    scheme: ['hooplings', 'bball-tracker'],
+    // URL scheme (#504). Sign-in asks for APP_URL_SCHEME explicitly
+    // (config/env.ts) rather than reading this value, because the OTA manifest
+    // carries it while the schemes a binary answers are baked into Info.plist.
+    // The pre-rename scheme left the array in #513; build #31 still
+    // registers it natively until its successor is cut.
+    scheme: 'hooplings',
     owner: 'deasystephen',
     runtimeVersion: {
       policy: 'appVersion',

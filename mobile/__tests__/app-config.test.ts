@@ -75,10 +75,11 @@ describe('app.config.js', () => {
     expect((await loadConfig({ APP_ENV: 'production' })).expo.ios.associatedDomains).toEqual(['applinks:hooplings.com']);
   });
 
-  // URL scheme rename (#504). The binary registers both schemes during the
-  // overlap; the sign-in redirect asks for APP_URL_SCHEME explicitly.
-  it('registers the current scheme first and keeps the pre-rename scheme during the overlap', async () => {
-    expect((await loadConfig({ APP_ENV: 'production' })).expo.scheme).toEqual(['hooplings', 'bball-tracker']);
+  // URL scheme rename (#504); the pre-rename scheme overlap ended with #513,
+  // so the binary registers exactly one scheme. The sign-in redirect asks for
+  // APP_URL_SCHEME explicitly rather than reading this value.
+  it('registers only the current scheme', async () => {
+    expect((await loadConfig({ APP_ENV: 'production' })).expo.scheme).toEqual('hooplings');
   });
 
   it('registers the scheme the sign-in redirect asks for (config/env APP_URL_SCHEME)', async () => {
