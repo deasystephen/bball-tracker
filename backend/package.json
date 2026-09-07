@@ -45,7 +45,7 @@
     "ics": "^3.12.0",
     "ioredis": "^5.11.1",
     "jose": "^5.10.0",
-    "pdfkit": "^0.20.1",
+    "pdfkit": "^0.20.2",
     "pg": "^8.23.0",
     "prisma": "^7.10.0",
     "socket.io": "^4.6.1",
@@ -88,7 +88,7 @@
     "socket.io-client": "^4.8.3",
     "supertest": "^7.1.3",
     "ts-jest": "^29.4.12",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.68.0"
   }
