@@ -61,7 +61,7 @@ start, whereas the previous split silently deployed neither copy.
 ```hcl
 domains = {
   "hooplings.com" = { serve = true }
-  "capyhoops.com" = { serve = true }   # retire (PR4, #503): serve = false
+  "capyhoops.com" = { serve = false }  # retired 2026-09-07 (#503): zone only
 }
 primary_domain = "hooplings.com"
 ```
