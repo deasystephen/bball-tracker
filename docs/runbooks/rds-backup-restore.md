@@ -362,7 +362,12 @@ protection. From the one-off task:
 Measured on the 2026-09-07 Multi-AZ rehearsal (drill log): `modify-db-instance` → `available`
 10 min 52 s, database unavailable ~4 min 20 s of that (the pre-upgrade snapshot dominates;
 `pg_upgrade` took 23 s on 20 GB), ANALYZE 7 s. Budget the rest of the window for the manual
-snapshot, scaling ECS down and up, and the checks.
+snapshot, scaling ECS down and up, and the checks. The production run the same day
+(15.17 → 18.6, 2026-09-07): manual snapshot 3 min; **pending OS update + engine patch 20 min**
+(22:22 → 22:42, the OS patch alone 11 min — apply pending maintenance well before the window
+next time, or budget for it); upgrade 7 min 9 s modify → `available`, database unavailable
+4 min 00 s; checks + `migrate deploy` + ANALYZE 1 min; scale-up to `/health` `db: ok` 71 s.
+API down 22:21:55 → 22:54:14 (32 min).
 
 **Preconditions:** rehearsal done; the PR is open and green; no other change is about to
 merge — `aws ecs describe-services … deployments[0].rolloutState` is `COMPLETED`, and nothing
@@ -402,7 +407,23 @@ up, health check fails against the unavailable DB) or passes green while running
    reports `db: ok`, then sign in on a device and load Teams / Games / Stats.
 7. `aws rds describe-db-instances … --query 'DBInstances[0].EngineVersion'` → `18.6`; the
    parameter group is now `default.postgres18`.
-8. **Merge the PR**; `terraform plan` → No changes; close the issue with the measured timings.
+8. **Patch the Terraform state, then prove the pin.** The provider keeps the configured
+   major-only value in state only while `"<stored>."` is a prefix of the live version
+   (`compareActualEngineVersion` in the AWS provider). The first refresh after a major upgrade
+   finds `"15."` is not a prefix of `18.6`, stores the full `18.6`, and from then on config
+   `"18"` plans as `"18.6" -> "18"` forever — and an `apply` would send `EngineVersion=18`,
+   which RDS resolves to its default minor (18.3) and rejects as a downgrade. Fix it once:
+   ```bash
+   cd infra && terraform state pull > /tmp/tfstate.json
+   jq '.serial += 1 | (.resources[] | select(.type=="aws_db_instance" and .name=="main")
+       | .instances[0].attributes.engine_version) = "18"' /tmp/tfstate.json > /tmp/tfstate-patched.json
+   terraform state push /tmp/tfstate-patched.json
+   terraform plan   # must print "No changes"
+   ```
+   (`terraform import` does not help — an import reads with an empty stored value and stores
+   the full version too.) Verified 2026-09-07: plan showed the `"18.6" -> "18"` diff until the
+   patch, No changes after it.
+9. **Merge the PR**; close the issue with the measured timings.
 
 **Rollback:** restore the pre-upgrade snapshot per Procedure A (including step 8's Terraform
 reconcile) and repoint the secret; writes made after the upgrade are lost; a restored 18

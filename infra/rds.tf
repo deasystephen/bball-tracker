@@ -38,9 +38,13 @@ resource "aws_db_instance" "main" {
   # flagged. So a major is a watched CLI operation with the exact minor:
   #   aws rds modify-db-instance --engine-version 18.6 \
   #     --allow-major-version-upgrade --apply-immediately
-  # then this pin is bumped to the new major and `terraform plan` must show
-  # "No changes". Full procedure: docs/runbooks/rds-backup-restore.md, "Major
-  # version upgrade". allow_major_version_upgrade is deliberately absent, so an
+  # then this pin is bumped to the new major AND the stored engine_version in
+  # state is patched to the same major (state pull / jq / state push — the
+  # provider only keeps a major-only value while "<stored>." prefixes the live
+  # version, so the first refresh after a major upgrade stores the full "18.6"
+  # and config "18" would plan as a change forever). `terraform plan` must then
+  # show "No changes". Full procedure: docs/runbooks/rds-backup-restore.md,
+  # "Major version upgrade". allow_major_version_upgrade is deliberately absent, so an
   # accidental major bump here fails loudly at apply instead of upgrading.
   # backend/tests/infra/postgres-version.test.ts pins this major to the
   # docker-compose and CI images and to the RDS end-of-standard-support date.
