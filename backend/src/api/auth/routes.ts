@@ -172,11 +172,16 @@ router.get('/login', async (req, res): Promise<void> => {
     const customRedirectUri = req.query.redirect_uri as string | undefined;
     if (customRedirectUri) {
       const allowedRedirectHosts = (process.env.ALLOWED_REDIRECT_HOSTS || 'localhost').split(',').map(h => h.trim());
-      const allowedSchemes = (process.env.ALLOWED_REDIRECT_SCHEMES || 'bball-tracker').split(',').map(s => s.trim());
+      // Custom schemes the mobile app may ask WorkOS to redirect to. The code
+      // default names only the current scheme; production sets
+      // ALLOWED_REDIRECT_SCHEMES explicitly in infra/task-definition.json, where the
+      // pre-rename `bball-tracker` scheme stays listed until the dated follow-up so
+      // binaries built before #504 keep signing in (tests/infra/task-definition.test.ts).
+      const allowedSchemes = (process.env.ALLOWED_REDIRECT_SCHEMES || 'hooplings').split(',').map(s => s.trim());
       try {
         const redirectUrl = new URL(customRedirectUri);
         const scheme = redirectUrl.protocol.replace(':', '');
-        // Allow app deep link schemes (e.g., bball-tracker://) or whitelisted hosts
+        // Allow app deep link schemes (e.g., hooplings://) or whitelisted hosts
         if (!allowedSchemes.includes(scheme) && !allowedRedirectHosts.includes(redirectUrl.hostname)) {
           res.status(400).json({ error: 'Invalid redirect_uri: host not allowed' });
           return;

@@ -127,8 +127,9 @@ As of 2026-08-30 the API task carries:
 - `WORKOS_API_KEY`, `WORKOS_CLIENT_ID` (secrets), `WORKOS_REDIRECT_URI`; optional `WORKOS_JWT_ISSUER`
   (default `https://api.workos.com`) for local JWKS verification of access tokens
 - `ADMIN_EMAILS` (comma-separated; legacy `ADMIN_EMAIL` still read): emails granted ADMIN at first sign-up
-- `ALLOWED_REDIRECT_HOSTS` / `ALLOWED_REDIRECT_SCHEMES` (defaults `localhost` / `bball-tracker`): allowed
-  `redirect_uri` targets for `GET /auth/login`
+- `ALLOWED_REDIRECT_HOSTS` / `ALLOWED_REDIRECT_SCHEMES` (defaults `localhost` / `hooplings`): allowed
+  `redirect_uri` targets for `GET /auth/login`. Production lists `hooplings,bball-tracker` in
+  `infra/task-definition.json` until the #504 follow-up (2026-12-01) drops the pre-rename scheme
 - `PUBLIC_APP_URL` (`https://hooplings.com`): human-facing links in emails / invite pages
 - `API_BASE_URL` (`https://api.hooplings.com`): host for calendar feed / webcal URLs
   Both are read only through `backend/src/utils/urls.ts`; unset they fall back to `http://localhost:3000` (fail-loud) and the server logs a warning at boot in production.

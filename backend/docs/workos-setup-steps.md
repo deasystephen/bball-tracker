@@ -173,7 +173,7 @@ Or manually check:
 
 ### "Invalid redirect URI"
 - Make sure the redirect URI in WorkOS dashboard matches exactly: `http://localhost:3000/api/v1/auth/callback`
-- For mobile apps, also add: `bball-tracker://auth/callback`
+- For mobile apps, also add: `hooplings://auth/callback` (Staging also keeps `bball-tracker://auth/callback` for pre-#504 builds until the dated follow-up)
 - Check that it's added in the WorkOS Configuration → Redirect URIs section
 
 ### "Client ID not found"
