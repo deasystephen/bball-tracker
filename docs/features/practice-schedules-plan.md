@@ -15,7 +15,7 @@
 
 Coaches need to set and maintain a team practice schedule (location + time), and
 players/parents need to mark availability. That baseline is table stakes —
-TeamSnap, Spond, Heja, and TeamCord all do it, and Spond does it free.
+Spond, Heja, TeamCord and the paid incumbents all do it, and Spond does it free.
 
 The differentiating thesis: **this app is a tracker, not just a calendar.** We
 own roster, RSVP history, attendance, and a real-time engine, so practice
@@ -39,7 +39,6 @@ The prioritized differentiators (chosen by product) are:
 | App | Availability | Recurring | Reminders | Gaps we exploit |
 | --- | --- | --- | --- | --- |
 | Spond | Free, Y/N/Maybe | Yes | Blanket | No standing defaults; no carpool; dumb reminders |
-| TeamSnap | Paywalled | Yes | Yes | Cost; no carpool |
 | Heja | Free/ad | Yes | Yes | Comms-first; no payments; no carpool |
 | TeamCord | One-tap | Yes | Non-responder nudges | No standing defaults; no carpool |
 

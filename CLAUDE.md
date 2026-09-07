@@ -624,7 +624,7 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
 
 ### Team Invitations & Unified Add Player (roster/invite unification)
 
-Spec: `docs/plans/roster-invite-unification-spec.md` (TeamSnap-style Add Player; decisions D1–D5 +
+Spec: `docs/plans/roster-invite-unification-spec.md` (unified Add Player; decisions D1–D5 +
 eng-review amendments recorded there).
 
 - **`POST /teams/:teamId/players`** (gate `canManageRoster`) is the unified Add Player call —
