@@ -174,9 +174,9 @@ router.get('/login', async (req, res): Promise<void> => {
       const allowedRedirectHosts = (process.env.ALLOWED_REDIRECT_HOSTS || 'localhost').split(',').map(h => h.trim());
       // Custom schemes the mobile app may ask WorkOS to redirect to. The code
       // default names only the current scheme; production sets
-      // ALLOWED_REDIRECT_SCHEMES explicitly in infra/task-definition.json, where the
-      // pre-rename `bball-tracker` scheme stays listed until the dated follow-up so
-      // binaries built before #504 keep signing in (tests/infra/task-definition.test.ts).
+      // ALLOWED_REDIRECT_SCHEMES explicitly in infra/task-definition.json
+      // (tests/infra/task-definition.test.ts pins it). The pre-rename scheme
+      // overlap from #504 was dropped in #513.
       const allowedSchemes = (process.env.ALLOWED_REDIRECT_SCHEMES || 'hooplings').split(',').map(s => s.trim());
       try {
         const redirectUrl = new URL(customRedirectUri);

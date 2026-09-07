@@ -173,7 +173,8 @@ describe('Auth API', () => {
       });
 
       it('rejects the pre-rename scheme with the code default (env unset)', async () => {
-        // The overlap is a production concern and lives ONLY in the task definition.
+        // The pre-#504 scheme is retired everywhere (#513): the code default and the
+        // production value below must both refuse it.
         delete process.env.ALLOWED_REDIRECT_SCHEMES;
         const response = await login('bball-tracker://auth/callback');
         expect(response.status).toBe(400);
@@ -181,20 +182,20 @@ describe('Auth API', () => {
         expect(mockWorkOSService.getAuthorizationUrl).not.toHaveBeenCalled();
       });
 
-      it('accepts both schemes with the production value from infra/task-definition.json', async () => {
-        // Binaries built before #504 (TestFlight #25-#30) still redirect to
-        // bball-tracker://auth/callback; the deploy file must keep accepting them
-        // until the dated follow-up. Same deploy-file binding as cors.test.ts.
+      it('accepts only the current scheme with the production value from infra/task-definition.json', async () => {
+        // The #504 overlap (pre-rename binaries redirecting to the old scheme) ended
+        // with #513; the deploy file must refuse the old scheme like any unknown one.
+        // Same deploy-file binding as cors.test.ts.
         process.env.ALLOWED_REDIRECT_SCHEMES = productionSchemes();
         expect((await login('hooplings://auth/callback')).status).toBe(200);
-        expect((await login('bball-tracker://auth/callback')).status).toBe(200);
+        expect((await login('bball-tracker://auth/callback')).status).toBe(400);
         expect((await login('myapp://callback')).status).toBe(400);
       });
 
       it('trims whitespace around comma-separated entries', async () => {
-        process.env.ALLOWED_REDIRECT_SCHEMES = ' hooplings , bball-tracker ';
+        process.env.ALLOWED_REDIRECT_SCHEMES = ' hooplings , other-scheme ';
         expect((await login('hooplings://auth/callback')).status).toBe(200);
-        expect((await login('bball-tracker://auth/callback')).status).toBe(200);
+        expect((await login('other-scheme://auth/callback')).status).toBe(200);
       });
 
       it('rejects a malformed redirect_uri', async () => {

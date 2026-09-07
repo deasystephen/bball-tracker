@@ -66,14 +66,13 @@ describe('infra/task-definition.json — production domain values', () => {
     }
   });
 
-  it('ALLOWED_REDIRECT_SCHEMES lists the current scheme and, until the #504 follow-up, the pre-rename one', () => {
-    // Production ran on the code default before #504; now the deploy file is the
-    // single home of the overlap. `bball-tracker` stays while any pre-rename
-    // TestFlight build can still launch (build #30 expires 2026-11-27) — the
-    // follow-up dated 2026-12-01 deletes that entry AND the assertion below.
+  it('ALLOWED_REDIRECT_SCHEMES lists only the current scheme', () => {
+    // Production ran on the code default before #504; the deploy file is now the
+    // explicit home of the allowlist. The pre-rename scheme overlap was dropped
+    // in #513 (no pre-#504 binary left in the field), so any re-appearance of a
+    // second scheme here is a deliberate new decision, not drift.
     const schemes = get('ALLOWED_REDIRECT_SCHEMES').split(',').map((s) => s.trim());
-    expect(schemes).toContain('hooplings');
-    expect(schemes).toContain('bball-tracker');
+    expect(schemes).toEqual(['hooplings']);
     for (const scheme of schemes) {
       // RFC 3986 scheme grammar, lower-case (URL.protocol lower-cases before the compare).
       expect(scheme).toMatch(/^[a-z][a-z0-9+.-]*$/);
