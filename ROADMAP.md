@@ -56,7 +56,7 @@ Blockers group into four lanes, three of which run in parallel:
 - **Infrastructure.** Pin autoscaling to one task (#446), apex CORS (#447),
   production alerting (#448), SES bounce handling (#449), task-definition
   split-brain (#53).
-- **The deploy that unblocks onboarding.** `web/` to capyhoops.com (#30) —
+- **The deploy that unblocks onboarding.** `web/` to hooplings.com (#30) —
   carries the legal pages, the invite funnel, and Universal Links.
 
 Ordering is not free. `#53 → #447 → #30 → #23 → #24` is a genuine chain: each

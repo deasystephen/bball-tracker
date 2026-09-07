@@ -7,7 +7,7 @@ Decision log `2168b35f`.
 
 ## 0. Ship order
 
-**#30 ships first.** `PUBLIC_APP_URL=https://capyhoops.com` and the apex has no A record, so every
+**#30 ships first.** `PUBLIC_APP_URL=https://hooplings.com` and the apex has no A record, so every
 invite and guardian email in production already links to a dead host. Without it, #442 delivers a
 coach who can create a team, type in player names and invite nobody, and
 `.maestro/coach-onboarding.yaml` would pass anyway because it adds a managed player with no email.

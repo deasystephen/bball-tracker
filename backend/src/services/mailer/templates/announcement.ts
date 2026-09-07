@@ -1,5 +1,6 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
+import { APP_NAME } from './brand';
 
 export const announcementTemplate: EmailTemplate = {
   name: 'announcement',
@@ -19,7 +20,7 @@ export const announcementTemplate: EmailTemplate = {
   </div>
   <p style="color:#555;font-size:14px;">Posted by ${e(vars.authorName)}</p>
   <hr>
-  <p style="color:#999;font-size:12px;">Hooplings</p>
+  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
 </body>
 </html>`;
   },
@@ -32,6 +33,6 @@ ${vars.body}
 
 Posted by ${vars.authorName}
 
-Hooplings`;
+${APP_NAME}`;
   },
 };

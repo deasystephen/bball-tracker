@@ -5,16 +5,16 @@ different things per package:
 
 | Package | How it reaches users | Trigger |
 |---|---|---|
-| `backend/` | Docker image → ECR → ECS Fargate (`api.capyhoops.com`) | **Automatic** on every merge to `main` that touches `backend/` (`.github/workflows/ci.yml`; Prisma migrations run from `docker/entrypoint.sh`) |
+| `backend/` | Docker image → ECR → ECS Fargate (`api.hooplings.com`) | **Automatic** on every merge to `main` that touches `backend/` (`.github/workflows/ci.yml`; Prisma migrations run from `docker/entrypoint.sh`) |
 | `mobile/` JS-only changes | EAS **OTA update** on the `production` branch | Manual: `npx eas-cli update --branch production --environment production --platform ios --non-interactive --message "…"` (run from `mobile/`) |
 | `mobile/` native changes (new native module, `app.config.js` plugins/entitlements, Expo SDK bump) | EAS **build** → TestFlight / App Store | Manual: `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` |
-| `web/` | Not deployed yet (`capyhoops.com` has no hosting target) | — |
+| `web/` | Not deployed yet (`hooplings.com` has no hosting target) | — |
 
 ## Backend
 
 1. Merge to `main` → CI builds, pushes to ECR and rolls the ECS service (deploy
    waiter 10 min; health check `GET /health` → `{"status":"ok","db":"ok"}`).
-2. Verify with `curl -s https://api.capyhoops.com/health` and the Datadog /
+2. Verify with `curl -s https://api.hooplings.com/health` and the Datadog /
    Sentry dashboards. Roll back by re-deploying the previous task-definition
    revision.
 

@@ -259,7 +259,7 @@ fallback: compute nudges/alerts lazily on read + a single periodic sweep.
 ## 7. Calendar & Real-time
 
 - **ICS:** extend `CalendarService.buildFeed` to include `SCHEDULED` practices
-  (`uid: practice-<id>@capyhoops.com`, title "Practice — <location>",
+  (`uid: practice-<id>@hooplings.com`, title "Practice — <location>",
   `CANCELLED` → ICS `CANCELLED`). Gated by existing `CALENDAR_SYNC`.
 - **Real-time (optional, Phase B):** Socket.io room `practice:<sessionId>`,
   event `practice-availability-change` and `practice-ride-change`, mirroring

@@ -144,7 +144,7 @@ addresses.  To request production access:
 | Variable | Where set | Value in production |
 |----------|-----------|---------------------|
 | `AWS_SES_REGION` | ECS task definition env | `us-east-1` |
-| `SES_FROM_ADDRESS` | ECS task definition env | `noreply@mail.capyhoops.com` |
+| `SES_FROM_ADDRESS` | ECS task definition env | `noreply@mail.hooplings.com` |
 
 Both variables are pre-filled in `env.example` (with a comment to leave them
 blank in dev/test); leaving them blank causes the backend to fall back to the

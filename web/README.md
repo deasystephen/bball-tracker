@@ -1,6 +1,6 @@
 # Hooplings Web
 
-Next.js web app served at `https://capyhoops.com`. Hosts the public invitation accept flow (`/invite/<token>`) that emails link to and the `.well-known/` Universal Link assets that route into the mobile app when installed.
+Next.js web app served at `https://hooplings.com`. Hosts the public invitation accept flow (`/invite/<token>`) that emails link to and the `.well-known/` Universal Link assets that route into the mobile app when installed.
 
 ## Tech Stack
 
@@ -33,7 +33,7 @@ npm run build   # production build
 
 ## How the invite flow works
 
-1. Coach creates invitation → backend (#131 mailer) sends an email with a link to `https://capyhoops.com/invite/<token>`.
+1. Coach creates invitation → backend (#131 mailer) sends an email with a link to `https://hooplings.com/invite/<token>`.
 2. Recipient taps the link:
    - **iOS with app installed** → Universal Link routes directly into `mobile/app/invite/[token].tsx`.
    - **Android with app installed (after Android signing setup, #139)** → same.
@@ -47,9 +47,9 @@ Two API-host variables, both defaulting to `http://localhost:3000`:
 
 If `API_URL` is wrong the page swallows the fetch failure and renders "Invitation Not Found" for every token, so check it first when debugging. Running against a local backend also needs the web dev origin in the backend's `CORS_ORIGIN` (see `backend/env.example`).
 
-In production both point at `https://api.capyhoops.com`, and:
-- The backend's `CORS_ORIGIN` must list this site's origin(s) (`https://capyhoops.com`, `https://www.capyhoops.com`) or the Accept button fails its CORS preflight (#447) — see `infra/task-definition.json`.
-- The backend's `PUBLIC_APP_URL` must point at this site (`https://capyhoops.com`) so invitation emails embed the right CTA URL — see `backend/env.example`.
+In production both point at `https://api.hooplings.com`, and:
+- The backend's `CORS_ORIGIN` must list this site's origin(s) (`https://hooplings.com`, `https://www.hooplings.com`) or the Accept button fails its CORS preflight (#447) — see `infra/task-definition.json`.
+- The backend's `PUBLIC_APP_URL` must point at this site (`https://hooplings.com`) so invitation emails embed the right CTA URL — see `backend/env.example`.
 
 ## Tests
 

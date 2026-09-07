@@ -36,7 +36,7 @@ describe('sentry beforeSend', () => {
   it('scrubs authorization and cookie headers from the request', () => {
     const event: Event = {
       request: {
-        url: 'https://api.capyhoops.com/api/v1/games',
+        url: 'https://api.example.test/api/v1/games',
         method: 'POST',
         headers: {
           authorization: 'Bearer eyJhbGciOi...',
@@ -108,14 +108,14 @@ describe('sentry beforeSend', () => {
   it('redacts request.url query values and by-token path segments', () => {
     const event: Event = {
       request: {
-        url: 'https://api.capyhoops.com/api/v1/invitations/by-token/abcdef0123456789?code=OAUTHCODE&page=1',
+        url: 'https://api.example.test/api/v1/invitations/by-token/abcdef0123456789?code=OAUTHCODE&page=1',
         query_string: 'code=OAUTHCODE&state=ST&page=1',
       },
       transaction: 'GET /api/v1/teams/t1/calendar.ics?token=CALTOKEN',
     };
     const out = beforeSend(event);
     expect(out.request!.url).toBe(
-      'https://api.capyhoops.com/api/v1/invitations/by-token/[redacted]?code=[redacted]&page=1'
+      'https://api.example.test/api/v1/invitations/by-token/[redacted]?code=[redacted]&page=1'
     );
     expect(out.request!.query_string).toBe('code=[redacted]&state=[redacted]&page=1');
     expect(out.transaction).toBe('GET /api/v1/teams/t1/calendar.ics?token=[redacted]');
@@ -143,12 +143,12 @@ describe('sentry beforeSendTransaction', () => {
     const event: TransactionEvent = {
       type: 'transaction',
       transaction: 'GET /api/v1/invitations/by-token/abcdef0123456789',
-      request: { url: 'https://api.capyhoops.com/api/v1/auth/callback?code=OAUTHCODE' },
+      request: { url: 'https://api.example.test/api/v1/auth/callback?code=OAUTHCODE' },
       contexts: {
         trace: {
           span_id: 's',
           trace_id: 't',
-          data: { 'http.url': 'https://api.capyhoops.com/api/v1/auth/callback?code=OAUTHCODE', 'http.method': 'GET' },
+          data: { 'http.url': 'https://api.example.test/api/v1/auth/callback?code=OAUTHCODE', 'http.method': 'GET' },
         },
       },
       spans: [
@@ -163,9 +163,9 @@ describe('sentry beforeSendTransaction', () => {
     };
     const out = beforeSendTransaction(event);
     expect(out.transaction).toBe('GET /api/v1/invitations/by-token/[redacted]');
-    expect(out.request!.url).toBe('https://api.capyhoops.com/api/v1/auth/callback?code=[redacted]');
+    expect(out.request!.url).toBe('https://api.example.test/api/v1/auth/callback?code=[redacted]');
     expect(out.contexts!.trace!.data!['http.url']).toBe(
-      'https://api.capyhoops.com/api/v1/auth/callback?code=[redacted]'
+      'https://api.example.test/api/v1/auth/callback?code=[redacted]'
     );
     expect(out.contexts!.trace!.data!['http.method']).toBe('GET');
     expect(out.spans![0].description).toBe('GET /api/v1/teams/t1/calendar.ics?token=[redacted]');

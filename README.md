@@ -14,7 +14,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Stats Export** — Streaming CSV (game events, season stats) and PDF box score endpoints
 - **Calendar Feed** — Per-team iCal (`.ics`) subscription URLs for Google/Apple/Outlook calendars
 - **Invitation System** — Invite players and staff to teams with in-app notifications
-- **Web-Based Invite Accept** — `capyhoops.com/invite/<token>` landing page with deep-link fallback to App Store / Play Store
+- **Web-Based Invite Accept** — `hooplings.com/invite/<token>` landing page with deep-link fallback to App Store / Play Store
 - **Announcements** — Coach-to-team announcements with threaded discussion
 - **Game RSVPs** — Players and parents can RSVP to scheduled games
 - **Push + Email Notifications** — Expo push and AWS SES email for invitations, RSVPs, and announcements (behind a `Mailer` interface so the provider can be swapped)
@@ -47,7 +47,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 - **Database**: AWS RDS PostgreSQL
 - **Cache**: AWS ElastiCache Redis
 - **CI/CD**: GitHub Actions → Docker → ECR → ECS (Node 22 image)
-- **Domain**: `api.capyhoops.com` with HTTPS (ACM cert)
+- **Domain**: `api.hooplings.com` with HTTPS (ACM cert)
 - **Observability**: Datadog (logs/metrics via CloudWatch Forwarder) + Sentry (errors)
 - **Email**: AWS SES (`@aws-sdk/client-sesv2`) behind a `Mailer` interface
 - **Mobile Builds**: Expo Application Services (EAS)

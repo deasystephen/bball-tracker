@@ -114,7 +114,8 @@ describe('InvitationService', () => {
         expect.objectContaining({
           to: player.email,
           variables: expect.objectContaining({
-            acceptUrl: `https://capyhoops.com/invite/${generatedToken}`,
+            // PUBLIC_APP_URL is unset in tests: the fail-loud localhost fallback (utils/urls.ts)
+            acceptUrl: `http://localhost:3000/invite/${generatedToken}`,
           }),
         })
       );
@@ -168,7 +169,7 @@ describe('InvitationService', () => {
 
     it('uses PUBLIC_APP_URL env var for invite link when set', async () => {
       const previous = process.env.PUBLIC_APP_URL;
-      process.env.PUBLIC_APP_URL = 'https://staging.capyhoops.com';
+      process.env.PUBLIC_APP_URL = 'https://staging.example.test';
       try {
         const coach = createCoach();
         const player = createPlayer();
@@ -198,7 +199,7 @@ describe('InvitationService', () => {
         expect(mockedMailerSend).toHaveBeenCalledWith(
           expect.objectContaining({
             variables: expect.objectContaining({
-              acceptUrl: `https://staging.capyhoops.com/invite/${generatedToken}`,
+              acceptUrl: `https://staging.example.test/invite/${generatedToken}`,
             }),
           })
         );

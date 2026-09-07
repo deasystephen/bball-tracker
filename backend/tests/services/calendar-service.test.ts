@@ -2,7 +2,7 @@
  * Unit tests for CalendarService
  */
 
-import { CalendarService } from '../../src/services/calendar-service';
+import { ICAL_PRODUCT_ID, ICAL_UID_DOMAIN, CalendarService } from '../../src/services/calendar-service';
 import { mockPrisma } from '../setup';
 import { createTeam, createGame, createUser } from '../factories';
 import {
@@ -214,19 +214,19 @@ describe('CalendarService', () => {
     }
 
     it('builds feedUrl/webcalUrl on API_BASE_URL, not PUBLIC_APP_URL', async () => {
-      process.env.API_BASE_URL = 'https://api.capyhoops.com/';
-      process.env.PUBLIC_APP_URL = 'https://capyhoops.com';
+      process.env.API_BASE_URL = 'https://api.example.test/';
+      process.env.PUBLIC_APP_URL = 'https://app.example.test';
       const { team, user } = mockSubscribe();
 
       const result = await CalendarService.subscribe(team.id, user.id);
 
-      expect(result.feedUrl).toBe(`https://api.capyhoops.com/api/v1/teams/${team.id}/calendar.ics?token=tok`);
-      expect(result.webcalUrl).toBe(`webcal://api.capyhoops.com/api/v1/teams/${team.id}/calendar.ics?token=tok`);
+      expect(result.feedUrl).toBe(`https://api.example.test/api/v1/teams/${team.id}/calendar.ics?token=tok`);
+      expect(result.webcalUrl).toBe(`webcal://api.example.test/api/v1/teams/${team.id}/calendar.ics?token=tok`);
     });
 
     it('ignores PUBLIC_APP_URL for the feed and falls back to localhost when API_BASE_URL is unset', async () => {
       delete process.env.API_BASE_URL;
-      process.env.PUBLIC_APP_URL = 'https://capyhoops.com';
+      process.env.PUBLIC_APP_URL = 'https://app.example.test';
       const { team, user } = mockSubscribe();
 
       const result = await CalendarService.subscribe(team.id, user.id);
@@ -393,6 +393,8 @@ describe('CalendarService', () => {
       const ics = await CalendarService.buildFeed(team.id);
 
       expect(ics).toContain('BEGIN:VCALENDAR');
+      expect(ics).toContain(ICAL_PRODUCT_ID);
+      expect(ics).toMatch(new RegExp(`UID:game-[^@\\s]+@${ICAL_UID_DOMAIN}`));
       expect(ics).toContain('END:VCALENDAR');
       // One VEVENT per game
       const eventMatches = ics.match(/BEGIN:VEVENT/g) || [];

@@ -129,16 +129,17 @@ As of 2026-08-30 the API task carries:
 - `ADMIN_EMAILS` (comma-separated; legacy `ADMIN_EMAIL` still read): emails granted ADMIN at first sign-up
 - `ALLOWED_REDIRECT_HOSTS` / `ALLOWED_REDIRECT_SCHEMES` (defaults `localhost` / `bball-tracker`): allowed
   `redirect_uri` targets for `GET /auth/login`
-- `PUBLIC_APP_URL` (`https://capyhoops.com`): human-facing links in emails / invite pages
-- `API_BASE_URL` (`https://api.capyhoops.com`): host for calendar feed / webcal URLs
+- `PUBLIC_APP_URL` (`https://hooplings.com`): human-facing links in emails / invite pages
+- `API_BASE_URL` (`https://api.hooplings.com`): host for calendar feed / webcal URLs
+  Both are read only through `backend/src/utils/urls.ts`; unset they fall back to `http://localhost:3000` (fail-loud) and the server logs a warning at boot in production.
 - `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
-- `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.capyhoops.com`): SES mailer
+- `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.hooplings.com`): SES mailer
 - `SENTRY_DSN` (secret), `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` (injected by CI from the git SHA)
 - `CORS_ORIGIN`: comma-separated list of exact browser origins allowed to call the API
-  (`https://api.capyhoops.com,https://capyhoops.com,https://www.capyhoops.com`). The apex + www
+  (`https://api.hooplings.com,https://hooplings.com,https://www.hooplings.com`). The apex + www
   entries exist for the web invite page, whose Accept button `POST`s cross-origin from
-  `capyhoops.com` (#447). No wildcard. This is browser hygiene, not access control — the public
+  `hooplings.com` (#447). No wildcard. This is browser hygiene, not access control — the public
   accept route is an unauthenticated bearer-token endpoint; `tests/api/cors.test.ts` reads the
   value from `infra/task-definition.json`, so dropping the apex fails CI
 - `PORT`, `NODE_ENV=production`

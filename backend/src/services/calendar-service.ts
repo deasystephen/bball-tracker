@@ -9,26 +9,25 @@ import prisma from '../models';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
 import { Feature, getEffectiveTier, hasFeature } from './entitlements';
+import { apiBaseUrl, publicAppUrl } from '../utils/urls';
 
 // Assume games run ~2 hours. Game model has only a start `date`.
 const DEFAULT_GAME_DURATION_HOURS = 2;
 
 /**
- * Base URL of this API, used for the feed/webcal URLs handed to calendar
- * clients. This must be the host that actually serves `/api/v1/...`
- * (`https://api.capyhoops.com` in production via the ECS task definition) —
- * not `PUBLIC_APP_URL`, which is the web apex and serves no API (audit #24).
+ * iCal identity strings. The UID is how a subscriber's calendar matches an
+ * event across refreshes — changing it after anyone subscribes duplicates
+ * every game in their calendar. Moved to the current domain on 2026-09-07
+ * while there were zero subscribers (CALENDAR_SYNC has no client UI); treat
+ * both as frozen from GA onward.
  */
-function getApiBaseUrl(): string {
-  return process.env.API_BASE_URL || 'http://localhost:3000';
-}
+export const ICAL_UID_DOMAIN = 'hooplings.com';
+export const ICAL_PRODUCT_ID = 'hooplings/ical';
 
-/**
- * Public web base URL for human-facing deep links (e.g. "View game").
- */
-function getPublicAppUrl(): string {
-  return process.env.PUBLIC_APP_URL || 'http://localhost:3000';
-}
+// Feed/webcal URLs use `apiBaseUrl()` — the host that actually serves
+// `/api/v1/...` (`https://api.hooplings.com` in production via the ECS task
+// definition) — not `publicAppUrl()`, the web apex, which serves no API
+// (audit #24). Both live in `utils/urls.ts`.
 
 function dateToDateArray(d: Date): DateArray {
   return [
@@ -99,7 +98,7 @@ export class CalendarService {
           },
         });
 
-    const base = getApiBaseUrl().replace(/\/$/, '');
+    const base = apiBaseUrl();
     const path = `/api/v1/teams/${teamId}/calendar.ics?token=${encodeURIComponent(
       tokenRow.token
     )}`;
@@ -213,7 +212,7 @@ export class CalendarService {
       orderBy: { date: 'asc' },
     });
 
-    const base = getPublicAppUrl().replace(/\/$/, '');
+    const base = publicAppUrl();
 
     const events: EventAttributes[] = games.map((game) => {
       const start = new Date(game.date);
@@ -231,7 +230,7 @@ export class CalendarService {
       ].filter((l): l is string => !!l);
 
       return {
-        uid: `game-${game.id}@capyhoops.com`,
+        uid: `game-${game.id}@${ICAL_UID_DOMAIN}`,
         start: dateToDateArray(start),
         startInputType: 'utc',
         end: dateToDateArray(end),
@@ -246,7 +245,7 @@ export class CalendarService {
 
     const { error, value } = createEvents(events, {
       calName: `${team.name} — Basketball Schedule`,
-      productId: 'capyhoops/ical',
+      productId: ICAL_PRODUCT_ID,
     });
 
     if (error) {
