@@ -19,6 +19,8 @@ export interface TeamStaff {
     /** Only present when the caller has `canManageRoster` (GET /teams/:id/staff). */
     email?: string | null;
     isManaged?: boolean;
+    /** Set for a deleted account (tombstone, #444); render via utils/display-name. */
+    deletedAt?: string | null;
   };
   role: {
     id: string;
@@ -42,6 +44,8 @@ export interface TeamMember {
     name: string;
     email?: string | null;
     isManaged?: boolean;
+    /** Set for a deleted account (tombstone, #444); render via utils/display-name. */
+    deletedAt?: string | null;
   };
 }
 

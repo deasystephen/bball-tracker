@@ -1,0 +1,75 @@
+appId: com.bballtracker.mobile
+---
+# Guardian deletes a managed child's record (#444, COPPA route; E2E plan B.7).
+# Gloria James is the seeded guardian of LeBron James (a CLAIMED-style account
+# with an email — no "Delete record" for her) and of Bryce James (a MANAGED,
+# unclaimed Lakers player, fixed UUID BRYCE_JAMES_ID). The flow DELETES Bryce —
+# run `cd backend && npx prisma db seed` before every run (tombstone sweep +
+# fixture recreate).
+#
+# Expected: the ⋯ menu on Bryce offers "Delete Bryce James's record"; the
+# confirmation screen needs the typed DELETE; on success My kids re-reads
+# /auth/me and Bryce is gone while LeBron remains. Then Frank Vogel's Lakers
+# roster shows the tombstone with a "Deleted" chip.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Gloria James.*"
+- tapOn: "Profile tab"
+- assertVisible: "My kids"
+- assertVisible: "Bryce James, Mother"
+- assertVisible: "LeBron James, Mother"
+
+# A claimed child has no delete item.
+- tapOn: "More options for LeBron James"
+- assertVisible: "View stats"
+- assertNotVisible: "Delete LeBron James's record"
+- tapOn: "View stats"
+- tapOn: "Go back"
+
+# The managed child does.
+- tapOn: "More options for Bryce James"
+- tapOn: "Delete Bryce James's record"
+- assertVisible: "Delete Bryce James's record"
+- tapOn:
+    id: "delete-confirmation-input"
+- inputText: "DELETE"
+- pressKey: Enter
+- tapOn:
+    id: "delete-account-submit"
+
+# Back on Profile: Bryce gone, LeBron still listed.
+- assertVisible: "My kids"
+- assertNotVisible: "Bryce James, Mother"
+- assertVisible: "LeBron James, Mother"
+
+# The tombstone stays on the Lakers roster with a Deleted chip (coach view).
+# Same logout steps as .maestro/logout.yaml (swipe, tap, confirm the alert).
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- tapOn: "Logout"
+- tapOn:
+    text: "Logout"
+    index: 1
+- assertVisible: "Hooplings"
+- tapOn: "Developer login with test users"
+- tapOn: "Frank Vogel.*"
+- tapOn: "Teams tab"
+- tapOn: "Lakers"
+# Same roster entry as .maestro/roster-management.yaml
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Add Player"
+- scrollUntilVisible:
+    element:
+      text: "Deleted user status: Deleted"
+    direction: DOWN
+    visibilityPercentage: 60
+- assertVisible: "Deleted user status: Deleted"

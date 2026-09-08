@@ -15,6 +15,7 @@ import Animated, {
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
+import { displayName } from '../../utils/display-name';
 
 interface Player {
   id: string;
@@ -22,6 +23,7 @@ interface Player {
   jerseyNumber?: number;
   position?: string;
   player: {
+    deletedAt?: string | null;
     id: string;
     name: string;
   };
@@ -88,7 +90,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
       onPress={handlePress}
       style={[styles.playerChip, animatedChipStyle]}
       accessibilityRole="button"
-      accessibilityLabel={`${member.player.name}${member.jerseyNumber != null ? `, number ${member.jerseyNumber}` : ''}`}
+      accessibilityLabel={`${displayName(member.player)}${member.jerseyNumber != null ? `, number ${member.jerseyNumber}` : ''}`}
       accessibilityState={{ selected: isSelected }}
     >
       <View
@@ -110,7 +112,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
         >
           {member.jerseyNumber != null
             ? `#${member.jerseyNumber}`
-            : getInitials(member.player.name)}
+            : getInitials(displayName(member.player))}
         </ThemedText>
       </View>
       <ThemedText
@@ -121,7 +123,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
           { color: isSelected ? '#FFFFFF' : colors.text },
         ]}
       >
-        {member.player.name.split(' ')[0]}
+        {displayName(member.player).split(' ')[0]}
       </ThemedText>
       {isHot && (
         <Ionicons name="flame" size={14} color="#FF6B35" />
@@ -177,7 +179,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(function Pla
               isSelected={isSelected}
               isHot={isHot}
               colors={colors}
-              onPress={() => onSelectPlayer(member.playerId, member.player.name)}
+              onPress={() => onSelectPlayer(member.playerId, displayName(member.player))}
             />
           );
         })}

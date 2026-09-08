@@ -1,0 +1,57 @@
+appId: com.bballtracker.mobile
+---
+# Self-serve account deletion (#444, App Store 5.1.1(v); E2E plan B.6).
+# Mike Brown is the seeded Warriors ASSISTANT coach: never a last head coach,
+# so the flow reaches the success path. The flow DELETES him — run
+# `cd backend && npx prisma db seed` before every run (the seed sweeps
+# tombstones and recreates him by email).
+#
+# Expected: Profile → Account → "Delete account" opens the confirmation
+# screen; the button stays disabled for "delete" and arms for "DELETE";
+# success toasts, lands on the sign-in screen, and the dev-login list no
+# longer offers Mike Brown.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Mike Brown.*"
+- assertVisible: "Your Teams"
+- tapOn: "Profile tab"
+- assertVisible: "Account"
+
+# The Account card sits mid-screen; the delete row is its last row.
+- scrollUntilVisible:
+    element:
+      id: "delete-account-row"
+    direction: DOWN
+    visibilityPercentage: 60
+- tapOn:
+    id: "delete-account-row"
+- assertVisible: "Delete your account"
+- assertVisible: "What is removed"
+- assertVisible: "What is kept (without a name)"
+
+# Wrong word: the destructive button must stay disabled.
+- tapOn:
+    id: "delete-confirmation-input"
+- inputText: "delete"
+- pressKey: Enter
+- tapOn:
+    id: "delete-account-submit"
+- assertVisible: "Delete your account"
+
+# Exact word arms it.
+- tapOn:
+    id: "delete-confirmation-input"
+- eraseText
+- inputText: "DELETE"
+- pressKey: Enter
+- tapOn:
+    id: "delete-account-submit"
+
+# Session cleared locally; the sign-in screen is the landing page.
+- assertVisible: "Developer login with test users"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- assertNotVisible: "Mike Brown.*"

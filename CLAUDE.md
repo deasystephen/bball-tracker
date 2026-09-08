@@ -201,6 +201,29 @@ Backend API (Node.js/Express)
   lazy-getter `expo-updates` mock — Babel's `import * as` interop copies plain mock objects); Maestro
   `.maestro/profile.yaml`.
 
+- **Account deletion** (#444, App Store 5.1.1(v)): Profile → Account → **Delete account**
+  (`testID delete-account-row`) → `app/account/delete.tsx` — plain-language removed/kept summary,
+  `Input` "Type DELETE to confirm" (exact, case-sensitive, trimmed — `isConfirmed`), destructive
+  `Button` disabled until it matches and while pending (double-tap guard). Success:
+  `hooks/useAccount.ts#useDeleteAccount` (`DELETE /auth/me`) clears the LOCAL session only
+  (`clearSession`, no remote logout — the server side is already gone; never treat
+  `clearSession` as a deletion) and the screen replaces to `/login`. A 400 `last_head_coach`
+  (`getLastHeadCoachTeams(error)`) renders the blocking teams inline with links; anything else
+  toasts via `getApiErrorMessage` and stays. The same screen with `?childId=` is the guardian
+  path: Profile → **My kids** → ⋯ (`components/ActionMenu`, never an `Alert` menu) → "Delete
+  <child>'s record" (only when `guardianOf[].isManaged`) → `useDeleteChildRecord`
+  (`DELETE /players/:id/account`), which re-reads `GET /auth/me` so My kids drops the child at
+  once, then pops back. **Deleted accounts elsewhere:** the API keeps the row as a tombstone with
+  `deletedAt` set and an English placeholder name; render names ONLY via
+  `utils/display-name.ts#displayName(user)` (localized `account.deletedUser` when `deletedAt`
+  is set, stored name otherwise — never branch on the name) and derive roster chips ONLY via
+  `getRosterStatus`, whose `'deleted'` branch comes first (a tombstone has `isManaged: false`,
+  which would read as Active). A deleted roster row's menu offers only Remove player. Tests:
+  `__tests__/app/account-delete.test.tsx`, `__tests__/hooks/useAccount.runtime.test.tsx`,
+  `__tests__/utils/{display-name,roster-status}.test.ts`, `__tests__/app/profile-my-kids.test.tsx`.
+  Maestro: `.maestro/account-delete.yaml` (Mike Brown) and `.maestro/guardian-child-delete.yaml`
+  (Gloria James / Bryce James) — both delete their fixture; re-seed before every run.
+
 #### Mobile permission gating (role matrix M3, M8, M9, M12–M18, M27, M4.1, M4.2)
 Every gated control mirrors a backend rule; the API is still the authority (403). Rules live in two helpers —
 never inline a role check in a screen:

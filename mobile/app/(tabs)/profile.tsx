@@ -11,13 +11,14 @@ import Constants from 'expo-constants';
 import { useAuthStore } from '../../store/auth-store';
 import { canAccessAdmin } from '../../utils/team-permissions';
 import { guardianChildren, isGuardian, relationshipLabel } from '../../utils/guardian';
+import type { GuardianOfEntry } from '../../../shared/types';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useUpdateProfile } from '../../hooks/useProfile';
 import { useUsage } from '../../hooks/useUsage';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
-import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter } from '../../components';
+import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter, ActionMenu, type ActionMenuItem } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
@@ -37,6 +38,32 @@ export default function Profile() {
   const updateProfile = useUpdateProfile();
   const { t } = useTranslation();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  // "My kids" ⋯ menu (ActionMenu, never an Alert menu — Android caps Alert at
+  // three buttons). Items derive from the child at render time.
+  const [menuChildId, setMenuChildId] = useState<string | null>(null);
+  const menuChild = menuChildId ? guardianChildren(user).find((c) => c.childId === menuChildId) : undefined;
+
+  const childMenuItems = (child: GuardianOfEntry): ActionMenuItem[] => {
+    const items: ActionMenuItem[] = [
+      { label: t('account.delete.menuViewStats'), onPress: () => router.push(`/players/${child.childId}/stats`) },
+    ];
+    if (child.teams && child.teams.length > 0) {
+      items.push({
+        label: t('account.delete.menuManageGuardians'),
+        onPress: () => router.push(`/teams/${child.teams![0].id}/players/${child.childId}/guardians`),
+      });
+    }
+    // Only a managed, unclaimed child record may be deleted by a guardian
+    // (#444 D5); a child who has signed in deletes their own account.
+    if (child.isManaged) {
+      items.push({
+        label: t('account.delete.menuDeleteRecord', { name: child.childName }),
+        destructive: true,
+        onPress: () => router.push(`/account/delete?childId=${child.childId}`),
+      });
+    }
+    return items;
+  };
 
   const handleAvatarSelected = async (uri: string | null) => {
     if (!user?.id) return;
@@ -186,20 +213,14 @@ export default function Profile() {
                         </ThemedText>
                       </View>
                     </View>
-                    {child.teams && child.teams.length > 0 ? (
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        accessibilityLabel={`Manage guardians for ${child.childName}`}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        onPress={() =>
-                          router.push(`/teams/${child.teams![0].id}/players/${child.childId}/guardians`)
-                        }
-                      >
-                        <Ionicons name="people-circle-outline" size={24} color={colors.primary} />
-                      </TouchableOpacity>
-                    ) : (
-                      <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
-                    )}
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('account.delete.menuMore', { name: child.childName })}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      onPress={() => setMenuChildId(child.childId)}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
+                    </TouchableOpacity>
                   </TouchableOpacity>
                 </React.Fragment>
               ))}
@@ -256,6 +277,26 @@ export default function Profile() {
                 <ThemedText variant="body">Active</ThemedText>
               </View>
             </View>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            {/* Account deletion (#444, App Store 5.1.1(v)): one tap to the
+                confirmation screen, which needs a typed DELETE. */}
+            <TouchableOpacity
+              style={styles.infoRow}
+              accessibilityRole="button"
+              accessibilityLabel={t('account.delete.row')}
+              testID="delete-account-row"
+              onPress={() => router.push('/account/delete')}
+            >
+              <View style={[styles.infoIcon, { backgroundColor: colors.error + '20' }]}>
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+              </View>
+              <View style={styles.infoContent}>
+                <ThemedText variant="body" style={{ color: colors.error }}>
+                  {t('account.delete.row')}
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
           </Card>
         </View>
 
@@ -424,6 +465,13 @@ export default function Profile() {
         </View>
 
       </ScrollView>
+
+      <ActionMenu
+        visible={menuChild !== undefined}
+        title={menuChild?.childName ?? ''}
+        items={menuChild ? childMenuItems(menuChild) : []}
+        onClose={() => setMenuChildId(null)}
+      />
     </ThemedView>
   );
 }
