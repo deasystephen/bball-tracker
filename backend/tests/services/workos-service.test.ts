@@ -11,6 +11,7 @@ jest.mock('../../src/utils/workos-client', () => {
         authenticateWithCode: jest.fn(),
         authenticateWithRefreshToken: jest.fn(),
         revokeSession: jest.fn(),
+        deleteUser: jest.fn(),
         getUser: jest.fn(),
         listUsers: jest.fn(),
       },
@@ -40,6 +41,7 @@ const mockWorkos = {
     authenticateWithCode: workos.userManagement.authenticateWithCode as jest.Mock,
     authenticateWithRefreshToken: workos.userManagement.authenticateWithRefreshToken as jest.Mock,
     revokeSession: workos.userManagement.revokeSession as jest.Mock,
+    deleteUser: workos.userManagement.deleteUser as jest.Mock,
     getUser: workos.userManagement.getUser as jest.Mock,
     listUsers: workos.userManagement.listUsers as jest.Mock,
   },
@@ -227,6 +229,22 @@ describe('WorkOSService', () => {
     it('should propagate WorkOS errors so the route can map them to 401', async () => {
       mockWorkos.userManagement.authenticateWithRefreshToken.mockRejectedValue(new Error('invalid_grant'));
       await expect(WorkOSService.refreshSession('bad')).rejects.toThrow('invalid_grant');
+    });
+  });
+
+  describe('deleteUser (#444)', () => {
+    it('deletes the WorkOS user by id (account deletion, after the local commit)', async () => {
+      mockWorkos.userManagement.deleteUser.mockResolvedValue(undefined);
+
+      await WorkOSService.deleteUser('user_123');
+
+      expect(mockWorkos.userManagement.deleteUser).toHaveBeenCalledWith('user_123');
+    });
+
+    it('propagates provider failures to the caller (AccountService reports identityDeleted:false)', async () => {
+      mockWorkos.userManagement.deleteUser.mockRejectedValue(new Error('workos down'));
+
+      await expect(WorkOSService.deleteUser('user_123')).rejects.toThrow('workos down');
     });
   });
 

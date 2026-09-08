@@ -291,6 +291,21 @@ describe('AccountService.deleteAccount', () => {
       expect(mockPrisma.user.update).toHaveBeenCalled();
     });
 
+    it('survives the revoke fallback failing too (both errors logged, request still succeeds)', async () => {
+      armHappyPath();
+      mockWorkOS.deleteUser.mockRejectedValue(new Error('workos down'));
+      mockWorkOS.revokeSession.mockRejectedValue(new Error('still down'));
+
+      const result = await AccountService.deleteAccount(USER_ID, {
+        actorId: USER_ID,
+        mode: 'self',
+        sessionId: 'sess_1',
+      });
+
+      expect(result.identityDeleted).toBe(false);
+      expect(mockWorkOS.revokeSession).toHaveBeenCalledWith('sess_1');
+    });
+
     it('skips the WorkOS call for a row that never had a login', async () => {
       armHappyPath(lockedRow({ workosUserId: null }));
 
