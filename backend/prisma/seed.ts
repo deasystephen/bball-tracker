@@ -8,6 +8,8 @@ import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+/** #444 guardian child-deletion fixture (fixed UUID; see the Bryce James block). */
+export const BRYCE_JAMES_ID = '40000000-0000-4000-a000-000000000109';
 const prisma = new PrismaClient({ adapter });
 
 // Deterministic UUIDs for seed data (reproducible across runs)
@@ -89,6 +91,16 @@ async function main() {
   }
 
   console.log('Seeding database...\n');
+
+  // Account-deletion tombstones (#444) left by .maestro/account-delete.yaml and
+  // .maestro/guardian-child-delete.yaml. The fixtures are recreated below by
+  // email / fixed id, so the old rows would otherwise pile up as "Deleted user"
+  // in the dev-login list. Cascading hard delete — fine while no deleted
+  // fixture carries game events.
+  const staleTombstones = await prisma.user.deleteMany({ where: { deletedAt: { not: null } } });
+  if (staleTombstones.count > 0) {
+    console.log(`  Removed ${staleTombstones.count} account-deletion tombstone(s) from a previous E2E run`);
+  }
 
   // =========================================================================
   // USERS
@@ -376,6 +388,35 @@ async function main() {
   });
   console.log(`  Gloria James -> LeBron James (Mother)`);
 
+  // Guardian child-deletion fixture (#444, .maestro/guardian-child-delete.yaml):
+  // a MANAGED, unclaimed Lakers player with Gloria as guardian. Fixed real UUID
+  // because every /players/:id route validates the param (a `managed-…` id
+  // would 400 on the very call the flow tests). The flow deletes him; the
+  // tombstone sweep at the top removes the old row and this recreates him.
+  const bryce = await prisma.user.upsert({
+    where: { id: BRYCE_JAMES_ID },
+    update: {},
+    create: {
+      id: BRYCE_JAMES_ID,
+      name: 'Bryce James',
+      role: UserRole.PLAYER,
+      isManaged: true,
+      managedById: coachFrank.id,
+      email: null,
+    },
+  });
+  await prisma.guardian.upsert({
+    where: { parentId_childId: { parentId: parentGloria.id, childId: bryce.id } },
+    update: {},
+    create: {
+      parentId: parentGloria.id,
+      childId: bryce.id,
+      relationship: GuardianRelationship.MOTHER,
+      isPrimary: true,
+    },
+  });
+  console.log(`  Gloria James -> Bryce James (Mother, managed child)`);
+
   // =========================================================================
   // LEAGUE & SEASON
   // =========================================================================
@@ -628,10 +669,12 @@ async function main() {
     console.log(`    Added managed player: ${mp.name} (#${mp.jersey}) to Warriors`);
   }
 
-  // Lakers managed players (managed by Coach Frank Vogel)
+  // Lakers managed players (managed by Coach Frank Vogel). Bryce James is the
+  // #444 guardian child-deletion fixture (created above with Gloria as guardian).
   const managedLakersPlayers = [
     { id: '40000000-0000-4000-a000-000000000107', name: 'Marcus Johnson', jersey: 7, position: 'SG' },
     { id: '40000000-0000-4000-a000-000000000114', name: 'Ethan Williams', jersey: 14, position: 'PF' },
+    { id: BRYCE_JAMES_ID, name: 'Bryce James', jersey: 9, position: 'SG' },
   ];
 
   for (const mp of managedLakersPlayers) {

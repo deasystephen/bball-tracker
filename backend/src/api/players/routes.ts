@@ -10,13 +10,11 @@ import {
   playerQuerySchema,
 } from './schemas';
 import { authenticate } from '../auth/middleware';
-import {
-  BadRequestError,
-  NotFoundError,
-  ForbiddenError,
-  ConflictError,
-} from '../../utils/errors';
+import { BadRequestError, NotFoundError, ForbiddenError, ConflictError, AppError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { AccountService } from '../../services/account-service';
+import { isGuardianOf } from '../../utils/permissions';
+import prisma from '../../models';
 import { logger } from '../../utils/logger';
 
 const router = Router();
@@ -185,6 +183,44 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to delete player' });
     }
+  }
+});
+
+/**
+ * DELETE /api/v1/players/:id/account
+ * A guardian deletes a managed child's record (#444, D5).
+ *
+ * Allowed only when the caller is a guardian of `:id` AND the child is a
+ * managed, unclaimed record (`isManaged`, no login). A claimed account can be
+ * deleted only by its owner via `DELETE /auth/me` — not by guardians, not by
+ * ADMINs through the API. The route pre-checks; the service re-checks under
+ * the row lock. Anonymize-in-place, see `AccountService.deleteAccount`.
+ */
+router.delete('/:id/account', validateUuidParams('id'), async (req, res, next) => {
+  try {
+    const childId = req.params.id as string;
+    if (!(await isGuardianOf(req.user!.id, childId))) {
+      throw new ForbiddenError('You are not a guardian of this player');
+    }
+    const child = await prisma.user.findUnique({
+      where: { id: childId },
+      select: { isManaged: true, workosUserId: true, deletedAt: true },
+    });
+    if (!child || child.deletedAt !== null) {
+      throw new NotFoundError('Player not found');
+    }
+    if (!child.isManaged || child.workosUserId !== null) {
+      throw new ForbiddenError('Only the account owner can delete a claimed account');
+    }
+    await AccountService.deleteAccount(childId, { actorId: req.user!.id, mode: 'guardian' });
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof AppError) {
+      next(error);
+      return;
+    }
+    logger.error('Error deleting player account', { error: error instanceof Error ? error.message : String(error) });
+    res.status(500).json({ error: 'Failed to delete player account' });
   }
 });
 

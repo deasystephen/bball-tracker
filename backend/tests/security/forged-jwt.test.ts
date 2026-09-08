@@ -55,7 +55,7 @@ describe('authenticate with forged tokens', () => {
     expect(next).toHaveBeenCalledWith();
     expect(req.user).toEqual(user);
     expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { workosUserId: 'user_victim' } })
+      expect.objectContaining({ where: { workosUserId: 'user_victim', deletedAt: null } })
     );
   });
 

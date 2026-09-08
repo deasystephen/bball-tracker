@@ -208,6 +208,33 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ---
 
+### B.6 — Delete account (#444, App Store 5.1.1(v))
+
+- **Steps:** Sign in as `mike.brown@example.com` (Warriors assistant coach — never the last head
+  coach). Profile → Account → **Delete account**. Read the summary (removed vs kept). Type `delete`
+  (lowercase): the button stays disabled. Type `DELETE` → tap **Delete account**.
+- **Expected:** Toast "Your account has been deleted", app lands on the sign-in screen, the dev-login
+  list no longer shows Mike. Backend: `DELETE /api/v1/auth/me` → `200 { success: true,
+  identityDeleted: false }` (dev users have no WorkOS identity). A second request with the old token
+  is **401**. In the DB the row has `deletedAt` set, `email`/`workosUserId` null, name `Deleted
+  user`, no `TeamStaff`/`PushToken`/`GameRsvp` rows; his `GameEvent`/`PlayerStats` rows (if any)
+  still exist. Signing in again as the same email creates a **new** account. Re-run `npx prisma db
+  seed` to restore the fixture (the seed sweeps tombstones). Maestro: `.maestro/account-delete.yaml`.
+- **Variant — last head coach:** as Frank Vogel (sole Lakers head coach) → 400 with
+  `code: last_head_coach` and the team list rendered inline; nothing is deleted. Make Mike Brown
+  head coach of the Lakers first and retry → succeeds.
+
+### B.7 — Guardian deletes a managed child's record (#444, COPPA route)
+
+- **Steps:** Sign in as `gloria.james@example.com` (guardian of LeBron — claimed — and of Bryce
+  James — managed, unclaimed). Profile → My kids → ⋯ on **Bryce James** → **Delete Bryce's record**
+  → type `DELETE` → confirm. Then open ⋯ on **LeBron James**.
+- **Expected:** Bryce disappears from My kids (the app re-reads `GET /auth/me`); the Lakers roster
+  (as Frank Vogel) shows a "Deleted user" line with a **Deleted** chip and jersey #9, and Remove
+  from team still works. LeBron's menu has **no** "Delete record" item (`guardianOf[].isManaged`
+  is false); a direct `DELETE /api/v1/players/<lebronId>/account` as Gloria → **403** "Only the
+  account owner can delete a claimed account". Maestro: `.maestro/guardian-child-delete.yaml`.
+
 ## C. League / season admin (ADMIN only)
 
 ### C.1 — Create league

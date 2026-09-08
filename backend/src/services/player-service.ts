@@ -40,6 +40,7 @@ const PLAYER_DETAIL_SELECT = {
   ...PLAYER_SELECT,
   isManaged: true,
   managedById: true,
+  deletedAt: true,
   teamMembers: {
     include: {
       team: {
@@ -229,7 +230,8 @@ export class PlayerService {
       select: PLAYER_DETAIL_SELECT,
     });
 
-    if (!player) {
+    // A deleted account is a tombstone (#444, D14): 404 like an unknown id
+    if (!player || player.deletedAt) {
       throw new NotFoundError('Player not found');
     }
 
@@ -274,6 +276,8 @@ export class PlayerService {
       role: isAdmin && role ? role : 'PLAYER',
       // Exclude managed players by default; only admins may include them
       isManaged: isAdmin && isManaged !== undefined ? isManaged : false,
+      // Deleted accounts are tombstones (#444, D14): never offered in pickers
+      deletedAt: null,
     };
 
     const conditions: Prisma.UserWhereInput[] = [];

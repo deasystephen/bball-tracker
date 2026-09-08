@@ -6,7 +6,7 @@ import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-ser
 import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
-import { ConflictError } from '../utils/errors';
+import { ConflictError, UnauthorizedError } from '../utils/errors';
 
 const expo = new Expo();
 
@@ -73,17 +73,29 @@ export class NotificationService {
       });
     }
 
-    return prisma.pushToken.upsert({
-      where: { token },
-      create: {
-        userId,
-        token,
-        platform,
-      },
-      update: {
-        userId,
-        platform,
-      },
+    // Lock the caller's User row (FOR SHARE) for the duration of the write so
+    // a registration that authenticated just before AccountService.deleteAccount
+    // committed cannot attach a device to the tombstone (#444, D9): the
+    // deletion holds FOR UPDATE on the same row, so this either runs before it
+    // (and the deletion then removes the token) or sees `deletedAt` set.
+    return prisma.$transaction(async (tx) => {
+      const live = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User" WHERE "id" = ${userId} AND "deletedAt" IS NULL FOR SHARE`;
+      if (live.length === 0) {
+        throw new UnauthorizedError('User not found');
+      }
+      return tx.pushToken.upsert({
+        where: { token },
+        create: {
+          userId,
+          token,
+          platform,
+        },
+        update: {
+          userId,
+          platform,
+        },
+      });
     });
   }
 

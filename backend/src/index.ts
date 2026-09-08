@@ -103,7 +103,7 @@ app.use('/api/v1', apiRouter);
 setupWebSocketHandlers(io);
 
 // Error handling middleware
-import { AppError } from './utils/errors';
+import { AppError, DetailedError } from './utils/errors';
 
 // Forward exceptions to Sentry before the app's own error handler renders a response.
 app.use(sentryErrorHandler);
@@ -121,7 +121,13 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 
-  // If it's an AppError, use its status code
+  // If it's an AppError, use its status code. A DetailedError also carries a
+  // machine-readable `code` and its structured payload (402 upgrade_required,
+  // 400 last_head_coach); `body()` is the single serialization rule for those.
+  if (err instanceof DetailedError) {
+    res.status(err.statusCode).json(err.body());
+    return;
+  }
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       error: err.message,

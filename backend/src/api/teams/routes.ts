@@ -72,7 +72,7 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
   } catch (error) {
     logger.error('Error creating team', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof PaymentRequiredError) {
-      res.status(error.statusCode).json({ code: 'upgrade_required', ...error.details });
+      res.status(error.statusCode).json(error.body());
     } else if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||

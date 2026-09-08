@@ -16,6 +16,7 @@ import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/en
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
 import { deletePreviousAvatar } from '../../services/upload-service';
+import { AccountService } from '../../services/account-service';
 import { z } from 'zod';
 
 const router = Router();
@@ -96,7 +97,7 @@ if (process.env.NODE_ENV === 'development') {
 
       // Find user by email
       const user = await prisma.user.findUnique({
-        where: { email },
+        where: { email, deletedAt: null },
         select: {
           id: true,
           email: true,
@@ -141,6 +142,8 @@ if (process.env.NODE_ENV === 'development') {
   router.get('/dev-users', async (_req, res) => {
     try {
       const users = await prisma.user.findMany({
+        // Deleted accounts (#444) are tombstones with no email — never offer them
+        where: { deletedAt: null },
         select: {
           id: true,
           email: true,
@@ -437,12 +440,21 @@ router.patch('/me', authenticate, async (req, res) => {
       profilePictureUrl !== undefined
         ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
         : null;
-    const user = await prisma.user.update({
-      where: { id: req.user!.id },
+    // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
+    // `authenticate` a moment before an account deletion committed must not
+    // write a real name or photo back onto the tombstone. Zero rows → 401.
+    const updated = await prisma.user.updateMany({
+      where: { id: req.user!.id, deletedAt: null },
       data: {
         ...(name !== undefined && { name }),
         ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
       },
+    });
+    if (updated.count === 0) {
+      throw new UnauthorizedError('User not found');
+    }
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: req.user!.id },
       select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, createdAt: true },
     });
 
@@ -482,9 +494,16 @@ router.patch('/me/role', authenticate, async (req, res) => {
       throw new ForbiddenError(`Role ${current} cannot be changed from the app`);
     }
 
-    const user = await prisma.user.update({
-      where: { id: req.user!.id },
+    // Same `deletedAt IS NULL` guard as PATCH /me (#444, D9).
+    const updated = await prisma.user.updateMany({
+      where: { id: req.user!.id, deletedAt: null },
       data: { role: parsed.data.role },
+    });
+    if (updated.count === 0) {
+      throw new UnauthorizedError('User not found');
+    }
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: req.user!.id },
       select: { id: true, email: true, name: true, role: true, createdAt: true },
     });
 
@@ -499,6 +518,47 @@ router.patch('/me/role', authenticate, async (req, res) => {
     logger.error('Error updating role', { error: error instanceof Error ? error.message : String(error) });
     captureException(error, { flow: 'auth-role' });
     res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+/**
+ * DELETE /api/v1/auth/me
+ * Delete the caller's own account (#444, App Store 5.1.1(v)).
+ *
+ * Anonymize-in-place: see `AccountService.deleteAccount`. No body. Any
+ * authenticated user, ADMIN included (the ADMIN_EMAIL allowlist re-promotes
+ * on re-signup, D15).
+ * - 200 `{ success, identityDeleted }`
+ * - 400 `code: 'last_head_coach'` + `teams` while the caller is the only
+ *   head coach of a team in an active season (hand the team over first)
+ * - 401 once deleted (the token no longer resolves to a user)
+ */
+router.delete('/me', authenticate, async (req, res, next) => {
+  try {
+    const token = req.headers.authorization!.substring(7);
+    let sessionId: string | undefined;
+    if (!token.startsWith('dev_')) {
+      try {
+        sessionId = (await WorkOSService.verifyToken(token))?.sessionId;
+      } catch {
+        // Already verified by `authenticate`; the sid is only a fallback for revocation.
+      }
+    }
+    const result = await AccountService.deleteAccount(req.user!.id, {
+      actorId: req.user!.id,
+      mode: 'self',
+      sessionId,
+    });
+    res.json({ success: true, identityDeleted: result.identityDeleted });
+  } catch (error) {
+    if (error instanceof AppError) {
+      // The central handler serializes DetailedError bodies (last_head_coach + teams)
+      next(error);
+      return;
+    }
+    logger.error('Error deleting account', { error: error instanceof Error ? error.message : String(error) });
+    captureException(error, { flow: 'account-delete' });
+    res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
