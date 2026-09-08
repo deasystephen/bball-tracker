@@ -859,6 +859,49 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - Sentry: `sentryErrorHandler` skips operational `AppError`s with status < 500 (`isExpectedClientError`) — an expired token is an expected outcome, not a defect. It also skips non-`AppError` throws carrying a 4xx `status`/`statusCode` (body-parser `entity.parse.failed` → 400, `entity.too.large` → 413; `clientErrorStatus()`), and the central error handler in `index.ts` answers those with that status instead of 500. 5xx and other non-`AppError` throws are still reported.
 - **Push tokens (role matrix B2.9).** `PushToken` is unique on `token` (a device, not an account). `POST /auth/push-token` upserts when the token is new or already the caller's; a token bound to a **different** user is rejected with **409** (`Push token is registered to another account`) unless that binding's `updatedAt` is older than 24h (`PUSH_TOKEN_REBIND_AFTER_MS` — a leftover from a build that never unregistered), in which case it is rebound to the caller. Hand-over on a shared device is `DELETE /auth/push-token` by the owner (logout does this). `PushToken.updatedAt` was added by migration `20260823000000_push_token_updated_at`.
 
+### Account deletion (#444, App Store 5.1.1(v); `docs/plans/account-deletion.md`)
+
+- **Anonymize in place, never hard-delete.** `AccountService.deleteAccount(userId, { actorId, mode })`
+  (`services/account-service.ts`) runs ONE `$transaction`: `SELECT … FOR UPDATE` on the user row →
+  last-head-coach check → purge rows that only serve the person → scrub personal data elsewhere →
+  tombstone the row (`workosUserId`/`email`/`profilePictureUrl` null, `name = DELETED_USER_NAME`,
+  `deletedAt = now()`). `GameEvent`, `PlayerStats`, `TeamMember` and authored announcements stay so
+  other members' stats remain coherent. After commit, best-effort: S3 avatar delete and
+  `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry `flow:
+  account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone state
+  from `name`/`email` — `deletedAt` is the signal.**
+- Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and
+  `DELETE /players/:id/account` (guardian of a **managed, unclaimed** child only; the route
+  pre-checks and the service re-checks under the lock). A claimed account is deletable only by its
+  owner — never by guardians or ADMINs through the API; emailed requests go through
+  `backend/scripts/data-subject-request.ts` (`export` / `delete <email>`, `operator` mode) per
+  [`docs/runbooks/data-subject-requests.md`](docs/runbooks/data-subject-requests.md).
+- **Last head coach blocks** with 400 `code: 'last_head_coach'` + `teams`, scoped to teams whose
+  season `isActive` (a `Team` row is a team-season, so past seasons go headless rather than forcing
+  a coach to delete history). The rule is `utils/permissions.ts#lastHeadCoachTeams` (one set-based
+  query), shared with `TeamService.assertNotLastHeadCoach`; never re-implement it. A sole league
+  admin is NOT blocked (they cannot appoint a replacement); the log line lists admin-less leagues.
+- **Every write onto a `User` row is guarded by `deletedAt IS NULL`**: `PATCH /auth/me`,
+  `PATCH /auth/me/role` (`updateMany` + re-read, 401 on zero rows), push-token registration (`FOR
+  SHARE` probe inside the upsert transaction) and both `syncUser` branches (`updateMany`, fall
+  through to create on zero rows). A request that authenticated a moment before the deletion
+  committed must not re-identify the tombstone. Keep that invariant on any new write path.
+- Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
+  `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
+  402s; never hand-roll `{ code, … }` in a route.
+- `deletedAt` rides on `USER_SUMMARY_SELECT` (rosters, staff, guardians) so clients derive a
+  "Deleted" chip and a localized label; pickers (`listPlayers`, `getPlayerById`, staff lookup,
+  `dev-users`, `dev-login`) filter tombstones out. `guardianOf[].isManaged` tells the app which
+  child records a guardian may delete.
+- Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats
+  retained de-identified; RDS backups 7 days; Sentry/Amplitude keep records keyed on the internal
+  id for their windows (no name/email/photo). Seed: `mike.brown@example.com` (assistant coach, never
+  blocked) is the self-delete Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria
+  James as guardian) is the guardian child-delete fixture; the seed sweeps tombstones first.
+- Tests: `tests/services/account-service.test.ts`, `tests/api/account-delete.test.ts`,
+  `tests/integration/account-deletion.db.test.ts` (real Postgres: rollback, concurrency, guarded
+  writes, export contract), `lastHeadCoachTeams` in `tests/utils/permissions.test.ts`.
+
 ### Logging & Sentry redaction (audit #15/#28/#48)
 - **Never log `req.originalUrl`.** `request-logger.ts` logs `loggablePath(req)`: the path with secret segments masked (`/invitations/by-token/<x>`, `/teams/:id/calendar/<x>`, `/invite/<x>` → `[redacted]`) plus a query string whose *keys* are kept and whose sensitive *values* (`code`, `state`, `token`, anything containing `token`/`secret`/`password`/`api_key`) are masked. Helpers live in `backend/src/utils/redact.ts` (`redactUrl`, `redactPath`, `redactQueryString`, `redactQueryObject`) — reuse them for any new log line that includes a URL.
 - Backend Sentry (`utils/sentry.ts`): `beforeSend` redacts `request.url`, `request.query_string`, breadcrumb `data.url` and the `transaction` name with the same helpers; `beforeSendTransaction` does the same for performance transactions (`transaction`, `request.url`, `contexts.trace.data.*url*`, span descriptions/data), which bypass `beforeSend`.
@@ -1067,6 +1110,11 @@ Dependency and security updates are split between **Dependabot** (mechanical pat
 
 Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs/runbooks/):
 
+- **[Data-subject requests](docs/runbooks/data-subject-requests.md)** — account deletion (self-serve,
+  guardian, operator script) and data export: what is removed, what is retained and why, the
+  7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the
+  post-deletion checklist (admin-less leagues). The privacy policy (#25) must match its
+  "Retention" section.
 - **[RDS backup & restore](docs/runbooks/rds-backup-restore.md)** — verify automated backups, restore from snapshot, repoint the app via Secrets Manager, rollback path, and a user-facing comms template. The app reaches RDS via the endpoint baked into `bball-tracker-production/database-url` in Secrets Manager (not via Route53), so a restore is: new instance → new secret version → `--force-new-deployment` on the ECS service.
   Its **"Major version upgrade"** section is the procedure for PostgreSQL majors (#521, 15 → 18):
   a watched CLI `modify-db-instance` with the exact minor (a bare major resolves to the RDS

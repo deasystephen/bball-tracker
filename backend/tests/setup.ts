@@ -19,10 +19,12 @@ loadEnv();
 export const mockPrisma = {
   user: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
   },
@@ -112,6 +114,7 @@ export const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn(),
     count: jest.fn(),
   },
   guardianInvitation: {
@@ -229,6 +232,7 @@ export const mockPrisma = {
   },
   $transaction: jest.fn(),
   $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+  $executeRaw: jest.fn().mockResolvedValue(0),
   $disconnect: jest.fn(),
 };
 
@@ -259,6 +263,7 @@ jest.mock('../src/utils/workos-client', () => ({
     userManagement: {
       getAuthorizationUrl: jest.fn().mockResolvedValue('https://auth.workos.com/authorize'),
       authenticateWithCode: jest.fn(),
+      deleteUser: jest.fn().mockResolvedValue(undefined),
       getUser: jest.fn(),
       listUsers: jest.fn(),
     },

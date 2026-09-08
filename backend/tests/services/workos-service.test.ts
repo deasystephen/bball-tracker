@@ -379,14 +379,17 @@ describe('WorkOSService', () => {
       };
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
 
       const result = await WorkOSService.syncUser(workosUser);
 
       expect(result).toHaveProperty('name', 'Edited In App');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: existingUser.id },
+      // Guarded write (#444 D9): a row deleted between the read and this write
+      // must not be re-identified, so the update is conditioned on deletedAt.
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: existingUser.id, deletedAt: null },
         data: { emailVerified: true },
       });
     });
@@ -394,12 +397,13 @@ describe('WorkOSService', () => {
     it('should follow an email change made in WorkOS for a linked user', async () => {
       const existingUser = createPlayer({ email: 'old@example.com', workosUserId: 'workos_123' });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...existingUser, email: 'new@example.com' });
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...existingUser, email: 'new@example.com' });
 
       const result = await WorkOSService.syncUser({ id: 'workos_123', email: 'new@example.com', emailVerified: true });
 
       expect(result).toHaveProperty('email', 'new@example.com');
-      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ email: 'new@example.com' }) })
       );
     });
@@ -407,7 +411,8 @@ describe('WorkOSService', () => {
     it('should fill in the avatar from WorkOS only when the local one is null', async () => {
       const existingUser = createPlayer({ workosUserId: 'workos_123', profilePictureUrl: null });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
 
       await WorkOSService.syncUser({
         id: 'workos_123',
@@ -416,11 +421,26 @@ describe('WorkOSService', () => {
         profilePictureUrl: 'https://workos.example.com/pic.jpg',
       });
 
-      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ profilePictureUrl: 'https://workos.example.com/pic.jpg' }),
         })
       );
+    });
+
+    it('creates a fresh account when the linked row was deleted during sign-in (#444 D9)', async () => {
+      const existingUser = createPlayer({ email: 'gone@example.com', workosUserId: 'workos_123' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId (read before the deletion committed)
+        .mockResolvedValueOnce(null); // by email: the tombstone has no email
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
+
+      const result = await WorkOSService.syncUser({ id: 'workos_123', email: 'gone@example.com', emailVerified: true });
+
+      expect(result).toHaveProperty('id', 'fresh-id');
+      expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
     });
 
     it('should claim a pre-provisioned row by email and clear managed-player ownership (audit #2)', async () => {
@@ -441,7 +461,8 @@ describe('WorkOSService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(null)          // by workosUserId
         .mockResolvedValueOnce(existingUser); // by email
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue({
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({
         ...existingUser,
         workosUserId: 'workos_456',
         isManaged: false,
@@ -451,8 +472,9 @@ describe('WorkOSService', () => {
       const result = await WorkOSService.syncUser(workosUser);
 
       expect(result).toHaveProperty('workosUserId', 'workos_456');
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: existingUser.id },
+      // Claim-guarded (RT4 shape) AND deletion-guarded (#444 D9)
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: existingUser.id, workosUserId: null, deletedAt: null },
         data: {
           workosUserId: 'workos_456',
           emailVerified: true,
@@ -461,9 +483,23 @@ describe('WorkOSService', () => {
         },
       });
       // Name set by the coach is kept; role is not touched for non-admin emails
-      const data = (mockPrisma.user.update as jest.Mock).mock.calls[0][0].data;
+      const data = (mockPrisma.user.updateMany as jest.Mock).mock.calls[0][0].data;
       expect(data).not.toHaveProperty('name');
       expect(data).not.toHaveProperty('role');
+    });
+
+    it('creates a fresh account when the pre-provisioned row was deleted or claimed during sign-in (#444 D9)', async () => {
+      const existingUser = { ...createPlayer({ email: 'user@example.com' }), workosUserId: null };
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id', workosUserId: 'workos_456' });
+
+      const result = await WorkOSService.syncUser({ id: 'workos_456', email: 'user@example.com', emailVerified: true });
+
+      expect(result).toHaveProperty('id', 'fresh-id');
+      expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
     });
 
     it('should promote a pre-provisioned row to ADMIN on first link when the email is allowlisted', async () => {
@@ -473,11 +509,12 @@ describe('WorkOSService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(existingUser);
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...existingUser, role: 'ADMIN' });
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...existingUser, role: 'ADMIN' });
 
       await WorkOSService.syncUser({ id: 'workos_admin', email: 'boss@example.com', emailVerified: true });
 
-      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ role: 'ADMIN' }) })
       );
     });
@@ -492,7 +529,7 @@ describe('WorkOSService', () => {
       await expect(
         WorkOSService.syncUser({ id: 'workos_new', email: 'taken@example.com', emailVerified: true })
       ).rejects.toBeInstanceOf(ConflictError);
-      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 

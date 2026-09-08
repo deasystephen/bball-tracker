@@ -68,7 +68,7 @@ scripts/data-subject-request delete ─┘                                      
   │                                   delete when no team references it (D16)
   │    user.managedById = me ── → null                        │
   │ 4  tombstone: workosUserId, email, profilePictureUrl → null│
-  │    name → DELETED_USER_NAME, emailVerified/isManaged false│
+  │    name → DELETED_USER_NAME, emailVerified false,         │
   │    managedById null, tier FREE, expiresAt null,           │
   │    deletedAt = now()                                      │
   └──────────────────────────────────────────────────────────┘
@@ -92,8 +92,10 @@ scripts/data-subject-request delete ─┘                                      
    after the creator leaves the roster (B2.10). Leagues left with zero admins are logged at info
    with their ids (D18).
 4. Tombstone. `DELETED_USER_NAME = 'Deleted user'` is an exported constant on the service (tests
-   import it; mobile renders its own localized label from `deletedAt`, D14). `role` is left as
-   is. Capture the previous `profilePictureUrl` and `workosUserId` for step 5.
+   import it; mobile renders its own localized label from `deletedAt`, D14). `role` and
+   `isManaged` are left as they are (flipping `isManaged` gains nothing and would make an old
+   client's roster chip read a deleted child as Active). Capture the previous `profilePictureUrl`
+   and `workosUserId` for step 5.
 5. After commit: `deletePreviousAvatar(previousUrl, null)` (own bucket only, never WorkOS URLs —
    `upload-service.ts:94`), then `WorkOSService.deleteUser(workosUserId)` (new thin wrapper; skipped
    when the id was null — managed child / dev user). A failure is `captureException`ed with

@@ -135,6 +135,8 @@ export class GuardianService {
         child: {
           select: {
             name: true,
+            isManaged: true,
+            workosUserId: true,
             teamMembers: { select: { team: { select: { id: true, name: true } } } },
           },
         },
@@ -147,6 +149,9 @@ export class GuardianService {
       childName: link.child.name,
       relationship: link.relationship,
       isPrimary: link.isPrimary,
+      // A managed, unclaimed child is the only record a guardian may delete
+      // (#444, D5); the app shows "Delete record" only when this is true.
+      isManaged: link.child.isManaged && link.child.workosUserId === null,
       // Lets the app deep-link to the child's guardians screen, which is
       // addressed per team (/teams/:teamId/members/:playerId/guardians).
       teams: (link.child.teamMembers ?? []).map((m) => ({ id: m.team.id, name: m.team.name })),
@@ -439,16 +444,25 @@ export class GuardianService {
       await tx.guardian.delete({ where: { id: link.id } });
 
       if (link.isPrimary) {
-        const next = await tx.guardian.findFirst({
-          where: { childId: playerId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        });
-        if (next) {
-          await tx.guardian.update({ where: { id: next.id }, data: { isPrimary: true } });
-        }
+        await GuardianService.promoteNextPrimary(tx, playerId);
       }
     });
+  }
+
+  /**
+   * After a child's primary guardian link is gone, make the oldest remaining
+   * link primary (no-op when none remain). Shared by `removeGuardian` and
+   * account deletion (#444), which removes every link of a deleted adult.
+   */
+  static async promoteNextPrimary(tx: Prisma.TransactionClient, childId: string): Promise<void> {
+    const next = await tx.guardian.findFirst({
+      where: { childId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (next) {
+      await tx.guardian.update({ where: { id: next.id }, data: { isPrimary: true } });
+    }
   }
 
   /**

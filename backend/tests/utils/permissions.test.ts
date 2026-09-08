@@ -16,6 +16,7 @@ import {
   teamAccessWhere,
   canWriteLeague,
   getGuardianChildIds,
+  lastHeadCoachTeams,
 } from '../../src/utils/permissions';
 import { mockPrisma } from '../setup';
 import {
@@ -414,5 +415,50 @@ describe('permissions — guardian branches', () => {
 
       await expect(canWriteLeague('member-1', 'league-1')).resolves.toBe(false);
     });
+  });
+});
+
+describe('lastHeadCoachTeams (#444, shared by staff removal and account deletion)', () => {
+  const me = 'me';
+  const rows = (...r: [string, string][]): { teamId: string; userId: string; team: { name: string } }[] =>
+    r.map(([teamId, userId]) => ({ teamId, userId, team: { name: `Team ${teamId}` } }));
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns only the teams where the user is the sole HEAD_COACH holder, from ONE query', async () => {
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(
+      rows(['t1', me], ['t2', me], ['t2', 'co-head'], ['t3', 'someone-else'])
+    );
+
+    const result = await lastHeadCoachTeams(me);
+
+    expect(result).toEqual([{ id: 't1', name: 'Team t1' }]);
+    expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
+      where: {
+        role: { type: 'HEAD_COACH' },
+        team: { staff: { some: { userId: me, role: { type: 'HEAD_COACH' } } } },
+      },
+      select: { teamId: true, userId: true, team: { select: { name: true } } },
+    });
+  });
+
+  it('returns [] when every team has another head coach', async () => {
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows(['t1', me], ['t1', 'other']));
+    expect(await lastHeadCoachTeams(me)).toEqual([]);
+  });
+
+  it('scopes the query to the given teams and to active seasons when asked', async () => {
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+
+    await lastHeadCoachTeams(me, mockPrisma as never, { teamIds: ['t1'], activeSeasonsOnly: true });
+
+    expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          team: expect.objectContaining({ id: { in: ['t1'] }, season: { isActive: true } }),
+        }),
+      })
+    );
   });
 });

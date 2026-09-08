@@ -8,7 +8,7 @@ jest.mock('../../src/services/upload-service', () => ({
 
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
-import { ConflictError } from '../../src/utils/errors';
+import { ConflictError, NotFoundError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
   createPlayer,
@@ -142,6 +142,21 @@ describe('PlayerService', () => {
   });
 
   describe('getPlayerById', () => {
+    it('treats a deleted account (tombstone) as not found, even for an admin (#444 D14)', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'p-gone',
+        role: 'PLAYER',
+        name: 'Deleted user',
+        email: null,
+        isManaged: false,
+        managedById: null,
+        deletedAt: new Date(),
+        teamMembers: [],
+      });
+
+      await expect(PlayerService.getPlayerById('p-gone', { id: 'admin-1', role: 'ADMIN' })).rejects.toBeInstanceOf(NotFoundError);
+    });
+
     it('should return player with teams', async () => {
       const player = createPlayer();
       const league = createLeague();
@@ -258,6 +273,18 @@ describe('PlayerService', () => {
   });
 
   describe('listPlayers', () => {
+    it('never lists deleted accounts, for admins or anyone else (#444 D14)', async () => {
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+      await PlayerService.listPlayers({ limit: 10, offset: 0 }, { id: 'admin-1', role: 'ADMIN' });
+      await PlayerService.listPlayers({ limit: 10, offset: 0 }, { id: 'coach-1', role: 'COACH' });
+
+      for (const call of (mockPrisma.user.findMany as jest.Mock).mock.calls) {
+        expect(call[0].where.deletedAt).toBeNull();
+      }
+    });
+
     it('should return all players with pagination', async () => {
       const player1 = createPlayer({ name: 'Player 1' });
       const player2 = createPlayer({ name: 'Player 2' });

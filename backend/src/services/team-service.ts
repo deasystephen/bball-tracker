@@ -41,6 +41,7 @@ import {
   assignTeamRole,
   canManageStaff,
   countDistinctStaffTeams,
+  lastHeadCoachTeams,
   teamAccessWhere,
   canWriteLeague,
 } from '../utils/permissions';
@@ -51,6 +52,9 @@ const USER_SUMMARY_SELECT = {
   email: true,
   // Lets clients label roster-only (managed) players (audit #64)
   isManaged: true,
+  // Deleted accounts stay on rosters as tombstones (#444, D10/D14); clients
+  // derive a "Deleted" chip and a localized label from this, never from name.
+  deletedAt: true,
 } satisfies Prisma.UserSelect;
 
 const TEAM_SUMMARY_SELECT = {
@@ -476,7 +480,7 @@ export class TeamService {
       invitations: [],
       members: team.members.map(({ player, ...member }) => ({
         ...member,
-        player: { id: player.id, name: player.name, isManaged: player.isManaged },
+        player: { id: player.id, name: player.name, isManaged: player.isManaged, deletedAt: player.deletedAt },
       })),
     };
   }
@@ -898,7 +902,7 @@ export class TeamService {
 
     return staff.map(({ user, ...row }) => ({
       ...row,
-      user: { id: user.id, name: user.name, isManaged: user.isManaged },
+      user: { id: user.id, name: user.name, isManaged: user.isManaged, deletedAt: user.deletedAt },
     }));
   }
 
@@ -910,9 +914,9 @@ export class TeamService {
     target: Pick<AddStaffInput, 'userId' | 'email'>
   ): Promise<{ id: string; name: string }> {
     const user = target.userId
-      ? await prisma.user.findUnique({ where: { id: target.userId }, select: { id: true, name: true } })
+      ? await prisma.user.findUnique({ where: { id: target.userId, deletedAt: null }, select: { id: true, name: true } })
       : await prisma.user.findFirst({
-          where: { email: { equals: target.email, mode: 'insensitive' } },
+          where: { email: { equals: target.email, mode: 'insensitive' }, deletedAt: null },
           select: { id: true, name: true },
         });
 
@@ -936,13 +940,9 @@ export class TeamService {
    * change that would remove their HEAD_COACH row.
    */
   private static async assertNotLastHeadCoach(teamId: string, staffUserId: string): Promise<void> {
-    const headCoaches = await prisma.teamStaff.findMany({
-      where: { teamId, role: { type: 'HEAD_COACH' } },
-      select: { userId: true },
-    });
-    const isHead = headCoaches.some((h) => h.userId === staffUserId);
-    const distinctHeadCoaches = new Set(headCoaches.map((h) => h.userId)).size;
-    if (isHead && distinctHeadCoaches <= 1) {
+    // Shared rule with account deletion (#444) — see utils/permissions.
+    const blocking = await lastHeadCoachTeams(staffUserId, prisma, { teamIds: [teamId] });
+    if (blocking.length > 0) {
       throw new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.');
     }
   }

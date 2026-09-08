@@ -39,22 +39,38 @@ describe('PATCH /api/v1/auth/me', () => {
     jest.clearAllMocks();
     currentRole = 'COACH';
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/old.jpg' });
-    (mockPrisma.user.update as jest.Mock).mockImplementation(
-      async ({ data }: { data: { name?: string; profilePictureUrl?: string | null } }) => ({
-        id: TEST_USER_ID,
-        email: 'test@example.com',
-        name: data.name ?? 'Test User',
-        role: currentRole,
-        profilePictureUrl: data.profilePictureUrl === undefined ? null : data.profilePictureUrl,
-        createdAt: new Date('2026-01-01'),
-      })
+    // The write is a guarded updateMany (`deletedAt: null`, #444 D9) followed
+    // by a re-read; the mock re-read reflects whatever the write carried.
+    let written: { name?: string; profilePictureUrl?: string | null } = {};
+    (mockPrisma.user.updateMany as jest.Mock).mockImplementation(async ({ data }: { data: typeof written }) => {
+      written = data;
+      return { count: 1 };
+    });
+    (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockImplementation(async () => ({
+      id: TEST_USER_ID,
+      email: 'test@example.com',
+      name: written.name ?? 'Test User',
+      role: currentRole,
+      profilePictureUrl: written.profilePictureUrl === undefined ? null : written.profilePictureUrl,
+      createdAt: new Date('2026-01-01'),
+    }));
+  });
+
+  it('answers 401 and writes nothing visible when the account was deleted underneath the request (#444 D9)', async () => {
+    (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+    const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ name: 'Back From The Dead' });
+
+    expect(res.status).toBe(401);
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TEST_USER_ID, deletedAt: null } })
     );
+    expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it('requires authentication', async () => {
     const res = await request(app).patch('/api/v1/auth/me').send({ name: 'X' });
     expect(res.status).toBe(401);
-    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it.each(['ADMIN', 'COACH', 'PLAYER', 'PARENT'])('lets a %s set their avatar (regression: PATCH /players/:id 404ed for non-players)', async (role) => {
@@ -67,9 +83,9 @@ describe('PATCH /api/v1/auth/me', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.user.profilePictureUrl).toBe('https://bucket.s3.amazonaws.com/avatars/u/photo.jpg');
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: TEST_USER_ID },
+        where: { id: TEST_USER_ID, deletedAt: null },
         data: { profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/photo.jpg' },
       })
     );
@@ -99,7 +115,7 @@ describe('PATCH /api/v1/auth/me', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user.name).toBe('New Name');
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { name: 'New Name' } })
     );
   });
@@ -109,7 +125,7 @@ describe('PATCH /api/v1/auth/me', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user.profilePictureUrl).toBeNull();
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { profilePictureUrl: null } })
     );
   });
@@ -120,15 +136,15 @@ describe('PATCH /api/v1/auth/me', () => {
       .set(AUTH)
       .send({ name: 'X', id: 'someone-else', email: 'evil@example.com', role: 'ADMIN' });
 
-    const call = (mockPrisma.user.update as jest.Mock).mock.calls[0][0];
-    expect(call.where).toEqual({ id: TEST_USER_ID });
+    const call = (mockPrisma.user.updateMany as jest.Mock).mock.calls[0][0];
+    expect(call.where).toEqual({ id: TEST_USER_ID, deletedAt: null });
     expect(call.data).toEqual({ name: 'X' });
   });
 
   it('rejects an empty body', async () => {
     const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({});
     expect(res.status).toBe(400);
-    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects a javascript: avatar URL', async () => {
@@ -145,7 +161,7 @@ describe('PATCH /api/v1/auth/me', () => {
   });
 
   it('returns 500 on unexpected errors', async () => {
-    (mockPrisma.user.update as jest.Mock).mockRejectedValue(new Error('db down'));
+    (mockPrisma.user.updateMany as jest.Mock).mockRejectedValue(new Error('db down'));
     const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ name: 'X' });
     expect(res.status).toBe(500);
   });

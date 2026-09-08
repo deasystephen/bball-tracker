@@ -56,8 +56,11 @@ export async function authenticate(
         }
 
         // Get user from database
+        // Dev tokens resolve by id, so a deleted account (#444) must be
+        // refused explicitly here — the WorkOS branch below gets that for free
+        // because deletion nulls `workosUserId`.
         const user = await prisma.user.findUnique({
-          where: { id: decoded.userId },
+          where: { id: decoded.userId, deletedAt: null },
           select: {
             id: true,
             email: true,
@@ -87,8 +90,10 @@ export async function authenticate(
     }
 
     // Get user from our database
+    // A deleted account has `workosUserId = null` (#444), so the old token's
+    // `sub` never matches again; `deletedAt: null` is belt and braces.
     const user = await prisma.user.findUnique({
-      where: { workosUserId: workosUser.id },
+      where: { workosUserId: workosUser.id, deletedAt: null },
       select: {
         id: true,
         email: true,

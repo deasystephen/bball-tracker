@@ -191,6 +191,7 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(402);
       expect(response.body).toEqual({
+        error: 'Upgrade required',
         code: 'upgrade_required',
         feature: 'unlimited_teams',
         currentTier: 'FREE',
@@ -207,6 +208,7 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(402);
       expect(response.body).toEqual({
+        error: 'Upgrade required',
         code: 'upgrade_required',
         feature: 'unlimited_teams',
         currentTier: 'FREE',

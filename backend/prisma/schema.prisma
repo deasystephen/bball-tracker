@@ -100,6 +100,12 @@ model User {
   subscriptionExpiresAt DateTime?
   isManaged             Boolean          @default(false)
   managedById           String?
+  // Set by AccountService.deleteAccount (#444). The row is a tombstone from
+  // then on: workosUserId/email/profilePictureUrl are null and name is the
+  // DELETED_USER_NAME constant, so GameEvent/PlayerStats/TeamMember rows keep
+  // a valid target. Every write path onto a User row is guarded by
+  // `deletedAt IS NULL`; never read the tombstone state from name/email.
+  deletedAt             DateTime?
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
@@ -169,8 +175,8 @@ model Guardian {
 // =============================================================================
 
 model League {
-  id   String @id @default(uuid())
-  name String
+  id              String   @id @default(uuid())
+  name            String
   // Set when this league is a coach's auto-provisioned personal container
   // (#442 self-serve team creation). `@unique` gives one personal league per
   // user and is what makes the find-or-create in `TeamService.createTeam`
@@ -227,21 +233,17 @@ model LeagueAdmin {
 
 /**
  * Persistent team identity across seasons (#462).
- *
- *   League (club) ─< Season ─< Team (= team-season: name, ageGroup, gender)
- *                                  │
- *                                  └── lineageId ──> TeamLineage (this)
- *
+ * League (club) ─< Season ─< Team (= team-season: name, ageGroup, gender)
+ * │
+ * └── lineageId ──> TeamLineage (this)
  * A `Team` row IS a team-season: every roster, staff, game and stats table
  * hangs off it and none carries a seasonId. This table is the identity that
  * links one season's row to the next, and nothing more — everything a coach
  * can change season to season (name, ageGroup, gender) lives on Team.
  * Rollover (#461) and adoption (#459) create a NEW Team row with the same
  * lineageId; they never move Team.seasonId on a row with history.
- *
  * Deliberately carries no club: a team's club is the league of the season it
  * plays in (one access path, `permissions.ts#getTeamPermissions`).
- *
  * Created by the migration `20260906120000_team_lineage`, which backfilled one
  * lineage per existing team (hand-written: Prisma would emit a NOT NULL add
  * that fails on a populated table). `deleteTeam` removes a lineage when its
@@ -257,7 +259,7 @@ model TeamLineage {
 }
 
 model Team {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
   name      String
   seasonId  String
   lineageId String
@@ -266,8 +268,8 @@ model Team {
   // max 20 chars, enforced by `createTeamSchema` / `updateTeamSchema`.
   ageGroup  String?
   gender    TeamGender?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 
   season              Season               @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   // Restrict: a lineage is only removed once no team-season references it.

@@ -26,7 +26,7 @@ import {
   canCreateTeam,
   featureCode,
 } from '../../services/entitlements';
-import { UnauthorizedError } from '../../utils/errors';
+import { PaymentRequiredError, UnauthorizedError } from '../../utils/errors';
 import { countDistinctStaffTeams } from '../../utils/permissions';
 
 const PAYMENT_REQUIRED = 402;
@@ -64,12 +64,13 @@ export function requireEntitlement(feature: Feature) {
       return next();
     }
 
-    res.status(PAYMENT_REQUIRED).json({
-      code: 'upgrade_required',
-      feature: featureCode(feature),
-      currentTier,
-      requiredTier: getRequiredTier(feature),
-    });
+    res.status(PAYMENT_REQUIRED).json(
+      new PaymentRequiredError({
+        feature: featureCode(feature),
+        currentTier,
+        requiredTier: getRequiredTier(feature),
+      }).body()
+    );
   };
 }
 
@@ -106,11 +107,12 @@ export function requireTeamCreateLimit() {
       return next();
     }
 
-    res.status(PAYMENT_REQUIRED).json({
-      code: 'upgrade_required',
-      feature: featureCode(Feature.UNLIMITED_TEAMS),
-      currentTier,
-      requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
-    });
+    res.status(PAYMENT_REQUIRED).json(
+      new PaymentRequiredError({
+        feature: featureCode(Feature.UNLIMITED_TEAMS),
+        currentTier,
+        requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
+      }).body()
+    );
   };
 }

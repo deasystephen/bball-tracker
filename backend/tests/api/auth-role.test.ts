@@ -27,13 +27,27 @@ describe('PATCH /api/v1/auth/me/role', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     currentRole = 'PLAYER';
-    (mockPrisma.user.update as jest.Mock).mockImplementation(async ({ data }: { data: { role: string } }) => ({
+    // Guarded updateMany (`deletedAt: null`, #444 D9) followed by a re-read.
+    let writtenRole = currentRole;
+    (mockPrisma.user.updateMany as jest.Mock).mockImplementation(async ({ data }: { data: { role: string } }) => {
+      writtenRole = data.role;
+      return { count: 1 };
+    });
+    (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockImplementation(async () => ({
       id: TEST_USER_ID,
       email: 'test@example.com',
       name: 'Test User',
-      role: data.role,
+      role: writtenRole,
       createdAt: new Date('2026-01-01'),
     }));
+  });
+
+  it('answers 401 when the account was deleted underneath the request (#444 D9)', async () => {
+    (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+    const res = await request(app).patch('/api/v1/auth/me/role').send({ role: 'COACH' });
+
+    expect(res.status).toBe(401);
+    expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it('lets a PLAYER become a COACH', async () => {
@@ -42,8 +56,8 @@ describe('PATCH /api/v1/auth/me/role', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.user.role).toBe('COACH');
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: TEST_USER_ID }, data: { role: 'COACH' } })
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TEST_USER_ID, deletedAt: null }, data: { role: 'COACH' } })
     );
   });
 
@@ -67,14 +81,14 @@ describe('PATCH /api/v1/auth/me/role', () => {
     const res = await request(app).patch('/api/v1/auth/me/role').send({ role: 'COACH' });
 
     expect(res.status).toBe(403);
-    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('never lets a user escalate to ADMIN', async () => {
     const res = await request(app).patch('/api/v1/auth/me/role').send({ role: 'ADMIN' });
 
     expect(res.status).toBe(400);
-    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('returns 400 for a missing or malformed role', async () => {
@@ -83,7 +97,7 @@ describe('PATCH /api/v1/auth/me/role', () => {
   });
 
   it('returns 500 (not a leaked stack) when the database fails', async () => {
-    (mockPrisma.user.update as jest.Mock).mockRejectedValue(new Error('db down'));
+    (mockPrisma.user.updateMany as jest.Mock).mockRejectedValue(new Error('db down'));
     const res = await request(app).patch('/api/v1/auth/me/role').send({ role: 'COACH' });
 
     expect(res.status).toBe(500);

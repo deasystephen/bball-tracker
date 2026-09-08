@@ -510,6 +510,62 @@ export async function countDistinctStaffTeams(userId: string, db: Db = prisma): 
   return rows.length;
 }
 
+export interface LastHeadCoachOptions {
+  /** Restrict the check to these teams (staff removal passes the one team it is about). */
+  teamIds?: string[];
+  /**
+   * Only count teams whose season is active. Account deletion (#444, D4)
+   * uses this: since #462 a Team row is a team-season, so a coach with N past
+   * seasons is sole head coach on N rows and an unscoped block would force
+   * them to delete history to leave. Staff removal leaves it off — it is
+   * always about the current team.
+   */
+  activeSeasonsOnly?: boolean;
+}
+
+/**
+ * Teams where `userId` is the ONLY head coach (distinct HEAD_COACH-type
+ * holders === 1 and that holder is the user), in ONE query: every HEAD_COACH
+ * staff row across the user's head-coach teams, grouped in memory. Shared by
+ * `TeamService.assertNotLastHeadCoach` (one team) and
+ * `AccountService.deleteAccount` (every team, active seasons only), so the
+ * rule cannot drift between the two (#444 review 5A/9A). Accepts a
+ * transaction client so the deletion can run it behind its row lock.
+ */
+export async function lastHeadCoachTeams(
+  userId: string,
+  db: Db = prisma,
+  options: LastHeadCoachOptions = {}
+): Promise<{ id: string; name: string }[]> {
+  const rows = await db.teamStaff.findMany({
+    where: {
+      role: { type: 'HEAD_COACH' },
+      team: {
+        ...(options.teamIds && { id: { in: options.teamIds } }),
+        ...(options.activeSeasonsOnly && { season: { isActive: true } }),
+        // Only teams where the user holds a HEAD_COACH row at all
+        staff: { some: { userId, role: { type: 'HEAD_COACH' } } },
+      },
+    },
+    select: { teamId: true, userId: true, team: { select: { name: true } } },
+  });
+
+  const holdersByTeam = new Map<string, { name: string; holders: Set<string> }>();
+  for (const row of rows) {
+    const entry = holdersByTeam.get(row.teamId) ?? { name: row.team.name, holders: new Set<string>() };
+    entry.holders.add(row.userId);
+    holdersByTeam.set(row.teamId, entry);
+  }
+
+  const result: { id: string; name: string }[] = [];
+  for (const [teamId, { name, holders }] of holdersByTeam) {
+    if (holders.size === 1 && holders.has(userId)) {
+      result.push({ id: teamId, name });
+    }
+  }
+  return result;
+}
+
 /**
  * Create default team roles when a new team is created
  */

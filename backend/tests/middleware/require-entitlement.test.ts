@@ -68,6 +68,7 @@ describe('requireEntitlement', () => {
 
     expect(res.status).toHaveBeenCalledWith(402);
     expect(res.json).toHaveBeenCalledWith({
+      error: 'Upgrade required',
       code: 'upgrade_required',
       feature: 'stats_export',
       currentTier: 'FREE',
@@ -175,6 +176,7 @@ describe('requireTeamCreateLimit', () => {
 
     expect(res.status).toHaveBeenCalledWith(402);
     expect(res.json).toHaveBeenCalledWith({
+      error: 'Upgrade required',
       code: 'upgrade_required',
       feature: 'unlimited_teams',
       currentTier: 'FREE',

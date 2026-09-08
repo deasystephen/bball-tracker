@@ -56,6 +56,17 @@ describe('NotificationService', () => {
       );
     });
 
+    it('refuses (401) to attach a device to a deleted account, without writing (#444 D9)', async () => {
+      (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(null);
+      // The FOR SHARE probe on the User row finds nothing live
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
+
+      await expect(
+        NotificationService.registerToken('user-1', VALID_TOKEN, 'ios')
+      ).rejects.toMatchObject({ statusCode: 401 });
+      expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
+    });
+
     describe('token already registered (role matrix B2.9)', () => {
       const existingRow = (userId: string, ageMs: number): {
         id: string;

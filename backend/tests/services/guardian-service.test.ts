@@ -74,16 +74,23 @@ describe('GuardianService', () => {
           childId: 'c1',
           relationship: 'FATHER',
           isPrimary: true,
-          child: { name: 'Kid One', teamMembers: [{ team: { id: 't1', name: 'Warriors' } }] },
+          child: { name: 'Kid One', isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 't1', name: 'Warriors' } }] },
         },
-        { childId: 'c2', relationship: 'OTHER', isPrimary: false, child: { name: 'Kid Two', teamMembers: [] } },
+        {
+          childId: 'c2',
+          relationship: 'OTHER',
+          isPrimary: false,
+          // Claimed account: managed flag already cleared by syncUser, and it has a login
+          child: { name: 'Kid Two', isManaged: false, workosUserId: 'workos_kid', teamMembers: [] },
+        },
       ]);
 
       const result = await GuardianService.getGuardianOf('parent-1');
 
+      // isManaged marks the only kind of child record a guardian may delete (#444 D5)
       expect(result).toEqual([
-        { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true, teams: [{ id: 't1', name: 'Warriors' }] },
-        { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false, teams: [] },
+        { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true, isManaged: true, teams: [{ id: 't1', name: 'Warriors' }] },
+        { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false, isManaged: false, teams: [] },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'parent-1' } })

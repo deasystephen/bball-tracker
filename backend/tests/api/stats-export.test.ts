@@ -169,6 +169,7 @@ describe('Stats Export API', () => {
 
       expect(res.status).toBe(402);
       expect(res.body).toEqual({
+        error: 'Upgrade required',
         code: 'upgrade_required',
         feature: 'stats_export',
         currentTier: 'FREE',

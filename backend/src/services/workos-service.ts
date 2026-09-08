@@ -124,6 +124,16 @@ export class WorkOSService {
   }
 
   /**
+   * Delete the WorkOS user behind a deleted account (#444, D3). Removes the
+   * email, name and credentials from the identity provider and invalidates
+   * every session and refresh token for it. Called best-effort AFTER the local
+   * transaction has committed; the caller handles failure.
+   */
+  static async deleteUser(workosUserId: string): Promise<void> {
+    await workos.userManagement.deleteUser(workosUserId);
+  }
+
+  /**
    * Get user information from WorkOS
    */
   static async getUser(userId: string): Promise<WorkOSUser> {
@@ -174,12 +184,19 @@ export class WorkOSService {
     const emailVerified = workosUser.emailVerified || false;
     const workosAvatar = workosUser.profilePictureUrl || null;
 
+    // Every write below is conditioned on `deletedAt IS NULL` (#444, D9): the
+    // reads above are unlocked, so a sign-in that read the row a moment before
+    // AccountService.deleteAccount committed would otherwise write the email or
+    // WorkOS id straight back onto the tombstone. Zero rows updated means the
+    // row was deleted underneath us — fall through to a fresh create, which is
+    // exactly what a post-deletion sign-in gets in the steady state.
+
     // 1. Already linked by WorkOS id
     const linked = await prisma.user.findUnique({ where: { workosUserId: workosUser.id } });
     if (linked) {
-      return WorkOSService.mapUniqueViolation(() =>
-        prisma.user.update({
-          where: { id: linked.id },
+      const updated = await WorkOSService.mapUniqueViolation(() =>
+        prisma.user.updateMany({
+          where: { id: linked.id, deletedAt: null },
           data: {
             emailVerified,
             ...(linked.email !== workosUser.email && { email: workosUser.email }),
@@ -187,6 +204,10 @@ export class WorkOSService {
           },
         })
       );
+      if (updated.count === 1) {
+        return prisma.user.findUniqueOrThrow({ where: { id: linked.id } });
+      }
+      logger.info('Linked user was deleted during sign-in; creating a fresh account', { userId: linked.id });
     }
 
     // 2./3. Pre-provisioned row with the same email
@@ -206,9 +227,11 @@ export class WorkOSService {
         promoteToAdmin,
       });
 
-      return WorkOSService.mapUniqueViolation(() =>
-        prisma.user.update({
-          where: { id: byEmail.id },
+      const claimed = await WorkOSService.mapUniqueViolation(() =>
+        prisma.user.updateMany({
+          // Claim-guarded like the RT4 write in team-service: still unclaimed
+          // and not deleted. A concurrent claim or deletion leaves zero rows.
+          where: { id: byEmail.id, workosUserId: null, deletedAt: null },
           data: {
             workosUserId: workosUser.id,
             emailVerified,
@@ -220,6 +243,12 @@ export class WorkOSService {
           },
         })
       );
+      if (claimed.count === 1) {
+        return prisma.user.findUniqueOrThrow({ where: { id: byEmail.id } });
+      }
+      logger.info('Pre-provisioned user changed during sign-in; creating a fresh account', {
+        userId: byEmail.id,
+      });
     }
 
     // 4. Brand-new user. Default role is PLAYER (self-selectable to COACH).
