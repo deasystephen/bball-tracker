@@ -123,5 +123,33 @@
     "changeRole": "Change account type",
     "currentCoach": "You're set up as a coach",
     "currentPlayer": "You're set up as a player"
+  },
+  "account": {
+    "deletedUser": "Deleted user",
+    "delete": {
+      "row": "Delete account",
+      "title": "Delete your account",
+      "childTitle": "Delete {{name}}'s record",
+      "removedTitle": "What is removed",
+      "removedBody": "Your name, email, photo and sign-in; notifications, calendar links, team roles and guardian links; pending invitations.",
+      "childRemovedBody": "{{name}}'s name and photo, and every guardian link. Nobody will be able to see or manage this record again.",
+      "keptTitle": "What is kept (without a name)",
+      "keptBody": "Game stats and box scores already recorded for your teams stay, so your teammates' season numbers still add up.",
+      "childKeptBody": "Game stats and box scores already recorded for {{name}}'s teams stay, so teammates' season numbers still add up.",
+      "confirmLabel": "Type DELETE to confirm",
+      "confirmPlaceholder": "DELETE",
+      "button": "Delete account",
+      "childButton": "Delete record",
+      "cancel": "Cancel",
+      "successToast": "Your account has been deleted",
+      "childSuccessToast": "{{name}}'s record has been deleted",
+      "errorToast": "Couldn't delete the account. Check your connection and try again.",
+      "lastHeadCoachTitle": "Hand your teams over first",
+      "lastHeadCoachBody": "You are the only Head Coach of these teams. Make someone else Head Coach, or delete the team, then try again.",
+      "menuMore": "More options for {{name}}",
+      "menuViewStats": "View stats",
+      "menuManageGuardians": "Manage guardians",
+      "menuDeleteRecord": "Delete {{name}}'s record"
+    }
   }
 }

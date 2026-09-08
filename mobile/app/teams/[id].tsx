@@ -23,6 +23,7 @@ import {
   SortPills,
 } from '../../components';
 import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
+import { displayName } from '../../utils/display-name';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { formatTeamBracket } from '../../utils/team-labels';
@@ -63,7 +64,7 @@ export default function TeamDetailsScreen() {
 
   const staff = team?.staff ?? [];
   const headCoaches = staff.filter((s) => s.role.type === 'HEAD_COACH');
-  const coachNames = (headCoaches.length > 0 ? headCoaches : staff).map((s) => s.user.name);
+  const coachNames = (headCoaches.length > 0 ? headCoaches : staff).map((s) => displayName(s.user));
 
   const handleDelete = () => {
     Alert.alert(
@@ -147,7 +148,7 @@ export default function TeamDetailsScreen() {
           </ThemedText>
           {headCoaches.length > 0 && (
             <ThemedText variant="caption" style={styles.heroCoach}>
-              {t('teams.coach')} {headCoaches.map((s) => s.user.name).join(', ')}
+              {t('teams.coach')} {headCoaches.map((s) => displayName(s.user)).join(', ')}
             </ThemedText>
           )}
         </View>
@@ -297,7 +298,7 @@ export default function TeamDetailsScreen() {
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
                   onPress={() => router.push(`/players/${member.playerId}/stats`)}
-                  accessibilityLabel={member.player.name}
+                  accessibilityLabel={displayName(member.player)}
                 >
                   <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>
                     <ThemedText variant="h3" style={{ color: teamColor }}>
@@ -305,7 +306,7 @@ export default function TeamDetailsScreen() {
                     </ThemedText>
                   </View>
                   <ThemedText variant="captionBold" numberOfLines={1}>
-                    {member.player.name}
+                    {displayName(member.player)}
                   </ThemedText>
                   {member.position && (
                     <ThemedText variant="footnote" color="textSecondary">

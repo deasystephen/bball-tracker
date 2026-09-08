@@ -63,6 +63,7 @@ import {
 import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
+import { displayName } from '../../../utils/display-name';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
@@ -435,8 +436,19 @@ export default function ManagePlayersScreen() {
     member: (typeof members)[number],
     { status, pendingInvitation }: RosterStatusResult
   ): ActionMenuItem[] => {
-    const playerName = member.player.name;
+    const playerName = displayName(member.player);
     const items: ActionMenuItem[] = [];
+
+    // A deleted account (#444) is a tombstone: nothing to invite or edit,
+    // only Remove from team (which never touches stats).
+    if (status === 'deleted') {
+      items.push({
+        label: 'Remove player',
+        destructive: true,
+        onPress: () => handleRemovePlayer(member.playerId, playerName),
+      });
+      return items;
+    }
 
     if (status === 'invited' || status === 'invite_expired') {
       items.push({
@@ -491,7 +503,7 @@ export default function ManagePlayersScreen() {
     return (
       <ListItem
         key={member.id}
-        title={member.player.name}
+        title={displayName(member.player)}
         subtitle={subtitle}
         leftElement={
           member.player.isManaged ? (
@@ -502,13 +514,13 @@ export default function ManagePlayersScreen() {
           <View style={styles.rowActions}>
             <StatusChip
               status={rosterStatus.status}
-              playerName={member.player.name}
+              playerName={displayName(member.player)}
               colors={colors}
             />
             <TouchableOpacity
               onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
-              accessibilityLabel={`Player options: ${member.player.name}`}
+              accessibilityLabel={`Player options: ${displayName(member.player)}`}
               style={styles.rowButton}
             >
               <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />

@@ -38,8 +38,10 @@ const signIn = (role: 'PLAYER' | 'COACH' | 'PARENT', guardianOf?: GuardianOfEntr
 };
 
 const kids: GuardianOfEntry[] = [
-  { childId: 'steph', childName: 'Steph Curry', relationship: 'FATHER', isPrimary: true },
-  { childId: 'seth', childName: 'Seth Curry', relationship: 'FATHER', isPrimary: false },
+  // Claimed account (has signed in): no "Delete record" for a guardian (#444 D5)
+  { childId: 'steph', childName: 'Steph Curry', relationship: 'FATHER', isPrimary: true, isManaged: false, teams: [{ id: 'w', name: 'Warriors' }] },
+  // Managed, unclaimed record: the guardian may delete it
+  { childId: 'seth', childName: 'Seth Curry', relationship: 'FATHER', isPrimary: false, isManaged: true },
 ];
 
 describe('Profile "My kids"', () => {
@@ -56,6 +58,30 @@ describe('Profile "My kids"', () => {
     fireEvent.press(getByLabelText('Steph Curry, Father'));
     expect(mockRouter.push).toHaveBeenCalledWith('/players/steph/stats');
     expect(queryByText('Change account type')).toBeNull();
+  });
+
+  it('opens a per-child menu: stats + guardians for a rostered child, "Delete record" only for a managed child (#444)', () => {
+    signIn('PARENT', kids);
+    const { getByLabelText, getByText, queryByText } = render(<Profile />);
+
+    fireEvent.press(getByLabelText('More options for Steph Curry'));
+    expect(getByText('View stats')).toBeTruthy();
+    expect(getByText('Manage guardians')).toBeTruthy();
+    expect(queryByText("Delete Steph Curry's record")).toBeNull();
+    fireEvent.press(getByText('Manage guardians'));
+    expect(mockRouter.push).toHaveBeenCalledWith('/teams/w/players/steph/guardians');
+
+    fireEvent.press(getByLabelText('More options for Seth Curry'));
+    expect(queryByText('Manage guardians')).toBeNull();
+    fireEvent.press(getByText("Delete Seth Curry's record"));
+    expect(mockRouter.push).toHaveBeenCalledWith('/account/delete?childId=seth');
+  });
+
+  it('shows the Delete account row under Account and opens the confirmation screen (#444)', () => {
+    signIn('PLAYER', []);
+    const { getByLabelText } = render(<Profile />);
+    fireEvent.press(getByLabelText('Delete account'));
+    expect(mockRouter.push).toHaveBeenCalledWith('/account/delete');
   });
 
   it('hides "Change account type" for a COACH who is also a guardian', () => {

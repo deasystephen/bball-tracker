@@ -104,5 +104,33 @@
     "teams": "Equipos",
     "seasons": "Temporadas",
     "upgradeForUnlimited": "Mejora para uso ilimitado"
+  },
+  "account": {
+    "deletedUser": "Usuario eliminado",
+    "delete": {
+      "row": "Eliminar cuenta",
+      "title": "Eliminar tu cuenta",
+      "childTitle": "Eliminar el registro de {{name}}",
+      "removedTitle": "Qué se elimina",
+      "removedBody": "Tu nombre, correo, foto e inicio de sesión; notificaciones, enlaces de calendario, roles de equipo y vínculos de tutor; invitaciones pendientes.",
+      "childRemovedBody": "El nombre y la foto de {{name}}, y todos los vínculos de tutor. Nadie podrá ver ni administrar este registro de nuevo.",
+      "keptTitle": "Qué se conserva (sin nombre)",
+      "keptBody": "Las estadísticas y marcadores ya registrados para tus equipos se conservan, para que los números de la temporada de tus compañeros sigan cuadrando.",
+      "childKeptBody": "Las estadísticas y marcadores ya registrados para los equipos de {{name}} se conservan, para que los números de la temporada sigan cuadrando.",
+      "confirmLabel": "Escribe DELETE para confirmar",
+      "confirmPlaceholder": "DELETE",
+      "button": "Eliminar cuenta",
+      "childButton": "Eliminar registro",
+      "cancel": "Cancelar",
+      "successToast": "Tu cuenta ha sido eliminada",
+      "childSuccessToast": "El registro de {{name}} ha sido eliminado",
+      "errorToast": "No se pudo eliminar la cuenta. Revisa tu conexión e inténtalo de nuevo.",
+      "lastHeadCoachTitle": "Primero cede tus equipos",
+      "lastHeadCoachBody": "Eres el único entrenador principal de estos equipos. Nombra a otro entrenador principal, o elimina el equipo, y vuelve a intentarlo.",
+      "menuMore": "Más opciones para {{name}}",
+      "menuViewStats": "Ver estadísticas",
+      "menuManageGuardians": "Administrar tutores",
+      "menuDeleteRecord": "Eliminar el registro de {{name}}"
+    }
   }
 }

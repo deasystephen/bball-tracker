@@ -41,6 +41,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { useAuthUser } from '../../../store/auth-store';
 import { getApiErrorMessage } from '../../../services/api-client';
+import { displayName } from '../../../utils/display-name';
 
 const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   HEAD_COACH: 'teams.roleHeadCoach',
@@ -118,7 +119,7 @@ export default function TeamStaffScreen() {
         }
       },
     }));
-    Alert.alert(t('teams.changeRoleTitle', { name: row.user.name }), undefined, [
+    Alert.alert(t('teams.changeRoleTitle', { name: displayName(row.user) }), undefined, [
       ...options,
       { text: t('common.cancel'), style: 'cancel' },
     ]);
@@ -127,7 +128,7 @@ export default function TeamStaffScreen() {
   const handleRemove = (row: TeamStaffRow, isSelf: boolean) => {
     Alert.alert(
       isSelf ? t('teams.leaveTeam') : t('teams.removeStaffTitle'),
-      isSelf ? t('teams.leaveTeamMessage') : t('teams.removeStaffMessage', { name: row.user.name }),
+      isSelf ? t('teams.leaveTeamMessage') : t('teams.removeStaffMessage', { name: displayName(row.user) }),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -302,9 +303,9 @@ export default function TeamStaffScreen() {
             return (
               <ListItem
                 key={row.id}
-                title={isSelf ? `${row.user.name} (${t('teams.you')})` : row.user.name}
+                title={isSelf ? `${displayName(row.user)} (${t('teams.you')})` : displayName(row.user)}
                 subtitle={subtitle}
-                accessibilityLabel={`${row.user.name}, ${roleLabel(row)}`}
+                accessibilityLabel={`${displayName(row.user)}, ${roleLabel(row)}`}
                 rightElement={
                   <View style={styles.rowActions}>
                     {canManage && (
@@ -312,7 +313,7 @@ export default function TeamStaffScreen() {
                         onPress={() => handleChangeRole(row)}
                         style={styles.rowButton}
                         accessibilityRole="button"
-                        accessibilityLabel={`${t('teams.changeRole')}: ${row.user.name}`}
+                        accessibilityLabel={`${t('teams.changeRole')}: ${displayName(row.user)}`}
                       >
                         <Ionicons name="swap-horizontal-outline" size={22} color={colors.primary} />
                       </TouchableOpacity>
@@ -323,7 +324,7 @@ export default function TeamStaffScreen() {
                         style={styles.rowButton}
                         accessibilityRole="button"
                         accessibilityLabel={
-                          isSelf ? t('teams.leaveTeam') : `${t('teams.removeStaff')}: ${row.user.name}`
+                          isSelf ? t('teams.leaveTeam') : `${t('teams.removeStaff')}: ${displayName(row.user)}`
                         }
                       >
                         <Ionicons

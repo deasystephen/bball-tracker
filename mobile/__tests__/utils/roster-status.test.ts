@@ -33,6 +33,20 @@ const row = (
 });
 
 describe('getRosterStatus', () => {
+  it('a deleted account (deletedAt set) is Deleted before any other rule (#444)', () => {
+    const gone = { playerId: 'p0', player: { isManaged: false, deletedAt: '2026-09-07T00:00:00Z' } };
+    const result = getRosterStatus(gone, [row('p0', 'PENDING', FUTURE), row('p0', 'ACCEPTED', PAST)], NOW);
+    expect(result).toEqual({ status: 'deleted' });
+    expect(rosterStatusLabel('deleted')).toBe('Deleted');
+    expect(
+      rosterStatusColor('deleted', { success: 's', primary: 'p', warning: 'w', textSecondary: 'n' })
+    ).toBe('n');
+  });
+
+  it('a null deletedAt is a live account', () => {
+    expect(getRosterStatus({ playerId: 'p1', player: { isManaged: false, deletedAt: null } }, [], NOW).status).toBe('active');
+  });
+
   it('claimed account (isManaged false) is Active regardless of invitations', () => {
     const result = getRosterStatus(member('p1', false), [row('p1', 'PENDING', FUTURE)], NOW);
     expect(result.status).toBe('active');

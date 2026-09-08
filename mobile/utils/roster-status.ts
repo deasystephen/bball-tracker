@@ -6,6 +6,11 @@
  * (same convention as utils/game-result.ts):
  *
  * ```
+ * player.deletedAt set ─────────────────────────► DELETED (account deletion, #444;
+ *                                                          checked FIRST — the
+ *                                                          tombstone has isManaged
+ *                                                          false, which would read
+ *                                                          as Active)
  * player.isManaged === false ───────────────────► ACTIVE  (claimed via login)
  * isManaged ─┬─ any ACCEPTED invitation row ────► ACTIVE  (accepted via web
  *            │                                            link, never signed in)
@@ -22,7 +27,7 @@
 
 import { isInvitationExpired } from './invitation-expiry';
 
-export type RosterStatus = 'active' | 'invited' | 'invite_expired' | 'not_invited';
+export type RosterStatus = 'deleted' | 'active' | 'invited' | 'invite_expired' | 'not_invited';
 
 /** One row of `team.invitations` on `GET /teams/:id` (roster managers only). */
 export interface TeamInvitationStatusRow {
@@ -40,10 +45,16 @@ export interface RosterStatusResult {
 }
 
 export function getRosterStatus(
-  member: { playerId: string; player: { isManaged?: boolean } },
+  member: { playerId: string; player: { isManaged?: boolean; deletedAt?: string | null } },
   invitations: TeamInvitationStatusRow[] | undefined | null,
   now: Date = new Date()
 ): RosterStatusResult {
+  // A deleted account stays on the roster as a tombstone (#444 D10); no
+  // invite action applies to it, only Remove from team.
+  if (member.player.deletedAt) {
+    return { status: 'deleted' };
+  }
+
   // A claimed account (isManaged flipped off by first login) is always Active.
   if (member.player.isManaged === false) {
     return { status: 'active' };
@@ -70,6 +81,8 @@ export function getRosterStatus(
 
 export function rosterStatusLabel(status: RosterStatus): string {
   switch (status) {
+    case 'deleted':
+      return 'Deleted';
     case 'active':
       return 'Active';
     case 'invited':
@@ -83,13 +96,16 @@ export function rosterStatusLabel(status: RosterStatus): string {
 
 /**
  * Chip color per status, from the theme palette. `active` = success,
- * `invited` = primary, `invite_expired` = warning, `not_invited` = neutral.
+ * `invited` = primary, `invite_expired` = warning, `not_invited` and
+ * `deleted` = neutral.
  */
 export function rosterStatusColor(
   status: RosterStatus,
   colors: { success: string; primary: string; warning: string; textSecondary: string }
 ): string {
   switch (status) {
+    case 'deleted':
+      return colors.textSecondary;
     case 'active':
       return colors.success;
     case 'invited':
