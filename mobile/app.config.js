@@ -16,6 +16,20 @@ const getAmplitudeApiKey = () => {
   return ''; // Disabled in local development
 };
 
+// iOS permission purpose strings (#451). App Review rejects generic purpose
+// strings, and the Expo config plugins fall back to boilerplate ("Allow
+// $(PRODUCT_NAME) to access your camera") when none is given. The camera and
+// the photo library are used for ONE thing: picking a profile photo, for the
+// signed-in user (Profile) or for a player a coach adds to a roster
+// (components/AvatarPicker.tsx -> services/upload-service.ts). Keep these
+// strings true to that; `__tests__/app-config.test.ts` pins them.
+// Baked into Info.plist at build time: they ship with the next `eas build`,
+// an OTA cannot change them.
+const CAMERA_PURPOSE =
+  'Hooplings uses your camera to take a profile photo for you or for a player on your team roster.';
+const PHOTOS_PURPOSE =
+  'Hooplings uses your photo library so you can choose a profile photo for yourself or for a player on your team roster.';
+
 export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
@@ -83,7 +97,24 @@ export default {
       'expo-router',
       'expo-localization',
       'expo-font',
-      'expo-secure-store',
+      // The app never asks for biometric unlock (services/secure-storage.ts
+      // passes only `keychainAccessible`, never `requireAuthentication`), so
+      // the plugin's default NSFaceIDUsageDescription would declare a
+      // capability the app does not use (#451). `false` removes the key.
+      ['expo-secure-store', { faceIDPermission: false }],
+      // Listed explicitly so the purpose strings are ours: prebuild applies
+      // this plugin with its boilerplate defaults when it is absent. The
+      // picker is images-only (`mediaTypes: ['images']`), so no audio is ever
+      // recorded: `microphonePermission: false` drops
+      // NSMicrophoneUsageDescription on iOS and blocks RECORD_AUDIO on Android.
+      [
+        'expo-image-picker',
+        {
+          cameraPermission: CAMERA_PURPOSE,
+          photosPermission: PHOTOS_PURPOSE,
+          microphonePermission: false,
+        },
+      ],
     ],
     extra: {
       apiUrl: getApiUrl(),
