@@ -56,6 +56,8 @@ jest.mock('../../hooks/useInvitations', () => ({
 jest.mock('../../hooks/usePlayers', () => ({
   ...jest.requireActual('../../hooks/usePlayers'),
   usePlayers: () => ({ data: { players: mockPlayersList }, isLoading: false }),
+  // The fix-email sheet (#449) has its own suite: players-email-issue.test.tsx
+  useUpdatePlayer: () => ({ mutateAsync: jest.fn(), isPending: false }),
 }));
 
 const headRole: TeamStaff['role'] = {

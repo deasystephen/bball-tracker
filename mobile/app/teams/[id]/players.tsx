@@ -52,7 +52,7 @@ import {
   useTeamInvitations,
   type TeamInvitation,
 } from '../../../hooks/useInvitations';
-import { usePlayers, type Player } from '../../../hooks/usePlayers';
+import { usePlayers, useUpdatePlayer, type Player } from '../../../hooks/usePlayers';
 import {
   getRosterStatus,
   rosterStatusLabel,
@@ -60,6 +60,13 @@ import {
   type RosterStatus,
   type RosterStatusResult,
 } from '../../../utils/roster-status';
+import {
+  getEmailDeliveryIssue,
+  emailDeliveryIssueLabel,
+  emailDeliveryIssueExplanation,
+  type EmailDeliveryIssue,
+} from '../../../utils/email-delivery';
+import type { NormalizedApiError } from '../../../services/api-client';
 import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
@@ -106,6 +113,35 @@ function StatusChip({
   );
 }
 
+/** Second chip on a row whose address SES stopped delivering to (#449). */
+function EmailIssueChip({
+  issue,
+  playerName,
+  color,
+}: {
+  issue: EmailDeliveryIssue;
+  playerName: string;
+  color: string;
+}) {
+  return (
+    <View
+      style={[styles.chip, { borderColor: color }]}
+      // Row-anchored, like StatusChip.
+      accessibilityLabel={`${playerName} email: ${emailDeliveryIssueLabel(issue)}`}
+    >
+      <ThemedText variant="caption" style={{ color }}>
+        {emailDeliveryIssueLabel(issue)}
+      </ThemedText>
+    </View>
+  );
+}
+
+/** Same shape the backend's `z.string().email()` accepts for everyday addresses. */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Roster statuses where the player is still waiting on an invitation email. */
+const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_expired', 'not_invited']);
+
 export default function ManagePlayersScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -131,10 +167,14 @@ export default function ManagePlayersScreen() {
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [editJersey, setEditJersey] = useState('');
   const [editPosition, setEditPosition] = useState('');
+  // Fix-email sheet (opened from the ActionMenu of a row with an email issue)
+  const [emailEditMember, setEmailEditMember] = useState<TeamMember | null>(null);
+  const [editEmail, setEditEmail] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const removePlayer = useRemovePlayerFromTeam();
   const updateTeamMember = useUpdateTeamMember();
+  const updatePlayer = useUpdatePlayer();
   const addRosterPlayer = useAddRosterPlayer();
   const createInvitation = useCreateInvitation();
   const cancelInvitation = useCancelInvitation();
@@ -358,6 +398,52 @@ export default function ManagePlayersScreen() {
     }
   };
 
+  const openEmailEdit = (member: TeamMember) => {
+    setEditEmail(member.player.email ?? '');
+    setEmailEditMember(member);
+  };
+
+  const trimmedEditEmail = editEmail.trim().toLowerCase();
+  // The flag follows the address: saving the same one would change nothing
+  // server-side, so the sheet only accepts a different, well-formed address.
+  const canSaveEmail =
+    EMAIL_PATTERN.test(trimmedEditEmail) &&
+    trimmedEditEmail !== (emailEditMember?.player.email ?? '').trim().toLowerCase();
+
+  /**
+   * Correct the address, then send the invitation to it in the same step when
+   * the player is still waiting on one — that is why the coach is here.
+   */
+  const handleSaveEmail = async (resend: boolean) => {
+    if (!emailEditMember || !canSaveEmail) return;
+    const { playerId } = emailEditMember;
+    const playerName = displayName(emailEditMember.player);
+
+    try {
+      await updatePlayer.mutateAsync({ playerId, data: { email: trimmedEditEmail } });
+    } catch (err) {
+      // Only the coach who added an unclaimed player may change its address
+      // (backend rule B2.10); the server's own text is about "your profile".
+      const forbidden = (err as NormalizedApiError).apiError?.status === 403;
+      toast.showToast(
+        forbidden
+          ? `Only the coach who added ${playerName} can change this email address.`
+          : err instanceof Error
+            ? err.message
+            : 'Failed to update email address',
+        'error'
+      );
+      return;
+    }
+
+    setEmailEditMember(null);
+    if (resend) {
+      await handleResendInvite(playerId, playerName);
+    } else {
+      toast.showToast('Email address updated', 'success');
+    }
+  };
+
   const handleRemovePlayer = (playerId: string, playerName: string) => {
     Alert.alert(
       'Remove Player',
@@ -450,6 +536,16 @@ export default function ManagePlayersScreen() {
       return items;
     }
 
+    // First, because it is why the invitations below are not arriving. Only
+    // an unclaimed (managed) player's address is the coach's to change; a
+    // claimed account's email belongs to its login (#449).
+    if (getEmailDeliveryIssue(member.player) && member.player.isManaged) {
+      items.push({
+        label: 'Fix email address',
+        onPress: () => openEmailEdit(member),
+      });
+    }
+
     if (status === 'invited' || status === 'invite_expired') {
       items.push({
         label: 'Resend invitation',
@@ -498,7 +594,9 @@ export default function ManagePlayersScreen() {
     ]
       .filter(Boolean)
       .join(' • ');
-    const subtitle = details || member.player.email || undefined;
+    const emailIssue = getEmailDeliveryIssue(member.player);
+    // A flagged row shows the address itself: it is what the coach has to check.
+    const subtitle = (emailIssue && member.player.email) || details || member.player.email || undefined;
 
     return (
       <ListItem
@@ -512,11 +610,20 @@ export default function ManagePlayersScreen() {
         }
         rightElement={
           <View style={styles.rowActions}>
-            <StatusChip
-              status={rosterStatus.status}
-              playerName={displayName(member.player)}
-              colors={colors}
-            />
+            <View style={styles.chipColumn}>
+              <StatusChip
+                status={rosterStatus.status}
+                playerName={displayName(member.player)}
+                colors={colors}
+              />
+              {emailIssue && (
+                <EmailIssueChip
+                  issue={emailIssue}
+                  playerName={displayName(member.player)}
+                  color={colors.error}
+                />
+              )}
+            </View>
             <TouchableOpacity
               onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
@@ -949,6 +1056,81 @@ export default function ManagePlayersScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Fix-email sheet (#449): same bottom-sheet idiom as the edit sheet.
+          The status is derived from LIVE state, like the ActionMenu items. */}
+      {(() => {
+        const liveMember = members.find((m) => m.playerId === emailEditMember?.playerId);
+        const issue = liveMember ? getEmailDeliveryIssue(liveMember.player) : null;
+        const awaitingInvite =
+          !!liveMember &&
+          AWAITING_INVITE.has(
+            getRosterStatus(liveMember, invitationsByPlayer.get(liveMember.playerId), statusNow).status
+          );
+        const saving = updatePlayer.isPending || createInvitation.isPending;
+        return (
+          <Modal
+            visible={emailEditMember != null}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setEmailEditMember(null)}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.editBackdropContainer}
+            >
+              <Pressable
+                style={styles.editBackdrop}
+                onPress={() => setEmailEditMember(null)}
+                accessibilityLabel="Close email edit"
+              />
+              <View
+                style={[
+                  styles.editSheet,
+                  {
+                    backgroundColor: colors.background,
+                    paddingBottom: insets.bottom + spacing.md,
+                  },
+                ]}
+              >
+                <ThemedText variant="h4" style={styles.editTitle}>
+                  {emailEditMember ? `Email for ${displayName(emailEditMember.player)}` : ''}
+                </ThemedText>
+                {issue && (
+                  <ThemedText variant="caption" color="textSecondary" style={styles.editHint}>
+                    {emailDeliveryIssueExplanation(issue)}
+                  </ThemedText>
+                )}
+                <Input
+                  label="Email address"
+                  placeholder="name@example.com"
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="edit-player-email-input"
+                />
+                <Button
+                  title={awaitingInvite ? 'Save & send invitation' : 'Save'}
+                  onPress={() => handleSaveEmail(awaitingInvite)}
+                  loading={saving}
+                  disabled={!canSaveEmail || saving}
+                  fullWidth
+                  testID="edit-player-email-save"
+                />
+                <Button
+                  title="Cancel"
+                  variant="outline"
+                  onPress={() => setEmailEditMember(null)}
+                  style={styles.cancelButton}
+                  fullWidth
+                />
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+        );
+      })()}
     </ThemedView>
   );
 }
@@ -1001,6 +1183,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  chipColumn: {
+    alignItems: 'flex-end',
+    gap: spacing.xxs,
   },
   chip: {
     borderWidth: 1,
@@ -1084,6 +1270,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   editTitle: {
+    marginBottom: spacing.md,
+  },
+  editHint: {
     marginBottom: spacing.md,
   },
 });

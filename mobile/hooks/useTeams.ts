@@ -46,6 +46,12 @@ export interface TeamMember {
     isManaged?: boolean;
     /** Set for a deleted account (tombstone, #444); render via utils/display-name. */
     deletedAt?: string | null;
+    /**
+     * What SES reported for `email` (#449). Roster managers only, and absent
+     * from a backend that predates it; derive via utils/email-delivery.
+     */
+    emailSuppressedAt?: string | null;
+    emailSuppressedReason?: 'BOUNCE' | 'COMPLAINT' | null;
   };
 }
 
