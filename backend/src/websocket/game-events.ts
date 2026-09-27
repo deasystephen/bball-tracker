@@ -20,7 +20,7 @@
  * Target concurrency
  *  - 50 concurrent spectators per game on a single ECS task is the GA target.
  *    For higher fan-out, add the `@socket.io/redis-adapter` (out of scope
- *    for this change; see issue #26).
+ *    for this change; see issue #452).
  */
 
 import type { Server as SocketServer, Socket } from 'socket.io';

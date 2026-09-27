@@ -20,6 +20,7 @@
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
         { "name": "PORT", "value": "3000" },
+        { "name": "MAX_REPLICAS", "value": "1" },
         { "name": "REDIS_URL", "value": "redis://bball-tracker-production-redis.xykxqz.0001.use1.cache.amazonaws.com:6379" },
         { "name": "WORKOS_REDIRECT_URI", "value": "https://api.hooplings.com/api/v1/auth/callback" },
         { "name": "ALLOWED_REDIRECT_SCHEMES", "value": "hooplings" },

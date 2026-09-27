@@ -106,10 +106,29 @@ aws ecs create-service \
   --cluster bball-tracker-cluster \
   --service-name bball-tracker-backend \
   --task-definition bball-tracker-backend \
-  --desired-count 2 \
+  --desired-count 1 \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}"
 ```
+
+`--desired-count` is 1 on purpose: the API is single-replica (see [Scaling](#scaling)).
+
+### Deploy window: avoid scheduled game times
+
+Production deploys are rolling, with `deployment_maximum_percent = 200` (`infra/ecs.tf`), so **every
+deploy briefly runs two tasks** — the old one draining and the new one taking connections. Socket.io
+rooms live in process memory, so for that window a live game is split: a coach tracking on one task
+and the spectators on the other stop seeing each other's events, and nobody gets an error. Clients
+converge again once the old task stops and they reconnect (every broadcast and the join snapshot
+carry the current score), but the gap is visible to anyone watching a game.
+
+- **Do not deploy during scheduled game windows** (weekday evenings and weekends, in practice).
+  Check for `IN_PROGRESS` games before merging anything that deploys.
+- Remember what deploys: any push to `main` touching a non-markdown file under `backend/**`,
+  `infra/**`, `docker/**` or `.github/workflows/ci.yml` — including auto-merged Dependabot PRs.
+- The startup guard does not (and must not) trip on this overlap: it checks the configured ceiling
+  (`MAX_REPLICAS`), not the live task count.
+- The window closes for good with the Redis adapter (#452).
 
 ## Environment Variables
 
@@ -144,9 +163,14 @@ As of 2026-08-30 the API task carries:
   accept route is an unauthenticated bearer-token endpoint; `tests/api/cors.test.ts` reads the
   value from `infra/task-definition.json`, so dropping the apex fails CI
 - `PORT`, `NODE_ENV=production`
-- `REDIS_SOCKET_ADAPTER_URL`: not set — Socket.io is single-replica; the server logs a `FATAL-WARN`
-  at startup in production without it. Keep `desiredCount = 1` until a Redis adapter is wired up
-  (issue #26)
+- `MAX_REPLICAS` (`1`): the replica ceiling the API's startup guard checks
+  (`backend/src/utils/replica-guard.ts`, #446). In production a value above 1, or one that is not a
+  positive integer, makes the process **exit non-zero before it listens**; unset logs an error and
+  boots. It must equal the `max_capacity` default in `infra/variables.tf` —
+  `backend/tests/infra/replica-ceiling.test.ts` fails CI if the two drift
+- `REDIS_SOCKET_ADAPTER_URL`: not set, and **setting it does nothing today** —
+  `@socket.io/redis-adapter` is not installed, so the guard does not accept it as a reason to run
+  more than one replica. It becomes meaningful when the Redis adapter lands (#452)
 
 Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs) and `S3_BUCKET`.
 (Kafka was removed entirely — the config stub, `kafkajs` dependency, and local containers are gone.)
@@ -168,10 +192,27 @@ Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs)
 
 ## Scaling
 
-Configure auto-scaling for ECS service based on:
-- CPU utilization
-- Memory utilization
-- Request count
+**The API is pinned to a single task (#446).** Socket.io uses the in-memory adapter and every rate
+limiter keeps its counters in process memory, so a second task silently splits live games and
+multiplies each rate limit. Three things hold the line, and they change together:
+
+- `infra/variables.tf`: `max_capacity` defaults to 1 and its `validation` block rejects any other
+  value, so a `terraform.tfvars` override cannot raise it (`min_capacity` accepts 0 or 1; 0 exists
+  for maintenance windows).
+- `infra/task-definition.json`: `MAX_REPLICAS=1`, read by the startup guard.
+- `backend/src/utils/replica-guard.ts`: refuses to start in production above a ceiling of 1.
+
+The autoscaling target and its CPU target-tracking policy stay defined in `infra/ecs.tf`; with
+min = max = 1 the policy has no room to act. **Do not raise capacity as a fix for load.** The order
+is: Redis adapter plus a Redis-backed rate-limit store first (#452), capacity second.
+
+Verify the live ceiling with:
+
+```bash
+aws application-autoscaling describe-scalable-targets --service-namespace ecs \
+  --resource-ids service/bball-tracker-production-cluster/bball-tracker-production-api \
+  --query 'ScalableTargets[0].[MinCapacity,MaxCapacity]'
+```
 
 ## Cost Optimization
 

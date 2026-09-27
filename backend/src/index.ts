@@ -16,6 +16,7 @@ import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
+import { enforceReplicaGuard } from './utils/replica-guard';
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,28 +30,17 @@ const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(
 
 // Socket.io currently uses the in-memory adapter. Rooms are local to a single
 // process, so broadcasts do NOT fan out across replicas. The GA target is a
-// single ECS task; horizontal scale requires `@socket.io/redis-adapter`
-// (tracked in issue #26). The startup guard below logs loudly if we boot in
-// production without a Redis adapter URL configured.
+// single ECS task; horizontal scale requires `@socket.io/redis-adapter` and a
+// shared rate-limit store (tracked in issue #452). `enforceReplicaGuard()`
+// (utils/replica-guard.ts) refuses to start the server in production when the
+// configured replica ceiling (MAX_REPLICAS) is above 1 — see the call next to
+// `httpServer.listen` at the bottom of this file (#446).
 const io = new SocketServer(httpServer, {
   cors: {
     origin: corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
-
-if (
-  process.env.NODE_ENV === 'production' &&
-  !process.env.REDIS_SOCKET_ADAPTER_URL
-) {
-  logger.error(
-    'FATAL-WARN: Socket.io running without Redis adapter in production. ' +
-      'Live game broadcasts will only reach clients connected to the SAME ' +
-      'backend replica. This is safe only when running a SINGLE ECS task. ' +
-      'Set REDIS_SOCKET_ADAPTER_URL and wire up @socket.io/redis-adapter ' +
-      'before scaling >1 replica. (issue #26)'
-  );
-}
 
 const PORT = process.env.PORT || 3000;
 
@@ -159,6 +149,9 @@ app.use((_req, res) => {
 
 // Only start server if this file is run directly (not when imported)
 if (require.main === module) {
+  // Exits non-zero before the server listens when the replica ceiling would
+  // split live games across tasks (#446). Must stay ahead of `listen`.
+  enforceReplicaGuard();
   warnMissingUrlConfig();
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });

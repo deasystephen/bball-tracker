@@ -2,8 +2,9 @@
  * In-memory rate limits for the Socket.io layer (audit #16).
  *
  * Three protections, all keyed in module state (single-replica only, like the
- * in-memory Socket.io adapter — see the startup guard in `src/index.ts` and
- * issue #26; counters reset on process restart, which is fine for abuse caps):
+ * in-memory Socket.io adapter — see the startup guard in
+ * `src/utils/replica-guard.ts` and issue #452; counters reset on process
+ * restart, which is fine for abuse caps):
  *
  *  - **Handshake attempt limit per IP** (fixed window): applied *before* token
  *    verification, so unauthenticated connect spam cannot burn a JWKS check +

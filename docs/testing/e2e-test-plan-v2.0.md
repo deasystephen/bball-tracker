@@ -1108,8 +1108,8 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 
 ### S.7 — ⚠ Multi-replica Socket.io
 - [ ] Verified-broken / Notes
-- **Issue:** Single-replica only (in-memory adapter). Backend logs fatal warning on startup if `NODE_ENV=production` and `REDIS_SOCKET_ADAPTER_URL` is unset.
-- **Expected fail mode:** Currently 1 ECS task running. Scaling beyond would split rooms.
+- **Issue:** Single-replica only (in-memory adapter); Redis adapter tracked in #452. Autoscaling `max_capacity` is pinned to 1 and the backend refuses to start in production when `MAX_REPLICAS` is above 1 or not a positive integer (#446).
+- **Expected fail mode:** 1 ECS task in steady state. A rolling deploy briefly runs 2 tasks and splits rooms for that window — don't test live games across a deploy.
 
 ### S.8 — ⚠ Mid-session Socket.io JWT reauth
 - [ ] Verified-broken / Notes
