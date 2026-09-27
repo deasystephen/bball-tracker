@@ -999,8 +999,9 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
   `dev-users`, `dev-login`) filter tombstones out. `guardianOf[].isManaged` tells the app which
   child records a guardian may delete.
 - Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats
-  retained de-identified; RDS backups 7 days; Sentry/Amplitude keep records keyed on the internal
-  id for their windows (no name/email/photo). Seed: `mike.brown@example.com` (assistant coach, never
+  retained de-identified; RDS backups 7 days; backend Sentry and Amplitude keep records keyed on
+  the internal id for their windows (no name/email/photo), mobile Sentry carries no user id at
+  all, and Amplitude also holds IP-derived city/region/country (#559). Seed: `mike.brown@example.com` (assistant coach, never
   blocked) is the self-delete Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria
   James as guardian) is the guardian child-delete fixture; the seed sweeps tombstones first.
 - Tests: `tests/services/account-service.test.ts`, `tests/api/account-delete.test.ts`,
@@ -1012,6 +1013,24 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - Backend Sentry (`utils/sentry.ts`): `beforeSend` redacts `request.url`, `request.query_string`, breadcrumb `data.url` and the `transaction` name with the same helpers; `beforeSendTransaction` does the same for performance transactions (`transaction`, `request.url`, `contexts.trace.data.*url*`, span descriptions/data), which bypass `beforeSend`.
 - Mobile Sentry (`services/sentry.ts`): `redactUrl` masks by **value** (not only by key name) on `request.url`, `request.query_string`, breadcrumb `data.url`/`from`/`to`, and `transaction`; `beforeSendTransaction` reuses `beforeSend`.
 - `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints solely under `NODE_ENV=development`.
+
+### Analytics tracking options (#559)
+
+`mobile/services/analytics.ts` passes `AMPLITUDE_TRACKING_OPTIONS` to `amplitude.init`; the SDK's
+defaults are never relied on (they turn everything on). Two values are decisions:
+
+- **`ipAddress: true`** — kept on purpose (product decision 2026-09-27) so Amplitude derives city,
+  region and country. It is declared as **Coarse Location** in the privacy-label draft
+  (`docs/release/app-store-submission.md`) and in the runbook's "Retention" section. The device's
+  location services are never used. `country: false` goes with it: that option is the country the
+  device reports, and enabling it disables the server-side lookup that supplies the city.
+- **`adid: false`** — the Android advertising id is never sent; the app shows no ads and the label
+  answers "no tracking".
+
+`__tests__/services/analytics.test.ts` pins the full set and compares its keys against the
+installed SDK's defaults, so an SDK upgrade that adds a tracking option fails CI until it is
+decided. Changing an option means changing the label draft and the runbook in the same PR. It is
+JS only, so it ships by OTA.
 
 ### Team staff management (role matrix B2.3 / B2.7 / B2.8, decision 2)
 

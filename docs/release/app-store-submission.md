@@ -42,10 +42,11 @@ longer than needed to service the request; it is **linked** when it is stored ag
 identity; **tracking** means combining it with third-party data for advertising or sharing it
 with a data broker.
 
-**Tracking: No, for every row.** The app has no advertising SDK, does not read the advertising
-identifier (the Amplitude iOS module reads `identifierForVendor` only, see
-`node_modules/@amplitude/analytics-react-native/ios/AppleContextProvider.swift`) and shares data
-with no data broker. No App Tracking Transparency prompt is needed.
+**Tracking: No, for every row.** The app has no advertising SDK and shares data with no data
+broker. It reads no advertising identifier: on iOS the Amplitude module reads
+`identifierForVendor` only (`node_modules/@amplitude/analytics-react-native/ios/AppleContextProvider.swift`),
+and on Android the advertising id is switched off (`adid: false` in `AMPLITUDE_TRACKING_OPTIONS`,
+`mobile/services/analytics.ts`). No App Tracking Transparency prompt is needed.
 
 | Apple data type | What is collected | Feature / SDK | Linked to identity | Purpose | Evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -54,13 +55,14 @@ with no data broker. No App Tracking Transparency prompt is needed.
 | User Content: Photos or Videos | One profile photo per person (photos only, no video) | Avatar upload to Amazon S3 | Yes | App Functionality | `mobile/services/upload-service.ts`, `backend/src/services/upload-service.ts` |
 | User Content: Other User Content | Teams, rosters, jersey numbers and positions, games, scores, game events and statistics, RSVPs, announcements | Core product | Yes | App Functionality | `backend/prisma/schema.prisma` |
 | Identifiers: User ID | The internal account id (a UUID) | Backend account; Amplitude `setUserId` | Yes | App Functionality, Analytics | `mobile/store/auth-store.ts` (`identifyUser(user.id)`, no other properties), `mobile/services/analytics.ts` |
-| Identifiers: Device ID | Expo push token; Amplitude device id and `identifierForVendor` | Push notifications; Amplitude default tracking options | Yes | App Functionality (push), Analytics (Amplitude) | `mobile/hooks/useNotifications.ts` (`POST /auth/push-token`), `mobile/services/analytics.ts` (`amplitude.init(apiKey)` with default options) |
+| Identifiers: Device ID | Expo push token; Amplitude device id and `identifierForVendor` | Push notifications; Amplitude (`idfv: true`) | Yes | App Functionality (push), Analytics (Amplitude) | `mobile/hooks/useNotifications.ts` (`POST /auth/push-token`), `mobile/services/analytics.ts` (`AMPLITUDE_TRACKING_OPTIONS`) |
+| Location: Coarse Location | City, region and country, derived by Amplitude on its servers from the IP address of the request. The device's location services are never used | Amplitude (`ipAddress: true`) | Yes (events carry the user id) | Analytics | `mobile/services/analytics.ts` (`AMPLITUDE_TRACKING_OPTIONS`), note 3 |
 | Usage Data: Product Interaction | Six event names with **no event properties**: `app_opened`, `user_logged_in`, `user_logged_out`, `game_created`, `game_updated`, `game_deleted` | Amplitude | Yes (events carry the user id) | Analytics | `mobile/services/analytics.ts`, call sites in `mobile/app/_layout.tsx`, `mobile/store/auth-store.ts`, `mobile/hooks/useGames.ts` |
 | Diagnostics: Crash Data | Unhandled errors and caught exceptions with stack traces | Sentry | No (see note 1) | App Functionality | `mobile/services/sentry.ts` |
 | Diagnostics: Performance Data | Sampled performance transactions (`tracesSampleRate: 0.1`) | Sentry | No (see note 1) | App Functionality | `mobile/services/sentry.ts` |
-| Diagnostics: Other Diagnostic Data | Breadcrumbs (navigation and request URLs, redacted), device model, OS version, app release | Sentry; Amplitude device context | Sentry: No. Amplitude: Yes | App Functionality, Analytics | `mobile/services/sentry.ts`, Amplitude defaults |
+| Diagnostics: Other Diagnostic Data | Breadcrumbs (navigation and request URLs, redacted), device model, OS version, app release | Sentry; Amplitude device context | Sentry: No. Amplitude: Yes | App Functionality, Analytics | `mobile/services/sentry.ts`, `AMPLITUDE_TRACKING_OPTIONS` |
 
-Not collected: precise location, contacts, health, financial or payment data, browsing or search
+Not collected: precise location (the app requests no location permission), contacts, health, financial or payment data, browsing or search
 history, sensitive information, audio, messages, advertising data. There is no in-app purchase
 flow.
 
@@ -78,11 +80,16 @@ flow.
    `session`, `email`, `otp` and similar are scrubbed; URLs are redacted by value, masking
    `code`, `state` and `token` query values and the secret path segment after `by-token/`,
    `calendar/` and `invite/`. Resource ids in URLs (team and game UUIDs) are not masked.
-3. **Amplitude runs on its default tracking options.** `amplitude.init(apiKey)` passes no
-   options, so the SDK defaults apply (`node_modules/@amplitude/analytics-react-native`,
-   `getDefaultConfig`): IP address, `identifierForVendor`, device manufacturer and model, OS name
-   and version, platform, language and carrier. The IP address is resolved server-side by
-   Amplitude into city, region and country. **That is an open decision, see section 4.**
+3. **Amplitude's tracking options are set explicitly (#559).** `amplitude.init` is passed
+   `AMPLITUDE_TRACKING_OPTIONS` (`mobile/services/analytics.ts`), so nothing depends on the SDK's
+   defaults, and `mobile/__tests__/services/analytics.test.ts` fails if an SDK upgrade adds an
+   option the app has not decided. Sent with every event: the IP address of the request,
+   `identifierForVendor`, the Android app set id, device manufacturer and model, OS name and
+   version, platform, language and carrier. Not sent: the Android advertising id.
+   **Keeping the IP address is a product decision (2026-09-27):** Amplitude resolves it into
+   city, region and country, which is wanted for analytics, so **Location: Coarse Location** is
+   declared above. Whether Amplitude also retains the raw IP address after the lookup is an
+   Amplitude project setting, not visible in code; see section 4.
 4. **Children's data is entered by adults.** A coach can add a minor's name, photo and email to a
    roster, and a guardian can be linked to a child's record. Whether this makes the answers
    "data collected from children" depends on the age-rating and child-directed decisions in
@@ -121,7 +128,9 @@ Paste into "App Review Information → Notes", after filling in the placeholders
 >
 > **Permissions.** The camera and photo library are requested only when the user taps a profile
 > photo and chooses "Take Photo" or "Choose from Library". Notifications are requested after
-> sign-in and are optional. The app does not use the microphone, location or contacts.
+> sign-in and are optional. The app does not request the microphone, location or contacts
+> permissions. Analytics derives an approximate city and country from the network address; the
+> device's location is never read.
 >
 > **Account deletion (Guideline 5.1.1(v)).** Profile tab → Account → "Delete account". The screen
 > lists what is removed and what is kept, and requires typing DELETE to confirm. Deletion is
@@ -164,7 +173,7 @@ issue named.
 | Support URL | Required field; no support inbox or page exists yet | #450 |
 | Screenshots for the required device sizes | Not producible from code | #451 |
 | Demo account credentials and seeded data | Placeholders in section 3 | #451 |
-| Amplitude IP address and derived location | With default options Amplitude derives city and region from the IP address. Either declare **Location: Coarse Location** (linked, Analytics) on the label, or pass `trackingOptions: { ipAddress: false }` to `amplitude.init` in `mobile/services/analytics.ts` (a JS change, deliverable by OTA) and leave Location undeclared | #451 |
+| Whether Amplitude retains the raw IP address | The app sends the IP address so that Amplitude can derive city and country (decided, see note 3). Whether the address itself is kept afterwards is a setting in the Amplitude project. It does not change the label, which already declares Coarse Location, but the privacy policy should say which it is | #25 |
 | Sign-in methods offered on the hosted sign-in page | Configured in the identity provider's dashboard, not in this repository. If any third-party social login is enabled, Guideline 4.8 requires an equivalent privacy-preserving option such as Sign in with Apple | #451 |
 | Sentry IP address storage | Whether Sentry stores the client IP is a Sentry project setting, not visible in code | #451 |
 
