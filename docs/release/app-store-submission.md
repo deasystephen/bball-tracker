@@ -133,7 +133,7 @@ Paste into "App Review Information → Notes", after filling in the placeholders
 > sign-in of their own. A child who has their own sign-in deletes their account from their own
 > Profile.
 >
-> **Purchases.** The app has no in-app purchases. Free accounts can create up to three teams.
+> **Purchases.** The app has no in-app purchases and no paid features.
 
 Facts behind the notes, for whoever maintains them:
 
@@ -145,7 +145,7 @@ Facts behind the notes, for whoever maintains them:
 | Tracking steps and labels | `.maestro/game-tracking.yaml` |
 | Account deletion path and copy | #444; `mobile/app/account/delete.tsx`, `mobile/i18n/locales/en.json` (`account.delete.*`) |
 | Guardian deletion is limited to managed child records | `guardianOf[].isManaged`; `DELETE /players/:id/account` |
-| Three-team cap | `FREE_TEAM_LIMIT` in `backend/src/services/entitlements/index.ts` |
+| No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (CLAUDE.md "Entitlements / Feature Gating"); the team-count limit is tracked on #445 |
 
 The demo account must exist in the identity-provider environment the submission build talks to
 (#24 covers the production-key cutover) and needs seeded data in the production database; both
