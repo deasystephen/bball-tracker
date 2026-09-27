@@ -59,10 +59,23 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   attributed to "Deleted user".
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited.
-- Error reports (Sentry) and usage analytics (Amplitude) are keyed on the internal user id and
-  keep their records for those vendors' retention windows (Sentry: 90 days by default; Amplitude:
-  per plan). No name, email or photo is stored there and, after deletion, nothing maps the id back
-  to a person. Application logs hash email addresses.
+- **Error reports (Sentry)** are kept for Sentry's retention window (90 days by default). No name,
+  email or photo is sent (`sendDefaultPii: false` on both sides).
+  - Backend reports carry the internal user id of the caller (`scope.setUser({ id })` in
+    `backend/src/utils/sentry.ts`).
+  - Mobile reports carry **no** user id: `setSentryUser` in `mobile/services/sentry.ts` is never
+    called. They hold device model, OS version, app release and redacted breadcrumbs.
+- **Usage analytics (Amplitude)** are kept for the window of the Amplitude plan. Each of the six
+  events carries the internal user id, a device id, `identifierForVendor`, device and OS details,
+  language, carrier, and the IP address of the request, from which Amplitude derives **city,
+  region and country**. That set is fixed in code (`AMPLITUDE_TRACKING_OPTIONS`,
+  `mobile/services/analytics.ts`) and pinned by a test. No name, email or photo is sent, and the
+  advertising id is never sent. Whether Amplitude keeps the raw IP address after the lookup is a
+  setting in the Amplitude project; confirm it there before the privacy policy states it.
+- After deletion nothing in the application maps the internal id back to a person, but the
+  analytics and backend error records above remain at the vendors, keyed on that id, until their
+  windows expire. To remove them sooner, use each vendor's own deletion request for that id.
+- Application logs hash email addresses.
 - Email delivery logs at SES keep hashed recipients only.
 
 ## Operator procedure (request by email)

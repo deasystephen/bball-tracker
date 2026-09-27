@@ -32,6 +32,17 @@ jest.mock('expo-constants', () => ({
   default: mockExpoConstants,
 }));
 
+/**
+ * The constant is read through `requireActual` at call time, not imported at
+ * the top: a top-level import is hoisted above `mockAmplitude` and would run
+ * the mock factory before that object exists.
+ */
+type AnalyticsModule = typeof import('../../services/analytics');
+
+function trackingOptions(): AnalyticsModule['AMPLITUDE_TRACKING_OPTIONS'] {
+  return jest.requireActual<AnalyticsModule>('../../services/analytics').AMPLITUDE_TRACKING_OPTIONS;
+}
+
 describe('analytics service', () => {
   let warnSpy: jest.SpyInstance;
 
@@ -69,11 +80,68 @@ describe('analytics service', () => {
     );
     await initAnalytics();
 
-    expect(mockAmplitude.init).toHaveBeenCalledWith('test-key');
+    expect(mockAmplitude.init).toHaveBeenCalledWith('test-key', undefined, {
+      trackingOptions: trackingOptions(),
+    });
 
     // After successful init, trackEvent should delegate.
     trackEvent('evt', { foo: 1 });
     expect(mockAmplitude.track).toHaveBeenCalledWith('evt', { foo: 1 });
+  });
+
+  // Tracking options (#559). These values are what the App Privacy labels and
+  // the data-subject runbook declare, so a change here is a change to what the
+  // app tells Apple and its users. Update docs/release/app-store-submission.md
+  // and docs/runbooks/data-subject-requests.md in the same change.
+  describe('tracking options', () => {
+    it('never falls back to the SDK defaults', async () => {
+      mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+      mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
+
+      const { initAnalytics } = jest.requireActual<typeof import('../../services/analytics')>(
+        '../../services/analytics'
+      );
+      await initAnalytics();
+
+      const options = mockAmplitude.init.mock.calls[0][2] as { trackingOptions?: unknown };
+      expect(options?.trackingOptions).toBeDefined();
+    });
+
+    it('keeps the IP address on, for city and country, and the advertising id off', () => {
+      expect(trackingOptions().ipAddress).toBe(true);
+      expect(trackingOptions().adid).toBe(false);
+    });
+
+    it('leaves the device-reported country off, which would disable the IP lookup', () => {
+      expect(trackingOptions().country).toBe(false);
+    });
+
+    it('pins the full set that the privacy labels declare', () => {
+      expect(trackingOptions()).toEqual({
+        adid: false,
+        appSetId: true,
+        carrier: true,
+        country: false,
+        deviceManufacturer: true,
+        deviceModel: true,
+        idfv: true,
+        ipAddress: true,
+        language: true,
+        osName: true,
+        osVersion: true,
+        platform: true,
+      });
+    });
+
+    it('decides every option the installed SDK has, so an upgrade cannot add one silently', () => {
+      const { getDefaultConfig } = jest.requireActual<{
+        getDefaultConfig: () => { trackingOptions: Record<string, boolean> };
+      }>('@amplitude/analytics-react-native/lib/commonjs/config');
+
+      const sdkOptions = Object.keys(getDefaultConfig().trackingOptions);
+
+      expect(Object.keys(trackingOptions()).sort()).toEqual(sdkOptions.sort());
+    });
   });
 
   it('initAnalytics swallows errors from amplitude.init', async () => {

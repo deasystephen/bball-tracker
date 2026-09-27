@@ -13,6 +13,42 @@ export const AnalyticsEvents = {
 
 type AnalyticsEvent = (typeof AnalyticsEvents)[keyof typeof AnalyticsEvents];
 
+/**
+ * What the Amplitude SDK attaches to every event, stated explicitly (#559).
+ *
+ * `amplitude.init(apiKey)` with no options turns every one of these on, which
+ * is how the app came to send more than the privacy-label draft assumed. The
+ * values below are a decision, not a default: they are what the App Privacy
+ * labels in `docs/release/app-store-submission.md` and the "Retention" section
+ * of `docs/runbooks/data-subject-requests.md` declare. Change one here and
+ * change it there; `__tests__/services/analytics.test.ts` pins the set.
+ *
+ * - `ipAddress: true` is deliberate. Amplitude resolves the request IP into
+ *   city, region and country on its servers, and that coarse location is
+ *   wanted for analytics. It is declared as Coarse Location on the label.
+ * - `country: false` goes with it. That option is the country the DEVICE
+ *   reports, and turning it on disables the server-side lookup, which would
+ *   lose the city.
+ * - `adid: false`. The Android advertising id serves ad attribution, the app
+ *   shows no ads, and sending it would make the "no tracking" answer on the
+ *   label false. iOS is unaffected: the SDK never reads the IDFA there.
+ * - Everything else is device and OS context used to read the six events.
+ */
+export const AMPLITUDE_TRACKING_OPTIONS: Required<amplitude.Types.ReactNativeTrackingOptions> = {
+  adid: false,
+  appSetId: true,
+  carrier: true,
+  country: false,
+  deviceManufacturer: true,
+  deviceModel: true,
+  idfv: true,
+  ipAddress: true,
+  language: true,
+  osName: true,
+  osVersion: true,
+  platform: true,
+};
+
 let initialized = false;
 
 /**
@@ -29,7 +65,9 @@ export async function initAnalytics(): Promise<void> {
   }
 
   try {
-    await amplitude.init(apiKey).promise;
+    await amplitude.init(apiKey, undefined, {
+      trackingOptions: AMPLITUDE_TRACKING_OPTIONS,
+    }).promise;
     initialized = true;
   } catch (error) {
     if (__DEV__) {
