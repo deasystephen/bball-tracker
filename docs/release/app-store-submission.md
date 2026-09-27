@@ -154,7 +154,7 @@ Facts behind the notes, for whoever maintains them:
 | Tracking steps and labels | `.maestro/game-tracking.yaml` |
 | Account deletion path and copy | #444; `mobile/app/account/delete.tsx`, `mobile/i18n/locales/en.json` (`account.delete.*`) |
 | Guardian deletion is limited to managed child records | `guardianOf[].isManaged`; `DELETE /players/:id/account` |
-| No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (CLAUDE.md "Entitlements / Feature Gating"); the team-count limit is tracked on #445 |
+| No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (CLAUDE.md "Entitlements / Feature Gating"); the free-tier team cap was lifted in #445, so no limit is enforced on any tier |
 
 The demo account must exist in the identity-provider environment the submission build talks to
 (#24 covers the production-key cutover) and needs seeded data in the production database; both
