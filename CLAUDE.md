@@ -1027,9 +1027,9 @@ mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQ
 - **Both halves are switched by environment and are off when unset**: `SES_CONFIGURATION_SET`
   (`SesMailer` adds `ConfigurationSetName` to every send; a send without it publishes no events)
   and `SES_EVENTS_QUEUE_URL` (`index.ts` starts `createSesEventConsumer()` after `listen`; `null`
-  when unset). The backend code merged ahead of the infrastructure, so **neither is set in
-  `infra/task-definition.json` yet** — the configuration set, topic, queue and IAM land with the
-  infra half of #449, which also sets both variables.
+  when unset). Production sets both in `infra/task-definition.json`; the resources they name are
+  in `infra/ses-events.tf`. Procedures, the apply order and the verification steps:
+  [`docs/runbooks/email-deliverability.md`](docs/runbooks/email-deliverability.md).
 - **`services/mailer/ses-events.ts`** turns one message into at most one write on
   `User.emailSuppressedAt` / `emailSuppressedReason` (`EmailSuppressionReason { BOUNCE, COMPLAINT }`,
   migration `20260927120000_user_email_suppression`):
@@ -1308,13 +1308,26 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   SNS subscription, test publish, deliberately fail the uptime check). Alerting is declared in
   `infra/alerting.tf` (#448): one SNS topic with an email subscriber (`alert_email`, set only in
   the gitignored `terraform.tfvars`), eleven CloudWatch alarms tuned for a **single-task**
-  service, and a Route 53 HTTPS health check on `api.hooplings.com/health`. Every alarm sets
+  service plus four email alarms (#449), and a Route 53 HTTPS health check on
+  `api.hooplings.com/health`. Every alarm sets
   `treat_missing_data` deliberately — `breaching` for liveness signals (a vanished task stops
-  emitting), `notBreaching` for counters and utilization — and thresholds are `alarm_*`
+  emitting), `notBreaching` for counters and utilization, `ignore` for the two SES rate alarms
+  (SES reports a rate only around a send) — and thresholds are `alarm_*`
   variables, so tune in tfvars rather than editing a resource. `RunningTaskCount` is a
   Container Insights metric: turning `containerInsights` off in `ecs.tf` stops it and the
   task-count alarm fires permanently, so replace that alarm in the same change. Sentry
   alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
+- **[Email deliverability](docs/runbooks/email-deliverability.md)** — how bounces and complaints
+  are handled (#449), the first three things to check when `ses-bounce-rate` /
+  `ses-complaint-rate` or the event-queue alarms fire, how to release an address a coach has
+  confirmed is correct (remove it from the SES suppression list; the next delivery clears the
+  roster flag, there is no database step), the apply order, the simulator-based verification,
+  and the answers for the SES production-access request (#23). Declared in `infra/ses-events.tf`
+  (suppression list, configuration set, SNS → SQS, dead-letter queue, consume policy) and
+  `infra/alerting.tf`. **`SES_CONFIGURATION_SET` must never be deployed ahead of the
+  `terraform apply` that creates the set and extends the send policy to its ARN** — every send
+  would fail while invitations keep being created. `tests/infra/ses-events.test.ts` pins the two
+  task-definition values to the Terraform names.
 - **[Data-subject requests](docs/runbooks/data-subject-requests.md)** — account deletion (self-serve,
   guardian, operator script) and data export: what is removed, what is retained and why, the
   7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the

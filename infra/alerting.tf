@@ -56,9 +56,12 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 
 locals {
   # AWS services allowed to publish to the alerts topic, each pinned to this
-  # account and to a source-ARN pattern. To let another service publish (for
-  # example SES bounce/complaint events, #449), add ONE entry here - the policy
-  # document below is generated from this map.
+  # account and to a source-ARN pattern. To let another service publish, add
+  # ONE entry here - the policy document below is generated from this map.
+  #
+  # Only things a person should read belong on this topic. SES sending events
+  # (#449) are machine-read and have their own topic in ses-events.tf; what
+  # reaches this one from email is the four alarms at the bottom of this file.
   alert_topic_publishers = {
     CloudWatchAlarms = {
       service    = "cloudwatch.amazonaws.com"
@@ -470,6 +473,115 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
 }
 
 # =============================================================================
+# Email - sender reputation, and the pipeline that records bounces (#449)
+# =============================================================================
+#
+# AWS puts an account under review at a 5% bounce rate or a 0.1% complaint
+# rate, and pauses sending at 10% / 0.5%. The thresholds below are set under
+# the review line so the email arrives while there is still room to act. The
+# metrics are account-wide (no dimensions), which is the level AWS enforces at.
+#
+# `ignore` on missing data, unlike every other alarm in this file, and on
+# purpose: SES publishes a reputation datapoint only around a send, so silence
+# is the normal state. A rate does not improve because sending stopped -
+# `notBreaching` would turn a real ALARM back to OK at the first quiet hour.
+# The cost is that a fresh alarm sits in INSUFFICIENT_DATA until the first
+# send after apply.
+
+resource "aws_cloudwatch_metric_alarm" "ses_bounce_rate" {
+  alarm_name        = "${local.name_prefix}-ses-bounce-rate"
+  alarm_description = "SES account bounce rate is above ${var.alarm_ses_bounce_rate_percent}%. AWS reviews the account at 5% and pauses sending at 10%. Runbook: docs/runbooks/email-deliverability.md#bounce-or-complaint-rate-alarm"
+
+  namespace   = "AWS/SES"
+  metric_name = "Reputation.BounceRate"
+
+  # The metric is a fraction (0.03 = 3%).
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.alarm_ses_bounce_rate_percent / 100
+  period              = 3600
+  evaluation_periods  = 1
+
+  treat_missing_data = "ignore"
+
+  alarm_actions = local.alert_actions
+  ok_actions    = local.alert_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_complaint_rate" {
+  alarm_name        = "${local.name_prefix}-ses-complaint-rate"
+  alarm_description = "SES account complaint rate is above ${var.alarm_ses_complaint_rate_percent}%. AWS reviews the account at 0.1% and pauses sending at 0.5%. Runbook: docs/runbooks/email-deliverability.md#bounce-or-complaint-rate-alarm"
+
+  namespace   = "AWS/SES"
+  metric_name = "Reputation.ComplaintRate"
+
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.alarm_ses_complaint_rate_percent / 100
+  period              = 3600
+  evaluation_periods  = 1
+
+  treat_missing_data = "ignore"
+
+  alarm_actions = local.alert_actions
+  ok_actions    = local.alert_actions
+}
+
+# The API stopped reading SES events: the consumer is not running (the task
+# has no SES_EVENTS_QUEUE_URL, or lost sqs:ReceiveMessage), or every message
+# fails. Nothing is lost - the queue keeps 14 days - but no bounce reaches a
+# roster until it is fixed.
+resource "aws_cloudwatch_metric_alarm" "ses_events_queue_stalled" {
+  alarm_name        = "${local.name_prefix}-ses-events-queue-stalled"
+  alarm_description = "The oldest SES event has waited more than ${var.alarm_ses_events_queue_age_minutes} minutes: the API is not consuming the ses-events queue, so bounces are not reaching rosters. Runbook: docs/runbooks/email-deliverability.md#events-are-not-being-processed"
+
+  namespace   = "AWS/SQS"
+  metric_name = "ApproximateAgeOfOldestMessage"
+  dimensions = {
+    QueueName = aws_sqs_queue.ses_events.name
+  }
+
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.alarm_ses_events_queue_age_minutes * 60
+  period              = 300
+  evaluation_periods  = 1
+
+  # notBreaching: SQS stops reporting for a queue with no activity, and an
+  # empty, idle queue has no oldest message.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = local.alert_actions
+  ok_actions    = local.alert_actions
+}
+
+# A message the consumer could not handle or parse five times in a row. It
+# stays in ALARM until someone reads the message and empties the queue, which
+# is the point.
+resource "aws_cloudwatch_metric_alarm" "ses_events_dlq" {
+  alarm_name        = "${local.name_prefix}-ses-events-dlq-not-empty"
+  alarm_description = "An SES event could not be processed after 5 attempts and is in the dead-letter queue. Runbook: docs/runbooks/email-deliverability.md#events-are-not-being-processed"
+
+  namespace   = "AWS/SQS"
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  dimensions = {
+    QueueName = aws_sqs_queue.ses_events_dlq.name
+  }
+
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  period              = 300
+  evaluation_periods  = 1
+
+  # notBreaching: an idle queue stops reporting; no data means nothing is in it.
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = local.alert_actions
+  ok_actions    = local.alert_actions
+}
+
+# =============================================================================
 # Variables
 # =============================================================================
 
@@ -545,6 +657,39 @@ variable "alarm_rds_cpu_percent" {
   description = "RDS average CPU utilization (%) above which the CPU alarm fires once sustained."
   type        = number
   default     = 80
+}
+
+variable "alarm_ses_bounce_rate_percent" {
+  description = "SES account bounce rate (%) above which the bounce-rate alarm fires. AWS places the account under review at 5% and pauses sending at 10%."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.alarm_ses_bounce_rate_percent > 0 && var.alarm_ses_bounce_rate_percent < 5
+    error_message = "alarm_ses_bounce_rate_percent must be above 0 and below 5, the rate at which AWS reviews the account: an alarm at or over it fires too late."
+  }
+}
+
+variable "alarm_ses_complaint_rate_percent" {
+  description = "SES account complaint rate (%) above which the complaint-rate alarm fires. AWS places the account under review at 0.1% and pauses sending at 0.5%. The default sits at the review line because one complaint in a small sending volume already exceeds any lower figure."
+  type        = number
+  default     = 0.1
+
+  validation {
+    condition     = var.alarm_ses_complaint_rate_percent > 0 && var.alarm_ses_complaint_rate_percent < 0.5
+    error_message = "alarm_ses_complaint_rate_percent must be above 0 and below 0.5, the rate at which AWS pauses sending."
+  }
+}
+
+variable "alarm_ses_events_queue_age_minutes" {
+  description = "Age of the oldest unprocessed SES event, in minutes, above which the queue-stalled alarm fires. A message that keeps failing reaches the dead-letter queue in about 5 minutes, so anything older means nothing is consuming."
+  type        = number
+  default     = 15
+
+  validation {
+    condition     = var.alarm_ses_events_queue_age_minutes >= 10
+    error_message = "alarm_ses_events_queue_age_minutes must be at least 10: below that a message on its way to the dead-letter queue trips the alarm."
+  }
 }
 
 locals {

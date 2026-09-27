@@ -6,11 +6,15 @@
 #     of the identity) with its MX + SPF records, so the envelope sender is
 #     ours and SPF aligns under DMARC instead of passing for amazonses.com
 #   - `_dmarc.mail.<domain>` TXT, monitor-only (`p=none`). No `rua` yet: no
-#     mailbox exists to receive reports — #449 adds the receiver, the `rua`
-#     tag and the later tightening to `p=quarantine`.
+#     mailbox exists to receive reports — #555 (Google Workspace on the apex)
+#     adds the receiver and the `rua` tag; tightening to `p=quarantine`
+#     follows about 30 days of clean reports.
 #
 # After apply, `MailFromAttributes.MailFromDomainStatus` must read SUCCESS for
-# each identity. SES sandbox → production access is account-wide (#23/#449).
+# each identity. SES sandbox → production access is account-wide (#23).
+#
+# The configuration set, the suppression list and the bounce/complaint event
+# pipeline are in ses-events.tf (#449).
 
 # =============================================================================
 # SES Domain Identities
@@ -108,11 +112,19 @@ resource "aws_route53_record" "ses_dmarc" {
 # recipient's verified identity ARN as well as the sender's, so the resource
 # must cover all identities; the FromAddress condition keeps the grant scoped
 # to our sending domains.
+#
+# A send that names a configuration set is ALSO authorized against that set's
+# ARN (#449). Without it every send from the API fails with AccessDenied the
+# moment SES_CONFIGURATION_SET is deployed - the same shape as the 2026-08
+# sandbox incident, where invitations were created and no email left.
 data "aws_iam_policy_document" "ses_send" {
   statement {
-    effect    = "Allow"
-    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
-    resources = ["arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*"]
+    effect  = "Allow"
+    actions = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = [
+      "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
+      aws_sesv2_configuration_set.transactional.arn,
+    ]
 
     condition {
       test     = "StringLike"

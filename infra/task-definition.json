@@ -31,6 +31,8 @@
         { "name": "SENTRY_RELEASE", "value": "SENTRY_RELEASE_PLACEHOLDER" },
         { "name": "AWS_SES_REGION", "value": "us-east-1" },
         { "name": "SES_FROM_ADDRESS", "value": "noreply@mail.hooplings.com" },
+        { "name": "SES_CONFIGURATION_SET", "value": "bball-tracker-production-transactional" },
+        { "name": "SES_EVENTS_QUEUE_URL", "value": "https://sqs.us-east-1.amazonaws.com/982343512143/bball-tracker-production-ses-events" },
         { "name": "PUBLIC_APP_URL", "value": "https://hooplings.com" },
         { "name": "API_BASE_URL", "value": "https://api.hooplings.com" },
         { "name": "DEFAULT_TIMEZONE", "value": "America/Los_Angeles" },

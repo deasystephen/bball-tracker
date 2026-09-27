@@ -14,8 +14,9 @@ Terraform manages all AWS infrastructure.
 | `s3.tf` | S3 buckets (profile picture avatars) |
 | `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records |
 | `ses.tf` | SES domain identities, DKIM, custom MAIL FROM (MX/SPF), DMARC, IAM policy for ECS task |
+| `ses-events.tf` | SES account-level suppression list, configuration set, event destination, SNS topic → SQS queue + dead-letter queue, IAM policy for the API to read the queue (#449) |
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
-| `alerting.tf` | SNS alerts topic + email subscription, CloudWatch alarms (ALB, ECS, RDS), Route 53 uptime check, and the `alert_email` / `alarm_*` variables |
+| `alerting.tf` | SNS alerts topic + email subscription, CloudWatch alarms (ALB, ECS, RDS, SES reputation, SES event queue), Route 53 uptime check, and the `alert_email` / `alarm_*` variables |
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
@@ -119,10 +120,39 @@ provisions the same set for every served domain:
    _dmarc.mail.<domain>  TXT  "v=DMARC1; p=none"
    ```
    No `rua` yet: no mailbox exists to receive aggregate reports, and an external address
-   (Gmail) would need an authorization record the receiving domain will not publish. **#449**
-   owns the report receiver, the `rua` tag and the later tightening to `p=quarantine`.
+   (Gmail) would need an authorization record the receiving domain will not publish. **#555**
+   (Google Workspace on the apex) adds the receiver and the `rua` tag; tightening to
+   `p=quarantine` follows about 30 days of clean reports.
 5. **IAM policy** (`ses_send`) grants the ECS task role `ses:SendEmail` / `ses:SendRawEmail`
-   with a `ses:FromAddress` condition covering `*@mail.<domain>` for every served domain.
+   with a `ses:FromAddress` condition covering `*@mail.<domain>` for every served domain, on
+   every identity **and on the configuration set** — a send that names a configuration set is
+   authorized against the set's ARN too.
+
+### Bounces, complaints and suppression (#449)
+
+`ses-events.tf` declares, once for the account (reputation and suppression are account-wide, not
+per domain):
+
+1. **Account-level suppression list** for `BOUNCE` and `COMPLAINT`. This is what stops mail to a
+   dead address: SES accepts the send, does not deliver it, and does not count it toward the
+   bounce rate.
+2. **Configuration set** `<prefix>-transactional`, named by the API on every send
+   (`SES_CONFIGURATION_SET`). A send without it publishes no events.
+3. **Event destination** publishing `BOUNCE`, `COMPLAINT`, `DELIVERY` and `REJECT` to the SNS
+   topic `<prefix>-ses-events`. This is a separate topic from the alerts topic on purpose: that
+   one has a person subscribed by email.
+4. **SQS queue** `<prefix>-ses-events` subscribed to the topic with raw message delivery, and a
+   **dead-letter queue** `<prefix>-ses-events-dlq` behind it (5 receives, 14-day retention). Both
+   use SQS-managed encryption; events carry recipient addresses.
+5. **IAM policy** (`ses_events_consume`) lets the ECS task role receive and delete from the queue
+   (`SES_EVENTS_QUEUE_URL`).
+
+Four alarms in `alerting.tf` watch it: bounce rate, complaint rate, a stalled queue, and a
+non-empty dead-letter queue. Procedures and the apply order are in
+[`docs/runbooks/email-deliverability.md`](../docs/runbooks/email-deliverability.md).
+
+**Apply before the task definition names the configuration set.** `SES_CONFIGURATION_SET` in
+`task-definition.json` deployed ahead of the apply makes every send fail.
 
 **After apply**, per identity: `VerifiedForSendingStatus` must be `true` and
 `MailFromAttributes.MailFromDomainStatus` must be `SUCCESS`:
@@ -138,7 +168,9 @@ addresses.  To request production access:
 
 1. Open the AWS SES console → **Account dashboard** → **Request production access**.
 2. Provide use case details (transactional only, no marketing).
-3. Confirm bounce/complaint handling via SNS topics (see SES console).
+3. Describe bounce and complaint handling. The answers are written out in
+   [`docs/runbooks/email-deliverability.md`](../docs/runbooks/email-deliverability.md#what-to-tell-aws),
+   and each one is a resource in `ses-events.tf` or `alerting.tf`.
 
 ### Environment variables
 
@@ -146,7 +178,11 @@ addresses.  To request production access:
 |----------|-----------|---------------------|
 | `AWS_SES_REGION` | ECS task definition env | `us-east-1` |
 | `SES_FROM_ADDRESS` | ECS task definition env | `noreply@mail.hooplings.com` |
+| `SES_CONFIGURATION_SET` | ECS task definition env | `terraform output ses_configuration_set_name` |
+| `SES_EVENTS_QUEUE_URL` | ECS task definition env | `terraform output ses_events_queue_url` |
 
-Both variables are pre-filled in `env.example` (with a comment to leave them
+The first two are pre-filled in `env.example` (with a comment to leave them
 blank in dev/test); leaving them blank causes the backend to fall back to the
-in-memory `FakeMailer` (no real emails sent in dev/test).
+in-memory `FakeMailer` (no real emails sent in dev/test). The last two are
+commented out there: unset, sends carry no configuration set and the event
+consumer does not start.

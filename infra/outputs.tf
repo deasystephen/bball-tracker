@@ -163,6 +163,25 @@ output "s3_avatars_bucket_domain" {
 }
 
 # =============================================================================
+# Email events (#449) - the two values infra/task-definition.json repeats
+# =============================================================================
+
+output "ses_configuration_set_name" {
+  description = "SES configuration set the API names on every send (SES_CONFIGURATION_SET in infra/task-definition.json)"
+  value       = aws_sesv2_configuration_set.transactional.configuration_set_name
+}
+
+output "ses_events_queue_url" {
+  description = "SQS queue the API reads SES sending events from (SES_EVENTS_QUEUE_URL in infra/task-definition.json)"
+  value       = aws_sqs_queue.ses_events.url
+}
+
+output "ses_events_dlq_url" {
+  description = "Dead-letter queue for SES events the API could not process (docs/runbooks/email-deliverability.md)"
+  value       = aws_sqs_queue.ses_events_dlq.url
+}
+
+# =============================================================================
 # Alerting
 # =============================================================================
 

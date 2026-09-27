@@ -2,7 +2,8 @@
 
 Where production alerts go, what each one means, and the first three things to check.
 Everything here is declared in [`infra/alerting.tf`](../../infra/alerting.tf) (#448) — do not
-create or edit alarms in the AWS console.
+create or edit alarms in the AWS console. The four email alarms (#449) are declared there too;
+their procedures are in the [email deliverability runbook](email-deliverability.md).
 
 ## At a glance
 
@@ -40,10 +41,16 @@ variables in `infra/alerting.tf`; tune them in `terraform.tfvars`, never by edit
 | `rds-free-storage-low` | Free storage < 2 GiB for 15 min | fine | [Database](#database) |
 | `rds-connections-high` | > 60 open connections for 10 min (about 75% of the `db.t3.micro` limit) | fine | [Database](#database) |
 | `rds-cpu-high` | RDS CPU > 80% average for 15 min | fine | [Database](#database) |
+| `ses-bounce-rate` | SES account bounce rate > 3% (AWS reviews the account at 5%) | unchanged | [Email deliverability](email-deliverability.md#bounce-or-complaint-rate-alarm) |
+| `ses-complaint-rate` | SES account complaint rate > 0.1% | unchanged | [Email deliverability](email-deliverability.md#bounce-or-complaint-rate-alarm) |
+| `ses-events-queue-stalled` | The oldest SES event has waited > 15 min: the API is not reading the queue | fine | [Email deliverability](email-deliverability.md#events-are-not-being-processed) |
+| `ses-events-dlq-not-empty` | An SES event failed 5 times and is in the dead-letter queue | fine | [Email deliverability](email-deliverability.md#events-are-not-being-processed) |
 
 "No data counts as failing" is deliberate: a task that vanishes stops emitting metrics, so silence
 on a liveness signal must never read as healthy. Counters and utilization treat silence as fine,
-so a real outage pages once per cause instead of once per metric.
+so a real outage pages once per cause instead of once per metric. The two SES rate alarms keep
+their state on no data ("unchanged"): SES reports a rate only around a send, and a rate does not
+improve because sending stopped.
 
 Expect several emails for one incident. A crashed task trips `ecs-no-running-task`,
 `alb-unhealthy-host`, `api-uptime` and usually `alb-elb-5xx` within a few minutes of each other.
@@ -147,7 +154,8 @@ Terraform change.
 
 1. **Set the subscriber** in `infra/terraform.tfvars` (gitignored): `alert_email = "<address>"`.
 2. **Plan and apply.** The plan must show only additions: the topic, its policy and
-   subscription, the health check and eleven alarms.
+   subscription, the health check and the alarms (fifteen: eleven from #448, four email alarms
+   from #449).
    ```bash
    cd infra && terraform plan -out alerting.tfplan && terraform apply alerting.tfplan
    ```
@@ -172,7 +180,9 @@ Terraform change.
    terraform apply
    # OK email arrives
    ```
-6. **Check every alarm settled.** Nothing should be left in `ALARM` or `INSUFFICIENT_DATA`:
+6. **Check every alarm settled.** Nothing should be left in `ALARM` or `INSUFFICIENT_DATA`
+   (except `ses-bounce-rate` and `ses-complaint-rate`, which read `INSUFFICIENT_DATA` until the
+   first email is sent after they are created):
    ```bash
    aws cloudwatch describe-alarms --alarm-name-prefix bball-tracker-production- \
      --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
@@ -191,6 +201,5 @@ issue, not here.
   "No Data", and each notifies the literal placeholder `@your-team-handle`. Delete or retarget
   them. No Datadog Terraform provider is configured — `infra/datadog.tf` only ships logs.
 
-Also not covered by any alarm today: a failed automated RDS backup, Redis memory or evictions
-(the cache is best-effort and fails open), and SES bounce or complaint rates (#449, which reuses
-this SNS topic).
+Also not covered by any alarm today: a failed automated RDS backup, and Redis memory or
+evictions (the cache is best-effort and fails open).
