@@ -161,3 +161,17 @@ output "s3_avatars_bucket_domain" {
   description = "Regional domain name of the avatars S3 bucket"
   value       = aws_s3_bucket.avatars.bucket_regional_domain_name
 }
+
+# =============================================================================
+# Alerting
+# =============================================================================
+
+output "alerts_topic_arn" {
+  description = "SNS topic every production alarm publishes to (alerting.tf). Used for the test publish in docs/runbooks/on-call.md and as the destination for any new alert source."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "uptime_health_check_id" {
+  description = "Route 53 health check behind the API uptime alarm"
+  value       = aws_route53_health_check.api.id
+}

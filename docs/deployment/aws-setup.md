@@ -184,11 +184,22 @@ Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs)
 
 ## Monitoring
 
-- Set up CloudWatch alarms for:
-  - ECS service CPU/memory usage
-  - RDS connection count
-  - Application error rates
-  - API response times
+Alerting is declared in `infra/alerting.tf` (#448); the response procedure is
+[`docs/runbooks/on-call.md`](../runbooks/on-call.md). Every alarm publishes to one SNS topic with
+an email subscriber (`alert_email` in the gitignored `terraform.tfvars`), on both ALARM and OK.
+
+- [x] ECS service: no running task, CPU and memory sustained high
+- [x] RDS: connection count, free storage, CPU sustained high
+- [x] Application error rates: ALB-generated 5xx and target 5xx, unhealthy target
+- [x] API response times: ALB target response time p99
+- [x] Uptime: Route 53 HTTPS health check on `https://api.hooplings.com/health`
+
+Declared is not the same as live: the alarms exist in AWS only after a manual `terraform apply`,
+and deliver nothing until the SNS subscription is confirmed from the inbox. The apply and
+verification steps are in the runbook.
+
+Outside Terraform, and not covered by the list above: Sentry issue-alert rules and the Datadog
+monitors (see "Not yet automated" in the runbook).
 
 ## Scaling
 

@@ -1167,6 +1167,18 @@ Dependency and security updates are split between **Dependabot** (mechanical pat
 
 Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs/runbooks/):
 
+- **[On-call](docs/runbooks/on-call.md)** — where production alerts go, what each alarm means and
+  the first three things to check per alert class, plus the apply-time verification (confirm the
+  SNS subscription, test publish, deliberately fail the uptime check). Alerting is declared in
+  `infra/alerting.tf` (#448): one SNS topic with an email subscriber (`alert_email`, set only in
+  the gitignored `terraform.tfvars`), eleven CloudWatch alarms tuned for a **single-task**
+  service, and a Route 53 HTTPS health check on `api.hooplings.com/health`. Every alarm sets
+  `treat_missing_data` deliberately — `breaching` for liveness signals (a vanished task stops
+  emitting), `notBreaching` for counters and utilization — and thresholds are `alarm_*`
+  variables, so tune in tfvars rather than editing a resource. `RunningTaskCount` is a
+  Container Insights metric: turning `containerInsights` off in `ecs.tf` stops it and the
+  task-count alarm fires permanently, so replace that alarm in the same change. Sentry
+  alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
 - **[Data-subject requests](docs/runbooks/data-subject-requests.md)** — account deletion (self-serve,
   guardian, operator script) and data export: what is removed, what is retained and why, the
   7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the
