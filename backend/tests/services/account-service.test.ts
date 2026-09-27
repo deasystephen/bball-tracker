@@ -112,6 +112,9 @@ describe('AccountService.deleteAccount', () => {
       data: expect.objectContaining({
         workosUserId: null,
         email: null,
+        // Delivery state describes the address, which is gone (#449).
+        emailSuppressedAt: null,
+        emailSuppressedReason: null,
         name: DELETED_USER_NAME,
         emailVerified: false,
         profilePictureUrl: null,

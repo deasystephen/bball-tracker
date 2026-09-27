@@ -483,6 +483,53 @@ describe('TeamService', () => {
       expect(result.members[0].player).toEqual({ id: player.id, name: player.name, email: player.email });
     });
 
+    it('selects and returns the email delivery state for roster managers (#449)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 1 });
+      const player = members[0].player;
+      const bouncedAt = new Date('2026-09-27T18:00:00.000Z');
+      const rosterPlayer = {
+        id: player.id,
+        name: player.name,
+        email: player.email,
+        isManaged: true,
+        deletedAt: null,
+        emailSuppressedAt: bouncedAt,
+        emailSuppressedReason: 'BOUNCE',
+      };
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [{ playerId: player.id, player: rosterPlayer }],
+        games: [],
+        invitations: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { ...coachStaff, role: headCoachRole },
+      ]);
+
+      const result = await TeamService.getTeamById(team.id, coach.id);
+
+      expect(result.members[0].player).toEqual(rosterPlayer);
+
+      // Prisma is mocked, so the include is the only guard on what is selected:
+      // roster rows carry the delivery state, staff rows (readable by every
+      // team member) must not.
+      const [{ include }] = (mockPrisma.team.findUnique as jest.Mock).mock.calls[0] as [
+        { include: { members: { include: { player: { select: object } } }; staff: { include: { user: { select: object } } } } },
+      ];
+      expect(include.members.include.player.select).toMatchObject({
+        email: true,
+        emailSuppressedAt: true,
+        emailSuppressedReason: true,
+      });
+      expect(include.staff.include.user.select).not.toHaveProperty('emailSuppressedAt');
+      expect(include.staff.include.user.select).not.toHaveProperty('emailSuppressedReason');
+    });
+
     it('should strip member emails for staff without canManageRoster (e.g. Team Manager)', async () => {
       const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 2 });
       const managerRole = createTeamRole({
@@ -503,7 +550,13 @@ describe('TeamService', () => {
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
         members: members.map(({ member, player }) => ({
           ...member,
-          player: { id: player.id, name: player.name, email: player.email },
+          player: {
+            id: player.id,
+            name: player.name,
+            email: player.email,
+            emailSuppressedAt: new Date('2026-09-27T18:00:00.000Z'),
+            emailSuppressedReason: 'COMPLAINT',
+          },
         })),
         games: [],
       });
@@ -518,6 +571,10 @@ describe('TeamService', () => {
       expect(result.members).toHaveLength(2);
       for (const m of result.members) {
         expect(m.player).not.toHaveProperty('email');
+        // That a teammate's address bounced, or that they reported the mail
+        // as spam, is roster-management information too (#449).
+        expect(m.player).not.toHaveProperty('emailSuppressedAt');
+        expect(m.player).not.toHaveProperty('emailSuppressedReason');
         expect(m.player.id).toBeDefined();
         expect(m.player.name).toBeDefined();
       }

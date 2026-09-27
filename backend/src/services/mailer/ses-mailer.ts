@@ -12,13 +12,27 @@ export function hashRecipient(address: string): string {
   return createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 12);
 }
 
+export interface SesMailerOptions {
+  region: string;
+  fromAddress: string;
+  /**
+   * SES configuration set every send is attributed to (#449). It is what
+   * publishes bounce/complaint/delivery events; a send without it is invisible
+   * to `ses-events.ts`. Optional so the mailer still works before the
+   * configuration set exists.
+   */
+  configurationSetName?: string;
+}
+
 export class SesMailer implements Mailer {
   private client: SESv2Client;
   private fromAddress: string;
+  private configurationSetName: string | undefined;
 
-  constructor({ region, fromAddress }: { region: string; fromAddress: string }) {
+  constructor({ region, fromAddress, configurationSetName }: SesMailerOptions) {
     this.client = new SESv2Client({ region });
     this.fromAddress = fromAddress;
+    this.configurationSetName = configurationSetName;
   }
 
   async send(params: MailSendParams): Promise<MailSendResult> {
@@ -30,6 +44,7 @@ export class SesMailer implements Mailer {
 
     const command = new SendEmailCommand({
       FromEmailAddress: this.fromAddress,
+      ...(this.configurationSetName && { ConfigurationSetName: this.configurationSetName }),
       Destination: { ToAddresses: [to] },
       Content: {
         Simple: {

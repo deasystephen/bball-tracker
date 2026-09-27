@@ -95,8 +95,26 @@ const TEAM_INCLUDE = {
   },
 } satisfies Prisma.TeamInclude;
 
+/**
+ * Roster rows on `GET /teams/:id` also carry the player's email delivery state
+ * (#449) so a coach can be told "this address bounced". Deliberately NOT part
+ * of USER_SUMMARY_SELECT: that select also feeds staff rows, which every team
+ * member reads. Stripped with the email for callers without `canManageRoster`.
+ */
+const ROSTER_PLAYER_SELECT = {
+  ...USER_SUMMARY_SELECT,
+  emailSuppressedAt: true,
+  emailSuppressedReason: true,
+} satisfies Prisma.UserSelect;
+
 const TEAM_DETAIL_INCLUDE = {
   ...TEAM_INCLUDE,
+  members: {
+    include: {
+      player: { select: ROSTER_PLAYER_SELECT },
+    },
+    orderBy: ROSTER_MEMBERS_ORDER_BY,
+  },
   roles: true,
   games: {
     orderBy: {
@@ -198,15 +216,18 @@ const TEAM_ROLE_SELECT = {
 export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>;
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
 type TeamDetailMember = TeamDetail['members'][number];
+type RosterManagerOnlyField = 'email' | 'emailSuppressedAt' | 'emailSuppressedReason';
 /**
- * `GET /teams/:id` payload. Member `player.email` is present only when the
- * caller has `canManageRoster` on the team (audit #80); other callers get
+ * `GET /teams/:id` payload. Member `player.email` and its delivery state
+ * (`emailSuppressedAt` / `emailSuppressedReason`, #449) are present only when
+ * the caller has `canManageRoster` on the team (audit #80); other callers get
  * `{ id, name }` for each member's player.
  */
 export type TeamDetailView = Omit<TeamDetail, 'members'> & {
   members: Array<
     Omit<TeamDetailMember, 'player'> & {
-      player: Omit<TeamDetailMember['player'], 'email'> & { email?: string | null };
+      player: Omit<TeamDetailMember['player'], RosterManagerOnlyField> &
+        Partial<Pick<TeamDetailMember['player'], RosterManagerOnlyField>>;
     }
   >;
 };

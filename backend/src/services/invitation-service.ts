@@ -30,6 +30,7 @@ import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
+import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -907,7 +908,7 @@ export class InvitationService {
     }
     await tx.user.updateMany({
       where: { id: playerId, workosUserId: null },
-      data: { email: null },
+      data: { email: null, ...EMAIL_SUPPRESSION_CLEARED },
     });
   }
 

@@ -17,6 +17,7 @@ import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
+import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 
 const app = express();
 const httpServer = createServer(app);
@@ -156,6 +157,10 @@ if (require.main === module) {
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
   });
+
+  // SES bounce/complaint events (#449). Null — and a no-op — until
+  // SES_EVENTS_QUEUE_URL is configured.
+  createSesEventConsumer()?.start();
 }
 
 export { app, io, httpServer };

@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
+import { getTeamAudienceUserIds } from '../utils/team-audience';
 import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
 import { mailer } from './mailer';
@@ -41,20 +42,10 @@ export class AnnouncementService {
     data: { title: string; body: string },
     userId: string
   ): Promise<AnnouncementWithAuthor> {
-    // Verify team exists (also fetch members for email delivery)
+    // Verify team exists
     const team = await prisma.team.findUnique({
       where: { id: teamId },
-      select: {
-        id: true,
-        name: true,
-        members: {
-          select: {
-            player: {
-              select: { id: true, name: true, email: true },
-            },
-          },
-        },
-      },
+      select: { id: true, name: true },
     });
 
     if (!team) {
@@ -77,40 +68,13 @@ export class AnnouncementService {
       include: ANNOUNCEMENT_INCLUDE,
     });
 
-    // Send announcement emails to team members (fire-and-forget)
-    type MemberPlayer = { id: string; name: string | null; email: string | null };
-    const recipients = (team.members as Array<{ player: MemberPlayer }>)
-      .map((m) => m.player)
-      .filter((p): p is MemberPlayer & { email: string } => p.id !== userId && p.email !== null);
-
-    for (const recipient of recipients) {
-      if (!recipient.email) continue;
-      mailer
-        .send({
-          template: announcementTemplate,
-          to: recipient.email,
-          variables: {
-            recipientName: recipient.name ?? recipient.email,
-            teamName: team.name,
-            title: data.title,
-            body: data.body,
-            authorName: announcement.author.name ?? announcement.author.email ?? '',
-          },
-          metadata: {
-            userId,
-            event_type: 'announcement.created',
-            teamId,
-            announcementId: announcement.id,
-          },
-        })
-        .catch((err: unknown) => {
-          logger.error('Failed to send announcement email', {
-            error: err instanceof Error ? err.message : String(err),
-            announcementId: announcement.id,
-            recipientId: recipient.id,
-          });
-        });
-    }
+    // Email the team (async, don't block response)
+    AnnouncementService.emailAnnouncement(team, announcement).catch((err: unknown) => {
+      logger.error('Failed to send announcement emails', {
+        error: err instanceof Error ? err.message : String(err),
+        announcementId: announcement.id,
+      });
+    });
 
     // Send push notification to team members (async, don't block response)
     NotificationService.sendToTeam(
@@ -128,6 +92,58 @@ export class AnnouncementService {
     });
 
     return announcement;
+  }
+
+  /**
+   * Email an announcement to the team's audience — players, staff and
+   * guardians of players, the same set push goes to (#449) — minus the author
+   * and anyone without an address.
+   *
+   * Sends run one after another, not all at once: with guardians included a
+   * single announcement is 30-45 messages, and a concurrent burst that size
+   * trips the SES per-second send rate. One failed recipient never stops the
+   * rest.
+   */
+  private static async emailAnnouncement(
+    team: { id: string; name: string },
+    announcement: AnnouncementWithAuthor
+  ): Promise<void> {
+    const audienceIds = await getTeamAudienceUserIds(team.id, announcement.authorId);
+    if (audienceIds.length === 0) return;
+
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: audienceIds }, email: { not: null }, deletedAt: null },
+      select: { id: true, name: true, email: true },
+    });
+
+    for (const recipient of recipients) {
+      if (!recipient.email) continue;
+      try {
+        await mailer.send({
+          template: announcementTemplate,
+          to: recipient.email,
+          variables: {
+            recipientName: recipient.name,
+            teamName: team.name,
+            title: announcement.title,
+            body: announcement.body,
+            authorName: announcement.author.name ?? announcement.author.email ?? '',
+          },
+          metadata: {
+            userId: announcement.authorId,
+            event_type: 'announcement.created',
+            teamId: team.id,
+            announcementId: announcement.id,
+          },
+        });
+      } catch (err) {
+        logger.error('Failed to send announcement email', {
+          error: err instanceof Error ? err.message : String(err),
+          announcementId: announcement.id,
+          recipientId: recipient.id,
+        });
+      }
+    }
   }
 
   /**

@@ -740,9 +740,10 @@ describe('InvitationService', () => {
       );
       // Consent guard: the email is stripped only while the row is unclaimed —
       // otherwise syncUser would turn a later sign-up into silent membership.
+      // The bounce/complaint state described the address being removed (#449).
       expect(txUserUpdateMany).toHaveBeenCalledWith({
         where: { id: invitation.playerId, workosUserId: null },
-        data: { email: null },
+        data: { email: null, emailSuppressedAt: null, emailSuppressedReason: null },
       });
     });
 

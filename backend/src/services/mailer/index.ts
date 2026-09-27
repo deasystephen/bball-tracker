@@ -45,7 +45,9 @@ export function createMailer(): Mailer {
     return new FakeMailer();
   }
 
-  return new SesMailer({ region, fromAddress });
+  const configurationSetName = process.env.SES_CONFIGURATION_SET?.trim() || undefined;
+
+  return new SesMailer({ region, fromAddress, configurationSetName });
 }
 
 export const mailer: Mailer = createMailer();

@@ -20,6 +20,13 @@ enum UserRole {
   ADMIN
 }
 
+// Why SES stopped delivering to an address (#449). Mirrors the SES
+// account-level suppression reasons; set from bounce/complaint events.
+enum EmailSuppressionReason {
+  BOUNCE
+  COMPLAINT
+}
+
 enum GuardianRelationship {
   MOTHER
   FATHER
@@ -106,6 +113,13 @@ model User {
   // a valid target. Every write path onto a User row is guarded by
   // `deletedAt IS NULL`; never read the tombstone state from name/email.
   deletedAt             DateTime?
+  // Set when SES reports a permanent bounce or a complaint for `email` (#449,
+  // services/mailer/ses-events.ts); cleared by a later delivery to the same
+  // address and by every write that changes or removes `email` (spread
+  // EMAIL_SUPPRESSION_CLEARED). SES's account-level suppression list is what
+  // actually stops delivery; these columns exist so a coach can be told.
+  emailSuppressedAt     DateTime?
+  emailSuppressedReason EmailSuppressionReason?
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 

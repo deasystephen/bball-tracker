@@ -555,6 +555,32 @@ describe('PlayerService', () => {
       );
 
       expect(result).toHaveProperty('email', 'new@test.com');
+      // The recovery path for a bounced address: a corrected one starts clean (#449).
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { email: 'new@test.com', emailSuppressedAt: null, emailSuppressedReason: null },
+        })
+      );
+    });
+
+    it('keeps the email delivery state when the email is unchanged (#449)', async () => {
+      const player = createPlayer({ email: 'same@test.com' });
+      const adminUser = createAdmin();
+
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(adminUser);
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...player, name: 'Renamed' });
+
+      await PlayerService.updatePlayer(
+        player.id,
+        { name: 'Renamed', email: 'same@test.com' },
+        adminUser.id
+      );
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { name: 'Renamed' } })
+      );
     });
 
     it('forbids a player from changing their own email (bound to the login provider)', async () => {

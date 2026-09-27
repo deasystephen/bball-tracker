@@ -41,10 +41,23 @@ function setNoAccess(): void {
   (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 }
 
+/** Email goes out in the background; let that chain of awaits run to completion. */
+function flushBackgroundWork(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 describe('AnnouncementService', () => {
   beforeEach(() => {
     mockedSendToTeam.mockReset();
     mockedSendToTeam.mockResolvedValue(undefined);
+    mockedMailerSend.mockReset();
+    mockedMailerSend.mockResolvedValue({ messageId: 'fake' });
+    // An empty audience by default: email is background work every
+    // createAnnouncement starts, whatever the test is about.
+    (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   describe('createAnnouncement', () => {
@@ -208,81 +221,189 @@ describe('AnnouncementService', () => {
       await Promise.resolve();
     });
 
-    it('does not surface email send failures to the caller', async () => {
-      const team = createTeam();
-      const admin = createAdmin();
-      const player = { id: 'p1', name: 'Player', email: 'player@test.com' };
-      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
-        id: team.id,
-        name: team.name,
-        members: [{ player }],
-      });
-      setSystemAdmin();
-      (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
-        id: 'a4',
-        teamId: team.id,
-        authorId: admin.id,
-        title: 't',
-        body: 'b',
-        author: { id: admin.id, name: admin.name, email: admin.email },
-      });
-      mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
-
-      await expect(
-        AnnouncementService.createAnnouncement(team.id, { title: 't', body: 'b' }, admin.id)
-      ).resolves.toMatchObject({ id: 'a4' });
-
-      await Promise.resolve();
-    });
-
-    it('emails members (excluding the author and emailless members) with name fallbacks', async () => {
+    describe('email audience (#449)', () => {
       const team = createTeam({ name: 'Hoops' });
       const admin = createAdmin();
-      const namedPlayer = { id: 'p1', name: 'Alice', email: 'alice@test.com' };
-      const namelessPlayer = { id: 'p2', name: null, email: 'p2@test.com' };
-      const authorAsMember = { id: admin.id, name: admin.name, email: admin.email };
-      const emaillessPlayer = { id: 'p3', name: 'NoEmail', email: null };
 
-      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
-        id: team.id,
-        name: team.name,
-        members: [
-          { player: namedPlayer },
-          { player: namelessPlayer },
-          { player: authorAsMember },
-          { player: emaillessPlayer },
-        ],
+      /** Stub the announcement row and the three audience queries. */
+      function setAudience(audience: {
+        memberIds?: string[];
+        staffIds?: string[];
+        guardianParentIds?: string[];
+        author?: { name: string | null; email: string | null };
+      }): void {
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({
+          id: team.id,
+          name: team.name,
+        });
+        setSystemAdmin();
+        (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
+          id: 'a5',
+          teamId: team.id,
+          authorId: admin.id,
+          title: 'Practice',
+          body: 'See you there',
+          author: { id: admin.id, name: admin.name, email: admin.email, ...audience.author },
+        });
+        (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue(
+          (audience.memberIds ?? []).map((playerId) => ({ playerId }))
+        );
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(
+          (audience.staffIds ?? []).map((userId) => ({ userId }))
+        );
+        (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue(
+          (audience.guardianParentIds ?? []).map((parentId) => ({ parentId }))
+        );
+      }
+
+      function announce(): Promise<unknown> {
+        return AnnouncementService.createAnnouncement(
+          team.id,
+          { title: 'Practice', body: 'See you there' },
+          admin.id
+        );
+      }
+
+      it('emails players, staff and guardians of players, never the author', async () => {
+        setAudience({
+          // The author is also rostered and on staff: excluded either way.
+          memberIds: ['p1', 'p2', admin.id],
+          staffIds: [admin.id, 'assistant'],
+          // `assistant` is also a parent: one recipient, not two.
+          guardianParentIds: ['mom', 'assistant'],
+        });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { id: 'p1', name: 'Alice', email: 'alice@test.com' },
+          { id: 'assistant', name: 'Assistant', email: 'assistant@test.com' },
+          { id: 'mom', name: 'Mom', email: 'mom@test.com' },
+        ]);
+
+        await announce();
+        await flushBackgroundWork();
+
+        expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith({
+          where: { childId: { in: ['p1', 'p2', admin.id] } },
+          select: { parentId: true },
+        });
+        // Addressless (managed) players and tombstones are filtered in the query.
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+          where: {
+            id: { in: ['p1', 'p2', 'assistant', 'mom'] },
+            email: { not: null },
+            deletedAt: null,
+          },
+          select: { id: true, name: true, email: true },
+        });
+
+        expect(mockedMailerSend.mock.calls.map((c) => c[0].to)).toEqual([
+          'alice@test.com',
+          'assistant@test.com',
+          'mom@test.com',
+        ]);
+        expect(mockedMailerSend.mock.calls[2][0]).toMatchObject({
+          variables: {
+            recipientName: 'Mom',
+            teamName: 'Hoops',
+            title: 'Practice',
+            body: 'See you there',
+            authorName: admin.name,
+          },
+          metadata: {
+            userId: admin.id,
+            event_type: 'announcement.created',
+            teamId: team.id,
+            announcementId: 'a5',
+          },
+        });
       });
-      setSystemAdmin();
-      // Author with no name and no email exercises the `?? ''` fallback
-      (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
-        id: 'a5',
-        teamId: team.id,
-        authorId: admin.id,
-        title: 'Practice',
-        body: 'See you there',
-        author: { id: admin.id, name: null, email: null },
+
+      it('falls back to the author email, then to an empty author name', async () => {
+        setAudience({ memberIds: ['p1'], author: { name: null, email: 'coach@test.com' } });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { id: 'p1', name: 'Alice', email: 'alice@test.com' },
+        ]);
+        await announce();
+        await flushBackgroundWork();
+        expect(mockedMailerSend.mock.calls[0][0].variables.authorName).toBe('coach@test.com');
+
+        mockedMailerSend.mockClear();
+        setAudience({ memberIds: ['p1'], author: { name: null, email: null } });
+        await announce();
+        await flushBackgroundWork();
+        expect(mockedMailerSend.mock.calls[0][0].variables.authorName).toBe('');
       });
 
-      await AnnouncementService.createAnnouncement(
-        team.id,
-        { title: 'Practice', body: 'See you there' },
-        admin.id
-      );
-      await Promise.resolve();
+      it('sends nothing, and looks nobody up, when the author is the whole audience', async () => {
+        setAudience({ memberIds: [admin.id], staffIds: [admin.id] });
 
-      // Only the two emailable non-author members get an email
-      expect(mockedMailerSend).toHaveBeenCalledTimes(2);
-      const recipientEmails = mockedMailerSend.mock.calls.map((c) => c[0].to);
-      expect(recipientEmails).toEqual(
-        expect.arrayContaining(['alice@test.com', 'p2@test.com'])
-      );
-      expect(recipientEmails).not.toContain(admin.email);
+        await announce();
+        await flushBackgroundWork();
 
-      const namelessCall = mockedMailerSend.mock.calls.find((c) => c[0].to === 'p2@test.com');
-      expect(namelessCall?.[0].variables).toMatchObject({
-        recipientName: 'p2@test.com',
-        authorName: '',
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+      });
+
+      it('skips a row that comes back without an address', async () => {
+        setAudience({ memberIds: ['p1', 'p2'] });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { id: 'p1', name: 'NoEmail', email: null },
+          { id: 'p2', name: 'Bob', email: 'bob@test.com' },
+        ]);
+
+        await announce();
+        await flushBackgroundWork();
+
+        expect(mockedMailerSend.mock.calls.map((c) => c[0].to)).toEqual(['bob@test.com']);
+      });
+
+      it('keeps sending after one recipient fails, and never surfaces the failure', async () => {
+        setAudience({ memberIds: ['p1', 'p2'] });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { id: 'p1', name: 'Alice', email: 'alice@test.com' },
+          { id: 'p2', name: 'Bob', email: 'bob@test.com' },
+        ]);
+        mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
+        mockedMailerSend.mockRejectedValueOnce('throttled');
+
+        await expect(announce()).resolves.toMatchObject({ id: 'a5' });
+        await flushBackgroundWork();
+
+        expect(mockedMailerSend).toHaveBeenCalledTimes(2);
+      });
+
+      it('sends one at a time, so a large team cannot burst past the SES send rate', async () => {
+        setAudience({ memberIds: ['p1', 'p2'] });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { id: 'p1', name: 'Alice', email: 'alice@test.com' },
+          { id: 'p2', name: 'Bob', email: 'bob@test.com' },
+        ]);
+        let releaseFirst: (value: { messageId: string }) => void = () => undefined;
+        mockedMailerSend.mockImplementationOnce(
+          () => new Promise((resolve) => { releaseFirst = resolve; })
+        );
+
+        await announce();
+        await flushBackgroundWork();
+        expect(mockedMailerSend).toHaveBeenCalledTimes(1);
+
+        releaseFirst({ messageId: 'first' });
+        await flushBackgroundWork();
+        expect(mockedMailerSend).toHaveBeenCalledTimes(2);
+      });
+
+      it('does not surface a failure to resolve the audience', async () => {
+        setAudience({});
+        (mockPrisma.teamMember.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
+
+        await expect(announce()).resolves.toMatchObject({ id: 'a5' });
+        await flushBackgroundWork();
+
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+
+        (mockPrisma.teamMember.findMany as jest.Mock).mockRejectedValue('db down');
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce({ id: team.id, name: team.name });
+        await expect(announce()).resolves.toMatchObject({ id: 'a5' });
+        await flushBackgroundWork();
       });
     });
   });

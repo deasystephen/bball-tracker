@@ -24,7 +24,8 @@ The `User` row stays as a tombstone so that game events, box scores and season s
 for the person's teams remain consistent for everyone else. In ONE transaction:
 
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
-  best-effort), email-verified flag, subscription, push tokens, calendar-feed tokens, every staff
+  best-effort), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
+  `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
   role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
   each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`),
   pending guardian invitations addressed to them (→ `EXPIRED`), and the email on **every**
