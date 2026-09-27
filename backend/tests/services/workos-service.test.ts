@@ -421,9 +421,30 @@ describe('WorkOSService', () => {
       const result = await WorkOSService.syncUser({ id: 'workos_123', email: 'new@example.com', emailVerified: true });
 
       expect(result).toHaveProperty('email', 'new@example.com');
+      // A bounce recorded against the old address says nothing about the new one (#449).
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ email: 'new@example.com' }) })
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'new@example.com',
+            emailSuppressedAt: null,
+            emailSuppressedReason: null,
+          }),
+        })
       );
+    });
+
+    it('leaves the email delivery state alone when the email did not change (#449)', async () => {
+      const existingUser = createPlayer({ email: 'same@example.com', workosUserId: 'workos_123' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
+
+      await WorkOSService.syncUser({ id: 'workos_123', email: 'same@example.com', emailVerified: true });
+
+      const [{ data }] = (mockPrisma.user.updateMany as jest.Mock).mock.calls[0] as [{ data: object }];
+      expect(data).not.toHaveProperty('email');
+      expect(data).not.toHaveProperty('emailSuppressedAt');
+      expect(data).not.toHaveProperty('emailSuppressedReason');
     });
 
     it('should fill in the avatar from WorkOS only when the local one is null', async () => {

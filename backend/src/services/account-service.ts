@@ -47,6 +47,7 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
+import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { deletePreviousAvatar } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
@@ -200,6 +201,7 @@ export class AccountService {
         data: {
           workosUserId: null,
           email: null,
+          ...EMAIL_SUPPRESSION_CLEARED,
           name: DELETED_USER_NAME,
           emailVerified: false,
           profilePictureUrl: null,
@@ -337,6 +339,9 @@ const USER_EXPORT_SELECT = {
   name: true,
   role: true,
   emailVerified: true,
+  // Delivery state SES reported for the address (#449): data held about the person.
+  emailSuppressedAt: true,
+  emailSuppressedReason: true,
   profilePictureUrl: true,
   subscriptionTier: true,
   subscriptionExpiresAt: true,

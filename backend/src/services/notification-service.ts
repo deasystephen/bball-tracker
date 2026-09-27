@@ -7,6 +7,7 @@ import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { ConflictError, UnauthorizedError } from '../utils/errors';
+import { getTeamAudienceUserIds } from '../utils/team-audience';
 
 const expo = new Expo();
 
@@ -146,42 +147,13 @@ export class NotificationService {
     notification: { title: string; body: string; data?: Record<string, unknown> },
     excludeUserId?: string
   ): Promise<ExpoPushTicket[]> {
-    // Get all team member and staff user IDs
-    const [members, staff] = await Promise.all([
-      prisma.teamMember.findMany({
-        where: { teamId },
-        select: { playerId: true },
-      }),
-      prisma.teamStaff.findMany({
-        where: { teamId },
-        select: { userId: true },
-      }),
-    ]);
+    // Members, staff and guardians of members, deduplicated — the same
+    // audience announcement email uses.
+    const userIds = await getTeamAudienceUserIds(teamId, excludeUserId);
 
-    const memberIds = members.map(m => m.playerId);
+    if (userIds.length === 0) return [];
 
-    // Guardians (PARENT role) of rostered players receive the team's
-    // notifications too; the Set dedupes a parent who is also staff.
-    const guardians = memberIds.length > 0
-      ? await prisma.guardian.findMany({
-          where: { childId: { in: memberIds } },
-          select: { parentId: true },
-        })
-      : [];
-
-    const userIds = new Set([
-      ...memberIds,
-      ...staff.map(s => s.userId),
-      ...guardians.map(g => g.parentId),
-    ]);
-
-    if (excludeUserId) {
-      userIds.delete(excludeUserId);
-    }
-
-    if (userIds.size === 0) return [];
-
-    return NotificationService.sendToUsers([...userIds], notification);
+    return NotificationService.sendToUsers(userIds, notification);
   }
 
   /**

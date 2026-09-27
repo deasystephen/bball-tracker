@@ -17,6 +17,7 @@ import {
 } from '../utils/errors';
 import { deletePreviousAvatar } from './upload-service';
 import { getPlayerTeamAccess, isGuardianOf } from '../utils/permissions';
+import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -402,7 +403,9 @@ export class PlayerService {
         where: { id: playerId },
         data: {
           ...(data.name && { name: data.name }),
-          ...(data.email && data.email !== player.email && { email: data.email }),
+          // A corrected address starts clean: the bounce belonged to the old one (#449).
+          ...(data.email &&
+            data.email !== player.email && { email: data.email, ...EMAIL_SUPPRESSION_CLEARED }),
           ...(data.profilePictureUrl !== undefined && {
             profilePictureUrl: data.profilePictureUrl || null,
           }),

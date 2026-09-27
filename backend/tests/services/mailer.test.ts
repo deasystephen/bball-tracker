@@ -83,6 +83,51 @@ describe('createMailer', () => {
     const m = createMailer();
     expect(m).toBeInstanceOf(SesMailer);
   });
+
+  describe('SES_CONFIGURATION_SET (#449)', () => {
+    const sesModule = jest.requireMock('@aws-sdk/client-sesv2') as { SendEmailCommand: jest.Mock };
+    const originalConfigurationSet = process.env.SES_CONFIGURATION_SET;
+
+    beforeEach(() => {
+      process.env.AWS_SES_REGION = 'us-east-1';
+      process.env.SES_FROM_ADDRESS = 'noreply@mail.example.test';
+      sesModule.SendEmailCommand.mockClear();
+    });
+
+    afterEach(() => {
+      if (originalConfigurationSet === undefined) {
+        delete process.env.SES_CONFIGURATION_SET;
+      } else {
+        process.env.SES_CONFIGURATION_SET = originalConfigurationSet;
+      }
+    });
+
+    it('attaches the configuration set to every send, trimmed', async () => {
+      process.env.SES_CONFIGURATION_SET = ' app-transactional ';
+
+      await createMailer().send(makeParams());
+
+      expect(sesModule.SendEmailCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ ConfigurationSetName: 'app-transactional' })
+      );
+    });
+
+    it.each([
+      ['unset', undefined],
+      ['blank', '   '],
+    ])('sends without one when the variable is %s', async (_label, value) => {
+      if (value === undefined) {
+        delete process.env.SES_CONFIGURATION_SET;
+      } else {
+        process.env.SES_CONFIGURATION_SET = value;
+      }
+
+      await createMailer().send(makeParams());
+
+      const [input] = sesModule.SendEmailCommand.mock.calls[0] as [Record<string, unknown>];
+      expect(input).not.toHaveProperty('ConfigurationSetName');
+    });
+  });
 });
 
 describe('SesMailer', () => {

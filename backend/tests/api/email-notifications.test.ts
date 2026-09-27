@@ -89,16 +89,20 @@ function setupCoachWithTeam(): {
 // ─── Announcement email ──────────────────────────────────────────────────────
 
 describe('POST /api/v1/teams/:teamId/announcements — email', () => {
-  it('sends announcement emails to team members', async () => {
+  it('sends announcement emails to players and their guardians, not to the author (#449)', async () => {
     const { coach, team, headCoachRole, coachStaff } = setupCoachWithTeam();
     const player = createPlayer({ email: 'player@example.com' });
+    const guardian = createPlayer({ email: 'parent@example.com' });
 
-    (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
-      ...team,
-      members: [{ player: { id: player.id, name: player.name, email: player.email } }],
-    });
+    (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
     (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
       { ...coachStaff, role: headCoachRole },
+    ]);
+    (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([{ playerId: player.id }]);
+    (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([{ parentId: guardian.id }]);
+    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+      { id: player.id, name: player.name, email: player.email },
+      { id: guardian.id, name: guardian.name, email: guardian.email },
     ]);
     (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
       id: 'ann-1',
@@ -119,25 +123,34 @@ describe('POST /api/v1/teams/:teamId/announcements — email', () => {
     // Allow fire-and-forget promises to settle
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(mockMailerSend).toHaveBeenCalledWith(
+    // The coach is on staff, so the audience query sees them — and drops them.
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        to: player.email,
-        metadata: expect.objectContaining({ event_type: 'announcement.created' }),
+        where: { id: { in: [player.id, guardian.id] }, email: { not: null }, deletedAt: null },
       })
     );
+    for (const recipient of [player, guardian]) {
+      expect(mockMailerSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: recipient.email,
+          metadata: expect.objectContaining({ event_type: 'announcement.created' }),
+        })
+      );
+    }
+    expect(mockMailerSend).toHaveBeenCalledTimes(2);
   });
 
   it('does not send emails when team has no members with email', async () => {
     const { team, headCoachRole, coachStaff, coach } = setupCoachWithTeam();
 
-    (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
-      ...team,
-      // managed player with no email
-      members: [{ player: { id: 'managed-1', name: 'Kid', email: null } }],
-    });
+    (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
     (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
       { ...coachStaff, role: headCoachRole },
     ]);
+    // A managed player with no email: in the audience, filtered by the query.
+    (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([{ playerId: 'managed-1' }]);
+    (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
       id: 'ann-2',
       teamId: team.id,

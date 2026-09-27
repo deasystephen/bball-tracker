@@ -8,6 +8,7 @@ import { Prisma, User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
+import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { ConflictError, ServiceUnavailableError } from '../utils/errors';
 
 type UserManagement = typeof workos.userManagement;
@@ -199,7 +200,10 @@ export class WorkOSService {
           where: { id: linked.id, deletedAt: null },
           data: {
             emailVerified,
-            ...(linked.email !== workosUser.email && { email: workosUser.email }),
+            ...(linked.email !== workosUser.email && {
+              email: workosUser.email,
+              ...EMAIL_SUPPRESSION_CLEARED,
+            }),
             ...(linked.profilePictureUrl === null && workosAvatar && { profilePictureUrl: workosAvatar }),
           },
         })
