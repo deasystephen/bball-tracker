@@ -333,9 +333,42 @@ never inline a role check in a screen:
 
 ### Socket.io (Live Game Broadcast)
 
-Real-time game updates use Socket.io with an in-memory adapter. Single-replica
-only — see `backend/src/index.ts` for the multi-replica startup guard and
-issue #26 for the Redis adapter follow-up.
+Real-time game updates use Socket.io with an in-memory adapter. **Single-replica
+only**: rooms and every rate-limit counter live in process memory, so a second
+task silently splits a live game (coach on task A, spectators on task B, no
+error anywhere). The Redis adapter and shared rate-limit store are the open
+follow-up **#452** (#26, which shipped the handlers, was closed without them).
+
+Three things pin the replica count, and they change together (#446):
+
+- **Autoscaling:** `max_capacity` in `infra/variables.tf` defaults to 1 and its
+  `validation` block rejects any other value, so a `terraform.tfvars` override
+  cannot raise it (`min_capacity` accepts 0 or 1; 0 is for maintenance windows).
+- **`MAX_REPLICAS=1`** in `infra/task-definition.json` — the process cannot
+  observe the autoscaling target, so the ceiling is explicit configuration.
+  `tests/infra/replica-ceiling.test.ts` pins it to the `max_capacity` default
+  and runs the real guard against the production env block.
+- **Hard startup guard:** `utils/replica-guard.ts` — pure
+  `evaluateReplicaGuard(env)` plus `enforceReplicaGuard()`, which `index.ts`
+  calls **before** `httpServer.listen`. Only evaluated when
+  `NODE_ENV=production`:
+
+  | `MAX_REPLICAS` | Result |
+  | --- | --- |
+  | `1` | starts (info log) |
+  | unset / blank | starts, logs at **error** level (the pre-guard behaviour, so a rollback to an older task definition cannot crash-loop) |
+  | not a positive integer | **exits 1** before listening |
+  | `> 1` | **exits 1** before listening |
+
+  `REDIS_SOCKET_ADAPTER_URL` is **not** accepted as an escape hatch:
+  `@socket.io/redis-adapter` is not installed and nothing reads the URL, so
+  honouring it would be false assurance. #452 flips `MULTI_REPLICA_SUPPORTED`
+  in the guard module; from then on a ceiling above 1 requires the URL. The
+  guard is configuration-based, so the two tasks of a rolling deploy do not
+  trip it — see the deploy-window caveat under "ECS deploy safety".
+
+Do not raise capacity as a fix for load: adapter and shared rate-limit store
+first (#452), capacity second.
 
 | Direction       | Event                | Payload                                                        |
 | --------------- | -------------------- | -------------------------------------------------------------- |
@@ -1181,6 +1214,16 @@ down until someone notices.
 
 **It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
 a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
+
+**Every deploy briefly splits live games — avoid scheduled game windows.** The rollout runs with
+`deployment_maximum_percent = 200`, so for a short overlap the old and the new task both hold
+connections. Socket.io rooms are in process memory (single-replica, #446), so a coach tracking on
+one task and the spectators on the other stop seeing each other's events until the old task stops
+and clients reconnect; nobody gets an error. Check for `IN_PROGRESS` games before merging anything
+that deploys, and remember that auto-merged Dependabot backend PRs deploy too. The startup guard
+(`utils/replica-guard.ts`) checks the configured ceiling, not the live task count, so it does not
+trip on the overlap. The window only closes with the Redis adapter (#452). Operator-facing copy:
+`docs/deployment/aws-setup.md` ("Deploy window").
 
 **Terraform is never applied by CI, but merging a `.tf` file still deploys.** These are two
 separate mechanisms and it is easy to conflate them:
