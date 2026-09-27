@@ -159,6 +159,14 @@ describe('app.config.js', () => {
     expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.3.0')).toBe(true);
   });
 
+  it('keeps the OTA runtime at or past the 1.4.0 dependency boundary', async () => {
+    // Build #31 (runtime 1.3.0) carries older native code for Amplitude,
+    // Sentry and expo-updates than the JavaScript on main expects (#562). An
+    // OTA from main must never reach it, so the version can never drop below
+    // 1.4.0 again.
+    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.4.0')).toBe(true);
+  });
+
   // Permission purpose strings (#451). Baked into Info.plist: a regression
   // here is invisible until App Review reads the prompt, and an OTA cannot
   // fix it. The strings are set through the plugin options because prebuild
