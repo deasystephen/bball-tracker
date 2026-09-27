@@ -73,7 +73,7 @@ Backend API (Node.js/Express)
 ```
 
 ### Backend Structure (`/backend/src/`)
-- **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, middleware). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
+- **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, admin, middleware). `admin/` holds system-ADMIN-only operator routes (today: setting a subscription tier, #445). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
 - **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates) shipped in #131 and `usage-service.ts` (usage metering, #43)
 - **websocket/**: Socket.io handlers for real-time updates
 - **models/**: Prisma ORM models
@@ -81,11 +81,12 @@ Backend API (Node.js/Express)
 
 ### Usage Metering & Tier Limits (#43)
 - `services/usage-service.ts` exposes `getUsage(userId)` → per-feature `{ count, limit, limitReached }`. Counts are derived from live data at read time (no counter table) and cached in Redis for 60s (`utils/redis.ts` JSON helpers), invalidated on team create/delete.
-- **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `utils/entitlements.ts` (`getUsageLimits`) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited (paid tiers).
+- **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `USAGE_LIMITS` in `services/entitlements/index.ts` (read through `getUsageLimits`; `utils/entitlements.ts` is a re-export) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited.
+- **Current limits (#445): nothing is capped, on any tier.** `maxTeams` and `maxSeasons` are `Infinity` for FREE, PREMIUM and LEAGUE, so `GET /auth/me/usage` reports `limit: null` / `limitReached: false` for both metrics and a FREE user can create a 4th (or 40th) team. The FREE team cap of 3 was lifted because enforcement had shipped without any way to buy an upgrade — a dead-end paywall. The exported `FREE_TEAM_LIMIT` constant is gone. Re-introduce a cap only together with a real purchase flow (#41), by changing the number in `USAGE_LIMITS` and nowhere else.
 - **Endpoint**: `GET /api/v1/auth/me/usage` returns all metered metrics for the current user's effective tier.
-- **Enforcement**: team create (`POST /api/v1/teams`) blocks FREE-tier users at/over the cap with a **402** (`PaymentRequiredError`); admins bypass. **Seasons are metered but never capped** — `maxSeasons` is `Infinity` for every tier, so `/auth/me/usage` reports `seasons.limit: null` and `limitReached: false`. The old FREE value of 1 was never enforced anywhere and rendered as a fake paywall (audit #81); season-history depth is the `FULL_SEASON_HISTORY` feature flag, not a usage limit. If a real cap is ever wanted, enforce it where a team joins a new season and re-add the number in one place (`USAGE_LIMITS`).
+- **Enforcement (dormant, kept on purpose)**: the team-cap machinery is still mounted and works for any finite `maxTeams` — team create (`POST /api/v1/teams`) would block a user at/over their tier's cap with a **402** (`PaymentRequiredError`); admins bypass. With every tier at `Infinity` both checks return before the count query, so today it never fires. Its tests run against a finite limit swapped into `USAGE_LIMITS` (`tests/helpers.ts#withFiniteFreeTeamLimit`, `jest.replaceProperty`) — use that helper rather than deleting a cap test. **Seasons are metered but never capped** — the old FREE value of 1 was never enforced anywhere and rendered as a fake paywall (audit #81); season-history depth is the `FULL_SEASON_HISTORY` feature flag, not a usage limit. If a real season cap is ever wanted, enforce it where a team joins a new season and re-add the number in one place (`USAGE_LIMITS`).
 - **Race-safe**: `requireTeamCreateLimit` is only a cheap pre-check. The authoritative check runs inside `TeamService.createTeam`'s `$transaction`, after `SELECT … FROM "User" … FOR UPDATE` on the caller's row, so concurrent creates serialize and can't exceed the cap (audit #49); it throws `PaymentRequiredError` (402, same `upgrade_required` body). Team + default roles + Head Coach staff row are written in that same transaction (no orphan teams, audit #70).
-- **Grandfather rule**: enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over the cap when enforcement shipped keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or upgraded. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
+- **Grandfather rule** (applies whenever a tier has a finite limit): enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over a cap keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or on a tier without one. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
 - **Out of scope** (#43): per-day/per-hour rate limits, usage-based pricing, admin usage dashboards.
 
 ### Mobile Structure (`/mobile/`)
@@ -168,7 +169,7 @@ Backend API (Node.js/Express)
   date-desc first page client-side — a backlog of scheduled games hides live/finished ones.
 - Infinite keys nest under the list root (`gameKeys.lists()`, `teamKeys.lists()`, `announcementKeys.team(id)`)
   so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
-  becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the FREE-tier meter).
+  becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the Profile usage meter).
 - The tab bar (`app/(tabs)/_layout.tsx`) is an absolutely-positioned translucent blur overlay — content
   deliberately scrolls behind it. Every scrollable tab screen therefore sets its scroll-content
   `paddingBottom` from `hooks/useTabBarPadding.ts#useTabBarPadding()` (= `TAB_BAR_HEIGHT` 60 + bottom
@@ -264,7 +265,7 @@ never inline a role check in a screen:
   `POST /staff` 404 (no account for that email) shows the inline "ask them to sign up first" hint — the
   endpoint never creates users. Hooks in `hooks/useTeamStaff.ts` (`useTeamStaff`, `useTeamRoles`,
   `useAddStaff`, `useUpdateStaffRole`, `useRemoveStaff`) invalidate the staff list, team detail/lists and
-  `usageKeys.all` (staff rows feed the FREE-tier team cap). Maestro: `.maestro/team-staff.yaml` (Frank Vogel =
+  `usageKeys.all` (staff rows are what the usage meter counts). Maestro: `.maestro/team-staff.yaml` (Frank Vogel =
   seeded Lakers head coach, read-only); Jest `__tests__/app/team-staff-gating.test.tsx`.
 - Maestro: `.maestro/player-no-tracking.yaml` (Steph Curry = seeded PLAYER) asserts the create FAB, Start Game,
   Delete game, Continue Tracking and End Game are absent while RSVP remains.
@@ -316,7 +317,8 @@ never inline a role check in a screen:
   interceptor. For any response with a JSON body it copies the server's `error` (or `message`) onto
   `error.message`, the server `code` onto `error.code`, and the whole body + `status` onto `error.apiError`.
   The existing `error instanceof Error ? error.message : fallback` sites therefore show the real reason
-  (e.g. the FREE-tier team cap) instead of "Request failed with status code N". Helpers:
+  (e.g. a 403's "You do not have permission to create teams in this league") instead of "Request failed
+  with status code N". Helpers:
   `getApiErrorMessage(err, fallback)` and `isUpgradeRequiredError(err)` (402 or `code === 'upgrade_required'`).
   Network errors keep axios' own `code` (`ECONNABORTED`, …).
 - `hasTeamPermission(team, userId, permission, userRole?, leagueAdminOf?)` returns `true` for a system `ADMIN`
@@ -525,13 +527,18 @@ current score so a client can drop events and still converge.
 
 ### Entitlements / Feature Gating
 
-**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the PREMIUM-gated features (team CSV export, calendar subscribe). The backend gates stay as the single source of truth. The only tier feedback users see is the 402 `upgrade_required` message on team create (`UsageMeter` on Profile still shows FREE-tier usage). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
+**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the PREMIUM-gated features (team CSV export, calendar subscribe). The backend gates stay as the single source of truth. **No 402 is reachable from the app today**: the only one a user could hit was the FREE team cap on team create, lifted in #445 (the `isUpgradeRequiredError` branch in `app/teams/create.tsx` stays for the day a cap returns). `UsageMeter` on Profile renders plain counts ("4 · Unlimited", no bar, no CTA) because every limit is `null` (`__tests__/components/UsageMeter.test.tsx`). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
 
 Subscription feature gating has a **single source of truth**:
 `backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
-feature->tier map (FREE / PREMIUM / LEAGUE), usage limits, and the
-`FREE_TEAM_LIMIT` constant (3). Do not redefine tier rules elsewhere — import
-from there (issue #43's usage metering reuses these constants).
+feature->tier map (FREE / PREMIUM / LEAGUE) and the usage limits
+(`USAGE_LIMITS`). Do not redefine tier rules elsewhere — import from there
+(issue #43's usage metering reuses them).
+
+**What FREE gets today (#445):** unlimited teams and seasons; none of the gated
+features (team season-stats CSV export and calendar subscribe are PREMIUM and
+answer 402 — neither has a client entry point). There is no `FREE_TEAM_LIMIT`
+any more.
 
 Enforcement lives in `backend/src/api/middleware/entitlements.ts` (the only entitlement middleware —
 the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware.ts`, which answered
@@ -542,11 +549,52 @@ the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware
   Applied to team season-stats CSV export (`STATS_EXPORT`) and calendar
   subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
   subscriptions resolve to an effective FREE tier.
-- `requireTeamCreateLimit()` — enforces the FREE-tier team cap on `POST /teams`.
-  **Grandfather rule:** the cap is checked only at create time. Users already
+- `requireTeamCreateLimit()` — enforces a tier's team cap on `POST /teams`
+  when the tier has one. **No tier does since #445**, so it calls `next()`
+  without a count query for everyone; it stays mounted so a finite `maxTeams`
+  in `USAGE_LIMITS` is enforced again with no other change.
+  **Grandfather rule:** a cap is checked only at create time. Users already
   over the limit KEEP their existing teams (nothing is deleted); they just
-  cannot create new ones until under the cap or upgraded. PREMIUM/LEAGUE are
-  unlimited and skip the count query.
+  cannot create new ones until under the cap or on an uncapped tier.
+
+#### Comping an account (admin-set tier, #445)
+
+There is no purchase flow (#41), so the only way onto PREMIUM or LEAGUE is a
+system ADMIN setting it — before #445 that meant hand-written SQL against
+production RDS.
+
+`PATCH /api/v1/admin/users/:userId/subscription` (`api/admin/routes.ts` →
+`SubscriptionService.setSubscription`, `services/subscription-service.ts`):
+
+- Body `{ tier: 'FREE' | 'PREMIUM' | 'LEAGUE', expiresAt?: string | null }`
+  (`setSubscriptionSchema`; the tiers are the Prisma `SubscriptionTier` enum).
+  **PREMIUM / LEAGUE require an `expiresAt` in the future** (ISO 8601 with `Z`
+  or an offset): `isSubscriptionActive` treats a paid tier with no expiry as
+  inactive, so a comp without a date would silently resolve to FREE. FREE
+  takes no expiry (omit or `null`) and clears the stored one.
+- **200** `{ success, user: { id, name, email, role, subscriptionTier,
+  subscriptionExpiresAt }, effectiveTier }`; **400** invalid body / non-UUID
+  `userId` / deleted account; **403** caller is not a system ADMIN; **404**
+  unknown user. Errors are plain `{ error }` from the central handler.
+- The write is `updateMany … WHERE deletedAt IS NULL` (the #444 invariant), the
+  target's cached usage is invalidated, and every change logs
+  `Subscription changed by admin` with actor, target and from/to tier + expiry
+  — that log line is the audit trail.
+- **How to comp someone:** sign in as an ADMIN, find the account id with
+  `GET /api/v1/players?search=<email>&role=COACH` (ADMIN search matches email;
+  pass the account's role, the list defaults to `PLAYER`), then
+  ```bash
+  curl -X PATCH https://api.hooplings.com/api/v1/admin/users/<userId>/subscription \
+    -H "Authorization: Bearer <admin access token>" -H 'Content-Type: application/json' \
+    -d '{"tier":"PREMIUM","expiresAt":"2027-09-30T00:00:00Z"}'
+  ```
+  To end a comp early send `{"tier":"FREE"}`; otherwise it lapses to an
+  effective FREE tier on its own at `expiresAt`. A route was chosen over an
+  operator script because RDS sits in a private subnet — a script needs a
+  tunnel or a one-off ECS task, a route needs only an ADMIN token.
+- Tests: `tests/api/admin-subscription.test.ts` (service un-mocked),
+  `tests/schemas/admin-subscription.test.ts`,
+  `tests/services/subscription-service.test.ts`.
 
 ### League / season / team / game authorization
 
@@ -638,7 +686,7 @@ rostered on a coach's team is a *member* of a team in that coach's personal leag
 `createTeamSchema.seasonId` is **optional**. Omitted means "my own teams":
 `TeamService.createTeam` resolves (creating on first use) the caller's personal league and its
 current-year season, inside the **existing** `$transaction`, after the `SELECT … FOR UPDATE` and
-**after** the FREE-tier cap check so a capped user provisions nothing.
+**after** the tier cap check (dormant since #445) so a capped user would provision nothing.
 
 - `League.personalOwnerId String? @unique` marks the container (migration
   `20260830000000_league_personal_owner`, `onDelete: SetNull` so deleting a user never cascades into
@@ -664,8 +712,8 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
   switches to COACH still has a valid choice.
 - Fixture: `dana.whitfield@example.com` is seeded **PLAYER** with no team, staff or league admin row, so
   `.maestro/coach-onboarding.yaml` exercises the real funnel including picking Coach (every WorkOS
-  sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, since the
-  FREE-tier cap would otherwise turn a re-run into a 402.
+  sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, so every
+  run starts from a coach with no teams (the flow exercises first-team provisioning, then reuse).
 - The picker only ever renders the name-only path once #443's list scoping is in: `areAllLeaguesPersonal`
   reads `GET /leagues`, so while that list is global a new coach still sees a real league. #442 and #443
   are therefore one release in two commits, and `.maestro/coach-onboarding.yaml` is the gate for the pair.
@@ -991,9 +1039,9 @@ Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
 - `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
 - `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal).
 
-POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the FREE-tier team cap counts.
+POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the usage meter (and any tier team cap) counts.
 
-**Distinct-teams cap fix (B2.8):** the cap now counts DISTINCT `teamId`s via
+**Distinct-teams cap fix (B2.8):** the team count (and any cap on it — none since #445) uses DISTINCT `teamId`s via
 `countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
 `requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
 `usage-service.computeCounts` — a user holding two roles on one team is one

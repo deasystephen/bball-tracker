@@ -1,11 +1,14 @@
 /**
  * Unit tests for the canonical entitlements source of truth
  * (src/services/entitlements): feature->tier map, usage limits, team cap.
+ *
+ * No tier has a finite team limit in production (#445); the cap semantics are
+ * tested against a finite limit swapped into `USAGE_LIMITS`.
  */
 
 import {
   Feature,
-  FREE_TEAM_LIMIT,
+  USAGE_LIMITS,
   hasFeature,
   getUsageLimits,
   getRequiredTier,
@@ -14,6 +17,7 @@ import {
   canCreateTeam,
   getAllFeatures,
 } from '../../src/services/entitlements';
+import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 describe('entitlements service (source of truth)', () => {
   it('FREE tier has no gated features', () => {
@@ -42,20 +46,41 @@ describe('entitlements service (source of truth)', () => {
     expect(getRequiredTier(Feature.TOURNAMENT_BRACKETS)).toBe('LEAGUE');
   });
 
-  it('exposes a documented FREE_TEAM_LIMIT of 3 used by usage limits', () => {
-    expect(FREE_TEAM_LIMIT).toBe(3);
-    expect(getUsageLimits('FREE').maxTeams).toBe(3);
-    expect(getUsageLimits('PREMIUM').maxTeams).toBe(Infinity);
-    expect(getUsageLimits('LEAGUE').maxTeams).toBe(Infinity);
+  it('caps no tier: every tier has unlimited teams and seasons (#445)', () => {
+    for (const tier of ['FREE', 'PREMIUM', 'LEAGUE'] as const) {
+      expect(getUsageLimits(tier)).toEqual({ maxTeams: Infinity, maxSeasons: Infinity });
+    }
   });
 
-  it('canCreateTeam enforces the cap at create time (grandfather semantics)', () => {
+  it('getUsageLimits reads the single source of truth (USAGE_LIMITS)', () => {
+    expect(getUsageLimits('FREE')).toBe(USAGE_LIMITS.FREE);
+    expect(getUsageLimits('PREMIUM')).toBe(USAGE_LIMITS.PREMIUM);
+    expect(getUsageLimits('LEAGUE')).toBe(USAGE_LIMITS.LEAGUE);
+  });
+
+  it('canCreateTeam never blocks a FREE user while the tier is uncapped (#445)', () => {
     expect(canCreateTeam('FREE', 0)).toBe(true);
-    expect(canCreateTeam('FREE', 2)).toBe(true);
-    expect(canCreateTeam('FREE', 3)).toBe(false); // at cap
-    expect(canCreateTeam('FREE', 9)).toBe(false); // grandfathered over-cap: no new creates
-    expect(canCreateTeam('PREMIUM', 100)).toBe(true);
-    expect(canCreateTeam('LEAGUE', 100)).toBe(true);
+    expect(canCreateTeam('FREE', 3)).toBe(true); // the 4th team
+    expect(canCreateTeam('FREE', 250)).toBe(true);
+  });
+
+  describe('with a finite FREE team limit (re-adding a cap is one number)', () => {
+    withFiniteFreeTeamLimit();
+
+    it('getUsageLimits reports the finite limit for FREE only', () => {
+      expect(getUsageLimits('FREE').maxTeams).toBe(TEST_TEAM_LIMIT);
+      expect(getUsageLimits('PREMIUM').maxTeams).toBe(Infinity);
+      expect(getUsageLimits('LEAGUE').maxTeams).toBe(Infinity);
+    });
+
+    it('canCreateTeam enforces the cap at create time (grandfather semantics)', () => {
+      expect(canCreateTeam('FREE', 0)).toBe(true);
+      expect(canCreateTeam('FREE', TEST_TEAM_LIMIT - 1)).toBe(true);
+      expect(canCreateTeam('FREE', TEST_TEAM_LIMIT)).toBe(false); // at cap
+      expect(canCreateTeam('FREE', 9)).toBe(false); // grandfathered over-cap: no new creates
+      expect(canCreateTeam('PREMIUM', 100)).toBe(true);
+      expect(canCreateTeam('LEAGUE', 100)).toBe(true);
+    });
   });
 
   it('expired paid subscriptions resolve to an effective FREE tier', () => {

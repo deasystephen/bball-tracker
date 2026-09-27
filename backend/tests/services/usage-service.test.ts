@@ -7,9 +7,14 @@
  *  - cache invalidation on writes
  *  - the grandfather rule (already-over-limit users keep teams but can't add)
  *  - effective-tier handling (expired paid tier falls back to FREE)
+ *
+ * No tier has a finite team limit in production (#445): FREE reports
+ * `limit: null`. The finite-limit paths are tested by swapping a limit into
+ * `USAGE_LIMITS` (`withFiniteFreeTeamLimit`).
  */
 
 import { mockPrisma } from '../setup';
+import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 // Mock the Redis cache helpers so we can control hits/misses without a server.
 jest.mock('../../src/utils/redis', () => ({
@@ -96,26 +101,63 @@ describe('usage-service', () => {
   });
 
   describe('getUsage — calculation correctness', () => {
-    it('reports FREE-tier usage vs limits with limitReached when under the cap', async () => {
+    it('reports FREE-tier teams as unlimited: limit null, never reached (#445)', async () => {
       mockUserTier('FREE');
       mockDbCounts(2, ['s1', 's2']);
 
       const usage = await getUsage(USER_ID);
 
       expect(usage.tier).toBe('FREE');
-      expect(usage.teams).toEqual({ count: 2, limit: 3, limitReached: false });
+      expect(usage.teams).toEqual({ count: 2, limit: null, limitReached: false });
       // Seasons are metered but never capped, so FREE reports limit: null and
       // can't be "reached" (audit #81).
       expect(usage.seasons).toEqual({ count: 2, limit: null, limitReached: false });
     });
 
-    it('marks teams.limitReached true when exactly at the cap', async () => {
+    it('keeps reporting unlimited for a FREE user with many teams', async () => {
       mockUserTier('FREE');
-      mockDbCounts(3, ['s1']);
+      mockDbCounts(12, ['s1']);
 
       const usage = await getUsage(USER_ID);
 
-      expect(usage.teams).toEqual({ count: 3, limit: 3, limitReached: true });
+      expect(usage.teams).toEqual({ count: 12, limit: null, limitReached: false });
+    });
+
+    describe('with a finite FREE team limit', () => {
+      withFiniteFreeTeamLimit();
+
+      it('reports usage vs the limit when under the cap', async () => {
+        mockUserTier('FREE');
+        mockDbCounts(2, ['s1', 's2']);
+
+        const usage = await getUsage(USER_ID);
+
+        expect(usage.teams).toEqual({ count: 2, limit: TEST_TEAM_LIMIT, limitReached: false });
+      });
+
+      it('marks teams.limitReached true when exactly at the cap', async () => {
+        mockUserTier('FREE');
+        mockDbCounts(TEST_TEAM_LIMIT, ['s1']);
+
+        const usage = await getUsage(USER_ID);
+
+        expect(usage.teams).toEqual({
+          count: TEST_TEAM_LIMIT,
+          limit: TEST_TEAM_LIMIT,
+          limitReached: true,
+        });
+      });
+
+      it('applies the FREE limit when a paid subscription has expired', async () => {
+        mockUserTier('PREMIUM', new Date('2020-01-01'));
+        mockDbCounts(5, ['s1']);
+
+        const usage = await getUsage(USER_ID);
+
+        // Effective tier is FREE => the 5 existing teams are over the cap.
+        expect(usage.tier).toBe('FREE');
+        expect(usage.teams).toEqual({ count: 5, limit: TEST_TEAM_LIMIT, limitReached: true });
+      });
     });
 
     it('normalizes unlimited (Infinity) limits to null for PREMIUM', async () => {
@@ -130,15 +172,15 @@ describe('usage-service', () => {
       expect(usage.seasons.limitReached).toBe(false);
     });
 
-    it('falls back to FREE limits when a paid subscription has expired', async () => {
+    it('falls back to the FREE tier when a paid subscription has expired', async () => {
       mockUserTier('PREMIUM', new Date('2020-01-01'));
       mockDbCounts(5, ['s1']);
 
       const usage = await getUsage(USER_ID);
 
-      // Effective tier is FREE => the 5 existing teams are over the cap of 3.
+      // Effective tier is FREE, which is uncapped (#445).
       expect(usage.tier).toBe('FREE');
-      expect(usage.teams).toEqual({ count: 5, limit: 3, limitReached: true });
+      expect(usage.teams).toEqual({ count: 5, limit: null, limitReached: false });
     });
 
     it('throws when the user does not exist', async () => {
@@ -190,31 +232,42 @@ describe('usage-service', () => {
     });
   });
 
-  describe('canCreateTeam — grandfather rule', () => {
-    it('allows creation when under the FREE cap', async () => {
+  describe('canCreateTeam', () => {
+    it('allows a FREE user a 4th team: no tier is capped (#445)', async () => {
       mockUserTier('FREE');
-      mockDbCounts(2, ['s1']);
+      mockDbCounts(3, ['s1']);
 
       await expect(canCreateTeam(USER_ID)).resolves.toBe(true);
     });
 
-    it('blocks creation when exactly at the FREE cap', async () => {
-      mockUserTier('FREE');
-      mockDbCounts(3, ['s1']);
+    describe('grandfather rule, with a finite FREE team limit', () => {
+      withFiniteFreeTeamLimit();
 
-      await expect(canCreateTeam(USER_ID)).resolves.toBe(false);
-    });
+      it('allows creation when under the FREE cap', async () => {
+        mockUserTier('FREE');
+        mockDbCounts(TEST_TEAM_LIMIT - 1, ['s1']);
 
-    it('grandfathers users already OVER the cap: they keep teams but cannot add more', async () => {
-      // e.g. a lapsed PREMIUM user now on FREE with 5 teams.
-      mockUserTier('FREE');
-      mockDbCounts(5, ['s1', 's2']);
+        await expect(canCreateTeam(USER_ID)).resolves.toBe(true);
+      });
 
-      const usage = await getUsage(USER_ID);
-      // Existing teams are preserved/reported, not deleted.
-      expect(usage.teams.count).toBe(5);
-      // But new creation is blocked.
-      await expect(canCreateTeam(USER_ID)).resolves.toBe(false);
+      it('blocks creation when exactly at the FREE cap', async () => {
+        mockUserTier('FREE');
+        mockDbCounts(TEST_TEAM_LIMIT, ['s1']);
+
+        await expect(canCreateTeam(USER_ID)).resolves.toBe(false);
+      });
+
+      it('grandfathers users already OVER the cap: they keep teams but cannot add more', async () => {
+        // e.g. a lapsed PREMIUM user now on FREE with 5 teams.
+        mockUserTier('FREE');
+        mockDbCounts(5, ['s1', 's2']);
+
+        const usage = await getUsage(USER_ID);
+        // Existing teams are preserved/reported, not deleted.
+        expect(usage.teams.count).toBe(5);
+        // But new creation is blocked.
+        await expect(canCreateTeam(USER_ID)).resolves.toBe(false);
+      });
     });
 
     it('always allows creation for unlimited (PREMIUM) tiers', async () => {

@@ -55,7 +55,7 @@ const axiosError = (status: number, data: unknown, message = `Request failed wit
 describe('normalizeApiError', () => {
   it('lifts the server error text and code onto the error', () => {
     const err = axiosError(402, {
-      error: 'Free tier is limited to 3 teams',
+      error: 'Upgrade required',
       code: UPGRADE_REQUIRED_CODE,
       feature: 'TEAMS',
       currentTier: 'FREE',
@@ -65,11 +65,11 @@ describe('normalizeApiError', () => {
     const out = normalizeApiError(err) as NormalizedApiError;
 
     expect(out).toBe(err); // same object: instanceof / response still work
-    expect(out.message).toBe('Free tier is limited to 3 teams');
+    expect(out.message).toBe('Upgrade required');
     expect(out.code).toBe(UPGRADE_REQUIRED_CODE);
     expect(out.apiError).toEqual({
       status: 402,
-      error: 'Free tier is limited to 3 teams',
+      error: 'Upgrade required',
       code: UPGRADE_REQUIRED_CODE,
       feature: 'TEAMS',
       currentTier: 'FREE',

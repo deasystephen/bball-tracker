@@ -41,9 +41,9 @@ appId: com.bballtracker.mobile
 # yet" (provision), the second exercises "the personal league already exists"
 # (reuse) — the branch the create screen must still render picker-free.
 #
-# Re-run `cd backend && npx prisma db seed` before re-running this flow: Dana
-# is on the FREE tier (3-team cap) and the seed deletes the teams a previous
-# run left behind.
+# Re-run `cd backend && npx prisma db seed` before re-running this flow: it
+# starts from a brand-new coach with no teams, and the seed deletes the teams
+# (and resets the role) a previous run left behind.
 - launchApp:
     clearState: true
 - tapOn: "Skip"

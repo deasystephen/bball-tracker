@@ -3,7 +3,7 @@
  *
  * Exercises the React Query hooks against the mocked api-client: endpoint
  * shapes, response unwrapping and cache invalidation (staff list, team
- * detail + lists, and the usage meter — staff rows feed the FREE-tier cap).
+ * detail + lists, and the usage meter — staff rows are what it counts).
  */
 
 import { renderHook, waitFor, act } from '@testing-library/react-native';

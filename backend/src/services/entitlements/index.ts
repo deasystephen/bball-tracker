@@ -26,17 +26,23 @@
  *   MASTER_CALENDAR        | LEAGUE
  *
  * ---------------------------------------------------------------------------
- * FREE-tier team limit & GRANDFATHER decision:
+ * Team limit & GRANDFATHER decision:
  *
- *   FREE users may belong to at most FREE_TEAM_LIMIT (3) teams as staff.
- *   This limit is enforced ONLY at create time: a FREE user is blocked from
- *   creating a new team when their current staff team count is already >= 3.
+ *   NO TIER IS CAPPED TODAY (#445). `USAGE_LIMITS.FREE.maxTeams` is `Infinity`:
+ *   the FREE cap of 3 shipped without any way to buy an upgrade, so it was a
+ *   dead-end paywall. The enforcement machinery below stays in place and works
+ *   for any finite number, so re-adding a cap is a one-number change in
+ *   `USAGE_LIMITS` -- do it only together with a real purchase flow (#41).
  *
- *   GRANDFATHERING: users who are already over the limit (e.g. they were on a
+ *   When a tier has a finite `maxTeams`, it is enforced ONLY at create time: a
+ *   user is blocked from creating a new team when the number of DISTINCT teams
+ *   they are staff on is already >= the limit.
+ *
+ *   GRANDFATHERING: users who are already over a limit (e.g. they were on a
  *   paid tier, created many teams, then downgraded; or the limit was lowered)
  *   KEEP all of their existing teams. We never delete or hide teams. They
  *   simply cannot create additional teams until they are back under the limit
- *   or upgrade to PREMIUM/LEAGUE (which removes the cap entirely).
+ *   or move to a tier without one.
  *
  * Out of scope here (owned by issue #43): broader usage metering. This file
  * intentionally exposes only the constants/map #43 can reuse.
@@ -69,12 +75,6 @@ export enum Feature {
   MASTER_CALENDAR = 'MASTER_CALENDAR',
 }
 
-/**
- * Maximum number of teams a FREE-tier user may be staff on.
- * Shared constant so usage-metering work (#43) reuses the same number.
- */
-export const FREE_TEAM_LIMIT = 3;
-
 const PREMIUM_FEATURES = new Set<Feature>([
   Feature.UNLIMITED_TEAMS,
   Feature.FULL_SEASON_HISTORY,
@@ -104,7 +104,12 @@ const TIER_ENTITLEMENTS: Record<SubscriptionTier, Set<Feature>> = {
 };
 
 export interface UsageLimits {
-  /** Hard cap on teams a user may be staff on; enforced on `POST /teams`. */
+  /**
+   * Cap on DISTINCT teams a user may be staff on; enforced on `POST /teams`
+   * whenever it is finite. `Infinity` for every tier since #445 (the FREE cap
+   * was a paywall with nothing to buy). To re-introduce a cap, put the number
+   * here and nowhere else.
+   */
   maxTeams: number;
   /**
    * Seasons are metered (reported by `/auth/me/usage`) but **not capped**:
@@ -117,8 +122,13 @@ export interface UsageLimits {
   maxSeasons: number;
 }
 
-const USAGE_LIMITS: Record<SubscriptionTier, UsageLimits> = {
-  FREE: { maxTeams: FREE_TEAM_LIMIT, maxSeasons: Infinity },
+/**
+ * The ONE place tier limits are defined. Exported read-only so tests can swap
+ * in a finite limit (`jest.replaceProperty`) and keep exercising the
+ * enforcement path; application code must go through `getUsageLimits`.
+ */
+export const USAGE_LIMITS: Readonly<Record<SubscriptionTier, Readonly<UsageLimits>>> = {
+  FREE: { maxTeams: Infinity, maxSeasons: Infinity },
   PREMIUM: { maxTeams: Infinity, maxSeasons: Infinity },
   LEAGUE: { maxTeams: Infinity, maxSeasons: Infinity },
 };
@@ -141,7 +151,7 @@ export function hasFeature(tier: SubscriptionTier, feature: Feature): boolean {
 /**
  * Get usage limits for a subscription tier.
  */
-export function getUsageLimits(tier: SubscriptionTier): UsageLimits {
+export function getUsageLimits(tier: SubscriptionTier): Readonly<UsageLimits> {
   return USAGE_LIMITS[tier];
 }
 
@@ -186,6 +196,7 @@ export function getAllFeatures(tier: SubscriptionTier): Record<Feature, boolean>
 /**
  * Whether a user at `tier` is allowed to create another team given how many
  * teams they currently staff. Enforced at create time only (grandfathering).
+ * Always true while the tier's `maxTeams` is `Infinity` (every tier, #445).
  */
 export function canCreateTeam(tier: SubscriptionTier, currentTeamCount: number): boolean {
   return currentTeamCount < getUsageLimits(tier).maxTeams;

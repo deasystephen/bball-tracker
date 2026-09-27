@@ -158,9 +158,8 @@ sign-in and keeps its role.
 
 ## Entitlement gating reminder
 
-- **Team creation** is capped for FREE-tier users at `FREE_TEAM_LIMIT` (3) **distinct** teams
-  the user is staff on → HTTP 402 `upgrade_required`. ADMINs bypass. The plan creates one team,
-  so no PREMIUM tier is needed for D.1.
+- **Team creation** is not capped for any tier (#445 lifted the FREE limit of 3, which had no
+  upgrade to buy). No PREMIUM tier is needed for D.1.
 - **Team season-stats CSV** (`GET /teams/:id/season-stats.csv`) requires the PREMIUM
   `STATS_EXPORT` feature (402 for FREE); per-game `export.csv` / `boxscore.pdf` are open.
   Calendar subscribe requires `CALENDAR_SYNC` (PREMIUM). Run those as ADMIN, who bypasses all

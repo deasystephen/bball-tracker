@@ -9,6 +9,7 @@ import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, ForbiddenError, PaymentRequiredError, BadRequestError } from '../../src/utils/errors';
 import { invalidateUsage } from '../../src/services/usage-service';
 import { prismaMock } from '../setup';
+import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 /** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
 function staffTeams(n: number): Array<{ teamId: string }> {
@@ -22,11 +23,12 @@ const TEST_LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
 const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
 
-// Mutable mock auth user. Team creation is behind the FREE-tier team-count cap
-// (`requireTeamCreateLimit`). PREMIUM short-circuits that check (unlimited), so
-// the default user is an active PREMIUM coach to keep the create/validation
-// tests focused on their own concerns. The dedicated 'FREE-tier team limit'
-// block below flips this to FREE to exercise the cap + grandfather rule.
+// Mutable mock auth user. Team creation runs through `requireTeamCreateLimit`,
+// which enforces a tier's team cap when it has one. No tier does in production
+// (#445); the default user is an active PREMIUM coach so the create/validation
+// tests stay focused on their own concerns. The 'team limit' blocks below flip
+// this to FREE: first uncapped (a 4th team succeeds), then with a finite limit
+// swapped in to exercise the cap + grandfather rule.
 const mockAuthUser: {
   id: string;
   email: string;
@@ -158,15 +160,66 @@ describe('Teams API', () => {
     });
   });
 
-  // Issue #40: FREE-tier team cap is enforced on create (grandfathered).
-  describe('POST /api/v1/teams - FREE-tier team limit (grandfathering)', () => {
+  // Issue #445: the FREE cap was a paywall with nothing to buy, so it is lifted.
+  describe('POST /api/v1/teams - FREE tier is uncapped (#445)', () => {
+    beforeEach(() => {
+      mockAuthUser.subscriptionTier = 'FREE';
+      mockAuthUser.subscriptionExpiresAt = null;
+    });
+
+    it('lets a FREE user create a 4th team', async () => {
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Fourth Team', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(mockTeamService.createTeam).toHaveBeenCalled();
+      // Unlimited tiers never pay for the count query.
+      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
+    });
+
+    it('lets a FREE user with many teams keep creating', async () => {
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(25));
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Twenty-sixth Team', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+    });
+
+    it('lets a lapsed PREMIUM user (effective tier FREE) create a team', async () => {
+      mockAuthUser.subscriptionTier = 'PREMIUM';
+      mockAuthUser.subscriptionExpiresAt = new Date('2020-01-01');
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(5));
+      mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
+
+      const response = await request(app)
+        .post('/api/v1/teams')
+        .send({ name: 'Sixth Team', seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(201);
+    });
+  });
+
+  // Issue #40: a finite tier team cap is enforced on create (grandfathered).
+  // The machinery is kept for the day a cap returns with a purchase flow; it
+  // is exercised here with a finite FREE limit swapped into USAGE_LIMITS.
+  describe('POST /api/v1/teams - finite team limit (grandfathering)', () => {
+    withFiniteFreeTeamLimit();
+
     beforeEach(() => {
       mockAuthUser.subscriptionTier = 'FREE';
       mockAuthUser.subscriptionExpiresAt = null;
     });
 
     it('allows a FREE user under the limit to create a team', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(2));
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT - 1));
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -200,7 +253,7 @@ describe('Teams API', () => {
     });
 
     it('blocks a FREE user at the limit with 402 upgrade_required', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
 
       const response = await request(app)
         .post('/api/v1/teams')

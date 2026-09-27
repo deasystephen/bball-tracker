@@ -4,9 +4,9 @@
  * Covers:
  *  - GET /api/v1/auth/me/usage returns usage vs limits for every metered
  *    feature, and is auth-gated.
- *  - POST /api/v1/teams blocks FREE-tier users at/over the team cap with a
- *    clear 402, including the grandfather case (already over the cap), while
- *    allowing users under the cap and bypassing for admins.
+ *  - POST /api/v1/teams lets a FREE-tier user create teams without a cap
+ *    (#445), and — with a finite limit swapped into USAGE_LIMITS — still
+ *    blocks at/over the cap with a 402 while bypassing for admins.
  */
 
 import request from 'supertest';
@@ -14,6 +14,7 @@ import { app, httpServer } from '../../src/index';
 import * as usageService from '../../src/services/usage-service';
 import { TeamService } from '../../src/services/team-service';
 import { prismaMock } from '../setup';
+import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 /** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
 function staffTeams(n: number): Array<{ teamId: string }> {
@@ -54,7 +55,36 @@ beforeEach(() => {
 });
 
 describe('GET /api/v1/auth/me/usage', () => {
-  it('returns usage vs limits for every metered feature', async () => {
+  it('reports a FREE user as unlimited on every metered feature (#445)', async () => {
+    // Un-mocked service: the limits come from USAGE_LIMITS, so this fails if a
+    // FREE cap is ever put back without updating the contract.
+    const actual = jest.requireActual<typeof usageService>('../../src/services/usage-service');
+    mockUsageService.getUsage.mockImplementation(actual.getUsage);
+    (prismaMock.user.findUnique as jest.Mock).mockResolvedValue({
+      subscriptionTier: 'FREE',
+      subscriptionExpiresAt: null,
+    });
+    (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue([
+      { teamId: 'team-0', team: { seasonId: 's1' } },
+      { teamId: 'team-1', team: { seasonId: 's1' } },
+      { teamId: 'team-2', team: { seasonId: 's2' } },
+      { teamId: 'team-3', team: { seasonId: 's2' } },
+    ]);
+
+    const response = await request(app)
+      .get('/api/v1/auth/me/usage')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.usage).toEqual({
+      tier: 'FREE',
+      teams: { count: 4, limit: null, limitReached: false },
+      seasons: { count: 2, limit: null, limitReached: false },
+    });
+  });
+
+  it('returns whatever the service reports, finite limits included', async () => {
     mockUsageService.getUsage.mockResolvedValue({
       tier: 'FREE',
       teams: { count: 2, limit: 3, limitReached: false },
@@ -105,10 +135,42 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
   const createdTeam = { id: TEST_TEAM_ID, name: 'Lakers', seasonId: TEST_SEASON_ID };
 
   // Team-create is gated by the `requireTeamCreateLimit()` middleware, which
-  // counts the user's staff teams via prisma and blocks FREE-tier users at/over
-  // the cap with a 402 `upgrade_required`. These tests exercise that gate end to
-  // end plus the handler's usage-cache invalidation on a successful create.
+  // enforces a tier's team cap when it has one. No tier does in production
+  // (#445). These tests exercise that gate end to end — uncapped, then with a
+  // finite limit swapped in — plus the handler's usage-cache invalidation on a
+  // successful create.
   // (The exhaustive PREMIUM/LEAGUE/grandfather matrix lives in teams.test.ts.)
+
+  it('lets a FREE user create a 4th team and invalidates cached usage (#445)', async () => {
+    (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+    mockTeamService.createTeam.mockResolvedValue(createdTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
+
+    const response = await request(app)
+      .post('/api/v1/teams')
+      .set('Authorization', 'Bearer valid-token')
+      .send(validBody);
+
+    expect(response.status).toBe(201);
+    expect(mockTeamService.createTeam).toHaveBeenCalled();
+    expect(mockUsageService.invalidateUsage).toHaveBeenCalledWith(TEST_USER_ID);
+  });
+
+  it('still validates the body (400) with bad input', async () => {
+    const response = await request(app)
+      .post('/api/v1/teams')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ name: '' });
+
+    expect(response.status).toBe(400);
+    expect(mockTeamService.createTeam).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/teams — finite tier limit enforcement', () => {
+  const validBody = { name: 'Lakers', seasonId: TEST_SEASON_ID };
+  const createdTeam = { id: TEST_TEAM_ID, name: 'Lakers', seasonId: TEST_SEASON_ID };
+
+  withFiniteFreeTeamLimit();
 
   it('creates the team and invalidates cached usage when under the cap', async () => {
     (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(1));
@@ -127,7 +189,7 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
   });
 
   it('blocks with 402 upgrade_required when the FREE-tier user is at/over the cap', async () => {
-    (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+    (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
 
     const response = await request(app)
       .post('/api/v1/teams')

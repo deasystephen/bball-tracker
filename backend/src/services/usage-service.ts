@@ -3,8 +3,10 @@
  *
  * Provides a single place to answer "how much of each metered feature has this
  * user consumed, and what is their tier limit?". Used both to ENFORCE limits
- * (e.g. block FREE-tier team creation past the cap) and to SURFACE usage to the
- * client so upgrade CTAs are accurate ("2 of 3 teams used").
+ * (block team creation past a tier's cap) and to SURFACE usage to the client.
+ * No tier has a finite limit today (#445), so every metric currently reports
+ * `limit: null` / `limitReached: false`; the code paths for a finite limit
+ * are kept and tested so a cap can be re-added in `USAGE_LIMITS` alone.
  *
  * Design decisions:
  * - Counts are derived from existing data at read time (no separate counter
@@ -51,8 +53,8 @@ export type MeteredFeature = 'teams' | 'seasons';
 export interface UsageMetric {
   count: number;
   /**
-   * The tier limit. `null` means unlimited (the paid-tier `Infinity` limit is
-   * normalized to `null` so it serializes cleanly to JSON).
+   * The tier limit. `null` means unlimited (an `Infinity` limit is normalized
+   * to `null` so it serializes cleanly to JSON).
    */
   limit: number | null;
   /** Whether the user is at or over the limit (i.e. cannot add more). */

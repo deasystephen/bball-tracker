@@ -497,7 +497,7 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
  * Number of DISTINCT teams the user is staff on.
  *
  * A user can hold several roles on one team (one `TeamStaff` row per role), so
- * `teamStaff.count` over-counts; the FREE-tier team cap must count teams, not
+ * `teamStaff.count` over-counts; a tier's team cap must count teams, not
  * rows (audit B2.8). Accepts a transaction client so the create-team
  * transaction can recount behind its row lock.
  */

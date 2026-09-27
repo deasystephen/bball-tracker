@@ -40,12 +40,12 @@ router.use(authenticate);
  * POST /api/v1/teams
  * Create a new team.
  *
- * FREE-tier users are capped at FREE_TEAM_LIMIT teams (see
- * src/services/entitlements). `requireTeamCreateLimit` returns a 402 Payment
- * Required when the cap is reached so the client can surface an upgrade CTA.
- * Users already over the cap when enforcement shipped keep their existing teams
- * but cannot create new ones (grandfather rule — see usage-service). System
- * admins bypass the cap.
+ * No tier caps team creation today (#445: `maxTeams` is unlimited for every
+ * tier in src/services/entitlements). `requireTeamCreateLimit` stays mounted
+ * and answers 402 Payment Required as soon as a tier is given a finite limit
+ * there; users already over such a limit keep their existing teams but cannot
+ * create new ones (grandfather rule — see usage-service). System admins
+ * bypass it.
  */
 router.post('/', requireTeamCreateLimit(), async (req, res) => {
   try {
