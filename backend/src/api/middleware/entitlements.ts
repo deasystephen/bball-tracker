@@ -2,8 +2,9 @@
  * Entitlement-enforcement middleware.
  *
  * `requireEntitlement(feature)` gates a route behind a subscription feature.
- * `requireTeamCreateLimit()` enforces the FREE-tier team-count cap at create
- * time (with grandfathering -- see `src/services/entitlements`).
+ * `requireTeamCreateLimit()` enforces a tier's team-count cap at create time
+ * (with grandfathering -- see `src/services/entitlements`). No tier has a
+ * finite cap today (#445), so it currently lets every caller through.
  *
  * Both read the canonical feature->tier map / limits from the single source of
  * truth in `src/services/entitlements`. On denial they respond with HTTP 402
@@ -75,7 +76,11 @@ export function requireEntitlement(feature: Feature) {
 }
 
 /**
- * Enforce the FREE-tier team-creation cap.
+ * Enforce the caller's tier team-creation cap, when that tier has one.
+ *
+ * Every tier is unlimited since #445, so today this always calls `next()`
+ * without a count query. It stays mounted so that a finite `maxTeams` in
+ * `USAGE_LIMITS` is enforced again with no other change.
  *
  * The limit is checked ONLY here, at create time: a user is blocked when their
  * current staff team count already meets/exceeds their tier's cap. Users who
@@ -96,7 +101,7 @@ export function requireTeamCreateLimit() {
 
     const currentTier = effectiveTierFor(req.user);
 
-    // Unlimited tiers (PREMIUM/LEAGUE) skip the count query entirely.
+    // Unlimited tiers (all of them today) skip the count query entirely.
     if (getUsageLimits(currentTier).maxTeams === Infinity) {
       return next();
     }

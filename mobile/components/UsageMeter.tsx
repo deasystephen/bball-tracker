@@ -2,9 +2,10 @@
  * UsageMeter — a labeled progress bar showing "<count> of <limit> used" for a
  * single metered feature, with an upgrade CTA when the tier limit is reached.
  *
- * An unlimited allowance (`limit === null`) renders as "Unlimited" with no bar.
- * Used on the Profile screen to make upgrade CTAs land (e.g. "2 of 3 teams
- * used — upgrade for unlimited").
+ * An unlimited allowance (`limit === null`) renders as "<count> · Unlimited"
+ * with no bar and no CTA. That is what every tier reports today: the API caps
+ * nothing since #445, so the Profile screen shows plain counts. The bar and
+ * the CTA render only when the API reports a finite limit.
  */
 
 import React from 'react';

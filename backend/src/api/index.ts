@@ -10,6 +10,7 @@ import invitationPublicRoutes from './invitations/public-routes';
 import invitationRoutes from './invitations/routes';
 import statsRoutes from './stats/routes';
 import uploadRoutes from './uploads/routes';
+import adminRoutes from './admin/routes';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.use('/invitations', invitationPublicRoutes);
 router.use('/invitations', invitationRoutes);
 router.use('/stats', statsRoutes);
 router.use('/uploads', uploadRoutes);
+router.use('/admin', adminRoutes);
 
 router.get('/', (_req, res) => {
   res.json({ message: 'API v1' });

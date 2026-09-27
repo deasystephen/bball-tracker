@@ -78,7 +78,7 @@ function useInvalidateStaff() {
     queryClient.invalidateQueries({ queryKey: teamStaffKeys.list(teamId) });
     queryClient.invalidateQueries({ queryKey: teamKeys.detail(teamId) });
     queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
-    // Staff membership is what the FREE-tier team cap counts (#43 / B2.8).
+    // Staff membership is what the usage meter counts (#43 / B2.8).
     queryClient.invalidateQueries({ queryKey: usageKeys.all });
   };
 }

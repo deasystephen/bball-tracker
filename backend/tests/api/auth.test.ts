@@ -702,7 +702,8 @@ describe('Auth API', () => {
       expect(response.body.tier).toBe('FREE');
       expect(response.body.features.STATS_EXPORT).toBe(false);
       expect(response.body.features.AD_FREE).toBe(false);
-      expect(response.body.limits.maxTeams).toBe(3);
+      // No tier is capped (#445): Infinity serializes as null.
+      expect(response.body.limits.maxTeams).toBeNull();
       // Seasons are metered, never capped (audit #81): Infinity serializes as null.
       expect(response.body.limits.maxSeasons).toBeNull();
       expect(response.body.expiresAt).toBeNull();
@@ -748,7 +749,7 @@ describe('Auth API', () => {
       expect(response.status).toBe(200);
       expect(response.body.tier).toBe('FREE');
       expect(response.body.features.STATS_EXPORT).toBe(false);
-      expect(response.body.limits.maxTeams).toBe(3);
+      expect(response.body.limits.maxTeams).toBeNull();
     });
 
     it('should return 401 without authorization', async () => {

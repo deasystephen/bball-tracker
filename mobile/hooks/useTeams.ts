@@ -262,7 +262,7 @@ export function useCreateTeam() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
-      // Team count feeds the FREE-tier usage meter (#43).
+      // Team count feeds the Profile usage meter (#43).
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
     },
   });

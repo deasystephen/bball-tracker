@@ -376,10 +376,12 @@ export class TeamService {
 
     // Team + default roles + Head Coach staff row are created atomically so a
     // failure part-way can't leave an orphan team nobody can see or delete
-    // (audit #70). The FREE-tier cap is re-checked inside the same transaction
+    // (audit #70). A tier's team cap is re-checked inside the same transaction
     // behind a row lock on the user, so concurrent creates serialize and the
     // check-then-act race in the route middleware can't exceed the cap
-    // (audit #49). Admins bypass; unlimited tiers skip the count.
+    // (audit #49). Admins bypass; unlimited tiers skip the count — which is
+    // every tier since #445, so the branch below only runs once a finite
+    // `maxTeams` is put back in `USAGE_LIMITS`.
     //
     // Personal-league provisioning happens inside this same transaction and
     // AFTER the cap check, so a capped user never leaves a stray league behind.

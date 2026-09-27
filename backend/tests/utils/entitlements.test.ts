@@ -46,9 +46,10 @@ describe('Entitlements', () => {
   });
 
   describe('getUsageLimits', () => {
-    it('should return limited teams (but uncapped seasons) for FREE tier', () => {
+    it('should return unlimited teams and seasons for FREE tier', () => {
       const limits = getUsageLimits('FREE');
-      expect(limits.maxTeams).toBe(3);
+      // The FREE team cap was lifted in #445 (a paywall with nothing to buy).
+      expect(limits.maxTeams).toBe(Infinity);
       // Seasons are metered, never capped (audit #81).
       expect(limits.maxSeasons).toBe(Infinity);
     });

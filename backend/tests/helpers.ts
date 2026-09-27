@@ -5,6 +5,7 @@
 
 import { mockPrisma } from './setup';
 import { UserData, TeamData, LeagueData, GameData, InvitationData, TeamMemberData, GameEventData } from './factories';
+import { USAGE_LIMITS } from '../src/services/entitlements';
 
 // ============================================
 // Mock Setup Helpers
@@ -364,4 +365,38 @@ export function expectUnauthorizedError(error: unknown, message?: string): void 
   if (message) {
     expect(err.message).toBe(message);
   }
+}
+
+// ============================================
+// Tier limit helpers
+// ============================================
+
+/**
+ * A finite team limit for tests of the cap machinery. No tier has a finite
+ * `maxTeams` in production (#445), so the enforcement path — middleware,
+ * in-transaction recount, grandfather rule, usage meter — is exercised by
+ * swapping this number in.
+ */
+export const TEST_TEAM_LIMIT = 3;
+
+/**
+ * Give the FREE tier a finite team limit for every test in the enclosing
+ * `describe` (put back after each test). Replaces the entry in `USAGE_LIMITS`
+ * itself, so everything that reads the single source of truth sees it —
+ * exactly what re-adding a cap in production would do.
+ */
+export function withFiniteFreeTeamLimit(limit: number = TEST_TEAM_LIMIT): void {
+  let replaced: { restore(): void } | undefined;
+
+  beforeEach(() => {
+    replaced = jest.replaceProperty(USAGE_LIMITS, 'FREE', {
+      maxTeams: limit,
+      maxSeasons: Infinity,
+    });
+  });
+
+  afterEach(() => {
+    replaced?.restore();
+    replaced = undefined;
+  });
 }

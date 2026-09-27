@@ -48,8 +48,8 @@ export const UPGRADE_REQUIRED_CODE = 'upgrade_required';
 /**
  * Lift the server's error body onto the thrown error so every
  * `error instanceof Error ? error.message : …` site shows the real reason
- * ("Free tier is limited to 3 teams") instead of axios' generic
- * "Request failed with status code 402" (audit #40). Mutates and returns the
+ * (e.g. "You do not have permission to create teams in this league") instead
+ * of axios' generic "Request failed with status code 403" (audit #40). Mutates and returns the
  * same object so `instanceof AxiosError` and `error.response` keep working.
  */
 export const normalizeApiError = (error: unknown): unknown => {

@@ -154,11 +154,12 @@ async function main() {
   console.log(`  Created coach: ${coachFrank.email}`);
 
   // Reset the fixture: `.maestro/create-team.yaml` creates a "Test Team" for
-  // Frank on every run and nothing else deletes it. He is FREE tier, so the
-  // leftovers march him toward the 3-team cap — after two runs the flow's
-  // create step answers 402 instead of a team-detail screen (found live while
-  // diagnosing #464). Same idempotence rule as Dana's block below: everything
-  // but his seeded Lakers goes. Team deletes cascade to members/staff/roles.
+  // Frank on every run and nothing else deletes it, so without this reset
+  // the leftovers accumulate, one more identically named team per run. (While
+  // FREE was capped at 3 teams they also turned the flow's create step into a
+  // 402 after two runs — found live while diagnosing #464; no tier is capped
+  // since #445.) Same idempotence rule as Dana's block below: everything but
+  // his seeded Lakers goes. Team deletes cascade to members/staff/roles.
   const staleFrankTeams = await prisma.team.findMany({
     where: {
       staff: { some: { userId: coachFrank.id } },
@@ -172,8 +173,8 @@ async function main() {
   }
 
   // ...and the games the game flows create on his Lakers ("Test Rival" from
-  // game-lifecycle.yaml, "Tracking Rival" from game-tracking.yaml). No cap at
-  // stake, but they accumulate one per run, pollute the Games tab and push
+  // game-lifecycle.yaml, "Tracking Rival" from game-tracking.yaml). They
+  // accumulate one per run, pollute the Games tab and push
   // seeded games (e.g. guardian-rsvp.yaml's "vs Lakers") down the list until
   // assertions time out. Game deletes cascade to events/RSVPs/stats rows.
   const staleFixtureGames = await prisma.game.deleteMany({
@@ -235,9 +236,8 @@ async function main() {
   console.log(`  Created unaffiliated new signup: ${coachDana.email}`);
 
   // Reset the fixture: delete any teams a previous E2E run created for her.
-  // She stays on the FREE tier (3-team cap), so without this a re-seed would
-  // not restore the "brand-new coach" state and coach-onboarding.yaml would
-  // eventually hit a 402 instead of a team-detail screen. Team deletes cascade
+  // Without this a re-seed would not restore the "brand-new coach" state that
+  // coach-onboarding.yaml starts from. Team deletes cascade
   // to members / staff / roles; her auto-provisioned personal league (if the
   // #442 backend has run) is left in place — reusing it is the second-team
   // branch the flow exercises.
