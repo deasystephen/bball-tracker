@@ -15,6 +15,7 @@ Terraform manages all AWS infrastructure.
 | `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records |
 | `ses.tf` | SES domain identities, DKIM, custom MAIL FROM (MX/SPF), DMARC, IAM policy for ECS task |
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
+| `alerting.tf` | SNS alerts topic + email subscription, CloudWatch alarms (ALB, ECS, RDS), Route 53 uptime check, and the `alert_email` / `alarm_*` variables |
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |

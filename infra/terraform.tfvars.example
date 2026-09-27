@@ -22,5 +22,10 @@ domains = {
 }
 primary_domain = "hooplings.com"
 
+# Alerting (alerting.tf). Required: the inbox that receives every production alarm.
+# AWS emails a confirmation link after apply; nothing is delivered until it is clicked.
+# Thresholds (alarm_*) and uptime_check_path have defaults - see docs/runbooks/on-call.md.
+alert_email = "alerts@example.com"
+
 # NOTE: application env vars (ADMIN_EMAILS, SENTRY_*, SES_*, ...) are NOT set here.
 # They live in infra/task-definition.json, which CI deploys. See infra/README.md.
