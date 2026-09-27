@@ -34,15 +34,20 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.3.0 = OTA runtime boundary for the URL scheme rename (#504). The
-    // sign-in redirect scheme is resolved from the OTA MANIFEST (expo-linking
-    // reads Constants.expoConfig.scheme), while the schemes a binary answers
-    // are baked into Info.plist at build time. A manifest naming `hooplings`
-    // must therefore never reach a binary that registers only the old scheme:
-    // runtimeVersion policy is appVersion, so bumping this keeps every OTA
-    // from here on to 1.3.0 builds (#31+); builds #25-#30 stay on the last
-    // 1.2.0 OTA. (1.2.0 was the expo-secure-store boundary, audit #52.)
-    version: '1.3.0',
+    // 1.4.0 = OTA runtime boundary for dependency drift (#562). An OTA ships
+    // JavaScript from the lockfile and runs it against the native code frozen
+    // in the binary. Between build #31 and this version, packages with native
+    // code moved on main (Amplitude 1.8.0 -> 1.10.2, Sentry 8.25 -> 8.28,
+    // expo-updates) and so did react (19.2.8 -> 19.3.0), so an OTA from main
+    // must never reach build #31. runtimeVersion policy is appVersion, so
+    // bumping this keeps every OTA from here on to 1.4.0 builds (#32+);
+    // build #31 stays on the last 1.3.0 OTA.
+    //
+    // Earlier boundaries: 1.3.0 was the URL scheme rename (#504: the sign-in
+    // redirect scheme is resolved from the OTA MANIFEST while the schemes a
+    // binary answers are baked into Info.plist, so builds #25-#30 stay on the
+    // last 1.2.0 OTA); 1.2.0 was expo-secure-store (audit #52).
+    version: '1.4.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
