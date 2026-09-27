@@ -12,6 +12,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "binary-manifest:check": "jest __tests__/binary-manifest.test.ts",
+    "binary-manifest:record": "RECORD_BINARY_MANIFEST=1 jest __tests__/binary-manifest.test.ts",
+    "ota:production": "npm run binary-manifest:check && eas update --branch production --environment production --platform ios --non-interactive",
     "eas-build-on-success": "node scripts/sentry-upload-sourcemaps.js"
   },
   "dependencies": {

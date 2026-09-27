@@ -42,6 +42,21 @@ NEVER bump these. Surface them in the deferred tracking issue + daily log only.
     - lottie-react-native >= 7.4 (needs RN >= 0.84)
     - jest, @types/jest
 
+  Mobile (binary-coupled — defer until the next native build, #562):
+    - EVERY package listed in `mobile/binary-manifest.json` under the runtime
+      that matches `version` in `mobile/app.config.js`. That file is the list;
+      read it, do not work from memory. It holds every package with native
+      code (all `expo-*` modules, `expo` itself, `@sentry/react-native`,
+      `@amplitude/analytics-react-native`, `react-native-*`, …) and `react`.
+    - react-dom and react-test-renderer (they must equal the `react` version).
+    Why: an OTA ships JavaScript from the lockfile and runs it against the
+    native code frozen in the binary. Bumping one of these on `main` makes the
+    next OTA deliver JavaScript no binary has ever run. This applies to
+    lockfile-only and transitive bumps too, and to security overrides: if the
+    fix for an alert would change the resolved version of one of these
+    packages, do NOT apply it — report it under ⚠ with the note
+    "needs a native build" and list it in the deferred tracking issue.
+
 ## Step 1 — Inventory
 
   - cat "$ALERTS_JSON"            (open alerts: severity, package, manifest,
@@ -88,8 +103,15 @@ under ⏸ only):
 
   - `npm outdated` entries where `current ≠ wanted` AND `wanted` is within the
     existing caret range → AUTO-FIX (lockfile-only).
-  - Expo SDK same-major patch bumps (`55.0.X → 55.0.Y`) → AUTO-FIX.
+  - Anything in the binary-coupled deferral list → DEFER, even a patch. This
+    includes Expo SDK same-major patch bumps (`55.0.X → 55.0.Y`), which were
+    auto-fixed before #562: almost every Expo module has native code.
   - Anything matching the deferral list, any major, or when unsure → DEFER.
+  - After `npm update` / `npm install`, run `npm run binary-manifest:check` in
+    `mobile/` BEFORE the other gates. If it fails, a binary-coupled package
+    moved (often as a transitive of something you did mean to bump): revert
+    that item and DEFER it. Never edit `mobile/binary-manifest.json` and never
+    run `binary-manifest:record`; only a human records a verified build.
 
 ## Step 3 — Apply AUTO-FIX (one PR per side)
 
@@ -105,7 +127,7 @@ For each side with ≥1 auto-fix item:
      Never add a transitive as a new direct dependency.
   3. Quality gates:
        backend: npm run type-check && npm test
-       mobile : npm run type-check && npm test && npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-export"
+       mobile : npm run binary-manifest:check && npm run type-check && npm test && npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-export"
        web    : npm run lint && npm run build
      Plus for every side: `npm ci --dry-run` must succeed (lockfile in sync).
   4. DIFF GUARD — `git diff --name-only` must contain ONLY

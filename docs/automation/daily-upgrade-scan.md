@@ -29,7 +29,7 @@ the deferral list current, and post a daily summary comment on the rolling
 | --- | --- | --- |
 | **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI |
 | **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list; daily log | `daily-upgrade-scan.yml` |
-| **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, dismissing alerts with no upstream fix | — |
+| **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
 
 The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
 the single runtime source of truth — the workflow tells Claude to read that
@@ -39,9 +39,41 @@ file. There is no second copy to keep in sync.
 
 | Bucket | Examples | Action |
 | --- | --- | --- |
-| **Auto-fix** | High/critical alert **with** a `first_patched` version → root `overrides` entry (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps; Expo SDK same-major patches | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
+| **Auto-fix** | High/critical alert **with** a `first_patched` version → root `overrides` entry (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps of **JavaScript-only** packages | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
 | **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses (reason: *Risk is tolerable to this project* — GitHub offers no "no fix" reason) or decides |
-| **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
+| **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major, **every binary-coupled mobile package, Expo SDK same-major patches included** | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
+
+## Binary-coupled packages (#562)
+
+An OTA (`eas update`) ships JavaScript from `mobile/package-lock.json` and runs
+it against the native code that was compiled into the binary. A package that
+has native code therefore has two halves that must match, and only a native
+build moves the native half. Between 2026-09-07 and 2026-09-27 this scan moved
+four such packages on `main` (Amplitude, Sentry, `expo-updates` and the
+`react` family) in ordinary patch-bump PRs. Every gate passed, because none of
+them can see the problem: Jest renders with `react-test-renderer`, and
+`expo export` only proves that the bundle builds. The next OTA would have
+been the first time that JavaScript ran on a real binary.
+
+The rule now:
+
+- **Packages with native code, and `react`, move only with a native build and
+  a new OTA runtime** (a `version` bump in `mobile/app.config.js`).
+- **`mobile/binary-manifest.json` is the list.** It records, per runtime, the
+  version of each such package in the newest binary.
+- **`mobile/__tests__/binary-manifest.test.ts` enforces it.** It recomputes
+  the set from the lockfile and `node_modules` (a package counts when its root
+  has an `ios/` or `android/` directory, a `*.podspec` or an
+  `expo-module.config.json`) and fails on any changed, added or removed
+  package. It is part of `npm test`, so a scan PR or a Dependabot PR that
+  moves one of them cannot merge.
+- **The scan never edits the manifest.** Its diff guard already limits it to
+  `package.json` and `package-lock.json`. Recording a build is a human step
+  (`npm run binary-manifest:record`), described in `CLAUDE.md` under
+  "Mobile Builds (EAS)".
+
+What this costs: security fixes in a binary-coupled package wait for a build.
+The scan reports them under ⚠ with "needs a native build" so they are visible.
 
 ## Secrets and permissions
 
@@ -87,6 +119,11 @@ are pinned to commit SHAs.
 Edit the "Inline deferral list" in `.github/prompts/daily-upgrade-scan.md` and,
 if Dependabot should also stop proposing it, add a matching `ignore` in
 `.github/dependabot.yml`. Same PR.
+
+Binary-coupled mobile packages are not maintained by hand in that list: the
+prompt points at `mobile/binary-manifest.json`, which is regenerated whenever a
+build is recorded. A new native module therefore joins the deferral set with
+the build that first contains it.
 
 ## Disabling
 
