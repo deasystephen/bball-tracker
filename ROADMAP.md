@@ -49,7 +49,8 @@ Blockers group into four lanes, three of which run in parallel:
 
 - **External clocks — start first, they queue.** SES production access (#23),
   privacy policy + ToS with a COPPA read (#25), WorkOS production environment
-  (#24), support inbox (#450), App Store Connect metadata (#451).
+  (#24), a mailbox on hooplings.com (#555) and the support inbox that needs it
+  (#450), App Store Connect metadata (#451).
 - **The paths a stranger walks.** Self-serve team creation (#442), league and
   season list scoping (#443), account deletion (#444), the dead-end free-tier
   team cap (#445).
