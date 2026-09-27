@@ -83,10 +83,27 @@ updates:
       - dependency-name: "expo-secure-store"
       - dependency-name: "react-native-screens"
       - dependency-name: "react-native-worklets"
-      # lottie-react-native >=7.4.0 requires react-native >=0.84; we're on the
-      # SDK 55 / RN 0.83 line. Re-evaluate at the SDK 57 bump (see PR #314).
+      # Packages with native code that the Expo SDK does NOT pin, plus the
+      # react family (#562). An OTA ships JavaScript from the lockfile and runs
+      # it against the native code frozen in the binary, so these move only
+      # together with a native build and a new OTA runtime. The enforcement is
+      # mobile/__tests__/binary-manifest.test.ts, which fails CI on any drift
+      # from mobile/binary-manifest.json; these entries only stop Dependabot
+      # from proposing bumps that can never pass. `expo-*` covers every Expo
+      # module, including ones a future feature adds.
+      - dependency-name: "@amplitude/analytics-react-native"
+      - dependency-name: "@sentry/react-native"
+      - dependency-name: "expo-*"
+      - dependency-name: "react-native-svg"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      # react-test-renderer must equal the react version exactly.
+      - dependency-name: "react-test-renderer"
+      # lottie-react-native has native code too (all versions are held by the
+      # rule above); in addition >=7.4.0 requires react-native >=0.84 and we
+      # are on the SDK 55 / RN 0.83 line. Re-evaluate at the SDK 57 bump
+      # (see PR #314).
       - dependency-name: "lottie-react-native"
-        versions: [">=7.4.0"]
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
