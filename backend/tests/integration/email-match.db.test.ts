@@ -122,13 +122,14 @@ afterAll(async () => {
 });
 
 describe('emailEquals against Postgres', () => {
+  // Sorted here, never by the database: where "_" sorts relative to a letter
+  // depends on the collation, and CI's differs from a local docker-compose.
   async function holders(lookup: string): Promise<string[]> {
     const rows = await prisma.user.findMany({
       where: { email: emailEquals(lookup), id: { in: userIds } },
       select: { email: true },
-      orderBy: { email: 'asc' },
     });
-    return rows.map((row) => row.email as string);
+    return rows.map((row) => row.email as string).sort();
   }
 
   beforeAll(async () => {
@@ -168,9 +169,10 @@ describe('emailEquals against Postgres', () => {
       // thing under test here.
       where: { email: { equals: address('help_under'), mode: 'insensitive' }, id: { in: userIds } },
       select: { email: true },
-      orderBy: { email: 'asc' },
     });
-    expect(rows.map((row) => row.email)).toEqual([address('helpXunder'), address('help_under')]);
+    expect(rows.map((row) => row.email).sort()).toEqual(
+      [address('helpXunder'), address('help_under')].sort()
+    );
   });
 });
 
