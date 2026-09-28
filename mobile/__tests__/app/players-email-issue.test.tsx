@@ -158,13 +158,19 @@ describe('ManagePlayersScreen — email delivery issues (#449)', () => {
       expect(screen.queryAllByLabelText(/ email: Email /)).toHaveLength(5);
     });
 
-    it('shows the address on a flagged row, where a healthy row shows jersey and position', () => {
+    it('shows the address on its own full-width line under a flagged row, and keeps jersey and position', () => {
       const screen = render(<ManagePlayersScreen />);
 
-      // The typo is the thing to look at.
-      expect(screen.getByText('invited@exmaple.com')).toBeTruthy();
+      // The typo is the thing to look at. Beside two chips it truncated to
+      // "xander.ex…" on a phone, so it sits on its own line, cut in the middle
+      // when it must be cut at all.
+      const address = screen.getByText('invited@exmaple.com');
+      expect(address.props.numberOfLines).toBe(1);
+      expect(address.props.ellipsizeMode).toBe('middle');
+
       expect(screen.queryByText('healthy@exmaple.com')).toBeNull();
-      expect(screen.getAllByText('#12 • Guard').length).toBeGreaterThan(0);
+      // Every row keeps its jersey line, flagged or not: 8 members, 8 lines.
+      expect(screen.getAllByText('#12 • Guard')).toHaveLength(8);
     });
   });
 

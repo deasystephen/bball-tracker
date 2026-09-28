@@ -221,7 +221,7 @@ receives the aggregate reports yet.
 | Step | Owner | State |
 | --- | --- | --- |
 | A mailbox that can receive reports, and the `rua` tag on both DMARC records | #555 (Google Workspace on `hooplings.com`) | open |
-| Tighten to `p=quarantine` | after about 30 days of reports show only aligned mail | not started |
+| Tighten to `p=quarantine`, after about 30 days of reports show only aligned mail | #555, step 5 | not started |
 
 Do not tighten the policy without the reports: `p=quarantine` on a domain with an unknown
 legitimate sender sends that sender's mail to spam.

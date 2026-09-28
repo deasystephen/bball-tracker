@@ -337,10 +337,11 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   2. ⋯ → **Fix email address** → replace the address → **Save & send
      invitation**.
 - **Expected:**
-  - (1) The row carries two chips, "Invite expired" and **"Email bounced"**,
-    and shows the address in place of the jersey line. Rows with a healthy
-    address carry no email chip. Non-managers see neither the address nor the
-    chip.
+  - (1) The row keeps its "Invite expired" chip and jersey line, and grows a
+    strip underneath with the **"Email bounced"** chip and the **full address
+    on its own line** (readable without truncation on a phone). Rows with a
+    healthy address carry no strip. Non-managers see neither the address nor
+    the chip.
   - (2) The sheet opens prefilled and explains what happened. Save is disabled
     for the unchanged address and for anything that is not an address. After
     saving, the "Email bounced" chip is gone, the status chip reads "Invited",

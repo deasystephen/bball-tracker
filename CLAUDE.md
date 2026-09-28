@@ -144,8 +144,10 @@ Backend API (Node.js/Express)
   ONLY via `utils/email-delivery.ts#getEmailDeliveryIssue(player)` (`'bounced'` | `'complaint'`
   | `null`; a tombstone or a player with no address is always `null`, and a reason this build
   does not know reads as `'bounced'`). It is orthogonal to the invite status — an Invited row
-  can also be bounced — so the row stacks both chips (`"<player> email: Email bounced"` is the
-  row-anchored label) and shows the address as its subtitle instead of jersey/position. The
+  can also be bounced — so the status chip stays where it is and a flagged row grows a strip
+  underneath: the email chip (`"<player> email: Email bounced"` is the row-anchored label) and,
+  on a line of its own, the full address. Keep the address on its own line — beside the chips it
+  truncated to "xander.ex…" on a 393pt screen, and the typo is what the coach has to read. The
   menu's first item on such a row is **Fix email address**, offered only when
   `player.isManaged` (a claimed account's email belongs to its login): a bottom sheet that
   accepts only a different, well-formed address, sends it trimmed and lower-cased through

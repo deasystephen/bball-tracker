@@ -76,7 +76,7 @@ import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
-import { getHorizontalPadding } from '../../../utils/responsive';
+import { getHorizontalPadding, getResponsiveValue } from '../../../utils/responsive';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
@@ -148,6 +148,8 @@ export default function ManagePlayersScreen() {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
+  // Same horizontal padding ListItem gives its own content
+  const rowPadding = getResponsiveValue(spacing.md, spacing.lg);
   const insets = useSafeAreaInsets();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -595,14 +597,15 @@ export default function ManagePlayersScreen() {
       .filter(Boolean)
       .join(' • ');
     const emailIssue = getEmailDeliveryIssue(member.player);
-    // A flagged row shows the address itself: it is what the coach has to check.
-    const subtitle = (emailIssue && member.player.email) || details || member.player.email || undefined;
+    const subtitle = details || member.player.email || undefined;
 
-    return (
+    const row = (
       <ListItem
         key={member.id}
         title={displayName(member.player)}
         subtitle={subtitle}
+        // A flagged row continues into the strip below; the strip draws the divider.
+        style={emailIssue ? styles.rowWithIssue : undefined}
         leftElement={
           member.player.isManaged ? (
             <Ionicons name="person-outline" size={20} color={colors.textTertiary} />
@@ -610,20 +613,11 @@ export default function ManagePlayersScreen() {
         }
         rightElement={
           <View style={styles.rowActions}>
-            <View style={styles.chipColumn}>
-              <StatusChip
-                status={rosterStatus.status}
-                playerName={displayName(member.player)}
-                colors={colors}
-              />
-              {emailIssue && (
-                <EmailIssueChip
-                  issue={emailIssue}
-                  playerName={displayName(member.player)}
-                  color={colors.error}
-                />
-              )}
-            </View>
+            <StatusChip
+              status={rosterStatus.status}
+              playerName={displayName(member.player)}
+              colors={colors}
+            />
             <TouchableOpacity
               onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
@@ -635,6 +629,38 @@ export default function ManagePlayersScreen() {
           </View>
         }
       />
+    );
+
+    if (!emailIssue) return row;
+
+    // The address gets a full-width line of its own: it is what the coach has
+    // to read, and beside the chips it truncated to "xander.ex…" on a phone.
+    // A very long address loses its middle, keeping the name and the domain.
+    return (
+      <View key={member.id}>
+        {row}
+        <View
+          style={[
+            styles.issueStrip,
+            { paddingHorizontal: rowPadding, borderBottomColor: colors.border },
+          ]}
+        >
+          <EmailIssueChip
+            issue={emailIssue}
+            playerName={displayName(member.player)}
+            color={colors.error}
+          />
+          <ThemedText
+            variant="caption"
+            color="textSecondary"
+            style={styles.issueAddress}
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
+            {member.player.email}
+          </ThemedText>
+        </View>
+      </View>
     );
   };
 
@@ -1184,9 +1210,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipColumn: {
-    alignItems: 'flex-end',
-    gap: spacing.xxs,
+  rowWithIssue: {
+    borderBottomWidth: 0,
+    paddingBottom: spacing.xs,
+  },
+  issueStrip: {
+    // Stacked, not side by side: next to the chip a 26-character address
+    // still lost its middle on a 393pt screen.
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  issueAddress: {
+    alignSelf: 'stretch',
   },
   chip: {
     borderWidth: 1,

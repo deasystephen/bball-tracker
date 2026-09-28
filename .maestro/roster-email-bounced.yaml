@@ -31,8 +31,8 @@ appId: com.bballtracker.mobile
 - tapOn: "Add Player"
 - assertVisible: "Roster"
 
-# The flagged row: both chips, row-anchored, and the address in place of the
-# jersey line — the typo is what the coach has to look at.
+# The flagged row: both chips, row-anchored, and the address on a line of its
+# own under the row — the typo is what the coach has to look at.
 - scrollUntilVisible:
     element:
       text: "Xander Expired"
