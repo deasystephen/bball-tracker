@@ -13,7 +13,9 @@ import Animated, {
 import { useTheme } from '../../hooks/useTheme';
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { borderRadius } from '../../theme';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+// expo-router carries its own fork of the tab navigator since SDK 56; the
+// `@react-navigation/bottom-tabs` package is no longer installed.
+import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 const TAB_CONFIGS = [
   { name: 'home', icon: 'home', label: 'Home' },

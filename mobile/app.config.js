@@ -34,20 +34,21 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.4.0 = OTA runtime boundary for dependency drift (#562). An OTA ships
+    // 1.5.0 = OTA runtime boundary for the Expo SDK 57 upgrade (#576): React
+    // Native 0.83 -> 0.86, React 19.3.0 -> 19.2.3 (the version the 0.86
+    // renderer is built against), and every expo-* native module. An OTA ships
     // JavaScript from the lockfile and runs it against the native code frozen
-    // in the binary. Between build #31 and this version, packages with native
-    // code moved on main (Amplitude 1.8.0 -> 1.10.2, Sentry 8.25 -> 8.28,
-    // expo-updates) and so did react (19.2.8 -> 19.3.0), so an OTA from main
-    // must never reach build #31. runtimeVersion policy is appVersion, so
-    // bumping this keeps every OTA from here on to 1.4.0 builds (#32+);
-    // build #31 stays on the last 1.3.0 OTA.
+    // in the binary, so SDK 57 JavaScript must never reach an SDK 55 binary.
+    // runtimeVersion policy is appVersion: every OTA from here on reaches
+    // 1.5.0 builds only, and build #32 stays on the last 1.4.0 OTA.
     //
-    // Earlier boundaries: 1.3.0 was the URL scheme rename (#504: the sign-in
-    // redirect scheme is resolved from the OTA MANIFEST while the schemes a
-    // binary answers are baked into Info.plist, so builds #25-#30 stay on the
-    // last 1.2.0 OTA); 1.2.0 was expo-secure-store (audit #52).
-    version: '1.4.0',
+    // Earlier boundaries: 1.4.0 was dependency drift (#562: Amplitude, Sentry,
+    // expo-updates and react moved on main after build #31 was cut); 1.3.0 was
+    // the URL scheme rename (#504: the sign-in redirect scheme is resolved
+    // from the OTA MANIFEST while the schemes a binary answers are baked into
+    // Info.plist, so builds #25-#30 stay on the last 1.2.0 OTA); 1.2.0 was
+    // expo-secure-store (audit #52).
+    version: '1.5.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -99,6 +100,13 @@ export default {
       favicon: './assets/favicon.png',
     },
     plugins: [
+      // UIKit scene-based life cycle (#576). An app built with the iOS 27 SDK
+      // (Xcode 27) on the old application life cycle does not launch correctly
+      // on iOS 27. SDK 57 keeps the old life cycle unless this is set; SDK 58
+      // makes it the default, where this entry becomes a no-op to remove.
+      // Native: it changes AppDelegate and Info.plist at prebuild, so it ships
+      // with an `eas build`, never an OTA.
+      ['expo-build-properties', { ios: { enableSceneSupport: true } }],
       'expo-router',
       'expo-localization',
       'expo-font',

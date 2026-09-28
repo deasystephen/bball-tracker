@@ -62,9 +62,14 @@ function pluginOptions(config: ExpoConfig, name: string): Record<string, unknown
  * do not touch permissions. No native project is generated.
  */
 async function evaluateNativePermissions(config: ExpoConfig): Promise<NativeConfig> {
+  return evaluateNativeConfig(config, ['expo-image-picker', 'expo-secure-store']);
+}
+
+/** Evaluates the named plugins, with the options app.config.js gives them, in introspection mode. */
+async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promise<NativeConfig> {
   const { withPlugins, compileModsAsync } = jest.requireActual<ConfigPlugins>('expo/config-plugins');
   const plugins = config.expo.plugins.filter(
-    (entry) => Array.isArray(entry) && ['expo-image-picker', 'expo-secure-store'].includes(entry[0])
+    (entry) => Array.isArray(entry) && names.includes(entry[0])
   );
   const base = {
     name: 'Hooplings',
@@ -165,6 +170,40 @@ describe('app.config.js', () => {
     // OTA from main must never reach it, so the version can never drop below
     // 1.4.0 again.
     expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.4.0')).toBe(true);
+  });
+
+  it('keeps the OTA runtime at or past the 1.5.0 Expo SDK 57 boundary', async () => {
+    // Build #32 (runtime 1.4.0) is an SDK 55 binary: React Native 0.83 and the
+    // SDK 55 native modules. JavaScript built against SDK 57 must never reach
+    // it (#576), so the version can never drop below 1.5.0 again.
+    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.5.0')).toBe(true);
+  });
+
+  // Xcode 27 / iOS 27 SDK (#576). Without the scene life cycle an app built
+  // with the iOS 27 SDK does not launch correctly on iOS 27, and the failure
+  // only shows on a device. Baked into the binary at prebuild.
+  describe('iOS scene life cycle', () => {
+    it('opts in through expo-build-properties', async () => {
+      const options = pluginOptions(await loadConfig({ APP_ENV: 'production' }), 'expo-build-properties');
+      expect(options).toEqual({ ios: { enableSceneSupport: true } });
+    });
+
+    it('evaluates to an Info.plist that declares a scene manifest with Expo\'s scene delegate', async () => {
+      const config = await loadConfig({ APP_ENV: 'production' });
+      const { infoPlist } = (await evaluateNativeConfig(config, ['expo-build-properties'])).ios;
+
+      expect(infoPlist.UIApplicationSceneManifest).toEqual({
+        UIApplicationSupportsMultipleScenes: false,
+        UISceneConfigurations: {
+          UIWindowSceneSessionRoleApplication: [
+            {
+              UISceneConfigurationName: 'Default Configuration',
+              UISceneDelegateClassName: 'EXExpoAppSceneDelegate',
+            },
+          ],
+        },
+      });
+    });
   });
 
   // Permission purpose strings (#451). Baked into Info.plist: a regression
