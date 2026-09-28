@@ -51,10 +51,11 @@ API sends (ConfigurationSetName) ──► SES ──► recipient's mail server
    | Transient bounce (mailbox full, greylisting) | nothing; logged |
    | Reject (SES refused the content) | nothing; logged |
 
-3. **The coach is told on the roster row** and corrects the address. Changing a player's email
-   clears the flag, because the bounce belonged to the old address. The API returns the state on
-   `GET /teams/:id` to roster managers; the roster row that displays it is the mobile half of
-   #449 and is not released yet.
+3. **The coach is told on the roster row** ("Email bounced" / "Email blocked", roster managers
+   only) and corrects the address from the row's menu, **Fix email address**, which also sends
+   the invitation again. Changing a player's email clears the flag, because the bounce belonged
+   to the old address. App binaries that have not taken the update show no chip; the API state
+   is the same either way.
 
 Nothing is lost while the API is down or deploying: the queue holds events for 14 days and the
 API catches up when it returns.
@@ -151,8 +152,8 @@ reaches a roster until this is fixed. Nothing is lost for 14 days.
 The roster shows an address as bounced, and the coach has confirmed with the family that it is
 right (a mailbox that did not exist yet, a provider outage that returned a permanent error).
 
-The roster row the coach is looking at is the mobile half of #449; until it is released the
-report arrives as "my player never got the invite".
+This is the one case the coach cannot fix from the app: "Fix email address" only accepts a
+different address.
 
 1. **Confirm it is suppressed, and why.**
    ```bash
@@ -190,7 +191,8 @@ After the deploy:
    account's reputation and never suppresses anything. As a coach, on a team used for testing,
    add a player with the email `bounce@simulator.amazonses.com`. Within a minute:
    - the log shows `SES permanent bounce recorded` with `matched: 1`;
-   - `GET /teams/:id` returns `emailSuppressedReason: "BOUNCE"` on that player's roster row.
+   - the roster row shows the "Email bounced" chip after a refresh (`GET /teams/:id` returns
+     `emailSuppressedReason: "BOUNCE"` for that player).
 
    Remove the player afterwards.
 3. **The same from the command line**, which proves SES → SNS → SQS → API but matches no account
@@ -219,7 +221,7 @@ receives the aggregate reports yet.
 | Step | Owner | State |
 | --- | --- | --- |
 | A mailbox that can receive reports, and the `rua` tag on both DMARC records | #555 (Google Workspace on `hooplings.com`) | open |
-| Tighten to `p=quarantine` | after about 30 days of reports show only aligned mail | not started |
+| Tighten to `p=quarantine`, after about 30 days of reports show only aligned mail | #555, step 5 | not started |
 
 Do not tighten the policy without the reports: `p=quarantine` on a domain with an unknown
 legitimate sender sends that sender's mail to spam.

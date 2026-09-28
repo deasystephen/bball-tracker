@@ -138,9 +138,31 @@ Backend API (Node.js/Express)
   `PATCH /teams/:id/players/:playerId`; an emptied input sends `null`, which clears the stored
   value (`updateTeamMemberSchema` is `.nullable()` for both fields). This is the recovery path for
   members rostered without a number (e.g. pre-fix resend-superseded invites).
+- **"Email bounced" is a second chip, never a roster status (#449).** The team payload carries
+  what SES reported for each rostered player's address (`player.emailSuppressedAt` /
+  `emailSuppressedReason`, roster managers only — see "Email bounces & complaints"). Derive it
+  ONLY via `utils/email-delivery.ts#getEmailDeliveryIssue(player)` (`'bounced'` | `'complaint'`
+  | `null`; a tombstone or a player with no address is always `null`, and a reason this build
+  does not know reads as `'bounced'`). It is orthogonal to the invite status — an Invited row
+  can also be bounced — so the status chip stays where it is and a flagged row grows a strip
+  underneath: the email chip (`"<player> email: Email bounced"` is the row-anchored label) and,
+  on a line of its own, the full address. Keep the address on its own line — beside the chips it
+  truncated to "xander.ex…" on a 393pt screen, and the typo is what the coach has to read. The
+  menu's first item on such a row is **Fix email address**, offered only when
+  `player.isManaged` (a claimed account's email belongs to its login): a bottom sheet that
+  accepts only a different, well-formed address, sends it trimmed and lower-cased through
+  `useUpdatePlayer` (`PATCH /players/:id { email }`, which now also invalidates
+  `teamKeys.details()`), and then — when the row is Invited / Invite expired / Not invited —
+  runs the same supersede create as Resend ("Save & send invitation"). The backend lets only
+  the coach who **added** an unclaimed player change its email (B2.10), so a 403 is translated
+  to "Only the coach who added … can change this email address". Tests:
+  `__tests__/utils/email-delivery.test.ts`, `__tests__/app/players-email-issue.test.tsx`.
 - Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
-  Marcus Johnson = Not invited). Maestro: `.maestro/roster-management.yaml` (add → immediate
-  roster + chip) and `.maestro/roster-invite-status.yaml` (all four chips + action gating).
+  Marcus Johnson = Not invited; **Xander also carries a hard-bounced address**, and the seed
+  restores his email and delivery state on every run). Maestro: `.maestro/roster-management.yaml`
+  (add → immediate roster + chip), `.maestro/roster-invite-status.yaml` (all four chips + action
+  gating) and `.maestro/roster-email-bounced.yaml` (email chip → fix → invitation re-sent;
+  mutates Xander, so re-seed first).
 - **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
   then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
   `GAME_DETAIL_INCLUDE.team.members`), so the team-detail and game-detail rosters carry a

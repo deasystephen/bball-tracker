@@ -1,0 +1,74 @@
+appId: com.bballtracker.mobile
+---
+# "This address bounced" on the roster (#449). Xander Expired is seeded on the
+# Lakers with a hard-bounced address and a lapsed invitation. Frank Vogel (head
+# coach, and the coach who added Xander) sees the second chip, corrects the
+# address, and the invitation goes out again in the same step.
+#
+# MUTATES the fixture: Xander's email changes and his invitation is superseded.
+# `npx prisma db seed` restores both — run it before every run of this flow.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Navigate to the Lakers roster
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Add Player"
+- assertVisible: "Roster"
+
+# The flagged row: both chips, row-anchored, and the address on a line of its
+# own under the row — the typo is what the coach has to look at.
+- scrollUntilVisible:
+    element:
+      text: "Xander Expired"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertVisible: "Xander Expired status: Invite expired"
+- assertVisible: "Xander Expired email: Email bounced"
+- assertVisible: "xander.expired@example.com"
+
+# A healthy neighbor carries no email chip
+- assertNotVisible: "Iris Invited email: Email bounced"
+
+# Fix the address from the overflow menu
+- tapOn: "Player options: Xander Expired"
+- assertVisible: "Fix email address"
+- tapOn: "Fix email address"
+- assertVisible: "Email for Xander Expired"
+- assertVisible: "Save & send invitation"
+- tapOn:
+    id: "edit-player-email-input"
+- eraseText: 60
+- inputText: "xander.fixed@example.com"
+# Single-line input: Enter blurs it (hideKeyboard is unreliable on the simulator)
+- pressKey: Enter
+- tapOn:
+    id: "edit-player-email-save"
+
+# The corrected address starts clean, and the fresh invitation is live
+- extendedWaitUntil:
+    visible: "Xander Expired status: Invited"
+    timeout: 10000
+- assertNotVisible: "Xander Expired email: Email bounced"
+
+# With no email issue left, the menu no longer offers the fix
+- tapOn: "Player options: Xander Expired"
+- assertNotVisible: "Fix email address"
+- assertVisible: "Resend invitation"
+- tapOn: "Close"

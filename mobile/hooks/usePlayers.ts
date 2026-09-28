@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { playerKeys, type PlayersQueryParams } from './query-keys';
+import { playerKeys, teamKeys, type PlayersQueryParams } from './query-keys';
 
 export interface Player {
   id: string;
@@ -138,6 +138,9 @@ export function useUpdatePlayer() {
         queryKey: playerKeys.detail(variables.playerId),
       });
       queryClient.invalidateQueries({ queryKey: playerKeys.lists() });
+      // Rosters embed the player's name, email and the email's delivery
+      // state; a corrected address must drop its "Email bounced" chip (#449).
+      queryClient.invalidateQueries({ queryKey: teamKeys.details() });
     },
   });
 }

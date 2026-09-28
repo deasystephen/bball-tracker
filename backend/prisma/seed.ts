@@ -724,6 +724,9 @@ async function main() {
       jersey: 22,
       status: 'PENDING' as const,
       expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      // The invite never arrived: the address hard-bounced (#449). Drives the
+      // "Email bounced" chip and .maestro/roster-email-bounced.yaml.
+      bounced: true,
     },
     {
       id: '40000000-0000-4000-a000-000000000224',
@@ -736,9 +739,16 @@ async function main() {
   ];
 
   for (const fixture of inviteStateFixtures) {
+    const deliveryState =
+      'bounced' in fixture && fixture.bounced
+        ? { emailSuppressedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), emailSuppressedReason: 'BOUNCE' as const }
+        : { emailSuppressedAt: null, emailSuppressedReason: null };
+
     const fixturePlayer = await prisma.user.upsert({
       where: { id: fixture.id },
-      update: {},
+      // Restored on every seed: roster-email-bounced.yaml corrects Xander's
+      // address, which changes the email and clears the delivery state.
+      update: { email: fixture.email, ...deliveryState },
       create: {
         id: fixture.id,
         name: fixture.name,
@@ -747,6 +757,7 @@ async function main() {
         // Rostered-at-creation case 2: coach-managed until claimed
         isManaged: true,
         managedById: coachFrank.id,
+        ...deliveryState,
       },
     });
 

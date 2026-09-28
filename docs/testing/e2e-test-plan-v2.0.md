@@ -327,6 +327,37 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
     the player STAYS on the roster, and their email survives (rejection-only
     strip — re-invite works without creating a duplicate account).
 
+### D.3b — Bounced address on the roster, and fixing it (NEW, #449)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageRoster` who added the player (Frank Vogel on
+  the seeded Lakers)
+- **Steps:**
+  1. Lakers roster → find **Xander Expired** (seeded with a hard-bounced
+     address and a lapsed invitation).
+  2. ⋯ → **Fix email address** → replace the address → **Save & send
+     invitation**.
+- **Expected:**
+  - (1) The row keeps its "Invite expired" chip and jersey line, and grows a
+    strip underneath with the **"Email bounced"** chip and the **full address
+    on its own line** (readable without truncation on a phone). Rows with a
+    healthy address carry no strip. Non-managers see neither the address nor
+    the chip.
+  - (2) The sheet opens prefilled and explains what happened. Save is disabled
+    for the unchanged address and for anything that is not an address. After
+    saving, the "Email bounced" chip is gone, the status chip reads "Invited",
+    and the toast reports the invitation email result.
+  - "Fix email address" is offered only on a flagged row of an **unclaimed**
+    player. A coach who did not add the player gets "Only the coach who added
+    … can change this email address."
+  - Maestro: `.maestro/roster-email-bounced.yaml` (mutates Xander — re-seed
+    first).
+- **Against production SES** (after the infra half of #449 is applied): add a
+  player with the email `bounce@simulator.amazonses.com` on a test team; the
+  "Email bounced" chip appears on the next refresh, within about a minute.
+  Remove the player afterwards. Procedure:
+  `docs/runbooks/email-deliverability.md`, "Applying and verifying".
+- **Notes:** ___________
+
 ### D.4 — Edit team name
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageTeam`
