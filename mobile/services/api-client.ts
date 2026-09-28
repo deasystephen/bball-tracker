@@ -1,6 +1,7 @@
 import { create as createAxiosInstance, AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
+import { NO_SESSION_CODE, NoSessionError, isNoSessionError } from './no-session-error';
 
 /**
  * API client configuration. The base URL is decided in one place,
@@ -18,7 +19,36 @@ const NO_REFRESH_PATHS = ['/auth/refresh', '/auth/callback', '/auth/login', '/au
 const isNoRefreshPath = (url?: string): boolean =>
   !!url && NO_REFRESH_PATHS.some((p) => url.startsWith(p) || url.includes(`/api/v1${p}`));
 
+/**
+ * The only endpoints a signed-out app may call. Everything else needs a
+ * session, and is refused locally when there is none (see `NoSessionError`).
+ *
+ * A new unauthenticated endpoint MUST be added here, or it will never be sent
+ * from the sign-in and invite screens. `__tests__/services/api-client.test.ts`
+ * pins the list.
+ */
+export const PUBLIC_PATHS = [
+  ...NO_REFRESH_PATHS,
+  '/auth/dev-users',
+  '/invitations/by-token/',
+];
+
+const isPublicPath = (url?: string): boolean =>
+  !!url && PUBLIC_PATHS.some((p) => url.startsWith(p) || url.includes(`/api/v1${p}`));
+
+export { NO_SESSION_CODE, NoSessionError, isNoSessionError };
+
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+
+/** True when the request went out carrying a bearer token. */
+const sentWithToken = (config?: RetriableConfig): boolean => {
+  const headers = config?.headers as
+    | { Authorization?: unknown; get?: (name: string) => unknown }
+    | undefined;
+  if (!headers) return false;
+  const value = typeof headers.get === 'function' ? headers.get('Authorization') : headers.Authorization;
+  return typeof value === 'string' && value.length > 0;
+};
 
 /**
  * Shape of the backend's JSON error body (`utils/errors.ts` + the Express
@@ -178,6 +208,11 @@ const createApiClient = (): AxiosInstance => {
       const token = useAuthStore.getState().accessToken;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        return config;
+      }
+      // No session: a request that needs one is never sent (#582).
+      if (!isPublicPath(config.url)) {
+        return Promise.reject(new NoSessionError(config));
       }
       return config;
     },
@@ -207,6 +242,13 @@ const createApiClient = (): AxiosInstance => {
       // rejected refresh is handled by refreshAccessToken's caller; a failed
       // login/callback never had a session to end). Never log out here.
       if (original && isNoRefreshPath(original.url)) {
+        return Promise.reject(error);
+      }
+
+      // Sent without a token (a public endpoint that answered 401): there was
+      // no session behind this request, so there is none to refresh and none
+      // to end (#582).
+      if (!sentWithToken(original)) {
         return Promise.reject(error);
       }
 

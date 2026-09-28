@@ -155,15 +155,126 @@ describe('api-client', () => {
     }));
     jest.requireActual('../../services/api-client');
 
-    const config = { headers: {} as Record<string, string> };
+    const config = { url: '/teams', headers: {} as Record<string, string> };
     const result = captured.request!(config) as typeof config;
     expect(result.headers.Authorization).toBe('Bearer jwt-xyz');
 
-    // When no token, no Authorization header is set.
+    // When no token, no Authorization header is set (on an endpoint that
+    // needs none; one that needs a session is not sent at all, see below).
     authMock.state.accessToken = null;
-    const config2 = { headers: {} as Record<string, string> };
+    const config2 = { url: '/auth/login', headers: {} as Record<string, string> };
     const result2 = captured.request!(config2) as typeof config2;
     expect(result2.headers.Authorization).toBeUndefined();
+  });
+
+  // #582: when a session ends, every query still on screen asks again. The
+  // server could only answer 401, so those requests never leave the device.
+  describe('without a session', () => {
+    const loadSignedOut = () => {
+      loadModule();
+      jest.doMock('expo-constants', () => ({
+        __esModule: true,
+        default: { expoConfig: { extra: { apiUrl: 'https://example.test' } } },
+      }));
+      const authMock = { state: { accessToken: null as string | null, clearCalls: 0 } };
+      jest.doMock('../../store/auth-store', () => ({
+        __esModule: true,
+        getLogoutEpoch: () => 0,
+        useAuthStore: {
+          getState: () => ({
+            accessToken: authMock.state.accessToken,
+            refreshToken: null,
+            clearSession: () => {
+              authMock.state.clearCalls += 1;
+            },
+          }),
+        },
+      }));
+      const mod = jest.requireActual('../../services/api-client');
+      return { authMock, mod };
+    };
+
+    it.each([
+      '/auth/me',
+      '/auth/me/usage',
+      '/teams',
+      '/games?status=IN_PROGRESS',
+      '/invitations',
+      '/invitations/3f0e6f6e-5a1b-4c7e-9d38-0b1c2d3e4f5a',
+      '/auth/logout',
+      '/auth/push-token',
+      undefined,
+    ])('refuses %s locally, with an error a screen can show', async (url) => {
+      const { mod } = loadSignedOut();
+      const config = { url, headers: {} as Record<string, string> };
+
+      const outcome = captured.request!(config);
+
+      await expect(outcome).rejects.toBeInstanceOf(mod.NoSessionError);
+      await expect(outcome).rejects.toMatchObject({
+        code: 'ERR_NO_SESSION',
+        message: 'You are signed out',
+        config,
+      });
+      expect(config.headers.Authorization).toBeUndefined();
+    });
+
+    it.each([
+      '/auth/login',
+      '/auth/callback',
+      '/auth/refresh',
+      '/auth/dev-users',
+      '/auth/dev-login',
+      '/invitations/by-token/abc',
+      '/invitations/by-token/abc/accept',
+      'https://example.test/api/v1/auth/login',
+    ])('sends %s: signing in and accepting an invite need no session', (url) => {
+      loadSignedOut();
+      const config = { url, headers: {} as Record<string, string> };
+
+      expect(captured.request!(config)).toBe(config);
+    });
+
+    it('pins the list of endpoints a signed-out app may call', () => {
+      const { mod } = loadSignedOut();
+      // Adding an unauthenticated endpoint to the API means adding it here.
+      expect([...mod.PUBLIC_PATHS].sort()).toEqual([
+        '/auth/callback',
+        '/auth/dev-login',
+        '/auth/dev-users',
+        '/auth/login',
+        '/auth/refresh',
+        '/invitations/by-token/',
+      ]);
+    });
+
+    it('isNoSessionError tells the local refusal from a server error', () => {
+      const { mod } = loadSignedOut();
+      const config = { url: '/teams', headers: {} };
+
+      expect(mod.isNoSessionError(new mod.NoSessionError(config))).toBe(true);
+      expect(mod.isNoSessionError(new Error('You are signed out'))).toBe(false);
+      expect(mod.isNoSessionError({ code: 'ERR_NO_SESSION' })).toBe(false);
+      expect(mod.isNoSessionError(undefined)).toBe(false);
+    });
+
+    it.each([
+      ['a plain headers object', { url: '/auth/dev-users', headers: {} }],
+      ['no headers at all', { url: '/auth/dev-users' }],
+      ['no request config', undefined],
+      ['an empty Authorization header', { url: '/teams', headers: { Authorization: '' } }],
+      [
+        'an AxiosHeaders-like object with no Authorization',
+        { url: '/auth/dev-users', headers: { get: () => undefined } },
+      ],
+    ])('a 401 for a request sent with %s ends no session and refreshes nothing', async (_label, config) => {
+      const { authMock } = loadSignedOut();
+      const err = { response: { status: 401 }, config, message: '401' };
+
+      await expect(captured.responseError!(err)).rejects.toBe(err);
+
+      expect(authMock.state.clearCalls).toBe(0);
+    });
   });
 
   it('request error handler rejects the error unchanged', async () => {
@@ -209,7 +320,11 @@ describe('api-client', () => {
     }));
     jest.requireActual('../../services/api-client');
 
-    const err401 = { response: { status: 401 }, message: '401' };
+    const err401 = {
+      response: { status: 401 },
+      config: { url: '/teams', headers: { Authorization: 'Bearer t' } },
+      message: '401',
+    };
     await expect(captured.responseError!(err401)).rejects.toBe(err401);
     expect(authMock.state.clearCalls).toBe(1);
 
@@ -416,6 +531,22 @@ describe('api-client', () => {
       expect(outcome.status).toBe('unavailable');
       expect(outcome.error).toMatchObject({ response: { status: 503 } });
     });
+  });
+
+  it('reads the bearer from real AxiosHeaders as well as from a plain object', async () => {
+    const { calls } = loadRefreshable({ refreshToken: 'r1', refreshResult: 'ok' });
+    const headers = {
+      Authorization: 'Bearer stale',
+      get(name: string): string | undefined {
+        return name === 'Authorization' ? this.Authorization : undefined;
+      },
+    };
+    const err = { response: { status: 401 }, config: { url: '/teams', headers }, message: '401' };
+
+    await captured.responseError!(err);
+
+    expect(calls.post).toHaveLength(1);
+    expect(calls.request).toHaveLength(1);
   });
 
   it('coalesces concurrent 401s into a single refresh call', async () => {

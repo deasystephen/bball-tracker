@@ -83,8 +83,22 @@ export const useAuthStore = create<AuthState>()(
       },
 
       clearSession: () => {
+        // Always: a refresh in flight must never resurrect a session (#41).
         logoutEpoch += 1;
-        const wasSignedIn = get().isAuthenticated || get().accessToken !== null;
+
+        // Ending a session that has already ended does nothing (#582). Every
+        // step below has a cost when it runs twice: the store write re-renders
+        // each screen that subscribes to the whole store, and clearing the
+        // query cache makes every mounted query fetch again — without a token,
+        // so it answers 401, which used to call this again. That loop sent
+        // about 100 requests in the two seconds before /login unmounted the
+        // tabs, and spent the IP's rate limit.
+        const { isAuthenticated, accessToken, refreshToken, user } = get();
+        const hasSession =
+          isAuthenticated || accessToken !== null || refreshToken !== null || user !== null;
+        if (!hasSession) return;
+
+        const wasSignedIn = isAuthenticated || accessToken !== null;
         if (wasSignedIn) {
           trackEvent(AnalyticsEvents.USER_LOGGED_OUT);
           resetUser();

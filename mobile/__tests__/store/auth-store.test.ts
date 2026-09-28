@@ -296,6 +296,82 @@ describe('auth-store logout sequence', () => {
     expect(resetUser).not.toHaveBeenCalled();
   });
 
+  // #582: clearing the query cache makes every mounted query fetch again,
+  // and writing to the store re-renders every screen that subscribes to all
+  // of it. Doing either for a session that is already gone fed a loop of
+  // about 100 requests in two seconds.
+  describe('clearSession on a session that has already ended', () => {
+    it('does nothing the second time: no store write, no cleanup, no analytics', async () => {
+      useAuthStore.getState().clearSession();
+      await flush();
+      expect(mockedLocal).toHaveBeenCalledTimes(1);
+      jest.clearAllMocks();
+      const stateAfterFirst = useAuthStore.getState();
+      const onWrite = jest.fn();
+      const unsubscribe = useAuthStore.subscribe(onWrite);
+
+      useAuthStore.getState().clearSession();
+      useAuthStore.getState().clearSession();
+      await flush();
+      unsubscribe();
+
+      expect(onWrite).not.toHaveBeenCalled();
+      // Same object: a subscriber to the whole store has nothing to re-render for.
+      expect(useAuthStore.getState()).toBe(stateAfterFirst);
+      expect(mockedLocal).not.toHaveBeenCalled();
+      expect(trackEvent).not.toHaveBeenCalled();
+      expect(resetUser).not.toHaveBeenCalled();
+    });
+
+    it('still advances the logout epoch, so a refresh in flight stays discarded (audit #41)', () => {
+      useAuthStore.getState().clearSession();
+      const before = getLogoutEpoch();
+
+      useAuthStore.getState().clearSession();
+
+      expect(getLogoutEpoch()).toBe(before + 1);
+    });
+
+    it.each([
+      ['a refresh token', { refreshToken: 'r' }],
+      ['a user', { user: makeUser() }],
+      ['an access token', { accessToken: 'a' }],
+      ['the authenticated flag', { isAuthenticated: true }],
+    ])('is not fooled by a half-cleared store: %s alone is still a session to end', async (_label, leftover) => {
+      useAuthStore.setState({
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        isAuthenticated: false,
+        ...leftover,
+      });
+
+      useAuthStore.getState().clearSession();
+      await flush();
+
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        isAuthenticated: false,
+      });
+      expect(mockedLocal).toHaveBeenCalledTimes(1);
+    });
+
+    it('a sign-in after a sign-out can be ended again', async () => {
+      useAuthStore.getState().clearSession();
+      useAuthStore.getState().setAuthToken('a2', 'r2');
+      jest.clearAllMocks();
+
+      useAuthStore.getState().clearSession();
+      await flush();
+
+      expect(useAuthStore.getState().accessToken).toBeNull();
+      expect(mockedLocal).toHaveBeenCalledTimes(1);
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT);
+    });
+  });
+
   it('tolerates a throwing local cleanup hook', () => {
     setSessionHooks({ localCleanup: () => { throw new Error('boom'); } });
     expect(() => useAuthStore.getState().clearSession()).not.toThrow();
