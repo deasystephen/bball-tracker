@@ -31,6 +31,7 @@ import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
+import { emailEquals } from '../utils/email-match';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -347,7 +348,7 @@ export class InvitationService {
       const name = data.name as string;
 
       const existingUser = await prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } },
+        where: { email: emailEquals(email) },
       });
 
       if (existingUser) {
@@ -562,7 +563,7 @@ export class InvitationService {
       throw err;
     }
     const racedUser = await prisma.user.findFirst({
-      where: { email: { equals: email, mode: 'insensitive' } },
+      where: { email: emailEquals(email) },
     });
     if (!racedUser) {
       throw err;
@@ -1075,7 +1076,7 @@ export class InvitationService {
       // Lowercase + insensitive match — see createInvitation (red-team RT1).
       const email = data.playerEmail.trim().toLowerCase();
       const existing = await prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } },
+        where: { email: emailEquals(email) },
       });
 
       if (existing?.workosUserId) {
