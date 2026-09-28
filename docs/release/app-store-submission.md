@@ -177,7 +177,14 @@ issue named.
 | Sign-in methods offered on the hosted sign-in page | Configured in the identity provider's dashboard, not in this repository. If any third-party social login is enabled, Guideline 4.8 requires an equivalent privacy-preserving option such as Sign in with Apple | #451 |
 | Sentry IP address storage | Whether Sentry stores the client IP is a Sentry project setting, not visible in code | #451 |
 
-## 5. Ordering constraint
+## 5. Minimum iOS version
+
+**iOS 16.4** (decided 2026-09-27, #576). It is set by Expo SDK 57, up from 15.1 on SDK 55, and
+drops iPhone 7 / 7 Plus, iPhone 6s / 6s Plus, iPhone SE (1st generation), iPad mini 4 and
+iPad Air 2. App Store Connect reads the minimum from the binary; nothing is entered by hand.
+Screenshots and the review device need iOS 16.4 or newer.
+
+## 6. Ordering constraint
 
 The purpose strings in section 1 reach users only in a native build cut after they merged. Cut
 the submission build from a commit that contains them, and confirm in the built app that the
