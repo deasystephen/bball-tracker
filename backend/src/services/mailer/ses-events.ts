@@ -28,6 +28,7 @@
 import { EmailSuppressionReason } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../../models';
+import { emailEquals } from '../../utils/email-match';
 import { EMAIL_SUPPRESSION_CLEARED } from '../../utils/email-suppression';
 import { logger } from '../../utils/logger';
 import { hashRecipient } from './ses-mailer';
@@ -156,17 +157,17 @@ function uniqueAddresses(raw: string[]): string[] {
  * `addresses` (already lower-cased) — compared case-insensitively, since
  * accounts created before the lowercase rule can hold a mixed-case address.
  *
- * Two steps on purpose. Prisma's `mode: 'insensitive'` compiles `equals` to
- * ILIKE without escaping, so `_` and `%` in an address are wildcards: a bounce
- * for `first_last@x.com` would also flag `firstXlast@x.com`. The query is only
- * the candidate search; the exact comparison happens here.
+ * Two steps on purpose. `emailEquals` (utils/email-match.ts) already escapes
+ * the ILIKE wildcards, so the query alone is exact; the comparison here stays
+ * as a second check because this write flags an address as undeliverable for
+ * every coach who sees it, and must never land on a near-match.
  */
 async function storedEmailsFor(addresses: string[]): Promise<string[]> {
   if (addresses.length === 0) return [];
 
   const candidates = await prisma.user.findMany({
     where: {
-      OR: addresses.map((address) => ({ email: { equals: address, mode: 'insensitive' as const } })),
+      OR: addresses.map((address) => ({ email: emailEquals(address) })),
       // The #444 invariant: never write onto a tombstone.
       deletedAt: null,
     },

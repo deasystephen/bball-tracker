@@ -20,6 +20,7 @@ import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
+import { emailEquals, isSameEmail } from '../utils/email-match';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -179,7 +180,7 @@ export class GuardianService {
 
     const rows = await prisma.guardianInvitation.findMany({
       where: {
-        invitedEmail: { equals: user.email, mode: 'insensitive' },
+        invitedEmail: emailEquals(user.email),
         status: 'PENDING',
         expiresAt: { gt: new Date() },
       },
@@ -255,7 +256,7 @@ export class GuardianService {
     const child = await this.requireMember(teamId, playerId);
     const email = data.email.trim().toLowerCase();
 
-    if (child.email && child.email.toLowerCase() === email) {
+    if (isSameEmail(child.email, email)) {
       throw new BadRequestError('A player cannot be their own guardian');
     }
 
@@ -263,7 +264,7 @@ export class GuardianService {
     // a guardian invite is PARENT; an existing account keeps its role (a coach
     // who is also a parent stays COACH).
     let parent = await prisma.user.findFirst({
-      where: { email: { equals: email, mode: 'insensitive' } },
+      where: { email: emailEquals(email) },
       select: { id: true, name: true, email: true },
     });
 
@@ -286,7 +287,7 @@ export class GuardianService {
           throw err;
         }
         parent = await prisma.user.findFirst({
-          where: { email: { equals: email, mode: 'insensitive' } },
+          where: { email: emailEquals(email) },
           select: { id: true, name: true, email: true },
         });
         if (!parent) {

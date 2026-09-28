@@ -45,6 +45,7 @@ import {
   teamAccessWhere,
   canWriteLeague,
 } from '../utils/permissions';
+import { emailEquals } from '../utils/email-match';
 
 const USER_SUMMARY_SELECT = {
   id: true,
@@ -936,12 +937,20 @@ export class TeamService {
   private static async resolveStaffTarget(
     target: Pick<AddStaffInput, 'userId' | 'email'>
   ): Promise<{ id: string; name: string }> {
-    const user = target.userId
-      ? await prisma.user.findUnique({ where: { id: target.userId, deletedAt: null }, select: { id: true, name: true } })
-      : await prisma.user.findFirst({
-          where: { email: { equals: target.email, mode: 'insensitive' }, deletedAt: null },
-          select: { id: true, name: true },
-        });
+    let user: { id: string; name: string } | null = null;
+    if (target.userId) {
+      user = await prisma.user.findUnique({
+        where: { id: target.userId, deletedAt: null },
+        select: { id: true, name: true },
+      });
+    } else if (target.email) {
+      // Never build the filter from a missing email: Prisma drops an
+      // `undefined` condition, and the lookup would match the first user.
+      user = await prisma.user.findFirst({
+        where: { email: emailEquals(target.email), deletedAt: null },
+        select: { id: true, name: true },
+      });
+    }
 
     if (!user) {
       throw new NotFoundError('User not found');

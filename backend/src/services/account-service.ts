@@ -48,6 +48,7 @@ import { captureException } from '../utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
+import { emailEquals } from '../utils/email-match';
 import { deletePreviousAvatar } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
@@ -150,7 +151,7 @@ export class AccountService {
       });
 
       const emailMatch: Prisma.GuardianInvitationWhereInput[] = row.email
-        ? [{ invitedEmail: { equals: row.email, mode: 'insensitive' } }]
+        ? [{ invitedEmail: emailEquals(row.email) }]
         : [];
       await tx.guardianInvitation.updateMany({
         where: { status: 'PENDING', OR: [{ childId: userId }, ...emailMatch] },
@@ -266,7 +267,7 @@ export class AccountService {
     }
 
     const emailOr: Prisma.GuardianInvitationWhereInput[] = user.email
-      ? [{ invitedEmail: { equals: user.email, mode: 'insensitive' } }]
+      ? [{ invitedEmail: emailEquals(user.email) }]
       : [];
 
     const [

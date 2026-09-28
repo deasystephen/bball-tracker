@@ -813,8 +813,22 @@ eng-review amendments recorded there).
   EXPIRY (resend needs the address; the invite email already informed that mailbox).
 - **Email matching is case-insensitive and new accounts store lowercase** (red-team RT1):
   WorkOS normalizes to lowercase and `syncUser` claims by exact match, so all invite/add flows
-  look up with `mode: 'insensitive'` and create with `trim().toLowerCase()` — a mixed-case entry
+  look up case-insensitively and create with `trim().toLowerCase()` — a mixed-case entry
   must never create an unclaimable duplicate or bypass the case-3 consent branch.
+- **Every "which row holds this email" filter is `utils/email-match.ts#emailEquals(address)`
+  (#572) — never a hand-written `{ equals, mode: 'insensitive' }`.** Prisma compiles that filter
+  to `ILIKE` with the value as an **unescaped pattern**, so `_` matched any character and `%` any
+  run: a lookup for `first_last@x.com` also returned the account `firstXlast@x.com`, and an
+  invitation, a staff role or a guardian link could land on a stranger. `emailEquals` escapes
+  `\`, `_` and `%`. It covers `User.email` (Add Player, the name+email invite arm, guardian
+  find-or-create, add staff by email, SES events) and `GuardianInvitation.invitedEmail`
+  (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on the
+  raw filter anywhere else in `src/`; `contains` + `insensitive` (search) stays allowed.
+  **Proven only against real Postgres** (`tests/integration/email-match.db.test.ts`): each flow
+  plants a look-alike account and must not touch it. When adding such a test, put the `_` on the
+  side that is the **query** — the look-alike on the wrong side passes with the bug present
+  (caught by mutation-testing the suite). That suite also fails if a future Prisma starts
+  escaping by itself, which would make addresses containing `_` stop matching.
 - **Supersede is atomic** (red-team RT2): `createInvitationRowSuperseding` expires the live
   PENDING row and creates its replacement in ONE transaction (an ACCEPTED row appearing in the
   window → 400, never a chip regression); a superseding resend for a rostered case-2 player uses
@@ -1072,10 +1086,10 @@ mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQ
   operator removes an address from the suppression list the next delivery clears the flag with no
   second step. Don't add an app-level "skip flagged addresses" check — it would make that
   self-heal impossible.
-- **Address matching is two steps, on purpose.** Prisma's `mode: 'insensitive'` compiles `equals`
-  to `ILIKE` **without escaping**, so `_` and `%` are wildcards: `first_last@x.com` also finds
-  `firstXlast@x.com`. `storedEmailsFor` uses the insensitive filter only as a candidate search,
-  compares exactly in code, then writes by the stored value (`email: { in: […] }`). Found by
+- **Address matching is two steps, on purpose.** `storedEmailsFor` searches with `emailEquals`
+  (which already escapes the `ILIKE` wildcards, see "Email matching" under Team Invitations),
+  compares exactly in code as a second check, then writes by the stored value
+  (`email: { in: […] }`). The wildcard behaviour was first found here, by
   `tests/integration/email-suppression.db.test.ts`; a mocked test cannot see it.
 - **Every write that changes or removes `User.email` spreads `EMAIL_SUPPRESSION_CLEARED`**
   (`utils/email-suppression.ts`): `PlayerService.updatePlayer` (the coach's recovery path — fix the
