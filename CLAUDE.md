@@ -1290,6 +1290,24 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   self-test. Scope is mobile only — `backend/tests/services/mailer.test.ts` runs the same retired
   patterns over every rendered email template.
 
+### Real-database suites (`backend/tests/integration/*.db.test.ts`)
+- They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,
+  next to the fixtures the Maestro flows depend on.
+- **Name every row with the run id** (`const RUN = randomUUID().slice(0, 8)`): user name
+  `<key>-<run>` and email `<local>.<run>@example.test`, league `ZZ-<label>-<run>`, team
+  `<label>-<run>`. Never use an `@example.com` address in a suite: that domain is the seed's.
+- **Clean up with `removeTestRows(prisma, { run: RUN, alsoUserIds })`**
+  (`tests/support/test-leftovers.ts`), never with a list of ids alone: a test that throws before
+  it records a row then leaves it behind (#584). `alsoUserIds` is for rows that lose their run
+  id on the way, such as an account the test deletes, which becomes a tombstone with no address.
+- The seed calls `removeTestRows(prisma, 'all')` for what an interrupted run left. **Never call
+  the `'all'` scope from a test:** suites run in parallel against one database, and it would
+  delete the rows of a suite that is still running. Read with `findTestRows` instead.
+- The helper refuses to run when `NODE_ENV` is `production` or `DATABASE_URL` names an RDS host.
+- `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
+  seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
+  purpose once and confirm that suite fails.
+
 ### Maestro E2E Tests
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
 - Flows test full user journeys: login → navigate → perform action → assert result
@@ -1326,6 +1344,17 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   on `"Create"` is ambiguous — it taps `id: create-team-submit` instead.
 - `visibilityPercentage` defaults to 100 on `scrollUntilVisible`, which fails on a row resting at the
   screen edge even though it is plainly readable. Relax it (60 is fine) for list hunting.
+- **The developer login list has a fixed order (#584):** the accounts the seed creates for
+  signing in come first, then everything else; inside each group by role (COACH, PARENT, PLAYER,
+  ADMIN), then name, then id (`backend/src/api/auth/dev-users.ts#orderDevUsers`). Coaches and
+  parents fit on the first screen; players need `scrollUntilVisible`. It used to be ordered by
+  role alone, so the order inside a role changed as rows were updated.
+- **The seed removes what it knows about, and nothing else.** Two lists have to stay current:
+  the games flows create (`backend/tests/support/flow-fixtures.ts#FLOW_CREATED_OPPONENTS`; a test
+  reads `.maestro/` and fails when a flow creates a game whose opponent is not listed) and the
+  rows real-database tests leave behind (next section, "Real-database suites").
+  `live-spectator.yaml`'s "Spectator Rival" was missing from the first list until #584; its
+  games stay in progress, and the Games tab had filled with them.
 - **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
   role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
   must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts
@@ -1352,10 +1381,11 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   `visibilityPercentage: 60` is the stop condition that works.
 - A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
   top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
-- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **The full suite is green
-  (18/18, 2026-08-31) when run sequentially with a fresh `npx prisma db seed` before every flow** — the
-  seed is a complete per-flow reset (it restores mutated fixture names/roles and deletes flow-created
-  teams/games/players), so never run two flows back-to-back without it. Nightly CI for the suite was
+- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite
+  sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
+  between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
+  and players, and removes what interrupted test runs left behind), so never run two flows
+  back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on 2026-09-29** (Maestro 2.1.0, iPhone 17 simulator on iOS 26.5, Expo SDK 57 build, with #583, #589 and #584 applied). Maestro 2.1.0 has hung mid-flow under Xcode 27 on other days; run each flow under a time limit with one retry. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
   be revived); flows are deliberately manual-only.
 

@@ -51,10 +51,12 @@ appId: com.bballtracker.mobile
 - extendedWaitUntil:
     visible: "Select Test User"
     timeout: 10000
-# The dev-user list is ordered by role (PLAYER, PARENT, COACH, ADMIN). Dana is
-# seeded PLAYER (see seed.ts: every WorkOS sign-up starts as PLAYER, and #442's
-# AC is that the coach PICKS Coach), so she sits among the players. Scrolling
-# rather than assuming a position keeps this working if the fixture set grows.
+# The dev-user list shows the seeded logins first, by role (COACH, PARENT,
+# PLAYER, ADMIN) and then by name (#584, backend/src/api/auth/dev-users.ts).
+# Dana is seeded PLAYER (see seed.ts: every WorkOS sign-up starts as PLAYER,
+# and #442's AC is that the coach PICKS Coach), so she sits among the players,
+# below the first screen. Scrolling rather than assuming a position keeps this
+# working if the fixture set grows.
 # Maestro `text` is a FULL-MATCH regex against the element's accessibility
 # text, and a dev-user card is ONE element whose label concatenates its fields:
 #

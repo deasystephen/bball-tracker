@@ -14,6 +14,7 @@
  */
 jest.unmock('../../src/models');
 import { randomUUID } from 'node:crypto';
+import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { handleSesEventMessage } from '../../src/services/mailer/ses-events';
 import { AccountService } from '../../src/services/account-service';
@@ -90,7 +91,10 @@ describe('email suppression against Postgres (#449)', () => {
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    // By run id, not only by collected ids: a test that throws before it
+    // records a row still cleans up (#584). The ids stay for an account
+    // that was deleted during the test and lost its address.
+    await removeTestRows(prisma, { run: RUN, alsoUserIds: userIds });
     await prisma.$disconnect();
     jest.restoreAllMocks();
   });
