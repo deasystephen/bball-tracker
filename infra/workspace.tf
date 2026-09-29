@@ -133,7 +133,7 @@ variable "google_site_verification" {
 variable "google_dkim_public_key" {
   description = "DKIM TXT value from the Google admin console (Gmail > Authenticate email), in full and as ONE string with no quotes or spaces inside the key (`v=DKIM1; k=rsa; p=...`). Empty = no DKIM record."
   type        = string
-  default     = ""
+  default     = "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA357DwmBL8p+UzwZGX/iLecNAbx2O9ZH5CitEqRQA+1jyIb2fQy40fdFyJIYscEWNukUlu95BnpkFrmSjzGEtwwndouII247tArhaWKMmEG33T+ZfgP5RWxGzXROxU7ObbAMScoFovbSWgk5JB575rqKhoJSDi3+P0zSFZgZHUaqNa74Mua95W0QqHRQYCMLPvSwEhfxDhROouEWOfS2kwHF2oBPvrdsbE8RQ36UH9hzPPOtr8QZt97ysypbgZRctVrNN3jIhxBQL8gNGLVLxIJffgIoXbv5q0pSd8c/AmTzBCu3rmZTYewjxfzwX5wKuIpVUT5Cm9OacEYiI6PKSaQIDAQAB"
 
   validation {
     condition     = var.google_dkim_public_key == "" || can(regex("^v=DKIM1; k=rsa; p=[A-Za-z0-9+/]+=*$", var.google_dkim_public_key))
