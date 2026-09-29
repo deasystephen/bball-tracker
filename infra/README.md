@@ -14,6 +14,7 @@ Terraform manages all AWS infrastructure.
 | `s3.tf` | S3 buckets (profile picture avatars) |
 | `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records |
 | `ses.tf` | SES domain identities, DKIM, custom MAIL FROM (MX/SPF), DMARC, IAM policy for ECS task |
+| `workspace.tf` | Google Workspace mail at the apex of the primary domain: MX, SPF + domain verification, DKIM, apex DMARC, and the `google_*` variables (#555) |
 | `ses-events.tf` | SES account-level suppression list, configuration set, event destination, SNS topic → SQS queue + dead-letter queue, IAM policy for the API to read the queue (#449) |
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
 | `alerting.tf` | SNS alerts topic + email subscription, CloudWatch alarms (ALB, ECS, RDS, SES reputation, SES event queue), Route 53 uptime check, and the `alert_email` / `alarm_*` variables |
@@ -115,18 +116,50 @@ provisions the same set for every served domain:
    bounce.mail.<domain>  MX   10 feedback-smtp.<region>.amazonses.com
    bounce.mail.<domain>  TXT  "v=spf1 include:amazonses.com ~all"
    ```
-4. **DMARC** for the sending subdomain, monitor mode:
+4. **DMARC** for the sending subdomain:
    ```
-   _dmarc.mail.<domain>  TXT  "v=DMARC1; p=none"
+   _dmarc.mail.<primary_domain>  TXT  "v=DMARC1; p=none; rua=mailto:dmarc@<primary_domain>"
+   _dmarc.mail.<other domain>    TXT  "v=DMARC1; p=none"
    ```
-   No `rua` yet: no mailbox exists to receive aggregate reports, and an external address
-   (Gmail) would need an authorization record the receiving domain will not publish. **#555**
-   (Google Workspace on the apex) adds the receiver and the `rua` tag; tightening to
-   `p=quarantine` follows about 30 days of clean reports.
+   The policy and the report address are locals in `workspace.tf`, shared with the apex
+   record, so the two cannot differ. Only the primary domain's record names the report
+   address: for any other domain it is an external address, and receivers send nothing to it
+   without an authorization record. Before `google_site_verification` is set no record
+   carries `rua`. Tightening to `p=quarantine` follows about 30 days of clean reports (#555,
+   step 5): change `local.dmarc_policy`, nothing else.
 5. **IAM policy** (`ses_send`) grants the ECS task role `ses:SendEmail` / `ses:SendRawEmail`
    with a `ses:FromAddress` condition covering `*@mail.<domain>` for every served domain, on
    every identity **and on the configuration set** — a send that names a configuration set is
    authorized against the set's ARN too.
+
+### Mail at the apex: Google Workspace (#555)
+
+People read mail at `<primary_domain>` through Google Workspace; the application sends from
+`mail.<domain>` through SES. `workspace.tf` declares the apex side, for the primary domain only:
+
+| Record | Value |
+| --- | --- |
+| `<primary_domain>` MX | `1 smtp.google.com` (`google_mx_records`) |
+| `<primary_domain>` TXT | `v=spf1 include:_spf.google.com ~all` and the domain verification value, in one record set |
+| `google._domainkey.<primary_domain>` TXT | the DKIM key, split into strings of at most 255 characters |
+| `_dmarc.<primary_domain>` TXT | `v=DMARC1; p=none; rua=mailto:dmarc@<primary_domain>` |
+
+- **The two sending paths stay on separate names.** Do not add SES to the apex SPF and do not
+  add Google to the `mail.` subdomain. `backend/tests/infra/workspace-mail.test.ts` fails on
+  either, and on a DMARC value written anywhere but the shared locals.
+- **Everything is off until `google_site_verification` is set.** The records come in two
+  applies, because Google generates the DKIM key only after Gmail has been active for 24 to 72
+  hours: first the verification value (verification + SPF, MX, apex DMARC, and `rua` on
+  `_dmarc.mail.`), then `google_dkim_public_key`. In the Google admin console, start DKIM
+  authentication only after the record resolves.
+- **Both values are committed** as the variable defaults in `workspace.tf`. They are published
+  in DNS and are not secrets. Paste the DKIM value as one string: the admin console shows a
+  long key in quoted pieces, and the quotes and line breaks between them are not part of it.
+- **Another TXT at the apex** (a verification for another service, for example) is a new entry
+  in the `records` list of `workspace_apex_txt`. Route 53 holds every TXT value of a name in
+  one record set, so a second resource for the same name fails on apply.
+- Which addresses exist and which accounts must never move to them:
+  [`docs/runbooks/email-deliverability.md`](../docs/runbooks/email-deliverability.md).
 
 ### Bounces, complaints and suppression (#449)
 

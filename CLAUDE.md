@@ -1513,6 +1513,15 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   `terraform apply` that creates the set and extends the send policy to its ARN** — every send
   would fail while invitations keep being created. `tests/infra/ses-events.test.ts` pins the two
   task-definition values to the Terraform names.
+  **Mail that people read is a separate path (#555):** Google Workspace at the apex
+  (`support@`, `privacy@`, `alerts@`, `dmarc@hooplings.com`), declared in `infra/workspace.tf`
+  (MX, SPF + verification, DKIM `google._domainkey`, apex DMARC; applied 2026-09-29). SES stays
+  on `mail.hooplings.com`. Never add SES to the apex SPF or Google to the `mail.` subdomain, and
+  change the DMARC policy only through `local.dmarc_policy`, which both DMARC records read;
+  `tests/infra/workspace-mail.test.ts` pins all three. A record added in the Route 53 console
+  must be imported before Terraform can manage it (one-shot `import` block, deleted after the
+  apply). The runbook's "Do not move" table lists the accounts that stay on an address outside
+  the domain (AWS root, Workspace recovery, Apple ID, GitHub, Expo, the app's ADMIN login).
 - **[Data-subject requests](docs/runbooks/data-subject-requests.md)** — account deletion (self-serve,
   guardian, operator script) and data export: what is removed, what is retained and why, the
   7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the

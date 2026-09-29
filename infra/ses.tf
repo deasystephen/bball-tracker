@@ -5,10 +5,11 @@
 #   - custom MAIL FROM domain `bounce.mail.<domain>` (SES requires a SUBDOMAIN
 #     of the identity) with its MX + SPF records, so the envelope sender is
 #     ours and SPF aligns under DMARC instead of passing for amazonses.com
-#   - `_dmarc.mail.<domain>` TXT, monitor-only (`p=none`). No `rua` yet: no
-#     mailbox exists to receive reports — #555 (Google Workspace on the apex)
-#     adds the receiver and the `rua` tag; tightening to `p=quarantine`
-#     follows about 30 days of clean reports.
+#   - `_dmarc.mail.<domain>` TXT. The policy and the report address are the
+#     locals in workspace.tf, shared with the apex record (#555). The primary
+#     domain's record carries the `rua` tag once Google Workspace receives
+#     mail at the apex; tightening to `p=quarantine` follows about 30 days of
+#     clean reports.
 #
 # After apply, `MailFromAttributes.MailFromDomainStatus` must read SUCCESS for
 # each identity. SES sandbox → production access is account-wide (#23).
@@ -91,9 +92,13 @@ resource "aws_route53_record" "ses_mail_from_spf" {
 }
 
 # =============================================================================
-# DMARC — monitor mode for the sending subdomain
+# DMARC — the sending subdomain
 # =============================================================================
 
+# Reports go to a mailbox on the primary domain, so only the primary domain's
+# record names it: for any other served domain that address is external, and
+# receivers send nothing to it without an authorization record
+# (`<domain>._report._dmarc.<primary_domain>`).
 resource "aws_route53_record" "ses_dmarc" {
   for_each = local.served_domains
 
@@ -101,7 +106,11 @@ resource "aws_route53_record" "ses_dmarc" {
   name    = "_dmarc.mail.${each.key}"
   type    = "TXT"
   ttl     = 300
-  records = ["v=DMARC1; p=none"]
+  records = [
+    local.workspace_enabled && each.key == var.primary_domain
+    ? local.dmarc_record_with_reports
+    : local.dmarc_record_no_reports
+  ]
 }
 
 # =============================================================================
