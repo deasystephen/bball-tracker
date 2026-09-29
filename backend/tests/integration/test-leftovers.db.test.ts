@@ -31,6 +31,12 @@ import {
 const OLD_RUN = randomUUID().slice(0, 8);
 /** Tags the look-alikes. Never a suffix after a hyphen, or they would match. */
 const KEEP = randomUUID().slice(0, 8);
+/**
+ * 8 characters that are upper-case hex whatever KEEP holds. `KEEP.toUpperCase()`
+ * is not: an id made of digits only reads the same in both cases, and a name
+ * ending in it would rightly match. That is 1 run in 43, and CI hit it.
+ */
+const UPPER_CASE_SUFFIX = `AB${KEEP.slice(0, 6).toUpperCase()}`;
 
 jest.setTimeout(30000);
 
@@ -106,7 +112,7 @@ beforeAll(async () => {
   const keepManaged = await mkUser(keep, { name: `Bryce James ${KEEP}`, email: null });
   // No address, a hyphen, and a suffix that is not 8 hex characters.
   await mkUser(keep, { name: `Mary-Kate Olsen-${KEEP.slice(0, 7)}`, email: null });
-  await mkUser(keep, { name: `Jean-Luc-${KEEP.toUpperCase()}`, email: null });
+  await mkUser(keep, { name: `Jean-Luc-${UPPER_CASE_SUFFIX}`, email: null });
   await mkUser(keep, { name: `Dash-${KEEP}x`, email: null });
   // An address AND a name that ends like a run id: the name rule is for rows
   // with no address only.
