@@ -42,6 +42,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { useAuthUser } from '../../../store/auth-store';
 import { getApiErrorMessage } from '../../../services/api-client';
 import { displayName } from '../../../utils/display-name';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   HEAD_COACH: 'teams.roleHeadCoach',
@@ -56,6 +57,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function TeamStaffScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -165,6 +167,7 @@ export default function TeamStaffScreen() {
           refetchTeam();
           refetchStaff();
         }}
+        onBack={goBack}
       />
     );
   }

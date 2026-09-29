@@ -13,7 +13,7 @@ import { render, fireEvent } from '@testing-library/react-native';
 import PlayerStatsScreen from '../../app/players/[id]/stats';
 import { useAuthStore } from '../../store/auth-store';
 
-const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn() };
+const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockRefetch = jest.fn();
 let mockQuery: { data?: unknown; isLoading: boolean; error: unknown; refetch: jest.Mock };
 

@@ -42,11 +42,13 @@ import { getApiErrorMessage } from '../../../../../services/api-client';
 import { relationshipLabel } from '../../../../../utils/guardian';
 import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
+import { useGoBack } from '../../../../../hooks/useGoBack';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function PlayerGuardiansScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/teams');
   const { id, playerId } = useLocalSearchParams<{ id: string; playerId: string }>();
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -129,6 +131,7 @@ export default function PlayerGuardiansScreen() {
           refetchTeam();
           refetchGuardians();
         }}
+        onBack={goBack}
       />
     );
   }

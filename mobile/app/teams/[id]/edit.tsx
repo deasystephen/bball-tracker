@@ -29,9 +29,11 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { areAllLeaguesPersonal } from '../../../utils/league-scope';
 import { Ionicons } from '@expo/vector-icons';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 export default function EditTeamScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const goBack = useGoBack('/(tabs)/teams');
   const { t } = useTranslation();
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const { data: leagues, isLoading: leaguesLoading } = useLeagues();
@@ -56,6 +58,7 @@ export default function EditTeamScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Team not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

@@ -29,11 +29,13 @@ import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getResultColor } from '../../../utils/game-result';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 type SortKey = 'ppg' | 'rpg' | 'apg' | 'efficiency';
 
 export default function TeamStatsScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
@@ -80,6 +82,7 @@ export default function TeamStatsScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Failed to load stats'}
         onRetry={handleRefresh}
+        onBack={goBack}
       />
     );
   }

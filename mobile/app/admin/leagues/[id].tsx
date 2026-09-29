@@ -30,9 +30,11 @@ import { useAuthUser } from '../../../store/auth-store';
 import { canCreateLeagues, canManageLeague } from '../../../utils/team-permissions';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 export default function LeagueDetailScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/admin');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
@@ -152,6 +154,7 @@ export default function LeagueDetailScreen() {
       <ErrorState
         message={leagueError instanceof Error ? leagueError.message : 'League not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

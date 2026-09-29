@@ -28,9 +28,11 @@ import { usePlayerOverallStats } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 export default function PlayerStatsScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/home');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
@@ -59,7 +61,7 @@ export default function PlayerStatsScreen() {
               : 'This player is not on any team yet.'
           }
           actionLabel={isSelf ? 'View Teams' : 'Go back'}
-          onAction={() => (isSelf ? router.push('/teams') : router.back())}
+          onAction={() => (isSelf ? router.push('/teams') : goBack())}
         />
       </ThemedView>
     );
@@ -71,7 +73,7 @@ export default function PlayerStatsScreen() {
         message={error instanceof Error ? error.message : 'Failed to load stats'}
         onRetry={refetch}
         // The error replaces the whole screen, header included (#589).
-        onBack={() => router.back()}
+        onBack={goBack}
       />
     );
   }

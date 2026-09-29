@@ -29,12 +29,15 @@ import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
 import { formatShotDescription } from '../../../utils/shot-label';
 import type { ShotMetadata } from '../../../types/game';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 const UNDO_DURATION = 5; // seconds
 
 export default function TrackGameScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
+  const goBackToGame = useGoBack(`/games/${id}`);
   const insets = useSafeAreaInsets();
 
   // Confetti ref
@@ -409,6 +412,7 @@ export default function TrackGameScreen() {
       <ErrorState
         message={gameError instanceof Error ? gameError.message : 'Game not found'}
         onRetry={refetchGame}
+        onBack={goBack}
       />
     );
   }
@@ -423,7 +427,8 @@ export default function TrackGameScreen() {
     return (
       <ErrorState
         message="This game is not in progress"
-        onRetry={() => router.back()}
+        // Nothing to retry: the only way on is out.
+        onBack={goBackToGame}
       />
     );
   }

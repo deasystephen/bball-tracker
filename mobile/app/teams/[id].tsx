@@ -34,6 +34,7 @@ import { useAuthStore } from '../../store/auth-store';
 import { getTeamColor } from '../../utils/team-colors';
 import { RosterSortKey, sortRosterMembers } from '../../utils/roster-sort';
 import { useRosterSortPreference } from '../../hooks/useRosterSortPreference';
+import { useGoBack } from '../../hooks/useGoBack';
 
 const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
   { key: 'jersey', label: 'Jersey #' },
@@ -42,6 +43,7 @@ const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
 
 export default function TeamDetailsScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -102,6 +104,7 @@ export default function TeamDetailsScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Team not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }
