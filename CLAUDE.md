@@ -1468,7 +1468,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 ## Automation
 
-Dependency and security updates are split between **Dependabot** (mechanical patch/minor bumps, auto-merged by `.github/workflows/dependabot-auto-merge.yml` once CI passes) and the **Daily Upgrade Scan** (`.github/workflows/daily-upgrade-scan.yml`, `0 15 * * *` UTC) — a scheduled GitHub Actions job that runs Claude Code to add `overrides` for vulnerable transitives, handle mobile lockfile-only bumps of JavaScript-only packages (packages with native code are held for the next native build by the OTA drift guard, #562), refresh the deferral issue, and post a daily summary on the rolling **Daily upgrade scan log** issue. The Claude prompt is `.github/prompts/daily-upgrade-scan.md`; design, secrets, and the deferral procedure are in [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md).
+Dependency and security updates are split between **Dependabot** (mechanical patch/minor bumps, auto-merged by `.github/workflows/dependabot-auto-merge.yml` once CI passes) and the **Daily Upgrade Scan** (`.github/workflows/daily-upgrade-scan.yml`, `0 15 * * *` UTC) — a scheduled GitHub Actions job that runs Claude Code to add `overrides` for vulnerable transitives, handle mobile lockfile-only bumps of JavaScript-only packages (packages with native code are held for the next native build by the OTA drift guard, #562), refresh the deferral issue, and post a daily summary on the rolling **Daily upgrade scan log** issue. **A backend pull request of the scan deploys to production on its own when it merges; a backend pull request of Dependabot does not, and waits on `main` for the next deploy** ("What a deploy carries", #570). The Claude prompt is `.github/prompts/daily-upgrade-scan.md`; design, secrets, and the deferral procedure are in [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md).
 
 ## Operations / Runbooks
 
@@ -1556,10 +1556,52 @@ a query path rolls out normally — the breaker is not a substitute for a stagin
 connections. Socket.io rooms are in process memory (single-replica, #446), so a coach tracking on
 one task and the spectators on the other stop seeing each other's events until the old task stops
 and clients reconnect; nobody gets an error. Check for `IN_PROGRESS` games before merging anything
-that deploys, and remember that auto-merged Dependabot backend PRs deploy too. The startup guard
+that deploys, and before starting a deploy by hand. Of the automated merges, the daily scan's
+backend pull requests deploy on their own and Dependabot's do not (next section). The startup guard
 (`utils/replica-guard.ts`) checks the configured ceiling, not the live task count, so it does not
 trip on the overlap. The window only closes with the Redis adapter (#452). Operator-facing copy:
 `docs/deployment/aws-setup.md` ("Deploy window").
+
+### What a deploy carries (#570)
+
+**A deploy ships everything on `main` since the commit production runs, not only the change whose
+merge started it.** The two kinds of automated merge behave differently, because of the token that
+enabled auto-merge:
+
+| Merge | Enabled by | `CI` run on `main` | Deploys |
+| --- | --- | --- | --- |
+| Dependabot, backend (`dependabot-auto-merge.yml`) | `GITHUB_TOKEN` | **none**: GitHub starts no workflow for an event caused by that token | **no**. It waits on `main` |
+| Daily scan, backend (`claude/auto-deps-*`) | the Claude GitHub App's token | yes | **yes, unattended**, in the hours after 15:00 UTC (#481 did, on 2026-09-02) |
+| A person, or Claude Code with the owner's `gh` login | a user token | yes | yes, when the push touches the deploy paths |
+
+A waiting Dependabot bump is not picked up by a later documentation or mobile merge either:
+`detect-changes` looks at the commits of the triggering push only. It ships with the next push that
+touches the deploy paths, or with a deploy started by hand. In September 2026 five backend bumps
+waited up to 18 days and went out inside a deploy described as a capacity pin.
+
+- **Which commit production runs:** `curl -s https://api.hooplings.com/health` returns `commit`
+  (`utils/release.ts#deployedCommit`, read from `SENTRY_RELEASE`, which the deploy job sets to the
+  commit; `null` anywhere else). It is the commit the answering task was built from.
+- **What is waiting:** `git log <that commit>..origin/main -- backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md'`,
+  or `.github/scripts/deploy-contents.sh <that commit> origin/main` for the same list as Markdown.
+- **Every deploy says what it carries.** The job's summary (the run's page in Actions) has "What
+  this deploy carries": the change that started it, and under "Merged earlier without a deploy,
+  shipped now" everything that was waiting. After the rollout it adds the commit `/health` reports.
+  **When a deploy misbehaves, read that list before blaming the change that was merged.** Both
+  steps are `continue-on-error` and their scripts always exit 0: a summary never stops a deploy.
+- **Deploying by hand:** Actions → CI → Run workflow, branch `main` (or
+  `gh workflow run CI --ref main`). The whole suite runs, then the deploy, whatever the path
+  filter says. This is the way to ship a waiting security bump at a chosen time, instead of
+  merging an unrelated backend change to carry it. On any other branch the run tests and does not
+  deploy.
+- **Kept on purpose:** Dependabot's merges do not deploy. Making them deploy means enabling
+  auto-merge with a token that starts workflows, and then every Monday's bumps, and security
+  updates on any day, roll production unattended and split live games. Revisit after the Redis
+  adapter (#452) and a staging gate (#73).
+- The deploy paths are written twice, in the path filter of `ci.yml` and in
+  `.github/scripts/deploy-contents.sh`; `tests/infra/deploy-contents.test.ts` fails when they
+  differ, runs the script against a repository it builds, and pins the wiring `/health` depends on.
+  The deploy job itself runs only on `main`, so no test or pull request can prove a deploy.
 
 **Terraform is never applied by CI, but merging a `.tf` file still deploys.** These are two
 separate mechanisms and it is easy to conflate them:

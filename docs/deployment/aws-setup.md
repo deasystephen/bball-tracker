@@ -124,11 +124,44 @@ carry the current score), but the gap is visible to anyone watching a game.
 
 - **Do not deploy during scheduled game windows** (weekday evenings and weekends, in practice).
   Check for `IN_PROGRESS` games before merging anything that deploys.
-- Remember what deploys: any push to `main` touching a non-markdown file under `backend/**`,
-  `infra/**`, `docker/**` or `.github/workflows/ci.yml` — including auto-merged Dependabot PRs.
+- Remember what deploys: a push to `main` that starts a `CI` run and touches a non-markdown file
+  under `backend/**`, `infra/**`, `docker/**` or `.github/workflows/ci.yml`, and a `CI` run
+  started by hand on `main`. The daily scan's backend pull requests deploy on their own when they
+  merge, in the hours after 15:00 UTC. Dependabot's do not (next section).
 - The startup guard does not (and must not) trip on this overlap: it checks the configured ceiling
   (`MAX_REPLICAS`), not the live task count.
 - The window closes for good with the Redis adapter (#452).
+
+### What a deploy carries
+
+A deploy ships everything on `main` since the commit production runs, not only the change whose
+merge started it (#570).
+
+Backend bumps that Dependabot auto-merges start no `CI` run on `main`, because auto-merge is
+enabled with `GITHUB_TOKEN` and GitHub starts no workflow for an event that token caused. They
+wait on `main` and go out with the next deploy. Nothing about this is a failure, but it means a
+deploy can contain changes nobody was thinking of when they merged.
+
+| Question | Answer |
+| --- | --- |
+| Which commit is production running? | `curl -s https://api.hooplings.com/health`, field `commit` |
+| What is on `main` and not deployed? | `.github/scripts/deploy-contents.sh <commit> origin/main` |
+| What did a deploy contain? | The summary of its run in Actions: "What this deploy carries" |
+| How do I ship what is waiting? | Actions → CI → Run workflow on `main`, or `gh workflow run CI --ref main` |
+
+A deploy started by hand runs the whole suite first and then deploys whatever the path filter
+says. It is a production rollout like any other: check for games in progress first.
+
+If `commit` on `/health` is `null` in production, the deploy job did not replace
+`SENTRY_RELEASE_PLACEHOLDER` in `infra/task-definition.json`; the image tag of the running task
+definition is the fallback:
+
+```bash
+aws ecs describe-task-definition \
+  --task-definition "$(aws ecs describe-services --cluster bball-tracker-production-cluster \
+    --services bball-tracker-production-api --query 'services[0].taskDefinition' --output text)" \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text
+```
 
 ## Environment Variables
 

@@ -341,8 +341,8 @@ Bump `docker-compose.yml` (image **and** mount: the `postgres:18` image moved `P
 `infra/rds.tf`; add the new major's end-of-support date to the parity test. Open the PR: its CI
 run is the whole backend suite on the new major, including the real-database
 `league-access.db.test.ts`. **Merge only after production is upgraded** — merging first makes
-CI validate migrations against an engine production does not run (dependabot deploys
-`backend/**` merges unattended).
+CI validate migrations against an engine production does not run (the daily scan's backend
+pull requests deploy unattended, and every deploy carries whatever is on `main`).
 
 ### 2. Rehearse on a Multi-AZ restored copy
 
