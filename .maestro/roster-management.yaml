@@ -50,13 +50,12 @@ appId: com.bballtracker.mobile
     id: "add-player-jersey-input"
 - inputText: "99"
 
-# Dismiss the keyboard so the submit button is tappable. hideKeyboard is
-# best-effort on iOS and silently fails against the jersey field's NUMBER PAD
-# (no return key) — the submit tap then lands on the keyboard and the flow
-# dies asserting a roster that never changed. The form's ScrollView has
-# keyboardShouldPersistTaps="handled", so tapping any non-interactive text
-# (the field's own label) dismisses the keyboard deterministically.
-- hideKeyboard
+# Dismiss the keyboard so the submit button is tappable. The jersey field has
+# a NUMBER PAD, which has no return key, so Enter cannot blur it. The form's
+# ScrollView has keyboardShouldPersistTaps="handled", so tapping any
+# non-interactive text (the field's own label) dismisses the keyboard
+# deterministically. Never hideKeyboard: on iOS it cannot hide a number pad,
+# and since Maestro 2.11 that fails the flow instead of doing nothing (#584).
 - tapOn: "Jersey Number"
 
 # Submit
@@ -83,7 +82,9 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "edit-member-position-input"
 - inputText: "Guard"
-- hideKeyboard
+# Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
+# hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
 - tapOn:
     id: "edit-member-save"
 

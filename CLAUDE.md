@@ -1362,11 +1362,14 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
   step timed out.
 - For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
-- **`hideKeyboard` is unreliable on the iOS simulator** — it regularly no-ops (number pads AND text
-  keyboards), after which a tap on a button behind the keyboard lands on a keyboard key instead (the
-  profile.yaml rename kept typing a stray "v" from tapping Save). Deterministic dismissals: `pressKey:
-  Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
-  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own label.
+- **Never use `hideKeyboard`.** On iOS it often cannot hide the keyboard (number pads AND text
+  keyboards). Up to Maestro 2.1 it then did nothing, and a tap on a button behind the keyboard
+  landed on a keyboard key instead (the profile.yaml rename kept typing a stray "v" from tapping
+  Save). **Since Maestro 2.11 it fails the flow** ("Hide Keyboard... FAILED"): the upgrade broke
+  the two flows that still used it (#584). No flow uses it any more. Deterministic dismissals:
+  `pressKey: Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
+  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own
+  label, which is the only way out of a number pad (it has no return key).
 - **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
   `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
   into whatever field has focus (the flow then fails on its next assert, with a stray word in the
@@ -1385,7 +1388,13 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
   between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
   and players, and removes what interrupted test runs left behind), so never run two flows
-  back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on 2026-09-29** (Maestro 2.1.0, iPhone 17 simulator on iOS 26.5, Expo SDK 57 build, with #583, #589 and #584 applied). Maestro 2.1.0 has hung mid-flow under Xcode 27 on other days; run each flow under a time limit with one retry. Nightly CI for the suite was
+  back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
+  2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build). The same
+  day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
+  2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
+  under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a
+  Maestro upgrade, run the full suite before trusting it**: 2.1 → 2.11 changed what
+  `hideKeyboard` does and broke two flows. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
   be revived); flows are deliberately manual-only.
 

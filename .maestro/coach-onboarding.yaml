@@ -123,7 +123,9 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "team-name-input"
 - inputText: "Fixture One"
-- hideKeyboard
+# Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
+# hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
 - tapOn:
     id: "create-team-submit"
 
@@ -147,7 +149,9 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "add-player-name-input"
 - inputText: "Jordan Fixture"
-- hideKeyboard
+# Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
+# hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
 - tapOn:
     id: "add-player-submit"
 # Rostered immediately (case 1, no email = no invite). The chip label is
@@ -205,7 +209,9 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "team-name-input"
 - inputText: "Fixture Two"
-- hideKeyboard
+# Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
+# hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
 - tapOn:
     id: "create-team-submit"
 
@@ -239,7 +245,9 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "opponent-name-input"
 - inputText: "Fixture Rival"
-- hideKeyboard
+# Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
+# hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
 - tapOn: "Fixture Two.*"
 - tapOn: "Create Game"
 # Lands on the game detail via router.replace, same pattern as team create.
