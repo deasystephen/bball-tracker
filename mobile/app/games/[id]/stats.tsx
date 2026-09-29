@@ -26,6 +26,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getGameResult, getResultColor } from '../../../utils/game-result';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -135,6 +136,7 @@ const compStyles = StyleSheet.create({
 
 export default function GameStatsScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
@@ -151,6 +153,7 @@ export default function GameStatsScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Failed to load stats'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

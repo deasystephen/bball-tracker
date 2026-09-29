@@ -1,0 +1,49 @@
+appId: com.bballtracker.mobile
+---
+# A pushed screen that cannot load its data offers a way back (#595).
+#
+# The error replaces the whole screen, header and back arrow included, so
+# "Go back" is the only visible way out. The ids below belong to no team and
+# no game: the API answers 404 and the screen shows its error state.
+# Read-only: creates nothing, so it needs no seed reset of its own.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+# Team detail
+- openLink: "hooplings://teams/00000000-0000-4000-8000-000000000595"
+# iOS asks before handing a custom-scheme URL to an app; the simulator may
+# remember the answer, so the dialog is cleared only when it is there.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Something went wrong"
+    timeout: 15000
+- assertVisible: "Try Again"
+- tapOn: "Go back"
+- assertNotVisible: "Something went wrong"
+- assertVisible: "Your Teams"
+
+# Game detail
+- openLink: "hooplings://games/00000000-0000-4000-8000-000000000595"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Something went wrong"
+    timeout: 15000
+- assertVisible: "Try Again"
+- tapOn: "Go back"
+- assertNotVisible: "Something went wrong"
+- assertVisible: "Your Teams"

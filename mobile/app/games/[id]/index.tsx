@@ -32,6 +32,7 @@ import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 const getStatusColor = (
   status: GameStatus,
@@ -86,6 +87,7 @@ const formatTime = (dateString: string): string => {
 
 export default function GameDetailScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors, colorScheme } = useTheme();
   const padding = getHorizontalPadding();
@@ -216,6 +218,7 @@ export default function GameDetailScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Game not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

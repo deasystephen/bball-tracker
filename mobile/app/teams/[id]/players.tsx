@@ -81,6 +81,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 interface ChipPalette {
   success: string;
@@ -144,6 +145,7 @@ const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_e
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -480,6 +482,7 @@ export default function ManagePlayersScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Team not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

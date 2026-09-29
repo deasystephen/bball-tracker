@@ -33,9 +33,11 @@ import {
 } from '../../utils/team-permissions';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { useGoBack } from '../../hooks/useGoBack';
 
 export default function AdminDashboard() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/profile');
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
@@ -133,6 +135,7 @@ export default function AdminDashboard() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Failed to load leagues'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }

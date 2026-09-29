@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-25
 **Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:hooplings.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
-**Checkboxes:** 133 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
+**Checkboxes:** 135 `- [ ]` items (count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`); none are pre-ticked.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
 
@@ -288,6 +288,13 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Role:** COACH (creator)
 - **Steps:** Teams tab → tap `Test Team`. For the sort pills, open the seeded **Lakers** instead if `Test Team` is still empty (pills need a 2+ player roster).
 - **Expected:** Shows team name, league/season, empty roster with "Add Player", the **Staff** card (head coach name + count → staff screen), "Announcements", "View Team Stats". Once the roster has 2+ players, **sort pills** labeled `Jersey #` / `Name` appear above the roster grid (their accessibility labels are "Sort by Jersey #" / "Sort by Name" — what Maestro targets): jersey order is the default (server-provided — jersey asc, 0 valid, no-number last, name tiebreak), tapping **Name** reorders and the choice persists per user across app restarts (AsyncStorage). Maestro: `.maestro/team-detail.yaml` (asserts both pills + the Name pill's selected state after tap).
+- **Notes:** ___________
+
+### D.2a — A screen that cannot load offers a way back (#595)
+- [ ] Pass / Fail / Skipped
+- **Role:** any signed-in user
+- **Steps:** With the app open and signed in, open a link to a team that does not exist: `xcrun simctl openurl booted "hooplings://teams/00000000-0000-4000-8000-000000000595"` (on a device, turn on Airplane Mode and open any team, game or stats screen that is not cached). Tap **Go back**. Repeat with `hooplings://games/00000000-0000-4000-8000-000000000595`.
+- **Expected:** The error screen shows the reason, **Try Again** and **Go back**. Go back returns to the screen underneath; when the screen was opened by a link on a cold start (nothing underneath), it lands on the parent tab (Teams for team screens, Games for game screens, Profile for the admin list, Home for player stats). With VoiceOver on, Go back is reachable. The tracker opened on a game that is not in progress shows only **Go back**. Maestro: `.maestro/error-way-back.yaml`; Jest `__tests__/app/error-state-way-back.test.tsx` (all 13 screens), `__tests__/a11y/error-state-way-back.test.ts` (source guard).
 - **Notes:** ___________
 
 ### D.3 — Add a player (unified form — roster/invite unification)

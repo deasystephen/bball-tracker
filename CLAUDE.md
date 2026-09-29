@@ -373,11 +373,22 @@ never inline a role check in a screen:
 - Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
   (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
 - Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
-- **A full-screen error on a pushed route needs a way back (#589).** `components/ErrorState`
-  replaces the whole screen, header and back arrow included, so with only `onRetry` the user is
-  left with Try Again and the swipe gesture. Pass `onBack={() => router.back()}` wherever the
-  screen is a pushed route (`app/players/[id]/stats.tsx` does). Tab screens have the tab bar and
-  do not need it. The other pushed screens that render `ErrorState` are listed in #595.
+- **A full-screen error on a pushed route needs a way back (#589, #595).** Every pushed screen
+  draws its own header (the root `Stack` has `headerShown: false`) and returns
+  `components/ErrorState` in its place, so the back arrow goes with it; with only `onRetry` the
+  user is left with Try Again and the swipe gesture. Pass `onBack={goBack}` with
+  `const goBack = useGoBack(<parent route>)` (`hooks/useGoBack.ts`): it pops the stack, or
+  replaces with the parent when there is nothing to pop (a screen opened by a link), the same
+  rule as `useAccessGuard`. Never `router.back()` alone, which does nothing without history. All
+  13 pushed screens that replace themselves with `ErrorState` do this. When there is nothing to
+  retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
+  Try Again button that left the screen). Tab screens have the tab bar and need nothing.
+  `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
+  and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
+  (today only `teams/[id]/announcements`, where the error replaces the list under a header that
+  stays); an entry there must have its own control labelled "Go back". Screen tests:
+  `__tests__/app/error-state-way-back.test.tsx` (every screen, real hooks, the API failing);
+  Maestro `.maestro/error-way-back.yaml` (read-only, opens a team and a game that do not exist).
 - **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
   everything inside it from the accessibility tree, so a button nested in a pressable row can be
   tapped by a sighted user while VoiceOver and Maestro see only the row. On Profile → My kids
@@ -1388,7 +1399,8 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
   and players, and removes what interrupted test runs left behind), so never run two flows
   back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
-  2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build). The same
+  2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
+  flow, `error-way-back.yaml`, was added later that day and passed on its own). The same
   day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
   2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
   under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a

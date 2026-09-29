@@ -31,9 +31,11 @@ import { useTheme } from '../../../hooks/useTheme';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import type { GameStatus } from '../../../types/game';
+import { useGoBack } from '../../../hooks/useGoBack';
 
 export default function GameLiveScreen() {
   const router = useRouter();
+  const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors, colorScheme } = useTheme();
   const padding = getHorizontalPadding();
@@ -56,6 +58,7 @@ export default function GameLiveScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Game not found'}
         onRetry={refetch}
+        onBack={goBack}
       />
     );
   }
