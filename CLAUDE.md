@@ -373,6 +373,19 @@ never inline a role check in a screen:
 - Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
   (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
 - Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
+- **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
+  everything inside it from the accessibility tree, so a button nested in a pressable row can be
+  tapped by a sighted user while VoiceOver and Maestro see only the row. On Profile → My kids
+  that hid the ⋯ menu, the only way for a guardian to delete a child's record. Make the two
+  **siblings inside a plain `View`**, each with a 44pt target (`childRow` / `childRowMain` /
+  `childRowMore` in `app/(tabs)/profile.tsx`; the date rows in `admin/seasons/create`).
+  `__tests__/a11y/nested-pressables.test.ts` reads the source of `app/` and `components/` and
+  fails on any nesting, unless the outer pressable opts out with `accessible={false}`
+  (`ActionMenu`'s sheet wrapper). A `ListItem` counts as a pressable only when it is given
+  `onPress`. Screen tests cannot stand in for the guard: `getByLabelText` finds a nested button,
+  which is how the defect shipped with a passing test. To assert it in a screen test, walk the
+  `parent` chain of the button and expect no other accessible ancestor
+  (`__tests__/app/profile-my-kids.test.tsx`).
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
   Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the

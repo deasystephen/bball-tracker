@@ -198,61 +198,83 @@ export default function CreateSeasonScreen() {
               Season Dates (Optional)
             </ThemedText>
 
-            <TouchableOpacity
+            {/* The date button and its clear button are siblings, never
+                parent and child (#583). */}
+            <View
               style={[
-                styles.dateButton,
+                styles.dateRow,
                 {
                   backgroundColor: colors.backgroundSecondary,
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => openPicker('start')}
-              testID="season-start-date-button"
             >
-              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-              <View style={styles.dateContent}>
-                <ThemedText variant="caption" color="textSecondary">
-                  Start Date
-                </ThemedText>
-                <ThemedText variant="body">{formatDate(startDate)}</ThemedText>
-              </View>
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => openPicker('start')}
+                accessibilityRole="button"
+                accessibilityLabel={`Start Date: ${formatDate(startDate)}`}
+                testID="season-start-date-button"
+              >
+                <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                <View style={styles.dateContent}>
+                  <ThemedText variant="caption" color="textSecondary">
+                    Start Date
+                  </ThemedText>
+                  <ThemedText variant="body">{formatDate(startDate)}</ThemedText>
+                </View>
+              </TouchableOpacity>
               {startDate && (
                 <TouchableOpacity
                   onPress={() => setStartDate(null)}
                   style={styles.clearButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear start date"
+                  testID="season-start-date-clear"
                 >
                   <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
                 </TouchableOpacity>
               )}
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
+            {/* The date button and its clear button are siblings, never
+                parent and child (#583). */}
+            <View
               style={[
-                styles.dateButton,
+                styles.dateRow,
                 {
                   backgroundColor: colors.backgroundSecondary,
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => openPicker('end')}
-              testID="season-end-date-button"
             >
-              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-              <View style={styles.dateContent}>
-                <ThemedText variant="caption" color="textSecondary">
-                  End Date
-                </ThemedText>
-                <ThemedText variant="body">{formatDate(endDate)}</ThemedText>
-              </View>
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => openPicker('end')}
+                accessibilityRole="button"
+                accessibilityLabel={`End Date: ${formatDate(endDate)}`}
+                testID="season-end-date-button"
+              >
+                <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+                <View style={styles.dateContent}>
+                  <ThemedText variant="caption" color="textSecondary">
+                    End Date
+                  </ThemedText>
+                  <ThemedText variant="body">{formatDate(endDate)}</ThemedText>
+                </View>
+              </TouchableOpacity>
               {endDate && (
                 <TouchableOpacity
                   onPress={() => setEndDate(null)}
                   style={styles.clearButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear end date"
+                  testID="season-end-date-clear"
                 >
                   <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
                 </TouchableOpacity>
               )}
-            </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.buttonContainer}>
@@ -328,20 +350,29 @@ const styles = StyleSheet.create({
   label: {
     marginBottom: spacing.sm,
   },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    marginTop: spacing.sm,
+  },
   dateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    marginTop: spacing.sm,
+    flex: 1,
   },
   dateContent: {
     flex: 1,
   },
   clearButton: {
-    padding: spacing.xs,
+    // 44pt minimum touch target
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   buttonContainer: {
     marginTop: spacing.xl,

@@ -77,6 +77,33 @@ describe('Profile "My kids"', () => {
     expect(mockRouter.push).toHaveBeenCalledWith('/account/delete?childId=seth');
   });
 
+  // #583. On iOS an accessible element hides everything inside it from the
+  // accessibility tree. The ⋯ button used to sit inside the row's own button,
+  // so VoiceOver and Maestro saw the row and never the menu. getByLabelText
+  // finds a nested button anyway, which is why the test above passed while the
+  // device failed: the nesting has to be asserted.
+  it('keeps the ⋯ button outside the row button, so both can be reached (#583)', () => {
+    signIn('PARENT', kids);
+    const { getByLabelText } = render(<Profile />);
+
+    for (const child of ['Steph Curry', 'Seth Curry']) {
+      const ownLabel = `More options for ${child}`;
+      const enclosing = new Set<string>();
+      for (let node = getByLabelText(ownLabel).parent; node; node = node.parent) {
+        const { accessibilityRole, accessibilityLabel, accessible } = node.props;
+        const isAccessible = accessibilityRole === 'button' || accessible === true;
+        if (isAccessible && accessibilityLabel !== ownLabel) {
+          enclosing.add(String(accessibilityLabel ?? '(no label)'));
+        }
+      }
+      expect([...enclosing]).toEqual([]);
+
+      // Both halves keep a 44pt touch target.
+      expect(getByLabelText(ownLabel)).toHaveStyle({ minWidth: 44, minHeight: 44 });
+      expect(getByLabelText(`${child}, Father`)).toHaveStyle({ minHeight: 44 });
+    }
+  });
+
   it('shows the Delete account row under Account and opens the confirmation screen (#444)', () => {
     signIn('PLAYER', []);
     const { getByLabelText } = render(<Profile />);

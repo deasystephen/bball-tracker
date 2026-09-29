@@ -195,13 +195,17 @@ export default function Profile() {
               {guardianChildren(user).map((child, index) => (
                 <React.Fragment key={child.childId}>
                   {index > 0 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
-                  <TouchableOpacity
-                    style={styles.settingRow}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${child.childName}, ${relationshipLabel(child.relationship)}`}
-                    onPress={() => router.push(`/players/${child.childId}/stats`)}
-                  >
-                    <View style={styles.settingLeft}>
+                  {/* The row and its ⋯ button are SIBLINGS in a plain View,
+                      never parent and child: on iOS an accessible element
+                      hides its descendants, so a button nested in the row
+                      cannot be reached by VoiceOver or Maestro (#583). */}
+                  <View style={styles.childRow}>
+                    <TouchableOpacity
+                      style={styles.childRowMain}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${child.childName}, ${relationshipLabel(child.relationship)}`}
+                      onPress={() => router.push(`/players/${child.childId}/stats`)}
+                    >
                       <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
                         <Ionicons name="people" size={18} color={colors.primary} />
                       </View>
@@ -212,16 +216,17 @@ export default function Profile() {
                           {child.isPrimary ? ' \u00B7 Primary' : ''}
                         </ThemedText>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                     <TouchableOpacity
+                      style={styles.childRowMore}
                       accessibilityRole="button"
                       accessibilityLabel={t('account.delete.menuMore', { name: child.childName })}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      testID={`child-menu-${child.childId}`}
                       onPress={() => setMenuChildId(child.childId)}
                     >
                       <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
                     </TouchableOpacity>
-                  </TouchableOpacity>
+                  </View>
                 </React.Fragment>
               ))}
             </Card>
@@ -544,6 +549,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     flex: 1,
+  },
+  childRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
+  },
+  childRowMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    flex: 1,
+    // 44pt minimum touch target
+    minHeight: 44,
+  },
+  childRowMore: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingIcon: {
     width: 36,
