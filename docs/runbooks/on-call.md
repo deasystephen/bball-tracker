@@ -19,6 +19,7 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | RDS | `bball-tracker-production-postgres` |
 | Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` |
 | Errors | Sentry org `satsun-ventures`, projects `bball-tracker-backend` and `bball-tracker-mobile` |
+| Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, **not** to the SNS subscriber above. |
 
 Because the service runs a single task, there is no redundancy to absorb a failure: "one task is
 unhealthy" and "the API is down" are the same event.
@@ -188,14 +189,44 @@ Terraform change.
      --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
    ```
 
+## Sentry alert rules
+
+CloudWatch tells you the service is down or slow. Sentry tells you the code threw. Two rules
+send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
+
+| Rule | Fires when | Environment | Created |
+| --- | --- | --- | --- |
+| **New issue in production** (id `6086584`) | An issue is seen for the first time | `production` only | 2026-09-29, for #448 |
+| **Send a notification for high priority issues** (id `3278785`) | A new or existing issue that Sentry ranks high priority | Any | 2026-04-13, Sentry's default |
+
+- **Who gets the email:** the owners of the issue, and when it has none, every active member of
+  the Sentry organization. Add a responder by inviting them to the organization. This is a
+  different list from the SNS subscriber: changing `alert_email` does not change it.
+- **A new high-priority issue sends two emails**, one per rule. That is accepted: the rules
+  overlap on purpose, so that a low-priority new issue is not silent and a known issue that
+  becomes urgent is not either.
+- **"New issue in production" sends at most one email per issue every 30 minutes**, and an issue
+  is new only once, so it does not repeat for an error that keeps happening. A resolved issue
+  that comes back is a *regression*, which this rule does not cover; the high-priority rule
+  does when Sentry ranks it so.
+- **Both projects report `production`** as their environment: the API through
+  `SENTRY_ENVIRONMENT` in `infra/task-definition.json`, the app through the EAS `production`
+  environment. An event from a preview build or a simulator carries another name and does not
+  trigger the first rule.
+- **Expected client errors never reach Sentry** (4xx `AppError`s are filtered in
+  `utils/sentry.ts`), so neither rule fires for an expired token or a validation error.
+- **Not proven by a real event.** The rule was read back after it was created and is enabled,
+  but no new issue has occurred in production since. Its first email is the proof; check
+  "Last triggered" on the rule's page.
+
+The rules live in Sentry, not in this repository. They were created through Sentry's API; to
+change one, edit it in Sentry (Alerts) and update the table above in the same change.
+
 ## Not yet automated
 
-Two items from #448 live outside Terraform and are done by hand. Their status is tracked on the
+One item from #448 lives outside Terraform and is done by hand. Its status is tracked on the
 issue, not here.
 
-- **Sentry issue alerts.** One rule per project (`bball-tracker-backend`,
-  `bball-tracker-mobile`): a new issue is created in environment `production` → email. Sentry
-  alert rules are not version-controlled in this repo.
 - **The seven placeholder Datadog monitors.** The default host-monitor pack (CPU, load, disk,
   memory, network) queries `system.*` host metrics that Fargate never emits, so all seven sit in
   "No Data", and each notifies the literal placeholder `@your-team-handle`. Delete or retarget
