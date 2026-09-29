@@ -329,6 +329,25 @@ never inline a role check in a screen:
   `__tests__/utils/role-onboarding.test.ts`, `__tests__/app/onboarding-name.test.tsx`; Maestro
   `.maestro/profile.yaml` renames Frank Vogel and **reverts** (team-staff.yaml asserts the seeded name).
 
+#### Mobile date and time pickers (#576)
+- **Every date or time choice goes through `components/DateTimePickerSheet`**; never render
+  `@react-native-community/datetimepicker` in a screen. On iOS it is a bottom sheet with the
+  wheels, Cancel and Done: the wheels edit a draft, Done commits it (`onConfirm`), Cancel and the
+  backdrop discard it (`onCancel`), and every opening starts from the value the screen holds. On
+  Android the library shows the system dialog, which has its own buttons. The picker it replaced
+  was rendered inline at the end of the form and closed on the first change, so it opened under
+  the keyboard and vanished as soon as one wheel settled.
+- The screen calls `Keyboard.dismiss()` before it opens the sheet: `games/create` and
+  `admin/seasons/create` both open with a focused text field.
+- Version 9 of the library splits the old `onChange` into `onValueChange` and `onDismiss`; use
+  those (`onChange` is deprecated and warns).
+- The date and time rows on `games/create` carry `testID` `game-date-button` /
+  `game-time-button` and the labels `Game date: <date>` / `Game time: <time>`; the sheet's
+  buttons are `date-time-picker-done` / `date-time-picker-cancel`. Tap Cancel **by id**: the form
+  behind the sheet has a Cancel button too. Tests: `__tests__/components/DateTimePickerSheet.test.tsx`,
+  `__tests__/app/game-create-date.test.tsx`; Maestro `.maestro/game-create-date.yaml` (creates
+  nothing, so it needs no seed reset).
+
 #### Mobile API errors, permissions & toasts
 - **The API host is decided in ONE place: `config/env.ts#getApiUrl()`** (`extra.apiUrl` from
   `app.config.js`, else `http://127.0.0.1:3000` under `__DEV__`, else `https://api.hooplings.com`).
@@ -949,7 +968,7 @@ Removing the last guardian never deletes the child.
 Best-effort cache only — every helper fails open. The ioredis `retryStrategy` (`redisRetryDelay`) never returns `null`: it backs off 200 ms → 30 s and keeps reconnecting for the life of the process; if the connection ends anyway (`quit()`), the client is dropped and recreated lazily on next use (audit #50). Commands still fail fast while disconnected (`enableOfflineQueue: false`, `maxRetriesPerRequest: 1`).
 
 ### Avatar uploads (`services/upload-service.ts`, `api/uploads/`)
-`POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
+`POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). **The file part is an `expo-file-system` `File` (`new File(localUri)`), never React Native's `{ uri, name, type }` object (#576):** since Expo SDK 57 the global `fetch` is Expo's own, which encodes a multipart body in JavaScript and takes only a string, a Blob or a File for a part; the old object failed every upload on build #33 with "Unsupported FormDataPart implementation". No test saw it, because every test stubbed `fetch` and never encoded the body; `__tests__/services/upload-service.test.ts` now runs the form through Expo's real encoder (`expo/src/winter/fetch/convertFormData`). The same goes for any future upload: build the form, then prove it encodes. When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
 
 ### Environment URLs & time zone
 - `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.hooplings.com` in prod via `infra/task-definition.json`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://hooplings.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API. **Both are read ONLY via `utils/urls.ts`** (`publicAppUrl()` / `apiBaseUrl()`, trailing slash stripped) — never `process.env.PUBLIC_APP_URL` inline. The fallback for both is `http://localhost:3000` on purpose: a localhost link in a production email is obviously broken, whereas the old per-service brand-domain fallbacks emitted plausible links to the wrong host with nothing in the logs; `warnMissingUrlConfig()` runs at boot and warns in production when either is unset (domain migration #501). The iCal `uid` domain / `productId` are the exported `ICAL_UID_DOMAIN` / `ICAL_PRODUCT_ID` in `calendar-service.ts` — frozen once anyone subscribes (changing a UID duplicates every event in a subscriber's calendar). Email copy names the product only through `mailer/templates/brand.ts#APP_NAME`; `tests/services/mailer.test.ts` fails on any retired brand name in a rendered template.
