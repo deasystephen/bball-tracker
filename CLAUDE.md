@@ -541,7 +541,10 @@ current score so a client can drop events and still converge.
   start. **CI applies migrations to an empty database**, so a backfill's data statements first run on
   real rows in production unless rehearsed: restore a snapshot per `docs/runbooks/rds-backup-restore.md`
   (stop before the Secrets Manager repoint), `migrate deploy` from the branch, assert
-  `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. The permanent CI guard is #493.
+  `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. Since #493 the migration backfill
+  guard runs every new migration against seeded rows on each pull request (see "Migration backfill
+  guard" under Testing Requirements); it is the first check, and the snapshot rehearsal is still
+  the one that meets production's rows.
 - Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
   plan and not built** (#492, gated on an organizer persona; the opponent-linkage half was
   **decided** on 2026-09-07 in `docs/plans/game-opponent-linkage.md`: two `Game` rows under a
@@ -1317,6 +1320,29 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
   seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
   purpose once and confirm that suite fails.
+
+### Migration backfill guard (#493)
+- `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The
+  check **Migration backfill guard** (`.github/workflows/migration-backfill-guard.yml`) runs on
+  every pull request: it puts a throwaway Postgres on the **base** commit's schema, seeds it
+  from the base checkout, then runs `prisma migrate deploy` from the pull request. It exits at
+  once when the pull request adds no migration.
+- Run it before pushing a migration: `.github/scripts/migration-backfill-guard.sh` (Docker
+  running, about half a minute). It starts its own container and never touches the database in
+  `backend/.env`.
+- **The base checkout does the seeding, on purpose.** The seed imports the generated Prisma
+  client, and a client generated from the new schema cannot write to a database that is still
+  on the previous one. Do not "simplify" it to one checkout.
+- It also fails when a migration that is already on `main` is edited or removed: that migration
+  has run in production.
+- **Seed coverage is the limit.** A backfill on a table the seed leaves empty passes without
+  running on a row; the log names those tables on every run. When a migration backfills such a
+  table, add rows for it to `backend/prisma/seed.ts` in an **earlier** pull request (the guard
+  seeds from the base branch), or rehearse on a restored snapshot. Details and the recorded
+  proof: [`docs/testing/migration-backfill-guard.md`](docs/testing/migration-backfill-guard.md).
+- The script and the workflow live under `.github/`, outside the path filter that makes a merge
+  deploy. The Postgres image is read from `docker-compose.yml`, so the major stays pinned in
+  the places `tests/infra/postgres-version.test.ts` already checks.
 
 ### Maestro E2E Tests
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
