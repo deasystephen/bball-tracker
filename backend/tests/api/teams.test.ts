@@ -728,6 +728,17 @@ describe('Teams API', () => {
     });
   });
 
+  describe('POST /api/v1/teams/:teamId/managed-players (removed in #418)', () => {
+    it('answers 404: the route is gone, with no tombstone', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/managed-players`)
+        .send({ name: 'Jane Hooper', jerseyNumber: 7 });
+
+      expect(response.status).toBe(404);
+      expect(mockInvitationService.addRosterPlayer).not.toHaveBeenCalled();
+    });
+  });
+
   describe('POST /api/v1/teams/:teamId/invitations', () => {
     const mockInvitation = {
       id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234',
@@ -800,7 +811,17 @@ describe('Teams API', () => {
       expect(response.status).toBe(400);
     });
 
-    it('should create-and-invite a new player with name + email in one call (audit #69)', async () => {
+    it('answers 400 for the removed name + email arm (#418)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ name: 'Jane Hooper', email: 'jane@example.com', jerseyNumber: 7 });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('playerId is required');
+      expect(mockInvitationService.createInvitation).not.toHaveBeenCalled();
+    });
+
+    it('never passes name or email through to the service', async () => {
       mockInvitationService.createInvitation.mockResolvedValue({
         invitation: mockInvitation,
         emailSent: true,
@@ -808,24 +829,14 @@ describe('Teams API', () => {
 
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
-        .send({ name: 'Jane Hooper', email: 'jane@example.com', jerseyNumber: 7 });
-
-      expect(response.status).toBe(201);
-      expect(response.body.invitation).not.toHaveProperty('token');
-      expect(mockInvitationService.createInvitation).toHaveBeenCalledWith(
-        TEST_TEAM_ID,
-        expect.objectContaining({ name: 'Jane Hooper', email: 'jane@example.com', jerseyNumber: 7 }),
-        TEST_USER_ID
-      );
-    });
-
-    it('should return 400 when playerId and email are both supplied', async () => {
-      const response = await request(app)
-        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
         .send({ playerId: TEST_PLAYER_ID, name: 'Jane', email: 'jane@example.com' });
 
-      expect(response.status).toBe(400);
-      expect(mockInvitationService.createInvitation).not.toHaveBeenCalled();
+      expect(response.status).toBe(201);
+      expect(mockInvitationService.createInvitation).toHaveBeenCalledWith(
+        TEST_TEAM_ID,
+        { playerId: TEST_PLAYER_ID, expiresInDays: 7, supersede: false },
+        TEST_USER_ID
+      );
     });
 
     it('should handle service errors', async () => {

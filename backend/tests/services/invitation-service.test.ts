@@ -244,121 +244,6 @@ describe('InvitationService', () => {
       expect(result.emailSent).toBe(false);
     });
 
-    describe('create-and-invite with name + email (audit #69)', () => {
-      const setupCoachTeam = (): {
-        coach: ReturnType<typeof createCoach>;
-        team: ReturnType<typeof createTeam>;
-        season: ReturnType<typeof createSeason>;
-        league: ReturnType<typeof createLeague>;
-      } => {
-        const coach = createCoach();
-        const league = createLeague();
-        const season = createSeason({ leagueId: league.id });
-        const team = createTeam({ seasonId: season.id });
-        const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
-        const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
-        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
-        return { coach, team, season, league };
-      };
-
-      it('creates the user and the invitation in one transaction when the email is new', async () => {
-        const { coach, team, season, league } = setupCoachTeam();
-        const created = createInvitation({ teamId: team.id, playerId: 'new-user-id', invitedById: coach.id });
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-        const txUserCreate = jest.fn().mockResolvedValue({ id: 'new-user-id' });
-        const txInvitationCreate = jest.fn().mockResolvedValue({
-          ...created,
-          team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
-          player: { id: 'new-user-id', name: 'Jane Hooper', email: 'jane@example.com' },
-          invitedBy: { id: coach.id, name: coach.name, email: coach.email },
-        });
-        (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
-          callback({ user: { create: txUserCreate }, teamInvitation: { create: txInvitationCreate } })
-        );
-
-        const result = await InvitationService.createInvitation(
-          team.id,
-          { name: 'Jane Hooper', email: 'jane@example.com', expiresInDays: 7, jerseyNumber: 7 },
-          coach.id
-        );
-
-        expect(result.invitation).toHaveProperty('id', created.id);
-        expect(txUserCreate).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              name: 'Jane Hooper',
-              email: 'jane@example.com',
-              role: 'PLAYER',
-              // Unification spec T2: invite-created accounts are managed by
-              // the inviting coach until claimed (chip derivation + B2.10).
-              isManaged: true,
-              managedById: coach.id,
-            }),
-          })
-        );
-        expect(txInvitationCreate).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({ teamId: team.id, playerId: 'new-user-id', jerseyNumber: 7 }),
-          })
-        );
-        // Nothing is written outside the transaction, so a failed invite leaves no orphan user
-        expect(mockPrisma.user.create).not.toHaveBeenCalled();
-        expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
-
-        await new Promise((resolve) => setImmediate(resolve));
-        expect(mockedMailerSend).toHaveBeenCalledWith(expect.objectContaining({ to: 'jane@example.com' }));
-      });
-
-      it('reuses an existing account with that email instead of failing', async () => {
-        const { coach, team, season, league } = setupCoachTeam();
-        const existing = createPlayer({ email: 'jane@example.com' });
-        const created = createInvitation({ teamId: team.id, playerId: existing.id, invitedById: coach.id });
-        (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(existing);
-        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
-        (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
-        (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
-          ...created,
-          team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
-          player: { id: existing.id, name: existing.name, email: existing.email },
-          invitedBy: { id: coach.id, name: coach.name, email: coach.email },
-        });
-
-        const result = await InvitationService.createInvitation(
-          team.id,
-          { name: 'Jane', email: 'jane@example.com', expiresInDays: 7 },
-          coach.id
-        );
-
-        expect(result.invitation).toHaveProperty('playerId', existing.id);
-        expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
-        where: { email: { equals: 'jane@example.com', mode: 'insensitive' } },
-      });
-        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-        expect(mockPrisma.teamInvitation.create).toHaveBeenCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ playerId: existing.id }) })
-        );
-      });
-
-      it('rejects when the existing account is already on the team', async () => {
-        const { coach, team } = setupCoachTeam();
-        const existing = createPlayer({ email: 'jane@example.com' });
-        (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(existing);
-        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
-          createTeamMember({ teamId: team.id, playerId: existing.id })
-        );
-
-        await expect(
-          InvitationService.createInvitation(
-            team.id,
-            { name: 'Jane', email: 'jane@example.com', expiresInDays: 7 },
-            coach.id
-          )
-        ).rejects.toMatchObject({ statusCode: 400, message: 'Player is already on this team' });
-        expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
-      });
-    });
-
     it('should throw NotFoundError if team does not exist', async () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
 
@@ -2222,44 +2107,6 @@ describe('InvitationService', () => {
 
     afterEach(() => jest.restoreAllMocks());
 
-    it('createInvitation email arm retries once against the race winner (P2002)', async () => {
-      const { coach, team } = setupCoachTeam();
-      const winner = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
-      routeUserLookups((n) => (n === 1 ? null : winner));
-      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(p2002());
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
-      const fresh = createInvitation({ teamId: team.id, playerId: winner.id, invitedById: coach.id });
-      (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue(
-        relationRow(fresh, team, { id: winner.id, name: winner.name, email: winner.email }, coach)
-      );
-
-      const result = await InvitationService.createInvitation(
-        team.id,
-        { name: 'Jane', email: 'jane@example.com', expiresInDays: 7 },
-        coach.id
-      );
-
-      expect(result.invitation).toHaveProperty('playerId', winner.id);
-      expect(mockPrisma.teamInvitation.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ playerId: winner.id }) })
-      );
-    });
-
-    it('createInvitation email arm rethrows the P2002 when the refetch finds nobody', async () => {
-      const { coach, team } = setupCoachTeam();
-      routeUserLookups(() => null);
-      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(p2002());
-
-      await expect(
-        InvitationService.createInvitation(
-          team.id,
-          { name: 'Jane', email: 'jane@example.com', expiresInDays: 7 },
-          coach.id
-        )
-      ).rejects.toMatchObject({ code: 'P2002' });
-    });
-
     it('addRosterPlayer double-add of the same email answers 400, creates nothing', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: coach.id };
@@ -2316,6 +2163,20 @@ describe('InvitationService', () => {
       expect(result.invited).toBe(true);
       expect(result.guardianInvited).toBe(false);
       expect(result.guardianReason).toMatch(/after the player accepts/i);
+    });
+
+    it('addRosterPlayer rethrows the P2002 when the refetch finds nobody', async () => {
+      const { coach, team } = setupCoachTeam();
+      routeUserLookups(() => null);
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(p2002());
+
+      await expect(
+        InvitationService.addRosterPlayer(
+          team.id,
+          { name: 'Jane', playerEmail: 'jane@example.com' },
+          coach.id
+        )
+      ).rejects.toMatchObject({ code: 'P2002' });
     });
 
     it.each(['reject', 'cancel'] as const)(
@@ -2461,66 +2322,6 @@ describe('InvitationService', () => {
 
       expect(result.emailSent).toBeNull();
       expect(mockedMailerSend).not.toHaveBeenCalled();
-    });
-
-    it('email-arm supersede expires the live PENDING invite for an unclaimed rostered player', async () => {
-      const { coach, team } = setupCoachTeam();
-      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null };
-      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(unclaimed);
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
-        createTeamMember({ teamId: team.id, playerId: unclaimed.id })
-      );
-      const live = createInvitation({
-        teamId: team.id,
-        playerId: unclaimed.id,
-        expiresAt: new Date(Date.now() + 86400000),
-      });
-      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(live);
-      const fresh = createInvitation({ teamId: team.id, playerId: unclaimed.id, invitedById: coach.id });
-      const txExpire = jest.fn().mockResolvedValue({ count: 1 });
-      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
-        cb({
-          teamInvitation: {
-            findFirst: jest.fn().mockResolvedValue(null),
-            updateMany: txExpire,
-            create: jest
-              .fn()
-              .mockResolvedValue(relationRow(fresh, team, { id: unclaimed.id, name: unclaimed.name, email: unclaimed.email }, coach)),
-          },
-        })
-      );
-
-      const result = await InvitationService.createInvitation(
-        team.id,
-        { name: 'Jane', email: 'jane@example.com', expiresInDays: 7, supersede: true },
-        coach.id
-      );
-
-      expect(result.invitation).toHaveProperty('id', fresh.id);
-      expect(txExpire).toHaveBeenCalledWith({
-        where: { teamId: team.id, playerId: unclaimed.id, status: 'PENDING' },
-        data: { status: 'EXPIRED' },
-      });
-    });
-
-    it('email-arm supersede refuses a claimed account that is already a member', async () => {
-      const { coach, team } = setupCoachTeam();
-      const active = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: 'workos-1' };
-      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(active);
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
-        createTeamMember({ teamId: team.id, playerId: active.id })
-      );
-
-      await expect(
-        InvitationService.createInvitation(
-          team.id,
-          { name: 'Jane', email: 'jane@example.com', expiresInDays: 7, supersede: true },
-          coach.id
-        )
-      ).rejects.toMatchObject({ statusCode: 400, message: 'Player already has access to this team' });
-      expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
     });
   });
 

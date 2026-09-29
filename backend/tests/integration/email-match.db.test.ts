@@ -213,23 +213,6 @@ describe('Add Player: the invitation lands on the typed address', () => {
   });
 });
 
-describe('Invite by name and email (deprecated arm, still mounted)', () => {
-  it('creates a new account for first_last@, never reusing firstXlast@', async () => {
-    const decoy = await mkUser('armXinvite', { workosUserId: `workos-decoy-arm-${RUN}` });
-
-    const { invitation } = await InvitationService.createInvitation(
-      teamId,
-      { name: 'Arm Invitee', email: address('arm_invite') },
-      coachId
-    );
-
-    const created = await trackByEmail(address('arm_invite'));
-    expect(created).not.toBeNull();
-    expect(invitation.playerId).toBe(created?.id);
-    expect(invitation.playerId).not.toBe(decoy);
-  });
-});
-
 describe('Add staff by email', () => {
   it('answers 404 for first_last@ when only firstXlast@ has an account', async () => {
     const decoy = await mkUser('staffXcoach', { role: 'COACH' });

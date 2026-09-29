@@ -125,19 +125,6 @@ export const teamQuerySchema = z.object({
 });
 
 /**
- * Schema for creating a managed player (no email/account required)
- */
-export const createManagedPlayerSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
-  jerseyNumber: z.number().int().min(0).max(99).optional(),
-  position: z.string().max(50).optional(),
-  profilePictureUrl: z.string().url().refine(
-    (url) => url.startsWith('https://') || url.startsWith('http://'),
-    { message: 'URL must use http or https protocol' }
-  ).optional(),
-});
-
-/**
  * Unified Add Player (roster/invite unification spec,
  * docs/plans/roster-invite-unification-spec.md).
  *
@@ -194,7 +181,6 @@ export type AddStaffInput = z.infer<typeof addStaffSchema>;
 export type UpdateStaffRoleInput = z.infer<typeof updateStaffRoleSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;
-export type CreateManagedPlayerInput = z.infer<typeof createManagedPlayerSchema>;
 
 /**
  * Schema for creating an announcement

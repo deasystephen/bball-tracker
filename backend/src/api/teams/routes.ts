@@ -11,7 +11,6 @@ import {
   updateTeamSchema,
   updateTeamMemberSchema,
   teamQuerySchema,
-  createManagedPlayerSchema,
   addRosterPlayerSchema,
   createAnnouncementSchema,
   announcementQuerySchema,
@@ -212,8 +211,8 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * POST /api/v1/teams/:teamId/players
  * Unified Add Player (roster/invite unification spec). Name required; player
  * email optional (invitation goes out when present); guardian email optional.
- * Supersedes POST /teams/:id/managed-players and the {name,email} arm of
- * POST /teams/:id/invitations (both stay mounted for old clients).
+ * Superseded POST /teams/:id/managed-players and the {name,email} arm of
+ * POST /teams/:id/invitations, both removed in #418.
  *
  * (This path previously answered 410 — the pre-2026 direct roster-add was
  * removed in favor of invitations. The unified flow deliberately reclaims it.)
@@ -255,46 +254,9 @@ router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) =
 });
 
 /**
- * POST /api/v1/teams/:teamId/managed-players
- * Create a managed player on a team (COPPA compliant - no email required)
- */
-router.post('/:teamId/managed-players', validateUuidParams('teamId'), async (req, res) => {
-  try {
-    // Validate request body
-    const validationResult = createManagedPlayerSchema.safeParse(req.body);
-    if (!validationResult.success) {
-      throw new BadRequestError(
-        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
-      );
-    }
-
-    const teamMember = await TeamService.addManagedPlayer(
-      req.params.teamId as string,
-      validationResult.data,
-      req.user!.id
-    );
-
-    res.status(201).json({
-      success: true,
-      teamMember,
-    });
-  } catch (error) {
-    logger.error('Error creating managed player', { error: error instanceof Error ? error.message : String(error) });
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create managed player' });
-    }
-  }
-});
-
-/**
  * POST /api/v1/teams/:teamId/invitations
- * Create a new team invitation (coach only)
+ * Invite an existing user by `playerId` (coach only); with `supersede` this is
+ * Resend. New players go through POST /teams/:teamId/players.
  */
 router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, res) => {
   try {

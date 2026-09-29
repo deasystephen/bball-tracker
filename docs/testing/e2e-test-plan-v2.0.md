@@ -317,7 +317,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
     only; for an existing-account player the toast explains the deferral).
   - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
 - **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the
-  old managed-players and create-and-invite arms stay mounted for old builds).
+  old managed-players route and the create-and-invite arm were removed in #418).
 
 ### D.3a — Invite-status chips, resend & cancel (NEW)
 - [ ] Pass / Fail / Skipped
@@ -1037,11 +1037,11 @@ These are quick `curl` checks. Each test verifies a role CANNOT do something the
 | Q.1 | PLAYER (member) | `DELETE /teams/:id` | 403 |
 | Q.2 | PLAYER (member) | `PATCH /teams/:id` (rename) | 403 |
 | Q.3 | PLAYER (non-member) | `GET /teams/:otherTeamId` | 403/404 |
-| Q.4 | Assistant Coach | `POST /teams/:id/managed-players` | 201 (Assistant Coach has `canManageRoster`) |
+| Q.4 | Assistant Coach | `POST /teams/:teamId/players` | 201 (Assistant Coach has `canManageRoster`) |
 | Q.5 | COACH (head) of team A | `POST /teams/:teamB/invitations` | 403 (no cross-team access) |
 | Q.6 | Team Manager | `POST /games/:id/events` | 201 (`canTrackStats: true`) |
 | Q.7 | PARENT (guardian of a rostered child) | `GET /teams/:teamId` | 200, read-only; `members[].player` has no `email` |
-| Q.8 | PARENT | `POST /teams/:teamId/managed-players` | 403 |
+| Q.8 | PARENT | `POST /teams/:teamId/players` | 403 |
 | Q.9 | non-member | `GET /api/v1/teams/:teamId/announcements` | 403 unless team member / staff / guardian |
 | Q.10 | unauthenticated | any `/api/v1/*` except `/invitations/by-token/*`, `/teams/:id/calendar.ics`, `/auth/login`, `/auth/callback`, `/auth/refresh` | 401 |
 | Q.11 | Assistant Coach | `POST /teams/:id/staff`, `DELETE /teams/:id`, `PATCH /teams/:id { seasonId }` | 403 (head-coach-only; self `DELETE /teams/:id/staff/:ownId` → 200) |
@@ -1238,3 +1238,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-08-23: refresh for the authz/role-matrix batch on `main` (#370–#401): JWKS-verified access tokens + PKCE (A.1/A.2), self-selected COACH (A.1b), presigned-POST avatars (B.2), "Leagues & Seasons" replaces the Admin tab (C), player-hidden team creation + 402 cap (D.1), staff management (D.8, Q.11/Q.12), create-and-invite + tokenless invitation responses + lazy expiry/partial unique index (E.1/E.8/E.14/E.15), PARENT role (E.12a–d, I.5–I.7, Q.7), `FINISHED` status and server-derived score (F.3/F.4/H.2/R.3), calendar/export have no app UI and are PREMIUM-gated (L, M), rate limiters (P.6), health body (P.7), Q.13–Q.19 boundary rows, Maestro flow list. Dev-login is dev-build-only (P.3). Target build → v1.2.0 / #25+ (set by #401, kept). Seeded fixtures re-verified against `backend/prisma/seed.ts` (Dell Curry is Warriors staff, Sonya Curry is the pure guardian). Nothing marked passed.
 - 2026-08-29: roster ordering (feature/roster-jersey-sort). D.2 gained the roster sort pills (visible labels `Jersey #`/`Name`, a11y "Sort by <label>"; 2+ player gate; per-user persistence) and the Maestro flow list notes `team-detail.yaml`'s new sort assertions. Server rosters (team detail + game detail) now come back jersey-asc, nulls last, name then id tiebreak.
 - 2026-09-27: #445 — FREE team cap lifted. D.1 no longer expects a 402 on the 4th team; the Profile usage meter reads `<count> · Unlimited` for every tier. Paid tiers are reachable only through the ADMIN comp route (`PATCH /api/v1/admin/users/:userId/subscription`, exercised with `curl`; no app UI). Nothing marked passed.
+- 2026-09-29: #418 — the deprecated add-player endpoints are gone. `POST /teams/:id/managed-players` answers 404 and `POST /teams/:id/invitations` takes `{ playerId }` only; Q.4 and Q.8 now target the unified `POST /teams/:teamId/players`. No app-visible change (the app has used the unified endpoint since the 2026-08-28 OTA).
