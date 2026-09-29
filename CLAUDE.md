@@ -377,8 +377,7 @@ never inline a role check in a screen:
   replaces the whole screen, header and back arrow included, so with only `onRetry` the user is
   left with Try Again and the swipe gesture. Pass `onBack={() => router.back()}` wherever the
   screen is a pushed route (`app/players/[id]/stats.tsx` does). Tab screens have the tab bar and
-  do not need it. Most of the other pushed screens that render `ErrorState` have not been
-  changed yet.
+  do not need it. The other pushed screens that render `ErrorState` are listed in #595.
 - **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
   everything inside it from the accessibility tree, so a button nested in a pressable row can be
   tapped by a sighted user while VoiceOver and Maestro see only the row. On Profile → My kids
