@@ -1,0 +1,85 @@
+appId: com.bballtracker.mobile
+---
+# Create Game: choosing the date and time (#576)
+#
+# The picker is a bottom sheet with wheels, Cancel and Done. On build #33 it
+# was rendered inline under the keyboard and closed on the first wheel
+# movement. This flow creates nothing, so it needs no reset in the seed.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Track game tab"
+- tapOn: "Create new game"
+- assertVisible: "New Game"
+
+# The opponent field has focus and its keyboard is up: the state the screen
+# opens in, and the one in which the old picker was hidden.
+- scrollUntilVisible:
+    element:
+      id: "game-date-button"
+    direction: DOWN
+    visibilityPercentage: 60
+    timeout: 10000
+- copyTextFrom:
+    id: "game-date-button"
+- evalScript: ${output.dateBefore = maestro.copiedText}
+
+# --- Date: move two wheels, confirm ---
+- tapOn:
+    id: "game-date-button"
+# "Game date" is the sheet's title. The row behind it reads "Game date: <date>",
+# which a full-match selector does not hit.
+- assertVisible: "Game date"
+- assertVisible: "Done"
+- swipe:
+    start: 50%, 80%
+    end: 50%, 72%
+- swipe:
+    start: 25%, 80%
+    end: 25%, 72%
+# Still open after the wheels moved.
+- assertVisible: "Game date"
+- tapOn:
+    id: "date-time-picker-done"
+- assertNotVisible: "Game date"
+- copyTextFrom:
+    id: "game-date-button"
+- assertTrue: ${maestro.copiedText != output.dateBefore}
+
+# --- Time: move a wheel, cancel ---
+- copyTextFrom:
+    id: "game-time-button"
+- evalScript: ${output.timeBefore = maestro.copiedText}
+- tapOn:
+    id: "game-time-button"
+- assertVisible: "Game time"
+- swipe:
+    start: 40%, 80%
+    end: 40%, 72%
+- assertVisible: "Game time"
+# By id: the form behind the sheet has a Cancel button of its own.
+- tapOn:
+    id: "date-time-picker-cancel"
+- assertNotVisible: "Game time"
+- copyTextFrom:
+    id: "game-time-button"
+- assertTrue: ${maestro.copiedText == output.timeBefore}
+
+# --- Time: move a wheel, confirm ---
+- tapOn:
+    id: "game-time-button"
+- assertVisible: "Game time"
+- swipe:
+    start: 40%, 80%
+    end: 40%, 72%
+- tapOn:
+    id: "date-time-picker-done"
+- assertNotVisible: "Game time"
+- copyTextFrom:
+    id: "game-time-button"
+- assertTrue: ${maestro.copiedText != output.timeBefore}

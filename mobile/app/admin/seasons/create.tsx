@@ -7,6 +7,7 @@ import {
   View,
   StyleSheet,
   ScrollView,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -15,7 +16,6 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import {
   ThemedView,
   ThemedText,
@@ -23,6 +23,7 @@ import {
   Button,
   LoadingSpinner,
 } from '../../../components';
+import { DateTimePickerSheet } from '../../../components/DateTimePickerSheet';
 import { useToast } from '../../../components/Toast';
 import { useLeague } from '../../../hooks/useLeagues';
 import { useCreateSeason } from '../../../hooks/useSeasons';
@@ -43,8 +44,7 @@ export default function CreateSeasonScreen() {
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
-  const [showStartPicker, setShowStartPicker] = useState(false);
-  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [picker, setPicker] = useState<'start' | 'end' | null>(null);
   const [errors, setErrors] = useState<{ name?: string; leagueId?: string }>({});
 
   const { data: league, isLoading: leagueLoading } = useLeague(leagueId || '');
@@ -95,6 +95,13 @@ export default function CreateSeasonScreen() {
         error instanceof Error ? error.message : 'Failed to create season'
       );
     }
+  };
+
+  const openPicker = (which: 'start' | 'end') => {
+    // The name field takes focus when the screen opens; its keyboard would
+    // otherwise sit on top of the sheet.
+    Keyboard.dismiss();
+    setPicker(which);
   };
 
   const formatDate = (date: Date | null): string => {
@@ -199,7 +206,8 @@ export default function CreateSeasonScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setShowStartPicker(true)}
+              onPress={() => openPicker('start')}
+              testID="season-start-date-button"
             >
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               <View style={styles.dateContent}>
@@ -226,7 +234,8 @@ export default function CreateSeasonScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setShowEndPicker(true)}
+              onPress={() => openPicker('end')}
+              testID="season-end-date-button"
             >
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               <View style={styles.dateContent}>
@@ -246,34 +255,6 @@ export default function CreateSeasonScreen() {
             </TouchableOpacity>
           </View>
 
-          {showStartPicker && (
-            <DateTimePicker
-              value={startDate || new Date()}
-              mode="date"
-              display="spinner"
-              onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
-                setShowStartPicker(false);
-                if (selectedDate) {
-                  setStartDate(selectedDate);
-                }
-              }}
-            />
-          )}
-
-          {showEndPicker && (
-            <DateTimePicker
-              value={endDate || new Date()}
-              mode="date"
-              display="spinner"
-              onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
-                setShowEndPicker(false);
-                if (selectedDate) {
-                  setEndDate(selectedDate);
-                }
-              }}
-            />
-          )}
-
           <View style={styles.buttonContainer}>
             <Button
               title="Create Season"
@@ -292,6 +273,22 @@ export default function CreateSeasonScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <DateTimePickerSheet
+        visible={picker !== null}
+        mode="date"
+        value={(picker === 'end' ? endDate : startDate) ?? new Date()}
+        title={picker === 'end' ? 'End date' : 'Start date'}
+        onConfirm={(selected) => {
+          if (picker === 'end') {
+            setEndDate(selected);
+          } else {
+            setStartDate(selected);
+          }
+          setPicker(null);
+        }}
+        onCancel={() => setPicker(null)}
+      />
     </ThemedView>
   );
 }
