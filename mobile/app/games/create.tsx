@@ -7,6 +7,7 @@ import {
   View,
   StyleSheet,
   ScrollView,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -15,7 +16,6 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import {
   ThemedView,
   ThemedText,
@@ -25,6 +25,7 @@ import {
   ListItem,
   Card,
 } from '../../components';
+import { DateTimePickerSheet, DateTimePickerSheetMode } from '../../components/DateTimePickerSheet';
 import { useToast } from '../../components/Toast';
 import { useCreateGame } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT, hasTeamPermission } from '../../hooks/useTeams';
@@ -44,8 +45,7 @@ export default function CreateGameScreen() {
   const [opponent, setOpponent] = useState('');
   const [teamId, setTeamId] = useState('');
   const [date, setDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [picker, setPicker] = useState<DateTimePickerSheetMode | null>(null);
   const [errors, setErrors] = useState<{ opponent?: string; teamId?: string }>(
     {}
   );
@@ -106,6 +106,13 @@ export default function CreateGameScreen() {
         error instanceof Error ? error.message : 'Failed to create game'
       );
     }
+  };
+
+  const openPicker = (mode: DateTimePickerSheetMode) => {
+    // The opponent field takes focus when the screen opens; its keyboard
+    // would otherwise sit on top of the sheet.
+    Keyboard.dismiss();
+    setPicker(mode);
   };
 
   const formatDate = (d: Date): string => {
@@ -284,7 +291,10 @@ export default function CreateGameScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setShowDatePicker(true)}
+              onPress={() => openPicker('date')}
+              accessibilityRole="button"
+              accessibilityLabel={`Game date: ${formatDate(date)}`}
+              testID="game-date-button"
             >
               <Ionicons
                 name="calendar"
@@ -302,40 +312,15 @@ export default function CreateGameScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={() => setShowTimePicker(true)}
+              onPress={() => openPicker('time')}
+              accessibilityRole="button"
+              accessibilityLabel={`Game time: ${formatTime(date)}`}
+              testID="game-time-button"
             >
               <Ionicons name="time" size={20} color={colors.primary} />
               <ThemedText variant="body">{formatTime(date)}</ThemedText>
             </TouchableOpacity>
           </Card>
-
-          {showDatePicker && (
-            <DateTimePicker
-              value={date}
-              mode="date"
-              display="spinner"
-              onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
-                setShowDatePicker(false);
-                if (selectedDate) {
-                  setDate(selectedDate);
-                }
-              }}
-            />
-          )}
-
-          {showTimePicker && (
-            <DateTimePicker
-              value={date}
-              mode="time"
-              display="spinner"
-              onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
-                setShowTimePicker(false);
-                if (selectedDate) {
-                  setDate(selectedDate);
-                }
-              }}
-            />
-          )}
 
           <View style={styles.buttonContainer}>
             <Button
@@ -355,6 +340,18 @@ export default function CreateGameScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <DateTimePickerSheet
+        visible={picker !== null}
+        mode={picker ?? 'date'}
+        value={date}
+        title={picker === 'time' ? 'Game time' : 'Game date'}
+        onConfirm={(selected) => {
+          setDate(selected);
+          setPicker(null);
+        }}
+        onCancel={() => setPicker(null)}
+      />
     </ThemedView>
   );
 }

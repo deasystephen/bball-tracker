@@ -575,6 +575,10 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   1. Games tab → Create
   2. Pick team, opponent name, date/time
 - **Expected:** Game appears in Games list with status SCHEDULED.
+- **Date and time (#576):** tapping the date or the time row puts the keyboard away and opens a bottom sheet
+  with wheels, Cancel and Done. Move more than one wheel: the sheet stays open. Done changes the row; Cancel
+  (or a tap outside the sheet) leaves it as it was. The created game carries the chosen date and time.
+  Maestro: `.maestro/game-create-date.yaml`.
 - **Notes:** ___________
 
 ### F.2 — Start game

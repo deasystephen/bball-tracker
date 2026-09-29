@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { apiClient } from './api-client';
 import { captureException } from './sentry';
 
@@ -13,7 +14,7 @@ export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 /**
  * Upload an avatar image to S3 via a presigned POST policy.
  *
- * 1. Reads the local file to learn its size (rejects oversize files locally)
+ * 1. Opens the local file to learn its size (rejects unreadable and oversize files locally)
  * 2. Requests a presigned POST (url + policy fields) from the backend
  * 3. POSTs a multipart form (policy fields + `file`) directly to S3
  * 4. Returns the public image URL
@@ -25,17 +26,18 @@ export async function uploadAvatar(localUri: string): Promise<string> {
   const isPng = localUri.toLowerCase().endsWith('.png');
   const contentType = isPng ? 'image/png' : 'image/jpeg';
 
-  // Read the local file as a blob (for its size)
-  const response = await fetch(localUri);
-  const blob = await response.blob();
-  if (blob.size > MAX_AVATAR_BYTES) {
+  const file = new File(localUri);
+  if (!file.exists || file.size < 1) {
+    throw new Error('The selected image could not be read');
+  }
+  if (file.size > MAX_AVATAR_BYTES) {
     throw new Error('Avatar image must be 5 MB or smaller');
   }
 
   // Get presigned POST from backend
   const { data } = await apiClient.post<AvatarUploadResponse>('/uploads/avatar-url', {
     contentType,
-    contentLength: blob.size,
+    contentLength: file.size,
   });
 
   // Build the multipart form: policy fields first, file part last (S3 requires it).
@@ -43,12 +45,12 @@ export async function uploadAvatar(localUri: string): Promise<string> {
   for (const [name, value] of Object.entries(data.fields)) {
     form.append(name, value);
   }
-  // React Native's FormData uploads `{ uri, name, type }` objects natively.
-  form.append('file', {
-    uri: localUri,
-    name: `avatar.${isPng ? 'png' : 'jpg'}`,
-    type: contentType,
-  } as unknown as Blob);
+  // The file part is an expo-file-system `File`. Since Expo SDK 57 the global
+  // `fetch` is Expo's own, which encodes the multipart body in JavaScript and
+  // takes a string, a Blob or a File for each part. React Native's
+  // `{ uri, name, type }` part is refused there with "Unsupported FormDataPart
+  // implementation" (#576).
+  form.append('file', file);
 
   const res = await fetch(data.uploadUrl, { method: 'POST', body: form });
   if (!res.ok) {
@@ -65,7 +67,7 @@ export async function uploadAvatar(localUri: string): Promise<string> {
       status: String(res.status),
       code: code ?? 'unknown',
       contentType,
-      size: String(blob.size),
+      size: String(file.size),
     });
     throw error;
   }

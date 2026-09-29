@@ -17,7 +17,7 @@ React Native mobile application built with Expo for iOS and Android.
 ### Prerequisites
 
 - Node.js 22+
-- Xcode (for iOS Simulator) on macOS, or Android Studio for the Android Emulator
+- Xcode 26.4 or newer (for iOS Simulator) on macOS, or Android Studio for the Android Emulator. Xcode 27 works: the project is on Expo SDK 57, whose CLI knows that Xcode 27 replaced `Simulator.app` with `DeviceHub.app`. Minimum iOS is 16.4.
 - EAS CLI (`npx eas-cli` works via the local dev dep — no global install needed)
 
 ### Installation
