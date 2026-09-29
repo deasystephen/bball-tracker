@@ -229,8 +229,12 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
 
 CI applies migrations to an **empty** database (`ci.yml` starts a bare `postgres:18`), so a
 migration that backfills data (`UPDATE … SET`, `INSERT … SELECT`, then `SET NOT NULL`) first
-meets real rows at the production container start. Rehearse it here before merging; the
-permanent CI guard is #493. Steps 1–4 of Procedure A apply unchanged, except restore
+meets real rows at the production container start. The migration backfill guard (#493,
+[`docs/testing/migration-backfill-guard.md`](../testing/migration-backfill-guard.md)) runs every
+new migration against the seed's rows on each pull request, which catches a migration that
+cannot apply to a populated table at all. It does not meet production's rows, so for a backfill
+on a table that matters, rehearse it here as well before merging. Steps 1–4 of Procedure A apply
+unchanged, except restore
 **single-AZ, no deletion protection** (`--no-multi-az --no-deletion-protection`) so the
 copy is cheap and deletable in one call. Then, instead of step 5:
 

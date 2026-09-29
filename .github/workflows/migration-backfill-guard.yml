@@ -1,0 +1,46 @@
+name: Migration backfill guard
+
+# Runs the migrations a pull request adds against a database that is on the
+# base branch's schema and already holds the seed's rows (#493). The backend
+# job in ci.yml applies every migration to an empty database, which cannot see
+# a backfill fail. Design and limits: docs/testing/migration-backfill-guard.md
+#
+# This is a separate workflow on purpose: ci.yml is inside the path filter that
+# decides whether a merge deploys to ECS, and this file is not.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-backfill-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  migration-backfill-guard:
+    name: Migration backfill guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The pull request's merge commit and its first parent, which is the
+          # tip of the base branch the merge was built on.
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      # No path filter on the workflow: the script exits at once when the pull
+      # request adds no migration, so the check always reports and can be made
+      # a required check without blocking unrelated pull requests.
+      - name: Run new migrations against a seeded database on the previous schema
+        run: .github/scripts/migration-backfill-guard.sh HEAD^1
