@@ -373,6 +373,12 @@ never inline a role check in a screen:
 - Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
   (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
 - Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
+- **A full-screen error on a pushed route needs a way back (#589).** `components/ErrorState`
+  replaces the whole screen, header and back arrow included, so with only `onRetry` the user is
+  left with Try Again and the swipe gesture. Pass `onBack={() => router.back()}` wherever the
+  screen is a pushed route (`app/players/[id]/stats.tsx` does). Tab screens have the tab bar and
+  do not need it. Most of the other pushed screens that render `ErrorState` have not been
+  changed yet.
 - **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
   everything inside it from the accessibility tree, so a button nested in a pressable row can be
   tapped by a sighted user while VoiceOver and Maestro see only the row. On Profile → My kids
@@ -713,7 +719,13 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `seasonId` / `leagueId` / `playerId` filter — only system ADMINs skip it. That clause is
   `utils/permissions.ts#teamAccessWhere(userId, childIds)` (staff OR member OR league admin OR guardian
   of a member); it lives there, not inline, so the league-access predicates share one definition with it
-  and the two can never drift. `PATCH /teams/:id { seasonId }` moving a team into a different season requires
+  and the two can never drift. **A copy did drift (#589):** `StatsService.getPlayerOverallStats` decided
+  access with its own three-branch version (league admin, staff, member), so a guardian got 403 on
+  `GET /stats/players/:childId`, the screen every My kids row opens. It now runs the shared clause in
+  one query (`getAccessibleTeamIds`). Before writing "who may read this team" anywhere, use
+  `canAccessTeam` for one team or `teamAccessWhere` for a set. Proven against real Postgres in
+  `tests/integration/player-stats-access.db.test.ts`, one caller per branch.
+  `PATCH /teams/:id { seasonId }` moving a team into a different season requires
   `isLeagueAdmin` on the **target** season's league (in addition to `canManageTeam`), otherwise 403.
   `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
   (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.

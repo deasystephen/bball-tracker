@@ -46,7 +46,16 @@ appId: com.bballtracker.mobile
 - assertVisible: "LeBron James, Mother"
 
 # The tombstone stays on the Lakers roster with a Deleted chip (coach view).
-# Same logout steps as .maestro/logout.yaml (swipe, tap, confirm the alert).
+# Logout as in .maestro/logout.yaml, but with TWO swipes. A guardian's profile
+# is longer by the My kids section: after one swipe the Logout button rests
+# behind the translucent tab bar, where Maestro counts it as visible and the
+# tap lands on the centre tab button (it opened the Games tab). The second
+# swipe reaches the end of the screen, whose bottom padding keeps the button
+# clear of the bar; on a shorter profile it is a no-op.
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
 - swipe:
     start: 50%, 60%
     end: 50%, 20%

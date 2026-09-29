@@ -20,6 +20,7 @@ import {
   createTeamStats,
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
+import { teamAccessWhere } from '../../src/utils/permissions';
 
 describe('StatsService', () => {
   describe('calculatePlayerStats', () => {
@@ -945,14 +946,10 @@ describe('StatsService', () => {
             team: { ...team, season: { ...season, league } },
           }]);
         }
-        // Second call inside getAccessibleTeamIds: by teamIds + playerId
-        if (args.where.teamId && args.where.playerId === player.id) {
-          return Promise.resolve([{ teamId: team.id }]);
-        }
         return Promise.resolve([]);
       });
-      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]); // no league admin access
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]); // no staff access
+      // The access query answers with the team the caller can read.
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: team.id }]);
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: game.id, teamId: team.id }]);
       (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([stats]);
 
@@ -964,7 +961,7 @@ describe('StatsService', () => {
       expect(result.careerTotals.gamesPlayed).toBe(1);
     });
 
-    it('should grant access to league admin via getAccessibleTeamIds', async () => {
+    it('should return the teams the access query answers with', async () => {
       const leagueAdmin = createCoach({ id: 'league-admin' });
       const player = createPlayer({ id: 'player-la', name: 'Player LA' });
       const league = createLeague();
@@ -988,9 +985,7 @@ describe('StatsService', () => {
         }
         return Promise.resolve([]); // caller is not a team member
       });
-      // League admin returns the team
       (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: team.id }]);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: game.id, teamId: team.id }]);
       (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([stats]);
 
@@ -1000,7 +995,7 @@ describe('StatsService', () => {
       expect(result.careerTotals.points).toBe(8);
     });
 
-    it('should grant access to team staff via getAccessibleTeamIds', async () => {
+    it('should return zeroed stats for a readable team with no finished games', async () => {
       const staffUser = createCoach({ id: 'staff-user' });
       const player = createPlayer({ id: 'player-staff', name: 'P' });
       const league = createLeague();
@@ -1021,8 +1016,7 @@ describe('StatsService', () => {
         }
         return Promise.resolve([]);
       });
-      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ teamId: team.id }]); // staff
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: team.id }]);
       // No finished games
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([]);
@@ -1095,6 +1089,72 @@ describe('StatsService', () => {
       }
     });
 
+    // #589. This suite mocks the database, so it cannot show WHO gets access;
+    // tests/integration/player-stats-access.db.test.ts does that. What it can
+    // pin is that the service asks the shared rule, with the caller's children,
+    // in one query, and keeps no copy of its own.
+    it('should ask the shared team access rule, with the children of a guardian', async () => {
+      const guardian = createPlayer({ id: 'guardian-1', name: 'Gloria' });
+      const child = createPlayer({ id: 'child-1', name: 'Bryce' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-child', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: child.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === child.id) return Promise.resolve(child);
+        return Promise.resolve({ role: 'PARENT' });
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+        { ...member, team: { ...team, season: { ...season, league } } },
+      ]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([{ childId: child.id }]);
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: team.id }]);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await StatsService.getPlayerOverallStats(child.id, guardian.id);
+
+      expect(result.teams.map((t) => t.teamId)).toEqual([team.id]);
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith({
+        where: { parentId: guardian.id },
+        select: { childId: true },
+      });
+      expect(mockPrisma.team.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.team.findMany).toHaveBeenCalledWith({
+        where: { AND: [{ id: { in: [team.id] } }, teamAccessWhere(guardian.id, [child.id])] },
+        select: { id: true },
+      });
+      // The private copy queried these two tables; the shared rule does not.
+      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamMember.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not ask the access rule at all for a system admin', async () => {
+      const admin = createAdmin({ id: 'sys-admin' });
+      const player = createPlayer({ id: 'player-any', name: 'P' });
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ id: 'team-any', seasonId: season.id });
+      const member = createTeamMember({ teamId: team.id, playerId: player.id });
+
+      (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+        if (args.where.id === player.id) return Promise.resolve(player);
+        return Promise.resolve({ role: 'ADMIN' });
+      });
+      (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([
+        { ...member, team: { ...team, season: { ...season, league } } },
+      ]);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await StatsService.getPlayerOverallStats(player.id, admin.id);
+
+      expect(result.teams.map((t) => t.teamId)).toEqual([team.id]);
+      expect(mockPrisma.team.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.guardian.findMany).not.toHaveBeenCalled();
+    });
+
     it('should skip teams the caller cannot access', async () => {
       // Caller is a staff member on teamA only; player is on teamA and teamB.
       const staffUser = createCoach({ id: 'staff-partial' });
@@ -1121,8 +1181,7 @@ describe('StatsService', () => {
         }
         return Promise.resolve([]);
       });
-      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ teamId: teamA.id }]); // access only to A
+      (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([{ id: teamA.id }]); // access only to A
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: gameA.id, teamId: teamA.id }]);
       (mockPrisma.playerStats.findMany as jest.Mock).mockResolvedValue([statsA]);
 

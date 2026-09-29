@@ -70,6 +70,8 @@ export default function PlayerStatsScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : 'Failed to load stats'}
         onRetry={refetch}
+        // The error replaces the whole screen, header included (#589).
+        onBack={() => router.back()}
       />
     );
   }
