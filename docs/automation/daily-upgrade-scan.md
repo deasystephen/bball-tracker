@@ -35,6 +35,27 @@ The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
 the single runtime source of truth — the workflow tells Claude to read that
 file. There is no second copy to keep in sync.
 
+## What reaches production, and when (#570)
+
+The two automations merge the same way and deploy differently.
+
+| | Auto-merge enabled by | After the merge |
+| --- | --- | --- |
+| **Dependabot** | `GITHUB_TOKEN` (`dependabot-auto-merge.yml`) | No `CI` run starts on `main`, so nothing is deployed. A backend bump waits on `main` and ships with the next deploy |
+| **Claude scan** | the Claude GitHub App's token | `CI` runs on `main`. A pull request that touches `backend/` **deploys to production unattended**, usually between 15:00 and 19:00 UTC. It also carries any Dependabot bump that was waiting |
+
+Web and mobile pull requests deploy nothing in either case: the web app is not deployed from CI
+and mobile ships by OTA, which has its own guard (#562).
+
+So a security `override` for the backend is in production the same day, and a Dependabot
+backend bump is not in production until somebody deploys. To ship waiting bumps on purpose, start
+the `CI` workflow by hand on `main`. Every deploy lists what it carries in its run summary. The
+commands are in `docs/deployment/aws-setup.md`, "What a deploy carries".
+
+Dependabot's behaviour is kept on purpose. Enabling its auto-merge with a token that starts
+workflows would roll production on every Monday's bumps and on security updates on any day, and
+each rollout briefly splits live games.
+
 ## Buckets
 
 | Bucket | Examples | Action |

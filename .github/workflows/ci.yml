@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Deploy main by hand (#570): Actions -> CI -> Run workflow, on main. The
+  # whole suite runs first, then the deploy, whatever the path filter says.
+  # This is how changes that reached main without a deploy (backend bumps that
+  # Dependabot auto-merged) are shipped on purpose, at a chosen time.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -150,13 +155,14 @@ jobs:
   detect-changes:
     name: Detect backend changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      backend: ${{ steps.decide.outputs.backend }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
+        if: github.event_name == 'push'
         with:
           # Only non-markdown changes under these paths produce a new backend
           # container image. Mobile/web-only changes (e.g. nightly dep bumps) and
@@ -171,11 +177,26 @@ jobs:
               - '{backend/**,infra/**,docker/**,.github/workflows/ci.yml}'
               - '!**/*.md'
 
+      # A run started by hand always deploys: that is what it is for. The paths
+      # above are repeated in .github/scripts/deploy-contents.sh, which lists
+      # what a deploy carries; change them together.
+      - name: Decide
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FILTER_BACKEND: ${{ steps.filter.outputs.backend }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=${FILTER_BACKEND:-false}" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-deploy:
     name: Build & Deploy to ECS
     runs-on: ubuntu-latest
     needs: [lint-and-typecheck, test-backend, test-mobile, detect-changes]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-changes.outputs.backend == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.backend == 'true'
     # Serialize deploys to the shared ECS service. When the nightly upgrade scan
     # merges several PRs within minutes, concurrent deploy jobs would otherwise
     # race and the superseded one fails with a misleading "deployment not found /
@@ -188,6 +209,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: the summary below lists the commits since the one
+          # production is running.
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -198,6 +223,24 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # A deploy ships everything on main since the running commit, not only
+      # the change that started it (#570). The image tag is the commit it was
+      # built from, so the image the service runs names the running commit.
+      # This never blocks a deploy: the script always exits 0 and the step is
+      # allowed to fail.
+      - name: Summarize what this deploy carries
+        continue-on-error: true
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-production-cluster' }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE_NAME || 'bball-tracker-production-api' }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          task_definition="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' --output text || true)"
+          image="$(aws ecs describe-task-definition --task-definition "$task_definition" \
+            --query 'taskDefinition.containerDefinitions[0].image' --output text || true)"
+          .github/scripts/deploy-contents.sh "${image##*:}" "$GITHUB_SHA" "$PUSH_BEFORE" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -210,10 +253,10 @@ jobs:
           ECR_REPOSITORY: bball-tracker-backend
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest -f docker/Dockerfile .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" -f docker/Dockerfile .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Inject SENTRY_RELEASE into task definition
         run: |
@@ -257,4 +300,13 @@ jobs:
           cluster: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-production-cluster' }}
           wait-for-service-stability: true
           wait-for-minutes: 10
+
+      # /health returns the commit the answering task was built from (#570).
+      # This reports and never fails the job: the step above has already judged
+      # the deploy.
+      - name: Read the commit production reports
+        continue-on-error: true
+        env:
+          HEALTH_URL: ${{ vars.API_HEALTH_URL || 'https://api.hooplings.com/health' }}
+        run: .github/scripts/report-deployed-commit.sh "$HEALTH_URL" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
 

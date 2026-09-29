@@ -69,17 +69,20 @@ app.use(requestLogger);
 // unhealthy so ECS recycles it) and reports to Sentry.
 import prisma from './models';
 import { captureException } from './utils/sentry';
+import { deployedCommit } from './utils/release';
 
 app.get('/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', db: 'ok', commit: deployedCommit(), timestamp: new Date().toISOString() });
   } catch (err) {
     logger.error('Health check DB ping failed', {
       error: err instanceof Error ? err.message : String(err),
     });
     captureException(err, { flow: 'health-check' });
-    res.status(503).json({ status: 'degraded', db: 'down', timestamp: new Date().toISOString() });
+    res
+      .status(503)
+      .json({ status: 'degraded', db: 'down', commit: deployedCommit(), timestamp: new Date().toISOString() });
   }
 });
 
