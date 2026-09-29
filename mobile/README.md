@@ -37,6 +37,18 @@ npx expo run:ios
 npx expo run:android
 ```
 
+If `npx expo run:ios` stops with **"No code signing certificates are available to use"**: the app has the Associated Domains entitlement, and the Expo CLI wants a development certificate for it even on the simulator.
+
+1. Check what macOS considers valid: `security find-identity -v -p codesigning`.
+2. No certificate listed: Xcode → Settings → Accounts → Manage Certificates → "+" → Apple Development.
+3. A certificate exists but the command still reports 0 valid identities: install the certificate of Apple's issuing authority.
+   ```bash
+   curl -o ~/Downloads/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+   security add-certificates -k ~/Library/Keychains/login.keychain-db ~/Downloads/AppleWWDRCAG3.cer
+   ```
+
+After switching branches across an Expo SDK change, run `npm ci` and `npx expo prebuild --platform ios --clean` first; `run:ios` alone reuses the existing `ios/` folder. The root `CLAUDE.md` ("Toolchain") describes a build that needs no certificate.
+
 **Do not use** `npm start` / `npx expo start` with this project. Several native modules (Sentry, Reanimated, etc.) require a custom dev client; the legacy Expo Go flow does not work here. See `npx expo run:ios --help` for device-selection flags.
 
 ## Project Structure
