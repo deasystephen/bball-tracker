@@ -23,6 +23,7 @@
 jest.unmock('../../src/models');
 
 import { randomUUID } from 'node:crypto';
+import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { StatsService } from '../../src/services/stats-service';
 import { ForbiddenError } from '../../src/utils/errors';
@@ -62,18 +63,6 @@ async function mkOrg(key: string): Promise<{ leagueId: string; teamId: string; r
   });
   teams[key] = team.id;
   return { leagueId: league.id, teamId: team.id, roleId: role.id };
-}
-
-async function removeEverything(): Promise<void> {
-  const runTeams = await prisma.team.findMany({
-    where: { name: { endsWith: `-${RUN}` } },
-    select: { lineageId: true },
-  });
-  // Leagues cascade to seasons, teams, roles, staff and members.
-  await prisma.league.deleteMany({ where: { name: { endsWith: `-${RUN}` } } });
-  await prisma.teamLineage.deleteMany({ where: { id: { in: runTeams.map((t) => t.lineageId) } } });
-  // Users cascade to their guardian links.
-  await prisma.user.deleteMany({ where: { email: { endsWith: `.${RUN}@example.test` } } });
 }
 
 const teamIdsOf = (result: { teams: { teamId: string }[] }): string[] =>
@@ -133,7 +122,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await removeEverything();
+  await removeTestRows(prisma, { run: RUN, alsoUserIds: Object.values(users) });
   await prisma.$disconnect();
 });
 
