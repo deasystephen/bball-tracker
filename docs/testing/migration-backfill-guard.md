@@ -95,3 +95,16 @@ Recorded on 2026-09-29, when the guard was built.
 | A throwaway migration adding a `NOT NULL` column to `Team` | `HEAD` | failed with `23502`, exit code 1 |
 | An edit to a migration that is already merged | `HEAD` | failed before any container was started, exit code 1 |
 | No new migration | `HEAD` | exit code 0, nothing started |
+
+And in CI, on the same day:
+
+| Pull request | **Test Backend** (empty database) | **Migration backfill guard** |
+| --- | --- | --- |
+| #598, the guard itself, no new migration | passed | passed in 11 seconds, nothing started |
+| #599, a throwaway: `ADD COLUMN … NOT NULL` on `Team`, then `DROP COLUMN` | **passed** | **failed** with `23502` after 1 minute |
+
+#599 is the case the guard exists for: the empty-database job applied the migration and went
+green, and only the guard saw it fail. Its migration drops the column again so that the schema
+ends unchanged on an empty database; a first version without the `DROP` also turned Test
+Backend red, because the tests could no longer insert a team, which proved nothing about the
+migration step. #599 was closed without merging.
