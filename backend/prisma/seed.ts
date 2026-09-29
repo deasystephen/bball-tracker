@@ -6,6 +6,8 @@
 import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType, SubscriptionTier } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { removeTestRows } from '../tests/support/test-leftovers';
+import { FLOW_CREATED_OPPONENTS } from '../tests/support/flow-fixtures';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 /** #444 guardian child-deletion fixture (fixed UUID; see the Bryce James block). */
@@ -102,6 +104,18 @@ async function main() {
     console.log(`  Removed ${staleTombstones.count} account-deletion tombstone(s) from a previous E2E run`);
   }
 
+  // Rows that tests/integration/*.db.test.ts left behind when a run was
+  // interrupted (#584). They carry `@example.test` addresses and names with a
+  // run id; no seeded fixture does. 26 of them once filled the dev-login list.
+  const leftovers = await removeTestRows(prisma, 'all');
+  if (leftovers.users + leftovers.leagues + leftovers.teams > 0) {
+    console.log(
+      `  Removed what interrupted test runs left behind: ${leftovers.users} account(s), ` +
+        `${leftovers.leagues} league(s), ${leftovers.teams} team(s), ${leftovers.games} game(s), ` +
+        `${leftovers.invitations} invitation(s)`
+    );
+  }
+
   // =========================================================================
   // USERS
   // =========================================================================
@@ -173,12 +187,15 @@ async function main() {
   }
 
   // ...and the games the game flows create on his Lakers ("Test Rival" from
-  // game-lifecycle.yaml, "Tracking Rival" from game-tracking.yaml). They
-  // accumulate one per run, pollute the Games tab and push
-  // seeded games (e.g. guardian-rsvp.yaml's "vs Lakers") down the list until
-  // assertions time out. Game deletes cascade to events/RSVPs/stats rows.
+  // game-lifecycle.yaml, "Tracking Rival" from game-tracking.yaml, "Spectator
+  // Rival" from live-spectator.yaml). They accumulate one per run, pollute the
+  // Games tab and push seeded games (e.g. guardian-rsvp.yaml's "vs Lakers")
+  // down the list until assertions time out. "Spectator Rival" was missing
+  // here until #584, and each of its games stays IN_PROGRESS, so the Games tab
+  // had filled with live games. Game deletes cascade to events/RSVPs/stats rows.
+  // A flow that creates a game must add its opponent name to this list.
   const staleFixtureGames = await prisma.game.deleteMany({
-    where: { opponent: { in: ['Test Rival', 'Tracking Rival'] } },
+    where: { opponent: { in: FLOW_CREATED_OPPONENTS } },
   });
   if (staleFixtureGames.count > 0) {
     console.log(`    Removed ${staleFixtureGames.count} fixture game(s) from a previous E2E run`);

@@ -17,6 +17,7 @@ import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
 import { deletePreviousAvatar } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
+import { listDevUsers } from './dev-users';
 import { z } from 'zod';
 
 const router = Router();
@@ -141,17 +142,8 @@ if (process.env.NODE_ENV === 'development') {
    */
   router.get('/dev-users', async (_req, res) => {
     try {
-      const users = await prisma.user.findMany({
-        // Deleted accounts (#444) are tombstones with no email — never offer them
-        where: { deletedAt: null },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-        },
-        orderBy: { role: 'asc' },
-      });
+      // Seeded logins first, in a fixed order (#584): see dev-users.ts.
+      const users = await listDevUsers();
 
       res.json({ users });
     } catch (error) {

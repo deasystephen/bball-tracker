@@ -28,6 +28,7 @@
 jest.unmock('../../src/models');
 
 import { randomUUID } from 'node:crypto';
+import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import {
   getReadableLeagueIds,
@@ -50,8 +51,6 @@ const users: Ids = {};
 const leagues: Ids = {};
 const teams: Ids = {};
 const seasons: Ids = {};
-/** Lineages survive the league cascade (Restrict on the child side), so they are removed by hand. */
-const lineageIds: string[] = [];
 
 async function mkUser(key: string, role: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN'): Promise<string> {
   const u = await prisma.user.create({
@@ -90,7 +89,6 @@ beforeAll(async () => {
   });
   teams.a = ta.id;
   seasons.a = sa.id;
-  lineageIds.push(ta.lineageId);
   const role = await prisma.teamRole.create({
     data: { teamId: ta.id, type: 'HEAD_COACH', name: 'Head Coach', canManageTeam: true },
     select: { id: true },
@@ -107,7 +105,6 @@ beforeAll(async () => {
     data: { name: `TeamB-${RUN}`, season: { connect: { id: sb.id } }, lineage: { create: {} } },
     select: { id: true, lineageId: true },
   });
-  lineageIds.push(tb.lineageId);
   const roleB = await prisma.teamRole.create({
     data: { teamId: tb.id, type: 'HEAD_COACH', name: 'Head Coach', canManageTeam: true },
     select: { id: true },
@@ -155,10 +152,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // League deletes cascade to seasons -> teams -> staff/members/roles.
-  await prisma.league.deleteMany({ where: { name: { in: [LEAGUE_A, LEAGUE_B, LEAGUE_P] } } });
-  await prisma.teamLineage.deleteMany({ where: { id: { in: lineageIds } } });
-  await prisma.user.deleteMany({ where: { id: { in: Object.values(users) } } });
+  // By run id, not only by the ids collected along the way: a test that
+  // throws before it records a row still cleans up (#584). The collected
+  // user ids stay for rows that lost their run id on the way, such as an
+  // account that was deleted and is now a tombstone.
+  await removeTestRows(prisma, { run: RUN, alsoUserIds: Object.values(users) });
   await prisma.$disconnect();
 });
 

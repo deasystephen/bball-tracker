@@ -25,6 +25,7 @@
  */
 jest.unmock('../../src/models');
 import { randomUUID } from 'node:crypto';
+import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { AccountService, DELETED_USER_NAME, DELETED_LEAGUE_NAME } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
@@ -36,9 +37,6 @@ jest.setTimeout(30000);
 const RUN = randomUUID().slice(0, 8);
 const ids = {
   users: {} as Record<string, string>,
-  leagues: [] as string[],
-  lineages: [] as string[],
-  games: [] as string[],
 };
 
 async function mkUser(key: string, role: 'PLAYER' | 'COACH' | 'PARENT', extra: Record<string, unknown> = {}): Promise<string> {
@@ -63,7 +61,6 @@ async function mkLeagueSeasonTeam(label: string, isActive: boolean, personalOwne
     data: { name: `ZZ-${label}-${RUN}`, ...(personalOwnerId && { personalOwnerId }) },
     select: { id: true },
   });
-  ids.leagues.push(league.id);
   const season = await prisma.season.create({
     data: { leagueId: league.id, name: `S-${RUN}`, isActive },
     select: { id: true },
@@ -72,7 +69,6 @@ async function mkLeagueSeasonTeam(label: string, isActive: boolean, personalOwne
     data: { name: `${label}-${RUN}`, season: { connect: { id: season.id } }, lineage: { create: {} } },
     select: { id: true, lineageId: true },
   });
-  ids.lineages.push(team.lineageId);
   const head = await prisma.teamRole.create({
     data: { teamId: team.id, type: 'HEAD_COACH', name: 'Head Coach', canManageTeam: true, canManageRoster: true },
     select: { id: true },
@@ -124,7 +120,6 @@ beforeAll(async () => {
     select: { id: true },
   });
   personalLeagueId = pl.id;
-  ids.leagues.push(pl.id);
   await prisma.leagueAdmin.create({ data: { leagueId: pl.id, userId: coach } });
 
   // Staff rows
@@ -170,7 +165,6 @@ beforeAll(async () => {
     select: { id: true },
   });
   gameId = game.id;
-  ids.games.push(game.id);
   await prisma.gameEvent.createMany({
     data: [
       { gameId: game.id, playerId: coach, eventType: 'SHOT', metadata: { made: true, points: 2 } },
@@ -231,14 +225,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  const userIds = Object.values(ids.users);
-  // `invitedById` has no cascade on either invitation table
-  await prisma.guardianInvitation.deleteMany({ where: { invitedById: { in: userIds } } });
-  await prisma.teamInvitation.deleteMany({ where: { invitedById: { in: userIds } } });
-  await prisma.game.deleteMany({ where: { id: { in: ids.games } } });
-  await prisma.league.deleteMany({ where: { id: { in: ids.leagues } } });
-  await prisma.teamLineage.deleteMany({ where: { id: { in: ids.lineages } } });
-  await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  // By run id, not only by the ids collected along the way: a test that
+  // throws before it records a row still cleans up (#584). The collected
+  // user ids stay for rows that lost their run id on the way, such as an
+  // account that was deleted and is now a tombstone.
+  await removeTestRows(prisma, { run: RUN, alsoUserIds: Object.values(ids.users) });
   await prisma.$disconnect();
 });
 

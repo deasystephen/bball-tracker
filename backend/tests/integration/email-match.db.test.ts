@@ -18,6 +18,7 @@
  */
 jest.unmock('../../src/models');
 import { randomUUID } from 'node:crypto';
+import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
@@ -31,8 +32,6 @@ jest.setTimeout(30000);
 
 const RUN = randomUUID().slice(0, 8);
 const userIds: string[] = [];
-const leagueIds: string[] = [];
-const lineageIds: string[] = [];
 
 /** `<local>.<run>@example.test` — the run id keeps reruns and parallel CI apart. */
 function address(local: string): string {
@@ -77,7 +76,6 @@ beforeAll(async () => {
   coachId = await mkUser('coach', { role: 'COACH', workosUserId: `workos-coach-${RUN}` });
 
   const league = await prisma.league.create({ data: { name: `ZZ-email-match-${RUN}` }, select: { id: true } });
-  leagueIds.push(league.id);
   const season = await prisma.season.create({
     data: { leagueId: league.id, name: `S-${RUN}`, isActive: true },
     select: { id: true },
@@ -87,7 +85,6 @@ beforeAll(async () => {
     select: { id: true, lineageId: true },
   });
   teamId = team.id;
-  lineageIds.push(team.lineageId);
 
   const head = await prisma.teamRole.create({
     data: {
@@ -112,11 +109,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.guardianInvitation.deleteMany({ where: { teamId } });
-  await prisma.teamInvitation.deleteMany({ where: { teamId } });
-  await prisma.league.deleteMany({ where: { id: { in: leagueIds } } });
-  await prisma.teamLineage.deleteMany({ where: { id: { in: lineageIds } } });
-  await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  // By run id, not only by the ids collected along the way: a test that
+  // throws before it records a row still cleans up (#584). The collected
+  // user ids stay for rows that lost their run id on the way, such as an
+  // account that was deleted and is now a tombstone.
+  await removeTestRows(prisma, { run: RUN, alsoUserIds: userIds });
   await prisma.$disconnect();
   jest.restoreAllMocks();
 });
