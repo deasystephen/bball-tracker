@@ -16,7 +16,7 @@ Mail that people read, at `hooplings.com` itself, is a separate path through Goo
 | Item | Value |
 | --- | --- |
 | Sender | `noreply@mail.hooplings.com`, SES v2, `us-east-1` |
-| Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=none` |
+| Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=none` with reports to `dmarc@hooplings.com` |
 | What is sent | Transactional only: team and guardian invitations, RSVP confirmations, team announcements. No marketing. |
 | Suppression | SES **account-level suppression list**, reasons `BOUNCE` and `COMPLAINT` |
 | Configuration set | `bball-tracker-production-transactional` — named on every send |
@@ -218,13 +218,18 @@ After the deploy:
 
 ## DMARC
 
-`_dmarc.mail.hooplings.com` is `v=DMARC1; p=none`: monitor only, and with no `rua` tag nobody
-receives the aggregate reports yet.
+`_dmarc.hooplings.com` and `_dmarc.mail.hooplings.com` both read
+`v=DMARC1; p=none; rua=mailto:dmarc@hooplings.com`: monitor only, with the aggregate reports
+sent to `dmarc@hooplings.com`. The policy is `local.dmarc_policy` in
+[`infra/workspace.tf`](../../infra/workspace.tf), one value for both records.
 
 | Step | Owner | State |
 | --- | --- | --- |
-| A mailbox that can receive reports, and the `rua` tag on both DMARC records | #555 (Google Workspace on `hooplings.com`) | open |
-| Tighten to `p=quarantine`, after about 30 days of reports show only aligned mail | #555, step 5 | not started |
+| The `rua` tag on both DMARC records | #555 (Google Workspace on `hooplings.com`) | done, applied 2026-09-29 |
+| Tighten to `p=quarantine`, after about 30 days of reports show only aligned mail | #555, step 5 | not started; earliest 2026-10-29 |
+
+Every source in the reports must be one of ours (Google Workspace for `hooplings.com`, Amazon
+SES for `mail.hooplings.com`) and must pass DKIM or SPF **aligned**.
 
 Do not tighten the policy without the reports: `p=quarantine` on a domain with an unknown
 legitimate sender sends that sender's mail to spam.
