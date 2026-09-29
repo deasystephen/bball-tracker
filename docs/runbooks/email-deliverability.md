@@ -8,6 +8,9 @@ Everything here is declared in [`infra/ses.tf`](../../infra/ses.tf),
 [`infra/alerting.tf`](../../infra/alerting.tf) (#449). Do not create or edit these resources in
 the AWS console.
 
+Mail that people read, at `hooplings.com` itself, is a separate path through Google Workspace
+(#555): see [Mail at the apex](#mail-at-the-apex-google-workspace).
+
 ## At a glance
 
 | Item | Value |
@@ -225,6 +228,46 @@ receives the aggregate reports yet.
 
 Do not tighten the policy without the reports: `p=quarantine` on a domain with an unknown
 legitimate sender sends that sender's mail to spam.
+
+## Mail at the apex: Google Workspace
+
+People read mail at `hooplings.com` through Google Workspace (#555). The DNS records are in
+[`infra/workspace.tf`](../../infra/workspace.tf); the account, its one seat and the addresses
+are set in the Google admin console.
+
+| Name | Sender | SPF | DKIM | DMARC record |
+| --- | --- | --- | --- | --- |
+| `hooplings.com` | Google Workspace | `include:_spf.google.com` | `google._domainkey.hooplings.com` | `_dmarc.hooplings.com` |
+| `mail.hooplings.com` | Amazon SES | `include:amazonses.com`, at `bounce.mail.hooplings.com` | three Easy DKIM CNAMEs | `_dmarc.mail.hooplings.com` |
+
+Keep the two on separate names. SES does not belong in the apex SPF and Google does not belong
+on the `mail.` subdomain: separate names keep the DMARC alignment of one path independent of
+the other.
+
+### Addresses
+
+All four are aliases or groups on the one paid seat, not extra users.
+
+| Address | Purpose |
+| --- | --- |
+| `support@hooplings.com` | User support, and the public contact for the App Store listing (#450, #451) |
+| `privacy@hooplings.com` | Privacy policy contact and data-subject requests (#25, [data-subject requests](data-subject-requests.md)) |
+| `alerts@hooplings.com` | Production alerts |
+| `dmarc@hooplings.com` | DMARC aggregate reports, named by the `rua` tag of both DMARC records |
+
+A group rejects mail from outside the organization unless it is set to accept it. After
+creating or changing an address, send it a message from an outside account.
+
+### Do not move these to `hooplings.com`
+
+These accounts stay on an address outside the domain, on purpose. Do not tidy them up.
+
+| Account | Why it stays |
+| --- | --- |
+| AWS root account email | The domain is registered and its DNS is hosted in this AWS account. If the account is locked or the zone breaks, mail to `@hooplings.com` stops, and that is where the password reset would be sent. |
+| Google Workspace admin recovery address | Same dependency: the recovery message for the Workspace account cannot go to a mailbox inside it. |
+| Apple ID, GitHub and Expo owner logins | A recovery identity must not depend on the infrastructure it recovers. |
+| The application ADMIN login | Email is the login identity in the app (`syncUser` links by email) and the admin allowlist keys on it. Changing it is an account migration, not a forwarding change. |
 
 ## What to tell AWS
 
