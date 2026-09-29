@@ -20,7 +20,7 @@ the app/API:
 | Head Coach (team staff) | Auto-assigned to whoever creates the team. |
 | Assistant Coach / Team Manager (team staff) | Head coach (or league admin / ADMIN) adds an **existing** account: team detail → Staff card → "Add staff" (email + role chips), or `POST /teams/:teamId/staff { email \| userId, roleType }`. The target must have signed in once — the endpoint never creates users (404 otherwise). |
 | League admin | `POST /leagues/:id/admins { userId }` — **system-ADMIN-only**. Appears as `user.leagueAdminOf: [leagueId]` on `GET /auth/me`. |
-| Team member (roster) | Accept a team invitation (email link / Invitations tab), or be added as a managed roster player (`POST /teams/:id/managed-players`, no email). |
+| Team member (roster) | Accept a team invitation (email link / Invitations tab), or be added as a managed roster player (`POST /teams/:teamId/players`, no email). |
 
 The old `backend/scripts/promote-test-users.ts` ("bump `+headcoach` to COACH, insert
 `TeamStaff`/`Guardian` rows") was deleted — all of those are now ordinary app actions.

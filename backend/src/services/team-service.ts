@@ -10,7 +10,6 @@ import {
   AddPlayerInput,
   UpdateTeamMemberInput,
   TeamQueryParams,
-  CreateManagedPlayerInput,
   AddStaffInput,
   StaffRoleType,
 } from '../api/teams/schemas';
@@ -190,17 +189,6 @@ const TEAM_MEMBER_INCLUDE = {
   team: { select: TEAM_SUMMARY_SELECT },
 } satisfies Prisma.TeamMemberInclude;
 
-const MANAGED_MEMBER_INCLUDE = {
-  player: {
-    select: {
-      ...USER_SUMMARY_SELECT,
-      isManaged: true,
-      managedById: true,
-    },
-  },
-  team: { select: TEAM_SUMMARY_SELECT },
-} satisfies Prisma.TeamMemberInclude;
-
 const TEAM_ROLE_SELECT = {
   id: true,
   teamId: true,
@@ -235,9 +223,6 @@ export type TeamDetailView = Omit<TeamDetail, 'members'> & {
 export type TeamListItem = Prisma.TeamGetPayload<{ include: typeof TEAM_LIST_INCLUDE }>;
 export type TeamMemberWithRelations = Prisma.TeamMemberGetPayload<{
   include: typeof TEAM_MEMBER_INCLUDE;
-}>;
-export type ManagedTeamMember = Prisma.TeamMemberGetPayload<{
-  include: typeof MANAGED_MEMBER_INCLUDE;
 }>;
 export type TeamStaffWithRelations = Prisma.TeamStaffGetPayload<{
   include: typeof TEAM_STAFF_INCLUDE;
@@ -1217,58 +1202,5 @@ export class TeamService {
     });
 
     return roles;
-  }
-
-  /**
-   * Add a managed player to a team (no email/account required - COPPA compliant)
-   * @param teamId Team ID
-   * @param data Managed player data
-   * @param userId User ID of the coach creating the managed player
-   */
-  static async addManagedPlayer(
-    teamId: string,
-    data: CreateManagedPlayerInput,
-    userId: string
-  ): Promise<ManagedTeamMember> {
-    // Verify team exists
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-    });
-
-    if (!team) {
-      throw new NotFoundError('Team not found');
-    }
-
-    // Check permission
-    const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
-    if (!canManageRoster) {
-      throw new ForbiddenError('You do not have permission to manage this team\'s roster');
-    }
-
-    // Managed user + team membership are created atomically: a failure on the
-    // second insert must not leave an orphan managed user that belongs to no
-    // roster and can't be reached through any team (audit #70).
-    return prisma.$transaction(async (tx) => {
-      const managedUser = await tx.user.create({
-        data: {
-          name: data.name,
-          role: 'PLAYER',
-          isManaged: true,
-          managedById: userId,
-          email: null,
-          profilePictureUrl: data.profilePictureUrl,
-        },
-      });
-
-      return tx.teamMember.create({
-        data: {
-          teamId,
-          playerId: managedUser.id,
-          jerseyNumber: data.jerseyNumber,
-          position: data.position,
-        },
-        include: MANAGED_MEMBER_INCLUDE,
-      });
-    });
   }
 }

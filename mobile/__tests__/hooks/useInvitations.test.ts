@@ -236,15 +236,12 @@ describe('useInvitations', () => {
       expect(input.expiresInDays).toBe(14);
     });
 
-    it('should accept create-and-invite input with name + email (audit #69)', () => {
+    it('should accept a resend (supersede) for a player', () => {
       const input: CreateInvitationInput = {
-        name: 'Jane Hooper',
-        email: 'jane@example.com',
-        profilePictureUrl: 'https://cdn.example.com/a.png',
-        jerseyNumber: 7,
+        playerId: 'player-1',
+        supersede: true,
       };
-      expect(input.email).toBe('jane@example.com');
-      expect(input.playerId).toBeUndefined();
+      expect(input.supersede).toBe(true);
     });
 
     it('should accept complete input', () => {

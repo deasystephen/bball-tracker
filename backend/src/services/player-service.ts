@@ -131,7 +131,7 @@ export class PlayerService {
    * on first sign-in, so this is restricted to system ADMINs and to staff who
    * manage a roster somewhere (team staff with `canManageRoster`, league
    * admins) — the "create & invite" flow (audit #2). Roster-only players
-   * without an email go through `POST /teams/:id/managed-players`.
+   * without an email go through `POST /teams/:teamId/players`.
    * @param data Player creation data
    * @param caller The authenticated user
    */

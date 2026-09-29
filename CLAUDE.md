@@ -822,9 +822,11 @@ eng-review amendments recorded there).
 
 - **`POST /teams/:teamId/players`** (gate `canManageRoster`) is the unified Add Player call —
   name required, `playerEmail?`, `guardianEmail?` + `guardianRelationship?`, jersey/position/photo.
-  It supersedes both `POST /teams/:id/managed-players` and the `{name,email}` arm of
-  `POST /teams/:id/invitations` (both stay mounted for old clients; remove after OTA adoption).
-  The path previously answered 410 — that tombstone was deleted deliberately. Consent model:
+  It replaced `POST /teams/:id/managed-players` and the `{name,email}` arm of
+  `POST /teams/:id/invitations`, both **removed in #418** once the request logs showed no
+  traffic to either: the first now answers 404, the second 400 (`playerId is required`). Do not
+  add a tombstone for them. The unified path itself previously answered 410 — that tombstone was
+  deleted deliberately. Consent model:
   - **Case 1** (no email): managed `User` + `TeamMember`, one transaction. `rostered: true`.
   - **Case 2** (email with no *claimed* account — includes reusing an **unclaimed** pre-provisioned
     row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
@@ -836,8 +838,7 @@ eng-review amendments recorded there).
     `rostered: false` in the response; `guardianEmail` is refused with `guardianInvited: false` +
     reason (guardian system requires membership).
   - Unique-email races: `user.create` P2002 is caught and retried once against the winner row
-    (both the unified endpoint and the deprecated create-and-invite arm, which also sets the
-    managed flags now).
+    (`resolveEmailRaceWinner`).
   - Response: `{ rostered, invited, member, invitation, guardianInvited, guardianReason?, emails:
     { player?, guardian? } }` — **per-send email flags**; a failed SES send returns `false` and the
     client must warn the coach (silent failures were invisible — SES-sandbox incident 2026-08-28).
@@ -881,7 +882,7 @@ eng-review amendments recorded there).
   to `ILIKE` with the value as an **unescaped pattern**, so `_` matched any character and `%` any
   run: a lookup for `first_last@x.com` also returned the account `firstXlast@x.com`, and an
   invitation, a staff role or a guardian link could land on a stranger. `emailEquals` escapes
-  `\`, `_` and `%`. It covers `User.email` (Add Player, the name+email invite arm, guardian
+  `\`, `_` and `%`. It covers `User.email` (Add Player, guardian
   find-or-create, add staff by email, SES events) and `GuardianInvitation.invitedEmail`
   (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on the
   raw filter anywhere else in `src/`; `contains` + `insensitive` (search) stays allowed.
@@ -900,7 +901,7 @@ eng-review amendments recorded there).
   guard. Awaited invite/guardian email sends are bounded at 5s (`utils/promise-timeout.ts`) so
   routes stay under the mobile client's 10s timeout.
 - The invitation email template branches on `variant`: `'added'` (cases 1-2, "You've been added…
-  activate your access") vs default "invited to join" (case 3 + deprecated arm).
+  activate your access") vs default "invited to join" (case 3).
 - `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random
   `token` and emails the player a `hooplings.com/invite/<token>` link. The token is a **bearer secret**:
   `POST /invitations/by-token/:token/accept` is unauthenticated and accepts on behalf of the invited player.
@@ -928,12 +929,12 @@ eng-review amendments recorded there).
   accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
   `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
   other callers with team access (rostered players) remain scoped to `playerId = caller`.
-- **Create-and-invite (audit #69).** `POST /teams/:id/invitations` accepts **either** `{ playerId }` or
-  `{ name, email, profilePictureUrl? }` (never both — `createInvitationSchema` `superRefine`). With an email:
-  an existing account with that email is reused (so a retry or a self-signed-up player just works);
-  otherwise the `User` (`role: PLAYER`, unverified) and the `TeamInvitation` are created in **one
-  `$transaction`**, so a failed invite never leaves an orphan player. Mobile now uses the unified
-  `POST /teams/:teamId/players` instead (this arm stays mounted for pre-unification builds).
+- **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
+  and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is
+  gone: `createInvitationSchema` requires `playerId` and strips unknown keys, so a body without
+  it is a 400 and `name` / `email` sent next to a `playerId` are ignored. A new player, with or
+  without an email, is created only by `POST /teams/:teamId/players`, which keeps the
+  one-transaction rule (no orphan player when the invite fails).
 - **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
   (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `hooplings.com/invite/<token>` is
   rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
@@ -1034,7 +1035,7 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 `sendMessages` inspects Expo tickets immediately and schedules `checkReceipts()` ~15 min later (unref'd timer); any ticket/receipt with `DeviceNotRegistered` deletes that `PushToken` (`pruneDeadTokens`). Other receipt errors are logged only (audit #60). The jest mock in `tests/__mocks__/expo-server-sdk.js` stubs both the send and receipt APIs.
 
 ### Transactions (audit #70)
-`TeamService.addManagedPlayer` creates the managed user + team membership inside one `$transaction` so a failed second insert can't leave an orphan managed user (the `createTeam` half — team + roles + staff row — landed with audit #49 in `fix/infra-limits-and-reconnects`).
+`InvitationService.addRosterPlayer` creates the managed user + team membership (and, with an email, the invitation) inside one `$transaction` so a failed later insert can't leave an orphan managed user (`TeamService.addManagedPlayer`, where the rule started, was removed in #418; the `createTeam` half — team + roles + staff row — landed with audit #49 in `fix/infra-limits-and-reconnects`).
 
 ### Key Patterns
 - Layered architecture: API routes → Services → Models (Prisma)
@@ -1053,7 +1054,7 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - **Account type self-select (audit #9):** every WorkOS sign-up is created as `PLAYER`. `PATCH /auth/me/role { role: 'PLAYER' | 'COACH' }` (authenticated, general limiter) lets a user switch between those two; `ADMIN`/`PARENT` get 403 and `ADMIN` can never be selected. Mobile shows `app/onboarding/role.tsx` once per user after sign-in when the role is `PLAYER` (`utils/role-onboarding.ts`, flag `roleChosen:<userId>` in AsyncStorage) and again from Profile → "Change account type". `auth-store.updateUser(patch)` merges the new role without re-firing login analytics.
 - Dev-login tokens (`dev_…`) have no refresh token and are only accepted when `NODE_ENV=development`.
 - **Account linking** (`WorkOSService.syncUser`, audit #2/#25): resolve by `workosUserId` first; then by `email` **only** if that row has no `workosUserId` (a pre-provisioned/managed row) — linking sets `workosUserId`, clears `isManaged`/`managedById`, and re-checks the admin allowlist (`isAdminEmail`) so a pre-seeded row can't suppress ADMIN bootstrap. An email already bound to a *different* WorkOS identity is a **409** from `/auth/callback` (not a merge, not a 500); P2002 races map to 409 too. `name` is set only on create; `profilePictureUrl` only on create or when the local value is null — in-app edits survive re-login. `/auth/callback` returns `profilePictureUrl` in `user`.
-- **Email edits**: `email` is the login identity. `PATCH /players/:id { email }` is allowed for ADMINs, and for the managing coach of a managed player only until that player signs in (`workosUserId` null); players cannot change their own email (403). `POST /players` (pre-create an account for an email) requires ADMIN or roster-managing staff (`TeamStaff` role with `canManageRoster`, or a league admin) — 403 otherwise; roster-only players still go through `POST /teams/:id/managed-players`.
+- **Email edits**: `email` is the login identity. `PATCH /players/:id { email }` is allowed for ADMINs, and for the managing coach of a managed player only until that player signs in (`workosUserId` null); players cannot change their own email (403). `POST /players` (pre-create an account for an email) requires ADMIN or roster-managing staff (`TeamStaff` role with `canManageRoster`, or a league admin) — 403 otherwise; roster-only players go through `POST /teams/:teamId/players`.
 - **Self profile** (audit #10): `PATCH /auth/me { name?, profilePictureUrl? }` (authenticated, any role; `''` clears the avatar; email/role not editable here) returns `{ success, user }` with `profilePictureUrl`; `GET /auth/me` includes `profilePictureUrl` too; a replaced avatar object is removed from S3 best-effort via `deletePreviousAvatar` (audit #61). Mobile Profile uses `hooks/useProfile.ts#useUpdateProfile` (merges into `auth-store` via `updateUser`) — never `PATCH /players/:id`, which only accepts PLAYER rows and 404s for ADMIN/COACH.
 - **Logout** (audit #51): `POST /auth/logout` (authenticated, no body) revokes the WorkOS session named by the token's `sid` claim via `WorkOSService.revokeSession`, which invalidates the bound refresh token. Responds `200 { success: true, revoked: boolean }` — `revoked: false` for dev tokens, tokens without `sid`, or a WorkOS outage (reported to Sentry); the client must clear local tokens regardless. `DELETE /auth/push-token` only deletes tokens owned by the caller (audit #47); call it *before* `/auth/logout` while the access token is still valid.
 - **Mobile logout sequence** (audit #17/#18/#19/#41/#62): `auth-store.logout()` (async) bumps the **logout epoch**, then — with the access token still stored — runs `services/session-logout.ts#runRemoteLogout()`: `DELETE /auth/push-token` for the token this device registered (`hooks/useNotifications.ts#unregisterPushToken`, tracked in module state after a successful POST) → `POST /auth/logout`; each best-effort with a 4s timeout. Then `clearSession()`: bumps the epoch again, fires logout analytics, clears the store, and runs `runLocalLogoutCleanup()` = `resetSocket()` + `queryClient.clear()` (`services/query-client.ts` now owns the QueryClient; `_layout.tsx` just provides it). `clearSession()` is synchronous and network-free — it is what the api-client calls when the session is dead (refresh rejected), so it can never recurse. The store reaches these side effects through `store/session-hooks.ts` (registered by `services/session-logout.ts`, imported for effect in `_layout.tsx`) so the store never imports the api-client. `refreshAccessToken()` captures `getLogoutEpoch()` before `POST /auth/refresh` and discards the result if it changed, so an in-flight refresh cannot resurrect a session after logout. `useNotificationSetup` is keyed on `isAuthenticated` (not the token string) and swallows registration rejections.

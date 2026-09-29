@@ -7,7 +7,7 @@
  */
 
 import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../../src/api/seasons/schemas';
-import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, createManagedPlayerSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
+import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
 import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
 import { createGameSchema, updateGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
@@ -147,57 +147,30 @@ describe('Schema Validation', () => {
         expect(result.success).toBe(true);
       });
 
-      describe('createInvitationSchema create-and-invite (audit #69)', () => {
-        it('accepts name + email without playerId', () => {
+      describe('createInvitationSchema is playerId-only (#418)', () => {
+        it('rejects name + email without playerId (the removed create-and-invite arm)', () => {
           const result = createInvitationSchema.safeParse({
-            name: '  Jane Hooper ',
+            name: 'Jane Hooper',
             email: 'jane@example.com',
             jerseyNumber: 7,
           });
-          expect(result.success).toBe(true);
-          if (result.success) {
-            expect(result.data.name).toBe('Jane Hooper');
-            expect(result.data.playerId).toBeUndefined();
-            expect(result.data.expiresInDays).toBe(7);
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            expect(result.error.issues.map((issue) => issue.message)).toEqual(['playerId is required']);
           }
         });
 
-        it('accepts an https profilePictureUrl with name + email', () => {
+        it('strips name, email and profilePictureUrl sent alongside playerId', () => {
           const result = createInvitationSchema.safeParse({
+            playerId: UUID_ID,
             name: 'Jane',
             email: 'jane@example.com',
             profilePictureUrl: 'https://cdn.example.com/a.png',
           });
           expect(result.success).toBe(true);
-        });
-
-        it('rejects a body with neither playerId nor name + email', () => {
-          expect(createInvitationSchema.safeParse({}).success).toBe(false);
-          expect(createInvitationSchema.safeParse({ name: 'Jane' }).success).toBe(false);
-          expect(createInvitationSchema.safeParse({ email: 'jane@example.com' }).success).toBe(false);
-        });
-
-        it('rejects playerId combined with name/email', () => {
-          const result = createInvitationSchema.safeParse({
-            playerId: UUID_ID,
-            name: 'Jane',
-            email: 'jane@example.com',
-          });
-          expect(result.success).toBe(false);
-        });
-
-        it('rejects an invalid email and an empty name', () => {
-          expect(createInvitationSchema.safeParse({ name: 'Jane', email: 'nope' }).success).toBe(false);
-          expect(createInvitationSchema.safeParse({ name: '   ', email: 'jane@example.com' }).success).toBe(false);
-        });
-
-        it('rejects a non-http profilePictureUrl', () => {
-          const result = createInvitationSchema.safeParse({
-            name: 'Jane',
-            email: 'jane@example.com',
-            profilePictureUrl: 'ftp://cdn.example.com/a.png',
-          });
-          expect(result.success).toBe(false);
+          if (result.success) {
+            expect(result.data).toEqual({ playerId: UUID_ID, expiresInDays: 7, supersede: false });
+          }
         });
       });
 
@@ -666,95 +639,6 @@ describe('Schema Validation', () => {
     });
   });
 
-  describe('Managed Player Schema', () => {
-    describe('createManagedPlayerSchema', () => {
-      it('should accept valid managed player with all fields', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Young Player',
-          jerseyNumber: 5,
-          position: 'PG',
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should accept name only (jersey and position optional)', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Young Player',
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should reject empty name', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: '',
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject missing name', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          jerseyNumber: 5,
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject name longer than 100 characters', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'A'.repeat(101),
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should accept jersey number 0', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          jerseyNumber: 0,
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should accept jersey number 99', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          jerseyNumber: 99,
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should reject jersey number 100', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          jerseyNumber: 100,
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject negative jersey number', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          jerseyNumber: -1,
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject non-integer jersey number', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          jerseyNumber: 5.5,
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject position longer than 50 characters', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          position: 'A'.repeat(51),
-        });
-        expect(result.success).toBe(false);
-      });
-    });
-  });
-
   describe('Player Query Schema (isManaged filter)', () => {
     it('should accept isManaged=true as string', () => {
       const result = playerQuerySchema.safeParse({
@@ -828,55 +712,6 @@ describe('Schema Validation', () => {
   });
 
   describe('Profile Picture URL Validation', () => {
-    describe('createManagedPlayerSchema profilePictureUrl', () => {
-      it('should accept valid https URL', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/user/image.jpg',
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should accept valid http URL', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          profilePictureUrl: 'http://localhost:3000/avatars/test.jpg',
-        });
-        expect(result.success).toBe(true);
-      });
-
-      it('should reject javascript: URI', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          profilePictureUrl: 'javascript:alert(1)',
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject data: URI', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          profilePictureUrl: 'data:image/png;base64,abc123',
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should reject non-URL string', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-          profilePictureUrl: 'not-a-url',
-        });
-        expect(result.success).toBe(false);
-      });
-
-      it('should accept omitted profilePictureUrl', () => {
-        const result = createManagedPlayerSchema.safeParse({
-          name: 'Player',
-        });
-        expect(result.success).toBe(true);
-      });
-    });
-
     describe('updatePlayerSchema profilePictureUrl', () => {
       it('should accept valid https URL', () => {
         const result = updatePlayerSchema.safeParse({

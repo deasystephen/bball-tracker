@@ -6,50 +6,25 @@ import { z } from 'zod';
 import { GuardianRelationship } from '@prisma/client';
 
 /**
- * Schema for creating a team invitation.
+ * Schema for creating a team invitation: invite an existing user by
+ * `playerId`. With `supersede` this is the Resend path.
  *
- * Either invite an existing user by `playerId`, or create-and-invite a new
- * player in one call with `name` + `email` (audit #69: the old two-step
- * create-player-then-invite left an orphan user when the second call failed).
+ * The `{ name, email }` create-and-invite arm (audit #69) was removed in #418;
+ * new players go through `POST /teams/:teamId/players` (`addRosterPlayerSchema`).
+ * Unknown keys are stripped, so a pre-unification client that still sends
+ * `{ name, email }` is answered 400 for the missing `playerId`.
  */
-export const createInvitationSchema = z
-  .object({
-    playerId: z.string().uuid('Invalid player ID format').optional(),
-    name: z.string().trim().min(1, 'Name is required').max(100, 'Name too long').optional(),
-    email: z.string().trim().email('Invalid email format').max(255).optional(),
-    profilePictureUrl: z
-      .string()
-      .url()
-      .refine((url) => url.startsWith('https://') || url.startsWith('http://'), {
-        message: 'URL must use http or https protocol',
-      })
-      .optional(),
-    jerseyNumber: z.number().int().min(0).max(99).optional(),
-    position: z.string().max(50).optional(),
-    message: z.string().max(500).optional(),
-    expiresInDays: z.number().int().min(1).max(30).default(7),
-    // Resend: expire the player's current live PENDING invitation (if any) and
-    // create a fresh one through this same path, in one transaction. Without
-    // it a live PENDING invitation is a 400 (dedupe).
-    supersede: z.boolean().default(false),
-  })
-  .superRefine((data, ctx) => {
-    const hasPlayerId = data.playerId !== undefined;
-    const hasNewPlayerField =
-      data.name !== undefined || data.email !== undefined || data.profilePictureUrl !== undefined;
-
-    if (hasPlayerId && hasNewPlayerField) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Provide either playerId or name and email, not both',
-      });
-    } else if (!hasPlayerId && !(data.name && data.email)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Provide playerId, or name and email to create and invite a new player',
-      });
-    }
-  });
+export const createInvitationSchema = z.object({
+  playerId: z.string({ error: 'playerId is required' }).uuid('Invalid player ID format'),
+  jerseyNumber: z.number().int().min(0).max(99).optional(),
+  position: z.string().max(50).optional(),
+  message: z.string().max(500).optional(),
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+  // Resend: expire the player's current live PENDING invitation (if any) and
+  // create a fresh one through this same path, in one transaction. Without
+  // it a live PENDING invitation is a 400 (dedupe).
+  supersede: z.boolean().default(false),
+});
 
 /**
  * Schema for invitation query parameters

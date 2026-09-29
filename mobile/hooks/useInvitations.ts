@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { teamKeys, invitationKeys, playerKeys, type InvitationsQueryParams } from './query-keys';
+import { teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
@@ -111,12 +111,12 @@ export interface InvitationResponse {
 }
 
 /**
- * Invite an existing user by `playerId`, or create-and-invite a new player in
- * a single backend call with `name` + `email` (the server creates the user
- * and the invitation in one transaction, so a failure leaves no orphan
- * player — audit #69).
+ * Invite an existing user by `playerId`. New players are created through the
+ * unified Add Player call (`useAddRosterPlayer`); the server no longer accepts
+ * `name` + `email` here (#418).
  */
 export type CreateInvitationInput = {
+  playerId: string;
   jerseyNumber?: number;
   position?: string;
   message?: string;
@@ -127,10 +127,7 @@ export type CreateInvitationInput = {
    * "Invite" on the roster are both this call with `supersede: true`.
    */
   supersede?: boolean;
-} & (
-  | { playerId: string; name?: never; email?: never; profilePictureUrl?: never }
-  | { playerId?: never; name: string; email: string; profilePictureUrl?: string }
-);
+};
 
 // Query key factories live in ./query-keys (dependency-free, cycle-safe).
 export { invitationKeys };
@@ -202,10 +199,6 @@ export function useCreateInvitation() {
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
       // The team payload's invite-status join changed (chips)
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
-      if (variables.data.email) {
-        // A new player account may have been created; refresh player search
-        queryClient.invalidateQueries({ queryKey: playerKeys.all });
-      }
     },
   });
 }

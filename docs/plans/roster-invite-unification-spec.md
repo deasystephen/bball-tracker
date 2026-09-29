@@ -108,9 +108,10 @@ emails: { player?: boolean, guardian?: boolean } }` — per-send flags (review T
 sends two independent best-effort emails; the UI warns specifically about whichever failed.
 
 Zod: `addRosterPlayerSchema` (superRefine: `guardianRelationship` iff `guardianEmail`;
-`playerEmail !== guardianEmail`). Old endpoints stay mounted and functional during the transition
-(the deprecated create-and-invite arm additionally adopts the case-2 managed flags), removal is a
-follow-up after OTA adoption.
+`playerEmail !== guardianEmail`). Old endpoints stayed mounted and functional during the
+transition (the deprecated create-and-invite arm additionally adopted the case-2 managed flags).
+**Both were removed in #418** (2026-09-29): `POST /teams/:id/managed-players` answers 404 and
+`POST /teams/:id/invitations` accepts `{ playerId }` only.
 
 ### Invitation lifecycle
 
@@ -229,6 +230,12 @@ user-visible outcome.
    (runtime 1.2.0, builds #25+); verify manifest per the OTA checklist; confirm no native dep.
 4. **Post-ship:** `/document-release` pass; status comments on touched issues; deprecated-endpoint
    removal follow-up.
+5. **Deprecated-endpoint removal (#418, done 2026-09-29).** Adoption evidence: the API request
+   logs (Datadog, `service:bball-tracker-api`, 15 days of retention, 2026-09-14 to 2026-09-29)
+   held no `POST …/managed-players` and no `POST …/invitations`, against one `POST …/players`.
+   The only clients that can still call the old paths are builds up to #24 (runtime 1.1.0),
+   which the unification OTA never reached. Such a client now gets a 404 or a 400; no tombstone
+   was added.
 
 ## Parallelization
 

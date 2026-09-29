@@ -266,7 +266,8 @@ export class InvitationService {
   }
 
   /**
-   * Create a new team invitation.
+   * Create a team invitation for an existing user (`data.playerId`). New
+   * players are created by `addRosterPlayer`.
    *
    * With `data.supersede` a live PENDING invitation for the player is expired
    * and replaced instead of answering 400 — this is how "Resend" works
@@ -314,81 +315,19 @@ export class InvitationService {
         message: data.message,
       });
 
-    let invitation: InvitationWithRelations;
+    const player = await prisma.user.findUnique({
+      where: { id: data.playerId },
+    });
 
-    if (data.playerId) {
-      // Invite an existing user
-      const player = await prisma.user.findUnique({
-        where: { id: data.playerId },
-      });
-
-      if (!player) {
-        throw new NotFoundError('User not found');
-      }
-
-      await this.assertSupersedeTarget(teamId, player, data.supersede);
-
-      invitation = data.supersede
-        ? await this.createInvitationRowSuperseding(invitationData(player.id))
-        : await this.createInvitationRow(invitationData(player.id));
-    } else {
-      // Create-and-invite (audit #69). `name` + `email` are guaranteed by the
-      // schema. If the email already belongs to a user (e.g. a retry after a
-      // partial failure, or a player who signed up on their own) reuse that
-      // account instead of failing; otherwise create the user and the
-      // invitation in ONE transaction so a failed invite leaves no orphan.
-      // Two coaches racing the same new email both pass the findUnique — the
-      // loser's create hits P2002 and retries once against the now-existing
-      // row instead of surfacing a 500.
-      // Emails are matched case-insensitively and stored lowercase: WorkOS
-      // normalizes to lowercase, and syncUser claims by exact match, so a
-      // mixed-case entry would create an unclaimable duplicate and bypass the
-      // case-3 consent branch (red-team RT1).
-      const email = (data.email as string).trim().toLowerCase();
-      const name = data.name as string;
-
-      const existingUser = await prisma.user.findFirst({
-        where: { email: emailEquals(email) },
-      });
-
-      if (existingUser) {
-        await this.assertSupersedeTarget(teamId, existingUser, data.supersede);
-
-        invitation = data.supersede
-          ? await this.createInvitationRowSuperseding(invitationData(existingUser.id))
-          : await this.createInvitationRow(invitationData(existingUser.id));
-      } else {
-        try {
-          invitation = await prisma.$transaction(async (tx) => {
-            const created = await tx.user.create({
-              data: {
-                name,
-                email,
-                role: 'PLAYER',
-                emailVerified: false,
-                profilePictureUrl: data.profilePictureUrl,
-                // The creating coach manages this account until it is claimed
-                // (chip derivation + B2.10 edit rights; unification spec T2).
-                isManaged: true,
-                managedById: userId,
-              },
-              select: { id: true },
-            });
-
-            return tx.teamInvitation.create({
-              data: invitationData(created.id),
-              select: INVITATION_SELECT,
-            });
-          });
-        } catch (err) {
-          const racedUser = await this.resolveEmailRaceWinner(email, err);
-          await this.assertSupersedeTarget(teamId, racedUser, data.supersede);
-          invitation = data.supersede
-            ? await this.createInvitationRowSuperseding(invitationData(racedUser.id))
-            : await this.createInvitationRow(invitationData(racedUser.id));
-        }
-      }
+    if (!player) {
+      throw new NotFoundError('User not found');
     }
+
+    await this.assertSupersedeTarget(teamId, player, data.supersede);
+
+    const invitation = data.supersede
+      ? await this.createInvitationRowSuperseding(invitationData(player.id))
+      : await this.createInvitationRow(invitationData(player.id));
 
     // A superseding resend for an already-rostered (case 2) player repeats the
     // "you've been added" framing, not "invited to join" (red-team RT6).
@@ -531,9 +470,7 @@ export class InvitationService {
   }
 
   /**
-   * The supersede guard trio, applied identically on every createInvitation
-   * arm so the option set cannot drift per branch (pre-landing review,
-   * maintainability specialist): an Active (claimed + rostered) member is
+   * The supersede guard trio: an Active (claimed + rostered) member is
    * refused; otherwise a live PENDING row is expired when superseding, and a
    * rostered case-2 player is a legitimate target.
    */
@@ -1046,7 +983,7 @@ export class InvitationService {
     let playerId: string;
 
     if (!data.playerEmail) {
-      // Case 1 — roster-only managed player (today's addManagedPlayer).
+      // Case 1 — roster-only managed player.
       result.member = await prisma.$transaction(async (tx) => {
         const managedUser = await tx.user.create({
           data: {
