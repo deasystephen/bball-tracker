@@ -122,7 +122,7 @@ resource "aws_route53_record" "workspace_dmarc" {
 variable "google_site_verification" {
   description = "Domain verification value from the Google Workspace setup, in full (`google-site-verification=...`). Empty = no Workspace records at all."
   type        = string
-  default     = ""
+  default     = "google-site-verification=n83bYCDNtnKeYlrgnTaTzhjQ_yMw3_sAHl1gFfva7Eg"
 
   validation {
     condition     = var.google_site_verification == "" || can(regex("^google-site-verification=[A-Za-z0-9_-]+$", var.google_site_verification))
