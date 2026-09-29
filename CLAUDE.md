@@ -1442,6 +1442,9 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   Container Insights metric: turning `containerInsights` off in `ecs.tf` stops it and the
   task-count alarm fires permanently, so replace that alarm in the same change. Sentry
   alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
+  Two Sentry rules email the members of the Sentry organization, a different list from the SNS
+  subscriber: "New issue in production" (#448) and Sentry's default high-priority rule. The
+  runbook's "Sentry alert rules" section is their only record; update it with any change.
 - **[Email deliverability](docs/runbooks/email-deliverability.md)** — how bounces and complaints
   are handled (#449), the first three things to check when `ses-bounce-rate` /
   `ses-complaint-rate` or the event-queue alarms fire, how to release an address a coach has
