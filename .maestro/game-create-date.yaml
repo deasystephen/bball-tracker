@@ -17,8 +17,14 @@ appId: com.bballtracker.mobile
 - tapOn: "Create new game"
 - assertVisible: "New Game"
 
-# The opponent field has focus and its keyboard is up: the state the screen
-# opens in, and the one in which the old picker was hidden.
+# The screen opens with the opponent field focused and its keyboard up, and
+# the date row can rest UNDER that keyboard. Maestro still counts such a row as
+# visible (with or without centerElement), so a tap on it lands on the keyboard
+# and types into the opponent field: seen on iOS 26.5, not on iOS 27. Put the
+# keyboard away first. Enter blurs a single-line field; hideKeyboard is not
+# reliable on the simulator (CLAUDE.md). That the APP puts the keyboard away
+# before it opens the sheet is pinned by __tests__/app/game-create-date.test.tsx.
+- pressKey: Enter
 - scrollUntilVisible:
     element:
       id: "game-date-button"

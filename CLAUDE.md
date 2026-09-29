@@ -1313,6 +1313,12 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   profile.yaml rename kept typing a stray "v" from tapping Save). Deterministic dismissals: `pressKey:
   Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
   `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own label.
+- **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
+  `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
+  into whatever field has focus (the flow then fails on its next assert, with a stray word in the
+  input as the only clue). It depends on keyboard geometry: `.maestro/game-create-date.yaml` passed
+  on iOS 27 and failed on iOS 26.5 for this reason. On a screen that opens with a focused field,
+  dismiss the keyboard first (`pressKey: Enter`), then scroll and tap.
 - **`assertVisible` passes on rows behind the translucent tab-bar overlay; taps there silently no-op**
   (content deliberately scrolls behind the bar). Before tapping anything near the bottom of a tab
   screen, `scrollUntilVisible` with `centerElement: true` so the tap point clears the bar.
