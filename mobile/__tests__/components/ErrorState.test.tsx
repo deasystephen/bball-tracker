@@ -96,6 +96,37 @@ describe('ErrorState', () => {
     });
   });
 
+  // #589: an error that replaces a pushed screen takes the header and its
+  // back arrow with it.
+  describe('back button', () => {
+    it('is absent unless onBack is provided', () => {
+      const { queryByText } = render(<ErrorState message="Something went wrong" onRetry={jest.fn()} />);
+      expect(queryByText('Go back')).toBeNull();
+    });
+
+    it('calls onBack, and leaves onRetry alone', () => {
+      const onBack = jest.fn();
+      const onRetry = jest.fn();
+      const { getByLabelText } = render(
+        <ErrorState message="Something went wrong" onRetry={onRetry} onBack={onBack} />
+      );
+
+      fireEvent.press(getByLabelText('Go back'));
+
+      expect(onBack).toHaveBeenCalledTimes(1);
+      expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it('can be the only button, with its own label', () => {
+      const { getByText, queryByText } = render(
+        <ErrorState message="Something went wrong" onBack={jest.fn()} backLabel="Back to team" />
+      );
+
+      expect(getByText('Back to team')).toBeTruthy();
+      expect(queryByText('Try Again')).toBeNull();
+    });
+  });
+
   describe('complete error state', () => {
     it('should render complete error state with all props', () => {
       const onRetryMock = jest.fn();

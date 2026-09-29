@@ -4,7 +4,7 @@
 
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
-import { canAccessTeam } from '../utils/permissions';
+import { canAccessTeam, getGuardianChildIds, teamAccessWhere } from '../utils/permissions';
 import { GameEventType, GameStatus } from '@prisma/client';
 
 // Types for stats responses
@@ -1147,61 +1147,35 @@ export class StatsService {
   }
 
   /**
-   * Batch-check which team IDs a user can access.
-   * Returns a Set of accessible teamIds.
+   * Which of `teamIds` the caller may read, as a Set.
+   *
+   * The rule is the shared `teamAccessWhere` (staff OR member OR league admin
+   * OR guardian of a member), the same one `canAccessTeam` and the team list
+   * apply. This method used to carry its own copy with three of the four
+   * branches, so a guardian was refused their child's stats (#589). Never
+   * write the rule out here again; change it in `utils/permissions.ts`.
    */
   private static async getAccessibleTeamIds(
     userId: string,
     teamIds: string[]
   ): Promise<Set<string>> {
-    // Check if system admin (can access all)
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { role: true },
     });
 
+    // A system admin reads every team.
     if (user?.role === 'ADMIN') {
       return new Set(teamIds);
     }
 
-    // Check league admin access, staff membership, and player membership in parallel
-    const [leagueAdminTeams, staffTeams, memberTeams] = await Promise.all([
-      // Teams where user is a league admin
-      prisma.team.findMany({
-        where: {
-          id: { in: teamIds },
-          season: {
-            league: {
-              admins: { some: { userId } },
-            },
-          },
-        },
-        select: { id: true },
-      }),
-      // Teams where user is staff
-      prisma.teamStaff.findMany({
-        where: {
-          teamId: { in: teamIds },
-          userId,
-        },
-        select: { teamId: true },
-      }),
-      // Teams where user is a player member
-      prisma.teamMember.findMany({
-        where: {
-          teamId: { in: teamIds },
-          playerId: userId,
-        },
-        select: { teamId: true },
-      }),
-    ]);
+    const childIds = await getGuardianChildIds(userId);
+    const readable = await prisma.team.findMany({
+      where: { AND: [{ id: { in: teamIds } }, teamAccessWhere(userId, childIds)] },
+      select: { id: true },
+    });
 
-    const accessible = new Set<string>();
-    for (const t of leagueAdminTeams) accessible.add(t.id);
-    for (const t of staffTeams) accessible.add(t.teamId);
-    for (const t of memberTeams) accessible.add(t.teamId);
-
-    return accessible;
+    return new Set(readable.map((team) => team.id));
   }
 
   /**

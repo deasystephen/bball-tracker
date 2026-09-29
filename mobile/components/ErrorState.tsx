@@ -19,6 +19,14 @@ interface ErrorStateProps {
   message: string;
   onRetry?: () => void;
   retryLabel?: string;
+  /**
+   * Shows a second button that leaves the screen. Pass it wherever the error
+   * replaces the whole screen of a pushed route: the header with its back
+   * arrow is gone then, and without this the only control left is Try Again
+   * (#589).
+   */
+  onBack?: () => void;
+  backLabel?: string;
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({
@@ -26,6 +34,8 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   message,
   onRetry,
   retryLabel = 'Try Again',
+  onBack,
+  backLabel = 'Go back',
 }) => {
   const { colors } = useTheme();
   const iconSize = getResponsiveValue(48, 64);
@@ -53,6 +63,16 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
           variant="primary"
           style={styles.button}
           accessibilityLabel={retryLabel}
+          accessibilityRole="button"
+        />
+      )}
+      {onBack && (
+        <Button
+          title={backLabel}
+          onPress={onBack}
+          variant="outline"
+          style={onRetry ? styles.secondButton : styles.button}
+          accessibilityLabel={backLabel}
           accessibilityRole="button"
         />
       )}
@@ -85,5 +105,8 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: spacing.lg,
+  },
+  secondButton: {
+    marginTop: spacing.sm,
   },
 });
