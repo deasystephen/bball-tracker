@@ -222,15 +222,18 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 The rules live in Sentry, not in this repository. They were created through Sentry's API; to
 change one, edit it in Sentry (Alerts) and update the table above in the same change.
 
-## Not yet automated
+## Datadog has logs, and no monitors
 
-One item from #448 lives outside Terraform and is done by hand. Its status is tracked on the
-issue, not here.
+Datadog receives the API's logs (`infra/datadog.tf`) and alerts on nothing. Its seven default
+monitors were deleted on 2026-09-29 (#448): they queried `system.*` host metrics, which Fargate
+never emits, so all seven sat in "No Data", and each notified the literal placeholder
+`@your-team-handle`. Alerting is CloudWatch and Sentry.
 
-- **The seven placeholder Datadog monitors.** The default host-monitor pack (CPU, load, disk,
-  memory, network) queries `system.*` host metrics that Fargate never emits, so all seven sit in
-  "No Data", and each notifies the literal placeholder `@your-team-handle`. Delete or retarget
-  them. No Datadog Terraform provider is configured — `infra/datadog.tf` only ships logs.
+If Datadog offers its default host-monitor pack again, decline it: on Fargate those monitors can
+never fire. No Datadog Terraform provider is configured, so a monitor created there would exist
+outside this repository.
 
-Also not covered by any alarm today: a failed automated RDS backup, and Redis memory or
+## Not covered
+
+Not covered by any alarm today: a failed automated RDS backup, and Redis memory or
 evictions (the cache is best-effort and fails open).
