@@ -108,3 +108,39 @@ export async function deletePreviousAvatar(
     });
   }
 }
+
+/**
+ * Best-effort removal of an avatar object the caller uploaded but that will
+ * never be referenced (a case-3 Add Player creates an invitation only, so the
+ * photo uploaded ahead of the request would otherwise be orphaned, #419).
+ *
+ * `imageUrl` is client-supplied, so this deletes only when the key sits under
+ * the caller's own upload prefix `avatars/<userId>/` (the shape
+ * `generateAvatarUploadUrl` issues); any other URL is ignored, or a coach could
+ * name another user's avatar and have it deleted. Failures are logged, never
+ * thrown — the invitation has already been created and emailed.
+ */
+export async function discardOwnAvatar(
+  imageUrl: string | null | undefined,
+  userId: string
+): Promise<void> {
+  if (!isManagedAvatarUrl(imageUrl)) {
+    return;
+  }
+  // Check the prefix on the parsed path, not the raw string: `deleteAvatar`
+  // takes the key from `URL.pathname`, which collapses `..` segments, so a raw
+  // `avatars/<me>/../<other>/x.jpg` would pass a string check and delete
+  // `<other>`'s object.
+  if (!new URL(imageUrl).pathname.startsWith(`/avatars/${userId}/`)) {
+    return;
+  }
+
+  try {
+    await deleteAvatar(imageUrl);
+  } catch (err) {
+    logger.warn('Failed to discard unreferenced avatar object (ignored)', {
+      imageUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
