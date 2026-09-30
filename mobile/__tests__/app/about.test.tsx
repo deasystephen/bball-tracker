@@ -8,10 +8,11 @@
  */
 
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Linking, Share } from 'react-native';
 
-import AboutScreen, { formatAboutDiagnostics, getAboutInfo } from '../../app/about';
+import AboutScreen, { buildSupportMailto, formatAboutDiagnostics, getAboutInfo } from '../../app/about';
 
+const mockShowToast = jest.fn();
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 
 // Mutable stand-in for expo-updates module state (read at render time).
@@ -37,6 +38,7 @@ let mockNativeApplication: { nativeBuildVersion?: string | number | null } | nul
 
 jest.mock('expo-router', () => ({ useRouter: () => mockRouter }));
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
+jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
 jest.mock('expo', () => ({
   ...jest.requireActual('expo'),
   requireOptionalNativeModule: (name: string) =>
@@ -134,6 +136,47 @@ describe('AboutScreen', () => {
     const { getByLabelText } = render(<AboutScreen />);
     fireEvent.press(getByLabelText('Go back'));
     expect(mockRouter.back).toHaveBeenCalled();
+  });
+
+  describe('Contact support (#450)', () => {
+    it('shows the support address on a row labelled for a screen reader', () => {
+      const { getByLabelText, getByText } = render(<AboutScreen />);
+
+      expect(getByText('support@hooplings.com')).toBeTruthy();
+      expect(getByLabelText('Contact support, support@hooplings.com')).toBeTruthy();
+    });
+
+    it('opens a message to support that already carries the diagnostics', async () => {
+      const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+      const { getByTestId } = render(<AboutScreen />);
+      fireEvent.press(getByTestId('about-contact-support'));
+
+      await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1));
+      const url = openSpy.mock.calls[0][0];
+      expect(url.startsWith('mailto:support@hooplings.com?subject=Hooplings%20support&body=')).toBe(true);
+      const body = decodeURIComponent(url.split('&body=')[1]);
+      expect(body).toContain('v1.4.0 (build 32)');
+      expect(body).toContain(OTA_ID);
+      expect(mockShowToast).not.toHaveBeenCalled();
+    });
+
+    it('says where to write when the device has no mail app', async () => {
+      jest.spyOn(Linking, 'openURL').mockRejectedValue(new Error('Unable to open URL'));
+      const { getByTestId } = render(<AboutScreen />);
+      fireEvent.press(getByTestId('about-contact-support'));
+
+      await waitFor(() =>
+        expect(mockShowToast).toHaveBeenCalledWith('No mail app found. Write to support@hooplings.com', 'info')
+      );
+    });
+
+    it('builds a link that a mail app can parse', () => {
+      const url = buildSupportMailto(getAboutInfo());
+
+      // Line breaks and spaces are percent-encoded; a raw one ends the link.
+      expect(url).not.toMatch(/[\s]/);
+      expect(url.split('?')).toHaveLength(2);
+    });
   });
 
   describe('getAboutInfo / formatAboutDiagnostics', () => {

@@ -5,7 +5,9 @@ import { invitationTemplate } from '../../src/services/mailer/templates/invitati
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
 import { guardianInvitationTemplate } from '../../src/services/mailer/templates/guardian-invitation';
-import { APP_NAME } from '../../src/services/mailer/templates/brand';
+import { APP_NAME, SUPPORT_EMAIL } from '../../src/services/mailer/templates/brand';
+import { readdirSync, readFileSync } from 'fs';
+import path from 'path';
 
 // Mock the AWS SES SDK so SesMailer tests don't make real network calls
 jest.mock('@aws-sdk/client-sesv2', () => {
@@ -128,6 +130,41 @@ describe('createMailer', () => {
       expect(input).not.toHaveProperty('ConfigurationSetName');
     });
   });
+
+  describe('Reply-To (#450)', () => {
+    const sesModule = jest.requireMock('@aws-sdk/client-sesv2') as { SendEmailCommand: jest.Mock };
+
+    beforeEach(() => {
+      process.env.AWS_SES_REGION = 'us-east-1';
+      process.env.SES_FROM_ADDRESS = 'noreply@mail.example.test';
+      sesModule.SendEmailCommand.mockClear();
+    });
+
+    // The sender is a no-reply address whose only MX is the SES bounce
+    // handler: without Reply-To an answer to an invitation reaches nobody.
+    it('sends every message with the support inbox as Reply-To', async () => {
+      await createMailer().send(makeParams());
+
+      expect(sesModule.SendEmailCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ ReplyToAddresses: [SUPPORT_EMAIL] })
+      );
+    });
+
+    it('the support inbox is on the apex of the production domain, not on the SES subdomain', () => {
+      const taskDefinition = JSON.parse(
+        readFileSync(path.resolve(__dirname, '../../../infra/task-definition.json'), 'utf8')
+      ) as { containerDefinitions: Array<{ environment?: Array<{ name: string; value: string }> }> };
+      const env = new Map(
+        taskDefinition.containerDefinitions.flatMap((c) => c.environment ?? []).map((e) => [e.name, e.value])
+      );
+      const apex = new URL(env.get('PUBLIC_APP_URL') ?? '').hostname;
+      const sender = env.get('SES_FROM_ADDRESS') ?? '';
+
+      expect(SUPPORT_EMAIL).toBe(`support@${apex}`);
+      expect(sender.endsWith(`@mail.${apex}`)).toBe(true);
+      expect(SUPPORT_EMAIL.split('@')[1]).not.toBe(sender.split('@')[1]);
+    });
+  });
 });
 
 describe('SesMailer', () => {
@@ -175,6 +212,19 @@ describe('SesMailer', () => {
       })
     );
     expect(sesModule.__mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets Reply-To when given an address, and leaves it out otherwise (#450)', async () => {
+    await new SesMailer({
+      region: 'us-east-1',
+      fromAddress: 'noreply@mail.example.test',
+      replyToAddress: 'help@example.test',
+    }).send(makeParams());
+    await new SesMailer({ region: 'us-east-1', fromAddress: 'noreply@mail.example.test' }).send(makeParams());
+
+    const [[withReplyTo], [without]] = sesModule.SendEmailCommand.mock.calls as Array<[Record<string, unknown>]>;
+    expect(withReplyTo.ReplyToAddresses).toEqual(['help@example.test']);
+    expect(without).not.toHaveProperty('ReplyToAddresses');
   });
 
   // Audit #48: recipient addresses must not reach info-level logs.
@@ -523,5 +573,30 @@ describe('brand copy (domain migration PR2, D12)', () => {
 
   it.each(renders.filter(([label]) => !label.endsWith('subject')))('%s carries the brand footer or copy', (_label, out) => {
     expect(out).toContain(APP_NAME);
+  });
+
+  // #450. A new template that skips the shared footer fails here once it is
+  // added to the list above.
+  it.each(renders.filter(([label]) => !label.endsWith('subject')))(
+    '%s names the support address and says where a reply goes',
+    (_label, out) => {
+      expect(out).toContain(SUPPORT_EMAIL);
+      expect(out).toContain(`Replies go to ${APP_NAME} support, not to your coach.`);
+    }
+  );
+
+  it.each(renders.filter(([label]) => label.endsWith('html')))('%s links the support address', (_label, out) => {
+    expect(out).toContain(`<a href="mailto:${SUPPORT_EMAIL}"`);
+  });
+
+  it('every template file is in the list above', () => {
+    const dir = path.resolve(__dirname, '../../src/services/mailer/templates');
+    const names = renders.map(([label]) => label.split(' ')[0]);
+    const helpers = ['brand.ts', 'footer.ts', 'index.ts'];
+    const files = readdirSync(dir)
+      .filter((file) => !helpers.includes(file))
+      .map((file) => file.replace(/\.ts$/, ''));
+
+    expect(files.sort()).toEqual([...new Set(names)].sort());
   });
 });

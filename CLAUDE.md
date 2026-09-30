@@ -218,7 +218,11 @@ Backend API (Node.js/Express)
   yet), channel, and a Share-sheet export (`formatAboutDiagnostics`) for OTA verification. This replaced the
   hardcoded version string in the Profile footer (it had drifted), and is the designated home for Terms of
   Service / Privacy Policy / open-source-license rows once #25 publishes the documents — don't add those
-  links anywhere else. The App-version row appends the native build number ("v1.2.0 (build 28)") read via
+  links anywhere else. The **Help** card under the diagnostics holds **Contact support** (#450,
+  `testID about-contact-support`, label `"Contact support, support@hooplings.com"`): it opens
+  `buildSupportMailto(info)`, a `mailto:` to `config/env.ts#SUPPORT_EMAIL` with the diagnostics in the
+  body, and shows a toast with the address when no mail app answers (every simulator). It is the only
+  support link in the app; legal rows go below it. The App-version row appends the native build number ("v1.2.0 (build 28)") read via
   `requireOptionalNativeModule('ExpoApplication')` — never the `expo-application` JS wrapper, which would
   crash binaries without the module: `expo-application` first shipped in build #28 (cut 2026-08-28); since
   the 1.3.0 runtime boundary (#504) every OTA-reachable binary has it, but the guard stays for the bare-version
@@ -1116,6 +1120,14 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - **Never log `req.originalUrl`.** `request-logger.ts` logs `loggablePath(req)`: the path with secret segments masked (`/invitations/by-token/<x>`, `/teams/:id/calendar/<x>`, `/invite/<x>` → `[redacted]`) plus a query string whose *keys* are kept and whose sensitive *values* (`code`, `state`, `token`, anything containing `token`/`secret`/`password`/`api_key`) are masked. Helpers live in `backend/src/utils/redact.ts` (`redactUrl`, `redactPath`, `redactQueryString`, `redactQueryObject`) — reuse them for any new log line that includes a URL.
 - Backend Sentry (`utils/sentry.ts`): `beforeSend` redacts `request.url`, `request.query_string`, breadcrumb `data.url` and the `transaction` name with the same helpers; `beforeSendTransaction` does the same for performance transactions (`transaction`, `request.url`, `contexts.trace.data.*url*`, span descriptions/data), which bypass `beforeSend`.
 - Mobile Sentry (`services/sentry.ts`): `redactUrl` masks by **value** (not only by key name) on `request.url`, `request.query_string`, breadcrumb `data.url`/`from`/`to`, and `transaction`; `beforeSendTransaction` reuses `beforeSend`.
+- **Every email carries `Reply-To: support@hooplings.com` and the shared footer (#450).** The
+  address is `mailer/templates/brand.ts#SUPPORT_EMAIL`; `createMailer` passes it to `SesMailer`
+  (`replyToAddress`), and every template ends with `templates/footer.ts#footerHtml()` /
+  `footerText()`, which name the address and say that a reply goes to support, not to the coach.
+  A new template must end with the footer and be added to the `renders` list in
+  `tests/services/mailer.test.ts`, which fails on a template file that is missing from it. The
+  mobile copy of the address is `config/env.ts#SUPPORT_EMAIL`; `__tests__/config/env.test.ts`
+  fails when the two differ. No postal address is printed (owner decision 2026-09-29).
 - `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints solely under `NODE_ENV=development`.
 
 ### Email bounces & complaints (#449)

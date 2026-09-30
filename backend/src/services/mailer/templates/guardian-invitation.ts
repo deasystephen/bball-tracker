@@ -1,6 +1,7 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
 import { APP_NAME } from './brand';
+import { footerHtml, footerText } from './footer';
 
 /**
  * Sent when a roster manager invites an adult to be a player's guardian
@@ -28,8 +29,7 @@ export const guardianInvitationTemplate: EmailTemplate = {
   <p>As a guardian you can see ${e(vars.childName)}'s schedule, stats and team announcements, and RSVP to games on their behalf.</p>
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
   ${ctaBlock}
-  <hr>
-  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
+  ${footerHtml()}
 </body>
 </html>`;
   },
@@ -49,6 +49,6 @@ This invitation expires on ${vars.expiresAt}.
 
 ${ctaBlock}
 
-${APP_NAME}`;
+${footerText()}`;
   },
 };

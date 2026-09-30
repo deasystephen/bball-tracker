@@ -47,5 +47,15 @@ appId: com.bballtracker.mobile
 - assertVisible: "Runtime version"
 - assertVisible: "Channel"
 - assertVisible: "Share diagnostics"
+# Support contact (#450). The row is ONE element whose label joins its two
+# texts, so the address is matched through the label. Asserted, never tapped:
+# it opens the mail app, and the flow cannot come back from there.
+- scrollUntilVisible:
+    element: "Contact support, support@hooplings.com"
+    direction: DOWN
+    visibilityPercentage: 60
+- scrollUntilVisible:
+    element: "Go back"
+    direction: UP
 - tapOn: "Go back"
 - assertVisible: "Toggle dark mode"
