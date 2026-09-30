@@ -1,71 +1,11 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. This file holds **commands, hard rules and pointers**. The as-built detail of every subsystem lives in `docs/` (index below) and loads only when a task needs it. **Keep this file under 200 lines and 40K characters**: a change that needs more than a line or two here goes into the matching `docs/` file, with a one-line pointer from here.
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker" — the repo, `bball-tracker` EAS slug and `com.bballtracker.mobile` bundle/package ids keep the old identifier; the URL scheme is `hooplings://` since #504; the old scheme's overlap was dropped in #513) is a monorepo with three packages: a React Native/Expo mobile app, a Node.js/TypeScript backend, and a Next.js web app at `web/` that hosts the public `hooplings.com/invite/<token>` accept flow (deep-links into mobile via Universal Links). Real-time game tracking uses Socket.io broadcasts backed by PostgreSQL; statistics are computed by the stats service when games finish.
+Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`) that hosts the public `hooplings.com/invite/<token>` accept flow. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
 
-## Common Commands
-
-### Backend (`/backend`)
-```bash
-npm run dev              # Start dev server with hot reload
-npm run build            # Compile TypeScript
-npm run lint             # ESLint check
-npm run lint:fix         # Fix linting errors
-npm run type-check       # Type check without build
-npm test                 # Run Jest tests
-npm test -- --testPathPattern="game" # Run single test file
-npm run prisma:generate  # Generate Prisma client after schema changes
-npm run prisma:migrate   # Run database migrations
-npm run prisma:studio    # Open Prisma Studio GUI
-```
-**After pulling main**, run `npm install` in `backend/` if you see TS2307 errors on `@aws-sdk/client-sesv2` or similar — the SES mailer landing in #131 added new deps that the daemon won't notice without a fresh install.
-
-### Mobile (`/mobile`)
-```bash
-npx expo run:ios            # Build + run on iOS simulator (preferred — native modules need this)
-npx expo run:android        # Build + run on Android emulator
-npm run lint                # ESLint check
-npm run type-check          # Type check
-```
-**Do not use** `npm start` / `npx expo start` with this project — several native modules (Sentry, Reanimated, etc.) require a custom dev client built via `expo run:*`, not Expo Go.
-**Toolchain (Expo SDK 57, #576):** React Native 0.86.3, React 19.2.3, minimum **iOS 16.4** (was 15.1 on SDK 55; owner decision 2026-09-27), minimum Xcode 26.4. **Xcode 27 works**: it replaced `Simulator.app` with `DeviceHub.app`, which the SDK 57 CLI knows and the SDK 55 CLI did not ("Can't determine id of Simulator app" on SDK 55 meant exactly that, not a wrong `xcode-select`). An app built with the iOS 27 SDK must use the UIKit **scene life cycle** or it does not launch correctly on iOS 27; `app.config.js` opts in through `expo-build-properties` (`ios.enableSceneSupport: true`), and `__tests__/app-config.test.ts` pins both the option and the resulting `UIApplicationSceneManifest`. It is native (AppDelegate + Info.plist at prebuild), so it ships with an `eas build`. On SDK 58 it becomes the default and the plugin entry can go. EAS builds SDK 57 on Xcode 26.6, where the opt-in is harmless. There is **no `expo-dev-client`** in this project: the "dev client" is a plain Debug build that loads from Metro on :8081, so with Metro stopped it shows a red "No script URL provided" screen, which is not a build failure. The `applinks:` entitlement makes `expo run:ios` ask for a signing certificate even for the simulator, and without one it stops with **"No code signing certificates are available to use"** (the "physical iOS devices" line above it is misleading, and `xcode-select` has nothing to do with it). The CLI counts only certificates macOS calls **valid**: check with `security find-identity -v -p codesigning`. Two causes, both seen on 2026-09-29: (1) no certificate at all: Xcode → Settings → Accounts → Manage Certificates → "+" → Apple Development; (2) the certificate exists but the count is still 0, because the certificate of its issuer is not installed. New certificates are issued by Apple's developer authority "G3"; a Mac may hold only the old one, which expired in February 2023. Install G3: `curl -o ~/Downloads/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer`, then `security add-certificates -k ~/Library/Keychains/login.keychain-db ~/Downloads/AppleWWDRCAG3.cer`. With a valid certificate `npx expo run:ios` works under Xcode 27 (verified on a build from `main`). To build with no certificate at all, use `xcodebuild -sdk iphonesimulator CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=` (ad-hoc signing, no certificate needed), then `xcrun simctl install` and `npx expo start` for Metro only. **Never build with `CODE_SIGNING_ALLOWED=NO` on SDK 57.** A fully unsigned build carries no entitlements, and the keychain then refuses every call: `expo-secure-store` throws `KeyChainException: A required entitlement is not present` (the session tokens are not stored) and `expo-notifications` logs `ERR_NOTIFICATIONS_KEYCHAIN_ACCESS`. The app still signs in, from memory, so it looks like it works. SDK 55 tolerated an unsigned build; SDK 57 does not. **Maestro's first flow after an install can fail at its first tap** while Metro builds the bundle for the first time (about 20 seconds); launch the app once before starting a suite.
-
-### Web (`/web` — Next.js)
-```bash
-npm install     # First-time setup
-npm run dev     # Local dev server on http://localhost:3000
-npm run lint    # ESLint check
-npm run build   # Production build
-```
-
-### Mobile Builds (EAS)
-```bash
-eas build --platform android --profile preview   # Android APK for testing
-eas build --platform ios --profile preview        # iOS (requires Apple Developer account)
-eas build --platform all --profile production     # Production builds for stores
-eas update --environment preview --message "description" # OTA update to preview builds
-npx eas-cli update --branch production --environment production --platform ios --non-interactive --message "description" # production OTA
-```
-**OTA env gotcha:** `eas update` evaluates `app.config.js` on *your* machine. `getApiUrl()` keys off `APP_ENV`; if it is unset the update ships `apiUrl: http://127.0.0.1:3000` (plus no Sentry DSN) and every device that takes it shows "Network error" on all API-backed tabs. The EAS `production` environment now provides `APP_ENV`, `SENTRY_ENVIRONMENT` and `SENTRY_DSN` (visibility *sensitive*, not *secret* — secret vars are builder-only and invisible to `eas update`). Always use `--environment production` and check the CLI line "Environment variables … loaded from the production environment" lists `APP_ENV`. (`AMPLITUDE_API_KEY` is *sensitive* too.) Remember an update runs on the **second** launch after it is downloaded.
-**Universal Links need a native build:** `app.config.js` sets `ios.associatedDomains: ['applinks:hooplings.com']` (audit #37) so iOS trusts the AASA file and `hooplings.com/invite/<token>` opens the app. Entitlements are baked into the binary at build time — an `eas update` (OTA) cannot add or change them, so any change here means cutting a new `eas build` and going through TestFlight again. The `hooplings.com` web deploy must also be serving `/.well-known/apple-app-site-association` for the link to resolve.
-**iOS permission purpose strings need a native build (#451):** the camera and photo-library strings are set in `app.config.js` through the `expo-image-picker` plugin options (`cameraPermission` / `photosPermission`), not a raw `ios.infoPlist` override — prebuild applies that plugin with boilerplate defaults ("Allow $(PRODUCT_NAME) to access your camera") whenever it is missing from `plugins`, so keep it listed. Two defaults are **deliberately disabled** because the app never uses the capability: `microphonePermission: false` (drops `NSMicrophoneUsageDescription` and blocks Android `RECORD_AUDIO`; the picker is images-only) and `faceIDPermission: false` on `expo-secure-store` (no `requireAuthentication` anywhere — adding biometric unlock later means restoring a real purpose string first, or the native module throws). `__tests__/app-config.test.ts` pins the options and evaluates the plugins' mods in introspection mode, asserting the resulting Info.plist carries exactly those two usage descriptions; check by hand with `npx expo config --type introspect`. Like entitlements, these are baked into the binary: they ship with the next `eas build`, never an OTA. A new permission-bearing native module means a new purpose string here **and** a new row in the privacy-label draft, [`docs/release/app-store-submission.md`](docs/release/app-store-submission.md) (label answers, review notes and the open submission decisions).
-**Runtime version 1.5.0 (#576; 1.4.0 was #562, 1.3.0 was #504, 1.2.0 was audit #52):** `app.config.js` uses `runtimeVersion: { policy: 'appVersion' }`, so bumping `version` moves the OTA target. **An OTA ships JavaScript from the lockfile and runs it against the native code frozen in the binary**, so the runtime must move whenever JavaScript on `main` stops matching a binary in the field. `1.4.0` → `1.5.0` is the Expo SDK 55 → 57 upgrade: React Native 0.83 → 0.86, React 19.3.0 → 19.2.3 (the version the 0.86 renderer is built against) and every `expo-*` native module. Every `eas update` from then on reaches **1.5.0 builds only** (build #33+, cut 2026-09-29 and verified on a device running iOS 27 before the merge; the build and the commit it was cut from are recorded in `mobile/binary-manifest.json`). Build #32 keeps the last 1.4.0 OTA (`fabbdad0…`, the #582 fix for the request burst at sign-out). **The device check is not a formality:** on build #33 it found that every photo upload failed and that the date picker could not be used, after Jest, `expo export` and 19 of 21 Maestro flows had passed; both were fixed in JavaScript and delivered to build #33 by OTA before the merge. `1.3.0` → `1.4.0` was dependency drift: after build #31 was cut, dependency automation moved packages that have native code (`@amplitude/analytics-react-native` 1.8.0 → 1.10.2, `@sentry/react-native` 8.25 → 8.28, `expo-updates`) and the `react` family (19.2.8 → 19.3.0, while React Native 0.83.4 bundled a renderer built against 19.2.0), and neither Jest (which uses `react-test-renderer`) nor `expo export` can detect that (build #32+, cut 2026-09-27; build #31 keeps the last 1.3.0 OTA, `f2862426…`). Earlier boundaries: `1.1.0` → `1.2.0` when `expo-secure-store` (native) landed (build #25+; build #24 stays on the last 1.1.0 OTA); `1.2.0` → `1.3.0` with the URL scheme rename, because `expo-linking` resolves the sign-in redirect scheme from the **OTA manifest** (`Constants.expoConfig.scheme`) while the schemes a binary answers are baked into Info.plist (#25–#30 keep the last 1.2.0 OTA, `9fc0a45d…`). Rule for any runtime change: bump `version`, cut the build from the branch and verify it on device **before** merging (a merge with no binary on the new runtime freezes OTA delivery). Native-module additions are also dependabot-ignored (`.github/dependabot.yml`, `expo-secure-store` included) because the Expo SDK pins them.
-**OTA drift guard (#562):** `mobile/binary-manifest.json` records, per OTA runtime, the version of every package with native code (48 on SDK 57, 45 on SDK 55: every `expo-*` module, `expo`, Sentry, Amplitude, `react-native-*`, …) plus `react`, as compiled into the newest binary of that runtime. `__tests__/binary-manifest.test.ts` recomputes that set from the lockfile and `node_modules` (a package counts when its root has an `ios/` or `android/` directory, a `*.podspec` or an `expo-module.config.json`; dev-only packages are skipped) and fails on any changed, added or removed package, on a runtime that has no recorded binary, and on a `node_modules` that does not match the lockfile. It runs in `npm test`, so CI blocks a dependency PR that would make the next OTA ship JavaScript no binary has run. **These packages move only with a native build and a new runtime**: bump `version`, cut the build from the branch, verify it on device, then record it with `BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record` (the record mode lives in the same test file, like a snapshot update, and refuses to overwrite an existing runtime — binaries in the field were compiled with those versions) and merge. Never edit the manifest by hand. The automation follows the same rule: Dependabot ignores these packages and the daily upgrade scan defers them, Expo same-major patches included (`docs/automation/daily-upgrade-scan.md`, "Binary-coupled packages"); a security fix in one of them waits for a build. **Publishing a production OTA:** `npm ci` in `mobile/` first (`eas update` bundles what is installed, not what the lockfile says), then `npm run ota:production -- --message "…"`, which runs the guard and then `eas update` with `--branch production --environment production --platform ios --non-interactive`; afterwards verify the served manifest.
-**URL scheme (#504, overlap dropped in #513):** `scheme: 'hooplings'` in `app.config.js`; sign-in passes `config/env.ts#APP_URL_SCHEME` explicitly to `Linking.createURL` (never read the scheme off the manifest — it is the OTA payload). The backend allowlist is `ALLOWED_REDIRECT_SCHEMES=hooplings` in `infra/task-definition.json` (same as the code default; `tests/infra/task-definition.test.ts` pins it to exactly that) and WorkOS lists only `hooplings://auth/callback`. The pre-rename scheme was retired early (2026-09-07) because no pre-#504 binary was in use; build #31 still registers it natively until the next `eas build`, which is harmless. The brand guard retires the `bball-tracker://` link form (bare slug and bundle id stay allowed) and also scans `web/app`. **A dev client built before this branch does not register `hooplings`** — after checkout, `npx expo prebuild --platform ios --clean` then `npx expo run:ios` (run:ios alone reuses the stale `ios/` project), or local sign-in bounces to Safari and Maestro `openLink` flows fail.
-**eas-cli pinning:** `mobile/package.json` pins `eas-cli ^22` and `eas.json` enforces `cli.version >= 22.2.0`. The `overrides` block must keep `@oclif/core > minimatch ^10` scoped to **@oclif/core only** — eas-cli itself needs the v5 default export, and giving it v9+ makes every credentials step fail with a misleading "Provisioning Profile is malformed" (#343).
-
-### Infrastructure
-```bash
-docker-compose up -d   # Start local services (PostgreSQL, Redis)
-docker-compose down    # Stop local services
-```
-
-## Architecture
-
-### System Flow
 ```
 iOS App (Expo/React Native)
     ↓ HTTP/WebSocket
@@ -74,1623 +14,182 @@ Backend API (Node.js/Express)
     └── Redis (caching)
 ```
 
-### Backend Structure (`/backend/src/`)
-- **api/**: Route handlers organized by resource (auth, games, teams, leagues, players, invitations, seasons, stats, uploads, admin, middleware). `admin/` holds system-ADMIN-only operator routes (today: setting a subscription tier, #445). `invitations/public-routes.ts` exposes the unauthenticated token lookup + accept used by the web invite page.
-- **services/**: Business logic layer (game-service.ts, team-service.ts, etc.) plus `mailer/` (Mailer interface + FakeMailer + SesMailer + templates, shipped in #131; SES bounce/complaint event handling and its queue consumer, #449) and `usage-service.ts` (usage metering, #43)
-- **websocket/**: Socket.io handlers for real-time updates
-- **models/**: Prisma ORM models
-- **utils/**: Helpers (logger, errors, workos-client, redis caching helpers)
-
-### Usage Metering & Tier Limits (#43)
-- `services/usage-service.ts` exposes `getUsage(userId)` → per-feature `{ count, limit, limitReached }`. Counts are derived from live data at read time (no counter table) and cached in Redis for 60s (`utils/redis.ts` JSON helpers), invalidated on team create/delete.
-- **Metered features**: `teams` (teams the user is staff on, vs tier `maxTeams`) and `seasons` (distinct seasons across those teams, vs tier `maxSeasons`). Limits are single-sourced from `USAGE_LIMITS` in `services/entitlements/index.ts` (read through `getUsageLimits`; `utils/entitlements.ts` is a re-export) — shared with the entitlement/feature-flag layer. `limit: null` means unlimited.
-- **Current limits (#445): nothing is capped, on any tier.** `maxTeams` and `maxSeasons` are `Infinity` for FREE, PREMIUM and LEAGUE, so `GET /auth/me/usage` reports `limit: null` / `limitReached: false` for both metrics and a FREE user can create a 4th (or 40th) team. The FREE team cap of 3 was lifted because enforcement had shipped without any way to buy an upgrade — a dead-end paywall. The exported `FREE_TEAM_LIMIT` constant is gone. Re-introduce a cap only together with a real purchase flow (#41), by changing the number in `USAGE_LIMITS` and nowhere else.
-- **Endpoint**: `GET /api/v1/auth/me/usage` returns all metered metrics for the current user's effective tier.
-- **Enforcement (dormant, kept on purpose)**: the team-cap machinery is still mounted and works for any finite `maxTeams` — team create (`POST /api/v1/teams`) would block a user at/over their tier's cap with a **402** (`PaymentRequiredError`); admins bypass. With every tier at `Infinity` both checks return before the count query, so today it never fires. Its tests run against a finite limit swapped into `USAGE_LIMITS` (`tests/helpers.ts#withFiniteFreeTeamLimit`, `jest.replaceProperty`) — use that helper rather than deleting a cap test. **Seasons are metered but never capped** — the old FREE value of 1 was never enforced anywhere and rendered as a fake paywall (audit #81); season-history depth is the `FULL_SEASON_HISTORY` feature flag, not a usage limit. If a real season cap is ever wanted, enforce it where a team joins a new season and re-add the number in one place (`USAGE_LIMITS`).
-- **Race-safe**: `requireTeamCreateLimit` is only a cheap pre-check. The authoritative check runs inside `TeamService.createTeam`'s `$transaction`, after `SELECT … FROM "User" … FOR UPDATE` on the caller's row, so concurrent creates serialize and can't exceed the cap (audit #49); it throws `PaymentRequiredError` (402, same `upgrade_required` body). Team + default roles + Head Coach staff row are written in that same transaction (no orphan teams, audit #70).
-- **Grandfather rule** (applies whenever a tier has a finite limit): enforcement compares *current* count `>= limit` rather than `count + 1 > limit`. Users already over a cap keep all existing teams (never deleted/hidden) but cannot create new ones until under the limit or on a tier without one. Covered by tests in `tests/services/usage-service.test.ts` and `tests/api/usage.test.ts`.
-- **Out of scope** (#43): per-day/per-hour rate limits, usage-based pricing, admin usage dashboards.
-
-### Mobile Structure (`/mobile/`)
-- **app/**: Expo Router screens (file-based routing)
-- **components/**: Reusable UI components
-- **services/**: API clients
-- **store/**: Zustand stores (auth, user state)
-- **hooks/**: Custom React hooks
-- **i18n/**: Internationalization
-- **assets/brand/**: Hooplings icon SVG masters ("Courtside Capy" capybara mark) + `render-icons.mjs`,
-  which regenerates `assets/{icon,adaptive-icon,splash-icon,favicon}.png` (`node assets/brand/render-icons.mjs`
-  from `mobile/`). Edit the SVGs, never the PNGs. Icon/splash changes are baked into the native binary —
-  they ship with the next `eas build`, not an OTA. Brand navy `#1C2742` is also the splash and
-  adaptive-icon background in `app.config.js`.
-
-#### Mobile roster & invite-status chips (roster/invite unification)
-
-- `app/teams/[id]/players.tsx` has ONE **Add Player** form (`useAddRosterPlayer` →
-  `POST /teams/:teamId/players`): name required, optional player email (invite goes out when
-  present), optional parent email + relationship chips (guardian invite in the same step,
-  rostered cases only). The old "Create New Player" / "Add Roster Player" split and
-  `useAddPlayerToTeam` are gone. Result handling: `rostered: false` (existing account) toasts an
-  explanation; `emails.player/guardian === false` toasts an error (never silent);
-  `guardianReason` surfaces as info.
-- **Chips derive ONLY via `utils/roster-status.ts#getRosterStatus(member, team.invitations)`**
-  (same never-inline rule as `game-result.ts`): Active = `player.isManaged === false` OR an
-  ACCEPTED row; Invited/Invite expired from the PENDING row (expiry client-computed); else Not
-  invited. `team.invitations` exists only for `canManageRoster` callers (stripped to `[]`
-  otherwise) and carries rostered players only.
-- **Resend and Invite are the same call**: `useCreateInvitation` with
-  `{ playerId, supersede: true }` (fresh token server-side, old link dies). Resend renders on
-  Invited/Expired rows; Invite on Not-invited rows **with an email on file**; Cancel
-  (`useCancelInvitation`, confirm dialog) only on Invited rows — a lazily-expired row has no
-  valid id to cancel. Cancel keeps the player rostered AND keeps their email (rejection-only
-  strip) — recovery from a wrong email is `PATCH /players/:id { email }` then Resend, never
-  re-adding (which would create a duplicate account).
-- **Case-3 invitees** (existing accounts, not yet members) render in a separate "Invited"
-  section from `useTeamInvitations(teamId, 'PENDING')`, filtered to non-members + unexpired
-  (dedupe by `playerId` against `members[]`); search results also exclude them (re-selecting
-  would 400 — Resend lives on the Invited row), and a failed invitations fetch renders an
-  inline error + Retry instead of silently dropping the section.
-- Per-player actions use `components/ActionMenu` (Modal bottom sheet) — never an `Alert`
-  menu: Android caps Alert at three buttons and silently truncates. Chip accessibility
-  labels are row-anchored (`"<player> status: <label>"`) and Maestro asserts that exact
-  string — a bare `assertVisible: "Active"` can false-pass off a neighboring row.
-- Every roster row's menu has **Edit jersey & position** (bottom-sheet form, prefilled with the
-  `!= null` rule so jersey 0 renders) → `useUpdateTeamMember` →
-  `PATCH /teams/:id/players/:playerId`; an emptied input sends `null`, which clears the stored
-  value (`updateTeamMemberSchema` is `.nullable()` for both fields). This is the recovery path for
-  members rostered without a number (e.g. pre-fix resend-superseded invites).
-- **"Email bounced" is a second chip, never a roster status (#449).** The team payload carries
-  what SES reported for each rostered player's address (`player.emailSuppressedAt` /
-  `emailSuppressedReason`, roster managers only — see "Email bounces & complaints"). Derive it
-  ONLY via `utils/email-delivery.ts#getEmailDeliveryIssue(player)` (`'bounced'` | `'complaint'`
-  | `null`; a tombstone or a player with no address is always `null`, and a reason this build
-  does not know reads as `'bounced'`). It is orthogonal to the invite status — an Invited row
-  can also be bounced — so the status chip stays where it is and a flagged row grows a strip
-  underneath: the email chip (`"<player> email: Email bounced"` is the row-anchored label) and,
-  on a line of its own, the full address. Keep the address on its own line — beside the chips it
-  truncated to "xander.ex…" on a 393pt screen, and the typo is what the coach has to read. The
-  menu's first item on such a row is **Fix email address**, offered only when
-  `player.isManaged` (a claimed account's email belongs to its login): a bottom sheet that
-  accepts only a different, well-formed address, sends it trimmed and lower-cased through
-  `useUpdatePlayer` (`PATCH /players/:id { email }`, which now also invalidates
-  `teamKeys.details()`), and then — when the row is Invited / Invite expired / Not invited —
-  runs the same supersede create as Resend ("Save & send invitation"). The backend lets only
-  the coach who **added** an unclaimed player change its email (B2.10), so a 403 is translated
-  to "Only the coach who added … can change this email address". Tests:
-  `__tests__/utils/email-delivery.test.ts`, `__tests__/app/players-email-issue.test.tsx`.
-- Seeded chip fixtures on the Lakers (Iris Invited / Xander Expired / Wendy WebAccept /
-  Marcus Johnson = Not invited; **Xander also carries a hard-bounced address**, and the seed
-  restores his email and delivery state on every run). Maestro: `.maestro/roster-management.yaml`
-  (add → immediate roster + chip), `.maestro/roster-invite-status.yaml` (all four chips + action
-  gating) and `.maestro/roster-email-bounced.yaml` (email chip → fix → invitation re-sent;
-  mutates Xander, so re-seed first).
-- **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
-  then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
-  `GAME_DETAIL_INCLUDE.team.members`), so the team-detail and game-detail rosters carry a
-  deterministic order; other roster-bearing queries (stats/season/league services) are still
-  unordered. Known, accepted divergence: the team overview always re-sorts client-side via
-  `sortRosterMembers` (both modes), whose name comparisons use device-locale `localeCompare`
-  (`sensitivity: 'base'`), while server-ordered screens show raw Postgres-collation order —
-  rows whose names differ only in case/accents can order differently between screens. The
-  team overview (`app/teams/[id].tsx`) adds a Jersey #/Name sort toggle (pills render only
-  with 2+ members): comparisons go ONLY through `utils/roster-sort.ts#sortRosterMembers`
-  (never inline; jersey 0 is valid, no number sorts last), and the choice persists per user via
-  `hooks/useRosterSortPreference.ts` (AsyncStorage `rosterSort:<userId>`, best-effort like
-  `role-onboarding.ts`; hydration resets on userId change and never overwrites a tap).
-  Sort pill rows are the shared `components/SortPills` (44pt targets, "Sort by <label>"
-  a11y + selected state) — used by the team overview and team stats screens; don't
-  hand-roll new pill rows. Maestro coverage lives in `.maestro/team-detail.yaml`.
-
-#### Mobile list pagination & cache invalidation
-- Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
-  (`useInfiniteGames`, `useInfiniteTeams`, `useInfiniteAnnouncements`) wired to `FlatList.onEndReached`; the
-  returned `data` is `{ items…, total }` flattened across pages. Pickers that need *every* team (Stats tab,
-  Profile, Create Game) call `useTeams({ limit: TEAMS_MAX_LIMIT })`.
-- Games status filtering is **server-side** (`GET /games?status=`). The Games tab passes the active pill as the
-  `status` filter; Home uses a dedicated `useLiveGames()` (`status=IN_PROGRESS`, small limit) for the live
-  card, `useGames({ status: 'FINISHED', limit: 5 })` for recent results (the tile is labelled "Wins (last 5)"),
-  and `useGamesPage({ status: 'SCHEDULED', limit: 1 }).total` for the Upcoming count. Never filter a
-  date-desc first page client-side — a backlog of scheduled games hides live/finished ones.
-- Infinite keys nest under the list root (`gameKeys.lists()`, `teamKeys.lists()`, `announcementKeys.team(id)`)
-  so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
-  becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the Profile usage meter).
-- The tab bar (`app/(tabs)/_layout.tsx`) is an absolutely-positioned translucent blur overlay — content
-  deliberately scrolls behind it. Every scrollable tab screen therefore sets its scroll-content
-  `paddingBottom` from `hooks/useTabBarPadding.ts#useTabBarPadding()` (= `TAB_BAR_HEIGHT` 60 + bottom
-  safe-area inset + `spacing.lg`); never hand-roll that padding — a too-small value leaves the last rows
-  permanently trapped under the bar (the pre-fix Profile bug).
-
-#### Mobile routing & guards
-- The `(tabs)` shell has no auth guard of its own. Screens reachable while logged out (the `/invite/<token>`
-  deep link) must send unauthenticated users to `/login` themselves. Use `setPendingReturnPath(path)` from
-  `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and
-  cold start) consumes it (30-minute TTL, in-app absolute paths only) after the role-onboarding check, so the
-  user lands back on the deep link.
-- Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
-  `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
-- `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`
-  renders an `EmptyState` for that case ("No stats yet" for the current user) instead of an error.
-- The Profile "Leagues & Seasons" entry is shown to system `ADMIN`s and to users with at least one league in
-  `user.leagueAdminOf` (`utils/team-permissions.ts#canAccessAdmin`). See "Mobile permission gating" below.
-- **About screen** (`app/about.tsx`, Profile → Settings → About): version + OTA diagnostics from
-  `expo-constants` / `expo-updates` — app version, runtime version, applied update id + publish time
-  ("Embedded build" when `!Updates.isEnabled || isEmbeddedLaunch || !updateId`, i.e. dev client or no OTA
-  yet), channel, and a Share-sheet export (`formatAboutDiagnostics`) for OTA verification. This replaced the
-  hardcoded version string in the Profile footer (it had drifted), and is the designated home for Terms of
-  Service / Privacy Policy / open-source-license rows once #25 publishes the documents — don't add those
-  links anywhere else. The **Help** card under the diagnostics holds **Contact support** (#450,
-  `testID about-contact-support`, label `"Contact support, support@hooplings.com"`): it opens
-  `buildSupportMailto(info)`, a `mailto:` to `config/env.ts#SUPPORT_EMAIL` with the diagnostics in the
-  body, and shows a toast with the address when no mail app answers (every simulator). It is the only
-  support link in the app; legal rows go below it. The App-version row appends the native build number ("v1.2.0 (build 28)") read via
-  `requireOptionalNativeModule('ExpoApplication')` — never the `expo-application` JS wrapper, which would
-  crash binaries without the module: `expo-application` first shipped in build #28 (cut 2026-08-28); since
-  the 1.3.0 runtime boundary (#504) every OTA-reachable binary has it, but the guard stays for the bare-version
-  degradation and the same guard shape as `services/secure-storage.ts`. `expo-application` is Expo-SDK-pinned and dependabot-ignored like the other
-  native modules. Tests `__tests__/app/about.test.tsx` (note the
-  lazy-getter `expo-updates` mock — Babel's `import * as` interop copies plain mock objects); Maestro
-  `.maestro/profile.yaml`.
-
-- **Account deletion** (#444, App Store 5.1.1(v)): Profile → Account → **Delete account**
-  (`testID delete-account-row`) → `app/account/delete.tsx` — plain-language removed/kept summary,
-  `Input` "Type DELETE to confirm" (exact, case-sensitive, trimmed — `isConfirmed`), destructive
-  `Button` disabled until it matches and while pending (double-tap guard). Success:
-  `hooks/useAccount.ts#useDeleteAccount` (`DELETE /auth/me`) clears the LOCAL session only
-  (`clearSession`, no remote logout — the server side is already gone; never treat
-  `clearSession` as a deletion) and the screen replaces to `/login`. A 400 `last_head_coach`
-  (`getLastHeadCoachTeams(error)`) renders the blocking teams inline with links; anything else
-  toasts via `getApiErrorMessage` and stays. The same screen with `?childId=` is the guardian
-  path: Profile → **My kids** → ⋯ (`components/ActionMenu`, never an `Alert` menu) → "Delete
-  <child>'s record" (only when `guardianOf[].isManaged`) → `useDeleteChildRecord`
-  (`DELETE /players/:id/account`), which re-reads `GET /auth/me` so My kids drops the child at
-  once, then pops back. **Deleted accounts elsewhere:** the API keeps the row as a tombstone with
-  `deletedAt` set and an English placeholder name; render names ONLY via
-  `utils/display-name.ts#displayName(user)` (localized `account.deletedUser` when `deletedAt`
-  is set, stored name otherwise — never branch on the name) and derive roster chips ONLY via
-  `getRosterStatus`, whose `'deleted'` branch comes first (a tombstone has `isManaged: false`,
-  which would read as Active). A deleted roster row's menu offers only Remove player. Tests:
-  `__tests__/app/account-delete.test.tsx`, `__tests__/hooks/useAccount.runtime.test.tsx`,
-  `__tests__/utils/{display-name,roster-status}.test.ts`, `__tests__/app/profile-my-kids.test.tsx`.
-  Maestro: `.maestro/account-delete.yaml` (Mike Brown) and `.maestro/guardian-child-delete.yaml`
-  (Gloria James / Bryce James) — both delete their fixture; re-seed before every run.
-
-#### Mobile permission gating (role matrix M3, M8, M9, M12–M18, M27, M4.1, M4.2)
-Every gated control mirrors a backend rule; the API is still the authority (403). Rules live in two helpers —
-never inline a role check in a screen:
-- `hooks/useTeams.ts#hasTeamPermission(team, userId, flag, userRole?, leagueAdminOf?)` — system `ADMIN` → true;
-  a user whose `leagueAdminOf` contains `team.season.league.id` → true (matches backend `isLeagueAdmin`);
-  otherwise the staff role flag. Accepts any `{ staff?, season? }` shape, so `game.team` from `GET /games/:id`
-  (which includes `staff` + `season.league`) works without a second fetch.
-- `utils/team-permissions.ts` — `canCreateTeams(user)` (COACH / ADMIN / any league admin), `canAccessAdmin(user)`
-  (ADMIN or `leagueAdminOf.length > 0`), `canCreateLeagues(user)` (ADMIN only), `canManageLeague(user, leagueId)`
-  (ADMIN or that league in `leagueAdminOf`). `utils/game-permissions.ts#getGamePermissions(game.team, user)`
-  derives `{ canManage, canTrack, canChangeStatus, canEditFinished }` from the game rules in `game-service` /
-  `game-event-service` (create/edit/delete → `canManageTeam`; start/end/score → `canManageTeam || canTrackStats`;
-  record/undo → `canTrackStats`; rewrite a FINISHED game → `canManageRoster`).
-- `user.leagueAdminOf?: string[]` is an **optional** field on the shared `User` type (populated by
-  `GET /auth/me` / `GET /auth/callback` once the backend ships it); `undefined` means "admin of no leagues".
-- Screens: Games tab FAB + `games/create` (teams the user can manage; bounce if none); `games/[id]` shows
-  Start/End only with `canChangeStatus`, Delete with `canManage` on SCHEDULED and FINISHED games (hidden while
-  IN_PROGRESS — end the game first; a finished-game confirm warns that the cascade removes the game's stats from
-  season totals, and `useDeleteGame` invalidates `statsKeys.all`), Continue Tracking with `canTrack` (players keep
-  Watch Live / RSVP / box score); `games/[id]/track` guards itself (toast + `replace` to the game detail) because
-  it is deep-linkable. Admin screens (`admin/*`), `teams/[id]/edit` (`canManageTeam`) and `teams/[id]/players`
-  (`canManageRoster`) use `hooks/useAccessGuard.ts` (toast + `back()`, `replace(fallback)` when there is no
-  history; returns `allowed` so the screen renders a spinner instead of flashing gated controls). League admins
-  see only their own leagues in `admin/index`; league create/delete stay ADMIN-only.
-- Teams tab shows the spinner until `user` has rehydrated — a `null` user must never render the player empty
-  state. Home's "no teams → Create Team" card uses `canCreateTeams(user)` like the Teams tab.
-- `hooks/useSessionRefresh.ts` (mounted in `_layout.tsx`) re-fetches `GET /auth/me` when a session becomes
-  active and on every foreground (AppState → `active`), throttled to once per 5 min, and merges
-  `role` / `leagueAdminOf` / `name` / `profilePictureUrl` via `auth-store.updateUser`. Failures are ignored.
-- **Team staff screen** (`app/teams/[id]/staff.tsx`, role matrix decision 2 / B2.3): reached from the "Staff"
-  card on team detail (coach names + count; the hero line lists every `HEAD_COACH`-type row from `team.staff`).
-  Lists `GET /teams/:id/staff` (name, role, email when the API returns it). Readable by anyone with team access;
-  **Add staff** (email + role chips), per-row role change and remove render only when
-  `hooks/useTeams.ts#canManageStaff(team, userId, userRole, leagueAdminOf)` — ADMIN, admin of the team's league
-  or a `HEAD_COACH`-type staff row (mirrors backend `canManageStaff`; flags can't tell head from assistant).
-  Any staff member gets **Leave team** on their own row; the last head coach never gets a remove control. A
-  `POST /staff` 404 (no account for that email) shows the inline "ask them to sign up first" hint — the
-  endpoint never creates users. Hooks in `hooks/useTeamStaff.ts` (`useTeamStaff`, `useTeamRoles`,
-  `useAddStaff`, `useUpdateStaffRole`, `useRemoveStaff`) invalidate the staff list, team detail/lists and
-  `usageKeys.all` (staff rows are what the usage meter counts). Maestro: `.maestro/team-staff.yaml` (Frank Vogel =
-  seeded Lakers head coach, read-only); Jest `__tests__/app/team-staff-gating.test.tsx`.
-- Maestro: `.maestro/player-no-tracking.yaml` (Steph Curry = seeded PLAYER) asserts the create FAB, Start Game,
-  Delete game, Continue Tracking and End Game are absent while RSVP remains.
-- **Guardians (PARENT role, role-matrix decision 1 / `docs/plans/parent-role-spec.md`).** `user.guardianOf?:
-  { childId, childName, relationship, isPrimary }[]` is optional on the shared `User` type like `leagueAdminOf`
-  (`useSessionRefresh` merges it). Helpers in `utils/guardian.ts` — `isGuardian(user)`, `guardianChildrenOnTeam(user,
-  team)` (children rostered on a `{ members }` shape, works with `game.team`), `isRosteredOn`,
-  `relationshipLabel`. Guardians have no staff row, so the gates above already hide every manage/track control.
-  Screens: Profile → **"My kids"** (each child → `/players/:childId/stats`; "Change account type" is hidden when
-  `guardianOf` is non-empty — PARENT is derived, never picked); game detail RSVP shows a **"Responding for"** chip
-  row when the user is a guardian of ≥1 member of the game's team ("Me" only when the user is rostered; defaults to
-  the first child otherwise) and sends `playerId` for a child (`useSubmitRsvp({ gameId, status, playerId? })`, the
-  selected state reads the child's `rsvp.userId` row); Invitations tab renders `guardianInvitations` from
-  `GET /invitations` ("Become <relationship> of <child> on <team>" / "Accept for <child>" / Decline — accept goes
-  through the polymorphic `POST /invitations/:id/accept`, then re-reads `GET /auth/me` so "My kids" appears at
-  once) and labels team invitations addressed to a child "For <child>" / "Accept for <child>"; `/invite/[token]`
-  and `web/app/invite/[token]` branch on `invitation.kind === 'guardian'` (child / relationship / team rows, same
-  accept call). Coach side: `teams/[id]/players` roster cards for **managed** players get an "Invite a parent"
-  action → `app/teams/[id]/players/[playerId]/guardians.tsx` (guardians + pending invites, email + relationship
-  chips, remove; invite/remove-others need `canManageRoster`, a guardian gets **Leave** on their own row). Hooks:
-  `hooks/useGuardians.ts` (`usePlayerGuardians`, `useInviteGuardian`, `useRemoveGuardian` — invalidate the guardian
-  list + team detail, invites also `invitationKeys.all`). Accounts created by a guardian invite carry
-  `name = email local part` and get the one-time display-name prompt — see "Display names" below (the prompt is
-  no longer guardian-specific). Tests:
-  `__tests__/utils/guardian.test.ts`, `__tests__/hooks/useGuardians.runtime.test.tsx`,
-  `__tests__/app/{game-detail-rsvp-picker,invitations-guardian,profile-my-kids}.test.tsx`. Maestro:
-  `.maestro/guardian-rsvp.yaml` (Sonya Curry = seeded MOTHER of Steph Curry with no staff row, Warriors "vs Lakers" game; Dell Curry is also Steph's FATHER but is seeded as **Warriors Team Manager**, so he sees Start Game / Continue Tracking and is not a pure-guardian fixture).
-- **Display names.** `syncUser` falls back to `name = email local part` when WorkOS supplies no first/last
-  name (plain AuthKit sign-ups as well as guardian-invite accounts), so
-  `utils/role-onboarding.ts#hasPlaceholderName(user)` (name === email local part, case-insensitive) is the
-  placeholder signal — it replaced the guardian-gated `utils/guardian.ts#needsDisplayName`. `postLoginRoute`
-  sends **any** placeholder-named account to `app/onboarding/name.tsx` once (`needsNamePrompt`, flag
-  `nameAsked:<userId>`; the role step, whose `finish` re-resolves `postLoginRoute`, still wins) →
-  `PATCH /auth/me { name }`; Skip keeps the placeholder and never asks again. The same screen doubles as the
-  editor behind Profile → Account → **Name** (`/onboarding/name?from=profile`: pre-fills a non-placeholder
-  name, Save pops back, Cancel discards — same back-vs-replace rule as `onboarding/role`). Tests:
-  `__tests__/utils/role-onboarding.test.ts`, `__tests__/app/onboarding-name.test.tsx`; Maestro
-  `.maestro/profile.yaml` renames Frank Vogel and **reverts** (team-staff.yaml asserts the seeded name).
-
-#### Mobile date and time pickers (#576)
-- **Every date or time choice goes through `components/DateTimePickerSheet`**; never render
-  `@react-native-community/datetimepicker` in a screen. On iOS it is a bottom sheet with the
-  wheels, Cancel and Done: the wheels edit a draft, Done commits it (`onConfirm`), Cancel and the
-  backdrop discard it (`onCancel`), and every opening starts from the value the screen holds. On
-  Android the library shows the system dialog, which has its own buttons. The picker it replaced
-  was rendered inline at the end of the form and closed on the first change, so it opened under
-  the keyboard and vanished as soon as one wheel settled.
-- The screen calls `Keyboard.dismiss()` before it opens the sheet: `games/create` and
-  `admin/seasons/create` both open with a focused text field.
-- Version 9 of the library splits the old `onChange` into `onValueChange` and `onDismiss`; use
-  those (`onChange` is deprecated and warns).
-- The date and time rows on `games/create` carry `testID` `game-date-button` /
-  `game-time-button` and the labels `Game date: <date>` / `Game time: <time>`; the sheet's
-  buttons are `date-time-picker-done` / `date-time-picker-cancel`. Tap Cancel **by id**: the form
-  behind the sheet has a Cancel button too. Tests: `__tests__/components/DateTimePickerSheet.test.tsx`,
-  `__tests__/app/game-create-date.test.tsx`; Maestro `.maestro/game-create-date.yaml` (creates
-  nothing, so it needs no seed reset).
-
-#### Mobile API errors, permissions & toasts
-- **The API host is decided in ONE place: `config/env.ts#getApiUrl()`** (`extra.apiUrl` from
-  `app.config.js`, else `http://127.0.0.1:3000` under `__DEV__`, else `https://api.hooplings.com`).
-  `services/api-client.ts` and `services/socket.ts` import it; never read
-  `Constants.expoConfig.extra.apiUrl` elsewhere. `__tests__/config/env.test.ts` pins the resolution
-  order and `__tests__/app-config.test.ts` pins the `APP_ENV` → `apiUrl` mapping plus the
-  `applinks:` entitlement (an OTA published with `APP_ENV` unset ships the dev host — see the OTA env
-  gotcha above). Domain migration #502.
-- `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
-  interceptor. For any response with a JSON body it copies the server's `error` (or `message`) onto
-  `error.message`, the server `code` onto `error.code`, and the whole body + `status` onto `error.apiError`.
-  The existing `error instanceof Error ? error.message : fallback` sites therefore show the real reason
-  (e.g. a 403's "You do not have permission to create teams in this league") instead of "Request failed
-  with status code N". Helpers:
-  `getApiErrorMessage(err, fallback)` and `isUpgradeRequiredError(err)` (402 or `code === 'upgrade_required'`).
-  Network errors keep axios' own `code` (`ECONNABORTED`, …). A request that needs a session and
-  was refused on the device for lack of one fails with `NoSessionError` (`code: 'ERR_NO_SESSION'`,
-  `isNoSessionError(err)`); it never reached the server, so there is no `apiError` on it (#582,
-  see "Ending a session must stay quiet").
-- `hasTeamPermission(team, userId, permission, userRole?, leagueAdminOf?)` returns `true` for a system `ADMIN`
-  regardless of staff rows and for an admin of the team's league (mirrors `backend/src/utils/permissions.ts`).
-  Pass `user?.role` and `user?.leagueAdminOf` from the auth store (see "Mobile permission gating").
-- Local user edits (avatar, role) go through `auth-store.updateUser(patch)`; `setUser` is for login only
-  (it fires `USER_LOGGED_IN` analytics and `identifyUser`).
-- Jersey numbers: `0` is a valid number — always test `jerseyNumber != null`, never truthiness.
-- **A full-screen error on a pushed route needs a way back (#589, #595).** Every pushed screen
-  draws its own header (the root `Stack` has `headerShown: false`) and returns
-  `components/ErrorState` in its place, so the back arrow goes with it; with only `onRetry` the
-  user is left with Try Again and the swipe gesture. Pass `onBack={goBack}` with
-  `const goBack = useGoBack(<parent route>)` (`hooks/useGoBack.ts`): it pops the stack, or
-  replaces with the parent when there is nothing to pop (a screen opened by a link), the same
-  rule as `useAccessGuard`. Never `router.back()` alone, which does nothing without history. All
-  13 pushed screens that replace themselves with `ErrorState` do this. When there is nothing to
-  retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
-  Try Again button that left the screen). Tab screens have the tab bar and need nothing.
-  `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
-  and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
-  (today only `teams/[id]/announcements`, where the error replaces the list under a header that
-  stays); an entry there must have its own control labelled "Go back". Screen tests:
-  `__tests__/app/error-state-way-back.test.tsx` (every screen, real hooks, the API failing);
-  Maestro `.maestro/error-way-back.yaml` (read-only, opens a team and a game that do not exist).
-- **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
-  everything inside it from the accessibility tree, so a button nested in a pressable row can be
-  tapped by a sighted user while VoiceOver and Maestro see only the row. On Profile → My kids
-  that hid the ⋯ menu, the only way for a guardian to delete a child's record. Make the two
-  **siblings inside a plain `View`**, each with a 44pt target (`childRow` / `childRowMain` /
-  `childRowMore` in `app/(tabs)/profile.tsx`; the date rows in `admin/seasons/create`).
-  `__tests__/a11y/nested-pressables.test.ts` reads the source of `app/` and `components/` and
-  fails on any nesting, unless the outer pressable opts out with `accessible={false}`
-  (`ActionMenu`'s sheet wrapper). A `ListItem` counts as a pressable only when it is given
-  `onPress`. Screen tests cannot stand in for the guard: `getByLabelText` finds a nested button,
-  which is how the defect shipped with a passing test. To assert it in a screen test, walk the
-  `parent` chain of the button and expect no other accessible ancestor
-  (`__tests__/app/profile-my-kids.test.tsx`).
-- `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
-  at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
-  Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the
-  column overlays the top-left hero back arrow and top-right hero actions, and an interactive card swallowed
-  taps meant for them for its whole 3s lifetime (#464 — surfaced as "back is a no-op after creating a team").
-  Don't add touch handlers to a toast; anything tappable belongs elsewhere.
-
-### Socket.io (Live Game Broadcast)
-
-Real-time game updates use Socket.io with an in-memory adapter. **Single-replica
-only**: rooms and every rate-limit counter live in process memory, so a second
-task silently splits a live game (coach on task A, spectators on task B, no
-error anywhere). The Redis adapter and shared rate-limit store are the open
-follow-up **#452** (#26, which shipped the handlers, was closed without them).
-
-Three things pin the replica count, and they change together (#446):
-
-- **Autoscaling:** `max_capacity` in `infra/variables.tf` defaults to 1 and its
-  `validation` block rejects any other value, so a `terraform.tfvars` override
-  cannot raise it (`min_capacity` accepts 0 or 1; 0 is for maintenance windows).
-- **`MAX_REPLICAS=1`** in `infra/task-definition.json` — the process cannot
-  observe the autoscaling target, so the ceiling is explicit configuration.
-  `tests/infra/replica-ceiling.test.ts` pins it to the `max_capacity` default
-  and runs the real guard against the production env block.
-- **Hard startup guard:** `utils/replica-guard.ts` — pure
-  `evaluateReplicaGuard(env)` plus `enforceReplicaGuard()`, which `index.ts`
-  calls **before** `httpServer.listen`. Only evaluated when
-  `NODE_ENV=production`:
-
-  | `MAX_REPLICAS` | Result |
-  | --- | --- |
-  | `1` | starts (info log) |
-  | unset / blank | starts, logs at **error** level (the pre-guard behaviour, so a rollback to an older task definition cannot crash-loop) |
-  | not a positive integer | **exits 1** before listening |
-  | `> 1` | **exits 1** before listening |
-
-  `REDIS_SOCKET_ADAPTER_URL` is **not** accepted as an escape hatch:
-  `@socket.io/redis-adapter` is not installed and nothing reads the URL, so
-  honouring it would be false assurance. #452 flips `MULTI_REPLICA_SUPPORTED`
-  in the guard module; from then on a ceiling above 1 requires the URL. The
-  guard is configuration-based, so the two tasks of a rolling deploy do not
-  trip it — see the deploy-window caveat under "ECS deploy safety".
-
-Do not raise capacity as a fix for load: adapter and shared rate-limit store
-first (#452), capacity second.
-
-| Direction       | Event                | Payload                                                        |
-| --------------- | -------------------- | -------------------------------------------------------------- |
-| client → server | `join-game`          | `{ gameId }` (ack with success/error)                          |
-| client → server | `leave-game`         | `{ gameId }`                                                   |
-| server → client | `game-snapshot`      | `{ game, events }` (on join / rejoin)                          |
-| server → client | `game-event`         | `{ event, score }` (on persist; score is **post-insert**)      |
-| server → client | `game-event-removed` | `{ gameId, eventId, score }` (on delete/undo; post-delete score) |
-| server → client | `game-score-change`  | `{ gameId, score }` (on `PATCH /games/:id` score edits)        |
-| server → client | `game-status-change` | `{ gameId, previousStatus, status, score }` (on transition)    |
-
-`score` is always `{ homeScore, awayScore }`. Every broadcast carries the
-current score so a client can drop events and still converge.
-
-- Handshake auth: bearer token via `socket.handshake.auth.token` (or
-  `Authorization` header). Checked once at connect; see `authenticateSocket`.
-- Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
-  handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
-  max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
-  A limited handshake rejects with `connect_error: Rate limited`, which mobile `services/socket.ts`
-  backs off and retries exactly like `Service unavailable`. The IP key is the rightmost
-  `x-forwarded-for` entry (the ALB-appended hop, same trust rule as `trust proxy: 1`), falling back
-  to the peer address.
-- Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
-- Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
-  join, in chronological order.
-- Handshake rejection recovery (mobile `services/socket.ts`, audit #17b): a
-  middleware rejection arrives as `connect_error` and socket.io does **not**
-  auto-reconnect from it. `Unauthorized` → refresh via the api-client's
-  single-flight `refreshAccessToken()` then `socket.connect()` (the `auth`
-  callback reads the new token), max `MAX_AUTH_REFRESHES` (2) in a row; a
-  rejected refresh token is left to the next REST 401 to log out. `Service
-  unavailable` (backend cannot reach JWKS) → exponential back-off
-  (2s·2ⁿ, max `MAX_UNAVAILABLE_RETRIES` = 5). A successful `connect` resets
-  both budgets; `resetSocket()` cancels any pending retry. `useLiveGame`
-  reports `reconnecting` while `isSocketRecovering()` and `error` otherwise.
-
-### Stats (finalized box scores & season aggregates)
-
-- `StatsService.finalizeGameStats(gameId)` (`backend/src/services/stats-service.ts`) recomputes a game's
-  box score from `GameEvent`s and upserts `PlayerStats` (one row per player) and `TeamStats` (one row per
-  game). It runs when a game is `PATCH`ed to `FINISHED` **and** whenever an event is created or deleted on a
-  game that is already `FINISHED` (`GameEventService` → `StatsService.refinalizeIfFinished`; post-finish
-  edits are allowed, not rejected — the stored box score just follows them). It is idempotent: `PlayerStats`
-  rows for players with no remaining events are deleted, and a game with **no** player events ends up with no
-  `PlayerStats`/`TeamStats` rows at all.
-- **Tracked vs. finished games.** `GET /api/v1/stats/teams/:teamId` returns `gamesPlayed` (all `FINISHED`
-  games = `wins + losses`, score-based) and `trackedGames` (finished games that have a `TeamStats` row).
-  Per-game averages divide by `trackedGames`, so a game created directly as `FINISHED` with a score but no
-  events (or finished with no events) counts in the record but does not deflate PPG/RPG/APG. Player season
-  averages already divide by the player's own `PlayerStats` row count.
-- `TeamStats` stores **raw shooting counts** (`fieldGoalsMade/Attempted`, `threePointersMade/Attempted`,
-  `freeThrowsMade/Attempted`; FG includes 3P, matching `PlayerStats`) plus the per-game percentages.
-  Season percentages in `GET /api/v1/stats/teams/:teamId` are **Σmade / Σattempted** across finalized games,
-  never a mean of per-game percentages (a 1/1 game then a 1/9 game reads 20.0%, not 55.6%). Games with zero
-  attempts contribute nothing to the denominator. The migration
-  `20260822120000_team_stats_shooting_counts` backfilled existing rows from their `PlayerStats`.
-- Use the exported `shootingPercentage(made, attempted)` helper (1 decimal, `0` when nothing attempted)
-  rather than inlining the rounding.
-- **Ties.** Equal scores are a `'T'`, never a loss: the season record is `{ wins, losses, ties }`
-  (`gamesPlayed = wins + losses + ties`) and `recentGames[].result` is `'W' | 'L' | 'T'` (`gameResult()` in
-  `stats-service.ts`). Mobile derives outcomes only through `mobile/utils/game-result.ts`
-  (`getGameResult`, `getResultColor` — T is neutral `textSecondary`, `formatRecord`); never compare
-  `homeScore > awayScore` inline in a screen. Screens show the tie count only when it is non-zero.
-
-### Team lineage (#462, `docs/plans/team-lineage-and-competition.md`)
-
-- **A `Team` row IS a team-season.** No game or stats table carries a `seasonId`; `Team.seasonId` is a
-  single required FK, so every roster, staff, game and stats row is already per-season. Persistent
-  identity across seasons is the additive `TeamLineage` parent (`Team.lineageId`, required,
-  `@@unique([lineageId, seasonId])`), **not** a `Team`/`TeamSeason` split — the split would re-point
-  nine FK tables and break `/teams` for the binaries in the field for no capability. The lineage is a
-  pure identity (id + timestamps) and carries no club: a team's club is the league of the season it
-  plays in, so `permissions.ts` keeps one access path. Rollover (#461) and adoption (#459) create a
-  **new `Team` row with the same `lineageId`** and copy the per-season tables; they never move
-  `seasonId` on a row with history.
-- `createTeam` creates the lineage inside its existing `$transaction`, after the cap check (two
-  statements — Prisma won't mix the scalar `seasonId` with a nested relation write). `deleteTeam` runs
-  in a `$transaction` and deletes the lineage when no other team-season references it; `Season`/`League`
-  cascades bypass that and leave harmless orphan lineages. `PATCH /teams/:id { seasonId }` pre-checks
-  for a sibling of the lineage in the target season and answers **400** (`SEASON_SIBLING_MESSAGE`); a
-  lost race on the unique index maps P2002 to the same 400.
-- **`ageGroup` / `gender` live on `Team`** (per-season: a U12 team is U13 next year). `gender` is the
-  Prisma enum `TeamGender { BOYS, GIRLS, COED }`; `ageGroup` is trimmed free text, max 20 (U14 / 14U /
-  Grade 7 — conventions differ by region, so no enum). On update `null` clears, absent leaves unchanged
-  (same rule as jersey/position). Mobile derives labels ONLY via `utils/team-labels.ts`
-  (`formatTeamBracket` → "U14 · Boys", `genderOptions`); the gender pills reuse `components/SortPills`
-  with `labelPrefix="Gender: "` (a11y "Gender: Boys", asserted by `.maestro/create-team.yaml`).
-- **Migration `20260906120000_team_lineage` is hand-written** (enum → table → nullable column →
-  `UPDATE … gen_random_uuid()` → `INSERT … SELECT` → `SET NOT NULL` → FK → unique index). Prisma would
-  emit `ADD COLUMN … NOT NULL`, which fails on a populated table and crash-loops the API at container
-  start. **CI applies migrations to an empty database**, so a backfill's data statements first run on
-  real rows in production unless rehearsed: restore a snapshot per `docs/runbooks/rds-backup-restore.md`
-  (stop before the Secrets Manager repoint), `migrate deploy` from the branch, assert
-  `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. Since #493 the migration backfill
-  guard runs every new migration against seeded rows on each pull request (see "Migration backfill
-  guard" under Testing Requirements); it is the first check, and the snapshot rehearsal is still
-  the one that meets production's rows.
-- Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
-  plan and not built** (#492, gated on an organizer persona; the opponent-linkage half was
-  **decided** on 2026-09-07 in `docs/plans/game-opponent-linkage.md`: two `Game` rows under a
-  `Matchup` parent, `competitionId` required, opponent name and score **projected at read** from
-  the linked row — never written across rows — and coach proposals count in standings only when
-  both sides agree; built inside #492 PR 2/3). Tests:
-  `tests/schemas/teams.test.ts`, lineage blocks in `tests/services/team-service.test.ts` and
-  `tests/api/teams.test.ts`, real-Postgres assertions in `tests/integration/league-access.db.test.ts`;
-  mobile `__tests__/app/team-bracket-fields.test.tsx`, `__tests__/utils/team-labels.test.ts`.
-
-### Game score (server-derived, audit #6/#8/#38)
-
-- `Game.homeScore` is **derived from the event log**: `GameEventService.createEvent`
-  / `deleteEvent` recompute it from made `SHOT` events (`metadata.points || 2`,
-  same rule as `StatsService`) inside the same Prisma transaction as the
-  insert/delete, after a `SELECT … FOR UPDATE` on the game row so concurrent
-  shots can't race to an undercount. Both endpoints return the post-change
-  `score` (`POST /games/:id/events` → `{ event, score }`,
-  `DELETE /games/:id/events/:eventId` → `{ success, score }`) and broadcast it.
-- `PATCH /games/:id { homeScore }` is honoured **only while the game has no
-  SHOT events** (score entered for a game not tracked in-app). Once shots
-  exist the client value is ignored and the derived score re-persisted (old
-  clients keep working; under-counted games self-heal on their next PATCH).
-  `awayScore` is always client-supplied (opponent points).
-- Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
-  renders `game.homeScore` from the detail cache, which
-  `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.
-- **Undo targets the created event (audit #7/#77/#76):** `recordEvent` returns
-  a `LocalEvent`; once the create resolves the screen calls
-  `confirmEvent(localId, event.id)` which attaches `serverId`. The
-  `UndoBanner` is rendered `pending` (button disabled, countdown held, label
-  "SAVING…") until then, and is `key`ed by `localId` so the 5s countdown
-  restarts per event. `handleUndo` deletes `lastEvent.serverId` — never
-  `events[0]` from the TanStack cache. A failed create calls
-  `discardEvent(localId)`. Invalidate event lists with
-  `gameEventKeys.listsFor(gameId)` (`list(gameId)` ends in `undefined`, which
-  TanStack's partial matcher does not treat as a wildcard).
-- **Spectator snapshot merge (audit #73):** `useLiveGame` merges a
-  `game-snapshot` with the events already in state by id (streamed-but-not-
-  in-snapshot events stay at the top and their score wins) instead of
-  replacing, so an event broadcast while the server was building the
-  snapshot isn't lost.
-- **Hot-streak / milestone counters (audit #75):** `game-tracking-store`
-  counters are derived = `seedCounters` (folded once from the server's event
-  page via `seedFromEvents` when the tracker opens) + remaining local events.
-  `undoLast`/`discardEvent` re-fold, so undoing a miss restores the streak
-  and undoing a rebound/assist reverts the double-double math. Seeding never
-  toasts. The seed is bounded by the 100-event page the tracker loads.
-  **Free throws** (SHOT with `points: 1`, the "FT" column in `ShotButtons` —
-  the grid is a MADE row and a MISS row of 2PT/3PT/FT so it keeps its
-  pre-FT height and stays above the fold on 667pt-class devices) never
-  touch `playerStreaks` in either direction — a made FT doesn't extend a hot
-  streak, a missed FT doesn't reset one — but made-FT points do count toward
-  `playerPoints` (10/20-point milestones and double-doubles include them).
-  Shot display text ("FT made" / "2pt miss") derives ONLY via
-  `utils/shot-label.ts#formatShotDescription` (EventTimeline + the tracker's
-  undo message; same never-inline rule as `game-result.ts`).
-
-### Entitlements / Feature Gating
-
-**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the PREMIUM-gated features (team CSV export, calendar subscribe). The backend gates stay as the single source of truth. **No 402 is reachable from the app today**: the only one a user could hit was the FREE team cap on team create, lifted in #445 (the `isUpgradeRequiredError` branch in `app/teams/create.tsx` stays for the day a cap returns). `UsageMeter` on Profile renders plain counts ("4 · Unlimited", no bar, no CTA) because every limit is `null` (`__tests__/components/UsageMeter.test.tsx`). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
-
-Subscription feature gating has a **single source of truth**:
-`backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
-feature->tier map (FREE / PREMIUM / LEAGUE) and the usage limits
-(`USAGE_LIMITS`). Do not redefine tier rules elsewhere — import from there
-(issue #43's usage metering reuses them).
-
-**What FREE gets today (#445):** unlimited teams and seasons; none of the gated
-features (team season-stats CSV export and calendar subscribe are PREMIUM and
-answer 402 — neither has a client entry point). There is no `FREE_TEAM_LIMIT`
-any more.
-
-Enforcement lives in `backend/src/api/middleware/entitlements.ts` (the only entitlement middleware —
-the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware.ts`, which answered
-403, are gone):
-
-- `requireEntitlement(feature)` — gates a route behind a feature. On denial it
-  returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
-  Applied to team season-stats CSV export (`STATS_EXPORT`) and calendar
-  subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
-  subscriptions resolve to an effective FREE tier.
-- `requireTeamCreateLimit()` — enforces a tier's team cap on `POST /teams`
-  when the tier has one. **No tier does since #445**, so it calls `next()`
-  without a count query for everyone; it stays mounted so a finite `maxTeams`
-  in `USAGE_LIMITS` is enforced again with no other change.
-  **Grandfather rule:** a cap is checked only at create time. Users already
-  over the limit KEEP their existing teams (nothing is deleted); they just
-  cannot create new ones until under the cap or on an uncapped tier.
-
-#### Comping an account (admin-set tier, #445)
-
-There is no purchase flow (#41), so the only way onto PREMIUM or LEAGUE is a
-system ADMIN setting it — before #445 that meant hand-written SQL against
-production RDS.
-
-`PATCH /api/v1/admin/users/:userId/subscription` (`api/admin/routes.ts` →
-`SubscriptionService.setSubscription`, `services/subscription-service.ts`):
-
-- Body `{ tier: 'FREE' | 'PREMIUM' | 'LEAGUE', expiresAt?: string | null }`
-  (`setSubscriptionSchema`; the tiers are the Prisma `SubscriptionTier` enum).
-  **PREMIUM / LEAGUE require an `expiresAt` in the future** (ISO 8601 with `Z`
-  or an offset): `isSubscriptionActive` treats a paid tier with no expiry as
-  inactive, so a comp without a date would silently resolve to FREE. FREE
-  takes no expiry (omit or `null`) and clears the stored one.
-- **200** `{ success, user: { id, name, email, role, subscriptionTier,
-  subscriptionExpiresAt }, effectiveTier }`; **400** invalid body / non-UUID
-  `userId` / deleted account; **403** caller is not a system ADMIN; **404**
-  unknown user. Errors are plain `{ error }` from the central handler.
-- The write is `updateMany … WHERE deletedAt IS NULL` (the #444 invariant), the
-  target's cached usage is invalidated, and every change logs
-  `Subscription changed by admin` with actor, target and from/to tier + expiry
-  — that log line is the audit trail.
-- **How to comp someone:** sign in as an ADMIN, find the account id with
-  `GET /api/v1/players?search=<email>&role=COACH` (ADMIN search matches email;
-  pass the account's role, the list defaults to `PLAYER`), then
-  ```bash
-  curl -X PATCH https://api.hooplings.com/api/v1/admin/users/<userId>/subscription \
-    -H "Authorization: Bearer <admin access token>" -H 'Content-Type: application/json' \
-    -d '{"tier":"PREMIUM","expiresAt":"2027-09-30T00:00:00Z"}'
-  ```
-  To end a comp early send `{"tier":"FREE"}`; otherwise it lapses to an
-  effective FREE tier on its own at `expiresAt`. A route was chosen over an
-  operator script because RDS sits in a private subnet — a script needs a
-  tunnel or a one-off ECS task, a route needs only an ADMIN token.
-- Tests: `tests/api/admin-subscription.test.ts` (service un-mocked),
-  `tests/schemas/admin-subscription.test.ts`,
-  `tests/services/subscription-service.test.ts`.
-
-### League / season / team / game authorization
-
-Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin`, `isLeagueAdmin`,
-`canAccessTeam`, `getTeamPermissions`). Rules enforced in the services (audit fix plan
-`docs/plans/audit-fix-plan-2026-08-22.md`, lane B):
-
-- **Leagues & seasons** (`league-service.ts`, `season-service.ts`): **both the list and the detail
-  endpoints are caller-scoped (#443).**
-  - `GET /leagues` / `GET /seasons` AND a caller-access clause into the `where`. The clause is an id
-    set from `utils/permissions.ts#getReadableLeagueIds(userId)` = league admin OR personal owner OR
-    staff/member of a team in it OR guardian of such a member. The **same `where` object feeds `count`
-    and `findMany`**, so `total` is the scoped count and never the global one, and `search` /
-    `leagueId` / `isActive` are ANDed alongside it, never substituted for it — search must not be a
-    scoping bypass. An empty id set short-circuits to `{ total: 0 }` with no query. System ADMINs are
-    unscoped, except that personal leagues (#442) are excluded by default so admin listings do not
-    accumulate one row per coach; `?includePersonal=true` opts back in.
-  - The id set is resolved from the **Team** side (`team.findMany` filtered by the shared
-    `teamAccessWhere`, selecting `season.leagueId`), not by scanning `League` with nested `some`
-    clauses: after #442 the League table grows one row per coach, while this query is bounded by the
-    caller's own teams. There is deliberately **no cap** — truncating an authorization set would make
-    `total` lie.
-  - `getLeagueById(id, userId)` / `getSeasonById(id, userId)` **404 for a caller with no affiliation**
-    (`canReadLeague`), 404 rather than 403 so ids cannot be probed, matching
-    `PlayerService.getPlayerById`. Before #443 these performed *no* access check at all: `isLeagueAdmin`
-    only chose which `include` to use, so any authenticated caller who knew an id got every season and
-    team name — and the id is not secret, since `TEAM_INCLUDE` hands it to every member and guardian.
-    An affiliated non-admin still gets the stripped payload (metadata plus team `{ id, name }`); full
-    detail with emails and rosters stays limited to system ADMINs and admins of that league.
-  - Authorization denials elsewhere throw `ForbiddenError` (**403**, not 400); the league/season routes
-    map any `AppError` to its `statusCode`. `PATCH /leagues/:id` enforces the same name-uniqueness rule
-    as create (400 on duplicate).
-  - **Tested against a real database.** `backend/tests/integration/league-access.db.test.ts` unmocks
-    Prisma and runs against Postgres (CI already provides one). It uses one fixture user per access
-    branch, each qualifying through exactly one — a negative-only test cannot catch a *dropped* branch,
-    which is verified by mutation: removing the `members` branch fails only the positive test while
-    every "sees none of org B" assertion stays green.
-- **League admins (decision 3)**: `POST /leagues/:id/admins { userId }` (201, `userId` must be a UUID)
-  and `DELETE /leagues/:id/admins/:userId` (404 if not an admin) are **system-ADMIN-only** — an existing
-  league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
-  match `removeLeagueAdmin`; revisit if delegated league administration becomes a product decision).
-  The session user payload on `GET /auth/me`, `GET /auth/callback` and `POST /auth/dev-login` carries
-  `leagueAdminOf: string[]` (league ids from `LeagueAdmin` rows, sorted; empty for most users, and **not**
-  populated for system ADMINs, who are implied admins of every league via `role === 'ADMIN'`).
-- **Global role is never an access check.** The self-selectable `User.role` (`COACH` / `PLAYER`) is
-  only read by services to (a) short-circuit for `ADMIN` and (b) allow team creation. Everything
-  "on behalf of another player" goes through `utils/permissions.ts#getPlayerTeamAccess(userId, playerId)`
-  → `{ memberTeamIds, manageableTeamIds }` (teams the player is on / the subset the caller has
-  `canManageRoster` on). `requireRole`, `requireFeature` and `requireUsageLimit` were removed from
-  `api/auth/middleware.ts` — they were unmounted and contradicted the 402 entitlement contract.
-- **Managed players (role matrix B2.10)**: `PATCH/DELETE /players/:id` for a managed player requires
-  the caller to be its `managedById` **and** currently have `canManageRoster` on a team the player is
-  rostered on, or — so create-then-edit works — the player is on no team yet and was created < 24h ago
-  (`MANAGED_PLAYER_GRACE_MS`). A creator who has left the roster loses edit/delete/email rights; system
-  ADMINs are unaffected. Consequence: deleting an un-rostered managed player older than 24h is admin-only.
-- **Teams** (`team-service.ts`): `listTeams` always ANDs the caller's access clause with any
-  `seasonId` / `leagueId` / `playerId` filter — only system ADMINs skip it. That clause is
-  `utils/permissions.ts#teamAccessWhere(userId, childIds)` (staff OR member OR league admin OR guardian
-  of a member); it lives there, not inline, so the league-access predicates share one definition with it
-  and the two can never drift. **A copy did drift (#589):** `StatsService.getPlayerOverallStats` decided
-  access with its own three-branch version (league admin, staff, member), so a guardian got 403 on
-  `GET /stats/players/:childId`, the screen every My kids row opens. It now runs the shared clause in
-  one query (`getAccessibleTeamIds`). Before writing "who may read this team" anywhere, use
-  `canAccessTeam` for one team or `teamAccessWhere` for a set. Proven against real Postgres in
-  `tests/integration/player-stats-access.db.test.ts`, one caller per branch.
-  `PATCH /teams/:id { seasonId }` moving a team into a different season requires
-  `isLeagueAdmin` on the **target** season's league (in addition to `canManageTeam`), otherwise 403.
-  `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
-  (head/assistant coach, league admin, system admin); players and stats-only staff get `{ id, name }`.
-  Staff emails stay in the payload for every team member (coach contact info).
-  **`GET /teams` list items carry the CALLER's own staff row** (`teamListInclude(userId)` — at most one
-  per team, same shape as detail rows, nobody else's). The mobile permission helpers gate the Games-tab
-  create FAB and the game-create team picker on it (`canManageAnyTeam` → `hasTeamPermission` needs
-  `team.staff`); #396 shipped that gate against a staff-less list payload, which hid game creation from
-  every coach for a week (#469) — self-serve coaches worst of all, since personal leagues are filtered
-  out of `leagueAdminOf` (#442). Don't remove the join without changing the client gate.
-
-#### Self-serve team creation and personal leagues (#442)
-
-`POST /teams` authorization is **two independent checks**, and they must stay separate:
-
-- **WHO may create a team at all** — system ADMIN, `role === 'COACH'`, or an admin of any league.
-  Unchanged from the pre-#442 rule.
-- **WHERE they may create it** — only when `seasonId` is supplied:
-  `utils/permissions.ts#canWriteLeague(userId, leagueId)` = league admin OR personal owner OR staff on
-  some team in that league. This replaces the old `!canCreate && role !== 'COACH'` escape hatch, which
-  let **any** COACH plant a team in **any** league (whose admin then got that roster, minors' emails
-  included).
-
-They are separate because the no-`seasonId` path has no target league to check. Folding WHO into WHERE
-leaves that path ungated and any authenticated PLAYER or guardian can create a team and become its Head
-Coach with all five flags. **Never use a read predicate as the write gate**: a player or guardian
-rostered on a coach's team is a *member* of a team in that coach's personal league.
-
-`createTeamSchema.seasonId` is **optional**. Omitted means "my own teams":
-`TeamService.createTeam` resolves (creating on first use) the caller's personal league and its
-current-year season, inside the **existing** `$transaction`, after the `SELECT … FOR UPDATE` and
-**after** the tier cap check (dormant since #445) so a capped user would provision nothing.
-
-- `League.personalOwnerId String? @unique` marks the container (migration
-  `20260830000000_league_personal_owner`, `onDelete: SetNull` so deleting a user never cascades into
-  seasons, teams and games). It is an **internal marker and never appears in a payload** — every
-  `LEAGUE_*` read carries `omit: LEAGUE_OMIT` and every nested `league:` include omits it. The
-  client-facing form is the derived `isPersonal` boolean on the league list (`personalOwnerId !== null`,
-  not `=== caller.id`, so an ADMIN still sees another coach's container labelled personal).
-- **There is no P2002 retry and none is needed.** The transaction opens by locking the caller's `User`
-  row; `personalOwnerId` is unique per user and the season lives only in that user's own league, so the
-  only writer that can contend is the same `userId` and it is serialized. Do not remove the lock
-  believing a retry covers it. The three writes use `upsert` with a non-empty `update` that rewrites the
-  unique key to itself — writing any other field would clobber a coach's later rename.
-- The owner **does** get a real `LeagueAdmin` row (so they can rename the league and add next year's
-  season, which unblocks rollover, #461), but personal leagues are filtered out of the `leagueAdminOf`
-  array in `getLeagueAdminOf` (`api/auth/routes.ts`). So `canAccessAdmin` stays false and no
-  "Leagues & Seasons" entry appears. Deliberate client/server divergence: backend rules are unchanged,
-  only the client hint list is filtered.
-- Season naming is the year of creation and **does not roll over** on its own (#461).
-- Mobile branches on "every visible league is personal" (`mobile/utils/league-scope.ts`), never on league
-  count — after the first team the personal league exists, so a count test would show team #2 a picker
-  for a concept the coach never chose. The create and edit screens hide the league/season pickers in that
-  case; the disclosure always offers a "My teams" default so a member-of-someone-else's-league who
-  switches to COACH still has a valid choice.
-- Fixture: `dana.whitfield@example.com` is seeded **PLAYER** with no team, staff or league admin row, so
-  `.maestro/coach-onboarding.yaml` exercises the real funnel including picking Coach (every WorkOS
-  sign-up starts as PLAYER). The seed also deletes teams left over from a previous E2E run, so every
-  run starts from a coach with no teams (the flow exercises first-team provisioning, then reuse).
-- The picker only ever renders the name-only path once #443's list scoping is in: `areAllLeaguesPersonal`
-  reads `GET /leagues`, so while that list is global a new coach still sees a real league. #442 and #443
-  are therefore one release in two commits, and `.maestro/coach-onboarding.yaml` is the gate for the pair.
-
-- **Games** (`game-service.ts`): `updateGame` runs `canAccessTeam` **before** any field-specific branch
-  (403 `You do not have access to this game` for unaffiliated users, regardless of body) and rejects a
-  body with no updatable fields (`updateGameSchema` `.refine` → 400 `At least one field must be provided`;
-  the service also throws `BadRequestError('No fields to update')` as defense in depth). Changing `status`
-  or a score on a `FINISHED` game requires `canManageRoster` (head/assistant coach, league admin, system
-  admin) — a `canTrackStats`-only Team Manager can no longer reopen or rewrite a final. `listGames`
-  includes teams the caller administers via the league (same set as `canAccessTeam`). Lane D owns the
-  socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
-  `GET /games/:id` (`GameDetailView`) and `GET /games/:id/rsvps` (`RsvpView`) apply the team-detail
-  email rule (role matrix B2.5): `team.members[].player.email` / `rsvps[].user.email` only for callers
-  with `canManageRoster` (RSVP keeps the caller's own row intact); staff emails stay. `listGames` uses
-  `GAME_LIST_INCLUDE` (no people at all).
-
-### Team Invitations & Unified Add Player (roster/invite unification)
-
-Spec: `docs/plans/roster-invite-unification-spec.md` (unified Add Player; decisions D1–D5 +
-eng-review amendments recorded there).
-
-- **`POST /teams/:teamId/players`** (gate `canManageRoster`) is the unified Add Player call —
-  name required, `playerEmail?`, `guardianEmail?` + `guardianRelationship?`, jersey/position/photo.
-  It replaced `POST /teams/:id/managed-players` and the `{name,email}` arm of
-  `POST /teams/:id/invitations`, both **removed in #418** once the request logs showed no
-  traffic to either: the first now answers 404, the second 400 (`playerId is required`). Do not
-  add a tombstone for them. The unified path itself previously answered 410 — that tombstone was
-  deleted deliberately. Consent model:
-  - **Case 1** (no email): managed `User` + `TeamMember`, one transaction. `rostered: true`.
-  - **Case 2** (email with no *claimed* account — includes reusing an **unclaimed** pre-provisioned
-    row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
-    `User` (`isManaged: true`, `managedById` = coach — deliberate authz statement, B2.10 edit
-    rights until claim) + `TeamMember` + `TeamInvitation` in one transaction, "added" email copy.
-    **The player is on the roster immediately**; accept only activates their login.
-  - **Case 3** (email belongs to a claimed account, `workosUserId` set): invitation **only** —
-    membership on accept (pre-consent membership = de facto auto-accept, deferred by D2).
-    `rostered: false` in the response; `guardianEmail` is refused with `guardianInvited: false` +
-    reason (guardian system requires membership).
-  - Unique-email races: `user.create` P2002 is caught and retried once against the winner row
-    (`resolveEmailRaceWinner`).
-  - Response: `{ rostered, invited, member, invitation, guardianInvited, guardianReason?, emails:
-    { player?, guardian? } }` — **per-send email flags**; a failed SES send returns `false` and the
-    client must warn the coach (silent failures were invisible — SES-sandbox incident 2026-08-28).
-    `POST /teams/:id/invitations` and the guardian invite route likewise return `emailSent`
-    (`null` = no address). Invitation emails are **awaited** (logged + reported, never thrown).
-- **Invite-status chips:** `GET /teams/:id` joins `invitations` with `status IN (PENDING,
-  ACCEPTED)` (`id, playerId, status, expiresAt, createdAt` — never `token`), stripped to `[]` for
-  callers without `canManageRoster` (same rule as member emails). Chip derivation: Active =
-  `player.isManaged === false` (claimed via login) **or** latest invitation ACCEPTED (web-link
-  accepters never clear `isManaged`); Invited = PENDING unexpired; Invite expired = PENDING past
-  `expiresAt` (client-computed); Not invited = everything else. Existing-account pending invites
-  (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
-  `members[]` by `playerId`.
-- **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the
-  live PENDING row and creates a fresh one (new token — the old link dies) in the same code path
-  as create. The superseding row **inherits `jerseyNumber`/`position`/`message` from the row it
-  expires** when the request omits them (mobile Resend sends only `{ playerId, supersede }`) —
-  a case-3 accept creates the member row from the live invitation, so a bare resend must not wipe
-  the coach-set jersey (jersey-loss fix 2026-08-29); explicit values still win. With `supersede` an existing **member** is allowed (a rostered case-2 player);
-  a claimed account that is already a member answers 400 `Player already has access to this team`.
-  Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
-  not one transaction, so a lost create race on the partial unique index (double-tap resend) maps
-  P2002 → 400 `A pending invitation already exists for this player` (`createInvitationRow`), never 500.
-- **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
-  (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
-  "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,
-  audit #58) unchanged.
-- **Rejection strips the unclaimed email (consent, spec T1 as narrowed by ship review):** only
-  the invitee's explicit REJECTED transition nulls `User.email` (guarded: `workosUserId` null and
-  no other PENDING **or ACCEPTED** invitation references the player) — otherwise `syncUser`'s
-  claim-by-email turns a later, unrelated sign-up into silent team membership. The roster entry
-  survives (D1). **Deliberately not stripped** on CANCEL (a coach's action must not destroy
-  coach/admin-entered emails; re-inviting would orphan the row into a duplicate account) or on
-  EXPIRY (resend needs the address; the invite email already informed that mailbox).
-- **Email matching is case-insensitive and new accounts store lowercase** (red-team RT1):
-  WorkOS normalizes to lowercase and `syncUser` claims by exact match, so all invite/add flows
-  look up case-insensitively and create with `trim().toLowerCase()` — a mixed-case entry
-  must never create an unclaimable duplicate or bypass the case-3 consent branch.
-- **Every "which row holds this email" filter is `utils/email-match.ts#emailEquals(address)`
-  (#572) — never a hand-written `{ equals, mode: 'insensitive' }`.** Prisma compiles that filter
-  to `ILIKE` with the value as an **unescaped pattern**, so `_` matched any character and `%` any
-  run: a lookup for `first_last@x.com` also returned the account `firstXlast@x.com`, and an
-  invitation, a staff role or a guardian link could land on a stranger. `emailEquals` escapes
-  `\`, `_` and `%`. It covers `User.email` (Add Player, guardian
-  find-or-create, add staff by email, SES events) and `GuardianInvitation.invitedEmail`
-  (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on the
-  raw filter anywhere else in `src/`; `contains` + `insensitive` (search) stays allowed.
-  **Proven only against real Postgres** (`tests/integration/email-match.db.test.ts`): each flow
-  plants a look-alike account and must not touch it. When adding such a test, put the `_` on the
-  side that is the **query** — the look-alike on the wrong side passes with the bug present
-  (caught by mutation-testing the suite). That suite also fails if a future Prisma starts
-  escaping by itself, which would make addresses containing `_` stop matching.
-- **Supersede is atomic** (red-team RT2): `createInvitationRowSuperseding` expires the live
-  PENDING row and creates its replacement in ONE transaction (an ACCEPTED row appearing in the
-  window → 400, never a chip regression); a superseding resend for a rostered case-2 player uses
-  the "added" email variant. The case-2 managed-flags write is claim-guarded
-  (`updateMany WHERE workosUserId IS NULL`; zero rows → the add re-branches to case 3, RT4).
-- The `GET /teams/:id` invitations join carries **rostered players only** (case-3 invites come
-  from `GET /invitations?teamId=` client-side, per the spec), newest-first with a `take: 200`
-  guard. Awaited invite/guardian email sends are bounded at 5s (`utils/promise-timeout.ts`) so
-  routes stay under the mobile client's 10s timeout.
-- The invitation email template branches on `variant`: `'added'` (cases 1-2, "You've been added…
-  activate your access") vs default "invited to join" (case 3).
-- `POST /teams/:id/invitations` (staff with `canManageRoster`) creates a `TeamInvitation` with a random
-  `token` and emails the player a `hooplings.com/invite/<token>` link. The token is a **bearer secret**:
-  `POST /invitations/by-token/:token/accept` is unauthenticated and accepts on behalf of the invited player.
-- **The token is never returned on an authenticated response** (audit #14). `invitation-service.ts` reads
-  invitations back through explicit `select` constants (`INVITATION_SCALAR_SELECT` / `INVITATION_SELECT` /
-  `INVITATION_TEAM_SELECT`) that omit `token`, and `api/invitations/serializers.ts#omitToken` strips it again
-  at the route layer as defense in depth. Only `getInvitationByToken` / `acceptInvitationByToken` (the
-  public routes, where the caller already holds the token) touch it. Tests in `tests/api/invitations.test.ts`,
-  `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
-  create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
-- **`GET /invitations?playerId=<other user>`** (role matrix B2.4): allowed for system ADMINs (unscoped);
-  with `teamId`, for callers with `canManageRoster` on that team; without `teamId`, for callers with
-  `canManageRoster` on at least one team the player is rostered on — results are then scoped to those
-  teams (`teamId: { in: manageableTeamIds }`). Everyone else gets 403. The old check (`user.role ===
-  'COACH'`, a self-selected role) let any user enumerate anyone's invitations.
-- **Lifecycle (audit #22/#23/#58).** Uniqueness is a hand-written **partial** unique index
-  `TeamInvitation_pending_teamId_playerId_key ON (teamId, playerId) WHERE status = 'PENDING'` (migration
-  `20260823060000_partial_unique_pending_invitation`; Prisma can't express it, so `schema.prisma` carries a
-  comment and a plain `@@index([teamId, playerId])` instead of `@@unique`). Any number of
-  REJECTED/CANCELLED/EXPIRED rows may pile up per team/player, so invite → reject → re-invite works.
-  Nothing schedules `expireOldInvitations`; expiry is **lazy**: `createInvitation` treats a PENDING row whose
-  `expiresAt` has passed as non-blocking and flips it to EXPIRED before creating the new one, and accept
-  paths flip it on contact. State transitions out of PENDING go through `transitionPending()` —
-  `updateMany … where { id, status: 'PENDING' }` inside the transaction — so the loser of a concurrent
-  accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
-  `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
-  other callers with team access (rostered players) remain scoped to `playerId = caller`.
-- **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
-  and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is
-  gone: `createInvitationSchema` requires `playerId` and strips unknown keys, so a body without
-  it is a 400 and `name` / `email` sent next to a `playerId` are ignored. A new player, with or
-  without an email, is created only by `POST /teams/:teamId/players`, which keeps the
-  one-transaction rule (no orphan player when the invite fails).
-- **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
-  (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `hooplings.com/invite/<token>` is
-  rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
-  stays on the IP-keyed `writeRateLimit` (the browser calls it directly).
-- Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
-  `isInvitationExpired`, timestamp compare — no `Math.ceil` → `-0` "Expires today" on a dead invite, #59).
-
-### Guardians / PARENT role (`services/guardian-service.ts`)
-
-Spec: `docs/plans/parent-role-spec.md` (role-matrix decision 1). A guardian is an adult `User` linked to one or
-more child players through `Guardian { parentId, childId, relationship, isPrimary }`; exactly one link per
-child is `isPrimary` (the first one; the oldest remaining link is promoted when the primary is removed).
-Removing the last guardian never deletes the child.
-
-- **Roles.** `UserRole.PARENT` is *derived*, never self-selectable (`PATCH /auth/me/role` still rejects it).
-  A brand-new account created through a guardian invite is `PARENT` (unverified email, **not** `isManaged`).
-  An existing account keeps its role — a coach who is also a parent stays `COACH`; a bare `PLAYER` (no
-  `TeamMember`, no `TeamStaff` rows) is promoted to `PARENT` on accept. `syncUser` is unchanged: the
-  guardian-created row is claimed by email on first WorkOS login like any pre-provisioned row.
-- **Link flow.** `POST /teams/:teamId/members/:playerId/guardians { email, relationship }`
-  (`canManageRoster`; `relationship` ∈ `GuardianRelationship` MOTHER/FATHER/GUARDIAN/OTHER) finds-or-creates
-  the adult's `User`, creates a PENDING `GuardianInvitation` (7-day expiry) and emails
-  `${PUBLIC_APP_URL}/invite/<token>` via `guardianInvitationTemplate`. Same token rules as team invites: the
-  token is a bearer secret, read back only through `GUARDIAN_INVITATION_SELECT` (no `token`) and stripped
-  again by `omitToken`. Uniqueness is the hand-written partial index
-  `GuardianInvitation_pending_childId_invitedEmail_key … WHERE status = 'PENDING'` (migration
-  `20260823120000_guardian_invitation`); a stale PENDING row is flipped to EXPIRED on re-invite.
-- **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
-  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `teamName`, `inviterName`,
-  `relationship`, `status`, `expiresAt`) and `POST /invitations/by-token/:token/accept` returns
-  `{ kind: 'guardian', invitation, guardian }` — acceptance creates the `Guardian` row inside one
-  `$transaction` guarded by `updateMany … WHERE status = 'PENDING'` (loser of a race gets 400).
-  Authenticated `POST /invitations/:id/accept|reject` try the id as a `GuardianInvitation` first and require
-  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too.
-- **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
-  isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
-  roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).
-- **What a guardian can do.** `utils/permissions.ts`: `isGuardianOf(userId, childId)`,
-  `isGuardianOfTeamMember(userId, teamId)`; `canAccessTeam` is true for a guardian of any current member and
-  `getTeamPermissions` returns `canViewStats: true` only (so schedule, live games, box scores, season stats —
-  the member read set; roster emails stay stripped; no stat tracking / roster / announcements → 403).
-  `POST /games/:id/rsvp { status, playerId? }` — `playerId` is allowed when the caller is a guardian of that
-  player and the player is rostered on the game's team; the `GameRsvp` row is keyed on the **player** and the
-  confirmation email goes to the guardian. Team invitations addressed to a child may be accepted/rejected by
-  a guardian, `GET /invitations` default scope includes the caller's children, and `listInvitations?playerId=`
-  accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
-  /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on
-  the coach-only team-member route). `GET /auth/me`, `/auth/callback` and `/auth/dev-login` add
-  `user.guardianOf: { childId, childName, relationship, isPrimary }[]`.
-- **List scoping (mobile PR).** `TeamService.listTeams` and `GameService.listGames` add
-  `{ members: { some: { playerId: { in: childIds } } } }` (via `GuardianService.getChildIds`) to the caller-access
-  `OR`, so a guardian's Teams / Games / Home tabs show the children's teams. `GET /invitations` (no `teamId` /
-  `playerId`, status unset or `PENDING`) also returns `guardianInvitations: PublicGuardianInvitation[]` — the
-  caller's pending, unexpired `GuardianInvitation`s matched on `invitedEmail` case-insensitively
-  (`GuardianService.listPendingForUser`), no token — which the mobile Invitations tab renders as "Accept for <child>".
-- Tests: `tests/services/guardian-service.test.ts`, `tests/api/guardians.test.ts`,
-  `tests/utils/permissions.test.ts`, `tests/schemas/guardian.test.ts`, guardian cases in the rsvp /
-  invitation / notification / player-service / auth suites. Out of scope (v1): claim-by-code, parent-to-parent
-  invites, `respondedBy` on RSVPs.
-
-### Player directory (`/api/v1/players`)
-
-`PlayerService.listPlayers(params, caller)` / `getPlayerById(id, caller)` take the authenticated caller (`{ id, role }`) and scope by it (audit #3):
-
-- **ADMIN**: unscoped; may filter by `role` / `isManaged`; `search` matches name *or* email; `email` is included.
-- **Everyone else**: only themselves plus users who share a team with them (teams they play on or are staff of); `role` / `isManaged` filters are ignored (always `PLAYER`, non-managed); `search` matches name only; `email` is omitted from list results and is `null` on detail unless it's the caller's own record. Players outside the caller's teams are a **404**, not a 403, so ids can't be enumerated.
-- Team rosters (`GET /teams/:id`) remain the place coaches see their managed players; `USER_SUMMARY_SELECT` now includes `isManaged` so clients can label roster-only players (audit #64).
-
-### Redis (`utils/redis.ts`)
-Best-effort cache only — every helper fails open. The ioredis `retryStrategy` (`redisRetryDelay`) never returns `null`: it backs off 200 ms → 30 s and keeps reconnecting for the life of the process; if the connection ends anyway (`quit()`), the client is dropped and recreated lazily on next use (audit #50). Commands still fail fast while disconnected (`enableOfflineQueue: false`, `maxRetriesPerRequest: 1`).
-
-### Avatar uploads (`services/upload-service.ts`, `api/uploads/`)
-`POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`), not a PUT URL — a presigned PUT can't bind `Content-Length`, a POST policy can. The policy enforces `content-length-range` 1..`MAX_AVATAR_BYTES` (5 MB) and pins `Content-Type`; `contentLength` is an optional early 400. Mobile `services/upload-service.ts` posts a multipart form (policy fields first, `file` part last) and **throws on `!res.ok`** so a failed upload never persists a dangling URL (audit #39). **The file part is an `expo-file-system` `File` (`new File(localUri)`), never React Native's `{ uri, name, type }` object (#576):** since Expo SDK 57 the global `fetch` is Expo's own, which encodes a multipart body in JavaScript and takes only a string, a Blob or a File for a part; the old object failed every upload on build #33 with "Unsupported FormDataPart implementation". No test saw it, because every test stubbed `fetch` and never encoded the body; `__tests__/services/upload-service.test.ts` now runs the form through Expo's real encoder (`expo/src/winter/fetch/convertFormData`). The same goes for any future upload: build the form, then prove it encodes. When a profile's `profilePictureUrl` changes, `deletePreviousAvatar(old, new)` best-effort deletes the replaced object if it lives in our bucket (WorkOS photo URLs are never touched) — call it from any new path that sets `profilePictureUrl` (audit #61). `infra/s3.tf` allows `POST` in CORS and aborts incomplete multipart uploads after 1 day.
-
-### Environment URLs & time zone
-- `API_BASE_URL` — the host that serves `/api/v1/*` (`https://api.hooplings.com` in prod via `infra/task-definition.json`). Used for the calendar feed/webcal URLs. `PUBLIC_APP_URL` stays the web apex (`https://hooplings.com`) for human-facing links (invite pages, "View game"). They were conflated before (audit #24) — feeds pointed at the apex, which serves no API. **Both are read ONLY via `utils/urls.ts`** (`publicAppUrl()` / `apiBaseUrl()`, trailing slash stripped) — never `process.env.PUBLIC_APP_URL` inline. The fallback for both is `http://localhost:3000` on purpose: a localhost link in a production email is obviously broken, whereas the old per-service brand-domain fallbacks emitted plausible links to the wrong host with nothing in the logs; `warnMissingUrlConfig()` runs at boot and warns in production when either is unset (domain migration #501). The iCal `uid` domain / `productId` are the exported `ICAL_UID_DOMAIN` / `ICAL_PRODUCT_ID` in `calendar-service.ts` — frozen once anyone subscribes (changing a UID duplicates every event in a subscriber's calendar). Email copy names the product only through `mailer/templates/brand.ts#APP_NAME`; `tests/services/mailer.test.ts` fails on any retired brand name in a rendered template.
-- `DEFAULT_TIMEZONE` — IANA zone used to format dates in outbound email (`utils/format-date.ts#formatEmailDate/formatEmailDateTime`; default `America/Los_Angeles`). Never call `toLocaleDateString()` bare in a template variable — ECS runs in UTC (audit #57). Teams/leagues have no time-zone column yet; pass one through the helper's `timeZone` arg once they do.
-- `CORS_ORIGIN` — comma-separated list of **exact** browser origins (scheme + host, no wildcard) that
-  `backend/src/index.ts` hands to both `cors()` and Socket.io. Production
-  (`infra/task-definition.json`) lists `https://api.hooplings.com,https://hooplings.com,https://www.hooplings.com`;
-  the apex + www entries exist because the web invite page (`web/app/invite/[token]/invite-client.tsx`)
-  `POST`s the accept cross-origin from `hooplings.com`, which is a preflighted request (#447). No old-domain origins were carried through the domain migration: no browser ever sent one, because nothing has ever served that host (#501). The list
-  is always passed as an **array** — `cors` stamps a plain-string origin on every response regardless
-  of the request `Origin`, while an array reflects only listed origins — so behaviour never depends on
-  how many entries are configured. CORS here is browser hygiene, not access control: the accept route is
-  an unauthenticated bearer-token endpoint reachable from any curl. `tests/api/cors.test.ts` reads the
-  production value out of `task-definition.json` and asserts the apex preflight, so dropping the apex
-  from the deploy file fails CI; `tests/infra/task-definition.test.ts` does the same for every other
-  domain-bearing env value (`PUBLIC_APP_URL`, `API_BASE_URL`, `SES_FROM_ADDRESS`, `WORKOS_REDIRECT_URI`). The mobile app sends no `Origin` header and is unaffected. The web
-  deploy (#30) separately needs `API_URL` (server-side GET) **and** `NEXT_PUBLIC_API_URL` (browser
-  POST, baked at build time) pointed at the API host.
-
-### Calendar feed (`services/calendar-service.ts`, `api/teams/calendar.ts`)
-- `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass) — a downgraded/expired subscription stops the feed with 403 instead of serving forever (audit #43).
-- The calendar router is mounted on `/teams` ahead of the main teams router so the public `GET /teams/:id/calendar.ics` skips auth. Because of that ordering, `authenticate` is attached **per route** to `subscribe`/`revoke` — never `router.use(authenticate)` there, or every `/teams/*` request verifies the JWT twice (audit #71).
-
-### Push notifications (`services/notification-service.ts`)
-`sendMessages` inspects Expo tickets immediately and schedules `checkReceipts()` ~15 min later (unref'd timer); any ticket/receipt with `DeviceNotRegistered` deletes that `PushToken` (`pruneDeadTokens`). Other receipt errors are logged only (audit #60). The jest mock in `tests/__mocks__/expo-server-sdk.js` stubs both the send and receipt APIs.
-
-### Transactions (audit #70)
-`InvitationService.addRosterPlayer` creates the managed user + team membership (and, with an email, the invitation) inside one `$transaction` so a failed later insert can't leave an orphan managed user (`TeamService.addManagedPlayer`, where the rule started, was removed in #418; the `createTeam` half — team + roles + staff row — landed with audit #49 in `fix/infra-limits-and-reconnects`).
-
-### Key Patterns
-- Layered architecture: API routes → Services → Models (Prisma)
-- Real-time: Socket.io WebSocket for live game updates
-- State management: Zustand (client) + TanStack Query (server state) in mobile
-- Authentication: WorkOS (AuthKit). JWT is the session token format — WorkOS is the identity provider.
-
-### Session tokens & refresh (#349)
-- **Access tokens are verified locally** (`WorkOSService.verifyToken`): signature against the WorkOS JWKS for `WORKOS_CLIENT_ID` (via `jose` `createRemoteJWKSet`, cached, auto-refresh on unknown `kid`), `alg` ∈ {RS256, ES256}, and required `iss` (`WORKOS_JWT_ISSUER`, default `https://api.workos.com`), `exp`, `sub`. No WorkOS API call per request — the DB lookup by `workosUserId = sub` is the user check. Invalid/expired/forged → **401**; JWKS unreachable → **503** (`ServiceUnavailableError`), which mobile must treat as transient, not as a logout. The pre-2026-08 implementation only base64-decoded the payload (audit finding #1).
-- WorkOS access tokens are **short-lived (minutes)**. `GET /auth/callback` returns both `accessToken` and a rotating `refreshToken`; `POST /auth/refresh { refreshToken }` returns a new pair — **401** only when WorkOS definitively rejects the token (4xx); **503** when WorkOS is down/unreachable and **429** (+`Retry-After`) when WorkOS rate-limits, both of which the mobile client treats as transient (keeps tokens, no logout). `WorkOSService.refreshSession()` wraps `authenticateWithRefreshToken`.
-- Mobile `services/api-client.ts`: on a 401 it performs a **single-flight** refresh (concurrent 401s share one call — WorkOS invalidates the old refresh token on use), stores the new pair via `setAuthToken(access, refresh)`, and replays the original request once. Auth endpoints (`/auth/refresh`, `/auth/callback`, `/auth/login`, `/auth/dev-login`) and already-retried requests never trigger a refresh. `refreshAccessToken()` is exported and resolves to a `RefreshOutcome`: `ok` (new token stored), `rejected` (no refresh token, or `/auth/refresh` answered **401**) → `logout()`, or `unavailable` (network error, timeout, 429, 5xx/503) → tokens are **kept** and the original error is surfaced to the caller; the next 401 retries the refresh (audit #20). A 401 from an auth endpoint itself never logs out from the interceptor.
-- **Where tokens live on the device (audit #52):** `auth-store` persists through `services/secure-storage.ts`, a split Zustand `StateStorage`. `accessToken` and `refreshToken` go to `expo-secure-store` (iOS Keychain / Android Keystore, `AFTER_FIRST_UNLOCK`) under two keys, `auth.accessToken` and `auth.refreshToken` (separate entries because iOS caps a SecureStore value at 2048 bytes); `user`/`isAuthenticated`/`version` stay in AsyncStorage under the unchanged `auth-storage` key with both token fields rewritten to `null`. `getItem` merges the halves back; `clearSession()` also calls `clearPersistedAuth()` so a sign-out always wipes the keychain entries. **Migration:** the first read on a binary with the native module finds tokens in the legacy AsyncStorage blob, moves them into SecureStore and scrubs the plaintext copy — the user stays signed in across the 1.1.0→1.2.0 upgrade. **Fallback:** `expo-secure-store` is a native module, so the adapter never imports the JS wrapper (it calls `requireNativeModule` at load and would crash an old binary); it probes `requireOptionalNativeModule('ExpoSecureStore')` and calls the native methods directly, degrading to the pre-#52 all-in-AsyncStorage layout when the module is absent. PKCE verifier/state (`utils/pkce.ts`) and the return-path/onboarding flags are short-lived and stay in AsyncStorage. **Runtime boundary:** the module first shipped in the **1.2.0** binary (build #25); build #24 stays on the last 1.1.0 OTA. The runtime moved again to **1.3.0** with the scheme rename (#504) and to **1.4.0** for dependency drift (#562), so OTAs now reach build #32+ only.
-- `auth-store` `onRehydrateStorage` clears `isLoading` via `setState` in both the success and the error branch (corrupt storage starts the app logged out instead of stuck on "Loading…", audit #34). `app/login.tsx` clears its spinner when `AppState` returns to `active` while a browser sign-in is pending (user backed out of Safari, audit #33).
-- **PKCE + `state` on the mobile sign-in (audit #5):** `app/login.tsx` calls `utils/pkce.ts#beginPkceLogin()`, which persists a random `{ state, verifier }` in AsyncStorage (`auth:pending-login`, 10-min TTL) and sends `state` + `code_challenge` (S256) on `GET /auth/login`; the backend forwards both to WorkOS (`getAuthorizationUrl(state, redirectUri, codeChallenge)`). `app/auth/callback.tsx` calls `consumePendingLogin(state)` — single-use, must match the echoed `state` — **before** any network call, then sends `code`, `state`, `code_verifier` to `GET /auth/callback`, which passes the verifier to `authenticateWithCode`; WorkOS refuses the exchange if it does not match the challenge, so an intercepted code is useless. Both query params are validated in `api/auth/schemas.ts` (`loginQuerySchema` / `callbackQuerySchema`: must travel together; RFC 7636 alphabet/length). Without `state`/`code_verifier` the backend still does a plain exchange (web redirect flow + pre-PKCE app builds) — the backend is stateless, so the CSRF check lives on the device. No native module: randomness is `expo-modules-core`'s native UUID v4 and SHA-256 is implemented in `utils/pkce.ts` (`expo-crypto` is not in the binary), so this ships as an OTA.
-- `hooks/useAuthRedirect.ts` (mounted in `app/_layout.tsx`) routes to `/login` whenever `isAuthenticated` flips true→false, so a dead session can't strand the user on a tab. Cold-start routing stays in `app/index.tsx`.
-- **Account type self-select (audit #9):** every WorkOS sign-up is created as `PLAYER`. `PATCH /auth/me/role { role: 'PLAYER' | 'COACH' }` (authenticated, general limiter) lets a user switch between those two; `ADMIN`/`PARENT` get 403 and `ADMIN` can never be selected. Mobile shows `app/onboarding/role.tsx` once per user after sign-in when the role is `PLAYER` (`utils/role-onboarding.ts`, flag `roleChosen:<userId>` in AsyncStorage) and again from Profile → "Change account type". `auth-store.updateUser(patch)` merges the new role without re-firing login analytics.
-- Dev-login tokens (`dev_…`) have no refresh token and are only accepted when `NODE_ENV=development`.
-- **Account linking** (`WorkOSService.syncUser`, audit #2/#25): resolve by `workosUserId` first; then by `email` **only** if that row has no `workosUserId` (a pre-provisioned/managed row) — linking sets `workosUserId`, clears `isManaged`/`managedById`, and re-checks the admin allowlist (`isAdminEmail`) so a pre-seeded row can't suppress ADMIN bootstrap. An email already bound to a *different* WorkOS identity is a **409** from `/auth/callback` (not a merge, not a 500); P2002 races map to 409 too. `name` is set only on create; `profilePictureUrl` only on create or when the local value is null — in-app edits survive re-login. `/auth/callback` returns `profilePictureUrl` in `user`.
-- **Email edits**: `email` is the login identity. `PATCH /players/:id { email }` is allowed for ADMINs, and for the managing coach of a managed player only until that player signs in (`workosUserId` null); players cannot change their own email (403). `POST /players` (pre-create an account for an email) requires ADMIN or roster-managing staff (`TeamStaff` role with `canManageRoster`, or a league admin) — 403 otherwise; roster-only players go through `POST /teams/:teamId/players`.
-- **Self profile** (audit #10): `PATCH /auth/me { name?, profilePictureUrl? }` (authenticated, any role; `''` clears the avatar; email/role not editable here) returns `{ success, user }` with `profilePictureUrl`; `GET /auth/me` includes `profilePictureUrl` too; a replaced avatar object is removed from S3 best-effort via `deletePreviousAvatar` (audit #61). Mobile Profile uses `hooks/useProfile.ts#useUpdateProfile` (merges into `auth-store` via `updateUser`) — never `PATCH /players/:id`, which only accepts PLAYER rows and 404s for ADMIN/COACH.
-- **Logout** (audit #51): `POST /auth/logout` (authenticated, no body) revokes the WorkOS session named by the token's `sid` claim via `WorkOSService.revokeSession`, which invalidates the bound refresh token. Responds `200 { success: true, revoked: boolean }` — `revoked: false` for dev tokens, tokens without `sid`, or a WorkOS outage (reported to Sentry); the client must clear local tokens regardless. `DELETE /auth/push-token` only deletes tokens owned by the caller (audit #47); call it *before* `/auth/logout` while the access token is still valid.
-- **Mobile logout sequence** (audit #17/#18/#19/#41/#62): `auth-store.logout()` (async) bumps the **logout epoch**, then — with the access token still stored — runs `services/session-logout.ts#runRemoteLogout()`: `DELETE /auth/push-token` for the token this device registered (`hooks/useNotifications.ts#unregisterPushToken`, tracked in module state after a successful POST) → `POST /auth/logout`; each best-effort with a 4s timeout. Then `clearSession()`: bumps the epoch again, fires logout analytics, clears the store, and runs `runLocalLogoutCleanup()` = `resetSocket()` + `queryClient.clear()` (`services/query-client.ts` now owns the QueryClient; `_layout.tsx` just provides it). `clearSession()` is synchronous and network-free — it is what the api-client calls when the session is dead (refresh rejected), so it can never recurse. The store reaches these side effects through `store/session-hooks.ts` (registered by `services/session-logout.ts`, imported for effect in `_layout.tsx`) so the store never imports the api-client. `refreshAccessToken()` captures `getLogoutEpoch()` before `POST /auth/refresh` and discards the result if it changed, so an in-flight refresh cannot resurrect a session after logout. `useNotificationSetup` is keyed on `isAuthenticated` (not the token string) and swallows registration rejections.
-- **Ending a session must stay quiet (#582).** It used to send about 100 requests in two seconds and spend the IP's rate limit, so the next sign-in was refused. The loop: `clearSession()` clears the query cache → a screen still mounted under the pushed one re-renders and its query fetches again, now with no token → 401 → the interceptor finds nothing to refresh and calls `clearSession()` → again. The re-render is the part that is easy to miss: Profile, Home and seven other screens call `useAuthStore()` **with no selector**, so they re-render on every store write, and after a cache clear a re-render is what makes a query observer build a new query. Three guards, each sufficient for the case it covers:
-  - **`clearSession()` does nothing on a session that has already ended** (no store write, no cache clear, no analytics); it still bumps the logout epoch. "Has a session" means any of `isAuthenticated`, `accessToken`, `refreshToken`, `user`.
-  - **A request that needs a session is never sent without one.** The request interceptor rejects it locally with `NoSessionError` (`services/no-session-error.ts`, code `ERR_NO_SESSION`, message "You are signed out"). `PUBLIC_PATHS` in `services/api-client.ts` is the list of endpoints a signed-out app may call (`/auth/login`, `/auth/callback`, `/auth/refresh`, `/auth/dev-login`, `/auth/dev-users`, `/invitations/by-token/`). **A new unauthenticated endpoint must be added to it**, or the sign-in and invite screens can never reach it; `__tests__/services/api-client.test.ts` pins the list.
-  - **A 401 for a request sent without a token ends no session and refreshes nothing.**
-  The query client does not retry a `NoSessionError` (`services/query-client.ts#shouldRetryQuery`; everything else keeps its one retry). Regression test: `__tests__/services/session-end-request-storm.test.tsx` runs the real api-client, store, query client and logout side effects against a recording axios adapter. **Its probe must subscribe to the whole store like Profile does**: with a selector, or with no subscription, the unfixed code sends one stray request or none and the test passes for the wrong reason. Prefer selectors (`useAuthUser`, `useIsAuthenticated`) in new screens.
-- The strict `authRateLimit` (20 req / 15 min / IP) applies only to `/auth/login`, `/auth/callback` and the dev endpoints; authenticated session routes (`/auth/me`, `/auth/me/usage`, `/auth/entitlements`, `/auth/push-token`) use the general API limiter.
-- `/auth/refresh` has its own `refreshRateLimit` (60 req / 15 min) keyed by a SHA-256 of the refresh token (IP fallback when the body has no token), so a team on shared gym Wi-Fi can't lock each other out — every device rotates its own token (audit #21). Mobile treats a 429 from `/auth/refresh` as transient (keeps the session, retries later); only a 401 logs out.
-- Sentry: `sentryErrorHandler` skips operational `AppError`s with status < 500 (`isExpectedClientError`) — an expired token is an expected outcome, not a defect. It also skips non-`AppError` throws carrying a 4xx `status`/`statusCode` (body-parser `entity.parse.failed` → 400, `entity.too.large` → 413; `clientErrorStatus()`), and the central error handler in `index.ts` answers those with that status instead of 500. 5xx and other non-`AppError` throws are still reported.
-- **Push tokens (role matrix B2.9).** `PushToken` is unique on `token` (a device, not an account). `POST /auth/push-token` upserts when the token is new or already the caller's; a token bound to a **different** user is rejected with **409** (`Push token is registered to another account`) unless that binding's `updatedAt` is older than 24h (`PUSH_TOKEN_REBIND_AFTER_MS` — a leftover from a build that never unregistered), in which case it is rebound to the caller. Hand-over on a shared device is `DELETE /auth/push-token` by the owner (logout does this). `PushToken.updatedAt` was added by migration `20260823000000_push_token_updated_at`.
-
-### Account deletion (#444, App Store 5.1.1(v); `docs/plans/account-deletion.md`)
-
-- **Anonymize in place; erase outright only when nothing references the row.**
-  `AccountService.deleteAccount(userId, { actorId, mode })` (`services/account-service.ts`) runs
-  ONE `$transaction`: `SELECT … FOR UPDATE` on the user row → last-head-coach check → purge rows
-  that only serve the person → scrub personal data elsewhere → **count what still points at the
-  row** → tombstone it (`workosUserId`/`email`/`profilePictureUrl` null, `name =
-  DELETED_USER_NAME`, `deletedAt = now()`), or `delete` it when the count is zero (#529). The
-  count is ONE `findUnique` with `USER_REFERENCE_SELECT` (`_count` of every list relation on
-  `model User` plus `personalLeague`); `USER_OUTBOUND_RELATIONS` names the relations that point
-  *from* the row (`managedBy`). A test in `tests/services/account-service.test.ts` parses
-  `schema.prisma` and fails when `User` gains a relation named in none of the three, so **a new
-  relation on `User` must be added to the select** (or declared outbound) — a missed one would
-  let the hard delete cascade through rows other people rely on, which is what D1 forbids. The
-  rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
-  `TeamMember` and authored announcements stay so other members' stats remain coherent, and any
-  of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
-  script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
-  delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
-  `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
-  state from `name`/`email` — `deletedAt` is the signal.**
-- Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and
-  `DELETE /players/:id/account` (guardian of a **managed, unclaimed** child only; the route
-  pre-checks and the service re-checks under the lock). A claimed account is deletable only by its
-  owner — never by guardians or ADMINs through the API; emailed requests go through
-  `backend/scripts/data-subject-request.ts` (`export` / `delete <email>`, `operator` mode) per
-  [`docs/runbooks/data-subject-requests.md`](docs/runbooks/data-subject-requests.md).
-- **Last head coach blocks** with 400 `code: 'last_head_coach'` + `teams`, scoped to teams whose
-  season `isActive` (a `Team` row is a team-season, so past seasons go headless rather than forcing
-  a coach to delete history). The rule is `utils/permissions.ts#lastHeadCoachTeams` (one set-based
-  query), shared with `TeamService.assertNotLastHeadCoach`; never re-implement it. A sole league
-  admin is NOT blocked (they cannot appoint a replacement); the log line lists admin-less leagues.
-- **Every write onto a `User` row is guarded by `deletedAt IS NULL`**: `PATCH /auth/me`,
-  `PATCH /auth/me/role` (`updateMany` + re-read, 401 on zero rows), push-token registration (`FOR
-  SHARE` probe inside the upsert transaction) and both `syncUser` branches (`updateMany`, fall
-  through to create on zero rows). A request that authenticated a moment before the deletion
-  committed must not re-identify the tombstone. Keep that invariant on any new write path.
-- Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
-  `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
-  402s; never hand-roll `{ code, … }` in a route.
-- `deletedAt` rides on `USER_SUMMARY_SELECT` (rosters, staff, guardians) so clients derive a
-  "Deleted" chip and a localized label; pickers (`listPlayers`, `getPlayerById`, staff lookup,
-  `dev-users`, `dev-login`) filter tombstones out. `guardianOf[].isManaged` tells the app which
-  child records a guardian may delete.
-- Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats
-  retained de-identified; RDS backups 7 days; backend Sentry and Amplitude keep records keyed on
-  the internal id for their windows (no name/email/photo), mobile Sentry carries no user id at
-  all, and Amplitude also holds IP-derived city/region/country (#559). Seed: `mike.brown@example.com` (assistant coach, never
-  blocked; his only row is the staff role, so his deletion **erases** the row) is the self-delete
-  Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria James as guardian; rostered,
-  so his deletion tombstones) is the guardian child-delete fixture; the seed sweeps tombstones
-  first and re-creates Mike by email.
-- Tests: `tests/services/account-service.test.ts`, `tests/api/account-delete.test.ts`,
-  `tests/integration/account-deletion.db.test.ts` (real Postgres: rollback, concurrency, guarded
-  writes, export contract), `lastHeadCoachTeams` in `tests/utils/permissions.test.ts`.
-
-### Logging & Sentry redaction (audit #15/#28/#48)
-- **Never log `req.originalUrl`.** `request-logger.ts` logs `loggablePath(req)`: the path with secret segments masked (`/invitations/by-token/<x>`, `/teams/:id/calendar/<x>`, `/invite/<x>` → `[redacted]`) plus a query string whose *keys* are kept and whose sensitive *values* (`code`, `state`, `token`, anything containing `token`/`secret`/`password`/`api_key`) are masked. Helpers live in `backend/src/utils/redact.ts` (`redactUrl`, `redactPath`, `redactQueryString`, `redactQueryObject`) — reuse them for any new log line that includes a URL.
-- Backend Sentry (`utils/sentry.ts`): `beforeSend` redacts `request.url`, `request.query_string`, breadcrumb `data.url` and the `transaction` name with the same helpers; `beforeSendTransaction` does the same for performance transactions (`transaction`, `request.url`, `contexts.trace.data.*url*`, span descriptions/data), which bypass `beforeSend`.
-- Mobile Sentry (`services/sentry.ts`): `redactUrl` masks by **value** (not only by key name) on `request.url`, `request.query_string`, breadcrumb `data.url`/`from`/`to`, and `transaction`; `beforeSendTransaction` reuses `beforeSend`.
-- **Every email carries `Reply-To: support@hooplings.com` and the shared footer (#450).** The
-  address is `mailer/templates/brand.ts#SUPPORT_EMAIL`; `createMailer` passes it to `SesMailer`
-  (`replyToAddress`), and every template ends with `templates/footer.ts#footerHtml()` /
-  `footerText()`, which name the address and say that a reply goes to support, not to the coach.
-  A new template must end with the footer and be added to the `renders` list in
-  `tests/services/mailer.test.ts`, which fails on a template file that is missing from it. The
-  mobile copy of the address is `config/env.ts#SUPPORT_EMAIL`; `__tests__/config/env.test.ts`
-  fails when the two differ. No postal address is printed (owner decision 2026-09-29).
-- `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints solely under `NODE_ENV=development`.
-
-### Email bounces & complaints (#449)
-
-The growth loop is email to hand-typed addresses, so typos are the norm. SES publishes what
-happened to each message; the backend records it per address so a coach can be told.
-
+## Where the detail lives
+
+| Topic | File |
+| --- | --- |
+| Backend layout, Redis, uploads, URLs, calendar feed, push | `docs/architecture/backend-services.md` |
+| Sessions, tokens, refresh, logout, PKCE, log redaction | `docs/architecture/auth-sessions.md` |
+| Authorization rules (leagues, seasons, teams, games, staff, player directory) | `docs/architecture/authorization.md` |
+| Roster, unified Add Player, invitations, status chips | `docs/architecture/roster-and-invitations.md` |
+| Guardians / PARENT role | `docs/architecture/guardians.md` |
+| Entitlements, usage metering, comped tiers | `docs/architecture/entitlements-and-usage.md` |
+| Socket.io broadcast, server-derived score, tracker undo | `docs/architecture/live-games.md` |
+| Stats finalization, ties, team lineage | `docs/architecture/stats-and-lineage.md` |
+| Account deletion (as built) | `docs/architecture/account-deletion.md` |
+| Email: SES events, bounces, complaints, audiences | `docs/architecture/email.md` |
+| Mobile app: routing, guards, permission gating, errors, pickers, analytics | `docs/architecture/mobile-app.md` |
+| Mobile builds, runtime versions, OTA drift guard, URL scheme, eas-cli | `docs/deployment/mobile-builds-and-ota.md` |
+| ECS deploys: task definition, circuit breaker, what a deploy carries | `docs/deployment/ecs-deploys.md` |
+| Runbooks index (on-call, email deliverability, data-subject requests, RDS) | `docs/runbooks/README.md` |
+| Testing conventions (API tests, schema tests, real-database suites, migration guard) | `docs/testing/conventions.md` |
+| Maestro E2E flows and their gotchas | `docs/testing/maestro.md` |
+| Dependency automation | `docs/automation/daily-upgrade-scan.md` |
+
+Path-scoped rules also load on their own from `.claude/rules/` (`backend.md`, `mobile.md`, `maestro.md`, `infra.md`) when a task touches those directories.
+
+## Common Commands
+
+### Backend (`/backend`)
+```bash
+npm run dev              # Dev server with hot reload
+npm run build            # Compile TypeScript
+npm run lint             # ESLint (--max-warnings 0)
+npm run type-check       # Type check without build
+npm test                 # Jest
+npm test -- --testPathPattern="game"   # One test file
+npm run prisma:generate  # Regenerate the Prisma client after schema changes
+npm run prisma:migrate   # Run database migrations
+npm run prisma:studio    # Prisma Studio GUI
+npx prisma db seed       # Seed dev-login users, teams and games (also the reset between Maestro flows)
 ```
-mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQS ──► SesEventConsumer ──► User row
+After pulling `main`, run `npm install` in `backend/` if you see TS2307 errors on new deps.
+
+### Mobile (`/mobile`)
+```bash
+npx expo run:ios            # Build + run on the iOS simulator (native modules need a real build)
+npx expo run:android        # Build + run on the Android emulator
+npm run lint                # ESLint (--max-warnings 0)
+npm run type-check          # Type check
+npm test                    # Jest (includes the OTA drift guard)
+```
+- **Never** `npm start` / `npx expo start` / Expo Go: native modules need the dev client that `expo run:*` builds. There is no `expo-dev-client`; a Debug build with Metro stopped shows a red "No script URL provided" screen, which is not a build failure.
+- Toolchain: Expo SDK 57, React Native 0.86, React 19.2.3, iOS 16.4+, Xcode 26.4+ (Xcode 27 works). Signing, certificate and ad-hoc `xcodebuild` details: `docs/deployment/mobile-builds-and-ota.md`.
+- **Never build SDK 57 with `CODE_SIGNING_ALLOWED=NO`**: an unsigned build has no entitlements, so the keychain refuses every call and the session tokens are never stored while the app looks fine.
+- After checking out a branch that changes `scheme` or another native config value, run `npx expo prebuild --platform ios --clean` before `npx expo run:ios`; `run:ios` alone reuses the stale `ios/` project.
+
+### Web (`/web`)
+```bash
+npm install && npm run dev   # http://localhost:3000
+npm run lint && npm run build
 ```
 
-- **Both halves are switched by environment and are off when unset**: `SES_CONFIGURATION_SET`
-  (`SesMailer` adds `ConfigurationSetName` to every send; a send without it publishes no events)
-  and `SES_EVENTS_QUEUE_URL` (`index.ts` starts `createSesEventConsumer()` after `listen`; `null`
-  when unset). Production sets both in `infra/task-definition.json`; the resources they name are
-  in `infra/ses-events.tf`. Procedures, the apply order and the verification steps:
-  [`docs/runbooks/email-deliverability.md`](docs/runbooks/email-deliverability.md).
-- **`services/mailer/ses-events.ts`** turns one message into at most one write on
-  `User.emailSuppressedAt` / `emailSuppressedReason` (`EmailSuppressionReason { BOUNCE, COMPLAINT }`,
-  migration `20260927120000_user_email_suppression`):
+### Mobile builds and OTA (EAS)
+```bash
+eas build --platform ios --profile preview          # TestFlight-style build
+eas build --platform all --profile production       # Store builds
+cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (runs the drift guard first)
+```
+- **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand. Current runtime: **1.5.0** (build #33+).
+- `eas update` evaluates `app.config.js` on your machine: always pass `--environment production` and check that the CLI lists `APP_ENV` among the loaded variables, or the update ships `apiUrl: http://127.0.0.1:3000`. An update runs on the **second** launch after download.
+- Entitlements, permission purpose strings, icons and splash are native: they ship with the next `eas build`, never an OTA.
+- Use `npx eas-cli` (project dependency). The `overrides` block in `mobile/package.json` must keep `@oclif/core > minimatch ^10` scoped to `@oclif/core` only.
 
-  | Event | Effect |
-  | --- | --- |
-  | Bounce, `Permanent` | flag, reason `BOUNCE` |
-  | Bounce, subtype `OnAccountSuppressionList` (a re-send to a suppressed address) | flag **only if unflagged** — it must not turn a recorded `COMPLAINT` into a `BOUNCE` |
-  | Bounce, `Transient` / `Undetermined` | log only |
-  | Complaint | flag, reason `COMPLAINT` |
-  | Delivery | clear a flag **older than** the delivery (events are unordered) |
-  | Reject | log only |
-  | anything else | ignored |
+### Infrastructure
+```bash
+docker-compose up -d     # PostgreSQL 18 + Redis (after the PG 15→18 bump: docker-compose down -v first)
+docker-compose down
+```
 
-- **Nothing in the app blocks a send.** SES's account-level suppression list is the gate: a send
-  to a suppressed address is accepted, never delivered, and does not count toward
-  `Reputation.BounceRate` (it does count toward the daily quota). State follows SES, so after an
-  operator removes an address from the suppression list the next delivery clears the flag with no
-  second step. Don't add an app-level "skip flagged addresses" check — it would make that
-  self-heal impossible.
-- **Address matching is two steps, on purpose.** `storedEmailsFor` searches with `emailEquals`
-  (which already escapes the `ILIKE` wildcards, see "Email matching" under Team Invitations),
-  compares exactly in code as a second check, then writes by the stored value
-  (`email: { in: […] }`). The wildcard behaviour was first found here, by
-  `tests/integration/email-suppression.db.test.ts`; a mocked test cannot see it.
-- **Every write that changes or removes `User.email` spreads `EMAIL_SUPPRESSION_CLEARED`**
-  (`utils/email-suppression.ts`): `PlayerService.updatePlayer` (the coach's recovery path — fix the
-  address, then Resend), `syncUser`'s linked-user email change, the rejection strip in
-  `invitation-service.ts`, and the account-deletion tombstone. A new write path onto `email` must
-  do the same, or a corrected address is reported as bounced.
-- **Who sees it:** `GET /teams/:id` roster rows carry both fields for callers with
-  `canManageRoster` and are stripped with the email for everyone else. They are selected through
-  `ROSTER_PLAYER_SELECT`, **not** `USER_SUMMARY_SELECT` — that one also feeds staff rows, which
-  every team member reads.
-- **`services/mailer/ses-event-consumer.ts`** long-polls the queue (20s, batches of 10). Handled
-  and ignored messages are deleted; a handler failure **or a malformed body** is left alone, so it
-  is redelivered and ends in the dead-letter queue intact. Receive failures back off 5s → 60s and
-  report to Sentry once per outage (`flow: ses-event-consumer`). Every write is idempotent, so
-  at-least-once delivery and a second replica are both safe. A queue rather than an SNS → HTTPS
-  webhook because the API is one task: a webhook drops events during every deploy once SNS stops
-  retrying, and needs a public route with signature verification.
-- Log lines carry `toHashes` (`hashRecipient`), never an address; parse errors name the offending
-  **paths**, never values.
-- **Announcement email goes to the same audience as push** — players, staff and guardians of
-  players, deduplicated, minus the author — through `utils/team-audience.ts#getTeamAudienceUserIds`,
-  which `NotificationService.sendToTeam` uses too (before #449 email went to players only). Sends
-  run **sequentially** in the background: with guardians a team is 30-45 messages, and a
-  concurrent burst that size trips the SES per-second rate.
-- Tests: `tests/services/ses-events.test.ts`, `tests/services/ses-event-consumer.test.ts`,
-  `tests/integration/email-suppression.db.test.ts` (real Postgres), the `SES_CONFIGURATION_SET`
-  block in `tests/services/mailer.test.ts`, the email-audience block in
-  `tests/services/announcement-service.test.ts`, `tests/api/email-notifications.test.ts`.
+## Architecture rules
 
-### Analytics tracking options (#559)
+Layered: API routes → services → Prisma. Zod validates every input. Backend service methods have explicit return types built from named `include`/`select` constants (`const X_INCLUDE = {...} satisfies Prisma.XInclude`; `Prisma.XGetPayload<…>`); extend those constants rather than inlining a new `include`. State in mobile: Zustand (client) + TanStack Query (server). Auth: WorkOS AuthKit; the JWT is the session token, WorkOS is the identity provider.
 
-`mobile/services/analytics.ts` passes `AMPLITUDE_TRACKING_OPTIONS` to `amplitude.init`; the SDK's
-defaults are never relied on (they turn everything on). Two values are decisions:
+### Authorization (`backend/src/utils/permissions.ts`)
+- **The global `User.role` is never an access check**; it only short-circuits ADMIN and gates team creation. Everything else goes through staff flags, league admin rows, membership and guardian links. Before writing "who may read this team" anywhere, use `canAccessTeam` (one team) or `teamAccessWhere` (a set); copies drift (#589).
+- List and detail endpoints for leagues and seasons are caller-scoped; an unaffiliated caller gets **404, not 403**, so ids cannot be probed (same for `GET /players/:id`). Denials elsewhere are `ForbiddenError` (403), never 400.
+- `POST /teams` is **two independent checks**: WHO may create (ADMIN, `COACH`, any league admin) and WHERE (`canWriteLeague` when `seasonId` is given). Never use a read predicate as a write gate. Omitted `seasonId` means the caller's personal league.
+- Head and assistant coach share the same five flags; staff management and team deletion key off `TeamRole.type` via `isHeadCoach` / `canManageStaff`. The last head coach can never be removed.
+- Emails in payloads: roster `player.email` (and the SES suppression fields) only for callers with `canManageRoster`; staff emails for every team member. `GET /teams` list items carry the **caller's own staff row**; the mobile create-game gate depends on it (#469).
+- The invitation `token` is a bearer secret: read invitations through the `INVITATION_*_SELECT` constants and `omitToken`, never an `include`; only the public by-token routes touch it.
+- **Every "which row holds this email" filter is `utils/email-match.ts#emailEquals`**, never a raw `{ equals, mode: 'insensitive' }` (Prisma compiles it to an unescaped `ILIKE`; a guard test fails on the raw form). New accounts store `trim().toLowerCase()`.
+- Every write onto a `User` row is guarded by `deletedAt IS NULL`; read tombstone state from `deletedAt`, never from the name or email. A new relation on `User` must be added to `USER_REFERENCE_SELECT` in `account-service.ts` (a test parses the schema and fails otherwise).
+- Every write that changes or removes `User.email` spreads `EMAIL_SUPPRESSION_CLEARED`.
+- Structured error bodies come only from `DetailedError.body()`; entitlement denials are **402** `upgrade_required`. Tier limits are single-sourced in `services/entitlements/index.ts#USAGE_LIMITS`; nothing is capped on any tier today (#445) and the cap machinery stays mounted.
 
-- **`ipAddress: true`** — kept on purpose (product decision 2026-09-27) so Amplitude derives city,
-  region and country. It is declared as **Coarse Location** in the privacy-label draft
-  (`docs/release/app-store-submission.md`) and in the runbook's "Retention" section. The device's
-  location services are never used. `country: false` goes with it: that option is the country the
-  device reports, and enabling it disables the server-side lookup that supplies the city.
-- **`adid: false`** — the Android advertising id is never sent; the app shows no ads and the label
-  answers "no tracking".
+### Data and invariants
+- A `Team` row **is a team-season** (`seasonId` required); persistent identity is `lineageId`. Rollover creates a new `Team` row with the same lineage, never moves `seasonId` on a row with history.
+- `Game.homeScore` is derived from `SHOT` events inside the same transaction, after `SELECT … FOR UPDATE`; `PATCH /games/:id { homeScore }` is honoured only while the game has no shot events. The mobile tracker never sends `homeScore`.
+- Stats: `finalizeGameStats` is idempotent and re-runs on any event change to a FINISHED game. Season shooting percentages are Σmade / Σattempted, never a mean of per-game percentages. Ties are `'T'`, never a loss.
+- Cross-row writes that must not leave orphans run in one `$transaction` (team create, Add Player, account deletion, supersede-resend, personal-league provisioning). Personal-league provisioning relies on the `FOR UPDATE` lock on the caller's `User` row, not on a P2002 retry.
+- Multi-statement backfills are **hand-written migrations** (nullable column → backfill → `SET NOT NULL`); run `.github/scripts/migration-backfill-guard.sh` before pushing one. Never edit or remove a migration that is already on `main`.
+- Redis is a best-effort cache; every helper fails open. Keep it that way.
 
-`__tests__/services/analytics.test.ts` pins the full set and compares its keys against the
-installed SDK's defaults, so an SDK upgrade that adds a tracking option fails CI until it is
-decided. Changing an option means changing the label draft and the runbook in the same PR. It is
-JS only, so it ships by OTA.
+### Socket.io and replicas
+Rooms and rate-limit counters are in process memory, so the API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. Do not raise capacity as a fix for load; the Redis adapter (#452) comes first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
 
-### Team staff management (role matrix B2.3 / B2.7 / B2.8, decision 2)
+### URLs, email and logging
+- `PUBLIC_APP_URL` (web apex) and `API_BASE_URL` (API host) are read **only** via `utils/urls.ts`. The product name in email comes only from `mailer/templates/brand.ts#APP_NAME`; the support address is `SUPPORT_EMAIL` there and in mobile `config/env.ts` (a test pins them equal).
+- Every email template ends with the shared footer and is listed in `renders` in `tests/services/mailer.test.ts`. Never format a date in a template with a bare `toLocaleDateString()`; use `utils/format-date.ts` (ECS runs in UTC).
+- Every email flag returned to a client is per send (`emails.player`, `emailSent`); a failed SES send is reported, never thrown and never silent.
+- Nothing in the app blocks a send to a bounced address; SES's suppression list is the gate and the next delivery clears the roster flag. Don't add an app-level skip.
+- **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address.
+- `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array.
 
-Head Coach and Assistant Coach share the same five permission **flags**
-(`canManageTeam/Roster/TrackStats/ViewStats/ShareStats`), so flag checks cannot
-tell them apart. Staff management is keyed off the `TeamRole.type` enum instead
-(no schema change): `utils/permissions.ts` exposes `isHeadCoach(userId, teamId)`
-(HEAD_COACH-type staff row exists) and `canManageStaff(userId, teamId)` =
-system `ADMIN` **or** admin of the team's league **or** head coach.
-
-| Action | Head Coach | Assistant Coach | Team Manager | League admin / ADMIN |
-| --- | --- | --- | --- | --- |
-| Edit team name / chat link, roster, invitations | yes | yes | no | yes |
-| Track / view / share stats | yes | yes | yes | yes |
-| **Add / re-role / remove staff** | yes | no (403) | no | yes |
-| **Delete team** (`DELETE /teams/:id`) | yes | no (403) | no | yes |
-| **Move team to another season** (`PATCH /teams/:id { seasonId }`) | yes, **and** must admin the target league | no (403) | no | yes (target league) |
-| Remove **self** from staff | yes, unless last head coach | yes | yes | n/a |
-
-Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
-
-- `GET /staff` → `{ success, staff: [{ id, teamId, userId, roleId, createdAt, updatedAt, user: { id, name, isManaged, email? }, role: TeamRole }] }`. Any team member/staff/admin may read; `user.email` only for callers with `canManageRoster`.
-- `GET /roles` → `{ success, roles: [{ id, teamId, type, name, description, canManageTeam, canManageRoster, canTrackStats, canViewStats, canShareStats }] }` (definitions only, no holders).
-- `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 if the user is already staff (one role per user; use PATCH). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
-- `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
-- `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal).
-
-POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the usage meter (and any tier team cap) counts.
-
-**Distinct-teams cap fix (B2.8):** the team count (and any cap on it — none since #445) uses DISTINCT `teamId`s via
-`countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
-`requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
-`usage-service.computeCounts` — a user holding two roles on one team is one
-team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
-`teamStaff` rows was removed along with `requireRole` / `requireFeature`.)
+### Mobile
+- The API host is decided in one place, `config/env.ts#getApiUrl()`; the sign-in redirect scheme is `APP_URL_SCHEME` passed explicitly (never read the scheme off the OTA manifest).
+- **Derive, never inline**: roster chips via `utils/roster-status.ts#getRosterStatus`, bounce chips via `utils/email-delivery.ts`, game outcomes via `utils/game-result.ts`, shot text via `utils/shot-label.ts`, roster order via `utils/roster-sort.ts`, team brackets via `utils/team-labels.ts`, names via `utils/display-name.ts#displayName` (tombstones), and every permission via `hooks/useTeams.ts#hasTeamPermission`, `utils/team-permissions.ts` or `utils/game-permissions.ts`. The API stays the authority (403).
+- Every date or time choice goes through `components/DateTimePickerSheet`; every per-row menu is `components/ActionMenu`, never an `Alert` (Android truncates at three buttons); every scrollable tab screen pads with `useTabBarPadding()`; sort pill rows are `components/SortPills`.
+- **Never put a pressable inside a pressable** (VoiceOver and Maestro only see the outer one; a source-scanning test fails on it). A pushed screen that replaces itself with `ErrorState` passes `onBack={useGoBack(<parent>)}` (a test fails on a missing `onBack`). Toasts are non-interactive.
+- Auth store: `updateUser(patch)` for local edits, `setUser` only at login. Prefer selectors (`useAuthUser`, `useIsAuthenticated`) over a bare `useAuthStore()`.
+- **A request that needs a session is never sent without one.** A new unauthenticated endpoint must be added to `PUBLIC_PATHS` in `services/api-client.ts` or signed-out screens cannot reach it. `clearSession()` is idempotent and network-free; `logout()` is the remote sequence (#582).
+- Native modules are reached through `requireOptionalNativeModule` guards (`expo-secure-store`, `expo-application`), never the JS wrapper, so an OTA never crashes an older binary.
+- Upload file parts are `expo-file-system` `File` objects; Expo's own `fetch` rejects the `{ uri, name, type }` object. Prove any new form encodes through the real encoder in a test.
+- Jersey `0` is valid: test `jerseyNumber != null`, never truthiness.
+- Amplitude tracking options are pinned in `services/analytics.ts`; changing one changes the privacy-label draft (`docs/release/app-store-submission.md`) in the same PR.
 
 ## Code Style
 
-- **Files**: kebab-case (e.g., `game-service.ts`)
-- **Classes/Types/Interfaces**: PascalCase
-- **Functions/Variables**: camelCase
-- **Constants**: UPPER_SNAKE_CASE
-- Prefer explicit TypeScript types over `any`
-- Use async/await over raw promises
-- Validate inputs with Zod schemas
-
-### Lint & Warning Policy
-- **Never suppress lint errors** with `eslint-disable` comments — fix the underlying issue instead
-- **Never ignore warnings** — treat them as problems to solve, not noise to silence
-- If a lint rule flags something, find the correct fix (e.g., use ES module `import` instead of `require()`, add proper types instead of `any`)
-- The only acceptable exception is `declare global { namespace Express }` for extending Express types, which requires `@typescript-eslint/no-namespace` disable (see `src/api/auth/middleware.ts` for the pattern)
-- **Warnings fail CI.** Each package's `npm run lint` runs `eslint . --max-warnings 0`, and the project rules in `eslint.config.mjs` are set to `error`, not `warn`. Do not downgrade a rule to `warn` or raise `--max-warnings` to get something merged — fix the code. (Backend hit 0 warnings in the lint burn-down of 2026-08-20; before that ~350 warnings had accumulated unnoticed because `eslint` exits 0 on warnings.)
-- Backend service methods have explicit return types built from named Prisma `include`/`select` constants (`const TEAM_INCLUDE = {...} satisfies Prisma.TeamInclude` + `export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_INCLUDE }>`). Reuse/extend those constants rather than inlining a new `include` and leaving the return type inferred.
-- CI must pass clean — do not merge code with lint errors or test failures
+- Files kebab-case; classes/types PascalCase; functions/variables camelCase; constants UPPER_SNAKE_CASE. Explicit types over `any`; async/await over raw promises; Zod for inputs.
+- **Never suppress lint errors** with `eslint-disable` and never downgrade a rule or raise `--max-warnings`: fix the code. The one exception is `declare global { namespace Express }` (see `src/api/auth/middleware.ts`). Warnings fail CI in every package.
 
 ## Testing Requirements
 
-When adding new features or fixing bugs, always write tests that verify behavior as it runs in the actual app:
-
-### API Endpoints
-- **Always add API integration tests** (in `tests/api/`) that test the full request/response cycle through Express routes
-- API tests catch validation issues, middleware problems, and response format errors that service-only tests miss
-- Test with realistic data formats (e.g., both UUID and custom string IDs if the database allows both)
-
-### Validation Schemas
-- **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
-- Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields
-- Ensure schema validation matches what the database actually accepts
-
-### Service Layer
-- Service tests (`tests/services/`) are valuable but not sufficient alone
-- Service tests mock the database, so they don't catch mismatches between API validation and database constraints
-
-### Test Coverage Principle
-> Tests should exercise code paths as they run in production. If a request goes through validation → route → service → database, tests should cover that full path, not just the service layer with mocks.
-
-### Example: What We Learned
-A bug where the API rejected valid league IDs (`downtown-youth-league`) wasn't caught because:
-1. Service tests bypassed API validation (called services directly)
-2. No API tests existed for the seasons endpoint
-3. Test factories used different ID formats than the seed data
-
-The fix: Add API integration tests AND schema validation tests for every endpoint.
-
-### Mobile copy & i18n
-- **Screen tests render the real i18n instance.** Never stub `useTranslation` to return the key
-  (`t: (k) => k`): that is how the #431 rebrand missed `roleOnboarding.title` for a week (#474) —
-  Jest pressed `roleOnboarding.coachTitle` and never saw a locale value. `jest.setup.js` pins
-  `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
-- `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (the pre-rename product
-  name and the pre-migration domain name; separators tolerated) in any `en.json`/`es.json` value,
-  any line of any `.maestro/**/*.{yaml,yml}` (nested directories included), or any line of mobile
-  source (`.ts/.tsx/.js/.jsx/.mjs/.cjs/.json` under `mobile/`, minus native/build dirs,
-  `package-lock.json`, and `__tests__/`, whose negative fixtures quote the old names) — comment
-  lines included, so reword historical notes instead of quoting the old name. `ALLOWED_DOMAINS`
-  (hostnames stripped before matching) has been **empty since the 2026-09 domain migration
-  (#502)**: the old domain used to be allowlisted while it was live in mobile source; now any
-  leftover link to it fails CI, and the stripping logic is covered by a synthetic entry in the
-  self-test. Scope is mobile only — `backend/tests/services/mailer.test.ts` runs the same retired
-  patterns over every rendered email template.
-
-### Real-database suites (`backend/tests/integration/*.db.test.ts`)
-- They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,
-  next to the fixtures the Maestro flows depend on.
-- **Name every row with the run id** (`const RUN = randomUUID().slice(0, 8)`): user name
-  `<key>-<run>` and email `<local>.<run>@example.test`, league `ZZ-<label>-<run>`, team
-  `<label>-<run>`. Never use an `@example.com` address in a suite: that domain is the seed's.
-- **Clean up with `removeTestRows(prisma, { run: RUN, alsoUserIds })`**
-  (`tests/support/test-leftovers.ts`), never with a list of ids alone: a test that throws before
-  it records a row then leaves it behind (#584). `alsoUserIds` is for rows that lose their run
-  id on the way, such as an account the test deletes, which becomes a tombstone with no address.
-- The seed calls `removeTestRows(prisma, 'all')` for what an interrupted run left. **Never call
-  the `'all'` scope from a test:** suites run in parallel against one database, and it would
-  delete the rows of a suite that is still running. Read with `findTestRows` instead.
-- The helper refuses to run when `NODE_ENV` is `production` or `DATABASE_URL` names an RDS host.
-- `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
-  seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
-  purpose once and confirm that suite fails.
-
-### Migration backfill guard (#493)
-- `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The
-  check **Migration backfill guard** (`.github/workflows/migration-backfill-guard.yml`) runs on
-  every pull request: it puts a throwaway Postgres on the **base** commit's schema, seeds it
-  from the base checkout, then runs `prisma migrate deploy` from the pull request. It exits at
-  once when the pull request adds no migration.
-- Run it before pushing a migration: `.github/scripts/migration-backfill-guard.sh` (Docker
-  running, about half a minute). It starts its own container and never touches the database in
-  `backend/.env`.
-- **The base checkout does the seeding, on purpose.** The seed imports the generated Prisma
-  client, and a client generated from the new schema cannot write to a database that is still
-  on the previous one. Do not "simplify" it to one checkout.
-- It also fails when a migration that is already on `main` is edited or removed: that migration
-  has run in production.
-- **Seed coverage is the limit.** A backfill on a table the seed leaves empty passes without
-  running on a row; the log names those tables on every run. When a migration backfills such a
-  table, add rows for it to `backend/prisma/seed.ts` in an **earlier** pull request (the guard
-  seeds from the base branch), or rehearse on a restored snapshot. Details and the recorded
-  proof: [`docs/testing/migration-backfill-guard.md`](docs/testing/migration-backfill-guard.md).
-- The script and the workflow live under `.github/`, outside the path filter that makes a merge
-  deploy. The Postgres image is read from `docker-compose.yml`, so the major stays pinned in
-  the places `tests/infra/postgres-version.test.ts` already checks.
-
-### Maestro E2E Tests
-- **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
-- Flows test full user journeys: login → navigate → perform action → assert result
-- All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
-- Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
-- When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
-- **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**
-  A composite row is ONE element whose label concatenates its fields with `", "` — a dev-user card
-  reads `"Dana Whitfield, dana.whitfield@example.com, PLAYER"`, so `text: "dana.whitfield@example.com"`
-  matches **nothing** while `".*dana.whitfield@example.com.*"` matches. That is why selectors here
-  carry a trailing `.*` (`"Frank Vogel.*"`, `"Downtown Youth Basketball League.*"`). Do not add `.*`
-  reflexively though: it widens the match, and `"Teams.*"` would also hit `"Teams tab"`. Exact strings
-  are right for standalone labels (`"Roster"`, `"No teams yet"`); wildcards are for rows that
-  concatenate.
-- **`openLink` needs a dev client that registers the scheme.** The scheme is native (`app.config.js`
-  `scheme`), so after checking out a branch that changes it, run `npx expo prebuild --platform ios --clean`
-  and THEN `npx expo run:ios` before any flow that opens `hooplings://…`. `expo run:ios` alone reuses the
-  existing gitignored `mobile/ios/` project and does not re-apply config changes — the Info.plist keeps the
-  old `CFBundleURLTypes` and the flow fails with no handler (verified while shipping #504). Check with
-  `/usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" mobile/ios/*/Info.plist`.
-- **`openLink` triggers an iOS system dialog.** Opening a custom scheme puts up
-  *Open in "<app>"?* (Cancel / Open) — even for the app's own scheme — and that modal blocks every
-  subsequent command, so the flow fails on whatever comes next with no hint of the cause. Follow every
-  `openLink` with a conditional `runFlow: { when: { visible: "Open" }, commands: [ tapOn: "Open" ] }`;
-  conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml` does
-  this; `.maestro/auth-callback.yaml` does **not** and is expected to fail for this reason.
-- There is no tab bar on pushed routes. `app/_layout.tsx` is a `Stack` with `(tabs)` as one screen, so
-  `teams/[id]`, its roster, `games/[id]` and friends render **above** the tabs — `tapOn: "Teams tab"`
-  cannot work there. Reaching a tab from a pushed screen means popping back, or a deep link.
-- `launchApp` mid-flow drops the session and lands on the sign-in screen. Do not use it to reset
-  navigation.
-- Prefer `testID` over text whenever a label is ambiguous. The create-team submit button is
-  `common.create` ("Create") while the screen header is `teams.create` ("Create Team"), so a text tap
-  on `"Create"` is ambiguous — it taps `id: create-team-submit` instead.
-- `visibilityPercentage` defaults to 100 on `scrollUntilVisible`, which fails on a row resting at the
-  screen edge even though it is plainly readable. Relax it (60 is fine) for list hunting.
-- **The developer login list has a fixed order (#584):** the accounts the seed creates for
-  signing in come first, then everything else; inside each group by role (COACH, PARENT, PLAYER,
-  ADMIN), then name, then id (`backend/src/api/auth/dev-users.ts#orderDevUsers`). Coaches and
-  parents fit on the first screen; players need `scrollUntilVisible`. It used to be ordered by
-  role alone, so the order inside a role changed as rows were updated.
-- **The seed removes what it knows about, and nothing else.** Two lists have to stay current:
-  the games flows create (`backend/tests/support/flow-fixtures.ts#FLOW_CREATED_OPPONENTS`; a test
-  reads `.maestro/` and fails when a flow creates a game whose opponent is not listed) and the
-  rows real-database tests leave behind (next section, "Real-database suites").
-  `live-spectator.yaml`'s "Spectator Rival" was missing from the first list until #584; its
-  games stay in progress, and the Games tab had filled with them.
-- **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
-  role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
-  must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts
-  Dana back to `PLAYER` and deletes her teams, personal league and managed players. Miss one and the
-  fixture drifts — the leaked managed player pushed her down the dev-login list until an unrelated
-  step timed out.
-- For scrolling, use explicit coordinates to avoid hitting the raised Track button in the center tab bar (e.g., `start: 50%, 60%` / `end: 50%, 20%`)
-- **Never use `hideKeyboard`.** On iOS it often cannot hide the keyboard (number pads AND text
-  keyboards). Up to Maestro 2.1 it then did nothing, and a tap on a button behind the keyboard
-  landed on a keyboard key instead (the profile.yaml rename kept typing a stray "v" from tapping
-  Save). **Since Maestro 2.11 it fails the flow** ("Hide Keyboard... FAILED"): the upgrade broke
-  the two flows that still used it (#584). No flow uses it any more. Deterministic dismissals:
-  `pressKey: Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
-  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own
-  label, which is the only way out of a number pad (it has no return key).
-- **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
-  `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
-  into whatever field has focus (the flow then fails on its next assert, with a stray word in the
-  input as the only clue). It depends on keyboard geometry: `.maestro/game-create-date.yaml` passed
-  on iOS 27 and failed on iOS 26.5 for this reason. On a screen that opens with a focused field,
-  dismiss the keyboard first (`pressKey: Enter`), then scroll and tap.
-- **`assertVisible` passes on rows behind the translucent tab-bar overlay; taps there silently no-op**
-  (content deliberately scrolls behind the bar). Before tapping anything near the bottom of a tab
-  screen, `scrollUntilVisible` with `centerElement: true` so the tap point clears the bar.
-- **Don't use `centerElement: true` for elements near the END of a list** — centering can never be
-  satisfied there and the scroll spins until timeout with the element plainly visible. Plain
-  `visibilityPercentage: 60` is the stop condition that works.
-- A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
-  top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
-- Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite
-  sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
-  between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
-  and players, and removes what interrupted test runs left behind), so never run two flows
-  back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
-  2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
-  flow, `error-way-back.yaml`, was added later that day and passed on its own). The same
-  day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
-  2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
-  under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a
-  Maestro upgrade, run the full suite before trusting it**: 2.1 → 2.11 changed what
-  `hideKeyboard` does and broke two flows. Nightly CI for the suite was
-  attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
-  be revived); flows are deliberately manual-only.
+- **Tests exercise the path production runs.** A new or changed endpoint gets an API integration test in `tests/api/` (validation → route → service) and a schema test in `tests/schemas/`; service tests alone mock away the mismatches that ship.
+- Backend `src/services/` has a CI-only 100% function-coverage threshold: a new method that every suite mocks turns CI red with all tests green.
+- Real-database suites (`backend/tests/integration/*.db.test.ts`) name every row with a run id, use `@example.test` addresses (never `@example.com`, the seed's domain) and clean up with `removeTestRows(prisma, { run })`; never call the `'all'` scope from a test.
+- Mobile screen tests render the **real i18n instance**; never stub `useTranslation` to return the key. `__tests__/i18n/brand-guard.test.ts` fails CI on any retired brand or domain name in mobile source, locale files or Maestro flows, comments included.
+- Any major new mobile functionality ships with a Maestro flow in `.maestro/`. Flows are manual only, run sequentially with `npx prisma db seed` before **every** flow; a flow that mutates data needs a matching reset in `backend/prisma/seed.ts`. Selector and keyboard gotchas: `docs/testing/maestro.md` (also loaded as a rule when a flow is open).
+- Jest, `expo export` and Maestro cannot see a JavaScript/native mismatch; a new runtime is verified **on a device** before merge.
 
 ## Work Hygiene
 
-- **GitHub issues are the only source of truth for what is left to do.** Four stores hold project
-  information and each has one job: **GitHub issues + milestones + the GA board** own work with
-  state; **repo docs** (`ROADMAP.md`, `docs/`, this file) own durable truth that versions with the
-  code and is reviewed in PRs; **Claude memory** owns cross-session facts and gotchas that are not
-  derivable from the repo; **artifacts** are dated analysis snapshots. Never track a task in memory,
-  a doc, or an artifact — file an issue and reference it. When an audit or assessment produces
-  findings, the deliverable is *issues*; the document is provenance, linked from them, and is not
-  maintained afterwards. `ROADMAP.md` carries the narrative for each milestone and links to it;
-  status belongs on the issues, not in the roadmap prose.
-- **Before starting new work, ensure prior work is committed.** If there are uncommitted changes from a previous feature, test them (`npm test`, `npx tsc --noEmit`), commit them on an appropriate branch, and verify a clean `git status` before beginning a new task. Mixing unrelated features in the same uncommitted diff makes testing and rollback difficult.
-- **End every task with a wrap-up sweep — unprompted.** The sweep ends with local `main` updated (Git Workflow, "End every work session"). Before declaring a task done, check whether the change requires updates to (a) tests — Jest, API integration, Maestro flows; (b) documentation — `CLAUDE.md`, `docs/` (including the E2E test plan), READMEs; (c) open GitHub issues — anything the change closes, unblocks, or contradicts (post a status comment or close as appropriate). Make the updates as part of the same task and report what was updated (or state explicitly that nothing needed updating). The user should never have to ask "what about tests/docs/issues?" after a change.
+- **GitHub issues are the only source of truth for what is left to do.** Issues, milestones and the GA board own work with state; repo docs own durable truth reviewed in PRs; Claude memory owns cross-session facts that are not derivable from the repo; artifacts are dated snapshots. Never track a task in memory, a doc or an artifact. An audit's deliverable is issues; the document is provenance.
+- **Before starting new work, ensure prior work is committed** and `git status` is clean. Several sessions share this checkout: never commit changes you did not make, and never `git reset`, `git stash` or `git checkout --` to get to a clean tree.
+- **End every task with a wrap-up sweep, unprompted:** tests (Jest, API, Maestro), docs (`docs/`, this file, READMEs, the E2E test plan) and open GitHub issues the change closes, unblocks or contradicts. Report what was updated, or say that nothing needed updating.
 
 ## Documentation Hygiene
 
-- **Keep docs in sync with code.** When a change alters behavior, APIs, schema, env vars, commands, architecture, or operational steps, update the affected documentation in the **same change** — `CLAUDE.md`, `docs/` (architecture, runbooks, testing plans, automation), and any relevant `README`.
-- **Forward-references go stale.** When you reference an unmerged PR or "incoming" work in docs, revisit it once that work lands and reword to past tense (e.g. "merged in #202", not "incoming"). Distinguish "merged to `main`" from "deployed to production" where it matters.
-- A committed **Stop hook** (`.claude/hooks/check-docs-updated.sh`) prints a reminder when code files changed in the working tree without any `docs/` or `CLAUDE.md` update. It is advisory only — treat it as a prompt to confirm docs are current, not a blocker.
+- **Keep docs in sync with code, in the same change.** Behaviour, API, schema, env-var, command and operational changes update the matching `docs/` file.
+- **This file stays small.** Add at most a one-line rule plus a pointer here; the explanation, history and test names go in the `docs/architecture/`, `docs/deployment/` or `docs/testing/` file for that subsystem (create one if none fits). Issue and audit numbers, "before this fix" history and incident narratives belong in those files or in the issue, not here. The docs-check Stop hook warns when this file exceeds 200 lines or 40K characters (the documented recommendation is under 200 lines per instruction file).
+- Forward references go stale: once referenced work lands, reword to past tense and distinguish "merged to `main`" from "deployed".
+- The Stop hook `.claude/hooks/check-docs-updated.sh` reminds when code changed without any docs update. It is advisory.
 
 ## Git Workflow
 
-- Single long-lived branch: `main`. All work happens on short-lived feature branches that merge back into `main` via PR.
-- Feature branches from `main`: `feature/your-feature-name`
-- **Delete feature branches once merged.** After a PR merges, delete the local branch and prune remote-tracking refs: `git branch -D <branch> && git fetch --prune`. PRs are squash-merged, so `git branch -d`/`--merged` won't recognize them as merged — verify the PR state is MERGED (`gh pr list --head <branch> --state all`) before `-D`. Do this as part of landing the PR, not as a later cleanup task.
-- **End every work session with local `main` level with `origin/main`.** After the last merge of
-  the session, run `git pull --ff-only` in the checkout that has `main` checked out. That is the
-  primary checkout, also when the work itself was done in a worktree (`git -C <primary checkout>
-  pull --ff-only`). When `main` is checked out nowhere, `git fetch origin main:main` moves the
-  branch without touching any files. Then `git fetch --prune`, and check with
-  `git status --short --branch`, which must not say `behind`. Do it unprompted and say in the
-  closing message that it was done. **Only ever fast-forward.** When the tree is not clean, or
-  `main` has local commits, leave it and report it: several sessions share this checkout, so
-  changes that are not yours belong to someone. Never `git reset`, `git stash` or `git checkout --`
-  to get there.
-- Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
-- **Tagging**: When pushing major changes to GitHub (new features, design overhauls, large refactors), create an annotated tag with `git tag -a vX.Y.Z -m "description"` and push it with `git push origin vX.Y.Z`. Use semantic versioning:
-  - **Major** (vX.0.0): Breaking changes or architectural rewrites
-  - **Minor** (v0.X.0): New features, design overhauls, significant improvements
-  - **Patch** (v0.0.X): Bug fixes, small tweaks
+- Single long-lived branch `main`; short-lived branches (`feature/…`, `fix/…`) merge via PR (squash). Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`.
+- Delete a branch once its PR is MERGED (`gh pr list --head <branch> --state all`, then `git branch -D <branch> && git fetch --prune`), as part of landing it.
+- **End every session with local `main` level with `origin/main`:** `git pull --ff-only` in the checkout that has `main` (or `git fetch origin main:main` when none does), then `git fetch --prune`; `git status --short --branch` must not say `behind`. Only ever fast-forward; if the tree is dirty or `main` has local commits, leave it and report it. Say in the closing message that it was done.
+- Never write "does not close #N" in a PR body: GitHub reads it as a closing keyword.
+- Tag major pushes with annotated semver tags (`git tag -a vX.Y.Z -m "…"`; `git push origin vX.Y.Z`).
+
+## Deploys and operations
+
+- **A push to `main` that touches `backend/`, `infra/`, `docker/` or `ci.yml` (minus Markdown) builds and deploys to ECS.** It ships everything waiting on `main` since the commit production runs (`curl -s https://api.hooplings.com/health` returns `commit`); read the run's "What this deploy carries" summary before blaming the change that started it. Dependabot's auto-merged backend bumps start no CI and wait; the daily scan's backend PRs deploy unattended.
+- **Every deploy briefly splits live games** (single-replica Socket.io during the rolling overlap). Check for `IN_PROGRESS` games before merging anything that deploys or deploying by hand (`gh workflow run CI --ref main`).
+- `infra/task-definition.json` is the **only** source of truth for the task definition (env vars, secrets, image). Terraform declares no task definition; a value written into `.tf` or `.tfvars` changes nothing and fails silently.
+- **CI never applies Terraform.** `terraform apply` from `infra/` first, then merge; the merge of a `.tf` file still triggers a full ECS deploy that contains none of the infra change.
+- `SES_CONFIGURATION_SET` must never be deployed ahead of the `terraform apply` that creates the set. Never add SES to the apex SPF or Google Workspace to the `mail.` subdomain.
+- Production OTA is part of the ship workflow for mobile JavaScript changes: publish it in the same session as the merge and verify the served manifest.
+- Runbooks: `docs/runbooks/` (on-call, email deliverability, data-subject requests, RDS backup and restore, PostgreSQL major upgrades). The privacy policy must match the retention section of `docs/runbooks/data-subject-requests.md`.
 
 ## Automation
 
-Dependency and security updates are split between **Dependabot** (mechanical patch/minor bumps, auto-merged by `.github/workflows/dependabot-auto-merge.yml` once CI passes) and the **Daily Upgrade Scan** (`.github/workflows/daily-upgrade-scan.yml`, `0 15 * * *` UTC) — a scheduled GitHub Actions job that runs Claude Code to add `overrides` for vulnerable transitives, handle mobile lockfile-only bumps of JavaScript-only packages (packages with native code are held for the next native build by the OTA drift guard, #562), refresh the deferral issue, and post a daily summary on the rolling **Daily upgrade scan log** issue. **A backend pull request of the scan deploys to production on its own when it merges; a backend pull request of Dependabot does not, and waits on `main` for the next deploy** ("What a deploy carries", #570). The Claude prompt is `.github/prompts/daily-upgrade-scan.md`; design, secrets, and the deferral procedure are in [`docs/automation/daily-upgrade-scan.md`](docs/automation/daily-upgrade-scan.md).
-
-## Operations / Runbooks
-
-Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs/runbooks/):
-
-- **[On-call](docs/runbooks/on-call.md)** — where production alerts go, what each alarm means and
-  the first three things to check per alert class, plus the apply-time verification (confirm the
-  SNS subscription, test publish, deliberately fail the uptime check). Alerting is declared in
-  `infra/alerting.tf` (#448): one SNS topic with an email subscriber (`alert_email`, set only in
-  the gitignored `terraform.tfvars`; `alerts@hooplings.com` since 2026-09-29, #555. To change
-  it without a gap in delivery, subscribe and confirm the new address first: the runbook's
-  "Changing the subscriber"), eleven CloudWatch alarms tuned for a **single-task**
-  service plus four email alarms (#449), and a Route 53 HTTPS health check on
-  `api.hooplings.com/health`. Every alarm sets
-  `treat_missing_data` deliberately — `breaching` for liveness signals (a vanished task stops
-  emitting), `notBreaching` for counters and utilization, `ignore` for the two SES rate alarms
-  (SES reports a rate only around a send) — and thresholds are `alarm_*`
-  variables, so tune in tfvars rather than editing a resource. `RunningTaskCount` is a
-  Container Insights metric: turning `containerInsights` off in `ecs.tf` stops it and the
-  task-count alarm fires permanently, so replace that alarm in the same change. Sentry
-  alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
-  Two Sentry rules email the members of the Sentry organization, a different list from the SNS
-  subscriber: "New issue in production" (#448) and Sentry's default high-priority rule. The
-  owner's Sentry account routes them to `alerts@hooplings.com` as well (a setting of that
-  account, #555). The
-  runbook's "Sentry alert rules" section is their only record; update it with any change.
-- **[Email deliverability](docs/runbooks/email-deliverability.md)** — how bounces and complaints
-  are handled (#449), the first three things to check when `ses-bounce-rate` /
-  `ses-complaint-rate` or the event-queue alarms fire, how to release an address a coach has
-  confirmed is correct (remove it from the SES suppression list; the next delivery clears the
-  roster flag, there is no database step), the apply order, the simulator-based verification,
-  and the answers for the SES production-access request (#23). Declared in `infra/ses-events.tf`
-  (suppression list, configuration set, SNS → SQS, dead-letter queue, consume policy) and
-  `infra/alerting.tf`. **`SES_CONFIGURATION_SET` must never be deployed ahead of the
-  `terraform apply` that creates the set and extends the send policy to its ARN** — every send
-  would fail while invitations keep being created. `tests/infra/ses-events.test.ts` pins the two
-  task-definition values to the Terraform names.
-  **Mail that people read is a separate path (#555):** Google Workspace at the apex
-  (`support@`, `privacy@`, `alerts@`, `dmarc@hooplings.com`), declared in `infra/workspace.tf`
-  (MX, SPF + verification, DKIM `google._domainkey`, apex DMARC; applied 2026-09-29). SES stays
-  on `mail.hooplings.com`. Never add SES to the apex SPF or Google to the `mail.` subdomain, and
-  change the DMARC policy only through `local.dmarc_policy`, which both DMARC records read;
-  `tests/infra/workspace-mail.test.ts` pins all three. A record added in the Route 53 console
-  must be imported before Terraform can manage it (one-shot `import` block, deleted after the
-  apply). The runbook's "Do not move" table lists the accounts that stay on an address outside
-  the domain (AWS root, Workspace recovery, Apple ID, GitHub, Expo, the app's ADMIN login).
-- **[Data-subject requests](docs/runbooks/data-subject-requests.md)** — account deletion (self-serve,
-  guardian, operator script) and data export: what is removed, what is retained and why, the
-  7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the
-  post-deletion checklist (admin-less leagues). The privacy policy (#25) must match its
-  "Retention" section.
-- **[RDS backup & restore](docs/runbooks/rds-backup-restore.md)** — verify automated backups, restore from snapshot, repoint the app via Secrets Manager, rollback path, and a user-facing comms template. The app reaches RDS via the endpoint baked into `bball-tracker-production/database-url` in Secrets Manager (not via Route53), so a restore is: new instance → new secret version → `--force-new-deployment` on the ECS service.
-  Its **"Major version upgrade"** section is the procedure for PostgreSQL majors (#521, 15 → 18):
-  a watched CLI `modify-db-instance` with the exact minor (a bare major resolves to the RDS
-  *default* minor, and `apply_immediately` defaults to false in Terraform), ECS scaled to 0 for
-  the window (lower the autoscaling minimum first), `backend/scripts/pg-upgrade-checks.mjs`
-  before/after (prechecks, row counts, collation version), then the major-only pin in
-  `infra/rds.tf` catches up with `terraform plan` = No changes. `backend/tests/infra/postgres-version.test.ts`
-  pins that major to the compose and CI images and fails CI six months before RDS ends standard
-  support for it (a deliberate dated assertion — the fix is the next upgrade, not a wider window).
-
-### The ECS task definition lives in ONE file (#53)
-
-`infra/task-definition.json` is the **single source of truth** for the API task definition — image,
-environment variables, Secrets Manager references, health check, cpu/memory. CI's **Build & Deploy
-to ECS** job renders it with the new image tag, registers a revision and updates the service.
-
-**Terraform does not manage the task definition.** `infra/ecs.tf` owns the cluster, service, IAM
-roles, log group, ALB and auto-scaling, and deliberately declares no `aws_ecs_task_definition` —
-the two copies had drifted by 20 revisions and 7 environment variables before this was fixed.
-
-So: **to add or change an env var or secret reference, edit `infra/task-definition.json` and merge
-it.** Writing the value into `infra/ecs.tf` or a `.tfvars` file changes nothing and fails silently —
-this is how a WorkOS or SES credential ends up "configured" while production keeps using the old
-one. Terraform declares no `container_image` / `task_cpu` / `task_memory` / `admin_emails`
-variables any more, precisely so there is nowhere wrong to put them. Secrets Manager ARNs to
-reference from the JSON come from `terraform output` (`infra/outputs.tf`).
-
-`aws_ecs_service.app` is configured with the bare family name plus
-`ignore_changes = [task_definition]`, so `terraform apply` never disturbs the revision CI chose.
-
-### ECS deploy safety
-
-`infra/ecs.tf` enables `deployment_circuit_breaker { enable = true, rollback = true }` on the
-production service (#73). A rollout that never reaches a steady state is rolled back to the last
-good task-definition revision automatically, and the CI deploy job
-(`aws-actions/amazon-ecs-deploy-task-definition`, `wait-for-service-stability: true`) then fails —
-so a bad deploy shows up as a red **Build & Deploy to ECS** job, not a silent outage. This matters
-because `desired_count` is 1 at `deployment_minimum_healthy_percent = 50`: ECS may stop the old
-task before the new one is healthy, so without the breaker a crash-looping image takes production
-down until someone notices.
-
-**It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
-a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
-
-**Every deploy briefly splits live games — avoid scheduled game windows.** The rollout runs with
-`deployment_maximum_percent = 200`, so for a short overlap the old and the new task both hold
-connections. Socket.io rooms are in process memory (single-replica, #446), so a coach tracking on
-one task and the spectators on the other stop seeing each other's events until the old task stops
-and clients reconnect; nobody gets an error. Check for `IN_PROGRESS` games before merging anything
-that deploys, and before starting a deploy by hand. Of the automated merges, the daily scan's
-backend pull requests deploy on their own and Dependabot's do not (next section). The startup guard
-(`utils/replica-guard.ts`) checks the configured ceiling, not the live task count, so it does not
-trip on the overlap. The window only closes with the Redis adapter (#452). Operator-facing copy:
-`docs/deployment/aws-setup.md` ("Deploy window").
-
-### What a deploy carries (#570)
-
-**A deploy ships everything on `main` since the commit production runs, not only the change whose
-merge started it.** The two kinds of automated merge behave differently, because of the token that
-enabled auto-merge:
-
-| Merge | Enabled by | `CI` run on `main` | Deploys |
-| --- | --- | --- | --- |
-| Dependabot, backend (`dependabot-auto-merge.yml`) | `GITHUB_TOKEN` | **none**: GitHub starts no workflow for an event caused by that token | **no**. It waits on `main` |
-| Daily scan, backend (`claude/auto-deps-*`) | the Claude GitHub App's token | yes | **yes, unattended**, in the hours after 15:00 UTC (#481 did, on 2026-09-02) |
-| A person, or Claude Code with the owner's `gh` login | a user token | yes | yes, when the push touches the deploy paths |
-
-A waiting Dependabot bump is not picked up by a later documentation or mobile merge either:
-`detect-changes` looks at the commits of the triggering push only. It ships with the next push that
-touches the deploy paths, or with a deploy started by hand. In September 2026 five backend bumps
-waited up to 18 days and went out inside a deploy described as a capacity pin.
-
-- **Which commit production runs:** `curl -s https://api.hooplings.com/health` returns `commit`
-  (`utils/release.ts#deployedCommit`, read from `SENTRY_RELEASE`, which the deploy job sets to the
-  commit; `null` anywhere else). It is the commit the answering task was built from.
-- **What is waiting:** `git log <that commit>..origin/main -- backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md'`,
-  or `.github/scripts/deploy-contents.sh <that commit> origin/main` for the same list as Markdown.
-- **Every deploy says what it carries.** The job's summary (the run's page in Actions) has "What
-  this deploy carries": the change that started it, and under "Merged earlier without a deploy,
-  shipped now" everything that was waiting. After the rollout it adds the commit `/health` reports.
-  **When a deploy misbehaves, read that list before blaming the change that was merged.** Both
-  steps are `continue-on-error` and their scripts always exit 0: a summary never stops a deploy.
-- **Deploying by hand:** Actions → CI → Run workflow, branch `main` (or
-  `gh workflow run CI --ref main`). The whole suite runs, then the deploy, whatever the path
-  filter says. This is the way to ship a waiting security bump at a chosen time, instead of
-  merging an unrelated backend change to carry it. On any other branch the run tests and does not
-  deploy.
-- **Kept on purpose:** Dependabot's merges do not deploy. Making them deploy means enabling
-  auto-merge with a token that starts workflows, and then every Monday's bumps, and security
-  updates on any day, roll production unattended and split live games. Revisit after the Redis
-  adapter (#452) and a staging gate (#73).
-- The deploy paths are written twice, in the path filter of `ci.yml` and in
-  `.github/scripts/deploy-contents.sh`; `tests/infra/deploy-contents.test.ts` fails when they
-  differ, runs the script against a repository it builds, and pins the wiring `/health` depends on.
-  The deploy job itself runs only on `main`, so no test or pull request can prove a deploy.
-
-**Terraform is never applied by CI, but merging a `.tf` file still deploys.** These are two
-separate mechanisms and it is easy to conflate them:
-
-- **CI only runs `terraform fmt -check` and `terraform validate`** (`terraform-validate` job in
-  `ci.yml`, `init -backend=false`, no credentials). A `.tf` change still needs a manual
-  `terraform apply` from `infra/` (S3 remote state, DynamoDB lock) — **apply first, then merge**
-  (#500). Merging the file does *not* apply it.
-- **Merging it does trigger a full ECS deploy anyway.** `detect-changes` in `ci.yml` filters on
-  `{backend/**,infra/**,docker/**,.github/workflows/ci.yml}` minus `**/*.md`, so any non-markdown
-  file under `infra/` rebuilds the image and rolls a new task-definition revision — applying none
-  of your Terraform changes.
-
-So a `.tf`-only merge causes a production rollout that does *not* contain the infra change you
-made. Apply first, then commit, and expect the merge to redeploy. (A `terraform apply` on its own
-does **not** redeploy: `aws_ecs_service.app` has `lifecycle { ignore_changes = [task_definition] }`,
-per #53.)
-
-Note `Detect backend changes: skipping` on a **pull request** proves nothing about whether the
-merge will deploy — that job is gated on `github.event_name == 'push' && github.ref ==
-'refs/heads/main'`, so it skips on every PR regardless of paths. Read the path filter, not the PR
-check. Verify a service-level change landed with:
-`aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-api --query 'services[0].deploymentConfiguration'`
+Dependabot handles mechanical bumps (auto-merged once CI passes; its backend merges do **not** deploy). The Daily Upgrade Scan (`.github/workflows/daily-upgrade-scan.yml`, 15:00 UTC) runs Claude Code to add `overrides` for vulnerable transitives and handle JavaScript-only mobile bumps; packages with native code wait for the next binary (the OTA drift guard blocks them in CI). Design and deferral procedure: `docs/automation/daily-upgrade-scan.md`.
 
 ## Local Development Setup
 
-1. Start services: `docker-compose up -d` (PostgreSQL 18). **After the PG 15 → 18 bump (#521)** an
-   existing local volume refuses to start ("database files are incompatible with server"): run
-   `docker-compose down -v && docker-compose up -d`, then the migrate + seed steps below. The compose
-   volume is mounted at `/var/lib/postgresql` (not `…/data`) because the `postgres:18` image moved
-   its data directory; a `/data` mount would silently stop persisting.
-2. Backend setup:
-   ```bash
-   cd backend && npm install
-   npm run prisma:generate
-   npm run prisma:migrate
-   npm run dev
-   ```
-3. Mobile setup (custom dev client — never `npm start` / Expo Go):
-   ```bash
-   cd mobile && npm install
-   npx expo run:ios
-   ```
-4. Seed test users/teams/games for dev-login: `cd backend && npx prisma db seed` (`backend/prisma/seed.ts`).
+1. `docker-compose up -d` (PostgreSQL 18 + Redis). A pre-PG-18 volume refuses to start; run `docker-compose down -v && docker-compose up -d`, then migrate and seed.
+2. Backend: `cd backend && npm install && npm run prisma:generate && npm run prisma:migrate && npm run dev`.
+3. Mobile: `cd mobile && npm install && npx expo run:ios` (never Expo Go).
+4. Seed dev-login fixtures: `cd backend && npx prisma db seed` (`backend/prisma/seed.ts`).

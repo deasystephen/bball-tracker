@@ -109,7 +109,7 @@ path, leaving a dead-end paywall in front of a product that sells nothing. The
 PREMIUM feature gates (stats export, calendar sync) are still enforced by the
 API. Until a purchase flow exists (#41) the only way onto a paid tier is a
 system ADMIN comping the account (`PATCH /api/v1/admin/users/:userId/subscription`,
-see CLAUDE.md). Re-introduce a cap only alongside a real upgrade flow, and
+see `docs/architecture/entitlements-and-usage.md`). Re-introduce a cap only alongside a real upgrade flow, and
 change the number in `USAGE_LIMITS` only — never inline.
 
 | Tier | Price | Audience | Key features |

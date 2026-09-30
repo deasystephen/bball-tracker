@@ -18,7 +18,7 @@ A/B). The re-verification remainder — none of which had been assigned to a lan
 - **#72 → resolved by disposition:** socket eviction on team removal is folded into issue #49
   (mid-session re-auth), per the comment in `game-events.ts` and the status note on that issue.
 
-Otherwise this document is historical; current behaviour is described in `CLAUDE.md`.
+Otherwise this document is historical; current behaviour is described in `docs/architecture/` (the sections lived in `CLAUDE.md` until 2026-09-30).
 
 Decision already made: **#9 → self-select COACH at onboarding** (global `COACH` role stays meaningful; a
 new onboarding step + endpoint sets it).

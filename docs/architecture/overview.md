@@ -1,5 +1,23 @@
 # Architecture Overview
 
+## As-built subsystem references
+
+Detail that used to live in `CLAUDE.md` (moved 2026-09-30):
+
+- [Backend services](backend-services.md) — layout, Redis, uploads, URLs, calendar feed, push
+- [Sessions and tokens](auth-sessions.md) — verification, refresh, logout, PKCE, redaction
+- [Authorization](authorization.md) — leagues, seasons, teams, games, staff, player directory
+- [Roster and invitations](roster-and-invitations.md) — unified Add Player, invitation lifecycle, chips
+- [Guardians](guardians.md) — PARENT role
+- [Entitlements and usage](entitlements-and-usage.md) — tiers, limits, comped accounts
+- [Live games](live-games.md) — Socket.io, server-derived score, tracker undo
+- [Stats and lineage](stats-and-lineage.md) — finalization, ties, team-season identity
+- [Account deletion](account-deletion.md)
+- [Email](email.md) — SES events, bounces, complaints
+- [Mobile app](mobile-app.md) — routing, guards, permission gating, errors, pickers
+- [Mobile builds and OTA](../deployment/mobile-builds-and-ota.md) · [ECS deploys](../deployment/ecs-deploys.md)
+- [Testing conventions](../testing/conventions.md) · [Maestro](../testing/maestro.md) · [Runbooks](../runbooks/README.md)
+
 ## System Architecture
 
 The Hooplings application is a single containerized API backed by PostgreSQL, with Socket.io broadcasting live game updates over WebSocket and Redis providing best-effort caching.
