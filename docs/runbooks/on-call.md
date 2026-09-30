@@ -19,7 +19,7 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | RDS | `bball-tracker-production-postgres` |
 | Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` |
 | Errors | Sentry org `satsun-ventures`, projects `bball-tracker-backend` and `bball-tracker-mobile` |
-| Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, **not** to the SNS subscriber above. |
+| Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, a separate list from the SNS subscriber above. The owner's account delivers them to `alerts@hooplings.com` too (since 2026-09-29, #555). |
 
 Because the service runs a single task, there is no redundancy to absorb a failure: "one task is
 unhealthy" and "the API is down" are the same event.
@@ -232,6 +232,11 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 - **Who gets the email:** the owners of the issue, and when it has none, every active member of
   the Sentry organization. Add a responder by inviting them to the organization. This is a
   different list from the SNS subscriber: changing `alert_email` does not change it.
+- **Where a member's email lands is that member's own setting.** The owner's account has
+  `alerts@hooplings.com` as a second, verified address and routes both projects to it (User
+  settings → Notifications → Email Routing; set 2026-09-29, #555). It is a setting of one
+  account, not of the organization or of a rule: a member who joins later receives alerts at
+  their own address until they change it.
 - **A new high-priority issue sends two emails**, one per rule. That is accepted: the rules
   overlap on purpose, so that a low-priority new issue is not silent and a known issue that
   becomes urgent is not either.
@@ -246,7 +251,8 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 - **Expected client errors never reach Sentry** (4xx `AppError`s are filtered in
   `utils/sentry.ts`), so neither rule fires for an expired token or a validation error.
 - **Not proven by a real event.** The rule was read back after it was created and is enabled,
-  but no new issue has occurred in production since. Its first email is the proof; check
+  but no new issue has occurred in production since. The routing to `alerts@hooplings.com` is
+  not proven either, for the same reason. Its first email is the proof; check
   "Last triggered" on the rule's page.
 
 The rules live in Sentry, not in this repository. They were created through Sentry's API; to

@@ -1503,6 +1503,8 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
   Two Sentry rules email the members of the Sentry organization, a different list from the SNS
   subscriber: "New issue in production" (#448) and Sentry's default high-priority rule. The
+  owner's Sentry account routes them to `alerts@hooplings.com` as well (a setting of that
+  account, #555). The
   runbook's "Sentry alert rules" section is their only record; update it with any change.
 - **[Email deliverability](docs/runbooks/email-deliverability.md)** — how bounces and complaints
   are handled (#449), the first three things to check when `ses-bounce-rate` /
