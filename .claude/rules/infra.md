@@ -7,7 +7,7 @@ paths:
 
 # Infra and deploy rules
 
-Loaded when a task touches `infra/`, `docker/` or `.github/`. Detail: `docs/deployment/ecs-deploys.md`,
+Loads when a file under `infra/`, `docker/` or `.github/` is read. Detail: `docs/deployment/ecs-deploys.md`,
 `docs/deployment/aws-setup.md`, `docs/runbooks/README.md`.
 
 - `infra/task-definition.json` is the only source of truth for the ECS task definition. Env vars
