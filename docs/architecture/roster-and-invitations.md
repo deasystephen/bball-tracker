@@ -19,7 +19,11 @@ eng-review amendments recorded there).
     row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
     `User` (`isManaged: true`, `managedById` = coach — deliberate authz statement, B2.10 edit
     rights until claim) + `TeamMember` + `TeamInvitation` in one transaction, "added" email copy.
-    **The player is on the roster immediately**; accept only activates their login.
+    **The player is on the roster immediately**; accept only activates their login. On a reused
+    row a supplied `profilePictureUrl` is written only when the row has none (a second
+    `updateMany` guarded on `profilePictureUrl: null` inside the transaction, so a race cannot
+    overwrite); when the row keeps its own photo the upload is discarded after commit with
+    `discardOwnAvatar`, as in case 3 (#618).
   - **Case 3** (email belongs to a claimed account, `workosUserId` set): invitation **only** —
     membership on accept (pre-consent membership = de facto auto-accept, deferred by D2).
     `rostered: false` in the response; `guardianEmail` is refused with `guardianInvited: false` +

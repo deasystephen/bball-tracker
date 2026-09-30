@@ -1633,6 +1633,91 @@ describe('InvitationService', () => {
       );
     });
 
+    const setupReuseTx = (team: { id: string; name: string }, coach: { id: string }, unclaimed: { id: string; name: string; email: string | null }, txUserUpdate: jest.Mock): void => {
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(unclaimed);
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          user: { updateMany: txUserUpdate },
+          teamMember: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({
+              teamId: team.id,
+              playerId: unclaimed.id,
+              player: { id: unclaimed.id, name: unclaimed.name, email: unclaimed.email, isManaged: true, managedById: coach.id },
+              team: { id: team.id, name: team.name },
+            }),
+          },
+          teamInvitation: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            create: jest
+              .fn()
+              .mockResolvedValue(invitationRow(team.id, unclaimed.id, { id: unclaimed.id, name: unclaimed.name, email: unclaimed.email })),
+          },
+        })
+      );
+    };
+
+    it('middle case — a supplied photo fills a reused row that has none, guarded on profilePictureUrl: null (#618)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null, profilePictureUrl: null };
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(true);
+      expect(txUserUpdate).toHaveBeenCalledTimes(2);
+      expect(txUserUpdate).toHaveBeenNthCalledWith(2, {
+        where: { id: unclaimed.id, profilePictureUrl: null },
+        data: { profilePictureUrl: AVATAR_URL },
+      });
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+    });
+
+    it('middle case — a reused row that already has a photo keeps it and the upload is discarded (#618)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
+      // First updateMany = flags (row still unclaimed); second = photo guard, zero rows (already has one)
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(true);
+      expect(txUserUpdate).toHaveBeenCalledTimes(2);
+      // The flags update never carries the photo, so an existing one is never overwritten
+      expect(txUserUpdate).toHaveBeenNthCalledWith(1, {
+        where: { id: unclaimed.id, workosUserId: null },
+        data: { isManaged: true, managedById: coach.id },
+      });
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+    });
+
+    it('middle case — no photo supplied means no photo write and no discard (#618)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
+      const txUserUpdate = jest.fn().mockResolvedValue({ count: 1 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+
+      await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com' },
+        coach.id
+      );
+
+      expect(txUserUpdate).toHaveBeenCalledTimes(1);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+    });
+
     it('case 3 — claimed account: invitation only, "invited" email, guardian deferred with reason', async () => {
       const { coach, team } = setupCoachTeam();
       const claimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: 'workos-1' };

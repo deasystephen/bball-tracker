@@ -1030,7 +1030,7 @@ export class InvitationService {
         // Two coaches racing the same new email both pass the findUnique;
         // the loser's user.create aborts the transaction with P2002 and we
         // retry once against the row that now exists.
-        let created: { member: AddedTeamMember; invitation: InvitationWithRelations; token: string };
+        let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
         try {
           created = await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email);
         } catch (err) {
@@ -1061,6 +1061,11 @@ export class InvitationService {
         result.rostered = true;
         result.invited = true;
         playerId = created.member.playerId;
+        if (data.profilePictureUrl && !created.photoApplied) {
+          // The reused row kept its own photo: the object the app uploaded
+          // before this request would otherwise be orphaned in S3 (#618).
+          await discardOwnAvatar(data.profilePictureUrl, userId);
+        }
         result.emails.player =
           (await this.deliverInvitationEmail(created.invitation, created.token, 'added')) ??
           undefined;
@@ -1114,12 +1119,19 @@ export class InvitationService {
     userId: string,
     reuse: { id: string; managedById: string | null } | null,
     email: string
-  ): Promise<{ member: AddedTeamMember; invitation: InvitationWithRelations; token: string }> {
+  ): Promise<{
+    member: AddedTeamMember;
+    invitation: InvitationWithRelations;
+    token: string;
+    /** False only when a supplied photo was not written (reused row already had one). */
+    photoApplied: boolean;
+  }> {
     const token = this.generateToken();
     const expiresAt = invitationExpiry();
 
     return prisma.$transaction(async (tx) => {
       let playerId: string;
+      let photoApplied = true;
       if (reuse) {
         // Guarded on workosUserId so a signup completing in the window can
         // never flip a freshly claimed account back to coach-managed
@@ -1135,6 +1147,16 @@ export class InvitationService {
           throw new ClaimedMidCreateError(reuse.id);
         }
         playerId = reuse.id;
+        // Fill the photo only when the row has none — never overwrite what
+        // another flow provisioned (same rule as name/role). The null guard is
+        // the race-safe check; the pre-transaction row is not trusted (#618).
+        if (data.profilePictureUrl) {
+          const photo = await tx.user.updateMany({
+            where: { id: reuse.id, profilePictureUrl: null },
+            data: { profilePictureUrl: data.profilePictureUrl },
+          });
+          photoApplied = photo.count === 1;
+        }
       } else {
         const created = await tx.user.create({
           data: {
@@ -1186,7 +1208,7 @@ export class InvitationService {
         select: INVITATION_SELECT,
       });
 
-      return { member, invitation, token };
+      return { member, invitation, token, photoApplied };
     });
   }
 
