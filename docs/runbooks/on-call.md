@@ -10,8 +10,8 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | Item | Value |
 | --- | --- |
 | Alert destination | SNS topic `bball-tracker-production-alerts` (`terraform output alerts_topic_arn`) |
-| Subscriber | One email address, set as `alert_email` in the gitignored `infra/terraform.tfvars`. It is deliberately not recorded in the repo. |
-| Who responds | Whoever owns that inbox. There is no rotation and no escalation path: one responder, best effort. |
+| Subscriber | `alerts@hooplings.com` since 2026-09-29 (#555), a role address on the Google Workspace seat ([addresses](email-deliverability.md#addresses)). It is set as `alert_email` in the gitignored `infra/terraform.tfvars`. |
+| Who responds | Whoever reads that inbox. There is no rotation and no escalation path: one responder, best effort. |
 | What arrives | One email when an alarm enters `ALARM`, one when it returns to `OK`. The subject carries the alarm name. |
 | Region | `us-east-1` (Route 53 health-check metrics exist only there) |
 | API | `https://api.hooplings.com` — health endpoint `/health` (pings Postgres; 503 when the DB is unreachable) |
@@ -188,6 +188,36 @@ Terraform change.
    aws cloudwatch describe-alarms --alarm-name-prefix bball-tracker-production- \
      --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
    ```
+
+
+### Changing the subscriber
+
+Changing `alert_email` and applying **replaces** the subscription: Terraform removes the old
+one and creates the new one in the same apply, and the new one delivers nothing until its
+confirmation link is clicked. Done in that order, alerts go nowhere in between. Subscribe the
+new address first:
+
+1. Subscribe it by hand and confirm it from its inbox:
+   ```bash
+   aws sns subscribe --topic-arn "$(terraform output -raw alerts_topic_arn)" \
+     --protocol email --notification-endpoint <new address>
+   ```
+2. Test publish (step 4 above) and check that it arrives at the new address.
+3. Set `alert_email` to the new address and apply. The plan reads `1 to add, 1 to destroy`.
+   SNS answers the "add" with the subscription that is already confirmed, so Terraform adopts
+   it and removes only the old one.
+4. Test publish again: it must arrive at the new address only. `terraform plan` reads
+   "No changes".
+
+This is how the subscriber moved to `alerts@hooplings.com` on 2026-09-29.
+
+**If mail to `hooplings.com` stops, so do the alerts.** The address depends on the domain's MX
+records and on Google Workspace. The zone is hosted in the AWS account the alarms watch, so a
+broken zone takes both down together, and no alarm covers inbound mail. When alerts are
+unexpectedly quiet during an incident, read the alarm states directly:
+```bash
+aws cloudwatch describe-alarms --state-value ALARM --query 'MetricAlarms[].AlarmName'
+```
 
 ## Sentry alert rules
 

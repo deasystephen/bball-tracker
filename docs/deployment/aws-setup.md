@@ -219,7 +219,8 @@ Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs)
 
 Alerting is declared in `infra/alerting.tf` (#448); the response procedure is
 [`docs/runbooks/on-call.md`](../runbooks/on-call.md). Every alarm publishes to one SNS topic with
-an email subscriber (`alert_email` in the gitignored `terraform.tfvars`), on both ALARM and OK.
+an email subscriber (`alert_email` in the gitignored `terraform.tfvars`; `alerts@hooplings.com`
+since 2026-09-29, #555), on both ALARM and OK.
 
 - [x] ECS service: no running task, CPU and memory sustained high
 - [x] RDS: connection count, free storage, CPU sustained high
