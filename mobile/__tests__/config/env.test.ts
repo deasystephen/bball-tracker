@@ -53,3 +53,18 @@ describe('config/env getApiUrl()', () => {
     expect(env.config.apiUrl).toBe(env.getApiUrl());
   });
 });
+
+describe('config/env SUPPORT_EMAIL (#450)', () => {
+  it('is the address the backend puts in Reply-To and in the email footers', async () => {
+    const { readFileSync } = jest.requireActual<typeof import('fs')>('fs');
+    const path = jest.requireActual<typeof import('path')>('path');
+    const brand = readFileSync(
+      path.resolve(__dirname, '../../../backend/src/services/mailer/templates/brand.ts'),
+      'utf8'
+    );
+    const match = /^export const SUPPORT_EMAIL = '([^']+)';$/m.exec(brand);
+    if (!match) throw new Error('backend brand.ts: could not find SUPPORT_EMAIL.');
+
+    expect((await loadEnv(undefined, false)).SUPPORT_EMAIL).toBe(match[1]);
+  });
+});

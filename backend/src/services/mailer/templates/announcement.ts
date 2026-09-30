@@ -1,6 +1,6 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
-import { APP_NAME } from './brand';
+import { footerHtml, footerText } from './footer';
 
 export const announcementTemplate: EmailTemplate = {
   name: 'announcement',
@@ -19,8 +19,7 @@ export const announcementTemplate: EmailTemplate = {
     <p style="margin:0;white-space:pre-wrap;">${e(vars.body)}</p>
   </div>
   <p style="color:#555;font-size:14px;">Posted by ${e(vars.authorName)}</p>
-  <hr>
-  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
+  ${footerHtml()}
 </body>
 </html>`;
   },
@@ -33,6 +32,6 @@ ${vars.body}
 
 Posted by ${vars.authorName}
 
-${APP_NAME}`;
+${footerText()}`;
   },
 };

@@ -170,7 +170,7 @@ issue named.
 | Age rating | Depends on the intended audience; drives the "data collected from children" answers | #451 |
 | Whether the app is declared child-directed (Kids category, "Made for Kids") | Interacts with the COPPA read in the privacy policy work and must not be answered independently of it | #25, #451 |
 | Privacy Policy URL | Required field; the document is not published. The labels in section 2 must match it, including the retention statement in `docs/runbooks/data-subject-requests.md` | #25 |
-| Support URL | Required field; no support inbox or page exists yet | #450 |
+| Support URL | Required field. The inbox exists (`support@hooplings.com`, #555) and the app and every email name it (#450); the **page** does not, and it needs the web deploy | #450, #30 |
 | Screenshots for the required device sizes | Not producible from code | #451 |
 | Demo account credentials and seeded data | Placeholders in section 3 | #451 |
 | Whether Amplitude retains the raw IP address | The app sends the IP address so that Amplitude can derive city and country (decided, see note 3). Whether the address itself is kept afterwards is a setting in the Amplitude project. It does not change the label, which already declares Coarse Location, but the privacy policy should say which it is | #25 |

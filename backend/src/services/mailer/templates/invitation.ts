@@ -1,6 +1,7 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
 import { APP_NAME } from './brand';
+import { footerHtml, footerText } from './footer';
 
 /**
  * Team invitation email.
@@ -45,8 +46,7 @@ export const invitationTemplate: EmailTemplate = {
   ${messageBlock}
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
   ${ctaBlock}
-  <hr>
-  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
+  ${footerHtml()}
 </body>
 </html>`;
   },
@@ -72,6 +72,6 @@ This invitation expires on ${vars.expiresAt}.
 
 ${ctaBlock}
 
-${APP_NAME}`;
+${footerText()}`;
   },
 };

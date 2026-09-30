@@ -22,17 +22,24 @@ export interface SesMailerOptions {
    * configuration set exists.
    */
   configurationSetName?: string;
+  /**
+   * `Reply-To` of every message (#450). The sender is a no-reply address on
+   * the SES subdomain, so without it a reply goes to the bounce handler.
+   */
+  replyToAddress?: string;
 }
 
 export class SesMailer implements Mailer {
   private client: SESv2Client;
   private fromAddress: string;
   private configurationSetName: string | undefined;
+  private replyToAddress: string | undefined;
 
-  constructor({ region, fromAddress, configurationSetName }: SesMailerOptions) {
+  constructor({ region, fromAddress, configurationSetName, replyToAddress }: SesMailerOptions) {
     this.client = new SESv2Client({ region });
     this.fromAddress = fromAddress;
     this.configurationSetName = configurationSetName;
+    this.replyToAddress = replyToAddress;
   }
 
   async send(params: MailSendParams): Promise<MailSendResult> {
@@ -45,6 +52,7 @@ export class SesMailer implements Mailer {
     const command = new SendEmailCommand({
       FromEmailAddress: this.fromAddress,
       ...(this.configurationSetName && { ConfigurationSetName: this.configurationSetName }),
+      ...(this.replyToAddress && { ReplyToAddresses: [this.replyToAddress] }),
       Destination: { ToAddresses: [to] },
       Content: {
         Simple: {

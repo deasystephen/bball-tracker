@@ -7,13 +7,16 @@
  * running, i.e. no OTA has applied yet). Share exports the same fields as
  * text for pasting into a bug report or an OTA verification thread.
  *
+ * The Help card holds the support contact (#450): the row opens the mail app
+ * with a message to the support address that already carries the diagnostics.
+ *
  * Also the future home of legal content: Terms of Service, Privacy Policy
  * and open-source licenses get rows here once published (#25) — add them
- * below the diagnostics card.
+ * below the Help card.
  */
 
 import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Share } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Share, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +27,8 @@ import { ThemedView, ThemedText, Card, Button } from '../components';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { getHorizontalPadding } from '../utils/responsive';
+import { SUPPORT_EMAIL } from '../config/env';
+import { useToast } from '../components/Toast';
 
 export const APP_NAME = 'Hooplings';
 
@@ -85,12 +90,30 @@ export function formatAboutDiagnostics(info: AboutInfo): string {
   ].join('\n');
 }
 
+/** `mailto:` link to support, with the diagnostics already in the message. */
+export function buildSupportMailto(info: AboutInfo): string {
+  const subject = `${APP_NAME} support`;
+  const body = `\n\n---\n${formatAboutDiagnostics(info)}`;
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 export default function AboutScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const padding = getHorizontalPadding();
   const info = getAboutInfo();
+  const toast = useToast();
+
+  const handleContactSupport = async () => {
+    try {
+      await Linking.openURL(buildSupportMailto(info));
+    } catch {
+      // No mail app is set up (a simulator, or a device whose mail app was
+      // removed). The address is on the row; say what to do with it.
+      toast.showToast(`No mail app found. Write to ${SUPPORT_EMAIL}`, 'info');
+    }
+  };
 
   const handleShare = async () => {
     try {
@@ -174,6 +197,31 @@ export default function AboutScreen() {
           fullWidth
           style={styles.shareButton}
         />
+
+        <ThemedText variant="h4" style={[styles.sectionTitle, styles.helpTitle]}>
+          Help
+        </ThemedText>
+        <Card variant="default" style={styles.card}>
+          <TouchableOpacity
+            onPress={handleContactSupport}
+            style={styles.linkRow}
+            accessibilityRole="link"
+            accessibilityLabel={`Contact support, ${SUPPORT_EMAIL}`}
+            accessibilityHint="Opens your mail app"
+            testID="about-contact-support"
+          >
+            <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
+              <Ionicons name="mail" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.infoContent}>
+              <ThemedText variant="caption" color="textSecondary">
+                Contact support
+              </ThemedText>
+              <ThemedText variant="body">{SUPPORT_EMAIL}</ThemedText>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </Card>
       </ScrollView>
     </ThemedView>
   );
@@ -211,4 +259,12 @@ const styles = StyleSheet.create({
   infoContent: { flex: 1 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: spacing.xs },
   shareButton: { marginTop: spacing.lg },
+  helpTitle: { marginTop: spacing.xl },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 44,
+  },
 });

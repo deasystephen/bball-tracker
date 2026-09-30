@@ -1,6 +1,7 @@
 import { EmailTemplate } from '../index';
 import { escapeHtml as e } from '../escape';
 import { APP_NAME } from './brand';
+import { footerHtml, footerText } from './footer';
 
 export const rsvpConfirmationTemplate: EmailTemplate = {
   name: 'rsvp-confirmation',
@@ -34,8 +35,7 @@ export const rsvpConfirmationTemplate: EmailTemplate = {
     <tr><td style="padding:8px;font-weight:bold;">Your RSVP</td><td style="padding:8px;">${e(label)}</td></tr>
   </table>
   <p>You can update your RSVP at any time in the ${APP_NAME} app.</p>
-  <hr>
-  <p style="color:#999;font-size:12px;">${APP_NAME}</p>
+  ${footerHtml()}
 </body>
 </html>`;
   },
@@ -59,6 +59,6 @@ Your RSVP for the following game has been recorded:
 
 You can update your RSVP at any time in the ${APP_NAME} app.
 
-${APP_NAME}`;
+${footerText()}`;
   },
 };

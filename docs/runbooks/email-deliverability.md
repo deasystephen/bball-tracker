@@ -16,6 +16,7 @@ Mail that people read, at `hooplings.com` itself, is a separate path through Goo
 | Item | Value |
 | --- | --- |
 | Sender | `noreply@mail.hooplings.com`, SES v2, `us-east-1` |
+| Reply-To | `support@hooplings.com` on every message (#450). The sender's domain has one MX, the SES bounce handler, so without it a reply reaches nobody. Every footer names the address and says that a reply goes to support, not to the coach |
 | Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=none` with reports to `dmarc@hooplings.com` |
 | What is sent | Transactional only: team and guardian invitations, RSVP confirmations, team announcements. No marketing. |
 | Suppression | SES **account-level suppression list**, reasons `BOUNCE` and `COMPLAINT` |

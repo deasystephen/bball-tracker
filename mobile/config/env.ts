@@ -26,6 +26,14 @@ export const PRODUCTION_API_URL = 'https://api.hooplings.com';
 export const APP_URL_SCHEME = 'hooplings';
 export const DEV_API_URL = 'http://127.0.0.1:3000';
 
+/**
+ * The address people write to for help (#450). The same value is the
+ * `Reply-To` and the footer of every email the backend sends
+ * (`backend/src/services/mailer/templates/brand.ts`); `__tests__/config/env.test.ts`
+ * fails when the two differ.
+ */
+export const SUPPORT_EMAIL = 'support@hooplings.com';
+
 export function getApiUrl(): string {
   const configured = Constants.expoConfig?.extra?.apiUrl;
   if (typeof configured === 'string' && configured.length > 0) return configured;

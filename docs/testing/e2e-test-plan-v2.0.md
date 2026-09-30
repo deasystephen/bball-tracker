@@ -204,6 +204,19 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   (second launch post-download) the Update row shows that update's id + publish time — "Embedded build (no
   OTA applied)" means the binary's bundled JS is running. Channel reads `production` on TestFlight builds.
   Share exports the same fields as text. This screen is how OTA rollout is verified on-device from now on.
+
+### B.5a — About screen: Contact support (#450)
+- [ ] Pass / Fail / Skipped
+- **Role:** any logged-in user, on a **device** with a mail app set up (the simulator has none)
+- **Steps:**
+  1. Profile → Settings → About → Help → "Contact support"
+  2. Send the message that opens
+  3. On a device with no mail app (or on the simulator), tap the row again
+- **Expected:** The mail app opens a new message to `support@hooplings.com`, subject "Hooplings support",
+  with the diagnostics (version, runtime, update id, channel) under a `---` line in the body. The message
+  arrives in the support inbox. With no mail app, a toast reads "No mail app found. Write to
+  support@hooplings.com" and the screen stays.
+- **Notes:** Maestro (`.maestro/profile.yaml`) asserts the row and never taps it: the tap leaves the app.
 - **Notes:** ___________
 
 ---

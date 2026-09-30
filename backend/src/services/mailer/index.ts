@@ -1,4 +1,5 @@
 import { SesMailer } from './ses-mailer';
+import { SUPPORT_EMAIL } from './templates/brand';
 
 export interface EmailTemplate {
   name: string;
@@ -47,7 +48,7 @@ export function createMailer(): Mailer {
 
   const configurationSetName = process.env.SES_CONFIGURATION_SET?.trim() || undefined;
 
-  return new SesMailer({ region, fromAddress, configurationSetName });
+  return new SesMailer({ region, fromAddress, configurationSetName, replyToAddress: SUPPORT_EMAIL });
 }
 
 export const mailer: Mailer = createMailer();
