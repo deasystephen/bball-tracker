@@ -36,7 +36,7 @@ Backend API (Node.js/Express)
 | Maestro E2E flows and their gotchas | `docs/testing/maestro.md` |
 | Dependency automation | `docs/automation/daily-upgrade-scan.md` |
 
-Path-scoped rules also load on their own from `.claude/rules/` (`backend.md`, `mobile.md`, `maestro.md`, `infra.md`) when a task touches those directories.
+Path-scoped rules in `.claude/rules/` (`backend.md`, `mobile.md`, `maestro.md`, `infra.md`) load when Claude reads a file under the matching directory.
 
 ## Common Commands
 
@@ -80,7 +80,7 @@ eas build --platform ios --profile preview          # TestFlight-style build
 eas build --platform all --profile production       # Store builds
 cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (runs the drift guard first)
 ```
-- **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand. Current runtime: **1.5.0** (build #33+).
+- **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand; it lists every runtime that has a binary and which build it is.
 - `eas update` evaluates `app.config.js` on your machine: always pass `--environment production` and check that the CLI lists `APP_ENV` among the loaded variables, or the update ships `apiUrl: http://127.0.0.1:3000`. An update runs on the **second** launch after download.
 - Entitlements, permission purpose strings, icons and splash are native: they ship with the next `eas build`, never an OTA.
 - Use `npx eas-cli` (project dependency). The `overrides` block in `mobile/package.json` must keep `@oclif/core > minimatch ^10` scoped to `@oclif/core` only.
@@ -96,16 +96,16 @@ docker-compose down
 Layered: API routes → services → Prisma. Zod validates every input. Backend service methods have explicit return types built from named `include`/`select` constants (`const X_INCLUDE = {...} satisfies Prisma.XInclude`; `Prisma.XGetPayload<…>`); extend those constants rather than inlining a new `include`. State in mobile: Zustand (client) + TanStack Query (server). Auth: WorkOS AuthKit; the JWT is the session token, WorkOS is the identity provider.
 
 ### Authorization (`backend/src/utils/permissions.ts`)
-- **The global `User.role` is never an access check**; it only short-circuits ADMIN and gates team creation. Everything else goes through staff flags, league admin rows, membership and guardian links. Before writing "who may read this team" anywhere, use `canAccessTeam` (one team) or `teamAccessWhere` (a set); copies drift (#589).
+- **The global `User.role` is never an access check**; it only short-circuits ADMIN and gates team creation. Everything else goes through staff flags, league admin rows, membership and guardian links. Before writing "who may read this team" anywhere, use `canAccessTeam` (one team) or `teamAccessWhere` (a set); copies drift.
 - List and detail endpoints for leagues and seasons are caller-scoped; an unaffiliated caller gets **404, not 403**, so ids cannot be probed (same for `GET /players/:id`). Denials elsewhere are `ForbiddenError` (403), never 400.
 - `POST /teams` is **two independent checks**: WHO may create (ADMIN, `COACH`, any league admin) and WHERE (`canWriteLeague` when `seasonId` is given). Never use a read predicate as a write gate. Omitted `seasonId` means the caller's personal league.
 - Head and assistant coach share the same five flags; staff management and team deletion key off `TeamRole.type` via `isHeadCoach` / `canManageStaff`. The last head coach can never be removed.
-- Emails in payloads: roster `player.email` (and the SES suppression fields) only for callers with `canManageRoster`; staff emails for every team member. `GET /teams` list items carry the **caller's own staff row**; the mobile create-game gate depends on it (#469).
+- Emails in payloads: roster `player.email` (and the SES suppression fields) only for callers with `canManageRoster`; staff emails for every team member. `GET /teams` list items carry the **caller's own staff row**; the mobile create-game gate depends on it.
 - The invitation `token` is a bearer secret: read invitations through the `INVITATION_*_SELECT` constants and `omitToken`, never an `include`; only the public by-token routes touch it.
 - **Every "which row holds this email" filter is `utils/email-match.ts#emailEquals`**, never a raw `{ equals, mode: 'insensitive' }` (Prisma compiles it to an unescaped `ILIKE`; a guard test fails on the raw form). New accounts store `trim().toLowerCase()`.
 - Every write onto a `User` row is guarded by `deletedAt IS NULL`; read tombstone state from `deletedAt`, never from the name or email. A new relation on `User` must be added to `USER_REFERENCE_SELECT` in `account-service.ts` (a test parses the schema and fails otherwise).
 - Every write that changes or removes `User.email` spreads `EMAIL_SUPPRESSION_CLEARED`.
-- Structured error bodies come only from `DetailedError.body()`; entitlement denials are **402** `upgrade_required`. Tier limits are single-sourced in `services/entitlements/index.ts#USAGE_LIMITS`; nothing is capped on any tier today (#445) and the cap machinery stays mounted.
+- Structured error bodies come only from `DetailedError.body()`; entitlement denials are **402** `upgrade_required`. Tier limits are single-sourced in `services/entitlements/index.ts#USAGE_LIMITS`; every value is `Infinity`, and the cap machinery stays mounted so a finite value there is enforced with no other change.
 
 ### Data and invariants
 - A `Team` row **is a team-season** (`seasonId` required); persistent identity is `lineageId`. Rollover creates a new `Team` row with the same lineage, never moves `seasonId` on a row with history.
@@ -132,7 +132,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - Every date or time choice goes through `components/DateTimePickerSheet`; every per-row menu is `components/ActionMenu`, never an `Alert` (Android truncates at three buttons); every scrollable tab screen pads with `useTabBarPadding()`; sort pill rows are `components/SortPills`.
 - **Never put a pressable inside a pressable** (VoiceOver and Maestro only see the outer one; a source-scanning test fails on it). A pushed screen that replaces itself with `ErrorState` passes `onBack={useGoBack(<parent>)}` (a test fails on a missing `onBack`). Toasts are non-interactive.
 - Auth store: `updateUser(patch)` for local edits, `setUser` only at login. Prefer selectors (`useAuthUser`, `useIsAuthenticated`) over a bare `useAuthStore()`.
-- **A request that needs a session is never sent without one.** A new unauthenticated endpoint must be added to `PUBLIC_PATHS` in `services/api-client.ts` or signed-out screens cannot reach it. `clearSession()` is idempotent and network-free; `logout()` is the remote sequence (#582).
+- **A request that needs a session is never sent without one.** A new unauthenticated endpoint must be added to `PUBLIC_PATHS` in `services/api-client.ts` or signed-out screens cannot reach it. `clearSession()` is idempotent and network-free; `logout()` is the remote sequence.
 - Native modules are reached through `requireOptionalNativeModule` guards (`expo-secure-store`, `expo-application`), never the JS wrapper, so an OTA never crashes an older binary.
 - Upload file parts are `expo-file-system` `File` objects; Expo's own `fetch` rejects the `{ uri, name, type }` object. Prove any new form encodes through the real encoder in a test.
 - Jersey `0` is valid: test `jerseyNumber != null`, never truthiness.

@@ -5,7 +5,7 @@ paths:
 
 # Backend rules
 
-Loaded when a task touches `backend/`. The full as-built reference for each area is in
+Loads when a file under `backend/` is read. The full as-built reference for each area is in
 `docs/architecture/` (see the index in `CLAUDE.md`).
 
 - Routes → services → Prisma. Service methods return types built from named `include`/`select`

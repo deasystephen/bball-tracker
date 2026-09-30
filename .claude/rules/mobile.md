@@ -5,7 +5,7 @@ paths:
 
 # Mobile rules
 
-Loaded when a task touches `mobile/`. Detail: `docs/architecture/mobile-app.md`,
+Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app.md`,
 `docs/architecture/roster-and-invitations.md`, `docs/deployment/mobile-builds-and-ota.md`.
 
 - Build with `npx expo run:ios`, never `expo start` / Expo Go, never `CODE_SIGNING_ALLOWED=NO`.
@@ -25,8 +25,9 @@ Loaded when a task touches `mobile/`. Detail: `docs/architecture/mobile-app.md`,
   mobile source, locales or `.maestro/`, comments included.
 - Packages with native code (`expo-*`, Sentry, Amplitude, `react-native-*`, `react`) move only
   with a native build and a runtime bump; `npm test` fails otherwise. Never edit
-  `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production`, with
-  `--environment production` so `APP_ENV` is set; verify the served manifest; publish it in the
+  `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production` (the script
+  runs the drift guard, then `eas update --environment production`, which supplies `APP_ENV`);
+  verify the served manifest; publish it in the
   same session as the merge.
 - Entitlements, permission strings, icons and splash ship only with an `eas build`.
 - Major new functionality gets a Maestro flow and, if it mutates data, a reset in the seed.

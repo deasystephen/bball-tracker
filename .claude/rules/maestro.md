@@ -5,7 +5,7 @@ paths:
 
 # Maestro rules
 
-Loaded when a task touches `.maestro/`. Full gotcha list and history: `docs/testing/maestro.md`.
+Loads when a file under `.maestro/` is read. Full gotcha list and history: `docs/testing/maestro.md`.
 
 - Flows are manual only (no CI). Run sequentially, `cd backend && npx prisma db seed` before
   **every** flow; a flow that mutates data needs a matching reset in `backend/prisma/seed.ts` and
