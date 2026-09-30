@@ -12,6 +12,13 @@ jest.mock('../../src/services/mailer', () => ({
 }));
 
 const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }).mailer.send;
+
+jest.mock('../../src/services/upload-service', () => ({
+  discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
+}));
+import { discardOwnAvatar } from '../../src/services/upload-service';
+const mockDiscardOwnAvatar = discardOwnAvatar as jest.Mock;
+const AVATAR_URL = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/coach/photo.jpg';
 import {
   createInvitation,
   createTeam,
@@ -1461,7 +1468,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.addRosterPlayer(
         team.id,
-        { name: 'Kid', jerseyNumber: 0 },
+        { name: 'Kid', jerseyNumber: 0, profilePictureUrl: AVATAR_URL },
         coach.id
       );
 
@@ -1472,9 +1479,16 @@ describe('InvitationService', () => {
       expect(result.emails).toEqual({});
       expect(txUserCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ isManaged: true, managedById: coach.id, email: null }),
+          data: expect.objectContaining({
+            isManaged: true,
+            managedById: coach.id,
+            email: null,
+            profilePictureUrl: AVATAR_URL,
+          }),
         })
       );
+      // The photo lives on the managed user — never discarded (#419)
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
       // Jersey 0 is a valid number — must survive to the membership row
       expect(txMemberCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ jerseyNumber: 0 }) })
@@ -1508,7 +1522,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.addRosterPlayer(
         team.id,
-        { name: 'Jane', playerEmail: 'jane@example.com' },
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
         coach.id
       );
 
@@ -1520,9 +1534,16 @@ describe('InvitationService', () => {
       expect(result.emails.player).toBe(true);
       expect(txUserCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ isManaged: true, managedById: coach.id, email: 'jane@example.com' }),
+          data: expect.objectContaining({
+            isManaged: true,
+            managedById: coach.id,
+            email: 'jane@example.com',
+            profilePictureUrl: AVATAR_URL,
+          }),
         })
       );
+      // The photo lives on the managed user — never discarded (#419)
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'jane@example.com',
@@ -1647,6 +1668,41 @@ describe('InvitationService', () => {
       expect(inviteGuardianSpy).not.toHaveBeenCalled();
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({ variables: expect.objectContaining({ variant: 'invited' }) })
+      );
+      // No photo supplied: nothing to discard (#419)
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+    });
+
+    it('case 3 — with a photo: the uploaded avatar is discarded under the caller id, response unchanged (#419)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const claimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: 'workos-1' };
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(claimed);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue(
+        invitationRow(team.id, claimed.id, { id: claimed.id, name: claimed.name, email: claimed.email })
+      );
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(false);
+      expect(result.invited).toBe(true);
+      expect(result.member).toBeNull();
+      expect(result.invitation).not.toBeNull();
+      expect(result.invitation).not.toHaveProperty('token');
+      expect(result.emails.player).toBe(true);
+      // A claimed account keeps its own photo; the object the client uploaded
+      // ahead of the request is discarded, ownership-checked on the caller.
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      // The invitation row never carries the coach's photo
+      expect(mockPrisma.teamInvitation.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.not.objectContaining({ profilePictureUrl: expect.anything() }) })
       );
     });
 
@@ -2154,6 +2210,7 @@ describe('InvitationService', () => {
           playerEmail: 'jane@example.com',
           guardianEmail: 'mom@example.com',
           guardianRelationship: 'MOTHER',
+          profilePictureUrl: AVATAR_URL,
         },
         coach.id
       );
@@ -2163,6 +2220,9 @@ describe('InvitationService', () => {
       expect(result.invited).toBe(true);
       expect(result.guardianInvited).toBe(false);
       expect(result.guardianReason).toMatch(/after the player accepts/i);
+      // The fallback lands in createCase3Invitation too, so the uploaded
+      // avatar is discarded on this path as well (#419)
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
     });
 
     it('addRosterPlayer rethrows the P2002 when the refetch finds nobody', async () => {
@@ -2237,7 +2297,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.addRosterPlayer(
         team.id,
-        { name: 'Jane', playerEmail: 'jane@example.com' },
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
         coach.id
       );
 
@@ -2250,6 +2310,8 @@ describe('InvitationService', () => {
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({ variables: expect.objectContaining({ variant: 'invited' }) })
       );
+      // RT4 fallback also discards the uploaded avatar (#419)
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
     });
 
     it('addRosterPlayer answers 404 when the team does not exist', async () => {

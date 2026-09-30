@@ -29,10 +29,12 @@ jest.mock('@aws-sdk/s3-presigned-post', () => ({
 }));
 
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { logger } from '../../src/utils/logger';
 import {
   generateAvatarUploadUrl,
   deleteAvatar,
   deletePreviousAvatar,
+  discardOwnAvatar,
   isManagedAvatarUrl,
   MAX_AVATAR_BYTES,
 } from '../../src/services/upload-service';
@@ -174,6 +176,68 @@ describe('Upload Service', () => {
     it('swallows S3 errors (the profile update already succeeded)', async () => {
       mockSend.mockRejectedValueOnce(new Error('boom'));
       await expect(deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, null)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('discardOwnAvatar (#419)', () => {
+    const callerId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+    const otherId = 'ffffffff-0000-4000-8000-000000000001';
+
+    it('deletes an object under the caller\'s own avatars/<userId>/ prefix', async () => {
+      await discardOwnAvatar(`${BUCKET_BASE}${callerId}/pic.jpg`, callerId);
+
+      expect(deleteObjectCalls).toEqual([
+        { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${callerId}/pic.jpg` },
+      ]);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('never deletes an object under another user\'s prefix (client-supplied URL)', async () => {
+      await discardOwnAvatar(`${BUCKET_BASE}${otherId}/pic.jpg`, callerId);
+
+      expect(deleteObjectCalls).toHaveLength(0);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('does not let a prefix-sharing id match (avatars/<id>-suffix/)', async () => {
+      await discardOwnAvatar(`${BUCKET_BASE}${callerId}-x/pic.jpg`, callerId);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('checks ownership on the normalised path, so a ../ hop out of the own prefix deletes nothing', async () => {
+      // URL parsing collapses `..` (and `%2e%2e`) before the key is derived
+      await discardOwnAvatar(`${BUCKET_BASE}${callerId}/../${otherId}/pic.jpg`, callerId);
+      await discardOwnAvatar(`${BUCKET_BASE}${callerId}/%2e%2e/${otherId}/pic.jpg`, callerId);
+
+      expect(deleteObjectCalls).toHaveLength(0);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('never touches objects outside our bucket', async () => {
+      await discardOwnAvatar('https://workos.example/photo.jpg', callerId);
+      await discardOwnAvatar(`https://evil.example/avatars/${callerId}/pic.jpg`, callerId);
+
+      expect(deleteObjectCalls).toHaveLength(0);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op without a URL', async () => {
+      await discardOwnAvatar(undefined, callerId);
+      await discardOwnAvatar(null, callerId);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('logs a warning and never throws when S3 rejects (the invitation already exists)', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      mockSend.mockRejectedValueOnce(new Error('AccessDenied'));
+
+      await expect(discardOwnAvatar(`${BUCKET_BASE}${callerId}/pic.jpg`, callerId)).resolves.toBeUndefined();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/discard/i),
+        expect.objectContaining({ error: 'AccessDenied' })
+      );
+      warnSpy.mockRestore();
     });
   });
 });

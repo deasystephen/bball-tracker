@@ -23,7 +23,12 @@ eng-review amendments recorded there).
   - **Case 3** (email belongs to a claimed account, `workosUserId` set): invitation **only** —
     membership on accept (pre-consent membership = de facto auto-accept, deferred by D2).
     `rostered: false` in the response; `guardianEmail` is refused with `guardianInvited: false` +
-    reason (guardian system requires membership).
+    reason (guardian system requires membership). A supplied `profilePictureUrl` is discarded
+    server-side (`upload-service.ts#discardOwnAvatar`, best-effort, inside `createCase3Invitation`
+    so every path into case 3 is covered): the mobile app uploads the photo before the request and
+    a claimed account keeps its own, so the object would otherwise be orphaned in S3 (#419). The
+    delete only touches keys under `avatars/<callerId>/` because the URL is client-supplied and a
+    coach must not be able to delete another user's avatar.
   - Unique-email races: `user.create` P2002 is caught and retried once against the winner row
     (`resolveEmailRaceWinner`).
   - Response: `{ rostered, invited, member, invitation, guardianInvited, guardianReason?, emails:

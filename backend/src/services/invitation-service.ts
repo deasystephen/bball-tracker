@@ -32,6 +32,7 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
+import { discardOwnAvatar } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1092,6 +1093,12 @@ export class InvitationService {
     );
 
     const emailSent = await this.deliverInvitationEmail(invitation, token, 'invited');
+    // The client uploads the avatar before calling us, but a claimed account
+    // keeps its own photo: discard the object so it is not orphaned in S3
+    // (#419). Ownership-checked because the URL is client-supplied.
+    if (data.profilePictureUrl) {
+      await discardOwnAvatar(data.profilePictureUrl, userId);
+    }
     return { invitation: this.toSummary(invitation), emailSent };
   }
 
