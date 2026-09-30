@@ -52,7 +52,7 @@ const DEV_AUTH = { Authorization: 'Bearer dev_abc' };
 describe('DELETE /api/v1/auth/me', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: true, adminlessLeagueIds: [] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
     mockWorkOS.verifyToken.mockResolvedValue({ id: 'workos_1', sessionId: 'sess_1', expiresAt: 0 });
   });
 
@@ -66,7 +66,7 @@ describe('DELETE /api/v1/auth/me', () => {
     const res = await request(app).delete('/api/v1/auth/me').set(AUTH);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true, identityDeleted: true });
+    expect(res.body).toEqual({ success: true, identityDeleted: true, erased: false });
     expect(mockAccount.deleteAccount).toHaveBeenCalledWith(CALLER_ID, {
       actorId: CALLER_ID,
       mode: 'self',
@@ -108,13 +108,13 @@ describe('DELETE /api/v1/auth/me', () => {
   });
 
   it('reports identityDeleted:false when the provider call failed but the row is gone', async () => {
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, adminlessLeagueIds: ['l1'] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: false, adminlessLeagueIds: ['l1'] });
 
     const res = await request(app).delete('/api/v1/auth/me').set(AUTH);
 
     expect(res.status).toBe(200);
     // adminlessLeagueIds is operator information (log + runbook), never sent to the client
-    expect(res.body).toEqual({ success: true, identityDeleted: false });
+    expect(res.body).toEqual({ success: true, identityDeleted: false, erased: false });
   });
 
   it('returns 500 without leaking details on an unexpected error', async () => {
@@ -130,7 +130,7 @@ describe('DELETE /api/v1/players/:id/account', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, adminlessLeagueIds: [] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: true, adminlessLeagueIds: [] });
     mockIsGuardianOf.mockResolvedValue(true);
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(managedChild);
   });
@@ -150,7 +150,7 @@ describe('DELETE /api/v1/players/:id/account', () => {
     const res = await request(app).delete(`/api/v1/players/${CHILD_ID}/account`).set(AUTH);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ success: true });
+    expect(res.body).toEqual({ success: true, erased: true });
     expect(mockIsGuardianOf).toHaveBeenCalledWith(CALLER_ID, CHILD_ID);
     expect(mockAccount.deleteAccount).toHaveBeenCalledWith(CHILD_ID, { actorId: CALLER_ID, mode: 'guardian' });
   });

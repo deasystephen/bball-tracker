@@ -1074,15 +1074,25 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 
 ### Account deletion (#444, App Store 5.1.1(v); `docs/plans/account-deletion.md`)
 
-- **Anonymize in place, never hard-delete.** `AccountService.deleteAccount(userId, { actorId, mode })`
-  (`services/account-service.ts`) runs ONE `$transaction`: `SELECT … FOR UPDATE` on the user row →
-  last-head-coach check → purge rows that only serve the person → scrub personal data elsewhere →
-  tombstone the row (`workosUserId`/`email`/`profilePictureUrl` null, `name = DELETED_USER_NAME`,
-  `deletedAt = now()`). `GameEvent`, `PlayerStats`, `TeamMember` and authored announcements stay so
-  other members' stats remain coherent. After commit, best-effort: S3 avatar delete and
-  `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry `flow:
-  account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone state
-  from `name`/`email` — `deletedAt` is the signal.**
+- **Anonymize in place; erase outright only when nothing references the row.**
+  `AccountService.deleteAccount(userId, { actorId, mode })` (`services/account-service.ts`) runs
+  ONE `$transaction`: `SELECT … FOR UPDATE` on the user row → last-head-coach check → purge rows
+  that only serve the person → scrub personal data elsewhere → **count what still points at the
+  row** → tombstone it (`workosUserId`/`email`/`profilePictureUrl` null, `name =
+  DELETED_USER_NAME`, `deletedAt = now()`), or `delete` it when the count is zero (#529). The
+  count is ONE `findUnique` with `USER_REFERENCE_SELECT` (`_count` of every list relation on
+  `model User` plus `personalLeague`); `USER_OUTBOUND_RELATIONS` names the relations that point
+  *from* the row (`managedBy`). A test in `tests/services/account-service.test.ts` parses
+  `schema.prisma` and fails when `User` gains a relation named in none of the three, so **a new
+  relation on `User` must be added to the select** (or declared outbound) — a missed one would
+  let the hard delete cascade through rows other people rely on, which is what D1 forbids. The
+  rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
+  `TeamMember` and authored announcements stay so other members' stats remain coherent, and any
+  of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
+  script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
+  delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
+  `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
+  state from `name`/`email` — `deletedAt` is the signal.**
 - Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and
   `DELETE /players/:id/account` (guardian of a **managed, unclaimed** child only; the route
   pre-checks and the service re-checks under the lock). A claimed account is deletable only by its
@@ -1110,8 +1120,10 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
   retained de-identified; RDS backups 7 days; backend Sentry and Amplitude keep records keyed on
   the internal id for their windows (no name/email/photo), mobile Sentry carries no user id at
   all, and Amplitude also holds IP-derived city/region/country (#559). Seed: `mike.brown@example.com` (assistant coach, never
-  blocked) is the self-delete Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria
-  James as guardian) is the guardian child-delete fixture; the seed sweeps tombstones first.
+  blocked; his only row is the staff role, so his deletion **erases** the row) is the self-delete
+  Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria James as guardian; rostered,
+  so his deletion tombstones) is the guardian child-delete fixture; the seed sweeps tombstones
+  first and re-creates Mike by email.
 - Tests: `tests/services/account-service.test.ts`, `tests/api/account-delete.test.ts`,
   `tests/integration/account-deletion.db.test.ts` (real Postgres: rollback, concurrency, guarded
   writes, export contract), `lastHeadCoachTeams` in `tests/utils/permissions.test.ts`.

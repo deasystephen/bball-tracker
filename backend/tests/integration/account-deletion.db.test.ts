@@ -22,6 +22,10 @@
  *            a PENDING team invitation, PENDING + ACCEPTED guardian invitations
  *            addressed to coach's email
  *   soleHead ── HEAD_COACH ── teamActive2 (sole, active)      ← blocked, rollback proof
+ *
+ * True erasure (#529): an account whose remaining rows are all purged by the
+ * transaction has nothing pointing at it afterwards and is deleted outright;
+ * one surviving row of any retained relation keeps the tombstone.
  */
 jest.unmock('../../src/models');
 import { randomUUID } from 'node:crypto';
@@ -261,7 +265,7 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     const deleteUserSpy = jest.spyOn(WorkOSService, 'deleteUser').mockResolvedValue(undefined);
 
     const result = await AccountService.deleteAccount(coach, { actorId: coach, mode: 'self' });
-    expect(result).toEqual({ success: true, identityDeleted: true, adminlessLeagueIds: [] });
+    expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
     expect(deleteUserSpy).toHaveBeenCalledWith(`workos-${RUN}`);
 
     // Tombstone columns
@@ -365,7 +369,7 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     expect(await prisma.team.count({ where: { id: own.teamId } })).toBe(1);
   });
 
-  it('guardian mode deletes a managed, unclaimed child and refuses a claimed one under the lock', async () => {
+  it('guardian mode tombstones a rostered managed, unclaimed child and refuses a claimed one under the lock', async () => {
     const parent = await mkUser('gParent', 'PARENT');
     const managed = await mkUser('gKidManaged', 'PLAYER', { isManaged: true, email: null });
     const claimed = await mkUser('gKidClaimed', 'PLAYER', { isManaged: false, workosUserId: `workos-kid-${RUN}` });
@@ -375,10 +379,14 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
         { parentId: parent, childId: claimed, relationship: 'MOTHER', isPrimary: true },
       ],
     });
+    // On a roster: the membership survives the purge, so the row must stay (D1)
+    await prisma.teamMember.create({ data: { teamId: teamActive.teamId, playerId: managed, jerseyNumber: 11 } });
 
-    await AccountService.deleteAccount(managed, { actorId: parent, mode: 'guardian' });
+    const result = await AccountService.deleteAccount(managed, { actorId: parent, mode: 'guardian' });
+    expect(result.erased).toBe(false);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: managed } })).deletedAt).toBeInstanceOf(Date);
     expect(await prisma.guardian.count({ where: { childId: managed } })).toBe(0);
+    expect(await prisma.teamMember.count({ where: { playerId: managed } })).toBe(1);
 
     await expect(
       AccountService.deleteAccount(claimed, { actorId: parent, mode: 'guardian' })
@@ -387,6 +395,8 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
   });
 
   it('serializes two concurrent deletes: one succeeds, the other gets 404', async () => {
+    // A brand-new account with nothing pointing at it: the winner erases the
+    // row (#529), so the loser's FOR UPDATE finds no row at all — still a 404.
     const dup = await mkUser('dup', 'PLAYER');
 
     const outcomes = await Promise.allSettled([
@@ -399,7 +409,178 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toBeInstanceOf(NotFoundError);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: dup } })).deletedAt).toBeInstanceOf(Date);
+    expect(await prisma.user.findUnique({ where: { id: dup } })).toBeNull();
+  });
+
+  describe('true erasure for an account nothing references (#529)', () => {
+    it('deletes the row outright when every remaining row was purged, with nothing left to cascade', async () => {
+      // Signed up, was made assistant coach, registered a device, RSVPed,
+      // became a guardian and a league admin, owns an empty personal league:
+      // every one of those rows is purged by the transaction itself.
+      const looker = await mkUser('looker', 'COACH', { workosUserId: `workos-looker-${RUN}` });
+      const ward = await mkUser('lookerWard', 'PLAYER', { isManaged: true, managedById: looker, email: null });
+      const personal = await prisma.league.create({
+        data: { name: `${looker}'s Teams`, personalOwnerId: looker },
+        select: { id: true },
+      });
+      await prisma.leagueAdmin.createMany({
+        data: [
+          { leagueId: personal.id, userId: looker },
+          { leagueId: teamOther.leagueId, userId: looker },
+          { leagueId: teamOther.leagueId, userId: ids.users.other },
+        ],
+      });
+      await prisma.teamStaff.create({ data: { teamId: teamOther.teamId, userId: looker, roleId: teamOther.assistantRoleId } });
+      await prisma.pushToken.create({ data: { userId: looker, token: `ExponentPushToken[looker-${RUN}]`, platform: 'ios' } });
+      await prisma.calendarFeedToken.create({ data: { userId: looker, teamId: teamOther.teamId, token: `cal-looker-${RUN}` } });
+      await prisma.gameRsvp.create({ data: { gameId, userId: looker, status: 'NO' } });
+      await prisma.guardian.create({ data: { parentId: looker, childId: ward, relationship: 'GUARDIAN', isPrimary: true } });
+      const deleteUserSpy = jest.spyOn(WorkOSService, 'deleteUser').mockResolvedValue(undefined);
+
+      const result = await AccountService.deleteAccount(looker, { actorId: looker, mode: 'self' });
+
+      expect(result).toEqual({ success: true, identityDeleted: true, erased: true, adminlessLeagueIds: [] });
+      expect(deleteUserSpy).toHaveBeenCalledWith(`workos-looker-${RUN}`);
+      expect(await prisma.user.findUnique({ where: { id: looker } })).toBeNull();
+      // Nothing cascaded: the rows around the account are as they were
+      expect(await prisma.league.findUnique({ where: { id: personal.id } })).toBeNull(); // D16, deleted by the purge
+      expect(await prisma.leagueAdmin.count({ where: { leagueId: teamOther.leagueId, userId: ids.users.other } })).toBe(1);
+      expect(await prisma.teamStaff.count({ where: { teamId: teamOther.teamId, userId: ids.users.other } })).toBe(1);
+      expect(await prisma.gameRsvp.count({ where: { gameId } })).toBe(0); // only the coach's RSVP existed, purged earlier
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: ward } })).toMatchObject({ isManaged: true, managedById: null });
+      // The identity cannot come back through the row either: a sign-in makes a new one
+      const fresh = await WorkOSService.syncUser({
+        id: `workos-looker-${RUN}`,
+        email: `looker.${RUN}@example.test`,
+        emailVerified: true,
+      });
+      expect(fresh.id).not.toBe(looker);
+      ids.users.freshLooker = fresh.id;
+      deleteUserSpy.mockRestore();
+    });
+
+    it('erases a managed child in guardian mode when the child was never rostered', async () => {
+      const parent = await mkUser('eParent', 'PARENT');
+      const child = await mkUser('eKid', 'PLAYER', { isManaged: true, email: null });
+      await prisma.guardian.create({ data: { parentId: parent, childId: child, relationship: 'FATHER', isPrimary: true } });
+
+      const result = await AccountService.deleteAccount(child, { actorId: parent, mode: 'guardian' });
+
+      expect(result).toMatchObject({ erased: true, identityDeleted: false });
+      expect(await prisma.user.findUnique({ where: { id: child } })).toBeNull();
+      expect(await prisma.user.findUnique({ where: { id: parent } })).not.toBeNull();
+    });
+
+    /** One retained row per relation the purge leaves alone; each must keep the tombstone. */
+    const retained: [string, (userId: string) => Promise<void>][] = [
+      [
+        'teamMembers',
+        async (userId) => {
+          await prisma.teamMember.create({ data: { teamId: teamActive.teamId, playerId: userId } });
+        },
+      ],
+      [
+        'gameEvents',
+        async (userId) => {
+          await prisma.gameEvent.create({ data: { gameId, playerId: userId, eventType: 'REBOUND', metadata: {} } });
+        },
+      ],
+      [
+        'playerStats',
+        async (userId) => {
+          await prisma.playerStats.create({ data: { playerId: userId, gameId, points: 0 } });
+        },
+      ],
+      [
+        'sentInvitations',
+        async (userId) => {
+          await prisma.teamInvitation.create({
+            data: {
+              teamId: teamActive.teamId,
+              playerId: ids.users.teammate,
+              invitedById: userId,
+              token: `ti-sent-${userId}`,
+              status: 'REJECTED',
+              expiresAt: new Date(Date.now() + 86_400_000),
+            },
+          });
+        },
+      ],
+      [
+        'receivedInvitations (already CANCELLED by the purge)',
+        async (userId) => {
+          await prisma.teamInvitation.create({
+            data: {
+              teamId: teamActive.teamId,
+              playerId: userId,
+              invitedById: ids.users.other,
+              token: `ti-recv-${userId}`,
+              expiresAt: new Date(Date.now() + 86_400_000),
+            },
+          });
+        },
+      ],
+      [
+        'guardianInvitationsAsChild (already EXPIRED by the purge)',
+        async (userId) => {
+          await prisma.guardianInvitation.create({
+            data: {
+              token: `gi-child-${userId}`,
+              childId: userId,
+              invitedEmail: `someone.${RUN}@example.test`,
+              relationship: 'MOTHER',
+              invitedById: ids.users.other,
+              expiresAt: new Date(Date.now() + 86_400_000),
+            },
+          });
+        },
+      ],
+      [
+        'sentGuardianInvitations',
+        async (userId) => {
+          await prisma.guardianInvitation.create({
+            data: {
+              token: `gi-sent-${userId}`,
+              childId: ids.users.teammate,
+              invitedEmail: `parent.${RUN}@example.test`,
+              relationship: 'FATHER',
+              invitedById: userId,
+              status: 'EXPIRED',
+              expiresAt: new Date(Date.now() - 1000),
+            },
+          });
+        },
+      ],
+      [
+        'announcements',
+        async (userId) => {
+          await prisma.announcement.create({
+            data: { teamId: teamActive.teamId, authorId: userId, title: `Hi-${RUN}`, body: 'Practice moved' },
+          });
+        },
+      ],
+      [
+        'refreshTokens',
+        async (userId) => {
+          await prisma.refreshToken.create({
+            data: { userId, token: `rt-${userId}`, expiresAt: new Date(Date.now() + 86_400_000) },
+          });
+        },
+      ],
+    ];
+
+    it.each(retained)('keeps the tombstone when one %s row survives the purge', async (label, plant) => {
+      const key = `keep-${label.split(' ')[0]}`;
+      const userId = await mkUser(key, 'PLAYER');
+      await plant(userId);
+
+      const result = await AccountService.deleteAccount(userId, { actorId: userId, mode: 'self' });
+
+      expect(result.erased).toBe(false);
+      const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+      expect(row).toMatchObject({ name: DELETED_USER_NAME, email: null });
+      expect(row.deletedAt).toBeInstanceOf(Date);
+    });
   });
 
   it('exportUserData names every table the runbook lists', async () => {
