@@ -19,8 +19,9 @@ changed="$({ git diff --name-only HEAD 2>/dev/null || true; \
 # CLAUDE.md is loaded into every turn; keep it to rules and pointers (detail goes in docs/).
 if [ -f CLAUDE.md ]; then
   size="$(wc -c < CLAUDE.md | tr -d ' ')"
-  if [ "$size" -gt 40000 ]; then
-    msg="CLAUDE.md is ${size} characters (budget 40000). Move detail into docs/ and leave a one-line pointer."
+  nlines="$(wc -l < CLAUDE.md | tr -d ' ')"
+  if [ "$size" -gt 40000 ] || [ "$nlines" -gt 200 ]; then
+    msg="CLAUDE.md is ${nlines} lines / ${size} characters (budget 200 lines, 40000 characters). Move detail into docs/ and leave a one-line pointer."
     printf '{"systemMessage": "%s", "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "%s"}}' "$msg" "$msg"
     exit 0
   fi

@@ -1,6 +1,6 @@
 ---
 paths:
-  - ".maestro/**"
+  - ".maestro/**/*"
 ---
 
 # Maestro rules

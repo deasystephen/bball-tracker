@@ -1,6 +1,6 @@
 ---
 paths:
-  - "backend/**"
+  - "backend/**/*"
 ---
 
 # Backend rules

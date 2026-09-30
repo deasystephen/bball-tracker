@@ -1,6 +1,6 @@
 ---
 paths:
-  - "mobile/**"
+  - "mobile/**/*"
 ---
 
 # Mobile rules

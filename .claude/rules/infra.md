@@ -1,8 +1,8 @@
 ---
 paths:
-  - "infra/**"
-  - "docker/**"
-  - ".github/**"
+  - "infra/**/*"
+  - "docker/**/*"
+  - ".github/**/*"
 ---
 
 # Infra and deploy rules
