@@ -16,6 +16,16 @@ changed="$({ git diff --name-only HEAD 2>/dev/null || true; \
              git ls-files --others --exclude-standard 2>/dev/null || true; } | sort -u)"
 [ -z "$changed" ] && exit 0
 
+# CLAUDE.md is loaded into every turn; keep it to rules and pointers (detail goes in docs/).
+if [ -f CLAUDE.md ]; then
+  size="$(wc -c < CLAUDE.md | tr -d ' ')"
+  if [ "$size" -gt 40000 ]; then
+    msg="CLAUDE.md is ${size} characters (budget 40000). Move detail into docs/ and leave a one-line pointer."
+    printf '{"systemMessage": "%s", "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "%s"}}' "$msg" "$msg"
+    exit 0
+  fi
+fi
+
 # If any documentation changed, assume docs were considered — stay quiet.
 docs_changed="$(printf '%s\n' "$changed" | grep -E '(^|/)CLAUDE\.md$|^docs/|\.md$' || true)"
 [ -n "$docs_changed" ] && exit 0
