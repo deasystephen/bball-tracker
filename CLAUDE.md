@@ -1489,7 +1489,9 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   the first three things to check per alert class, plus the apply-time verification (confirm the
   SNS subscription, test publish, deliberately fail the uptime check). Alerting is declared in
   `infra/alerting.tf` (#448): one SNS topic with an email subscriber (`alert_email`, set only in
-  the gitignored `terraform.tfvars`), eleven CloudWatch alarms tuned for a **single-task**
+  the gitignored `terraform.tfvars`; `alerts@hooplings.com` since 2026-09-29, #555. To change
+  it without a gap in delivery, subscribe and confirm the new address first: the runbook's
+  "Changing the subscriber"), eleven CloudWatch alarms tuned for a **single-task**
   service plus four email alarms (#449), and a Route 53 HTTPS health check on
   `api.hooplings.com/health`. Every alarm sets
   `treat_missing_data` deliberately — `breaching` for liveness signals (a vanished task stops
@@ -1501,6 +1503,8 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](docs
   alert rules and Datadog monitors are **not** in Terraform (no Datadog provider is configured).
   Two Sentry rules email the members of the Sentry organization, a different list from the SNS
   subscriber: "New issue in production" (#448) and Sentry's default high-priority rule. The
+  owner's Sentry account routes them to `alerts@hooplings.com` as well (a setting of that
+  account, #555). The
   runbook's "Sentry alert rules" section is their only record; update it with any change.
 - **[Email deliverability](docs/runbooks/email-deliverability.md)** — how bounces and complaints
   are handled (#449), the first three things to check when `ses-bounce-rate` /

@@ -10,8 +10,8 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | Item | Value |
 | --- | --- |
 | Alert destination | SNS topic `bball-tracker-production-alerts` (`terraform output alerts_topic_arn`) |
-| Subscriber | One email address, set as `alert_email` in the gitignored `infra/terraform.tfvars`. It is deliberately not recorded in the repo. |
-| Who responds | Whoever owns that inbox. There is no rotation and no escalation path: one responder, best effort. |
+| Subscriber | `alerts@hooplings.com` since 2026-09-29 (#555), a role address on the Google Workspace seat ([addresses](email-deliverability.md#addresses)). It is set as `alert_email` in the gitignored `infra/terraform.tfvars`. |
+| Who responds | Whoever reads that inbox. There is no rotation and no escalation path: one responder, best effort. |
 | What arrives | One email when an alarm enters `ALARM`, one when it returns to `OK`. The subject carries the alarm name. |
 | Region | `us-east-1` (Route 53 health-check metrics exist only there) |
 | API | `https://api.hooplings.com` — health endpoint `/health` (pings Postgres; 503 when the DB is unreachable) |
@@ -19,7 +19,7 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | RDS | `bball-tracker-production-postgres` |
 | Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` |
 | Errors | Sentry org `satsun-ventures`, projects `bball-tracker-backend` and `bball-tracker-mobile` |
-| Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, **not** to the SNS subscriber above. |
+| Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, a separate list from the SNS subscriber above. The owner's account delivers them to `alerts@hooplings.com` too (since 2026-09-29, #555). |
 
 Because the service runs a single task, there is no redundancy to absorb a failure: "one task is
 unhealthy" and "the API is down" are the same event.
@@ -189,6 +189,36 @@ Terraform change.
      --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
    ```
 
+
+### Changing the subscriber
+
+Changing `alert_email` and applying **replaces** the subscription: Terraform removes the old
+one and creates the new one in the same apply, and the new one delivers nothing until its
+confirmation link is clicked. Done in that order, alerts go nowhere in between. Subscribe the
+new address first:
+
+1. Subscribe it by hand and confirm it from its inbox:
+   ```bash
+   aws sns subscribe --topic-arn "$(terraform output -raw alerts_topic_arn)" \
+     --protocol email --notification-endpoint <new address>
+   ```
+2. Test publish (step 4 above) and check that it arrives at the new address.
+3. Set `alert_email` to the new address and apply. The plan reads `1 to add, 1 to destroy`.
+   SNS answers the "add" with the subscription that is already confirmed, so Terraform adopts
+   it and removes only the old one.
+4. Test publish again: it must arrive at the new address only. `terraform plan` reads
+   "No changes".
+
+This is how the subscriber moved to `alerts@hooplings.com` on 2026-09-29.
+
+**If mail to `hooplings.com` stops, so do the alerts.** The address depends on the domain's MX
+records and on Google Workspace. The zone is hosted in the AWS account the alarms watch, so a
+broken zone takes both down together, and no alarm covers inbound mail. When alerts are
+unexpectedly quiet during an incident, read the alarm states directly:
+```bash
+aws cloudwatch describe-alarms --state-value ALARM --query 'MetricAlarms[].AlarmName'
+```
+
 ## Sentry alert rules
 
 CloudWatch tells you the service is down or slow. Sentry tells you the code threw. Two rules
@@ -202,6 +232,11 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 - **Who gets the email:** the owners of the issue, and when it has none, every active member of
   the Sentry organization. Add a responder by inviting them to the organization. This is a
   different list from the SNS subscriber: changing `alert_email` does not change it.
+- **Where a member's email lands is that member's own setting.** The owner's account has
+  `alerts@hooplings.com` as a second, verified address and routes both projects to it (User
+  settings → Notifications → Email Routing; set 2026-09-29, #555). It is a setting of one
+  account, not of the organization or of a rule: a member who joins later receives alerts at
+  their own address until they change it.
 - **A new high-priority issue sends two emails**, one per rule. That is accepted: the rules
   overlap on purpose, so that a low-priority new issue is not silent and a known issue that
   becomes urgent is not either.
@@ -216,7 +251,8 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 - **Expected client errors never reach Sentry** (4xx `AppError`s are filtered in
   `utils/sentry.ts`), so neither rule fires for an expired token or a validation error.
 - **Not proven by a real event.** The rule was read back after it was created and is enabled,
-  but no new issue has occurred in production since. Its first email is the proof; check
+  but no new issue has occurred in production since. The routing to `alerts@hooplings.com` is
+  not proven either, for the same reason. Its first email is the proof; check
   "Last triggered" on the rule's page.
 
 The rules live in Sentry, not in this repository. They were created through Sentry's API; to
