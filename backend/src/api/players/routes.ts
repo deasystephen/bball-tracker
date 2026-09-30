@@ -194,7 +194,8 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * managed, unclaimed record (`isManaged`, no login). A claimed account can be
  * deleted only by its owner via `DELETE /auth/me` — not by guardians, not by
  * ADMINs through the API. The route pre-checks; the service re-checks under
- * the row lock. Anonymize-in-place, see `AccountService.deleteAccount`.
+ * the row lock. Anonymize-in-place, or erased outright when nothing references
+ * the row (#529): see `AccountService.deleteAccount`. 200 `{ success, erased }`.
  */
 router.delete('/:id/account', validateUuidParams('id'), async (req, res, next) => {
   try {
@@ -212,8 +213,8 @@ router.delete('/:id/account', validateUuidParams('id'), async (req, res, next) =
     if (!child.isManaged || child.workosUserId !== null) {
       throw new ForbiddenError('Only the account owner can delete a claimed account');
     }
-    await AccountService.deleteAccount(childId, { actorId: req.user!.id, mode: 'guardian' });
-    res.json({ success: true });
+    const result = await AccountService.deleteAccount(childId, { actorId: req.user!.id, mode: 'guardian' });
+    res.json({ success: true, erased: result.erased });
   } catch (error) {
     if (error instanceof AppError) {
       next(error);

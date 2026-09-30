@@ -517,10 +517,11 @@ router.patch('/me/role', authenticate, async (req, res) => {
  * DELETE /api/v1/auth/me
  * Delete the caller's own account (#444, App Store 5.1.1(v)).
  *
- * Anonymize-in-place: see `AccountService.deleteAccount`. No body. Any
- * authenticated user, ADMIN included (the ADMIN_EMAIL allowlist re-promotes
- * on re-signup, D15).
- * - 200 `{ success, identityDeleted }`
+ * Anonymize-in-place, or erased outright when nothing references the row
+ * (#529): see `AccountService.deleteAccount`. No body. Any authenticated
+ * user, ADMIN included (the ADMIN_EMAIL allowlist re-promotes on re-signup,
+ * D15).
+ * - 200 `{ success, identityDeleted, erased }`
  * - 400 `code: 'last_head_coach'` + `teams` while the caller is the only
  *   head coach of a team in an active season (hand the team over first)
  * - 401 once deleted (the token no longer resolves to a user)
@@ -541,7 +542,7 @@ router.delete('/me', authenticate, async (req, res, next) => {
       mode: 'self',
       sessionId,
     });
-    res.json({ success: true, identityDeleted: result.identityDeleted });
+    res.json({ success: true, identityDeleted: result.identityDeleted, erased: result.erased });
   } catch (error) {
     if (error instanceof AppError) {
       // The central handler serializes DetailedError bodies (last_head_coach + teams)

@@ -228,11 +228,16 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   (lowercase): the button stays disabled. Type `DELETE` → tap **Delete account**.
 - **Expected:** Toast "Your account has been deleted", app lands on the sign-in screen, the dev-login
   list no longer shows Mike. Backend: `DELETE /api/v1/auth/me` → `200 { success: true,
-  identityDeleted: false }` (dev users have no WorkOS identity). A second request with the old token
-  is **401**. In the DB the row has `deletedAt` set, `email`/`workosUserId` null, name `Deleted
-  user`, no `TeamStaff`/`PushToken`/`GameRsvp` rows; his `GameEvent`/`PlayerStats` rows (if any)
-  still exist. Signing in again as the same email creates a **new** account. Re-run `npx prisma db
-  seed` to restore the fixture (the seed sweeps tombstones). Maestro: `.maestro/account-delete.yaml`.
+  identityDeleted: false, erased: true }` (dev users have no WorkOS identity; Mike's only row is his
+  staff role, which the purge removes, so nothing references him and the row is deleted outright,
+  #529). A second request with the old token is **401**. In the DB there is **no row** for his id
+  and no `TeamStaff`/`PushToken`/`GameRsvp` rows. Signing in again as the same email creates a
+  **new** account. Re-run `npx prisma db seed` to restore the fixture (it re-creates Mike by
+  email). Maestro: `.maestro/account-delete.yaml`.
+- **Variant — tombstone:** first record a game event for Mike (or put him on a roster), then delete:
+  `erased: false`, and the row has `deletedAt` set, `email`/`workosUserId` null, name `Deleted
+  user`, while his `GameEvent`/`PlayerStats`/`TeamMember` rows still exist. The seed sweeps
+  tombstones.
 - **Variant — last head coach:** as Frank Vogel (sole Lakers head coach) → 400 with
   `code: last_head_coach` and the team list rendered inline; nothing is deleted. Make Mike Brown
   head coach of the Lakers first and retry → succeeds.

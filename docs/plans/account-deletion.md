@@ -22,7 +22,7 @@ anonymized or minimized; a confirmation step is fine and a grace period is allow
 
 | # | Decision | Why |
 | --- | --- | --- |
-| D1 | **Anonymize in place, never hard-delete.** The `User` row survives as a tombstone; personal data is removed from it. | Game history and season stats stay coherent for the other members (`GameEvent.playerId` / `PlayerStats` / `TeamStats` all key on the user id). A hard delete cascades through 29 relations and silently rewrites every team's box scores. Matches the issue's suggested semantics. True erasure for accounts with **no** history is a filed follow-up (review 10A), not part of this change. |
+| D1 | **Anonymize in place, never hard-delete.** The `User` row survives as a tombstone; personal data is removed from it. | Game history and season stats stay coherent for the other members (`GameEvent.playerId` / `PlayerStats` / `TeamStats` all key on the user id). A hard delete cascades through 29 relations and silently rewrites every team's box scores. Matches the issue's suggested semantics. True erasure for accounts with **no** history was the follow-up #529 (review 10A), shipped after this change: when nothing references the row once the purge is done, it is deleted outright. |
 | D2 | **Add `User.deletedAt DateTime?`** (additive, nullable migration). | Makes the tombstone explicit instead of inferred from `email IS NULL AND name = 'Deleted user'`: lists can filter it, the seed can purge it, the runbook can prove when a request was honoured, and the auth middleware can refuse it without heuristics. Prisma-generated `ADD COLUMN … NULL` is safe on a populated table (no backfill — the hand-written-migration rule from #462 does not apply). |
 | D3 | **Delete the WorkOS user** (`workos.userManagement.deleteUser`, SDK 8.13 has it), best-effort **after** the DB transaction commits; fall back to `revokeSession` if delete throws. *(Review 1A.)* | Apple's guideline means the account, not just our row; WorkOS holds the email and name too. Deleting the IdP user also kills every session and refresh token, so `POST /auth/logout`'s `sid` dance is unnecessary. Ordering: local unlink first, so a WorkOS outage leaves the person *unable to reach the tombstone* (they would get a brand-new account on next sign-in, which is acceptable and documented). After the #24 key cutover a row still carrying a *staging* WorkOS id will 404 here — same `identityDeleted: false` path, runbook step. |
 | D4 | **Last head coach blocks with 400** `code: 'last_head_coach'` + the affected `teams: [{ id, name }]`, **scoped to teams whose season `isActive`**; historical team-seasons go headless. *(Review 15A.)* | Auto-promoting a random assistant hands a team (roster with minors' emails) to someone who did not ask for it. Deleting the teams for them destroys other people's data. Since #462 a `Team` row is a team-season, so an unscoped block would force a long-tenured self-serve coach to delete past seasons (destroying the stats D1 exists to keep) or find another adult with an account for each. Blocking only on live seasons keeps the protection where a team can still be managed and is reversible in-app: **Delete team** (`mobile/app/teams/[id].tsx:137`) and re-roling on the staff screen. Headless past seasons stay readable; league admins / ADMIN can still edit them. Reuses the rule in `TeamService.assertNotLastHeadCoach` (`team-service.ts:938`) via the shared helper in D11. |
@@ -257,7 +257,7 @@ run, like every other flow.
   routing/guards and the roster chip section; the retention statement.
 - `docs/testing/e2e-test-plan-v2.0.md`: two new sections.
 - Comment on #25 with the retention statement (D8); status comment on #444 at each merge; file the
-  true-erasure follow-up (review 10A) and link it from #444.
+  true-erasure follow-up (review 10A, filed as #529 and since shipped) and link it from #444.
 
 ## PR split
 
@@ -293,8 +293,9 @@ run, like every other flow.
   counsel asks.
 - **Account deactivation / grace period** — Apple does not require it and it complicates the
   re-signup story; D3 makes deletion immediate.
-- **True erasure for zero-history accounts** — filed as a follow-up issue (review 10A); D1 stays
-  one behaviour in this change.
+- **True erasure for zero-history accounts** — filed as the follow-up #529 (review 10A); D1 stayed
+  one behaviour in this change. #529 has since shipped it: a row nothing references after the
+  purge is hard-deleted, and the response carries `erased`.
 - **Guardian deleting a claimed child account** — the child owns it (D5).
 - **A `last_league_admin` block** — rejected (D18); the person could not clear it themselves.
 - **Vendor-side deletion (Amplitude user-deletion API, Sentry)** — no personal properties are

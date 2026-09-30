@@ -1,12 +1,15 @@
 /**
  * Account deletion and data export (#444, `docs/plans/account-deletion.md`).
  *
- * Deletion is ANONYMIZE-IN-PLACE, never a hard delete: the `User` row becomes
- * a tombstone (`deletedAt` set, no email / login / photo, name replaced) so
- * that `GameEvent`, `PlayerStats` and `TeamMember` rows keep a valid target
- * and every other member's season stats stay coherent. Rows that only serve
- * the person are removed; rows that carry their personal data in other tables
- * are scrubbed. One `$transaction`, one code path for the three callers:
+ * Deletion is ANONYMIZE-IN-PLACE: the `User` row becomes a tombstone
+ * (`deletedAt` set, no email / login / photo, name replaced) so that
+ * `GameEvent`, `PlayerStats` and `TeamMember` rows keep a valid target and
+ * every other member's season stats stay coherent. Rows that only serve the
+ * person are removed; rows that carry their personal data in other tables are
+ * scrubbed. The one exception is an account nothing references once the purge
+ * is done (#529): a tombstone protects other people's data, and such an account
+ * never touched any, so the row is deleted outright ("erased"). One
+ * `$transaction`, one code path for the three callers:
  *
  *   DELETE /auth/me ─────────────┐
  *   DELETE /players/:id/account ─┼─► deleteAccount(target, { mode })
@@ -27,12 +30,16 @@
  *   │    every GuardianInvitation.invitedEmail match → sentinel,   │
  *   │    personal league → neutral name (deleted when empty),      │
  *   │    managedById = me → null                                   │
- *   │ 4  tombstone the User row, deletedAt = now()                 │
+ *   │ 4  count what still points at the row (USER_REFERENCE_SELECT) │
+ *   │    nothing ───────────► DELETE the User row (erased: true)    │
+ *   │    anything ──────────► tombstone, deletedAt = now()          │
  *   └─────────────────────────────────────────────────────────────┘
  *   after commit, best-effort: delete the S3 avatar, delete the WorkOS user
  *
  * KEPT, de-identified: TeamMember, GameEvent, PlayerStats, Announcement
- * (author), TeamInvitation rows the user SENT.
+ * (author), TeamInvitation rows the user SENT. Any of these (or any other
+ * remaining relation) is what keeps the tombstone; the check is "nothing
+ * references this row", never "no game events" (D1).
  *
  * The row lock is what makes "the identity cannot come back" true: every
  * other write onto a User row (`PATCH /auth/me`, `/me/role`, push-token
@@ -59,6 +66,54 @@ export const DELETED_USER_NAME = 'Deleted user';
 export const DELETED_LEAGUE_NAME = "Former coach's teams";
 
 /**
+ * Every list relation on `model User` whose rows point AT the user row,
+ * counted in one query by the erasure check (#529). Exhaustive on purpose: a
+ * relation missing here would let a hard delete cascade through rows other
+ * people rely on, which is exactly what D1 forbids. The schema test in
+ * `tests/services/account-service.test.ts` fails when `schema.prisma` gains a
+ * relation on `User` that is named neither here, in `USER_REFERENCE_SELECT`,
+ * nor in `USER_OUTBOUND_RELATIONS`.
+ */
+export const USER_REFERENCE_COUNT_SELECT = {
+  managedPlayers: true,
+  teamMembers: true,
+  teamStaff: true,
+  gameEvents: true,
+  refreshTokens: true,
+  sentInvitations: true,
+  receivedInvitations: true,
+  leagueAdmins: true,
+  guardiansAsParent: true,
+  guardiansAsChild: true,
+  guardianInvitationsAsChild: true,
+  sentGuardianInvitations: true,
+  playerStats: true,
+  gameRsvps: true,
+  pushTokens: true,
+  announcements: true,
+  calendarFeedTokens: true,
+} satisfies Prisma.UserCountOutputTypeSelect;
+
+/** The erasure check's select: the list-relation counts plus every one-to-one relation that points at the row. */
+export const USER_REFERENCE_SELECT = {
+  _count: { select: USER_REFERENCE_COUNT_SELECT },
+  personalLeague: { select: { id: true } },
+} satisfies Prisma.UserSelect;
+
+/**
+ * Relations on `model User` that point FROM the row (the user's own foreign
+ * key) and therefore never keep it alive: deleting the row drops the pointer.
+ */
+export const USER_OUTBOUND_RELATIONS = ['managedBy'] as const;
+
+type UserReferences = Prisma.UserGetPayload<{ select: typeof USER_REFERENCE_SELECT }>;
+
+/** True when no row in any relation still points at the user (#529). */
+export function isUnreferenced(refs: UserReferences): boolean {
+  return refs.personalLeague === null && Object.values(refs._count).every((count) => count === 0);
+}
+
+/**
  * Who is asking, and therefore which gate applies.
  * - `self`: the account owner (`DELETE /auth/me`). Last-head-coach rule applies.
  * - `guardian`: a guardian deleting a managed, unclaimed child's record. The
@@ -83,6 +138,12 @@ export interface DeleteAccountResult {
   success: true;
   /** Whether the WorkOS user was deleted (false for managed/dev accounts and on provider failure). */
   identityDeleted: boolean;
+  /**
+   * `true` when the `User` row was deleted outright because nothing referenced
+   * it after the purge (#529); `false` when it was tombstoned (D1). The
+   * runbook's request log records which branch ran.
+   */
+  erased: boolean;
   /** Real leagues left with zero admins — the runbook's post-deletion checklist (D18). */
   adminlessLeagueIds: string[];
 }
@@ -196,24 +257,34 @@ export class AccountService {
       // can edit them afterwards, same as today once the creator leaves (B2.10).
       await tx.user.updateMany({ where: { managedById: userId }, data: { managedById: null } });
 
-      // 4. Tombstone.
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          workosUserId: null,
-          email: null,
-          ...EMAIL_SUPPRESSION_CLEARED,
-          name: DELETED_USER_NAME,
-          emailVerified: false,
-          profilePictureUrl: null,
-          managedById: null,
-          subscriptionTier: 'FREE',
-          subscriptionExpiresAt: null,
-          deletedAt: new Date(),
-        },
-      });
+      // 4. Erase or tombstone (#529). Whatever still points at the row after
+      // the purge is history other people rely on: membership, events, stats,
+      // invitations either way, announcements. Nothing left → no reason to
+      // keep the id, and the row goes. The purge above made every remaining
+      // reference deliberate, so this is one query against a locked row.
+      const refs = await tx.user.findUnique({ where: { id: userId }, select: USER_REFERENCE_SELECT });
+      const erased = refs !== null && isUnreferenced(refs);
+      if (erased) {
+        await tx.user.delete({ where: { id: userId } });
+      } else {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            workosUserId: null,
+            email: null,
+            ...EMAIL_SUPPRESSION_CLEARED,
+            name: DELETED_USER_NAME,
+            emailVerified: false,
+            profilePictureUrl: null,
+            managedById: null,
+            subscriptionTier: 'FREE',
+            subscriptionExpiresAt: null,
+            deletedAt: new Date(),
+          },
+        });
+      }
 
-      return { previousAvatar: row.profilePictureUrl, workosUserId: row.workosUserId, adminlessLeagueIds };
+      return { previousAvatar: row.profilePictureUrl, workosUserId: row.workosUserId, adminlessLeagueIds, erased };
     });
 
     // 5. After commit: best-effort external cleanup. The local row is already
@@ -249,10 +320,16 @@ export class AccountService {
       actorId,
       mode,
       identityDeleted,
+      erased: committed.erased,
       adminlessLeagueIds: committed.adminlessLeagueIds,
     });
 
-    return { success: true, identityDeleted, adminlessLeagueIds: committed.adminlessLeagueIds };
+    return {
+      success: true,
+      identityDeleted,
+      erased: committed.erased,
+      adminlessLeagueIds: committed.adminlessLeagueIds,
+    };
   }
 
   /**

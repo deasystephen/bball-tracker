@@ -6,11 +6,17 @@
  * (tests/integration/account-deletion.db.test.ts) proves the row-level
  * outcomes, rollback and concurrency; this file proves the decision logic.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mockPrisma } from '../setup';
 import {
   AccountService,
   DELETED_LEAGUE_NAME,
   DELETED_USER_NAME,
+  USER_OUTBOUND_RELATIONS,
+  USER_REFERENCE_COUNT_SELECT,
+  USER_REFERENCE_SELECT,
+  isUnreferenced,
 } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
 import { deletePreviousAvatar } from '../../src/services/upload-service';
@@ -53,9 +59,28 @@ function lockedRow(overrides: Partial<Omit<LockedRow, 'id'>> = {}): LockedRow {
   };
 }
 
-/** Every purge call resolves; tests override what they care about. */
+type ReferenceCounts = Record<keyof typeof USER_REFERENCE_COUNT_SELECT, number>;
+
+/** What the erasure check (#529) reads back: every relation count zero unless overridden. */
+function references(
+  overrides: Partial<ReferenceCounts> = {},
+  personalLeague: { id: string } | null = null
+): { _count: ReferenceCounts; personalLeague: { id: string } | null } {
+  const _count = Object.fromEntries(
+    Object.keys(USER_REFERENCE_COUNT_SELECT).map((relation) => [relation, 0])
+  ) as ReferenceCounts;
+  return { _count: { ..._count, ...overrides }, personalLeague };
+}
+
+/**
+ * Every purge call resolves; tests override what they care about. The user
+ * keeps one roster row, so the default outcome is the tombstone (D1); erasure
+ * tests hand `findUnique` an all-zero reference set.
+ */
 function armHappyPath(row: LockedRow = lockedRow()): void {
   (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
+  (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references({ teamMembers: 1 }));
+  (mockPrisma.user.delete as jest.Mock).mockResolvedValue({ id: USER_ID });
   (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
   (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([]);
   (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
@@ -80,7 +105,7 @@ describe('AccountService.deleteAccount', () => {
 
     const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
-    expect(result).toEqual({ success: true, identityDeleted: true, adminlessLeagueIds: [] });
+    expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
     // Lock first
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     // Purge
@@ -124,9 +149,82 @@ describe('AccountService.deleteAccount', () => {
         deletedAt: expect.any(Date),
       }),
     });
+    // The reference check ran against the locked row, after the purge, with the exhaustive select
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({ where: { id: USER_ID }, select: USER_REFERENCE_SELECT });
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
     expect(mockWorkOS.deleteUser).toHaveBeenCalledWith('workos_1');
+  });
+
+  describe('true erasure for an account nothing references (#529)', () => {
+    it('deletes the row outright instead of tombstoning, and still runs the external cleanup', async () => {
+      armHappyPath(lockedRow({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/a.jpg' }));
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references());
+
+      const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+      expect(result).toEqual({ success: true, identityDeleted: true, erased: true, adminlessLeagueIds: [] });
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      // The purge still ran first: the count is taken AFTER it, so purged rows never keep a tombstone
+      expect(mockPrisma.teamStaff.deleteMany).toHaveBeenCalledWith({ where: { userId: USER_ID } });
+      expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
+      expect(mockWorkOS.deleteUser).toHaveBeenCalledWith('workos_1');
+    });
+
+    it('erases a managed child in guardian mode once its guardian links are purged', async () => {
+      armHappyPath(lockedRow({ email: null, workosUserId: null, isManaged: true }));
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references());
+
+      const result = await AccountService.deleteAccount(USER_ID, { actorId: 'parent-1', mode: 'guardian' });
+
+      expect(result).toMatchObject({ erased: true, identityDeleted: false });
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it.each(Object.keys(USER_REFERENCE_COUNT_SELECT) as (keyof typeof USER_REFERENCE_COUNT_SELECT)[])(
+      'keeps the tombstone when a single %s row still points at the user',
+      async (relation) => {
+        armHappyPath();
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references({ [relation]: 1 }));
+
+        const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+        expect(result.erased).toBe(false);
+        expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ deletedAt: expect.any(Date) }) })
+        );
+      }
+    );
+
+    it('keeps the tombstone when a personal league still points at the user', async () => {
+      armHappyPath();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references({}, { id: 'pl-1' }));
+
+      const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+      expect(result.erased).toBe(false);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the tombstone if the reference read returns nothing', async () => {
+      armHappyPath();
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+      expect(result.erased).toBe(false);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('isUnreferenced: every count zero and no personal league', () => {
+      expect(isUnreferenced(references())).toBe(true);
+      expect(isUnreferenced(references({ announcements: 1 }))).toBe(false);
+      expect(isUnreferenced(references({}, { id: 'pl-1' }))).toBe(false);
+    });
   });
 
   it('answers 404 for an unknown or already-deleted account and writes nothing', async () => {
@@ -184,12 +282,12 @@ describe('AccountService.deleteAccount', () => {
   });
 
   describe('guardian mode (D5, re-checked under the lock)', () => {
-    it('deletes a managed, unclaimed child without running the head-coach query', async () => {
+    it('tombstones a rostered managed, unclaimed child without running the head-coach query', async () => {
       armHappyPath(lockedRow({ email: null, workosUserId: null, isManaged: true }));
 
       const result = await AccountService.deleteAccount(USER_ID, { actorId: 'parent-1', mode: 'guardian' });
 
-      expect(result.identityDeleted).toBe(false);
+      expect(result).toMatchObject({ identityDeleted: false, erased: false });
       expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
       expect(mockWorkOS.deleteUser).not.toHaveBeenCalled();
       // No email → nothing to scrub on GuardianInvitation.invitedEmail
@@ -318,6 +416,44 @@ describe('AccountService.deleteAccount', () => {
       expect(mockWorkOS.deleteUser).not.toHaveBeenCalled();
       expect(mockCapture).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('USER_REFERENCE_SELECT covers every relation on model User (#529)', () => {
+  /**
+   * Parses `schema.prisma` rather than the generated client: the client only
+   * knows relations that exist, so it cannot say which ones the select forgot.
+   * A relation field is one whose type is another model (scalars and enums
+   * are excluded); list and optional markers are stripped.
+   */
+  function userRelationFields(): string[] {
+    const schema = readFileSync(path.join(__dirname, '../../prisma/schema.prisma'), 'utf8');
+    const models = new Set([...schema.matchAll(/^model (\w+) \{/gm)].map((m) => m[1]));
+    const userBlock = schema.match(/^model User \{([\s\S]*?)^\}/m);
+    if (!userBlock) throw new Error('model User not found in schema.prisma');
+    return userBlock[1]
+      .split('\n')
+      .map((line) => line.trim().match(/^(\w+)\s+(\w+)(\[\]|\?)?(\s|$)/))
+      .flatMap((m) => (m && models.has(m[2]) ? [m[1]] : []));
+  }
+
+  it('names every User relation exactly once: counted, selected one-to-one, or declared outbound', () => {
+    const relations = userRelationFields();
+    expect(relations.length).toBeGreaterThan(10); // the parser found the block
+
+    const counted = Object.keys(USER_REFERENCE_COUNT_SELECT);
+    const oneToOne = Object.keys(USER_REFERENCE_SELECT).filter((key) => key !== '_count');
+    const covered = [...counted, ...oneToOne, ...USER_OUTBOUND_RELATIONS];
+
+    expect(new Set(covered).size).toBe(covered.length);
+    expect([...covered].sort()).toEqual([...relations].sort());
+  });
+
+  it('the parser sees the relations the schema is known to carry', () => {
+    const relations = userRelationFields();
+    expect(relations).toEqual(expect.arrayContaining(['teamMembers', 'gameEvents', 'personalLeague', 'managedBy']));
+    expect(relations).not.toContain('role'); // enum
+    expect(relations).not.toContain('email'); // scalar
   });
 });
 

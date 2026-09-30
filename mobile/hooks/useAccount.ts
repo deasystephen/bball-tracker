@@ -2,7 +2,8 @@
  * Account deletion (#444, App Store 5.1.1(v)).
  *
  * - `useDeleteAccount` → `DELETE /auth/me`. The server anonymizes the account
- *   in place and deletes the WorkOS user; on success the hook clears the LOCAL
+ *   in place (or deletes the row outright when nothing references it, #529)
+ *   and deletes the WorkOS user; on success the hook clears the LOCAL
  *   session only (`clearSession`, no remote logout — the server side is
  *   already gone). Never the other way round: clearing local state is not a
  *   deletion.
@@ -24,6 +25,8 @@ export const LAST_HEAD_COACH_CODE = 'last_head_coach';
 export interface DeleteAccountResponse {
   success: boolean;
   identityDeleted: boolean;
+  /** `true` when the row was deleted outright rather than tombstoned (#529). Informational only. */
+  erased?: boolean;
 }
 
 export interface BlockingTeam {

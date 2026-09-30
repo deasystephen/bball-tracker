@@ -238,6 +238,11 @@ describe('email suppression against Postgres (#449)', () => {
 
     it('AccountService.deleteAccount: the tombstone carries no delivery state, and no later event reaches it', async () => {
       const id = await mkUser('leaver');
+      // A row that survives the purge, so the account is tombstoned rather than
+      // erased outright (#529) — this test is about what the tombstone carries.
+      await prisma.refreshToken.create({
+        data: { userId: id, token: `rt-leaver-${RUN}`, expiresAt: new Date(Date.now() + 86_400_000) },
+      });
       await handleSesEventMessage(bounce(address('leaver')));
 
       await AccountService.deleteAccount(id, { actorId: id, mode: 'self' });

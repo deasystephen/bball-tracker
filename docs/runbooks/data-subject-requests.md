@@ -8,8 +8,8 @@ The privacy policy (#25) must describe **exactly** what "Retention" below says.
 
 | Path | Who | How | Result |
 | --- | --- | --- | --- |
-| Self-serve | any signed-in user, ADMIN included | Profile → Account → **Delete account** → type `DELETE` | `DELETE /api/v1/auth/me` → anonymized in place, WorkOS user deleted |
-| Guardian | a guardian of a **managed, unclaimed** child | Profile → My kids → ⋯ → **Delete <child>'s record** | `DELETE /api/v1/players/:id/account` → child record anonymized |
+| Self-serve | any signed-in user, ADMIN included | Profile → Account → **Delete account** → type `DELETE` | `DELETE /api/v1/auth/me` → anonymized in place (or erased outright, see below), WorkOS user deleted |
+| Guardian | a guardian of a **managed, unclaimed** child | Profile → My kids → ⋯ → **Delete <child>'s record** | `DELETE /api/v1/players/:id/account` → child record anonymized (or erased, if never rostered) |
 | Operator (delete) | you, after verifying identity | `scripts/data-subject-request.ts delete <email>` | same transaction in `operator` mode |
 | Operator (export) | you, after verifying identity | `scripts/data-subject-request.ts export <email>` | one JSON document to stdout |
 
@@ -18,10 +18,18 @@ app, or by an operator through the script. Guardians cannot delete a claimed chi
 system ADMINs cannot delete anyone through the API — that is deliberate (D5), so a stolen admin
 token cannot erase users.
 
-## What deletion does (anonymize in place, never a hard delete)
+## What deletion does (anonymize in place; erase outright when nothing is left)
 
 The `User` row stays as a tombstone so that game events, box scores and season stats recorded
-for the person's teams remain consistent for everyone else. In ONE transaction:
+for the person's teams remain consistent for everyone else. **The tombstone exists for other
+people's data, so an account that never touched any is erased instead (#529):** once the removals
+below are done, the transaction counts every row that still points at the user (roster
+memberships, game events, box scores, invitations sent or received, guardian invitations,
+announcements, sessions — every relation on the `User` model, checked in one query that a test
+keeps in step with the schema). If nothing remains, the row itself is deleted and no record of
+the account survives; the response says `erased: true`. A person who signed up, looked around and
+left, or a coach who only ever held staff roles, ends up here. If anything remains, the row is
+tombstoned as described next and the response says `erased: false`. In ONE transaction:
 
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
   best-effort), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
@@ -35,7 +43,8 @@ for the person's teams remain consistent for everyone else. In ONE transaction:
   `managedById`.
 - **Kept, without the name:** `TeamMember` rows (the roster shows "Deleted user" until a coach
   removes it — Remove-from-roster is stats-safe), `GameEvent`, `PlayerStats`, announcements they
-  authored, and team invitations they **sent**.
+  authored, and team invitations they **sent**. Any of these is what keeps the tombstone; with
+  none of them the row is erased.
 - **After the transaction commits (best-effort):** the WorkOS user is deleted, which also kills
   every session and refresh token. If that call fails the response says `identityDeleted: false`
   and Sentry gets an event tagged `flow: account-delete` — see "When WorkOS deletion fails".
@@ -55,7 +64,11 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 
 ## Retention (this is what the privacy policy must say)
 
-- The tombstone keeps only the internal id, the role, the creation date and the deletion date.
+- An account with no history — never on a roster, no game events or statistics, no invitations
+  sent or received, no announcements — is **erased**: the record is deleted and nothing about it
+  remains in the application database.
+- Otherwise the tombstone keeps only the internal id, the role, the creation date and the
+  deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
 - RDS automated backups retain the pre-deletion data for up to **7 days**
@@ -104,7 +117,9 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    ```bash
    cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts delete <email>
    ```
-   Output: `{ userId, deleted, identityDeleted, adminlessLeagueIds }`. The last-head-coach rule
+   Output: `{ userId, deleted, identityDeleted, erased, adminlessLeagueIds }` (`erased: true` means
+   the row was deleted outright because nothing referenced it; `false` means it was tombstoned —
+   record which in the log table). The last-head-coach rule
    still applies: if it refuses, ask the person to hand the team over, or (with their consent)
    re-role another staff member yourself via `PATCH /teams/:id/staff/:userId`.
 5. Run the post-deletion checklist below, then record the request in the log table.
@@ -138,6 +153,6 @@ a supported operation.
 
 ## Request log
 
-| Date | Type | Verified via | Ran by | `identityDeleted` | Follow-ups |
-| --- | --- | --- | --- | --- | --- |
-| _(none yet)_ | | | | | |
+| Date | Type | Verified via | Ran by | `identityDeleted` | `erased` | Follow-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| _(none yet)_ | | | | | | |

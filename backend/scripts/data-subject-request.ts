@@ -55,6 +55,7 @@ async function main(argv: string[]): Promise<void> {
         userId,
         deleted: true,
         identityDeleted: result.identityDeleted,
+        erased: result.erased,
         adminlessLeagueIds: result.adminlessLeagueIds,
       },
       null,
