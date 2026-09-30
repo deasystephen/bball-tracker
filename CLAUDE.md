@@ -64,7 +64,7 @@ npm run type-check          # Type check
 npm test                    # Jest (includes the OTA drift guard)
 ```
 - **Never** `npm start` / `npx expo start` / Expo Go: native modules need the dev client that `expo run:*` builds. There is no `expo-dev-client`; a Debug build with Metro stopped shows a red "No script URL provided" screen, which is not a build failure.
-- Toolchain: Expo SDK 57, React Native 0.86, React 19.2.3, iOS 16.4+, Xcode 26.4+ (Xcode 27 works). Signing, certificate and ad-hoc `xcodebuild` details: `docs/deployment/mobile-builds-and-ota.md`.
+- Toolchain versions (Expo SDK, React Native, React) are whatever `mobile/package.json` says; the iOS and Xcode minimums, signing, certificate and ad-hoc `xcodebuild` details are in `docs/deployment/mobile-builds-and-ota.md`.
 - **Never build SDK 57 with `CODE_SIGNING_ALLOWED=NO`**: an unsigned build has no entitlements, so the keychain refuses every call and the session tokens are never stored while the app looks fine.
 - After checking out a branch that changes `scheme` or another native config value, run `npx expo prebuild --platform ios --clean` before `npx expo run:ios`; `run:ios` alone reuses the stale `ios/` project.
 
