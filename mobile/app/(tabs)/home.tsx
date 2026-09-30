@@ -25,6 +25,7 @@ import {
   Card,
   LoadingSpinner,
   ErrorState,
+  Avatar,
 } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
@@ -170,11 +171,12 @@ export default function Home() {
             )}
             <TouchableOpacity
               onPress={() => router.push('/profile')}
-              style={[styles.avatarSmall, { backgroundColor: colors.primary }]}
+              style={styles.avatarButton}
+              accessibilityRole="button"
+              accessibilityLabel="Profile"
+              testID="home-profile-avatar"
             >
-              <ThemedText variant="captionBold" style={styles.avatarSmallText}>
-                {user?.name?.charAt(0)?.toUpperCase() || '?'}
-              </ThemedText>
+              <Avatar uri={user?.profilePictureUrl} name={user?.name || ''} size="small" />
             </TouchableOpacity>
           </View>
         </View>
@@ -519,14 +521,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   bellBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
-  avatarSmall: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  // 44pt touch target around the 32pt avatar.
+  avatarButton: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarSmallText: { color: '#FFFFFF', fontWeight: '700' },
   liveCardWrapper: { marginBottom: spacing.md },
   liveCard: {
     height: 180,
