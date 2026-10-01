@@ -7,7 +7,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -22,8 +21,8 @@ import {
   Input,
   Button,
   LoadingSpinner,
+  SeasonDateFields,
 } from '../../../components';
-import { DateTimePickerSheet } from '../../../components/DateTimePickerSheet';
 import { useToast } from '../../../components/Toast';
 import { useLeague } from '../../../hooks/useLeagues';
 import { useCreateSeason } from '../../../hooks/useSeasons';
@@ -31,7 +30,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
 import { canManageLeague } from '../../../utils/team-permissions';
-import { spacing, borderRadius } from '../../../theme';
+import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 
 export default function CreateSeasonScreen() {
@@ -44,7 +43,6 @@ export default function CreateSeasonScreen() {
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
-  const [picker, setPicker] = useState<'start' | 'end' | null>(null);
   const [errors, setErrors] = useState<{ name?: string; leagueId?: string }>({});
 
   const { data: league, isLoading: leagueLoading } = useLeague(leagueId || '');
@@ -95,22 +93,6 @@ export default function CreateSeasonScreen() {
         error instanceof Error ? error.message : 'Failed to create season'
       );
     }
-  };
-
-  const openPicker = (which: 'start' | 'end') => {
-    // The name field takes focus when the screen opens; its keyboard would
-    // otherwise sit on top of the sheet.
-    Keyboard.dismiss();
-    setPicker(which);
-  };
-
-  const formatDate = (date: Date | null): string => {
-    if (!date) return 'Not set';
-    return date.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
   };
 
   if (leagueLoading || !allowed) {
@@ -192,90 +174,12 @@ export default function CreateSeasonScreen() {
             autoFocus
           />
 
-          {/* Date Pickers */}
-          <View style={styles.section}>
-            <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-              Season Dates (Optional)
-            </ThemedText>
-
-            {/* The date button and its clear button are siblings, never
-                parent and child (#583). */}
-            <View
-              style={[
-                styles.dateRow,
-                {
-                  backgroundColor: colors.backgroundSecondary,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => openPicker('start')}
-                accessibilityRole="button"
-                accessibilityLabel={`Start Date: ${formatDate(startDate)}`}
-                testID="season-start-date-button"
-              >
-                <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-                <View style={styles.dateContent}>
-                  <ThemedText variant="caption" color="textSecondary">
-                    Start Date
-                  </ThemedText>
-                  <ThemedText variant="body">{formatDate(startDate)}</ThemedText>
-                </View>
-              </TouchableOpacity>
-              {startDate && (
-                <TouchableOpacity
-                  onPress={() => setStartDate(null)}
-                  style={styles.clearButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear start date"
-                  testID="season-start-date-clear"
-                >
-                  <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* The date button and its clear button are siblings, never
-                parent and child (#583). */}
-            <View
-              style={[
-                styles.dateRow,
-                {
-                  backgroundColor: colors.backgroundSecondary,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => openPicker('end')}
-                accessibilityRole="button"
-                accessibilityLabel={`End Date: ${formatDate(endDate)}`}
-                testID="season-end-date-button"
-              >
-                <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-                <View style={styles.dateContent}>
-                  <ThemedText variant="caption" color="textSecondary">
-                    End Date
-                  </ThemedText>
-                  <ThemedText variant="body">{formatDate(endDate)}</ThemedText>
-                </View>
-              </TouchableOpacity>
-              {endDate && (
-                <TouchableOpacity
-                  onPress={() => setEndDate(null)}
-                  style={styles.clearButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear end date"
-                  testID="season-end-date-clear"
-                >
-                  <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+          <SeasonDateFields
+            startDate={startDate}
+            endDate={endDate}
+            onChangeStart={setStartDate}
+            onChangeEnd={setEndDate}
+          />
 
           <View style={styles.buttonContainer}>
             <Button
@@ -295,22 +199,6 @@ export default function CreateSeasonScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <DateTimePickerSheet
-        visible={picker !== null}
-        mode="date"
-        value={(picker === 'end' ? endDate : startDate) ?? new Date()}
-        title={picker === 'end' ? 'End date' : 'Start date'}
-        onConfirm={(selected) => {
-          if (picker === 'end') {
-            setEndDate(selected);
-          } else {
-            setStartDate(selected);
-          }
-          setPicker(null);
-        }}
-        onCancel={() => setPicker(null)}
-      />
     </ThemedView>
   );
 }
@@ -343,36 +231,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.xl,
-  },
-  section: {
-    marginBottom: spacing.lg,
-  },
-  label: {
-    marginBottom: spacing.sm,
-  },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    marginTop: spacing.sm,
-  },
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    flex: 1,
-  },
-  dateContent: {
-    flex: 1,
-  },
-  clearButton: {
-    // 44pt minimum touch target
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   buttonContainer: {
     marginTop: spacing.xl,

@@ -1,0 +1,92 @@
+appId: com.bballtracker.mobile
+---
+# !! RE-SEED BEFORE EVERY RUN:  cd backend && npx prisma db seed  !!
+#
+# Admin season management (#614): as the seeded system ADMIN, open the seeded
+# league, create a season, open it, edit it (name + active flag), delete it,
+# then prove the league delete is refused for TEAMS, not for seasons.
+#
+# The flow cleans up after itself (the season it creates is deleted at the
+# end). An interrupted run leaves "E2E Season…" behind, and the next run would
+# fail on the duplicate name, so the seed removes any season of that name in
+# the seeded league (backend/prisma/seed.ts).
+#
+# The seeded league already holds "Spring 2024" WITH teams, which is what the
+# final step relies on: the league screen's guard blocks the delete with the
+# teams message (the API would answer 400 for the same reason).
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+# The dev-user list is ordered COACH, PARENT, PLAYER, ADMIN, so the admin sits
+# at the very end; scroll to it rather than assuming a position.
+- scrollUntilVisible:
+    element:
+      text: ".*admin@bball-tracker.com.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+- tapOn: ".*admin@bball-tracker.com.*"
+- assertVisible: "Your Teams"
+- tapOn: "Profile tab"
+- scrollUntilVisible:
+    element:
+      text: "Leagues & Seasons"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- tapOn: "Leagues & Seasons"
+- assertVisible: "League Management"
+- tapOn: "Downtown Youth Basketball League"
+- assertVisible: "Seasons"
+- assertVisible: "Spring 2024"
+
+# --- Create ---
+- tapOn: "Add Season"
+- assertVisible: "Create Season"
+# The name field has focus when the screen opens.
+- inputText: "E2E Season"
+# Enter blurs the single-line input; the Create button sits under the keyboard
+# otherwise. Never hideKeyboard (fails flows since Maestro 2.11).
+- pressKey: Enter
+- tapOn: "Create Season"
+- assertVisible: "E2E Season"
+
+# --- Detail ---
+- tapOn: "E2E Season"
+- assertVisible: "Active"
+- assertVisible: "0 teams"
+- assertVisible: "No teams yet"
+
+# --- Edit ---
+- tapOn: "Edit season"
+- assertVisible: "Edit Season"
+- tapOn:
+    id: "season-name-input"
+- eraseText
+- inputText: "E2E Season Edited"
+- pressKey: Enter
+- tapOn:
+    id: "season-active-switch"
+- tapOn:
+    id: "season-save-button"
+- assertVisible: "E2E Season Edited"
+- assertVisible: "Inactive"
+
+# --- Delete the season (ActionMenu confirmation, never an Alert) ---
+- tapOn: "Delete season"
+- assertVisible: "Delete E2E Season Edited?"
+- tapOn: "Delete"
+# Back on the league screen, the season is gone.
+- assertVisible: "Seasons"
+- assertNotVisible: "E2E Season Edited"
+
+# --- League delete guard: teams, not seasons ---
+# "Spring 2024" still has teams, so the delete is refused with the teams
+# message. Before #614 the screen refused whenever ANY season existed.
+- tapOn: "Delete league"
+- assertVisible: "This league has teams. Remove the teams first."
+- assertVisible: "Downtown Youth Basketball League"

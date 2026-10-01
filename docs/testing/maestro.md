@@ -84,7 +84,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   and players, and removes what interrupted test runs left behind), so never run two flows
   back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
   2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
-  flow, `error-way-back.yaml`, was added later that day and passed on its own). The same
+  flow, `error-way-back.yaml`, was added later that day and passed on its own; a 24th,
+  `admin-season-manage.yaml` (#614, dev-login as the seeded ADMIN, create → edit → delete a season,
+  then the league delete refused for teams), was added 2026-09-30). The same
   day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
   2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
   under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a

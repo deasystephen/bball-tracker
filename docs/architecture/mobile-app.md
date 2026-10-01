@@ -46,6 +46,26 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   renders an `EmptyState` for that case ("No stats yet" for the current user) instead of an error.
 - The Profile "Leagues & Seasons" entry is shown to system `ADMIN`s and to users with at least one league in
   `user.leagueAdminOf` (`utils/team-permissions.ts#canAccessAdmin`). See "Mobile permission gating" in this file.
+- **Admin: leagues and seasons** (#614). Routes: `/admin` (leagues) → `/admin/leagues/[id]` (league +
+  its seasons, Add Season) → `/admin/seasons/[id]` (season detail: name, league, Active/Inactive badge,
+  date range, team count from `_count.teams`, team rows linking to `/teams/:id`) → `/admin/seasons/[id]/edit`
+  (name, dates, `isActive` switch; `PATCH /seasons/:id` with only the fields that changed —
+  `buildSeasonPatch`; a cleared date sends `null`). Guards mirror the server: every one of these screens
+  uses `useAccessGuard` + `canManageLeague(user, leagueId)` (ADMIN or admin of that league; the season
+  screens take the league id from the loaded season, so an unaffiliated caller sees the API's 404 as an
+  `ErrorState` instead); the league and season **Delete** buttons render only for `canCreateLeagues(user)`
+  (both deletes are `isSystemAdmin` on the server). Deletes confirm through `ActionMenu`, never an `Alert`,
+  and a refused delete shows the server's reason via `getApiErrorMessage` in a toast. **League delete rule
+  = the API's (`leagueHasTeams`):** blocked locally only while some season has teams (message names teams);
+  empty seasons cascade server-side. Before #614 the screen refused whenever any season existed, and a
+  season row only showed a "coming soon" alert. Validation on edit mirrors `updateSeasonSchema` (name 1–100)
+  plus the service's start ≤ end check. The season forms share `components/SeasonDateFields` (date rows +
+  picker sheet, clear button as a sibling of the date button). Strings live under `seasons.*` and
+  `leagues.delete*` in `i18n/locales`; the older admin screens (league list/create, season create) are still
+  inline English. Tests: `__tests__/app/{season-detail,season-edit,league-detail-delete}.test.tsx`; both
+  season screens are in the way-back list in `__tests__/app/error-state-way-back.test.tsx`. Maestro:
+  `.maestro/admin-season-manage.yaml` (dev-login as the seeded ADMIN; creates and deletes "E2E Season";
+  the seed removes a leftover).
 - **About screen** (`app/about.tsx`, Profile → Settings → About): version + OTA diagnostics from
   `expo-constants` / `expo-updates` — app version, runtime version, applied update id + publish time
   ("Embedded build" when `!Updates.isEnabled || isEmbeddedLaunch || !updateId`, i.e. dev client or no OTA

@@ -143,8 +143,13 @@ export function useDeleteSeason() {
     mutationFn: async (seasonId: string) => {
       await apiClient.delete(`/seasons/${seasonId}`);
     },
-    onSuccess: () => {
+    onSuccess: (_result, seasonId) => {
+      // The detail query is dropped, not invalidated: a refetch of a deleted
+      // season is a 404, and the screen that owned it is being replaced.
+      queryClient.removeQueries({ queryKey: seasonKeys.detail(seasonId) });
       queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
+      // League detail and list carry season counts.
+      queryClient.invalidateQueries({ queryKey: ['leagues'] });
     },
   });
 }
