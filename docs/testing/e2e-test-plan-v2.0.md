@@ -268,9 +268,27 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN
 - **Steps:**
-  1. Profile → "Leagues & Seasons" → Seasons → Create
-  2. Pick the league from C.1, name `Spring 2026`
-- **Expected:** Season appears under the league.
+  1. Profile → "Leagues & Seasons" → tap the league from C.1 → "Add Season"
+  2. Name `Spring 2026`, optionally pick start/end dates
+- **Expected:** Season appears under the league with "0 teams". Maestro: `.maestro/admin-season-manage.yaml`.
+- **Notes:** ___________
+
+### C.2b — Season detail and edit (#614)
+- [ ] Pass / Fail / Skipped
+- **Role:** ADMIN, or a league admin of that league (`leagueAdminOf`)
+- **Steps:**
+  1. Tap the season row from C.2 → season screen shows name, league, Active badge, date range, team count and team rows
+  2. "Edit season" → rename to `Spring 2026 Edited`, clear a date, switch Active off → Save
+- **Expected:** `PATCH /seasons/:id` carries only the changed fields (a cleared date is `null`); the detail screen shows the new name and "Inactive". A duplicate name is refused with the server's message in a toast. A team row opens the team.
+- **Notes:** ___________
+
+### C.2c — Delete season (#614)
+- [ ] Pass / Fail / Skipped
+- **Role:** ADMIN (the Delete button is hidden from a league admin; the API returns 403)
+- **Steps:**
+  1. On a season WITH teams (seeded "Spring 2024"): "Delete season" → confirm in the action sheet
+  2. On the empty season from C.2b: "Delete season" → confirm
+- **Expected:** (1) toast "Cannot delete season with existing teams. Remove teams first." and the screen stays; (2) toast "Season deleted" and the app lands back on the league, where the season is gone.
 - **Notes:** ___________
 
 ### C.3 — 🔒 Non-admin cannot create league
@@ -283,8 +301,8 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 ### C.4 — Delete league
 - [ ] Pass / Fail / Skipped
 - **Role:** ADMIN
-- **Steps:** Profile → "Leagues & Seasons" → Leagues → tap created league → Delete (use a *throwaway* league; ADMIN only).
-- **Expected:** League removed; associated seasons cascade or are blocked per current behavior (note which).
+- **Steps:** Profile → "Leagues & Seasons" → tap created league → "Delete league" → confirm in the action sheet (use a *throwaway* league; ADMIN only).
+- **Expected:** League removed and the app lands on the league list; its **empty** seasons cascade. A league where some season still has teams is refused in-app with "This league has teams. Remove the teams first." (the API answers 400 for the same reason); seasons alone never block a delete (#614).
 - **Notes:** ___________
 
 ---

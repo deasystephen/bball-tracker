@@ -473,6 +473,25 @@ async function main() {
   });
   console.log(`  Created season: ${season.name}`);
 
+  // Reset the fixture: `.maestro/admin-season-manage.yaml` creates an
+  // "E2E Season…" in this league and deletes it at the end, so only an
+  // interrupted run leaves one behind — and the next run would then fail on
+  // the duplicate name. Only team-less seasons go (the flow never adds a team).
+  const staleFlowSeasons = await prisma.season.deleteMany({
+    where: { leagueId: league.id, name: { startsWith: 'E2E Season' }, teams: { none: {} } },
+  });
+  if (staleFlowSeasons.count > 0) {
+    console.log(`    Removed ${staleFlowSeasons.count} season(s) left over from a previous E2E run`);
+  }
+  // ...and the throwaway "E2E League" the same flow creates and deletes at its
+  // end. Only a league with no teams anywhere goes (cascades to its seasons).
+  const staleFlowLeagues = await prisma.league.deleteMany({
+    where: { name: 'E2E League', personalOwnerId: null, seasons: { every: { teams: { none: {} } } } },
+  });
+  if (staleFlowLeagues.count > 0) {
+    console.log(`    Removed ${staleFlowLeagues.count} league(s) left over from a previous E2E run`);
+  }
+
   // =========================================================================
   // TEAMS
   // =========================================================================

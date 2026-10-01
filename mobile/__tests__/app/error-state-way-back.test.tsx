@@ -18,6 +18,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import AdminScreen from '../../app/admin/index';
 import LeagueDetailScreen from '../../app/admin/leagues/[id]';
+import SeasonDetailScreen from '../../app/admin/seasons/[id]';
+import EditSeasonScreen from '../../app/admin/seasons/[id]/edit';
 import GameDetailScreen from '../../app/games/[id]/index';
 import GameLiveScreen from '../../app/games/[id]/live';
 import GameStatsScreen from '../../app/games/[id]/stats';
@@ -70,6 +72,8 @@ interface ScreenCase {
 const SCREENS: ScreenCase[] = [
   { name: 'admin', Screen: AdminScreen, params: {}, fallback: '/(tabs)/profile' },
   { name: 'admin/leagues/[id]', Screen: LeagueDetailScreen, params: { id: 'league-1' }, fallback: '/admin' },
+  { name: 'admin/seasons/[id]', Screen: SeasonDetailScreen, params: { id: 'season-1' }, fallback: '/admin' },
+  { name: 'admin/seasons/[id]/edit', Screen: EditSeasonScreen, params: { id: 'season-1' }, fallback: '/admin' },
   { name: 'games/[id]', Screen: GameDetailScreen, params: { id: 'g1' }, fallback: '/(tabs)/games' },
   { name: 'games/[id]/live', Screen: GameLiveScreen, params: { id: 'g1' }, fallback: '/(tabs)/games' },
   { name: 'games/[id]/stats', Screen: GameStatsScreen, params: { id: 'g1' }, fallback: '/(tabs)/games' },

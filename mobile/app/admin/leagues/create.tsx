@@ -130,6 +130,7 @@ export default function CreateLeagueScreen() {
 
           <Input
             label="League Name"
+            testID="league-name-input"
             placeholder="e.g., Downtown Youth Basketball"
             value={name}
             onChangeText={setName}
@@ -141,6 +142,7 @@ export default function CreateLeagueScreen() {
           <View style={styles.buttonContainer}>
             <Button
               title="Create League"
+              testID="league-create-submit"
               onPress={handleSubmit}
               loading={createLeague.isPending}
               disabled={!name.trim()}

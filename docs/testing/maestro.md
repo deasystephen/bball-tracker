@@ -76,6 +76,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Don't use `centerElement: true` for elements near the END of a list** — centering can never be
   satisfied there and the scroll spins until timeout with the element plainly visible. Plain
   `visibilityPercentage: 60` is the stop condition that works.
+- **Icon glyphs are part of a composite label.** A row that starts with an `Ionicons` glyph reads
+  `"\uf601, Leagues & Seasons, Create and manage leagues, \uf23b"`, so a trailing `.*` is not enough:
+  `".*Leagues & Seasons.*"`. Better, give the pressable its own `accessibilityLabel` (VoiceOver then
+  stops reading the glyph too), as the league screen's "Add Season" button now has.
+- **Two elements with the same text: tap by id.** `tapOn: "Create Season"` on the Create Season screen
+  "COMPLETED" by tapping the header title, not the button, and the flow then asserted the name it had
+  typed into the still-open form (found while writing `admin-season-manage.yaml`). Every submit button
+  on the admin forms now carries a `testID` (`season-create-submit`, `league-create-submit`,
+  `season-save-button`); a flow that taps text shared with a title is wrong even when it passes.
+- **Never start Metro with `CI=1` for a Maestro session.** CI mode disables file watching
+  ("reloads are disabled"), so every edit after launch is invisible to the app while a `curl` of the
+  bundle looks fresh. From a non-interactive shell use `npx expo start --port 8081 --clear < /dev/null`.
+  `launchApp` with `clearState: true` reinstalls the app on iOS (the container path changes); it is not
+  another session installing over you.
 - A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
   top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite
@@ -84,7 +98,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   and players, and removes what interrupted test runs left behind), so never run two flows
   back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
   2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
-  flow, `error-way-back.yaml`, was added later that day and passed on its own). The same
+  flow, `error-way-back.yaml`, was added later that day and passed on its own; a 24th,
+  `admin-season-manage.yaml` (#614, dev-login as the seeded ADMIN, create → edit → delete a season,
+  then the league delete refused for teams), was added 2026-09-30). The same
   day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
   2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
   under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a

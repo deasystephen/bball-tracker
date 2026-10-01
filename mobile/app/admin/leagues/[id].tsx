@@ -2,14 +2,13 @@
  * League Detail screen - View and manage seasons
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
   FlatList,
   RefreshControl,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +20,9 @@ import {
   LoadingSpinner,
   EmptyState,
   ErrorState,
+  ActionMenu,
 } from '../../../components';
+import { useToast } from '../../../components/Toast';
 import { useLeague, useDeleteLeague } from '../../../hooks/useLeagues';
 import { useSeasons, Season } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
@@ -31,14 +32,28 @@ import { canCreateLeagues, canManageLeague } from '../../../utils/team-permissio
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { getApiErrorMessage } from '../../../services/api-client';
+import { useTranslation } from '../../../i18n';
+
+/**
+ * The league delete rule, as the API applies it (`league-service.deleteLeague`):
+ * a league is deletable while no season has teams; empty seasons cascade.
+ * Not "no seasons" — that blocked deletes the server would have accepted (#614).
+ */
+export function leagueHasTeams(seasons: Pick<Season, '_count' | 'teams'>[]): boolean {
+  return seasons.some((season) => (season._count?.teams ?? season.teams?.length ?? 0) > 0);
+}
 
 export default function LeagueDetailScreen() {
   const router = useRouter();
   const goBack = useGoBack('/admin');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const { data: league, isLoading: leagueLoading, error: leagueError, refetch: refetchLeague } = useLeague(id);
   const { data: seasonsData, isLoading: seasonsLoading, refetch: refetchSeasons, isRefetching } = useSeasons({ leagueId: id });
@@ -61,44 +76,28 @@ export default function LeagueDetailScreen() {
     router.push(`/admin/seasons/create?leagueId=${id}`);
   };
 
-  const handleSeasonPress = () => {
-    // Could navigate to season detail in the future
-    Alert.alert('Season', 'Season detail view coming soon');
+  const handleSeasonPress = (season: Season) => {
+    router.push(`/admin/seasons/${season.id}`);
   };
 
   const handleDeleteLeague = () => {
-    if (seasons.length > 0) {
-      Alert.alert(
-        'Cannot Delete',
-        'This league has seasons. Delete all seasons first before deleting the league.'
-      );
+    if (leagueHasTeams(seasons)) {
+      toast.showToast(t('leagues.deleteBlockedTeams'), 'error');
       return;
     }
+    setConfirmingDelete(true);
+  };
 
-    Alert.alert(
-      'Delete League',
-      `Are you sure you want to delete "${league?.name}"? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteLeague.mutateAsync(id);
-              Alert.alert('Success', 'League deleted successfully', [
-                { text: 'OK', onPress: () => router.replace('/admin') },
-              ]);
-            } catch (error) {
-              Alert.alert(
-                'Error',
-                error instanceof Error ? error.message : 'Failed to delete league'
-              );
-            }
-          },
-        },
-      ]
-    );
+  const confirmDeleteLeague = async () => {
+    try {
+      await deleteLeague.mutateAsync(id);
+      toast.showToast(t('leagues.deleteSuccess'), 'success');
+      // Pop to League Management (or land there from a deep link); a `replace`
+      // would stack a second copy of it.
+      goBack();
+    } catch (error) {
+      toast.showToast(getApiErrorMessage(error, t('leagues.deleteFailed')), 'error');
+    }
   };
 
   const refetch = () => {
@@ -115,8 +114,10 @@ export default function LeagueDetailScreen() {
     return (
       <Card
         variant="elevated"
-        onPress={handleSeasonPress}
+        onPress={() => handleSeasonPress(item)}
         style={styles.seasonCard}
+        accessibilityLabel={item.name}
+        testID={`season-row-${item.id}`}
       >
         <View style={styles.seasonHeader}>
           <View style={styles.seasonInfo}>
@@ -191,7 +192,8 @@ export default function LeagueDetailScreen() {
             onPress={handleDeleteLeague}
             style={styles.deleteButton}
             accessibilityRole="button"
-            accessibilityLabel="Delete league"
+            accessibilityLabel={t('leagues.deleteLeague')}
+            testID="league-delete-button"
           >
             <Ionicons name="trash-outline" size={22} color={colors.error} />
           </TouchableOpacity>
@@ -204,6 +206,9 @@ export default function LeagueDetailScreen() {
         <TouchableOpacity
           onPress={handleCreateSeason}
           style={[styles.addSeasonButton, { backgroundColor: colors.primary }]}
+          accessibilityRole="button"
+          accessibilityLabel="Add Season"
+          testID="league-add-season-button"
         >
           <Ionicons name="add" size={20} color={colors.textInverse} />
           <ThemedText variant="captionBold" style={{ color: colors.textInverse }}>
@@ -240,6 +245,13 @@ export default function LeagueDetailScreen() {
           }
         />
       )}
+
+      <ActionMenu
+        visible={confirmingDelete}
+        title={t('leagues.deleteConfirmTitle', { name: league.name })}
+        items={[{ label: t('common.delete'), destructive: true, onPress: confirmDeleteLeague }]}
+        onClose={() => setConfirmingDelete(false)}
+      />
     </ThemedView>
   );
 }
