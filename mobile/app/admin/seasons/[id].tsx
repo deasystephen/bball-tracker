@@ -58,6 +58,10 @@ export default function SeasonDetailScreen() {
 
   const { data: season, isLoading, error, refetch, isRefetching } = useSeason(id);
   const deleteSeason = useDeleteSeason();
+  // After a delete: pop back to the league screen that opened this one, or land
+  // on the league when there is nothing to pop (deep link). A `replace` here
+  // would leave two league screens on the stack.
+  const backToLeague = useGoBack(season ? `/admin/leagues/${season.leagueId}` : '/admin');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // The league id comes from the loaded season, so the guard is ready only
@@ -77,7 +81,7 @@ export default function SeasonDetailScreen() {
     try {
       await deleteSeason.mutateAsync(season.id);
       toast.showToast(t('seasons.deleteSuccess'), 'success');
-      router.replace(`/admin/leagues/${season.leagueId}`);
+      backToLeague();
     } catch (err) {
       // A 400 (the season still has teams) carries the server's reason.
       toast.showToast(getApiErrorMessage(err, t('seasons.deleteFailed')), 'error');

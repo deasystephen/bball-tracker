@@ -483,6 +483,14 @@ async function main() {
   if (staleFlowSeasons.count > 0) {
     console.log(`    Removed ${staleFlowSeasons.count} season(s) left over from a previous E2E run`);
   }
+  // ...and the throwaway "E2E League" the same flow creates and deletes at its
+  // end. Only a league with no teams anywhere goes (cascades to its seasons).
+  const staleFlowLeagues = await prisma.league.deleteMany({
+    where: { name: 'E2E League', personalOwnerId: null, seasons: { every: { teams: { none: {} } } } },
+  });
+  if (staleFlowLeagues.count > 0) {
+    console.log(`    Removed ${staleFlowLeagues.count} league(s) left over from a previous E2E run`);
+  }
 
   // =========================================================================
   // TEAMS

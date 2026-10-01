@@ -94,7 +94,8 @@ describe('LeagueDetailScreen', () => {
     fireEvent.press(view.getByLabelText('Delete'));
 
     await waitFor(() => expect(mockDeleteLeague.mutateAsync).toHaveBeenCalledWith('lg-1'));
-    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/admin'));
+    await waitFor(() => expect(mockRouter.back).toHaveBeenCalledTimes(1));
+    expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockShowToast).toHaveBeenCalledWith('League deleted', 'success');
   });
 
@@ -109,7 +110,7 @@ describe('LeagueDetailScreen', () => {
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith('Cannot delete league with existing teams. Remove teams first.', 'error')
     );
-    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.back).not.toHaveBeenCalled();
   });
 
   it('hides Delete from a league admin who is not a system ADMIN', () => {

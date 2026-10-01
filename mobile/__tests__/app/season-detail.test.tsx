@@ -91,7 +91,7 @@ describe('SeasonDetailScreen', () => {
     expect(mockRouter.push).toHaveBeenCalledWith('/admin/seasons/se-1/edit');
   });
 
-  it('deletes after confirming in the action menu and goes back to the league', async () => {
+  it('deletes after confirming in the action menu and pops back to the league', async () => {
     const view = render(<SeasonDetailScreen />);
 
     fireEvent.press(view.getByLabelText('Delete season'));
@@ -99,8 +99,20 @@ describe('SeasonDetailScreen', () => {
     fireEvent.press(view.getByLabelText('Delete'));
 
     await waitFor(() => expect(mockDeleteSeason.mutateAsync).toHaveBeenCalledWith('se-1'));
-    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/admin/leagues/lg-1'));
+    await waitFor(() => expect(mockRouter.back).toHaveBeenCalledTimes(1));
+    expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockShowToast).toHaveBeenCalledWith('Season deleted', 'success');
+  });
+
+  it('lands on the league after a delete when there is nothing to pop (deep link)', async () => {
+    mockRouter.canGoBack.mockReturnValue(false);
+    const view = render(<SeasonDetailScreen />);
+
+    fireEvent.press(view.getByLabelText('Delete season'));
+    fireEvent.press(view.getByLabelText('Delete'));
+
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/admin/leagues/lg-1'));
+    expect(mockRouter.back).not.toHaveBeenCalled();
   });
 
   it("shows the server's reason when the season still has teams and stays", async () => {

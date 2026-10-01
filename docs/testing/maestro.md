@@ -76,6 +76,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Don't use `centerElement: true` for elements near the END of a list** — centering can never be
   satisfied there and the scroll spins until timeout with the element plainly visible. Plain
   `visibilityPercentage: 60` is the stop condition that works.
+- **Icon glyphs are part of a composite label.** A row that starts with an `Ionicons` glyph reads
+  `"\uf601, Leagues & Seasons, Create and manage leagues, \uf23b"`, so a trailing `.*` is not enough:
+  `".*Leagues & Seasons.*"`. Better, give the pressable its own `accessibilityLabel` (VoiceOver then
+  stops reading the glyph too), as the league screen's "Add Season" button now has.
+- **Two elements with the same text: tap by id.** `tapOn: "Create Season"` on the Create Season screen
+  "COMPLETED" by tapping the header title, not the button, and the flow then asserted the name it had
+  typed into the still-open form (found while writing `admin-season-manage.yaml`). Every submit button
+  on the admin forms now carries a `testID` (`season-create-submit`, `league-create-submit`,
+  `season-save-button`); a flow that taps text shared with a title is wrong even when it passes.
+- **Never start Metro with `CI=1` for a Maestro session.** CI mode disables file watching
+  ("reloads are disabled"), so every edit after launch is invisible to the app while a `curl` of the
+  bundle looks fresh. From a non-interactive shell use `npx expo start --port 8081 --clear < /dev/null`.
+  `launchApp` with `clearState: true` reinstalls the app on iOS (the container path changes); it is not
+  another session installing over you.
 - A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
   top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite

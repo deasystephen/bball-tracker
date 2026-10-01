@@ -188,6 +188,7 @@ export default function CreateSeasonScreen() {
               loading={createSeason.isPending}
               disabled={!name.trim()}
               fullWidth
+              testID="season-create-submit"
             />
             <Button
               title="Cancel"

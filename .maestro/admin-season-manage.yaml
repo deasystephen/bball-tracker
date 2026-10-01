@@ -4,12 +4,13 @@ appId: com.bballtracker.mobile
 #
 # Admin season management (#614): as the seeded system ADMIN, open the seeded
 # league, create a season, open it, edit it (name + active flag), delete it,
-# then prove the league delete is refused for TEAMS, not for seasons.
+# prove the league delete is refused for TEAMS, not for seasons, then create a
+# throwaway league with one empty season and delete it (empty seasons cascade).
 #
-# The flow cleans up after itself (the season it creates is deleted at the
-# end). An interrupted run leaves "E2E Season…" behind, and the next run would
-# fail on the duplicate name, so the seed removes any season of that name in
-# the seeded league (backend/prisma/seed.ts).
+# The flow cleans up after itself (the season and the league it creates are
+# deleted at the end). An interrupted run leaves "E2E Season…" or "E2E League"
+# behind, and the next run would fail on the duplicate name, so the seed
+# removes both (backend/prisma/seed.ts).
 #
 # The seeded league already holds "Spring 2024" WITH teams, which is what the
 # final step relies on: the league screen's guard blocks the delete with the
@@ -32,27 +33,36 @@ appId: com.bballtracker.mobile
 - tapOn: ".*admin@bball-tracker.com.*"
 - assertVisible: "Your Teams"
 - tapOn: "Profile tab"
+# Composite rows concatenate their fields, so the Profile row reads
+# "<icon>, Leagues & Seasons, Create and manage leagues, <chevron>" and the league card
+# "Downtown Youth Basketball League, N seasons": wildcards on both sides.
 - scrollUntilVisible:
     element:
-      text: "Leagues & Seasons"
+      text: ".*Leagues & Seasons.*"
     direction: DOWN
     timeout: 20000
     centerElement: true
-- tapOn: "Leagues & Seasons"
+- tapOn: ".*Leagues & Seasons.*"
 - assertVisible: "League Management"
-- tapOn: "Downtown Youth Basketball League"
+- tapOn: "Downtown Youth Basketball League.*"
 - assertVisible: "Seasons"
 - assertVisible: "Spring 2024"
 
 # --- Create ---
-- tapOn: "Add Season"
+# By id: the button's text sits beside an icon glyph, and the id is what the
+# season screens use everywhere else.
+- tapOn:
+    id: "league-add-season-button"
 - assertVisible: "Create Season"
 # The name field has focus when the screen opens.
 - inputText: "E2E Season"
-# Enter blurs the single-line input; the Create button sits under the keyboard
-# otherwise. Never hideKeyboard (fails flows since Maestro 2.11).
-- pressKey: Enter
-- tapOn: "Create Season"
+# Dismiss the keyboard by tapping static text (the ScrollView has
+# keyboardShouldPersistTaps="handled"); the submit button is otherwise under
+# it. Never hideKeyboard (fails flows since Maestro 2.11). The header title
+# reads "Create Season" too, so the button is tapped by id.
+- tapOn: "Season Dates (Optional)"
+- tapOn:
+    id: "season-create-submit"
 - assertVisible: "E2E Season"
 
 # --- Detail ---
@@ -68,7 +78,7 @@ appId: com.bballtracker.mobile
     id: "season-name-input"
 - eraseText
 - inputText: "E2E Season Edited"
-- pressKey: Enter
+- tapOn: "Season Dates (Optional)"
 - tapOn:
     id: "season-active-switch"
 - tapOn:
@@ -84,9 +94,41 @@ appId: com.bballtracker.mobile
 - assertVisible: "Seasons"
 - assertNotVisible: "E2E Season Edited"
 
-# --- League delete guard: teams, not seasons ---
+
+# --- League delete success path: a throwaway league with one empty season ---
+- tapOn: "Go back"
+- assertVisible: "League Management"
+- tapOn: "Create league"
+- assertVisible: "Create League"
+- tapOn:
+    id: "league-name-input"
+- inputText: "E2E League"
+# The header title reads "Create League" too: tap the button by id. It sits
+# above the keyboard on this short form, so nothing to dismiss.
+- tapOn:
+    id: "league-create-submit"
+- assertVisible: "E2E League"
+- assertVisible: "No Seasons"
+- tapOn:
+    id: "league-add-season-button"
+- inputText: "E2E Season"
+- tapOn: "Season Dates (Optional)"
+- tapOn:
+    id: "season-create-submit"
+- assertVisible: "E2E Season"
+# One empty season does not block the delete (before #614 it did).
+- tapOn: "Delete league"
+- assertVisible: "Delete E2E League?"
+- tapOn: "Delete"
+- assertVisible: "League Management"
+- assertNotVisible: "E2E League.*"
+
+# --- League delete guard: teams, not seasons (last: the toast it shows stays
+# on screen for a while, and a tap under it does not navigate) ---
 # "Spring 2024" still has teams, so the delete is refused with the teams
 # message. Before #614 the screen refused whenever ANY season existed.
+- tapOn: "Downtown Youth Basketball League.*"
+- assertVisible: "Spring 2024"
 - tapOn: "Delete league"
 - assertVisible: "This league has teams. Remove the teams first."
 - assertVisible: "Downtown Youth Basketball League"

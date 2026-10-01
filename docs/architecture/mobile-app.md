@@ -55,7 +55,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   screens take the league id from the loaded season, so an unaffiliated caller sees the API's 404 as an
   `ErrorState` instead); the league and season **Delete** buttons render only for `canCreateLeagues(user)`
   (both deletes are `isSystemAdmin` on the server). Deletes confirm through `ActionMenu`, never an `Alert`,
-  and a refused delete shows the server's reason via `getApiErrorMessage` in a toast. **League delete rule
+  and a refused delete shows the server's reason via `getApiErrorMessage` in a toast; a successful delete
+  leaves with `useGoBack` (pop, or replace with the parent from a deep link), never `router.replace`, which
+  stacked a second copy of the parent screen under the one it returned to. **League delete rule
   = the API's (`leagueHasTeams`):** blocked locally only while some season has teams (message names teams);
   empty seasons cascade server-side. Before #614 the screen refused whenever any season existed, and a
   season row only showed a "coming soon" alert. Validation on edit mirrors `updateSeasonSchema` (name 1–100)

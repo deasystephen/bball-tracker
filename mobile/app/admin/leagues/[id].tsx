@@ -92,7 +92,9 @@ export default function LeagueDetailScreen() {
     try {
       await deleteLeague.mutateAsync(id);
       toast.showToast(t('leagues.deleteSuccess'), 'success');
-      router.replace('/admin');
+      // Pop to League Management (or land there from a deep link); a `replace`
+      // would stack a second copy of it.
+      goBack();
     } catch (error) {
       toast.showToast(getApiErrorMessage(error, t('leagues.deleteFailed')), 'error');
     }
@@ -204,6 +206,9 @@ export default function LeagueDetailScreen() {
         <TouchableOpacity
           onPress={handleCreateSeason}
           style={[styles.addSeasonButton, { backgroundColor: colors.primary }]}
+          accessibilityRole="button"
+          accessibilityLabel="Add Season"
+          testID="league-add-season-button"
         >
           <Ionicons name="add" size={20} color={colors.textInverse} />
           <ThemedText variant="captionBold" style={{ color: colors.textInverse }}>
