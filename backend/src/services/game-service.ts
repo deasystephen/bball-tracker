@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
-import { hasTeamPermission, canAccessTeam, isSystemAdmin } from '../utils/permissions';
+import { hasTeamPermission, canAccessTeam, isSystemAdmin, teamAccessWhere } from '../utils/permissions';
 import { GuardianService } from './guardian-service';
 import { ROSTER_MEMBERS_ORDER_BY } from './team-service';
 import { StatsService } from './stats-service';
@@ -236,42 +236,13 @@ export class GameService {
     const isSysAdmin = await isSystemAdmin(userId);
 
     if (!isSysAdmin) {
-      // Filter by user access (staff, team member, or league admin) — the
-      // same set canAccessTeam grants (audit #29).
-      // Guardians (PARENT role) also see games of the teams their children
-      // play on (docs/plans/parent-role-spec.md).
+      // The caller's access clause is `utils/permissions#teamAccessWhere`
+      // (staff OR member OR league admin OR guardian of a member), the same set
+      // `canAccessTeam` and `listTeams` grant. It is never inlined here: a
+      // copy drifted once (#589) and no mocked test could tell.
       const childIds = await GuardianService.getChildIds(userId);
       const userTeams = await prisma.team.findMany({
-        where: {
-          OR: [
-            {
-              staff: {
-                some: {
-                  userId,
-                },
-              },
-            },
-            {
-              members: {
-                some: {
-                  playerId: userId,
-                },
-              },
-            },
-            {
-              season: {
-                league: {
-                  admins: {
-                    some: {
-                      userId,
-                    },
-                  },
-                },
-              },
-            },
-            ...(childIds.length > 0 ? [{ members: { some: { playerId: { in: childIds } } } }] : []),
-          ],
-        },
+        where: teamAccessWhere(userId, childIds),
         select: { id: true },
       });
 

@@ -65,7 +65,8 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   `GET /stats/players/:childId`, the screen every My kids row opens. It now runs the shared clause in
   one query (`getAccessibleTeamIds`). Before writing "who may read this team" anywhere, use
   `canAccessTeam` for one team or `teamAccessWhere` for a set. Proven against real Postgres in
-  `tests/integration/player-stats-access.db.test.ts`, one caller per branch.
+  `tests/integration/player-stats-access.db.test.ts` and, for `listTeams` / `listGames` with every
+  filter, `tests/integration/list-access.db.test.ts`, one caller per branch (#458).
   `PATCH /teams/:id { seasonId }` moving a team into a different season requires
   `isLeagueAdmin` on the **target** season's league (in addition to `canManageTeam`), otherwise 403.
   `GET /teams/:id` includes `members[].player.email` only for callers with `canManageRoster`
@@ -136,7 +137,8 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT â
   the service also throws `BadRequestError('No fields to update')` as defense in depth). Changing `status`
   or a score on a `FINISHED` game requires `canManageRoster` (head/assistant coach, league admin, system
   admin) â€” a `canTrackStats`-only Team Manager can no longer reopen or rewrite a final. `listGames`
-  includes teams the caller administers via the league (same set as `canAccessTeam`). Lane D owns the
+  resolves the caller's team set with the shared `teamAccessWhere` (it carried its own copy of the
+  clause until #458) and answers 403 for a `teamId` outside that set. Lane D owns the
   socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
   `GET /games/:id` (`GameDetailView`) and `GET /games/:id/rsvps` (`RsvpView`) apply the team-detail
   email rule (role matrix B2.5): `team.members[].player.email` / `rsvps[].user.email` only for callers
