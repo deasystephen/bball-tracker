@@ -4,6 +4,8 @@
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents, changedFields, setUserProperties } from '../services/analytics';
+import { useAuthStore } from '../store/auth-store';
 import { usageKeys } from './useUsage';
 import { playerKeys, teamKeys, invitationKeys, type TeamFilters } from './query-keys';
 import type { TeamInvitationStatusRow } from '../utils/roster-status';
@@ -202,13 +204,35 @@ async function fetchTeamsPage(filters?: TeamFilters): Promise<TeamsResponse> {
   const response = await apiClient.get<TeamsResponse>(`/teams?${params.toString()}`);
   const data = response.data;
   const teams = data.teams ?? [];
+  const total = data.total ?? teams.length;
+  const unfilteredFirstPage =
+    !filters?.seasonId && !filters?.leagueId && !filters?.playerId && !filters?.offset;
+  if (unfilteredFirstPage) reportTeamUserProperties(teams, total);
   return {
     success: data.success,
     teams,
-    total: data.total ?? teams.length,
+    total,
     limit: data.limit ?? filters?.limit ?? TEAMS_PAGE_SIZE,
     offset: data.offset ?? filters?.offset ?? 0,
   };
+}
+
+/**
+ * Amplitude user properties the teams list is the source for (#616): how many
+ * teams the caller can see and which staff roles they hold. List items carry
+ * the caller's own staff row only, so this never reads anyone else's role.
+ */
+export function reportTeamUserProperties(teams: Team[], total: number): void {
+  const userId = useAuthStore.getState().user?.id;
+  if (!userId) return;
+  const roleTypes = new Set(
+    teams.flatMap((team) => team.staff ?? []).filter((s) => s.userId === userId).map((s) => s.role.type)
+  );
+  setUserProperties({
+    team_count: total,
+    is_head_coach: roleTypes.has('HEAD_COACH'),
+    is_assistant_coach: roleTypes.has('ASSISTANT_COACH'),
+  });
 }
 
 // Hooks
@@ -266,7 +290,12 @@ export function useCreateTeam() {
       const response = await apiClient.post<{ success: boolean; team: Team }>('/teams', data);
       return response.data.team;
     },
-    onSuccess: () => {
+    onSuccess: (team, variables) => {
+      trackEvent(AnalyticsEvents.TEAM_CREATED, {
+        team_id: team.id,
+        league_scope: variables.seasonId ? 'league' : 'personal',
+        has_bracket: !!(variables.ageGroup || variables.gender),
+      });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       // Team count feeds the Profile usage meter (#43).
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
@@ -286,6 +315,10 @@ export function useUpdateTeam() {
       return response.data.team;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.TEAM_UPDATED, {
+        team_id: variables.teamId,
+        fields: changedFields(variables.data),
+      });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
     },
@@ -299,7 +332,8 @@ export function useDeleteTeam() {
     mutationFn: async (teamId: string) => {
       await apiClient.delete(`/teams/${teamId}`);
     },
-    onSuccess: () => {
+    onSuccess: (_, teamId) => {
+      trackEvent(AnalyticsEvents.TEAM_DELETED, { team_id: teamId });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
     },
@@ -323,6 +357,15 @@ export function useAddRosterPlayer() {
       return response.data;
     },
     onSuccess: (result, variables) => {
+      trackEvent(AnalyticsEvents.ROSTER_PLAYER_ADDED, {
+        team_id: variables.teamId,
+        rostered: result.rostered,
+        invited: result.invited,
+        guardian_invited: result.guardianInvited,
+        has_jersey: variables.data.jerseyNumber != null,
+        has_position: !!variables.data.position,
+        has_photo: !!variables.data.profilePictureUrl,
+      });
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       if (result.invited) {
@@ -366,6 +409,10 @@ export function useUpdateTeamMember() {
       return response.data.teamMember;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.ROSTER_PLAYER_UPDATED, {
+        team_id: variables.teamId,
+        fields: changedFields(variables.data),
+      });
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
     },
   });
@@ -379,6 +426,7 @@ export function useRemovePlayerFromTeam() {
       await apiClient.delete(`/teams/${teamId}/players/${playerId}`);
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.ROSTER_PLAYER_REMOVED, { team_id: variables.teamId });
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
       // Team-card member counts (_count.members) live in the list payloads
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });

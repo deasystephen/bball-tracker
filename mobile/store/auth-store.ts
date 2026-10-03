@@ -3,9 +3,36 @@ import { useShallow } from 'zustand/react/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { secureAuthStorage, clearPersistedAuth } from '../services/secure-storage';
 import { User } from '../../shared/types';
-import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
+import {
+  trackEvent,
+  identifyUser,
+  resetUser,
+  setUserProperties,
+  appVersion,
+  AnalyticsEvents,
+  type AnalyticsEventProps,
+  type AnalyticsUserProperties,
+} from '../services/analytics';
 import { log } from '../services/log';
 import { getSessionHooks } from './session-hooks';
+
+export type LogoutReason = AnalyticsEventProps['user_logged_out']['reason'];
+
+/**
+ * Amplitude user properties the auth store is the source for (#616): the
+ * global role and what it says about the person. `is_parent` is true for a
+ * PARENT role or for anyone with a guardian link, since a coach can also be a
+ * parent. Team-derived properties come from `hooks/useTeams.ts`, the tier
+ * from `hooks/useUsage.ts`.
+ */
+export function userPropertiesFrom(user: User): Partial<AnalyticsUserProperties> {
+  return {
+    role: user.role,
+    is_parent: user.role === 'PARENT' || (user.guardianOf?.length ?? 0) > 0,
+    is_player: user.role === 'PLAYER',
+    app_version: appVersion(),
+  };
+}
 
 interface AuthState {
   accessToken: string | null;
@@ -31,9 +58,10 @@ interface AuthState {
    * Local-only sign-out: drop tokens/user, reset the socket and query cache.
    * Used directly when the session is already dead server-side (refresh
    * rejected) — no network calls, so it can never recurse through the
-   * api-client interceptor.
+   * api-client interceptor. `reason` is the `user_logged_out` property;
+   * the default is the api-client's case.
    */
-  clearSession: () => void;
+  clearSession: (reason?: LogoutReason) => void;
 }
 
 /**
@@ -74,16 +102,23 @@ export const useAuthStore = create<AuthState>()(
       },
 
       setUser: (user: User) => {
-        identifyUser(user.id);
+        identifyUser(user.id, userPropertiesFrom(user));
         trackEvent(AnalyticsEvents.USER_LOGGED_IN);
         set({ user, isAuthenticated: true, isLoading: false });
       },
 
       updateUser: (patch: Partial<User>) => {
-        set((state) => (state.user ? { user: { ...state.user, ...patch } } : {}));
+        const current = get().user;
+        if (!current) return;
+        const user = { ...current, ...patch };
+        set({ user });
+        // Only the fields the user properties are derived from refresh them.
+        if (patch.role !== undefined || patch.guardianOf !== undefined) {
+          setUserProperties(userPropertiesFrom(user));
+        }
       },
 
-      clearSession: () => {
+      clearSession: (reason: LogoutReason = 'session_expired') => {
         // Always: a refresh in flight must never resurrect a session (#41).
         logoutEpoch += 1;
 
@@ -101,7 +136,7 @@ export const useAuthStore = create<AuthState>()(
 
         const wasSignedIn = isAuthenticated || accessToken !== null;
         if (wasSignedIn) {
-          trackEvent(AnalyticsEvents.USER_LOGGED_OUT);
+          trackEvent(AnalyticsEvents.USER_LOGGED_OUT, { reason });
           resetUser();
         }
         set(CLEARED_SESSION);
@@ -130,7 +165,7 @@ export const useAuthStore = create<AuthState>()(
             // Best-effort; local sign-out always proceeds.
           }
         }
-        get().clearSession();
+        get().clearSession('user');
       },
     }),
     {

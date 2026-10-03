@@ -29,6 +29,7 @@ Backend API (Node.js/Express)
 | Account deletion (as built) | `docs/architecture/account-deletion.md` |
 | Email: SES events, bounces, complaints, audiences | `docs/architecture/email.md` |
 | Mobile app: routing, guards, permission gating, errors, pickers, analytics | `docs/architecture/mobile-app.md` |
+| Mobile analytics: Amplitude event catalogue, user properties, screen views, guard test | `docs/architecture/analytics.md` |
 | Mobile builds, runtime versions, OTA drift guard, URL scheme, eas-cli | `docs/deployment/mobile-builds-and-ota.md` |
 | ECS deploys: task definition, circuit breaker, what a deploy carries | `docs/deployment/ecs-deploys.md` |
 | Runbooks index (on-call, email deliverability, data-subject requests, RDS) | `docs/runbooks/README.md` |
@@ -138,6 +139,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - Upload file parts are `expo-file-system` `File` objects; Expo's own `fetch` rejects the `{ uri, name, type }` object. Prove any new form encodes through the real encoder in a test.
 - Jersey `0` is valid: test `jerseyNumber != null`, never truthiness.
 - Amplitude tracking options are pinned in `services/analytics.ts`; changing one changes the privacy-label draft (`docs/release/app-store-submission.md`) in the same PR.
+- Every new user-facing mutation hook fires a catalogued Amplitude event from its `onSuccess` (`trackEvent(AnalyticsEvents.X, props)`, ids only, never PII); new events go in `docs/architecture/analytics.md` in the same PR (a source-scanning test enforces both).
 - Log through `services/log.ts`, never bare `console.*` (ESLint `no-console`). Sentry sees URLs only as `endpointPattern(url)`; the api-client captures network failures and 5xx, never 4xx.
 
 ## Code Style

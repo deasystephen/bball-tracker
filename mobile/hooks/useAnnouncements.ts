@@ -4,6 +4,7 @@
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 
 export interface Announcement {
   id: string;
@@ -103,6 +104,7 @@ export function useCreateAnnouncement() {
       return response.data.announcement;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.ANNOUNCEMENT_CREATED, { team_id: variables.teamId });
       queryClient.invalidateQueries({ queryKey: announcementKeys.team(variables.teamId) });
     },
   });

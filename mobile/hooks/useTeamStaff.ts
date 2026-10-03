@@ -5,6 +5,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { teamKeys, type TeamStaff } from './useTeams';
 import { usageKeys } from './useUsage';
 
@@ -94,7 +95,14 @@ export function useAddStaff() {
       );
       return response.data.staff;
     },
-    onSuccess: (_, variables) => invalidate(variables.teamId),
+    onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.STAFF_ADDED, {
+        team_id: variables.teamId,
+        role_type: variables.data.roleType,
+        by: 'userId' in variables.data ? 'user_id' : 'email',
+      });
+      invalidate(variables.teamId);
+    },
   });
 }
 
@@ -117,7 +125,13 @@ export function useUpdateStaffRole() {
       );
       return response.data.staff;
     },
-    onSuccess: (_, variables) => invalidate(variables.teamId),
+    onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.STAFF_ROLE_UPDATED, {
+        team_id: variables.teamId,
+        role_type: variables.roleType,
+      });
+      invalidate(variables.teamId);
+    },
   });
 }
 
@@ -128,6 +142,9 @@ export function useRemoveStaff() {
     mutationFn: async ({ teamId, userId }: { teamId: string; userId: string }) => {
       await apiClient.delete(`/teams/${teamId}/staff/${userId}`);
     },
-    onSuccess: (_, variables) => invalidate(variables.teamId),
+    onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.STAFF_REMOVED, { team_id: variables.teamId });
+      invalidate(variables.teamId);
+    },
   });
 }

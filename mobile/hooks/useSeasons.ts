@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents, changedFields } from '../services/analytics';
 
 // Types
 export interface Season {
@@ -109,7 +110,12 @@ export function useCreateSeason() {
       );
       return response.data.season;
     },
-    onSuccess: (season) => {
+    onSuccess: (season, variables) => {
+      trackEvent(AnalyticsEvents.SEASON_CREATED, {
+        season_id: season.id,
+        league_id: season.leagueId,
+        has_dates: !!(variables.startDate || variables.endDate),
+      });
       // Invalidate season lists
       queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
       // Also invalidate the league detail since it includes seasons
@@ -130,6 +136,10 @@ export function useUpdateSeason() {
       return response.data.season;
     },
     onSuccess: (season, variables) => {
+      trackEvent(AnalyticsEvents.SEASON_UPDATED, {
+        season_id: variables.seasonId,
+        fields: changedFields(variables.data),
+      });
       queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
       queryClient.invalidateQueries({ queryKey: seasonKeys.detail(variables.seasonId) });
     },
@@ -144,6 +154,7 @@ export function useDeleteSeason() {
       await apiClient.delete(`/seasons/${seasonId}`);
     },
     onSuccess: (_result, seasonId) => {
+      trackEvent(AnalyticsEvents.SEASON_DELETED, { season_id: seasonId });
       // The detail query is dropped, not invalidated: a refetch of a deleted
       // season is a 404, and the screen that owned it is being replaced.
       queryClient.removeQueries({ queryKey: seasonKeys.detail(seasonId) });

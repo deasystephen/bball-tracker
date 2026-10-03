@@ -3,6 +3,7 @@ import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
 import { NO_SESSION_CODE, NoSessionError, isNoSessionError } from './no-session-error';
 import { addBreadcrumb, captureException, endpointPattern } from './sentry';
+import { trackEvent, AnalyticsEvents } from './analytics';
 
 /**
  * API client configuration. The base URL is decided in one place,
@@ -195,6 +196,16 @@ export const normalizeApiError = (error: unknown): unknown => {
   if (message) normalized.message = message;
   if (typeof body.code === 'string' && body.code) normalized.code = body.code;
   normalized.apiError = { ...body, status };
+  if (status === 402 || body.code === UPGRADE_REQUIRED_CODE) {
+    // Every entitlement denial is a product signal (#616): which cap, on
+    // which route, from which tier. The route pattern carries no ids.
+    trackEvent(AnalyticsEvents.ENTITLEMENT_DENIED, {
+      endpoint_pattern: configPattern(error.config),
+      feature: typeof body.feature === 'string' ? body.feature : 'unknown',
+      current_tier: typeof body.currentTier === 'string' ? body.currentTier : 'unknown',
+      required_tier: typeof body.requiredTier === 'string' ? body.requiredTier : 'unknown',
+    });
+  }
   return normalized;
 };
 
@@ -206,8 +217,15 @@ export const isUpgradeRequiredError = (error: unknown): error is NormalizedApiEr
   return status === 402 || code === UPGRADE_REQUIRED_CODE;
 };
 
-/** Message to show a user for any thrown value, preferring the server's text. */
+/**
+ * Message to show a user for any thrown value, preferring the server's text.
+ *
+ * Calling this means the error is about to be shown (a toast, an alert), so
+ * it also sends `error_shown` (#616): the error code, HTTP status and route
+ * pattern, never the message, which can quote user data.
+ */
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  trackErrorShown(error);
   if (isAxiosError(error)) {
     const info = (error as NormalizedApiError).apiError;
     if (info?.error) return info.error;
@@ -215,6 +233,23 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+};
+
+const trackErrorShown = (error: unknown): void => {
+  if (isAxiosError(error)) {
+    const normalized = error as NormalizedApiError;
+    trackEvent(AnalyticsEvents.ERROR_SHOWN, {
+      code: normalized.apiError?.code ?? normalized.code ?? 'http_error',
+      status: error.response?.status ?? null,
+      endpoint_pattern: configPattern(error.config),
+    });
+  } else {
+    trackEvent(AnalyticsEvents.ERROR_SHOWN, {
+      code: error instanceof Error ? error.name : 'unknown',
+      status: null,
+      endpoint_pattern: '',
+    });
+  }
 };
 
 interface RefreshResponse {

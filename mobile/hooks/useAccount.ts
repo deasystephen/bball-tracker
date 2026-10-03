@@ -17,6 +17,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { apiClient, type NormalizedApiError } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
 import type { User } from '../../shared/types';
 
@@ -52,10 +53,12 @@ export function useDeleteAccount() {
       const response = await apiClient.delete<DeleteAccountResponse>('/auth/me');
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Tracked before the session (and the Amplitude user id) is cleared.
+      trackEvent(AnalyticsEvents.ACCOUNT_DELETED, { erased: data.erased === true });
       // Local only: the account no longer exists server-side, and the old
       // token would 401 anyway. clearSession also resets the socket + cache.
-      useAuthStore.getState().clearSession();
+      useAuthStore.getState().clearSession('account_deleted');
     },
   });
 }
@@ -71,6 +74,7 @@ export function useDeleteChildRecord() {
       await apiClient.delete(`/players/${childId}/account`);
     },
     onSuccess: async () => {
+      trackEvent(AnalyticsEvents.CHILD_RECORD_DELETED);
       // The child is gone from every guardian's list; refresh guardianOf now
       // rather than waiting for useSessionRefresh's next foreground sync.
       try {

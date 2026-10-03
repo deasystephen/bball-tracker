@@ -331,6 +331,7 @@ export default function TrackGameScreen() {
       await deleteEvent.mutateAsync({
         gameId: id,
         eventId: target.serverId,
+        eventType: target.eventType,
       });
 
       refetchEvents();

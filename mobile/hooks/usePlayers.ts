@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents, changedFields } from '../services/analytics';
 import { playerKeys, teamKeys, type PlayersQueryParams } from './query-keys';
 
 export interface Player {
@@ -133,6 +134,7 @@ export function useUpdatePlayer() {
       return response.data;
     },
     onSuccess: (data, variables) => {
+      trackEvent(AnalyticsEvents.PLAYER_UPDATED, { fields: changedFields(variables.data) });
       // Invalidate specific player and list queries
       queryClient.invalidateQueries({
         queryKey: playerKeys.detail(variables.playerId),

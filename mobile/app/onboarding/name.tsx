@@ -19,6 +19,7 @@ import { ThemedView, ThemedText, Button, Input } from '../../components';
 import { useAuthUser } from '../../store/auth-store';
 import { useUpdateProfile } from '../../hooks/useProfile';
 import { captureException } from '../../services/sentry';
+import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import { isGuardian } from '../../utils/guardian';
 import { markNameAsked, hasPlaceholderName, postLoginRoute, HOME_ROUTE } from '../../utils/role-onboarding';
 import { spacing } from '../../theme';
@@ -66,6 +67,8 @@ export default function NamePromptScreen() {
     setError(undefined);
     try {
       await updateProfile.mutateAsync({ name: trimmed });
+      // The Profile path is an edit (`profile_updated`); only first-login counts as a step.
+      if (!fromProfile) trackEvent(AnalyticsEvents.ONBOARDING_STEP_COMPLETED, { step: 'name' });
       await finish();
     } catch (err) {
       captureException(err, { flow: 'name-onboarding' });

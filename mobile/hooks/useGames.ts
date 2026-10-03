@@ -4,7 +4,7 @@
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { trackEvent, AnalyticsEvents } from '../services/analytics';
+import { trackEvent, AnalyticsEvents, changedFields } from '../services/analytics';
 import { statsKeys } from './useStats';
 import type {
   Game,
@@ -144,8 +144,8 @@ export function useCreateGame() {
       const response = await apiClient.post('/games', data);
       return response.data.game as Game;
     },
-    onSuccess: () => {
-      trackEvent(AnalyticsEvents.GAME_CREATED);
+    onSuccess: (game, variables) => {
+      trackEvent(AnalyticsEvents.GAME_CREATED, { game_id: game.id, team_id: variables.teamId });
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
     },
   });
@@ -163,7 +163,17 @@ export function useUpdateGame() {
       return response.data.game as Game;
     },
     onSuccess: (game, variables) => {
-      trackEvent(AnalyticsEvents.GAME_UPDATED);
+      // A status change is its own event; everything else is an edit.
+      if (variables.data.status === 'IN_PROGRESS') {
+        trackEvent(AnalyticsEvents.GAME_STARTED, { game_id: variables.gameId });
+      } else if (variables.data.status === 'FINISHED') {
+        trackEvent(AnalyticsEvents.GAME_FINISHED, { game_id: variables.gameId });
+      } else {
+        trackEvent(AnalyticsEvents.GAME_UPDATED, {
+          game_id: variables.gameId,
+          fields: changedFields(variables.data),
+        });
+      }
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
       queryClient.invalidateQueries({ queryKey: gameKeys.detail(variables.gameId) });
       // Season/player/box-score stats are finalized when a game ends; drop the
@@ -186,7 +196,7 @@ export function useDeleteGame() {
       await apiClient.delete(`/games/${gameId}`);
     },
     onSuccess: (_data, gameId) => {
-      trackEvent(AnalyticsEvents.GAME_DELETED);
+      trackEvent(AnalyticsEvents.GAME_DELETED, { game_id: gameId });
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
       queryClient.removeQueries({ queryKey: gameKeys.detail(gameId) });
       // Deleting a game cascades away its PlayerStats/TeamStats rows, and
@@ -252,6 +262,11 @@ export function useSubmitRsvp() {
       return response.data.rsvp;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.RSVP_SUBMITTED, {
+        game_id: variables.gameId,
+        status: variables.status,
+        on_behalf_of_child: !!variables.playerId,
+      });
       queryClient.invalidateQueries({ queryKey: rsvpKeys.game(variables.gameId) });
     },
   });

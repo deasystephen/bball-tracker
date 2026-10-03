@@ -23,6 +23,7 @@ import {
   trackEvent,
   identifyUser,
   resetUser,
+  setUserProperties,
   AnalyticsEvents,
 } from '../../services/analytics';
 import { UserRole, User } from '../../../shared/types';
@@ -39,6 +40,8 @@ jest.mock('../../services/analytics', () => ({
   trackEvent: jest.fn(),
   identifyUser: jest.fn(),
   resetUser: jest.fn(),
+  setUserProperties: jest.fn(),
+  appVersion: () => '1.5.0',
   AnalyticsEvents: {
     USER_LOGGED_IN: 'user_logged_in',
     USER_LOGGED_OUT: 'user_logged_out',
@@ -91,7 +94,14 @@ describe('auth-store', () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.isLoading).toBe(false);
 
-    expect(identifyUser).toHaveBeenCalledWith('user-1');
+    // User properties (#616) ride on identify: role flags and app version, never name or email.
+    expect(identifyUser).toHaveBeenCalledWith('user-1', {
+      role: UserRole.COACH,
+      is_parent: false,
+      is_player: false,
+      app_version: '1.5.0',
+    });
+    expect(JSON.stringify((identifyUser as jest.Mock).mock.calls)).not.toContain('test@example.com');
     expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN);
   });
 
@@ -111,7 +121,7 @@ describe('auth-store', () => {
     expect(state.isAuthenticated).toBe(false);
     expect(state.isLoading).toBe(false);
 
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT);
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT, { reason: 'user' });
     expect(resetUser).toHaveBeenCalled();
   });
 
@@ -283,7 +293,7 @@ describe('auth-store logout sequence', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(getLogoutEpoch()).toBe(before + 1);
     expect(mockedRemote).not.toHaveBeenCalled();
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT);
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT, { reason: 'session_expired' });
     await flush();
     expect(mockedLocal).toHaveBeenCalledTimes(1);
   });
@@ -368,7 +378,7 @@ describe('auth-store logout sequence', () => {
 
       expect(useAuthStore.getState().accessToken).toBeNull();
       expect(mockedLocal).toHaveBeenCalledTimes(1);
-      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT);
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_OUT, { reason: 'session_expired' });
     });
   });
 
@@ -432,6 +442,27 @@ describe('auth-store updateUser', () => {
     expect(useAuthStore.getState().user).toMatchObject({ id: 'user-1', role: UserRole.COACH, email: 'test@example.com' });
     expect(trackEvent).not.toHaveBeenCalled();
     expect(identifyUser).not.toHaveBeenCalled();
+    // A role change refreshes the derived user properties (#616).
+    expect(setUserProperties).toHaveBeenCalledWith({
+      role: UserRole.COACH,
+      is_parent: false,
+      is_player: false,
+      app_version: '1.5.0',
+    });
+  });
+
+  it('refreshes user properties for a guardian link but not for a name edit', () => {
+    useAuthStore.getState().setUser(makeUser({ role: UserRole.COACH }));
+    jest.clearAllMocks();
+
+    useAuthStore.getState().updateUser({ name: 'New Name' });
+    expect(setUserProperties).not.toHaveBeenCalled();
+
+    useAuthStore.getState().updateUser({
+      guardianOf: [{ childId: 'c1', childName: 'Kid', relationship: 'MOTHER', isPrimary: true }],
+    });
+    expect(setUserProperties).toHaveBeenCalledWith(expect.objectContaining({ role: UserRole.COACH, is_parent: true }));
+    expect(JSON.stringify((setUserProperties as jest.Mock).mock.calls)).not.toContain('Kid');
   });
 
   it('is a no-op when nobody is logged in', () => {

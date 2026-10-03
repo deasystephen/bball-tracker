@@ -27,6 +27,12 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   (network, 5xx) are captured by the api-client, 4xx are not. Detail: `docs/architecture/mobile-app.md`.
 - Screen tests render the real i18n instance; the brand guard fails on retired names anywhere in
   mobile source, locales or `.maestro/`, comments included.
+- Analytics: every user-facing mutation hook fires a catalogued event from `onSuccess`
+  (`trackEvent(AnalyticsEvents.X, props)`); names are `snake_case` `<object>_<past-tense verb>`
+  and live only in `services/analytics.ts#AnalyticsEvents` with typed props. **No property may
+  carry PII**: ids, enums, counts and flags only, never a name, email, jersey number or message
+  (`fields` names keys, not values). A new event gets a row in `docs/architecture/analytics.md`
+  in the same PR; `__tests__/analytics/catalogue-guard.test.ts` fails otherwise.
 - Packages with native code (`expo-*`, Sentry, Amplitude, `react-native-*`, `react`) move only
   with a native build and a runtime bump; `npm test` fails otherwise. Never edit
   `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production` (the script

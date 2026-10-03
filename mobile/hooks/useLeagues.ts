@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { Season } from './useSeasons';
 
 // Types
@@ -114,7 +115,8 @@ export function useCreateLeague() {
       );
       return response.data.league;
     },
-    onSuccess: () => {
+    onSuccess: (league) => {
+      trackEvent(AnalyticsEvents.LEAGUE_CREATED, { league_id: league.id });
       queryClient.invalidateQueries({ queryKey: leagueKeys.lists() });
     },
   });
@@ -132,6 +134,7 @@ export function useUpdateLeague() {
       return response.data.league;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.LEAGUE_UPDATED, { league_id: variables.leagueId });
       queryClient.invalidateQueries({ queryKey: leagueKeys.lists() });
       queryClient.invalidateQueries({ queryKey: leagueKeys.detail(variables.leagueId) });
     },
@@ -145,7 +148,8 @@ export function useDeleteLeague() {
     mutationFn: async (leagueId: string) => {
       await apiClient.delete(`/leagues/${leagueId}`);
     },
-    onSuccess: () => {
+    onSuccess: (_, leagueId) => {
+      trackEvent(AnalyticsEvents.LEAGUE_DELETED, { league_id: leagueId });
       queryClient.invalidateQueries({ queryKey: leagueKeys.lists() });
     },
   });

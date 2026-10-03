@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
 
@@ -195,6 +196,12 @@ export function useCreateInvitation() {
       return response.data;
     },
     onSuccess: (data, variables) => {
+      trackEvent(AnalyticsEvents.INVITATION_SENT, {
+        team_id: variables.teamId,
+        invitation_id: data.invitation?.id ?? '',
+        resend: !!variables.data.supersede,
+        email_sent: data.emailSent ?? null,
+      });
       // lists() covers every invitation query, incl. useTeamInvitations
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
       // The team payload's invite-status join changed (chips)
@@ -217,6 +224,10 @@ export function useAcceptInvitation() {
       return response.data;
     },
     onSuccess: (data) => {
+      trackEvent(AnalyticsEvents.INVITATION_ACCEPTED, {
+        kind: data.kind === 'guardian' ? 'guardian' : 'team',
+        source: 'in_app',
+      });
       // Invalidate all invitation queries
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
       // Invalidate team members if teamMember was returned
@@ -245,7 +256,8 @@ export function useRejectInvitation() {
       );
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, invitationId) => {
+      trackEvent(AnalyticsEvents.INVITATION_DECLINED, { invitation_id: invitationId });
       // Invalidate all invitation queries
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
     },
@@ -266,6 +278,10 @@ export function useCancelInvitation() {
       return response.data;
     },
     onSuccess: (_data, variables) => {
+      trackEvent(AnalyticsEvents.INVITATION_CANCELLED, {
+        team_id: variables.teamId,
+        invitation_id: variables.invitationId,
+      });
       // lists() covers every invitation query, incl. useTeamInvitations
       queryClient.invalidateQueries({ queryKey: invitationKeys.lists() });
       // Chip flips to "Not invited" — invalidate only THIS team's detail

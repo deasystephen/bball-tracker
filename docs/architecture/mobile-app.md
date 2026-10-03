@@ -300,6 +300,13 @@ never inline a role check in a screen:
 - Jest mocks `@sentry/react-native` globally (`jest.setup.js`); a suite that asserts on the SDK
   installs its own mock, as `sentry.test.ts` does.
 
+## Analytics events, user properties and screen views (#616)
+
+The event catalogue, the user properties set on identify, the screen-view tracker and the
+enforcement test are in `analytics.md`. In short: `trackEvent` accepts only `AnalyticsEvents`
+names with per-event typed properties; mutation hooks emit from `onSuccess`; no property carries
+PII; a new event is a row in that doc in the same PR.
+
 ## Analytics tracking options (#559)
 
 `mobile/services/analytics.ts` passes `AMPLITUDE_TRACKING_OPTIONS` to `amplitude.init`; the SDK's
@@ -317,3 +324,6 @@ defaults are never relied on (they turn everything on). Two values are decisions
 installed SDK's defaults, so an SDK upgrade that adds a tracking option fails CI until it is
 decided. Changing an option means changing the label draft and the runbook in the same PR. It is
 JS only, so it ships by OTA.
+
+Also JS only, and from the api-client rather than a hook: `entitlement_denied` on every 402 and
+`error_shown` whenever `getApiErrorMessage` is asked for a message to display (`analytics.md`).

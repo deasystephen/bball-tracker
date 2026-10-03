@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { AxiosError } from 'axios';
 import type { GuardianRelationship } from '../../shared/types';
 
@@ -66,7 +67,11 @@ export function useAcceptInvitationByToken() {
       );
       return response.data;
     },
-    onSuccess: (_data, token) => {
+    onSuccess: (data, token) => {
+      trackEvent(AnalyticsEvents.INVITATION_ACCEPTED, {
+        kind: data.kind === 'guardian' ? 'guardian' : 'team',
+        source: 'link',
+      });
       queryClient.invalidateQueries({ queryKey: ['invitationByToken', token] });
       queryClient.invalidateQueries({ queryKey: ['invitations'] });
     },

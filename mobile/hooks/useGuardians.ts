@@ -6,6 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { teamKeys } from './useTeams';
 import { invitationKeys } from './useInvitations';
 import type { GuardianRelationship } from '../../shared/types';
@@ -95,6 +96,10 @@ export function useInviteGuardian() {
       return response.data.invitation;
     },
     onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.GUARDIAN_INVITED, {
+        team_id: variables.teamId,
+        relationship: variables.data.relationship,
+      });
       invalidate(variables.teamId, variables.playerId);
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
     },
@@ -116,6 +121,9 @@ export function useRemoveGuardian() {
     }) => {
       await apiClient.delete(`/teams/${teamId}/members/${playerId}/guardians/${guardianUserId}`);
     },
-    onSuccess: (_, variables) => invalidate(variables.teamId, variables.playerId),
+    onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.GUARDIAN_REMOVED, { team_id: variables.teamId });
+      invalidate(variables.teamId, variables.playerId);
+    },
   });
 }
