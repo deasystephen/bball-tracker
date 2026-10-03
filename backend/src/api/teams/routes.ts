@@ -26,6 +26,7 @@ import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
 import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitlements';
+import { exportRateLimit } from '../middleware/rate-limit';
 import { Feature } from '../../services/entitlements';
 import { logger } from '../../utils/logger';
 import { buildContentDisposition } from '../../utils/content-disposition';
@@ -721,9 +722,11 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
  * GET /api/v1/teams/:id/season-stats.csv
  * Export per-player season aggregates as CSV
  * Gated behind the STATS_EXPORT feature (PREMIUM+).
+ * Rate-limited per user with the other export routes (`exportRateLimit`).
  */
 router.get(
   '/:id/season-stats.csv',
+  exportRateLimit,
   validateUuidParams('id'),
   requireEntitlement(Feature.STATS_EXPORT),
   async (req, res) => {

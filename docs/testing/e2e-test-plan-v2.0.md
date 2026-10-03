@@ -964,6 +964,12 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** Aggregated season stats CSV (percentages are Σmade/Σattempted, ties counted). FREE-tier coach → 402 `{ code: 'upgrade_required', feature: 'STATS_EXPORT' }` (`requireEntitlement`).
 - **Notes:** ___________
 
+### M.5 — Export rate limit honored
+- [ ] Pass / Fail / Skipped
+- **Steps:** From terminal, as one signed-in user: `for i in {1..25}; do curl -s -o /dev/null -w "%{http_code} " -H "Authorization: Bearer $TOKEN" https://api.hooplings.com/api/v1/games/:gameId/boxscore.pdf; done`.
+- **Expected:** 20 × `200`, then `429` with `{ "error": "Too many export requests, please try again later" }` and `RateLimit-*` headers. A second user's token on the same network still gets `200`. The budget is shared across `export.csv`, `boxscore.pdf` and `season-stats.csv`.
+- **Notes:** `exportRateLimit` — 20 req / min / user (#50).
+
 ### M.4 — 🔒 CSV injection defense
 - [ ] Pass / Fail / Skipped
 - **Steps:** Create a player named `=cmd|"/c calc"`. Add to a game's event. Export CSV.
