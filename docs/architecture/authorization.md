@@ -180,6 +180,28 @@ POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is wh
 team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 `teamStaff` rows was removed along with `requireRole` / `requireFeature`.)
 
+## Announcements and threaded replies (#34)
+- Announcements are created and listed under `/teams/:teamId/announcements` (`canManageTeam` to
+  post, `canAccessTeam` to read). `GET /announcements/:id` returns one announcement with its author
+  and `_count.replies`; same gate as the list (404 unknown, 403 without access to its team).
+- Replies (`AnnouncementReply`, one level deep, never reply-to-reply) live under
+  `/announcements/:id/replies`. **Anyone who can read the team may reply** (`canAccessTeam`: staff,
+  rostered players, guardians of players, league admins, ADMIN); `POST` is 404 for an unknown
+  announcement and 403 without access. `GET` is the thread oldest first, `limit` 1-100 (default 20),
+  `offset`. `DELETE /announcements/:id/replies/:replyId` is allowed to the reply's **author** or to
+  anyone with **`canManageTeam`** on the team (head and assistant coach; a team manager cannot); a
+  reply under a different announcement is a 404, not a hint. Services: `announcement-service.ts`
+  (`getAnnouncement`) and `announcement-reply-service.ts`.
+- Reply payloads carry the author's `id`, `name`, `profilePictureUrl` and `deletedAt` and never an
+  email (reply authors are players and guardians, whose addresses only roster managers see).
+- A new reply notifies the announcement's author by push and email in the background
+  (`AnnouncementReplyService.notifyAuthor`) unless the author replied to their own post, has
+  `User.notifyOnReplies` false (`PATCH /auth/me { notifyOnReplies }`, Profile → Reply notifications),
+  or is a tombstone. Push data is `{ teamId, announcementId }`; the app opens the thread from it.
+- Tests: `tests/api/announcement-replies.test.ts`, `tests/schemas/announcement-replies.test.ts`,
+  `tests/services/announcement-reply-service.test.ts` (access, delete rules, notification triggers and
+  the opt-out), the `getAnnouncement` block in `tests/services/announcement-service.test.ts`.
+
 ## Player directory (`/api/v1/players`)
 
 `PlayerService.listPlayers(params, caller)` / `getPlayerById(id, caller)` take the authenticated caller (`{ id, role }`) and scope by it (audit #3):

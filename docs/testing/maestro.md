@@ -92,6 +92,12 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   another session installing over you.
 - A tap/assert that navigates away and back can land at the previous scroll offset — an element at the
   top of the screen may then be off-screen ABOVE; scroll `direction: UP` before asserting it.
+- A pressable `Card` (or any accessible container) is ONE element whose label joins every text
+  inside it, so `assertVisible: "0 replies"` fails even though the text is on screen; match the
+  joined label with a regex (`"Reply Fixture.*0 replies"`, `announcement-reply.yaml`). An explicit
+  `accessibilityLabel` on such a container hides the rest entirely, for VoiceOver too. And an empty
+  **multiline** `TextInput` is absent from the iOS accessibility tree, so it cannot be tapped by its
+  placeholder: give it a `testID` and use `tapOn: id:`.
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite
   sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
   between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
@@ -100,7 +106,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
   flow, `error-way-back.yaml`, was added later that day and passed on its own; a 24th,
   `admin-season-manage.yaml` (#614, dev-login as the seeded ADMIN, create → edit → delete a season,
-  then the league delete refused for teams), was added 2026-09-30). The same
+  then the league delete refused for teams), was added 2026-09-30; a 25th,
+  `announcement-reply.yaml` (#34, post an announcement as Frank, reply in the thread, delete the
+  reply; the seed removes the "Reply Fixture" announcement), was added 2026-10-03). The same
   day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
   2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
   under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a

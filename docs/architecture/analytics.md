@@ -75,7 +75,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `user_logged_in` | the signed-in user is stored (`setUser`) | none | `store/auth-store.ts` |
 | `user_logged_out` | a session that was signed in ends | `reason`: `user`, `session_expired`, `account_deleted` | `store/auth-store.ts#clearSession` (reason passed by `logout`, `useDeleteAccount`, default for the api-client) |
 | `onboarding_step_completed` | a first-login prompt is saved (not the Profile edit paths) | `step`: `name` / `role`; `role` (on the role step) | `app/onboarding/name.tsx`, `app/onboarding/role.tsx` |
-| `profile_updated` | `PATCH /auth/me` succeeds | `name_changed`, `photo_changed`, `photo_cleared` | `hooks/useProfile.ts` |
+| `profile_updated` | `PATCH /auth/me` succeeds | `name_changed`, `photo_changed`, `photo_cleared`, `reply_notifications_changed` | `hooks/useProfile.ts` |
 | `account_deleted` | `DELETE /auth/me` succeeds, before the session is cleared | `erased` (hard-deleted rather than tombstoned) | `hooks/useAccount.ts` |
 | `child_record_deleted` | a guardian deletes a managed child's record | none | `hooks/useAccount.ts` |
 | `team_created` | `POST /teams` succeeds | `team_id`, `league_scope`: `personal` / `league`, `has_bracket` | `hooks/useTeams.ts` |
@@ -95,6 +95,8 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `guardian_invited` | a parent is invited for a roster player | `team_id`, `relationship` | `hooks/useGuardians.ts` |
 | `guardian_removed` | a guardian link is removed | `team_id` | `hooks/useGuardians.ts` |
 | `announcement_created` | a team announcement is posted | `team_id` | `hooks/useAnnouncements.ts` |
+| `announcement_reply_created` | a reply is posted under an announcement (#34) | `team_id`, `announcement_id` | `hooks/useAnnouncementReplies.ts` |
+| `announcement_reply_deleted` | a reply is removed by its author or a coach | `team_id`, `announcement_id`, `own` (the caller wrote it) | `hooks/useAnnouncementReplies.ts` |
 | `league_created` | `POST /leagues` succeeds | `league_id` | `hooks/useLeagues.ts` |
 | `league_updated` | `PATCH /leagues/:id` succeeds | `league_id` | `hooks/useLeagues.ts` |
 | `league_deleted` | `DELETE /leagues/:id` succeeds | `league_id` | `hooks/useLeagues.ts` |
@@ -110,7 +112,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `game_event_undone` | the tracker's undo deletes an event | `game_id`, `event_type` (when the tracker knows it) | `hooks/useGameEvents.ts` |
 | `rsvp_submitted` | an RSVP is saved | `game_id`, `status`, `on_behalf_of_child` | `hooks/useGames.ts` |
 | `push_permission_answered` | the OS push prompt was shown and answered (not when already granted) | `granted` | `hooks/useNotifications.ts` |
-| `notification_opened` | the user taps a push notification | `target`: `game` / `team` / `none` | `hooks/useNotifications.ts` |
+| `notification_opened` | the user taps a push notification | `target`: `game` / `announcement` / `team` / `none` | `hooks/useNotifications.ts` |
 | `entitlement_denied` | the API answers 402 `upgrade_required` | `endpoint_pattern`, `feature`, `current_tier`, `required_tier` | `services/api-client.ts#normalizeApiError` |
 | `error_shown` | a screen asks for an error's message to show it (`getApiErrorMessage`) | `code`, `status` (null for a network failure), `endpoint_pattern` | `services/api-client.ts#getApiErrorMessage` |
 

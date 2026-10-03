@@ -41,7 +41,7 @@ describe('PATCH /api/v1/auth/me', () => {
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/old.jpg' });
     // The write is a guarded updateMany (`deletedAt: null`, #444 D9) followed
     // by a re-read; the mock re-read reflects whatever the write carried.
-    let written: { name?: string; profilePictureUrl?: string | null } = {};
+    let written: { name?: string; profilePictureUrl?: string | null; notifyOnReplies?: boolean } = {};
     (mockPrisma.user.updateMany as jest.Mock).mockImplementation(async ({ data }: { data: typeof written }) => {
       written = data;
       return { count: 1 };
@@ -52,6 +52,7 @@ describe('PATCH /api/v1/auth/me', () => {
       name: written.name ?? 'Test User',
       role: currentRole,
       profilePictureUrl: written.profilePictureUrl === undefined ? null : written.profilePictureUrl,
+      notifyOnReplies: written.notifyOnReplies ?? true,
       createdAt: new Date('2026-01-01'),
     }));
   });
@@ -139,6 +140,29 @@ describe('PATCH /api/v1/auth/me', () => {
     const call = (mockPrisma.user.updateMany as jest.Mock).mock.calls[0][0];
     expect(call.where).toEqual({ id: TEST_USER_ID, deletedAt: null });
     expect(call.data).toEqual({ name: 'X' });
+  });
+
+  it('turns reply notifications off and on, and returns the stored value (#34)', async () => {
+    const off = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ notifyOnReplies: false });
+
+    expect(off.status).toBe(200);
+    expect(off.body.user.notifyOnReplies).toBe(false);
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TEST_USER_ID, deletedAt: null }, data: { notifyOnReplies: false } })
+    );
+    // A preference change never touches the avatar.
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+
+    const on = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ notifyOnReplies: true });
+    expect(on.status).toBe(200);
+    expect(on.body.user.notifyOnReplies).toBe(true);
+  });
+
+  it('rejects a non-boolean notifyOnReplies', async () => {
+    const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ notifyOnReplies: 'no' });
+    expect(res.status).toBe(400);
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects an empty body', async () => {

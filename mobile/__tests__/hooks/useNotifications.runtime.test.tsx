@@ -354,6 +354,26 @@ describe('useNotificationSetup runtime', () => {
     expect(mockRouter.push).toHaveBeenCalledWith('/teams/t1');
   });
 
+  it('opens the announcement thread when the notification carries announcementId and teamId (#34)', async () => {
+    setAuthenticated('jwt-token');
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+    mockedGetToken.mockResolvedValueOnce({ data: 'tok' });
+    mockedPost.mockResolvedValueOnce({ data: { success: true } });
+
+    renderHook(() => useNotificationSetup());
+
+    await waitFor(() => expect(mockNotificationsState.lastHandler).not.toBeNull());
+
+    act(() => {
+      mockNotificationsState.lastHandler?.({
+        notification: { request: { content: { data: { teamId: 't1', announcementId: 'a1' } } } },
+      });
+    });
+
+    expect(mockRouter.push).toHaveBeenCalledTimes(1);
+    expect(mockRouter.push).toHaveBeenCalledWith('/teams/t1/announcements/a1');
+  });
+
   it('prefers gameId routing when both gameId and teamId are present', async () => {
     setAuthenticated('jwt-token');
     mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });

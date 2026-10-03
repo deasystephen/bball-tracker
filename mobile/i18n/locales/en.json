@@ -10,7 +10,10 @@
     "success": "Success",
     "confirm": "Confirm",
     "close": "Close",
-    "invalidEmail": "Enter a valid email address"
+    "invalidEmail": "Enter a valid email address",
+    "justNow": "Just now",
+    "hoursAgo": "{{count}}h ago",
+    "yesterday": "Yesterday"
   },
   "navigation": {
     "home": "Home",
@@ -193,5 +196,28 @@
       "menuManageGuardians": "Manage guardians",
       "menuDeleteRecord": "Delete {{name}}'s record"
     }
+  },
+  "announcements": {
+    "title": "Announcement",
+    "listTitle": "Announcements",
+    "replies": "Replies",
+    "replyCount_one": "{{count}} reply",
+    "replyCount_other": "{{count}} replies",
+    "noReplies": "No replies yet",
+    "noRepliesMessage": "Be the first to reply.",
+    "replyPlaceholder": "Write a reply…",
+    "send": "Send reply",
+    "sending": "Sending…",
+    "replyFailed": "Could not send your reply",
+    "replyMenu": "Reply options",
+    "deleteReply": "Delete reply",
+    "replyDeleted": "Reply deleted",
+    "deleteFailed": "Could not delete the reply",
+    "loadError": "Could not load this announcement",
+    "loadingMore": "Loading more…",
+    "replyNotifications": "Reply notifications",
+    "replyNotificationsOn": "Push and email when someone replies to your announcements",
+    "replyNotificationsOff": "Off",
+    "replyNotificationsFailed": "Could not save that setting"
   }
 }

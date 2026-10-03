@@ -856,10 +856,21 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** Subject `Test Team: Practice tomorrow`. Body has title, body, author name.
 - **Notes:** ___________
 
-### J.4 — ⚠ Known broken: threaded replies not implemented (#34)
-- [ ] Verified-broken / Notes
-- **Steps:** Try to reply to an announcement.
-- **Expected:** Feature absent; no reply UI.
+### J.4 — Threaded replies (#34)
+- [ ] Pass / Fail / Skipped
+- **Role:** PLAYER (or a guardian of a roster player), then COACH
+- **Steps:**
+  1. Team detail → Announcements → tap the announcement card (shows "N replies").
+  2. Type in the composer at the bottom → "Send reply". Pull to refresh.
+  3. As the coach (announcement author), open the same thread.
+- **Expected:** The reply appears at once (dimmed, "Sending…") and settles with the server's timestamp; the count on the card and in the thread rises by one. ⋯ on your own reply offers "Delete reply" (ActionMenu); a player sees no ⋯ on others' replies, the coach sees ⋯ on every reply. 📧 + push to the announcement **author only** (title `<Team>: <announcement title>`, body `<replier>: <text>`; nothing when the author replies to their own post). Tapping the push opens the thread. Maestro: `.maestro/announcement-reply.yaml`.
+- **Notes:** ___________
+
+### J.5 — Reply notifications opt-out (#34)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH (announcement author)
+- **Steps:** Profile → Settings → "Reply notifications" off (subtitle reads "Off"). Have a player reply to one of your announcements. Turn it back on and have them reply again.
+- **Expected:** No push or email for the first reply; both for the second. The thread itself is unaffected. `PATCH /auth/me { notifyOnReplies }` in the backend log; the value survives a cold start (`GET /auth/me` carries it).
 - **Notes:** ___________
 
 ---
@@ -1179,10 +1190,8 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 - **Issue:** #113 — feature not implemented.
 - **Expected fail mode:** No clock on the live spectator view.
 
-### S.6 — ⚠ Threaded announcement replies
-- [ ] Verified-broken / Notes
-- **Issue:** #34 deferred.
-- **Expected fail mode:** No reply UI.
+### S.6 — Threaded announcement replies (resolved)
+- **Issue:** #34 shipped 2026-10-03 (see J.4 / J.5). Real-time delivery of replies to other readers is still out of scope: a reader already on the thread sees new replies on pull-to-refresh or re-open.
 
 ### S.7 — ⚠ Multi-replica Socket.io
 - [ ] Verified-broken / Notes

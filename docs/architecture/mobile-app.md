@@ -40,6 +40,19 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and
   cold start) consumes it (30-minute TTL, in-app absolute paths only) after the role-onboarding check, so the
   user lands back on the deep link.
+- **Announcement threads** (#34): `/teams/[id]/announcements` lists announcements (each card opens
+  its thread and shows the served `_count.replies`); `/teams/[id]/announcements/[announcementId]`
+  (`hooks/useAnnouncement`, `hooks/useAnnouncementReplies.ts`) shows the announcement, the replies
+  oldest first (infinite, 20 a page) and an inline composer. Sends and deletes are optimistic with
+  rollback; the thread refetches on mount and pull-to-refresh (no real-time delivery). The ⋯
+  `ActionMenu` with Delete renders for a reply's author and for `hasTeamPermission(…,
+  'canManageTeam')`; the API is the authority. A push with `announcementId` + `teamId` (new post,
+  or a reply to the user's own post) deep-links to the thread (`hooks/useNotifications.ts`,
+  `notification_opened` target `announcement`). Profile → Settings → **Reply notifications** toggles
+  `notifyOnReplies` through `useUpdateProfile`. Timeline rows format dates with
+  `utils/relative-time.ts#formatRelativeTime`, never an inline helper. Tests:
+  `__tests__/app/announcement-thread.test.tsx`, `__tests__/hooks/useAnnouncementReplies.runtime.test.tsx`,
+  `__tests__/app/profile-reply-notifications.test.tsx`; Maestro `.maestro/announcement-reply.yaml`.
 - Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
   `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
 - `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`

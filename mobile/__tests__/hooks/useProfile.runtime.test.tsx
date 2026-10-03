@@ -91,4 +91,14 @@ describe('toUserPatch', () => {
       toUserPatch({ id: 'u1', email: null, name: 'N', role: UserRole.PLAYER, profilePictureUrl: null, createdAt: 'x' })
     ).toEqual({ name: 'N', profilePictureUrl: undefined });
   });
+
+  it('carries notifyOnReplies through only when the API sent it (#34)', () => {
+    const base = { id: 'u1', email: null, name: 'N', role: UserRole.PLAYER, profilePictureUrl: null, createdAt: 'x' };
+    expect(toUserPatch({ ...base, notifyOnReplies: false })).toEqual({
+      name: 'N',
+      profilePictureUrl: undefined,
+      notifyOnReplies: false,
+    });
+    expect(toUserPatch(base)).not.toHaveProperty('notifyOnReplies');
+  });
 });

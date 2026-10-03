@@ -17,8 +17,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   relation on `User` must be added to the select** (or declared outbound) — a missed one would
   let the hard delete cascade through rows other people rely on, which is what D1 forbids. The
   rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
-  `TeamMember` and authored announcements stay so other members' stats remain coherent, and any
-  of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
+  `TeamMember`, authored announcements and announcement replies stay so other members' stats and
+  threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
   delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone

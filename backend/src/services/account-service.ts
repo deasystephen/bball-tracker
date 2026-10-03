@@ -36,7 +36,7 @@
  *   └─────────────────────────────────────────────────────────────┘
  *   after commit, best-effort: delete the S3 avatar, delete the WorkOS user
  *
- * KEPT, de-identified: TeamMember, GameEvent, PlayerStats, Announcement
+ * KEPT, de-identified: TeamMember, GameEvent, PlayerStats, Announcement, AnnouncementReply
  * (author), TeamInvitation rows the user SENT. Any of these (or any other
  * remaining relation) is what keeps the tombstone; the check is "nothing
  * references this row", never "no game events" (D1).
@@ -91,6 +91,7 @@ export const USER_REFERENCE_COUNT_SELECT = {
   gameRsvps: true,
   pushTokens: true,
   announcements: true,
+  announcementReplies: true,
   calendarFeedTokens: true,
 } satisfies Prisma.UserCountOutputTypeSelect;
 
@@ -363,6 +364,7 @@ export class AccountService {
       pushTokens,
       calendarFeedTokens,
       announcements,
+      announcementReplies,
       personalLeague,
     ] = await Promise.all([
       prisma.teamMember.findMany({ where: { playerId: userId }, include: TEAM_REF_INCLUDE }),
@@ -383,6 +385,7 @@ export class AccountService {
       prisma.pushToken.findMany({ where: { userId }, select: { platform: true, createdAt: true, updatedAt: true } }),
       prisma.calendarFeedToken.findMany({ where: { userId }, select: { teamId: true, revokedAt: true, createdAt: true } }),
       prisma.announcement.findMany({ where: { authorId: userId } }),
+      prisma.announcementReply.findMany({ where: { authorId: userId } }),
       prisma.league.findUnique({ where: { personalOwnerId: userId }, select: { id: true, name: true } }),
     ]);
 
@@ -405,6 +408,7 @@ export class AccountService {
       pushTokens,
       calendarFeedTokens,
       announcements,
+      announcementReplies,
     };
   }
 }
@@ -425,6 +429,7 @@ const USER_EXPORT_SELECT = {
   subscriptionExpiresAt: true,
   isManaged: true,
   managedById: true,
+  notifyOnReplies: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -500,4 +505,5 @@ export interface UserDataExport {
   pushTokens: { platform: string; createdAt: Date; updatedAt: Date }[];
   calendarFeedTokens: { teamId: string; revokedAt: Date | null; createdAt: Date }[];
   announcements: Prisma.AnnouncementGetPayload<Record<string, never>>[];
+  announcementReplies: Prisma.AnnouncementReplyGetPayload<Record<string, never>>[];
 }

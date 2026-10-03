@@ -69,9 +69,12 @@ export const updateProfileSchema = z
     name: z.string().trim().min(1, 'Name is required').max(100, 'Name too long').optional(),
     // Empty string clears the avatar
     profilePictureUrl: safeUrlSchema.or(z.literal('')).optional(),
+    // Push + email when someone replies to the caller's announcement (#34)
+    notifyOnReplies: z.boolean().optional(),
   })
-  .refine((data) => data.name !== undefined || data.profilePictureUrl !== undefined, {
-    message: 'At least one of name or profilePictureUrl is required',
-  });
+  .refine(
+    (data) => data.name !== undefined || data.profilePictureUrl !== undefined || data.notifyOnReplies !== undefined,
+    { message: 'At least one of name, profilePictureUrl or notifyOnReplies is required' }
+  );
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

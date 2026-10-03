@@ -4,6 +4,7 @@ import { logger } from '../../src/utils/logger';
 import { invitationTemplate } from '../../src/services/mailer/templates/invitation';
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
+import { announcementReplyTemplate } from '../../src/services/mailer/templates/announcement-reply';
 import { guardianInvitationTemplate } from '../../src/services/mailer/templates/guardian-invitation';
 import { APP_NAME, SUPPORT_EMAIL } from '../../src/services/mailer/templates/brand';
 import { readdirSync, readFileSync } from 'fs';
@@ -489,6 +490,36 @@ describe('announcementTemplate', () => {
   });
 });
 
+describe('announcementReplyTemplate (#34)', () => {
+  const vars = {
+    recipientName: 'Coach Phil',
+    teamName: 'Bulls',
+    title: 'Practice moved',
+    replierName: 'Jordan',
+    body: 'On my way <3',
+  };
+
+  it('subject names the team, the replier and the announcement', () => {
+    expect(announcementReplyTemplate.subject(vars)).toBe('Bulls: Jordan replied to "Practice moved"');
+  });
+
+  it('html carries the recipient, the replier, the title and the escaped reply', () => {
+    const html = announcementReplyTemplate.html(vars);
+    expect(html).toContain('Hi Coach Phil');
+    expect(html).toContain('Jordan');
+    expect(html).toContain('Practice moved');
+    expect(html).toContain('On my way &lt;3');
+    expect(html).not.toContain('<3');
+  });
+
+  it('text carries the same fields unescaped', () => {
+    const text = announcementReplyTemplate.text(vars);
+    expect(text).toContain('Hi Coach Phil');
+    expect(text).toContain('Jordan replied to your announcement "Practice moved"');
+    expect(text).toContain('On my way <3');
+  });
+});
+
 describe('HTML escaping (template injection defense)', () => {
   const ATTACK = '<a href="https://phish.example">click</a>';
   const ESCAPED = '&lt;a href=&quot;https://phish.example&quot;&gt;click&lt;/a&gt;';
@@ -553,12 +584,14 @@ describe('brand copy (domain migration PR2, D12)', () => {
   };
   const rsvpVars = { playerName: 'Jordan', teamName: 'Bulls', opponent: 'Celtics', gameDate: 'Sat', rsvpStatus: 'YES' };
   const announcementVars = { teamName: 'Bulls', title: 'Practice', body: 'Gym 6pm', recipientName: 'Jordan', authorName: 'Phil' };
+  const replyVars = { teamName: 'Bulls', title: 'Practice', body: 'On my way', recipientName: 'Phil', replierName: 'Jordan' };
   for (const [tpl, vars] of [
     [invitationTemplate, invitationVars],
     [invitationTemplate, { ...invitationVars, variant: 'added' }],
     [guardianInvitationTemplate, guardianVars],
     [rsvpConfirmationTemplate, rsvpVars],
     [announcementTemplate, announcementVars],
+    [announcementReplyTemplate, replyVars],
   ] as const) {
     renders.push([`${tpl.name} subject`, tpl.subject(vars as Record<string, string>)]);
     renders.push([`${tpl.name} html`, tpl.html(vars as Record<string, string>)]);

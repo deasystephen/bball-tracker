@@ -65,6 +65,16 @@ export default function Profile() {
     return items;
   };
 
+  const replyNotificationsOn = user?.notifyOnReplies !== false;
+  const handleToggleReplyNotifications = async () => {
+    try {
+      await updateProfile.mutateAsync({ notifyOnReplies: !replyNotificationsOn });
+    } catch (err) {
+      captureException(err, { flow: 'profile-reply-notifications' });
+      Alert.alert(t('common.error'), t('announcements.replyNotificationsFailed'));
+    }
+  };
+
   const handleAvatarSelected = async (uri: string | null) => {
     if (!user?.id) return;
 
@@ -426,6 +436,41 @@ export default function Profile() {
                     colorScheme === 'dark' && styles.toggleKnobActive,
                   ]}
                 />
+              </View>
+            </TouchableOpacity>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            {/* Push + email when someone replies to one of my announcements
+                (#34). Undefined (older API builds) reads as on, the server
+                default; the store merges the saved value via updateUser. */}
+            <TouchableOpacity
+              style={styles.settingRow}
+              onPress={handleToggleReplyNotifications}
+              disabled={updateProfile.isPending}
+              accessibilityRole="switch"
+              accessibilityLabel={t('announcements.replyNotifications')}
+              accessibilityState={{ checked: replyNotificationsOn, disabled: updateProfile.isPending }}
+              testID="reply-notifications-toggle"
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: colors.success + '20' }]}>
+                  <Ionicons name="chatbubble-ellipses" size={18} color={colors.success} />
+                </View>
+                <View style={styles.settingContent}>
+                  <ThemedText variant="body">{t('announcements.replyNotifications')}</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">
+                    {replyNotificationsOn
+                      ? t('announcements.replyNotificationsOn')
+                      : t('announcements.replyNotificationsOff')}
+                  </ThemedText>
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.toggle,
+                  { backgroundColor: replyNotificationsOn ? colors.primary : colors.border },
+                ]}
+              >
+                <View style={[styles.toggleKnob, replyNotificationsOn && styles.toggleKnobActive]} />
               </View>
             </TouchableOpacity>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />

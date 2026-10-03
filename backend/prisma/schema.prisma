@@ -96,16 +96,16 @@ enum RsvpStatus {
 // =============================================================================
 
 model User {
-  id                    String           @id @default(uuid())
-  workosUserId          String?          @unique
-  email                 String?          @unique
+  id                    String                  @id @default(uuid())
+  workosUserId          String?                 @unique
+  email                 String?                 @unique
   name                  String
-  emailVerified         Boolean          @default(false)
+  emailVerified         Boolean                 @default(false)
   profilePictureUrl     String?
-  role                  UserRole         @default(PLAYER)
-  subscriptionTier      SubscriptionTier @default(FREE)
+  role                  UserRole                @default(PLAYER)
+  subscriptionTier      SubscriptionTier        @default(FREE)
   subscriptionExpiresAt DateTime?
-  isManaged             Boolean          @default(false)
+  isManaged             Boolean                 @default(false)
   managedById           String?
   // Set by AccountService.deleteAccount (#444). The row is a tombstone from
   // then on: workosUserId/email/profilePictureUrl are null and name is the
@@ -120,8 +120,13 @@ model User {
   // actually stops delivery; these columns exist so a coach can be told.
   emailSuppressedAt     DateTime?
   emailSuppressedReason EmailSuppressionReason?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
+  // Opt-out for the "someone replied to your announcement" push + email
+  // (#34). Editable through PATCH /auth/me; read by
+  // AnnouncementReplyService.notifyAuthor. Not personal data: untouched by
+  // the account-deletion tombstone.
+  notifyOnReplies       Boolean                 @default(true)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
 
   // Relations
   managedBy                  User?                @relation("ManagedPlayers", fields: [managedById], references: [id])
@@ -142,6 +147,7 @@ model User {
   gameRsvps                  GameRsvp[]
   pushTokens                 PushToken[]
   announcements              Announcement[]
+  announcementReplies        AnnouncementReply[]
   calendarFeedTokens         CalendarFeedToken[]
 
   @@index([email])
@@ -616,10 +622,30 @@ model Announcement {
   body      String
   createdAt DateTime @default(now())
 
-  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  team    Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author  User                @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies AnnouncementReply[]
 
   @@index([teamId])
   @@index([authorId])
   @@index([teamId, createdAt])
+}
+
+// A reply under an announcement (#34). One level only: a reply points at the
+// announcement, never at another reply. Anyone with access to the team may
+// reply; the author or a coach (`canManageTeam`) may delete. Replies by a
+// deleted account stay (de-identified through the tombstone, like
+// announcements) so the thread other members read keeps its shape.
+model AnnouncementReply {
+  id             String   @id @default(uuid())
+  announcementId String
+  authorId       String
+  body           String
+  createdAt      DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([announcementId, createdAt])
+  @@index([authorId])
 }

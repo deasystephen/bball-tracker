@@ -118,8 +118,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    The export contains: `user`, `personalLeague`, `teamMembers`, `teamStaff`, `leagueAdmins`,
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,
    `guardianInvitations`, `sentGuardianInvitations`, `gameRsvps`, `gameEvents`, `playerStats`,
-   `pushTokens`, `calendarFeedTokens`, `announcements` (`AccountService.exportUserData`; the
-   integration test asserts this list).
+   `pushTokens`, `calendarFeedTokens`, `announcements`, `announcementReplies`
+   (`AccountService.exportUserData`; the integration test asserts this list).
 4. **Delete:**
    ```bash
    cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts delete <email>

@@ -7,7 +7,7 @@ import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventTy
 import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { removeTestRows } from '../tests/support/test-leftovers';
-import { FLOW_CREATED_OPPONENTS } from '../tests/support/flow-fixtures';
+import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 /** #444 guardian child-deletion fixture (fixed UUID; see the Bryce James block). */
@@ -199,6 +199,15 @@ async function main() {
   });
   if (staleFixtureGames.count > 0) {
     console.log(`    Removed ${staleFixtureGames.count} fixture game(s) from a previous E2E run`);
+  }
+
+  // ...and the announcement announcement-reply.yaml posts (its replies go
+  // with it: AnnouncementReply cascades from Announcement, #34).
+  const staleFixtureAnnouncements = await prisma.announcement.deleteMany({
+    where: { title: { in: FLOW_CREATED_ANNOUNCEMENT_TITLES } },
+  });
+  if (staleFixtureAnnouncements.count > 0) {
+    console.log(`    Removed ${staleFixtureAnnouncements.count} fixture announcement(s) from a previous E2E run`);
   }
 
   // ...and the managed players roster flows add to his Lakers (E2E Test

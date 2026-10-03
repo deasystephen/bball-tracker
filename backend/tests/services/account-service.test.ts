@@ -223,6 +223,7 @@ describe('AccountService.deleteAccount', () => {
     it('isUnreferenced: every count zero and no personal league', () => {
       expect(isUnreferenced(references())).toBe(true);
       expect(isUnreferenced(references({ announcements: 1 }))).toBe(false);
+      expect(isUnreferenced(references({ announcementReplies: 1 }))).toBe(false);
       expect(isUnreferenced(references({}, { id: 'pl-1' }))).toBe(false);
     });
   });
@@ -483,7 +484,7 @@ describe('AccountService.exportUserData', () => {
     });
     for (const model of [
       'teamMember', 'teamStaff', 'leagueAdmin', 'guardian', 'teamInvitation', 'guardianInvitation',
-      'gameRsvp', 'gameEvent', 'playerStats', 'pushToken', 'calendarFeedToken', 'announcement',
+      'gameRsvp', 'gameEvent', 'playerStats', 'pushToken', 'calendarFeedToken', 'announcement', 'announcementReply',
     ] as const) {
       (mockPrisma[model].findMany as jest.Mock).mockResolvedValue([]);
     }
@@ -493,9 +494,9 @@ describe('AccountService.exportUserData', () => {
 
     expect(Object.keys(data).sort()).toEqual(
       [
-        'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps', 'guardianInvitations',
-        'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats', 'pushTokens',
-        'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
+        'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
+        'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
+        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
       ].sort()
     );
     expect(data.user).not.toHaveProperty('workosUserId');
