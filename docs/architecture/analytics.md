@@ -19,8 +19,15 @@ separate decision, documented in `mobile-app.md` under "Analytics tracking optio
 - **Emit from the hook or store that performs the mutation**, never from a screen, so every screen
   that uses the hook is covered. The only screen-level emitters are the onboarding steps, which
   have no hook of their own, and the root layout's screen-view tracker.
-- **Every call goes through `trackEvent`**, which no-ops until `initAnalytics` has succeeded and
-  swallows every SDK error: analytics can never crash the app.
+- **Every call goes through `trackEvent`**, which swallows every SDK error: analytics can never
+  crash the app. Events tracked before `initAnalytics` has resolved are held in a bounded buffer
+  (`PRE_INIT_BUFFER_LIMIT`, 50) and sent in order once init succeeds, so the launch route's
+  `screen_viewed` (fired by a child of the root layout, before its init effect) is not lost; they
+  are dropped when there is no API key or init fails.
+- **Identity is stamped at call time.** `amplitude.track` only enqueues, the SDK fills `user_id`
+  on a later tick, and `reset()` is synchronous, so `trackEvent` passes the current user and
+  device id as event options. That is what lets `user_logged_out` and `account_deleted`, tracked
+  immediately before `resetUser()`, stay attributed to the account that ended.
 - **A new event is a doc change in the same PR**: add the row here and, if it introduces a
   property name, the glossary entry. The guard test fails otherwise.
 - **The privacy label follows the catalogue.** "Usage Data: Product Interaction" and
@@ -40,9 +47,9 @@ source changes. `undefined` values are skipped, so a partial refresh never clear
 | `is_parent` | boolean | role `PARENT`, or any guardian link (a coach can also be a parent) | same |
 | `is_player` | boolean | role `PLAYER` | same |
 | `app_version` | string | `expoConfig.version` (the binary's version; an OTA keeps it) | same |
-| `is_head_coach` | boolean | a `HEAD_COACH` staff row of the caller's on any listed team | every unfiltered first page of `GET /teams` (`hooks/useTeams.ts#reportTeamUserProperties`) |
+| `is_head_coach` | boolean | a `HEAD_COACH` staff row of the caller's on any team | an unfiltered first page of `GET /teams` that holds every team (`teams.length >= total`, e.g. the `TEAMS_MAX_LIMIT` picker fetch), via `hooks/useTeams.ts#reportTeamUserProperties`; a partial page reports only the count, so the flag never flaps between page sizes |
 | `is_assistant_coach` | boolean | an `ASSISTANT_COACH` staff row, same source | same |
-| `team_count` | number | `total` of the unfiltered `GET /teams` | same |
+| `team_count` | number | `total` of the unfiltered `GET /teams` | every unfiltered first page |
 | `tier` | `FREE` / `PREMIUM` / `LEAGUE` | `GET /auth/me/usage` (`hooks/useUsage.ts`) | every usage fetch |
 
 Logout (`clearSession`) calls `resetUser()`, which drops the user id and starts a new anonymous

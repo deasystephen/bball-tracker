@@ -19,6 +19,8 @@ const mockAmplitude = {
   setUserId: jest.fn(),
   identify: jest.fn(),
   reset: jest.fn(),
+  getUserId: jest.fn(),
+  getDeviceId: jest.fn(),
   Identify: jest.fn().mockImplementation(() => ({
     set: jest.fn(),
   })),
@@ -49,9 +51,14 @@ function trackingOptions(): AnalyticsModule['AMPLITUDE_TRACKING_OPTIONS'] {
   return load().AMPLITUDE_TRACKING_OPTIONS;
 }
 
+/** What every sent event carries in its options: the identity at call time. */
+const IDENTITY = { user_id: 'u1', device_id: 'd1' };
+
 async function loadInitialized(): Promise<AnalyticsModule> {
   mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
   mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
+  mockAmplitude.getUserId.mockReturnValue('u1');
+  mockAmplitude.getDeviceId.mockReturnValue('d1');
   const mod = load();
   await mod.initAnalytics();
   return mod;
@@ -92,14 +99,14 @@ describe('analytics service', () => {
 
     // After successful init, trackEvent should delegate.
     trackEvent(AnalyticsEvents.TEAM_DELETED, { team_id: 't1' });
-    expect(mockAmplitude.track).toHaveBeenCalledWith('team_deleted', { team_id: 't1' });
+    expect(mockAmplitude.track).toHaveBeenCalledWith('team_deleted', { team_id: 't1' }, IDENTITY);
   });
 
   describe('typed event catalogue (#616)', () => {
     it('sends an event without properties with `undefined` properties', async () => {
       const { trackEvent, AnalyticsEvents } = await loadInitialized();
       trackEvent(AnalyticsEvents.APP_OPENED);
-      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined);
+      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined, IDENTITY);
     });
 
     it('passes the typed properties through untouched', async () => {
@@ -110,12 +117,11 @@ describe('analytics service', () => {
         shot_made: true,
         shot_points: 3,
       });
-      expect(mockAmplitude.track).toHaveBeenCalledWith('game_event_recorded', {
-        game_id: 'g1',
-        event_type: 'SHOT',
-        shot_made: true,
-        shot_points: 3,
-      });
+      expect(mockAmplitude.track).toHaveBeenCalledWith(
+        'game_event_recorded',
+        { game_id: 'g1', event_type: 'SHOT', shot_made: true, shot_points: 3 },
+        IDENTITY
+      );
     });
 
     it('rejects an uncatalogued name and wrong properties at compile time', async () => {
@@ -136,6 +142,81 @@ describe('analytics service', () => {
       for (const name of Object.values(AnalyticsEvents)) {
         expect(name).toMatch(/^[a-z]+(_[a-z]+)+$/);
       }
+    });
+  });
+
+  describe('identity at call time', () => {
+    it('stamps the user and device id the moment the event is tracked, so a following reset cannot steal it', async () => {
+      const { trackEvent, resetUser, AnalyticsEvents } = await loadInitialized();
+      // The real SDK clears these synchronously on reset(); the mock mirrors that.
+      mockAmplitude.reset.mockImplementationOnce(() => {
+        mockAmplitude.getUserId.mockReturnValue(undefined);
+        mockAmplitude.getDeviceId.mockReturnValue('fresh-device');
+      });
+
+      trackEvent(AnalyticsEvents.USER_LOGGED_OUT, { reason: 'user' });
+      resetUser();
+
+      expect(mockAmplitude.track).toHaveBeenCalledWith('user_logged_out', { reason: 'user' }, IDENTITY);
+      trackEvent(AnalyticsEvents.APP_OPENED);
+      expect(mockAmplitude.track).toHaveBeenLastCalledWith('app_opened', undefined, { device_id: 'fresh-device' });
+    });
+
+    it('sends no identity fields when the SDK has none yet', async () => {
+      const { trackEvent, AnalyticsEvents } = await loadInitialized();
+      mockAmplitude.getUserId.mockReturnValue(undefined);
+      mockAmplitude.getDeviceId.mockReturnValue(undefined);
+      trackEvent(AnalyticsEvents.APP_OPENED);
+      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined, {});
+    });
+  });
+
+  describe('events before init', () => {
+    it('are held and sent in order once init succeeds (the launch screen_viewed is not lost)', async () => {
+      mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+      mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
+      mockAmplitude.getDeviceId.mockReturnValue('d1');
+      const { initAnalytics, trackEvent, AnalyticsEvents } = load();
+
+      trackEvent(AnalyticsEvents.SCREEN_VIEWED, { screen: '/', params_kind: 'none' });
+      trackEvent(AnalyticsEvents.SCREEN_VIEWED, { screen: '/(tabs)/home', params_kind: 'none' });
+      expect(mockAmplitude.track).not.toHaveBeenCalled();
+
+      await initAnalytics();
+      expect(mockAmplitude.track.mock.calls.map((call) => call[1])).toEqual([
+        { screen: '/', params_kind: 'none' },
+        { screen: '/(tabs)/home', params_kind: 'none' },
+      ]);
+    });
+
+    it('are dropped when there is no key, and when init fails', async () => {
+      const first = load();
+      first.trackEvent(first.AnalyticsEvents.APP_OPENED);
+      await first.initAnalytics();
+      expect(mockAmplitude.track).not.toHaveBeenCalled();
+      // After the decision nothing is buffered either.
+      first.trackEvent(first.AnalyticsEvents.APP_OPENED);
+      expect(mockAmplitude.track).not.toHaveBeenCalled();
+
+      jest.resetModules();
+      mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+      mockAmplitude.init.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) });
+      const second = load();
+      second.trackEvent(second.AnalyticsEvents.APP_OPENED);
+      await second.initAnalytics();
+      expect(mockAmplitude.track).not.toHaveBeenCalled();
+    });
+
+    it('keep only the newest PRE_INIT_BUFFER_LIMIT events', async () => {
+      mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+      mockAmplitude.init.mockReturnValueOnce({ promise: Promise.resolve() });
+      const { initAnalytics, trackEvent, AnalyticsEvents, PRE_INIT_BUFFER_LIMIT } = load();
+      for (let i = 0; i < PRE_INIT_BUFFER_LIMIT + 5; i++) {
+        trackEvent(AnalyticsEvents.SCREEN_VIEWED, { screen: `/s${i}`, params_kind: 'none' });
+      }
+      await initAnalytics();
+      expect(mockAmplitude.track).toHaveBeenCalledTimes(PRE_INIT_BUFFER_LIMIT);
+      expect(mockAmplitude.track.mock.calls[0][1]).toEqual({ screen: '/s5', params_kind: 'none' });
     });
   });
 

@@ -221,10 +221,17 @@ async function fetchTeamsPage(filters?: TeamFilters): Promise<TeamsResponse> {
  * Amplitude user properties the teams list is the source for (#616): how many
  * teams the caller can see and which staff roles they hold. List items carry
  * the caller's own staff row only, so this never reads anyone else's role.
+ * The role flags are derived only from a page that holds every team
+ * (`teams.length >= total`): a 20-row page could miss the one team where the
+ * caller is head coach, and the flag would flap between fetches.
  */
 export function reportTeamUserProperties(teams: Team[], total: number): void {
   const userId = useAuthStore.getState().user?.id;
   if (!userId) return;
+  if (teams.length < total) {
+    setUserProperties({ team_count: total });
+    return;
+  }
   const roleTypes = new Set(
     teams.flatMap((team) => team.staff ?? []).filter((s) => s.userId === userId).map((s) => s.role.type)
   );

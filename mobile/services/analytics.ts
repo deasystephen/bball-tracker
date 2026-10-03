@@ -185,6 +185,23 @@ export const AMPLITUDE_TRACKING_OPTIONS: Required<amplitude.Types.ReactNativeTra
 };
 
 let initialized = false;
+/** True until `initAnalytics` has decided (key missing, init failed, or ready). */
+let initPending = true;
+
+interface BufferedEvent {
+  event: AnalyticsEvent;
+  properties: Record<string, AnalyticsValue> | undefined;
+}
+
+/**
+ * Events tracked before init has resolved. The root layout's children mount
+ * (and the first `screen_viewed` fires) before its own `initAnalytics` effect
+ * runs, and `amplitude.init` takes a moment, so the launch route would be lost
+ * without this. Bounded; flushed in order once init succeeds; dropped when
+ * there is no key or init fails.
+ */
+export const PRE_INIT_BUFFER_LIMIT = 50;
+let preInitBuffer: BufferedEvent[] = [];
 
 /**
  * Initialize Amplitude analytics.
@@ -194,6 +211,8 @@ export async function initAnalytics(): Promise<void> {
   const apiKey = Constants.expoConfig?.extra?.amplitudeApiKey;
   if (!apiKey) {
     log.debug('[Analytics] No Amplitude API key configured, skipping initialization');
+    initPending = false;
+    preInitBuffer = [];
     return;
   }
 
@@ -202,8 +221,14 @@ export async function initAnalytics(): Promise<void> {
       trackingOptions: AMPLITUDE_TRACKING_OPTIONS,
     }).promise;
     initialized = true;
+    const buffered = preInitBuffer;
+    preInitBuffer = [];
+    for (const { event, properties } of buffered) send(event, properties);
   } catch (error) {
     log.warn('[Analytics] Failed to initialize Amplitude', { error });
+    preInitBuffer = [];
+  } finally {
+    initPending = false;
   }
 }
 
@@ -213,11 +238,33 @@ export async function initAnalytics(): Promise<void> {
  * throws: analytics cannot crash the app.
  */
 export function trackEvent<E extends AnalyticsEvent>(event: E, ...args: PropsArgs<E>): void {
-  if (!initialized) return;
-
   const properties = args[0] as Record<string, AnalyticsValue> | undefined;
+  if (initialized) {
+    send(event, properties);
+    return;
+  }
+  if (!initPending) return;
+  if (preInitBuffer.length >= PRE_INIT_BUFFER_LIMIT) preInitBuffer.shift();
+  preInitBuffer.push({ event, properties });
+}
+
+/**
+ * The identity at the moment of the call. `amplitude.track` only enqueues;
+ * the SDK stamps `user_id` / `device_id` on a later tick, and `reset()` is
+ * synchronous. Without this, `user_logged_out` and `account_deleted`, which
+ * are tracked immediately before `resetUser()`, would land on the fresh
+ * anonymous identity. An explicit id in the event options wins over the
+ * context plugin's.
+ */
+function identityNow(): { user_id?: string; device_id?: string } {
+  const user_id = amplitude.getUserId();
+  const device_id = amplitude.getDeviceId();
+  return { ...(user_id ? { user_id } : {}), ...(device_id ? { device_id } : {}) };
+}
+
+function send(event: AnalyticsEvent, properties: Record<string, AnalyticsValue> | undefined): void {
   try {
-    amplitude.track(event, properties);
+    amplitude.track(event, properties, identityNow());
   } catch (error) {
     log.warn('[Analytics] Failed to track event', { event, error });
   }
