@@ -158,6 +158,8 @@ export class GameService {
       include: GAME_INCLUDE,
     });
 
+    logger.info('Game created', { gameId: game.id, teamId: game.teamId, status: game.status, userId });
+
     return game;
   }
 
@@ -415,12 +417,34 @@ export class GameService {
       include: GAME_INCLUDE,
     });
 
+    // One line per status transition, named for the two that matter to an
+    // operator (#617). Written before finalization so the two lines read in
+    // order when stats take a while.
+    if (updateData.status !== undefined && updateData.status !== game.status) {
+      const transition =
+        updatedGame.status === 'IN_PROGRESS'
+          ? 'Game started'
+          : updatedGame.status === 'FINISHED'
+            ? 'Game finished'
+            : 'Game status changed';
+      logger.info(transition, {
+        gameId,
+        teamId: game.teamId,
+        previousStatus: game.status,
+        status: updatedGame.status,
+        userId,
+      });
+    }
+
     // Finalize stats when game is marked as FINISHED
     if (updateData.status === 'FINISHED') {
       try {
         await StatsService.finalizeGameStats(gameId);
       } catch (error) {
-        logger.error('Error finalizing game stats', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Error finalizing game stats', {
+          gameId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         // Don't fail the update if stats calculation fails
       }
     }
@@ -483,6 +507,8 @@ export class GameService {
     await prisma.game.delete({
       where: { id: gameId },
     });
+
+    logger.info('Game deleted', { gameId, teamId: game.teamId, status: game.status, userId });
 
     return { success: true };
   }

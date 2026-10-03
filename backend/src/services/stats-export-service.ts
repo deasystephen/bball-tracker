@@ -12,6 +12,7 @@ import PDFDocument from 'pdfkit';
 import type { Game, Team } from '@prisma/client';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { logger } from '../utils/logger';
 import { canAccessTeam } from '../utils/permissions';
 import { StatsService } from './stats-service';
 
@@ -189,6 +190,8 @@ export class StatsExportService {
 
     const filename = `${slugify(game.team.name)}-${formatDateForFilename(game.date)}-${slugify(game.opponent)}-events.csv`;
 
+    logger.info('Export generated', { kind: 'game-events-csv', gameId, teamId: game.teamId, userId });
+
     return {
       filename,
       stream: stringifier,
@@ -306,6 +309,13 @@ export class StatsExportService {
 
     const filename = `${slugify(boxScore.team.name)}-${formatDateForFilename(gameDate)}-${slugify(boxScore.game.opponent)}-boxscore.pdf`;
 
+    logger.info('Export generated', {
+      kind: 'game-boxscore-pdf',
+      gameId,
+      teamId: boxScore.team.id,
+      userId,
+    });
+
     return {
       filename,
       stream: doc as unknown as Readable,
@@ -389,6 +399,8 @@ export class StatsExportService {
     stringifier.end();
 
     const filename = `${slugify(team.name)}-season-stats.csv`;
+
+    logger.info('Export generated', { kind: 'team-season-csv', teamId, userId });
 
     return {
       filename,

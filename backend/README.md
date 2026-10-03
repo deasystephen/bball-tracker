@@ -81,7 +81,21 @@ backend/
 
 ## Environment Variables
 
-See `env.example` for required environment variables.
+See `env.example` for required environment variables. Production values live in
+`infra/task-definition.json`, the only source of truth for the deployed task.
+
+| Variable | Purpose |
+| --- | --- |
+| `LOG_LEVEL` | Log threshold, `debug` / `info` / `warn` / `error` (default `info`). Read per call; set `debug` on the task briefly for a diagnosis, then revert. |
+| `NODE_ENV` | `development` enables dev-login tokens and stack traces in error bodies; never affects log output. |
+
+## Logging
+
+Every line is one JSON object (`utils/logger.ts`), forwarded from CloudWatch to Datadog
+(`service:bball-tracker-api`). Inside a request every line carries `requestId` and, once the
+bearer token resolved, `userId`. Domain events (team created, invitation accepted, game
+finished, stats finalized, …) are logged at `info` with ids only; see
+`docs/architecture/backend-services.md#logging`.
 
 ## Database
 

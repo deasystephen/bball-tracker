@@ -14,8 +14,11 @@ import {
   MAX_AUTH_REFRESHES,
   MAX_UNAVAILABLE_RETRIES,
   BASE_BACKOFF_MS,
+  UNAUTHORIZED_MESSAGE,
+  SERVICE_UNAVAILABLE_MESSAGE,
 } from '../../services/socket';
 import { refreshAccessToken } from '../../services/api-client';
+import { addBreadcrumb } from '../../services/sentry';
 
 jest.mock('socket.io-client', () => ({
   io: jest.fn(),
@@ -38,8 +41,14 @@ jest.mock('../../services/api-client', () => ({
   refreshAccessToken: jest.fn(),
 }));
 
+jest.mock('../../services/sentry', () => ({
+  addBreadcrumb: jest.fn(),
+}));
+
 const mockedIo = io as jest.Mock;
 const mockedRefresh = refreshAccessToken as jest.Mock;
+const mockedCrumb = addBreadcrumb as jest.Mock;
+const socketCrumbs = () => mockedCrumb.mock.calls.map((c) => c[0]).filter((c) => c.category === 'socket');
 
 interface FakeSocket {
   handlers: Record<string, ((...args: unknown[]) => void)[]>;
@@ -70,6 +79,61 @@ describe('socket wrapper', () => {
     resetSocket();
     mockedIo.mockReset();
     mockedRefresh.mockReset();
+    mockedCrumb.mockReset();
+  });
+
+  describe('breadcrumbs (#617)', () => {
+    it('crumbs connect, reconnect and disconnect with socket.io reasons only', () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      getSocket();
+
+      fake.fire('connect');
+      fake.fire('disconnect', 'transport close');
+      fake.fire('connect');
+
+      expect(socketCrumbs()).toEqual([
+        { category: 'socket', message: 'connected', level: 'info', data: { recovered: false } },
+        { category: 'socket', message: 'disconnected', level: 'warning', data: { reason: 'transport close' } },
+        { category: 'socket', message: 'reconnected', level: 'info', data: { recovered: false } },
+      ]);
+    });
+
+    it('crumbs a handshake rejection and each recovery decision', async () => {
+      jest.useFakeTimers();
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      getSocket();
+      mockedRefresh.mockResolvedValueOnce({ status: 'ok', accessToken: 'new' });
+
+      fake.fire('connect_error', new Error(UNAUTHORIZED_MESSAGE));
+      await Promise.resolve();
+      await Promise.resolve();
+      fake.fire('connect_error', new Error(SERVICE_UNAVAILABLE_MESSAGE));
+
+      expect(socketCrumbs().map((c) => [c.message, c.level, c.data])).toEqual([
+        ['connect_error', 'warning', { message: UNAUTHORIZED_MESSAGE }],
+        ['recovery: refreshing token', 'info', { attempt: 1 }],
+        ['connect_error', 'warning', { message: SERVICE_UNAVAILABLE_MESSAGE }],
+        ['recovery: backing off', 'info', { reason: SERVICE_UNAVAILABLE_MESSAGE, attempt: 1, delayMs: BASE_BACKOFF_MS }],
+      ]);
+      jest.useRealTimers();
+    });
+
+    it('resetSocket forgets the connection history so the next socket crumbs "connected"', () => {
+      const first = makeFake();
+      mockedIo.mockReturnValue(first);
+      getSocket();
+      first.fire('connect');
+      resetSocket();
+
+      const second = makeFake();
+      mockedIo.mockReturnValue(second);
+      getSocket();
+      second.fire('connect');
+
+      expect(socketCrumbs().map((c) => c.message)).toEqual(['connected', 'connected']);
+    });
   });
 
   it('lazily constructs a single socket', () => {

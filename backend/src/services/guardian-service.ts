@@ -377,6 +377,16 @@ export class GuardianService {
       emailSent = false;
     }
 
+    logger.info('Guardian invitation sent', {
+      invitationId: invitation.id,
+      teamId,
+      childId: playerId,
+      parentId: parent.id,
+      invitedById: userId,
+      userId,
+      emailSent,
+    });
+
     return { ...invitation, emailSent };
   }
 
@@ -447,6 +457,15 @@ export class GuardianService {
       if (link.isPrimary) {
         await GuardianService.promoteNextPrimary(tx, playerId);
       }
+    });
+
+    logger.info('Guardian unlinked', {
+      guardianId: link.id,
+      teamId,
+      childId: playerId,
+      parentId: guardianUserId,
+      wasPrimary: link.isPrimary,
+      userId,
     });
   }
 
@@ -538,11 +557,20 @@ export class GuardianService {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);
     }
 
-    return prisma.guardianInvitation.update({
+    const rejected = await prisma.guardianInvitation.update({
       where: { id: invitation.id },
       data: { status: 'REJECTED' },
       select: GUARDIAN_INVITATION_SELECT,
     });
+
+    logger.info('Guardian invitation declined', {
+      invitationId: invitation.id,
+      teamId: invitation.teamId,
+      childId: invitation.childId,
+      userId,
+    });
+
+    return rejected;
   }
 
   /** Look up a guardian invitation by id and assert the caller is its addressee. */
@@ -659,6 +687,16 @@ export class GuardianService {
           await tx.user.update({ where: { id: parentId }, data: { role: 'PARENT' } });
         }
       }
+
+      logger.info('Guardian linked', {
+        invitationId: invitation.id,
+        teamId: invitation.teamId,
+        guardianId: guardian.id,
+        parentId: guardian.parentId,
+        childId: guardian.childId,
+        isPrimary: guardian.isPrimary,
+        linkExisted: !!existingLink,
+      });
 
       return {
         kind: 'guardian' as const,

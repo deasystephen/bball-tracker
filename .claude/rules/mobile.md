@@ -21,6 +21,10 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
 - Auth store: `updateUser` for edits, `setUser` only at login; prefer selectors over a bare
   `useAuthStore()`. New unauthenticated endpoints go into `PUBLIC_PATHS` in `services/api-client.ts`.
 - Native modules behind `requireOptionalNativeModule`; upload parts are `expo-file-system` `File`s.
+- No bare `console.*` in app code (ESLint `no-console`; allowed in `services/log.ts`, `__tests__/`,
+  `scripts/`): use `services/log.ts` (`log.debug/info` dev-only, `log.warn/error` also breadcrumb).
+  Sentry tags and breadcrumbs take URLs only as `endpointPattern(url)`; errors a user cannot act on
+  (network, 5xx) are captured by the api-client, 4xx are not. Detail: `docs/architecture/mobile-app.md`.
 - Screen tests render the real i18n instance; the brand guard fails on retired names anywhere in
   mobile source, locales or `.maestro/`, comments included.
 - Packages with native code (`expo-*`, Sentry, Amplitude, `react-native-*`, `react`) move only

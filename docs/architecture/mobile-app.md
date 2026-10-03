@@ -269,6 +269,37 @@ never inline a role check in a screen:
   taps meant for them for its whole 3s lifetime (#464 — surfaced as "back is a no-op after creating a team").
   Don't add touch handlers to a toast; anything tappable belongs elsewhere.
 
+### Mobile logging and error reporting (#617)
+- **`services/log.ts` is the app's logger.** `log.debug` / `log.info` print to the Metro console in
+  development and do nothing in a release build; `log.warn` / `log.error` also leave a Sentry
+  breadcrumb (category `log`) once Sentry has initialized. Bare `console.*` anywhere else in app
+  code is an ESLint error (`no-console`; allowed only in `services/log.ts`, `__tests__/` and
+  `scripts/`). The module imports nothing, so `services/sentry.ts` and `services/analytics.ts` log
+  through it during their own init; Sentry installs the breadcrumb sink (`setLogBreadcrumbSink`)
+  after `Sentry.init` succeeds. Pass an `Error` under `data.error`; the sink keeps its name and
+  message only.
+- **Every API request leaves an `http` breadcrumb** (`services/api-client.ts#observeResponse` /
+  `observeError`, registered after the error-normalizing interceptor and before the 401 handler):
+  method, the redacted route pattern, `status_code`, `duration`. **Captured** with tags
+  `endpoint_pattern` and `status`: a network failure (no response, `status: 'network'`, axios `code`
+  in context) and any 5xx. A 4xx is the user's own outcome and is a breadcrumb only; an axios
+  cancellation (`ERR_CANCELED`) is neither. A `NoSessionError` (#582) is captured **once per endpoint
+  pattern per session end** (keyed on `getLogoutEpoch()`), so a screen that retries after sign-out
+  reports one event, not a storm; every refusal still leaves a breadcrumb.
+- **`endpointPattern(url)`** (`services/sentry.ts`) is the only shape a URL takes in a tag or
+  breadcrumb: `redactUrl` first, then scheme, host and query dropped, then every UUID, cuid or
+  numeric segment collapsed to `:id` (`/api/v1/teams/:id/games/:id`), so one tag value groups a
+  route. `addBreadcrumb` redacts eagerly as well as in `beforeSend`: the message and every string in
+  the data bag go through `redactUrl` and the key scrub, so a crumb never holds a token, an OAuth
+  code or an email even before it is sent. `__tests__/services/sentry.test.ts`,
+  `api-client-observability.test.ts` and `socket.test.ts` assert the absence of each.
+- **Socket breadcrumbs** (`services/socket.ts`, category `socket`): `connected` / `reconnected`
+  (with socket.io's `recovered` flag), `disconnected` (reason), `connect_error` (message) and every
+  recovery decision (refreshing the token, backing off, abandoning). Messages are socket.io's fixed
+  strings; no URL or token is involved.
+- Jest mocks `@sentry/react-native` globally (`jest.setup.js`); a suite that asserts on the SDK
+  installs its own mock, as `sentry.test.ts` does.
+
 ## Analytics tracking options (#559)
 
 `mobile/services/analytics.ts` passes `AMPLITUDE_TRACKING_OPTIONS` to `amplitude.init`; the SDK's

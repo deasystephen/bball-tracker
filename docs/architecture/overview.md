@@ -105,21 +105,41 @@ The Hooplings application is a single containerized API backed by PostgreSQL, wi
 
 ## Scalability
 
-- **Horizontal Scaling**: ECS Fargate auto-scaling based on load
-- **Database**: RDS read replicas for read-heavy operations
-- **Caching**: Redis for frequently accessed data
-- **CDN**: CloudFront for static asset delivery
-- **Load Balancing**: Application Load Balancer distributes traffic
+- **Single replica by design**: Socket.io rooms and rate-limit counters live in process memory, so the
+  API runs one ECS task (`MAX_REPLICAS=1`, autoscaling `max_capacity` validated to 1). The Redis
+  adapter (#452) comes before any scale-out.
+- **Database**: one RDS PostgreSQL instance, no read replicas.
+- **Caching**: Redis (ElastiCache, single node) as a best-effort cache that fails open.
+- **Load Balancing**: Application Load Balancer in front of the one task.
 
 ## Monitoring & Logging
 
-- **AWS CloudWatch**: Application logs and metrics
-- **Error Tracking**: Structured error logging
-- **Performance Monitoring**: API response times, database query performance
+What exists today (as built; the runbook is `../runbooks/on-call.md`):
+
+- **Logs**: the API writes one JSON object per line (`backend/src/utils/logger.ts`) to stdout; the
+  awslogs driver ships them to CloudWatch (`/ecs/bball-tracker-production`) and `infra/datadog.tf`
+  forwards them to Datadog. Query `service:bball-tracker-api`; every line inside a request carries
+  `requestId` and `userId`, domain events carry entity ids, and `LOG_LEVEL` (default `info`, in
+  `infra/task-definition.json`) is the threshold. Detail: `backend-services.md#logging`.
+- **Errors**: Sentry, backend project (Express error handler, health check, socket auth) and mobile
+  project (`ErrorBoundary`, auth and onboarding flows, and since #617 every network failure and 5xx
+  from the API client, tagged `endpoint_pattern` / `status`, plus http, socket and log breadcrumbs).
+  URLs are redacted on both sides before they leave the process.
+- **Alerting**: fifteen CloudWatch alarms (`infra/`), named `bball-tracker-production-*`, emailing
+  an SNS subscription: API down and 5xx, latency, task count, CPU and memory, RDS storage,
+  connections and CPU, and four SES email alarms (bounce and complaint rates, the events queue,
+  #449). Nothing watches Redis. Sentry has its own alert rules. **Datadog has logs and no monitors**: its default host monitors were deleted
+  because Fargate never emits `system.*` metrics (`../runbooks/on-call.md#datadog-has-logs-and-no-monitors`).
+- **Health**: `GET /health` pings the database and reports the running `commit`; ECS recycles a
+  task that fails it three times.
+- **Mobile**: `services/log.ts` is the app's logger (console in development, Sentry breadcrumbs
+  for warn/error); bare `console.*` is a lint error. Behavioural analytics is Amplitude (#616),
+  separate from this.
 
 ## Deployment
 
-- **Development**: Local Docker Compose
-- **Staging**: AWS ECS with staging RDS instance
-- **Production**: AWS ECS Fargate with multi-AZ RDS, ElastiCache cluster
+- **Development**: local Docker Compose (PostgreSQL + Redis), backend and app run on the host.
+- **Production**: a single AWS ECS Fargate task behind an ALB, one RDS PostgreSQL instance and a
+  single-node ElastiCache Redis. There is no staging environment; a push to `main` that touches
+  `backend/`, `infra/` or `docker/` deploys (`../deployment/ecs-deploys.md`).
 

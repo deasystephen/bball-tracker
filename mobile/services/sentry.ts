@@ -8,6 +8,7 @@
 
 import * as Sentry from '@sentry/react-native';
 import Constants from 'expo-constants';
+import { log, setLogBreadcrumbSink, type LogData } from './log';
 
 let initialized = false;
 
@@ -103,6 +104,37 @@ export function redactUrl(url: string): string {
   return redactedQs ? `${redactedPath}?${redactedQs}` : redactedPath;
 }
 
+/**
+ * Collapse an API URL to the route it hit, for Sentry tags and breadcrumbs
+ * (#617): secrets redacted first (`redactUrl`), then the scheme, host and
+ * query dropped and every id-looking segment (UUID, cuid, number) replaced
+ * with `:id`, so `/teams/4f1c…/games/9a2b…` becomes `/teams/:id/games/:id`
+ * and one tag value groups every request to that route. Exported for the
+ * api-client and tests.
+ */
+export function endpointPattern(url: string | undefined): string {
+  if (!url) return '';
+  const redacted = redactUrl(url);
+  const hashIdx = redacted.indexOf('#');
+  const noHash = hashIdx === -1 ? redacted : redacted.slice(0, hashIdx);
+  const qIdx = noHash.indexOf('?');
+  const base = qIdx === -1 ? noHash : noHash.slice(0, qIdx);
+  const schemeMatch = base.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*(\/.*)?$/i);
+  const path = schemeMatch ? schemeMatch[1] ?? '/' : base;
+  return path
+    .split('/')
+    .map((segment) => (looksLikeId(segment) ? ':id' : segment))
+    .join('/');
+}
+
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CUID_SEGMENT = /^c[a-z0-9]{20,}$/i;
+const NUMERIC_SEGMENT = /^\d+$/;
+
+function looksLikeId(segment: string): boolean {
+  return UUID_SEGMENT.test(segment) || CUID_SEGMENT.test(segment) || NUMERIC_SEGMENT.test(segment);
+}
+
 /** Keys in breadcrumb/extra data that hold URLs and need value-level redaction. */
 const URL_DATA_KEYS = ['url', 'http.url', 'http.target', 'url.full', 'from', 'to'];
 
@@ -110,6 +142,23 @@ function scrubDataBag<T>(data: T): T {
   const out = scrub(data) as Record<string, unknown>;
   for (const key of URL_DATA_KEYS) {
     if (typeof out[key] === 'string') out[key] = redactUrl(out[key] as string);
+  }
+  return out as T;
+}
+
+/**
+ * Run `redactUrl` over every string in a data bag, whatever its key (#617).
+ * App breadcrumbs carry an Error's message under `error.message`, and a
+ * network library's message can quote the failing URL; the key-based scrub
+ * never looks there. `redactUrl` on a plain sentence is a no-op.
+ */
+function redactStrings<T>(input: T): T {
+  if (typeof input === 'string') return redactUrl(input) as unknown as T;
+  if (!input || typeof input !== 'object') return input;
+  if (Array.isArray(input)) return (input as unknown[]).map(redactStrings) as unknown as T;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    out[key] = redactStrings(value);
   }
   return out as T;
 }
@@ -171,9 +220,7 @@ export function initSentry(): void {
   const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
   const dsn = (extra?.sentryDsn as string | undefined) || process.env.SENTRY_DSN;
   if (!dsn) {
-    if (__DEV__) {
-      console.log('[Sentry] No DSN configured, skipping initialization');
-    }
+    log.debug('[Sentry] No DSN configured, skipping initialization');
     return;
   }
 
@@ -202,10 +249,12 @@ export function initSentry(): void {
       beforeSendTransaction: event => beforeSend(event as Sentry.Event) as typeof event,
     });
     initialized = true;
+    // From here on `log.warn` / `log.error` leave a breadcrumb (#617).
+    setLogBreadcrumbSink((level, message, data) =>
+      addBreadcrumb({ category: 'log', level, message, data })
+    );
   } catch (error) {
-    if (__DEV__) {
-      console.warn('[Sentry] Failed to initialize:', error);
-    }
+    log.warn('[Sentry] Failed to initialize', { error });
   }
 }
 
@@ -234,25 +283,62 @@ export function setSentryUser(userId: string | null): void {
   }
 }
 
+export type SentryTags = Record<string, string | number | boolean>;
+
 /**
  * Report a caught exception to Sentry.
  *
  * No-op until init has run (dev, or production without a DSN wired), so callers
  * can wire it into catch blocks unconditionally. Optional `context` is attached
  * as event contexts and runs through `beforeSend` scrubbing like any other event.
+ * `tags` are indexed in Sentry (e.g. `endpoint_pattern`, `status` from the
+ * api-client, #617): keep them low-cardinality and never put a secret in one.
  */
 export function captureException(
   error: unknown,
-  context?: Record<string, unknown>
+  context?: Record<string, unknown>,
+  tags?: SentryTags
 ): void {
   if (!initialized) return;
   try {
-    Sentry.captureException(
-      error,
-      context ? { contexts: { app: context } } : undefined
-    );
+    const hint: { contexts?: { app: Record<string, unknown> }; tags?: SentryTags } = {};
+    if (context) hint.contexts = { app: context };
+    if (tags) hint.tags = tags;
+    Sentry.captureException(error, context || tags ? hint : undefined);
   } catch {
     // swallow — error reporting must never throw into the caller's catch block
+  }
+}
+
+export interface AppBreadcrumb {
+  /** `http`, `socket`, `log`, … */
+  category: string;
+  message?: string;
+  level?: Sentry.SeverityLevel;
+  type?: string;
+  data?: LogData;
+}
+
+/**
+ * Leave a breadcrumb on the next event (#617). No-op until init has run.
+ *
+ * Redaction is applied here, eagerly, as well as in `beforeSend`: the message
+ * goes through `redactUrl` and the data bag through the same key scrub and
+ * URL-value redaction as event breadcrumbs, so a crumb never holds a token,
+ * an OAuth code or an email even before it is sent.
+ */
+export function addBreadcrumb(crumb: AppBreadcrumb): void {
+  if (!initialized) return;
+  try {
+    Sentry.addBreadcrumb({
+      category: crumb.category,
+      type: crumb.type,
+      level: crumb.level ?? 'info',
+      message: crumb.message === undefined ? undefined : redactUrl(crumb.message),
+      data: crumb.data ? redactStrings(scrubDataBag(crumb.data)) : undefined,
+    });
+  } catch {
+    // swallow — never throw into the caller
   }
 }
 

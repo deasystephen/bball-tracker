@@ -1,7 +1,8 @@
-import { create as createAxiosInstance, AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { create as createAxiosInstance, AxiosInstance, AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
 import { NO_SESSION_CODE, NoSessionError, isNoSessionError } from './no-session-error';
+import { addBreadcrumb, captureException, endpointPattern } from './sentry';
 
 /**
  * API client configuration. The base URL is decided in one place,
@@ -38,7 +39,101 @@ const isPublicPath = (url?: string): boolean =>
 
 export { NO_SESSION_CODE, NoSessionError, isNoSessionError };
 
-type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _startedAt?: number };
+
+/** Route pattern for a request config: base URL + url, redacted and id-collapsed. */
+const configPattern = (config?: Pick<InternalAxiosRequestConfig, 'baseURL' | 'url'>): string => {
+  if (!config?.url) return '';
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(config.url);
+  return endpointPattern(absolute || !config.baseURL ? config.url : `${config.baseURL}${config.url}`);
+};
+
+const configMethod = (config?: Pick<InternalAxiosRequestConfig, 'method'>): string =>
+  (config?.method ?? 'get').toUpperCase();
+
+const elapsed = (config?: RetriableConfig): number | undefined =>
+  config?._startedAt === undefined ? undefined : Date.now() - config._startedAt;
+
+/** Axios' own cancellation (`ERR_CANCELED`) is the caller's doing, never an incident. */
+const isCancellation = (error: AxiosError): boolean => error.code === 'ERR_CANCELED';
+
+/**
+ * `NoSessionError` is reported once per endpoint pattern per session end
+ * (#582 showed one screen can retry the same request dozens of times after
+ * sign-out): the first refusal of each pattern since the last logout is
+ * captured, the rest only leave a breadcrumb. `getLogoutEpoch` increments on
+ * every session end, so the next sign-out reports again.
+ */
+const noSessionReported = new Map<string, number>();
+
+const reportNoSession = (error: NoSessionError, pattern: string): void => {
+  const epoch = getLogoutEpoch();
+  if (noSessionReported.get(pattern) === epoch) return;
+  noSessionReported.set(pattern, epoch);
+  captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status: 'no_session' });
+};
+
+/**
+ * Observability interceptor (#617): a breadcrumb for every request (method,
+ * redacted route pattern, status, duration) and a captured exception for
+ * what the user cannot act on — a network failure or a 5xx. 4xx answers are
+ * the user's own outcome (403, 404, validation) and are breadcrumbs only.
+ * Everything passes through `endpointPattern`, so no token, OAuth code or
+ * email reaches Sentry.
+ */
+export const observeResponse = (response: AxiosResponse): AxiosResponse => {
+  const config = response.config as RetriableConfig | undefined;
+  addBreadcrumb({
+    category: 'http',
+    type: 'http',
+    data: {
+      method: configMethod(config),
+      url: configPattern(config),
+      status_code: response.status,
+      duration: elapsed(config),
+    },
+  });
+  return response;
+};
+
+export const observeError = (error: unknown): Promise<never> => {
+  if (isNoSessionError(error)) {
+    const pattern = configPattern(error.config);
+    addBreadcrumb({
+      category: 'http',
+      type: 'http',
+      level: 'warning',
+      data: { method: configMethod(error.config), url: pattern, reason: NO_SESSION_CODE },
+    });
+    reportNoSession(error, pattern);
+  } else if (isAxiosError(error)) {
+    const config = error.config as RetriableConfig | undefined;
+    const pattern = configPattern(config);
+    const status = error.response?.status;
+    addBreadcrumb({
+      category: 'http',
+      type: 'http',
+      level: status === undefined || status >= 500 ? 'error' : 'warning',
+      data: {
+        method: configMethod(config),
+        url: pattern,
+        status_code: status,
+        duration: elapsed(config),
+        ...(status === undefined ? { reason: error.code ?? 'network' } : {}),
+      },
+    });
+    if (status === undefined && !isCancellation(error)) {
+      captureException(
+        error,
+        { endpoint: pattern, code: error.code },
+        { endpoint_pattern: pattern, status: 'network' }
+      );
+    } else if (status !== undefined && status >= 500) {
+      captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status });
+    }
+  }
+  return Promise.reject(error);
+};
 
 /** True when the request went out carrying a bearer token. */
 const sentWithToken = (config?: RetriableConfig): boolean => {
@@ -205,6 +300,7 @@ const createApiClient = (): AxiosInstance => {
   // Add request interceptor to include auth token
   client.interceptors.request.use(
     (config) => {
+      (config as RetriableConfig)._startedAt = Date.now();
       const token = useAuthStore.getState().accessToken;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -227,6 +323,11 @@ const createApiClient = (): AxiosInstance => {
     (response) => response,
     (error: unknown) => Promise.reject(normalizeApiError(error))
   );
+
+  // Breadcrumbs + error capture (#617). After normalization so the captured
+  // error carries the server's message; before the 401 handler so a refresh
+  // and replay shows up as two crumbs.
+  client.interceptors.response.use(observeResponse, observeError);
 
   // Add response interceptor to handle errors
   client.interceptors.response.use(

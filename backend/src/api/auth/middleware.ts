@@ -6,6 +6,7 @@ import { Request, Response, NextFunction } from 'express';
 import { SubscriptionTier } from '@prisma/client';
 import { WorkOSService } from '../../services/workos-service';
 import { UnauthorizedError } from '../../utils/errors';
+import { setLogContextUser } from '../../utils/log-context';
 import prisma from '../../models';
 
 /**
@@ -76,6 +77,7 @@ export async function authenticate(
         }
 
         req.user = user;
+        setLogContextUser(user.id);
         return next();
       } catch (_e) {
         throw new UnauthorizedError('Invalid dev token');
@@ -108,8 +110,10 @@ export async function authenticate(
       throw new UnauthorizedError('User not found');
     }
 
-    // Attach user to request
+    // Attach user to request (and to the log context, so every line written
+    // while this request is handled carries the caller's id, #617).
     req.user = user;
+    setLogContextUser(user.id);
     next();
   } catch (error) {
     next(error);

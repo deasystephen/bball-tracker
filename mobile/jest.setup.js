@@ -257,6 +257,17 @@ jest.mock('@expo-google-fonts/oswald', () => ({
 // Note: TanStack Query is NOT mocked globally to allow proper hook testing
 // Individual component tests can mock it as needed
 
+// Mock the Sentry SDK (native-backed; Jest cannot parse it). `services/sentry.ts`
+// is imported by the api-client and the socket client since #617, so every
+// suite that uses the real api-client would otherwise load the SDK.
+// `__tests__/services/sentry.test.ts` installs its own mock and asserts on it.
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  setUser: jest.fn(),
+  captureException: jest.fn(),
+  addBreadcrumb: jest.fn(),
+}));
+
 // Mock API client
 jest.mock('./services/api-client', () => ({
   apiClient: {

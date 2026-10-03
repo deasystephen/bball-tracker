@@ -22,6 +22,11 @@ Loads when a file under `backend/` is read. The full as-built reference for each
 - URLs via `utils/urls.ts`, dates in email via `utils/format-date.ts`, brand via
   `mailer/templates/brand.ts`; every template ends with the shared footer and is listed in the
   mailer test's `renders`. Never log `req.originalUrl`; redact with `utils/redact.ts`.
+- Logging (`utils/logger.ts`, threshold `LOG_LEVEL`): a new service method that mutates data logs
+  one info-level domain event with ids only (never a name, email or token; `hashRecipient()` for an
+  address); a new external call (SES, S3, WorkOS, Redis) logs its failures at warn/error with the
+  failing operation named. `requestId` and `userId` arrive from the request context; do not thread
+  them through signatures. No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
 - Multi-step backfills are hand-written migrations; run `.github/scripts/migration-backfill-guard.sh`
   before pushing. Never edit a migration already on `main`.
 - Every endpoint change ships an API integration test (`tests/api/`) and a schema test

@@ -3,6 +3,7 @@
  */
 
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { logger } from '../../src/utils/logger';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
 import {
@@ -2140,10 +2141,27 @@ describe('TeamService', () => {
         );
         (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, staff: [], roles: [], members: [] });
 
+        const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
         await TeamService.createTeam(
           { name: team.name, seasonId: season.id, ageGroup: 'U14', gender: 'BOYS' },
           coach.id
         );
+
+        // The domain event carries ids only — never the team name or the
+        // coach's email (#617).
+        const created = infoSpy.mock.calls.find(([msg]) => msg === 'Team created');
+        expect(created?.[1]).toEqual(
+          expect.objectContaining({
+            teamId: team.id,
+            seasonId: season.id,
+            lineageId: 'lineage-new',
+            personalLeague: false,
+            userId: coach.id,
+          })
+        );
+        expect(JSON.stringify(created)).not.toContain(team.name);
+        expect(JSON.stringify(created)).not.toContain(coach.email);
+        infoSpy.mockRestore();
 
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         expect(mockPrisma.teamLineage.create).toHaveBeenCalledWith({ data: {}, select: { id: true } });

@@ -23,6 +23,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthActions } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
+import { log } from '../../services/log';
 import { spacing } from '../../theme';
 import { postLoginRoute } from '../../utils/role-onboarding';
 import { consumePendingLogin } from '../../utils/pkce';
@@ -92,7 +93,7 @@ export default function AuthCallbackScreen() {
         router.replace(await postLoginRoute(user));
       } catch (err) {
         captureException(err, { flow: 'auth-callback' });
-        console.error('Token exchange error:', err);
+        log.error('Token exchange error', { error: err });
         setExchangeError('Failed to complete sign in. Please try again.');
       }
     })();

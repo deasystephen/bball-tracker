@@ -6,6 +6,7 @@ import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
 import { captureException } from '../services/sentry';
+import { log } from '../services/log';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { borderRadius } from '../theme/border-radius';
@@ -84,7 +85,7 @@ export default function Login() {
     } catch (error) {
       awaitingBrowserRef.current = false;
       captureException(error, { flow: 'login-initiate' });
-      console.error('Login error:', error);
+      log.error('Login error', { error });
       Alert.alert('Error', 'Failed to initiate login. Please try again.');
       setIsLoading(false);
     }
@@ -98,7 +99,7 @@ export default function Login() {
       setDevUsers(response.data.users);
       setShowDevLogin(true);
     } catch (error) {
-      console.error('Error fetching dev users:', error);
+      log.error('Error fetching dev users', { error });
       Alert.alert('Error', 'Failed to load test users. Is the backend running?');
     } finally {
       setIsLoading(false);
@@ -118,7 +119,7 @@ export default function Login() {
 
       router.replace(await postLoginRoute(user));
     } catch (error) {
-      console.error('Dev login error:', error);
+      log.error('Dev login error', { error });
       Alert.alert('Error', 'Dev login failed. Please try again.');
     } finally {
       setIsLoading(false);
