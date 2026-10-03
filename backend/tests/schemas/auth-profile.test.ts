@@ -30,6 +30,15 @@ describe('updateProfileSchema', () => {
     expect(updateProfileSchema.safeParse({ name: 'A', profilePictureUrl: 'https://x.test/a.png' }).success).toBe(true);
   });
 
+  it('accepts notifyOnReplies alone, as a boolean only (#34)', () => {
+    const result = updateProfileSchema.safeParse({ notifyOnReplies: false });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ notifyOnReplies: false });
+    expect(updateProfileSchema.safeParse({ notifyOnReplies: true }).success).toBe(true);
+    expect(updateProfileSchema.safeParse({ notifyOnReplies: 'false' }).success).toBe(false);
+    expect(updateProfileSchema.safeParse({ notifyOnReplies: 0 }).success).toBe(false);
+  });
+
   it('rejects an empty object', () => {
     const result = updateProfileSchema.safeParse({});
     expect(result.success).toBe(false);

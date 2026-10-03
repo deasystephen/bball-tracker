@@ -60,6 +60,54 @@ describe('AnnouncementService', () => {
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
   });
 
+  describe('getAnnouncement (#34)', () => {
+    const stored = {
+      id: 'a-1',
+      teamId: 'team-1',
+      authorId: 'coach-1',
+      title: 'T',
+      body: 'B',
+      createdAt: new Date(),
+      author: { id: 'coach-1', name: 'Coach', email: 'coach@example.test' },
+      _count: { replies: 2 },
+    };
+
+    it('throws NotFoundError when the announcement does not exist', async () => {
+      (mockPrisma.announcement.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      try {
+        await AnnouncementService.getAnnouncement('missing', 'u-1');
+        throw new Error('expected rejection');
+      } catch (error) {
+        expectNotFoundError(error, 'Announcement not found');
+      }
+    });
+
+    it('throws ForbiddenError for a caller without access to the team', async () => {
+      (mockPrisma.announcement.findUnique as jest.Mock).mockResolvedValueOnce(stored);
+      setNoAccess();
+
+      try {
+        await AnnouncementService.getAnnouncement('a-1', 'u-1');
+        throw new Error('expected rejection');
+      } catch (error) {
+        expectForbiddenError(error);
+      }
+    });
+
+    it('returns the announcement with author and reply count for a caller with access', async () => {
+      (mockPrisma.announcement.findUnique as jest.Mock).mockResolvedValueOnce(stored);
+      setSystemAdmin();
+
+      const result = await AnnouncementService.getAnnouncement('a-1', 'admin-1');
+
+      expect(result).toEqual(stored);
+      expect(mockPrisma.announcement.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'a-1' }, include: expect.objectContaining({ _count: { select: { replies: true } } }) })
+      );
+    });
+  });
+
   describe('createAnnouncement', () => {
     it('throws NotFoundError when the team does not exist', async () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce(null);

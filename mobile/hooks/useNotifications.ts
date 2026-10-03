@@ -112,11 +112,17 @@ export function useNotificationSetup() {
       (response) => {
         const data = response.notification.request.content.data ?? {};
 
+        // An announcement (new post, or a reply to the user's own post, #34)
+        // opens its thread; the server sends teamId alongside announcementId.
+        const announcementPath =
+          data.teamId && data.announcementId ? `/teams/${data.teamId}/announcements/${data.announcementId}` : null;
         trackEvent(AnalyticsEvents.NOTIFICATION_OPENED, {
-          target: data.gameId ? 'game' : data.teamId ? 'team' : 'none',
+          target: data.gameId ? 'game' : announcementPath ? 'announcement' : data.teamId ? 'team' : 'none',
         });
         if (data.gameId) {
           router.push(`/games/${data.gameId}`);
+        } else if (announcementPath) {
+          router.push(announcementPath);
         } else if (data.teamId) {
           router.push(`/teams/${data.teamId}`);
         }

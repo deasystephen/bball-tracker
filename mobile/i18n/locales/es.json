@@ -10,7 +10,10 @@
     "success": "Éxito",
     "confirm": "Confirmar",
     "close": "Cerrar",
-    "invalidEmail": "Ingresa un correo electrónico válido"
+    "invalidEmail": "Ingresa un correo electrónico válido",
+    "justNow": "Ahora mismo",
+    "hoursAgo": "hace {{count}} h",
+    "yesterday": "Ayer"
   },
   "navigation": {
     "home": "Inicio",
@@ -174,5 +177,28 @@
       "menuManageGuardians": "Administrar tutores",
       "menuDeleteRecord": "Eliminar el registro de {{name}}"
     }
+  },
+  "announcements": {
+    "title": "Anuncio",
+    "listTitle": "Anuncios",
+    "replies": "Respuestas",
+    "replyCount_one": "{{count}} respuesta",
+    "replyCount_other": "{{count}} respuestas",
+    "noReplies": "Aún no hay respuestas",
+    "noRepliesMessage": "Sé el primero en responder.",
+    "replyPlaceholder": "Escribe una respuesta…",
+    "send": "Enviar respuesta",
+    "sending": "Enviando…",
+    "replyFailed": "No se pudo enviar tu respuesta",
+    "replyMenu": "Opciones de respuesta",
+    "deleteReply": "Eliminar respuesta",
+    "replyDeleted": "Respuesta eliminada",
+    "deleteFailed": "No se pudo eliminar la respuesta",
+    "loadError": "No se pudo cargar este anuncio",
+    "loadingMore": "Cargando más…",
+    "replyNotifications": "Notificaciones de respuestas",
+    "replyNotificationsOn": "Aviso y correo cuando alguien responde a tus anuncios",
+    "replyNotificationsOff": "Desactivadas",
+    "replyNotificationsFailed": "No se pudo guardar ese ajuste"
   }
 }

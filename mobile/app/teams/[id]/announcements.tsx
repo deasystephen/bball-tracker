@@ -29,21 +29,11 @@ import { useInfiniteAnnouncements, useCreateAnnouncement } from '../../../hooks/
 import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
 import { useAuthStore } from '../../../store/auth-store';
 import { useTheme } from '../../../hooks/useTheme';
+import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { formatRelativeTime } from '../../../utils/relative-time';
 import type { Announcement } from '../../../hooks/useAnnouncements';
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-  if (diffHours < 1) return 'Just now';
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffHours < 48) return 'Yesterday';
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
 
 export default function AnnouncementsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -52,6 +42,7 @@ export default function AnnouncementsScreen() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { t } = useTranslation();
 
   const [showCompose, setShowCompose] = useState(false);
   const [title, setTitle] = useState('');
@@ -96,8 +87,16 @@ export default function AnnouncementsScreen() {
     }
   };
 
+  // Each card opens its thread (#34); the reply count is the list's only
+  // hint of activity, the thread itself loads on the next screen.
   const renderItem = ({ item }: { item: Announcement }) => (
-    <Card variant="default" style={styles.announcementCard}>
+    <Card
+      variant="default"
+      style={styles.announcementCard}
+      onPress={() => router.push(`/teams/${id}/announcements/${item.id}`)}
+      accessibilityRole="button"
+      testID={`announcement-${item.id}`}
+    >
       <ThemedText variant="bodyBold">{item.title}</ThemedText>
       <ThemedText variant="body" style={styles.announcementBody}>
         {item.body}
@@ -107,7 +106,13 @@ export default function AnnouncementsScreen() {
           {item.author.name}
         </ThemedText>
         <ThemedText variant="footnote" color="textTertiary">
-          {formatDate(item.createdAt)}
+          {formatRelativeTime(item.createdAt, t)}
+        </ThemedText>
+      </View>
+      <View style={styles.replyCountRow}>
+        <Ionicons name="chatbubble-outline" size={14} color={colors.textSecondary} />
+        <ThemedText variant="footnote" color="textSecondary" style={styles.replyCountText}>
+          {t('announcements.replyCount', { count: item._count?.replies ?? 0 })}
         </ThemedText>
       </View>
     </Card>
@@ -161,7 +166,10 @@ export default function AnnouncementsScreen() {
               placeholder="Announcement title"
               value={title}
               onChangeText={setTitle}
+              testID="announcement-title-input"
             />
+            {/* testID: an empty multiline input is absent from the iOS
+                accessibility tree, so Maestro cannot find it by placeholder. */}
             <Input
               label="Message"
               placeholder="Write your announcement..."
@@ -169,6 +177,7 @@ export default function AnnouncementsScreen() {
               onChangeText={setBody}
               multiline
               numberOfLines={3}
+              testID="announcement-body-input"
             />
             <Button
               title="Post Announcement"
@@ -243,4 +252,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: spacing.md,
   },
+  replyCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  replyCountText: { marginLeft: spacing.xs },
 });

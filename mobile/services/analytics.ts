@@ -43,6 +43,8 @@ export const AnalyticsEvents = {
   GUARDIAN_INVITED: 'guardian_invited',
   GUARDIAN_REMOVED: 'guardian_removed',
   ANNOUNCEMENT_CREATED: 'announcement_created',
+  ANNOUNCEMENT_REPLY_CREATED: 'announcement_reply_created',
+  ANNOUNCEMENT_REPLY_DELETED: 'announcement_reply_deleted',
   LEAGUE_CREATED: 'league_created',
   LEAGUE_UPDATED: 'league_updated',
   LEAGUE_DELETED: 'league_deleted',
@@ -79,7 +81,12 @@ export interface AnalyticsEventProps {
   user_logged_in: undefined;
   user_logged_out: { reason: 'user' | 'session_expired' | 'account_deleted' };
   onboarding_step_completed: { step: 'name' | 'role'; role?: string };
-  profile_updated: { name_changed: boolean; photo_changed: boolean; photo_cleared: boolean };
+  profile_updated: {
+    name_changed: boolean;
+    photo_changed: boolean;
+    photo_cleared: boolean;
+    reply_notifications_changed: boolean;
+  };
   account_deleted: { erased: boolean };
   child_record_deleted: undefined;
   team_created: { team_id: string; league_scope: 'personal' | 'league'; has_bracket: boolean };
@@ -107,6 +114,8 @@ export interface AnalyticsEventProps {
   guardian_invited: { team_id: string; relationship: string };
   guardian_removed: { team_id: string };
   announcement_created: { team_id: string };
+  announcement_reply_created: { team_id: string; announcement_id: string };
+  announcement_reply_deleted: { team_id: string; announcement_id: string; own: boolean };
   league_created: { league_id: string };
   league_updated: { league_id: string };
   league_deleted: { league_id: string };
@@ -122,7 +131,7 @@ export interface AnalyticsEventProps {
   game_event_undone: { game_id: string; event_type?: string };
   rsvp_submitted: { game_id: string; status: string; on_behalf_of_child: boolean };
   push_permission_answered: { granted: boolean };
-  notification_opened: { target: 'game' | 'team' | 'none' };
+  notification_opened: { target: 'game' | 'announcement' | 'team' | 'none' };
   entitlement_denied: { endpoint_pattern: string; feature: string; current_tier: string; required_tier: string };
   error_shown: { code: string; status: number | null; endpoint_pattern: string };
 }

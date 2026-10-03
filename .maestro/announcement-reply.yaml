@@ -1,0 +1,79 @@
+appId: com.bballtracker.mobile
+---
+# Threaded replies on an announcement (#34): post an announcement as the
+# coach, open its thread, reply, see the count move, delete the reply.
+# Mutates data: the seed removes the "Reply Fixture" announcement (and its
+# replies, by cascade) on every run — re-seed before this flow.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- assertVisible: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "Announcements"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Announcements"
+
+# Post the fixture announcement (coach only: the "+" renders for canManageTeam).
+- tapOn: "New announcement"
+- tapOn:
+    id: "announcement-title-input"
+- inputText: "Reply Fixture"
+- tapOn:
+    id: "announcement-body-input"
+- inputText: "Reply here"
+# The body field is multiline, so Enter would add a newline rather than blur;
+# the compose form sits in a KeyboardAvoidingView and the button stays reachable.
+- tapOn: "Post Announcement"
+# The card is ONE accessible element whose label joins its texts (title,
+# body, author, time, count), so it is matched through a regex on the label.
+- extendedWaitUntil:
+    visible: "Reply Fixture.*0 replies"
+    timeout: 10000
+
+# Open the thread.
+- tapOn: "Reply Fixture.*"
+- assertVisible: "Announcement"
+- assertVisible: "Reply here"
+- assertVisible: "No replies yet"
+
+# Reply from the inline composer; the row shows at once (optimistic) and the
+# count follows the server.
+- tapOn:
+    id: "reply-input"
+- inputText: "On my way"
+- tapOn:
+    id: "reply-send"
+- extendedWaitUntil:
+    visible: "On my way"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "1 reply"
+    timeout: 10000
+
+# The author deletes their own reply through the ⋯ ActionMenu.
+- tapOn: "Reply options"
+- assertVisible: "Delete reply"
+- tapOn: "Delete reply"
+- extendedWaitUntil:
+    visible: "0 replies"
+    timeout: 10000
+- assertVisible: "No replies yet"
+
+# Back to the list: the count there is served, not optimistic.
+- tapOn: "Go back"
+- assertVisible: "Announcements"
+- extendedWaitUntil:
+    visible: "Reply Fixture.*0 replies"
+    timeout: 10000

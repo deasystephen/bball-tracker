@@ -65,6 +65,10 @@ mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQ
   which `NotificationService.sendToTeam` uses too (before #449 email went to players only). Sends
   run **sequentially** in the background: with guardians a team is 30-45 messages, and a
   concurrent burst that size trips the SES per-second rate.
+- **Reply email** (#34, `templates/announcement-reply.ts`) goes to the announcement's author only,
+  from `AnnouncementReplyService.notifyAuthor`, after the push; skipped for a self-reply, when the
+  author has `notifyOnReplies` off, or when the author is a tombstone. Metadata `event_type`
+  `announcement.replied` with `teamId`, `announcementId`, `replyId`.
 - Tests: `tests/services/ses-events.test.ts`, `tests/services/ses-event-consumer.test.ts`,
   `tests/integration/email-suppression.db.test.ts` (real Postgres), the `SES_CONFIGURATION_SET`
   block in `tests/services/mailer.test.ts`, the email-audience block in

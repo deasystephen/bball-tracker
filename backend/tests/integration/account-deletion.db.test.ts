@@ -560,6 +560,17 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
         },
       ],
       [
+        'announcementReplies',
+        async (userId) => {
+          const announcement = await prisma.announcement.create({
+            data: { teamId: teamActive.teamId, authorId: ids.users.teammate, title: `Reply-${RUN}`, body: 'Gym 6pm' },
+          });
+          await prisma.announcementReply.create({
+            data: { announcementId: announcement.id, authorId: userId, body: `Seen-${RUN}` },
+          });
+        },
+      ],
+      [
         'refreshTokens',
         async (userId) => {
           await prisma.refreshToken.create({
@@ -587,9 +598,9 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     const data = await AccountService.exportUserData(ids.users.teammate);
     expect(Object.keys(data).sort()).toEqual(
       [
-        'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps', 'guardianInvitations',
-        'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats', 'pushTokens',
-        'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
+        'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
+        'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
+        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
       ].sort()
     );
     expect(data.gameEvents).toHaveLength(1);

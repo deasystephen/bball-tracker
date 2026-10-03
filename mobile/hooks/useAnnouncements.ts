@@ -18,6 +18,8 @@ export interface Announcement {
     name: string;
     email?: string;
   };
+  /** Reply count (#34); absent from responses older than the thread feature. */
+  _count?: { replies: number };
 }
 
 export const announcementKeys = {
@@ -25,6 +27,8 @@ export const announcementKeys = {
   team: (teamId: string) => [...announcementKeys.all, teamId] as const,
   // Nested under `team()` so the create-mutation invalidation covers it.
   teamInfinite: (teamId: string) => [...announcementKeys.team(teamId), 'infinite'] as const,
+  /** One announcement by id (the thread screen, a push deep link). */
+  detail: (announcementId: string) => [...announcementKeys.all, 'detail', announcementId] as const,
 };
 
 /** Default page size for announcements (matches the server default). */
@@ -86,6 +90,23 @@ export function useAnnouncements(teamId: string) {
       return response.data;
     },
     enabled: !!teamId,
+  });
+}
+
+/**
+ * One announcement (GET /announcements/:id): the thread screen's header, and
+ * what a push deep link loads when the team's list was never fetched.
+ */
+export function useAnnouncement(announcementId: string) {
+  return useQuery({
+    queryKey: announcementKeys.detail(announcementId),
+    queryFn: async () => {
+      const response = await apiClient.get<{ success: boolean; announcement: Announcement }>(
+        `/announcements/${announcementId}`
+      );
+      return response.data.announcement;
+    },
+    enabled: !!announcementId,
   });
 }
 

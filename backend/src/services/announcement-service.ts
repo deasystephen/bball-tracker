@@ -20,6 +20,9 @@ const ANNOUNCEMENT_INCLUDE = {
       email: true,
     },
   },
+  // Reply count for the list's "N replies" footnote (#34); the thread itself
+  // is GET /announcements/:id/replies.
+  _count: { select: { replies: true } },
 } satisfies Prisma.AnnouncementInclude;
 
 export type AnnouncementWithAuthor = Prisma.AnnouncementGetPayload<{
@@ -144,6 +147,28 @@ export class AnnouncementService {
         });
       }
     }
+  }
+
+  /**
+   * One announcement, for the thread screen and for a push deep link that
+   * arrives before the list was ever loaded (#34). Same gate as the list:
+   * 404 when it does not exist, 403 without access to its team.
+   */
+  static async getAnnouncement(announcementId: string, userId: string): Promise<AnnouncementWithAuthor> {
+    const announcement = await prisma.announcement.findUnique({
+      where: { id: announcementId },
+      include: ANNOUNCEMENT_INCLUDE,
+    });
+    if (!announcement) {
+      throw new NotFoundError('Announcement not found');
+    }
+
+    const hasAccess = await canAccessTeam(userId, announcement.teamId);
+    if (!hasAccess) {
+      throw new ForbiddenError('You do not have access to this team');
+    }
+
+    return announcement;
   }
 
   /**

@@ -381,6 +381,7 @@ router.get('/me', authenticate, async (req, res) => {
         name: true,
         role: true,
         profilePictureUrl: true,
+        notifyOnReplies: true,
         createdAt: true,
       },
     });
@@ -425,7 +426,7 @@ router.patch('/me', authenticate, async (req, res) => {
       throw new BadRequestError(parsed.error.issues.map((e: { message: string }) => e.message).join(', '));
     }
 
-    const { name, profilePictureUrl } = parsed.data;
+    const { name, profilePictureUrl, notifyOnReplies } = parsed.data;
     // req.user does not carry the avatar; read it so the replaced S3 object
     // can be removed after the update (audit #61, best-effort).
     const previous =
@@ -440,6 +441,7 @@ router.patch('/me', authenticate, async (req, res) => {
       data: {
         ...(name !== undefined && { name }),
         ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
+        ...(notifyOnReplies !== undefined && { notifyOnReplies }),
       },
     });
     if (updated.count === 0) {
@@ -447,7 +449,7 @@ router.patch('/me', authenticate, async (req, res) => {
     }
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },
-      select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, notifyOnReplies: true, createdAt: true },
     });
 
     if (profilePictureUrl !== undefined) {

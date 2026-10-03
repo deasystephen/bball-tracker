@@ -16,6 +16,8 @@ export interface UpdateProfileInput {
   name?: string;
   /** Empty string clears the avatar. */
   profilePictureUrl?: string;
+  /** Push + email when someone replies to the user's announcement (#34). */
+  notifyOnReplies?: boolean;
 }
 
 export interface ProfileResponse {
@@ -26,6 +28,7 @@ export interface ProfileResponse {
     name: string;
     role: User['role'];
     profilePictureUrl: string | null;
+    notifyOnReplies?: boolean;
     createdAt: string;
   };
 }
@@ -35,6 +38,7 @@ export function toUserPatch(user: ProfileResponse['user']): Partial<User> {
   return {
     name: user.name,
     profilePictureUrl: user.profilePictureUrl ?? undefined,
+    ...(user.notifyOnReplies !== undefined && { notifyOnReplies: user.notifyOnReplies }),
   };
 }
 
@@ -49,6 +53,7 @@ export function useUpdateProfile() {
         name_changed: variables.name !== undefined,
         photo_changed: variables.profilePictureUrl !== undefined,
         photo_cleared: variables.profilePictureUrl === '',
+        reply_notifications_changed: variables.notifyOnReplies !== undefined,
       });
       // Merge without re-firing login analytics (setUser would).
       useAuthStore.getState().updateUser(toUserPatch(data.user));

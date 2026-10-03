@@ -76,6 +76,12 @@ export interface User {
    * builds omit it and clients treat `undefined` as `[]`.
    */
   guardianOf?: GuardianOfEntry[];
+  /**
+   * Push + email when someone replies to one of the user's announcements
+   * (#34). Optional like the fields above: older API builds omit it and
+   * clients treat `undefined` as `true` (the server default).
+   */
+  notifyOnReplies?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

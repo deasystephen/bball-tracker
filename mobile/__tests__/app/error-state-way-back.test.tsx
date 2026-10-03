@@ -30,6 +30,7 @@ import EditTeamScreen from '../../app/teams/[id]/edit';
 import ManagePlayersScreen from '../../app/teams/[id]/players';
 import PlayerGuardiansScreen from '../../app/teams/[id]/players/[playerId]/guardians';
 import TeamStaffScreen from '../../app/teams/[id]/staff';
+import AnnouncementThreadScreen from '../../app/teams/[id]/announcements/[announcementId]';
 import TeamStatsScreen from '../../app/teams/[id]/stats';
 import { apiClient } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
@@ -89,6 +90,12 @@ const SCREENS: ScreenCase[] = [
     fallback: '/(tabs)/teams',
   },
   { name: 'teams/[id]/staff', Screen: TeamStaffScreen, params: { id: 't1' }, fallback: '/(tabs)/teams' },
+  {
+    name: 'teams/[id]/announcements/[announcementId]',
+    Screen: AnnouncementThreadScreen,
+    params: { id: 't1', announcementId: 'a1' },
+    fallback: '/(tabs)/teams',
+  },
   { name: 'teams/[id]/stats', Screen: TeamStatsScreen, params: { id: 't1' }, fallback: '/(tabs)/teams' },
 ];
 

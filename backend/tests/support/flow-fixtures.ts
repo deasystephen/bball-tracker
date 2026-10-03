@@ -14,3 +14,11 @@ export const FLOW_CREATED_OPPONENTS = [
   'Spectator Rival', // live-spectator.yaml
   'Fixture Rival', // coach-onboarding.yaml (also removed with Dana's teams)
 ];
+
+/**
+ * Announcement titles the flows post (announcement-reply.yaml). The seed
+ * deletes them by title; replies go with them (cascade).
+ */
+export const FLOW_CREATED_ANNOUNCEMENT_TITLES = [
+  'Reply Fixture', // announcement-reply.yaml
+];
