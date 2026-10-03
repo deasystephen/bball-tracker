@@ -5,6 +5,10 @@
  * calendar tokens and invite tokens never reach CloudWatch / Datadog
  * (audit #15). Secret path segments (`/by-token/<x>`, `/calendar/<x>`,
  * `/invite/<x>`) are masked too.
+ *
+ * The line carries `userId` when the request authenticated (#617): the
+ * middleware is mounted before any router, but it logs on `finish`, by which
+ * time `authenticate` has set `req.user`. `/health` is never logged.
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -43,6 +47,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       statusCode: res.statusCode,
       duration,
       requestId: req.requestId,
+      ...(req.user ? { userId: req.user.id } : {}),
     });
   });
 

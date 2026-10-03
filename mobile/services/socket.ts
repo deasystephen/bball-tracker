@@ -25,6 +25,7 @@ import { io, type Socket } from 'socket.io-client';
 import { useAuthStore } from '../store/auth-store';
 import { refreshAccessToken } from './api-client';
 import { getApiUrl } from '../config/env';
+import { addBreadcrumb } from './sentry';
 
 // Same host as the REST client — decided once in config/env.ts.
 const getBaseURL = (): string => getApiUrl();
@@ -46,6 +47,18 @@ let authRefreshes = 0;
 let unavailableRetries = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let recovering = false;
+/** True once this socket has connected at least once, so a later `connect` is a reconnect. */
+let hasConnected = false;
+
+/**
+ * Socket lifecycle breadcrumbs (#617): connect / reconnect / disconnect and
+ * every recovery decision, so a captured error during a live game shows what
+ * the connection was doing. Reasons and messages are socket.io's own fixed
+ * strings; no URL or token is involved.
+ */
+const socketCrumb = (message: string, data?: Record<string, unknown>, level: 'info' | 'warning' = 'info'): void => {
+  addBreadcrumb({ category: 'socket', message, level, data });
+};
 
 const clearRetryTimer = (): void => {
   if (retryTimer) {
@@ -83,11 +96,13 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
 
   if (err.message === UNAUTHORIZED_MESSAGE) {
     if (authRefreshes >= MAX_AUTH_REFRESHES) {
+      socketCrumb('recovery abandoned: unauthorized', { attempts: authRefreshes }, 'warning');
       recovering = false;
       return;
     }
     authRefreshes += 1;
     recovering = true;
+    socketCrumb('recovery: refreshing token', { attempt: authRefreshes });
     const outcome = await refreshAccessToken();
     if (target !== socket) return;
     if (outcome.status === 'ok') {
@@ -95,11 +110,13 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
       return;
     }
     if (outcome.status === 'unavailable') {
+      socketCrumb('recovery: refresh unavailable, backing off', { delayMs: BASE_BACKOFF_MS }, 'warning');
       scheduleReconnect(target, BASE_BACKOFF_MS);
       return;
     }
     // Rejected: the refresh token is dead. The next REST 401 will log the
     // user out (useAuthRedirect → /login); nothing more to do here.
+    socketCrumb('recovery abandoned: refresh rejected', undefined, 'warning');
     recovering = false;
     return;
   }
@@ -109,12 +126,14 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
   // rejection is not auto-reconnected by socket.io.
   if (err.message === SERVICE_UNAVAILABLE_MESSAGE || err.message === RATE_LIMITED_MESSAGE) {
     if (unavailableRetries >= MAX_UNAVAILABLE_RETRIES) {
+      socketCrumb('recovery abandoned: ' + err.message, { attempts: unavailableRetries }, 'warning');
       recovering = false;
       return;
     }
     const delay = BASE_BACKOFF_MS * 2 ** unavailableRetries;
     unavailableRetries += 1;
     recovering = true;
+    socketCrumb('recovery: backing off', { reason: err.message, attempt: unavailableRetries, delayMs: delay });
     scheduleReconnect(target, delay);
     return;
   }
@@ -138,12 +157,18 @@ export function getSocket(): Socket {
   socket = created;
 
   created.on('connect', () => {
+    socketCrumb(hasConnected ? 'reconnected' : 'connected', { recovered: created.recovered === true });
+    hasConnected = true;
     authRefreshes = 0;
     unavailableRetries = 0;
     recovering = false;
     clearRetryTimer();
   });
+  created.on('disconnect', (reason: string) => {
+    socketCrumb('disconnected', { reason }, 'warning');
+  });
   created.on('connect_error', (err: Error) => {
+    socketCrumb('connect_error', { message: err.message }, 'warning');
     void handleConnectError(created, err);
   });
 
@@ -155,6 +180,7 @@ export function resetSocket(): void {
   authRefreshes = 0;
   unavailableRetries = 0;
   recovering = false;
+  hasConnected = false;
   if (!socket) return;
   socket.removeAllListeners();
   socket.disconnect();

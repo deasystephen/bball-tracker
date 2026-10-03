@@ -439,6 +439,14 @@ export class TeamService {
       return created;
     });
 
+    logger.info('Team created', {
+      teamId: team.id,
+      seasonId: team.seasonId,
+      lineageId: team.lineageId,
+      personalLeague: !data.seasonId,
+      userId,
+    });
+
     // Return the full team with relations
     return prisma.team.findUnique({
       where: { id: team.id },
@@ -645,11 +653,23 @@ export class TeamService {
 
     // Update the team
     try {
-      return await prisma.team.update({
+      const updated = await prisma.team.update({
         where: { id: teamId },
         data: updateData,
         include: TEAM_INCLUDE,
       });
+      // Season rollover (#461) is not built; moving a team-season row is the
+      // only lineage-level change today and the one worth a line.
+      if (data.seasonId !== undefined && data.seasonId !== team.seasonId) {
+        logger.info('Team moved to season', {
+          teamId,
+          lineageId: team.lineageId,
+          fromSeasonId: team.seasonId,
+          toSeasonId: data.seasonId,
+          userId,
+        });
+      }
+      return updated;
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestError(SEASON_SIBLING_MESSAGE);
@@ -684,7 +704,7 @@ export class TeamService {
     // its lineage if this was the last team-season on it. Season/League
     // cascades bypass this path and leave harmless orphan lineages; this is
     // the only cleanup (#462).
-    await prisma.$transaction(async (tx) => {
+    const lineageDeleted = await prisma.$transaction(async (tx) => {
       await tx.team.delete({
         where: { id: teamId },
       });
@@ -692,7 +712,17 @@ export class TeamService {
       const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
       if (remaining === 0) {
         await tx.teamLineage.delete({ where: { id: team.lineageId } });
+        return true;
       }
+      return false;
+    });
+
+    logger.info('Team deleted', {
+      teamId,
+      seasonId: team.seasonId,
+      lineageId: team.lineageId,
+      lineageDeleted,
+      userId,
     });
 
     return { success: true };
@@ -758,6 +788,8 @@ export class TeamService {
       include: TEAM_MEMBER_INCLUDE,
     });
 
+    logger.info('Roster player added', { teamId, playerId: data.playerId, userId, via: 'existing-user' });
+
     return teamMember;
   }
 
@@ -810,6 +842,8 @@ export class TeamService {
         },
       },
     });
+
+    logger.info('Roster player removed', { teamId, playerId, userId });
 
     return { success: true };
   }

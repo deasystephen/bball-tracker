@@ -57,6 +57,19 @@ export default tseslint.config(
       // Memoized / forwardRef components must be named function expressions
       // so React DevTools and error stacks show a real name.
       'react/display-name': 'error',
+
+      // App code logs through `services/log.ts` (dev-only console, Sentry
+      // breadcrumbs for warn/error, #617). Bare console output is invisible
+      // in a release build and never reaches Sentry.
+      'no-console': 'error',
+    },
+  },
+
+  // The one place console is reached directly.
+  {
+    files: ['services/log.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 
@@ -69,6 +82,9 @@ export default tseslint.config(
         ...globals.jest,
         ...globals.node,
       },
+    },
+    rules: {
+      'no-console': 'off',
     },
   },
 );

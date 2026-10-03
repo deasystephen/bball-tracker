@@ -4,6 +4,7 @@
 
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
+import { logger } from '../utils/logger';
 import { canAccessTeam, getGuardianChildIds, teamAccessWhere } from '../utils/permissions';
 import { GameEventType, GameStatus } from '@prisma/client';
 
@@ -382,6 +383,7 @@ export class StatsService {
    * score-based).
    */
   static async finalizeGameStats(gameId: string): Promise<void> {
+    const startedAt = Date.now();
     const game = await prisma.game.findUnique({
       where: { id: gameId },
       include: {
@@ -400,6 +402,12 @@ export class StatsService {
         prisma.playerStats.deleteMany({ where: { gameId } }),
         prisma.teamStats.deleteMany({ where: { gameId } }),
       ]);
+      logger.info('Stats finalized', {
+        gameId,
+        teamId: game.teamId,
+        players: 0,
+        duration: Date.now() - startedAt,
+      });
       return;
     }
 
@@ -499,6 +507,13 @@ export class StatsService {
         },
       }),
     ]);
+
+    logger.info('Stats finalized', {
+      gameId,
+      teamId: game.teamId,
+      players: playerStats.length,
+      duration: Date.now() - startedAt,
+    });
   }
 
   /**

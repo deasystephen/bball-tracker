@@ -1,5 +1,6 @@
 import * as amplitude from '@amplitude/analytics-react-native';
 import Constants from 'expo-constants';
+import { log } from './log';
 
 export const AnalyticsEvents = {
   APP_OPENED: 'app_opened',
@@ -58,9 +59,7 @@ let initialized = false;
 export async function initAnalytics(): Promise<void> {
   const apiKey = Constants.expoConfig?.extra?.amplitudeApiKey;
   if (!apiKey) {
-    if (__DEV__) {
-      console.log('[Analytics] No Amplitude API key configured, skipping initialization');
-    }
+    log.debug('[Analytics] No Amplitude API key configured, skipping initialization');
     return;
   }
 
@@ -70,9 +69,7 @@ export async function initAnalytics(): Promise<void> {
     }).promise;
     initialized = true;
   } catch (error) {
-    if (__DEV__) {
-      console.warn('[Analytics] Failed to initialize Amplitude:', error);
-    }
+    log.warn('[Analytics] Failed to initialize Amplitude', { error });
   }
 }
 
@@ -88,9 +85,7 @@ export function trackEvent(
   try {
     amplitude.track(event, properties);
   } catch (error) {
-    if (__DEV__) {
-      console.warn('[Analytics] Failed to track event:', error);
-    }
+    log.warn('[Analytics] Failed to track event', { event, error });
   }
 }
 
@@ -113,9 +108,7 @@ export function identifyUser(
       amplitude.identify(identifyObj);
     }
   } catch (error) {
-    if (__DEV__) {
-      console.warn('[Analytics] Failed to identify user:', error);
-    }
+    log.warn('[Analytics] Failed to identify user', { error });
   }
 }
 
@@ -128,8 +121,6 @@ export function resetUser(): void {
   try {
     amplitude.reset();
   } catch (error) {
-    if (__DEV__) {
-      console.warn('[Analytics] Failed to reset user:', error);
-    }
+    log.warn('[Analytics] Failed to reset user', { error });
   }
 }

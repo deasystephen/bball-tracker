@@ -29,8 +29,29 @@ import {
 } from '../../services/entitlements';
 import { PaymentRequiredError, UnauthorizedError } from '../../utils/errors';
 import { countDistinctStaffTeams } from '../../utils/permissions';
+import { logger } from '../../utils/logger';
 
 const PAYMENT_REQUIRED = 402;
+
+/**
+ * Answer 402 and log the denial (#617). Logged at info with ids only: a
+ * denial is an expected product outcome, not an error, but it is the one
+ * signal that a tier cap is biting a real user.
+ */
+function denyUpgradeRequired(
+  req: Request,
+  res: Response,
+  details: { feature: string; currentTier: SubscriptionTier; requiredTier: SubscriptionTier }
+): void {
+  logger.info('Entitlement denied', {
+    userId: req.user?.id,
+    feature: details.feature,
+    currentTier: details.currentTier,
+    requiredTier: details.requiredTier,
+    statusCode: PAYMENT_REQUIRED,
+  });
+  res.status(PAYMENT_REQUIRED).json(new PaymentRequiredError(details).body());
+}
 
 /**
  * Resolve the effective tier for the authenticated request user. A user that
@@ -65,13 +86,11 @@ export function requireEntitlement(feature: Feature) {
       return next();
     }
 
-    res.status(PAYMENT_REQUIRED).json(
-      new PaymentRequiredError({
-        feature: featureCode(feature),
-        currentTier,
-        requiredTier: getRequiredTier(feature),
-      }).body()
-    );
+    denyUpgradeRequired(req, res, {
+      feature: featureCode(feature),
+      currentTier,
+      requiredTier: getRequiredTier(feature),
+    });
   };
 }
 
@@ -112,12 +131,10 @@ export function requireTeamCreateLimit() {
       return next();
     }
 
-    res.status(PAYMENT_REQUIRED).json(
-      new PaymentRequiredError({
-        feature: featureCode(Feature.UNLIMITED_TEAMS),
-        currentTier,
-        requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
-      }).body()
-    );
+    denyUpgradeRequired(req, res, {
+      feature: featureCode(Feature.UNLIMITED_TEAMS),
+      currentTier,
+      requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
+    });
   };
 }

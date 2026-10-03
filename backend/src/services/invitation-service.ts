@@ -344,6 +344,17 @@ export class InvitationService {
     }
     const emailSent = await this.deliverInvitationEmail(invitation, token, variant);
 
+    logger.info('Invitation sent', {
+      invitationId: invitation.id,
+      teamId,
+      playerId: invitation.playerId,
+      invitedById: userId,
+      userId,
+      supersede: !!data.supersede,
+      variant,
+      emailSent,
+    });
+
     return { invitation, emailSent };
   }
 
@@ -446,10 +457,18 @@ export class InvitationService {
           select: { jerseyNumber: true, position: true, message: true },
         });
 
-        await tx.teamInvitation.updateMany({
+        const { count: supersededCount } = await tx.teamInvitation.updateMany({
           where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
           data: { status: 'EXPIRED' },
         });
+        if (supersededCount > 0) {
+          logger.info('Invitation superseded', {
+            teamId: data.teamId,
+            playerId: data.playerId,
+            invitedById: data.invitedById,
+            supersededCount,
+          });
+        }
 
         return tx.teamInvitation.create({
           data: {
@@ -776,6 +795,14 @@ export class InvitationService {
       return { invitation: updatedInvitation, teamMember };
     });
 
+    logger.info('Invitation accepted', {
+      invitationId,
+      teamId: invitation.teamId,
+      playerId: invitation.playerId,
+      userId,
+      via: 'app',
+    });
+
     return result;
   }
 
@@ -878,8 +905,8 @@ export class InvitationService {
       );
     }
 
-    return prisma.$transaction(async (tx) => {
-      const updated = await this.transitionPending(
+    const updated = await prisma.$transaction(async (tx) => {
+      const rejected = await this.transitionPending(
         tx,
         invitationId,
         { status: 'REJECTED', rejectedAt: new Date() },
@@ -889,8 +916,17 @@ export class InvitationService {
 
       await this.stripUnclaimedEmail(tx, invitation.playerId);
 
-      return updated;
+      return rejected;
     });
+
+    logger.info('Invitation declined', {
+      invitationId,
+      teamId: invitation.teamId,
+      playerId: invitation.playerId,
+      userId,
+    });
+
+    return updated;
   }
 
   /**
@@ -921,7 +957,7 @@ export class InvitationService {
       );
     }
 
-    return prisma.$transaction(async (tx) => {
+    const cancelled = await prisma.$transaction(async (tx) => {
       // No email strip on cancel — see stripUnclaimedEmail's docstring
       // (rejection-only rule, ship review decision).
       return this.transitionPending(
@@ -932,6 +968,15 @@ export class InvitationService {
         INVITATION_SCALAR_SELECT
       );
     });
+
+    logger.info('Invitation cancelled', {
+      invitationId,
+      teamId: invitation.teamId,
+      playerId: invitation.playerId,
+      userId,
+    });
+
+    return cancelled;
   }
 
   /**
@@ -1042,6 +1087,7 @@ export class InvitationService {
             result.invited = true;
             result.emails.player = case3.emailSent ?? undefined;
             playerId = err.playerId;
+            this.logRosterAdd(teamId, playerId, userId, result);
             return this.attachGuardianInvite(teamId, playerId, data, userId, result);
           }
           const raced = await this.resolveEmailRaceWinner(email, err);
@@ -1051,6 +1097,7 @@ export class InvitationService {
             result.invited = true;
             result.emails.player = case3.emailSent ?? undefined;
             playerId = raced.id;
+            this.logRosterAdd(teamId, playerId, userId, result);
             return this.attachGuardianInvite(teamId, playerId, data, userId, result);
           }
           created = await this.createRosteredInvitedPlayer(teamId, data, userId, raced, email);
@@ -1071,6 +1118,8 @@ export class InvitationService {
           undefined;
       }
     }
+
+    this.logRosterAdd(teamId, playerId, userId, result);
 
     return this.attachGuardianInvite(teamId, playerId, data, userId, result);
   }
@@ -1210,6 +1259,39 @@ export class InvitationService {
 
       return { member, invitation, token, photoApplied };
     });
+  }
+
+  /**
+   * One line per unified Add Player, whichever consent case it took (#617).
+   * `rostered` + `invited` identify the case (1: rostered only, 2: both,
+   * 3: invited only); the email outcome is the per-send flag the client gets.
+   */
+  private static logRosterAdd(
+    teamId: string,
+    playerId: string,
+    userId: string,
+    result: AddRosterPlayerResult
+  ): void {
+    if (result.rostered) {
+      logger.info('Roster player added', {
+        teamId,
+        playerId,
+        userId,
+        via: result.invited ? 'add-player-invited' : 'add-player-managed',
+      });
+    }
+    if (result.invitation) {
+      logger.info('Invitation sent', {
+        invitationId: result.invitation.id,
+        teamId,
+        playerId,
+        invitedById: userId,
+        userId,
+        supersede: false,
+        variant: result.rostered ? 'added' : 'invited',
+        emailSent: result.emails.player ?? null,
+      });
+    }
   }
 
   /** Strip relations down to the scalar summary, driven by the select
@@ -1369,6 +1451,13 @@ export class InvitationService {
       });
 
       return { invitation: updatedInvitation, teamMember };
+    });
+
+    logger.info('Invitation accepted', {
+      invitationId: invitation.id,
+      teamId: invitation.teamId,
+      playerId: invitation.playerId,
+      via: 'token',
     });
 
     return result;

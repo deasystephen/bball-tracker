@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { secureAuthStorage, clearPersistedAuth } from '../services/secure-storage';
 import { User } from '../../shared/types';
 import { trackEvent, identifyUser, resetUser, AnalyticsEvents } from '../services/analytics';
+import { log } from '../services/log';
 import { getSessionHooks } from './session-hooks';
 
 interface AuthState {
@@ -147,7 +148,7 @@ export const useAuthStore = create<AuthState>()(
       // Use `set`, never mutate the passed state object (it is a snapshot).
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
-          console.warn('Auth storage rehydration failed; starting logged out', error);
+          log.warn('Auth storage rehydration failed; starting logged out', { error });
           useAuthStore.setState({
             accessToken: null,
             refreshToken: null,

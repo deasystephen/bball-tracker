@@ -124,6 +124,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - Every email flag returned to a client is per send (`emails.player`, `emailSent`); a failed SES send is reported, never thrown and never silent.
 - Nothing in the app blocks a send to a bounced address; SES's suppression list is the gate and the next delivery clears the roster flag. Don't add an app-level skip.
 - **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address.
+- `LOG_LEVEL` is the log threshold (default `info`, set in `infra/task-definition.json`). A service method that mutates data logs one info-level domain event, ids only; `requestId`/`userId` come from the request context. No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
 - `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array.
 
 ### Mobile
@@ -137,6 +138,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - Upload file parts are `expo-file-system` `File` objects; Expo's own `fetch` rejects the `{ uri, name, type }` object. Prove any new form encodes through the real encoder in a test.
 - Jersey `0` is valid: test `jerseyNumber != null`, never truthiness.
 - Amplitude tracking options are pinned in `services/analytics.ts`; changing one changes the privacy-label draft (`docs/release/app-store-submission.md`) in the same PR.
+- Log through `services/log.ts`, never bare `console.*` (ESLint `no-console`). Sentry sees URLs only as `endpointPattern(url)`; the api-client captures network failures and 5xx, never 4xx.
 
 ## Code Style
 

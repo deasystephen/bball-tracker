@@ -40,9 +40,10 @@ router.get(
 
     // Resolve + authorize the token. Throws ForbiddenError on revoked,
     // mismatched, or stale tokens.
-    await CalendarService.resolveToken(teamId, token);
+    const { userId } = await CalendarService.resolveToken(teamId, token);
 
     const icsText = await CalendarService.buildFeed(teamId);
+    logger.info('Calendar feed served', { teamId, userId, bytes: Buffer.byteLength(icsText) });
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader(

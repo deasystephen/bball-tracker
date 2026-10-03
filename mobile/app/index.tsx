@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/auth-store';
 import { postLoginRoute } from '../utils/role-onboarding';
+import { log } from '../services/log';
 
 const ONBOARDED_KEY = 'hasOnboarded';
 
@@ -54,7 +55,7 @@ export default function Index() {
       } catch (error) {
         // If navigation fails, reset flag to retry
         hasNavigated.current = false;
-        console.warn('Navigation failed, will retry:', error);
+        log.warn('Navigation failed, will retry', { error });
       }
     };
 

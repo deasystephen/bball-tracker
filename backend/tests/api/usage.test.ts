@@ -13,6 +13,7 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import * as usageService from '../../src/services/usage-service';
 import { TeamService } from '../../src/services/team-service';
+import { logger } from '../../src/utils/logger';
 import { prismaMock } from '../setup';
 import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
@@ -190,6 +191,7 @@ describe('POST /api/v1/teams — finite tier limit enforcement', () => {
 
   it('blocks with 402 upgrade_required when the FREE-tier user is at/over the cap', async () => {
     (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
+    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
 
     const response = await request(app)
       .post('/api/v1/teams')
@@ -201,6 +203,14 @@ describe('POST /api/v1/teams — finite tier limit enforcement', () => {
     // The team must NOT have been created and the cache must NOT be touched.
     expect(mockTeamService.createTeam).not.toHaveBeenCalled();
     expect(mockUsageService.invalidateUsage).not.toHaveBeenCalled();
+
+    // The denial is logged with ids only (#617).
+    const denied = infoSpy.mock.calls.find(([msg]) => msg === 'Entitlement denied');
+    expect(denied?.[1]).toEqual(
+      expect.objectContaining({ userId: TEST_USER_ID, currentTier: 'FREE', statusCode: 402 })
+    );
+    expect(JSON.stringify(denied)).not.toContain('coach@example.com');
+    infoSpy.mockRestore();
   });
 
   it('admins bypass the cap entirely (count not even queried)', async () => {

@@ -15,6 +15,7 @@ jest.mock('@sentry/react-native', () => ({
   init: jest.fn(),
   setUser: jest.fn(),
   captureException: jest.fn(),
+  addBreadcrumb: jest.fn(),
 }));
 
 jest.mock('expo-constants', () => ({
@@ -30,6 +31,7 @@ jest.mock('expo-constants', () => ({
 const sentryInit = Sentry.init as jest.Mock;
 const sentrySetUser = Sentry.setUser as jest.Mock;
 const sentryCaptureException = Sentry.captureException as jest.Mock;
+const sentryAddBreadcrumb = Sentry.addBreadcrumb as jest.Mock;
 
 // Each test re-imports the module so the `initialized` module-level flag
 // starts fresh.
@@ -368,6 +370,150 @@ describe('services/sentry', () => {
       const { initSentry, captureException } = loadSentryModule();
       initSentry();
       expect(() => captureException(new Error('boom'))).not.toThrow();
+    });
+  });
+
+  describe('captureException tags (#617)', () => {
+    it('forwards tags alongside the app context', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, captureException } = loadSentryModule();
+      initSentry();
+      const err = new Error('500');
+      captureException(err, { endpoint: '/teams/:id' }, { endpoint_pattern: '/teams/:id', status: 500 });
+      expect(sentryCaptureException).toHaveBeenCalledWith(err, {
+        contexts: { app: { endpoint: '/teams/:id' } },
+        tags: { endpoint_pattern: '/teams/:id', status: 500 },
+      });
+    });
+
+    it('sends tags alone when no context is given', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, captureException } = loadSentryModule();
+      initSentry();
+      captureException(new Error('x'), undefined, { status: 'network' });
+      expect(sentryCaptureException.mock.calls[0][1]).toEqual({ tags: { status: 'network' } });
+    });
+  });
+
+  describe('endpointPattern (#617)', () => {
+    it('drops host and query, redacts secrets and collapses ids', () => {
+      const { endpointPattern } = loadSentryModule();
+      expect(
+        endpointPattern('https://api.hooplings.com/api/v1/teams/4f1c2a3b-5d6e-4f70-8a9b-0c1d2e3f4a5b/games/42?token=abc')
+      ).toBe('/api/v1/teams/:id/games/:id');
+      expect(endpointPattern('/invitations/by-token/abcdefghijklmnop')).toBe('/invitations/by-token/[scrubbed]');
+      expect(endpointPattern('/auth/callback?code=SECRET&state=S')).toBe('/auth/callback');
+      expect(endpointPattern('/players/cm1abcdefghijklmnopqrstu/stats')).toBe('/players/:id/stats');
+      expect(endpointPattern('/teams/t1/calendar/subscribe')).toBe('/teams/t1/calendar/subscribe');
+      expect(endpointPattern('')).toBe('');
+      expect(endpointPattern(undefined)).toBe('');
+    });
+  });
+
+  describe('addBreadcrumb (#617)', () => {
+    it('no-ops until Sentry is initialized', () => {
+      const { addBreadcrumb } = loadSentryModule();
+      addBreadcrumb({ category: 'http', data: { url: '/x' } });
+      expect(sentryAddBreadcrumb).not.toHaveBeenCalled();
+    });
+
+    it('redacts the message and the data bag before the crumb is stored', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, addBreadcrumb } = loadSentryModule();
+      initSentry();
+
+      addBreadcrumb({
+        category: 'http',
+        type: 'http',
+        level: 'warning',
+        message: 'GET /api/v1/auth/callback?code=OAUTHCODE&state=S',
+        data: {
+          url: 'https://api.test/api/v1/invitations/by-token/abcdefghijklmnop?token=TOK',
+          authorization: 'Bearer JWT',
+          email: 'coach@example.test',
+          status_code: 401,
+        },
+      });
+
+      expect(sentryAddBreadcrumb).toHaveBeenCalledTimes(1);
+      const crumb = sentryAddBreadcrumb.mock.calls[0][0];
+      expect(crumb).toEqual({
+        category: 'http',
+        type: 'http',
+        level: 'warning',
+        message: 'GET /api/v1/auth/callback?code=[scrubbed]&state=[scrubbed]',
+        data: {
+          url: 'https://api.test/api/v1/invitations/by-token/[scrubbed]?token=[scrubbed]',
+          authorization: '[scrubbed]',
+          email: '[scrubbed]',
+          status_code: 401,
+        },
+      });
+      const serialized = JSON.stringify(crumb);
+      expect(serialized).not.toContain('OAUTHCODE');
+      expect(serialized).not.toContain('abcdefghijklmnop');
+      expect(serialized).not.toContain('TOK"');
+      expect(serialized).not.toContain('JWT');
+      expect(serialized).not.toContain('coach@example.test');
+    });
+
+    it('defaults the level to info and swallows SDK errors', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry, addBreadcrumb } = loadSentryModule();
+      initSentry();
+      addBreadcrumb({ category: 'socket', message: 'connected' });
+      expect(sentryAddBreadcrumb.mock.calls[0][0]).toMatchObject({ category: 'socket', level: 'info' });
+
+      sentryAddBreadcrumb.mockImplementationOnce(() => {
+        throw new Error('sdk');
+      });
+      expect(() => addBreadcrumb({ category: 'socket', message: 'x' })).not.toThrow();
+    });
+  });
+
+  describe('log sink wiring (#617)', () => {
+    it('after init, log.warn / log.error leave a redacted breadcrumb; debug does not', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      let sentry!: typeof import('../../services/sentry');
+      let logMod!: typeof import('../../services/log');
+      jest.isolateModules(() => {
+        sentry = jest.requireActual('../../services/sentry');
+        logMod = jest.requireActual('../../services/log');
+      });
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      jest.spyOn(console, 'log').mockImplementation(() => undefined);
+
+      logMod.log.warn('before init');
+      expect(sentryAddBreadcrumb).not.toHaveBeenCalled();
+
+      sentry.initSentry();
+      logMod.log.debug('quiet');
+      logMod.log.warn('Login error', {
+        error: new Error('Request failed: https://api.test/auth/callback?code=OAUTHCODE'),
+        url: '/invitations/by-token/abcdefghijklmnop',
+        email: 'coach@example.test',
+      });
+      logMod.log.error('Token exchange error', { error: new Error('nope') });
+
+      expect(sentryAddBreadcrumb).toHaveBeenCalledTimes(2);
+      const [warnCrumb, errorCrumb] = sentryAddBreadcrumb.mock.calls.map((c) => c[0]);
+      expect(warnCrumb).toMatchObject({ category: 'log', level: 'warning', message: 'Login error' });
+      expect(warnCrumb.data.url).toBe('/invitations/by-token/[scrubbed]');
+      expect(warnCrumb.data.email).toBe('[scrubbed]');
+      expect(errorCrumb).toMatchObject({
+        category: 'log',
+        level: 'error',
+        message: 'Token exchange error',
+        data: { error: { name: 'Error', message: 'nope' } },
+      });
+      // An Error's message is the one string a caller cannot redact for us;
+      // the sink keeps only name + message, and the breadcrumb data walk
+      // leaves it alone, so the crumb must still carry no secret.
+      const serialized = JSON.stringify(sentryAddBreadcrumb.mock.calls);
+      expect(serialized).not.toContain('abcdefghijklmnop');
+      expect(serialized).not.toContain('coach@example.test');
+      expect(serialized).not.toContain('OAUTHCODE');
     });
   });
 });
