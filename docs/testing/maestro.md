@@ -102,16 +102,17 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
   between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
   and players, and removes what interrupted test runs left behind), so never run two flows
-  back-to-back without it. **Last full run: 22 of 22, every flow on its first attempt, on
-  2026-09-29, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 build; a 23rd
-  flow, `error-way-back.yaml`, was added later that day and passed on its own; a 24th,
-  `admin-season-manage.yaml` (#614, dev-login as the seeded ADMIN, create → edit → delete a season,
-  then the league delete refused for teams), was added 2026-09-30; a 25th,
-  `announcement-reply.yaml` (#34, post an announcement as Frank, reply in the thread, delete the
-  reply; the seed removes the "Reply Fixture" announcement), was added 2026-10-03). The same
-  day it was also 22 of 22 on Maestro 2.1.0, which had hung mid-flow under Xcode 27 on
-  2026-09-27 and 28; no hang has been seen on 2.11.0, in three full runs. Still run each flow
-  under a time limit with one retry: a hung driver otherwise stalls the whole suite. **After a
+  back-to-back without it. **Last full run: 25 of 25, every flow on its first attempt, on
+  2026-10-03, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 Debug build at
+  commit `1efc177`, backend `npm run dev` + Metro, about 19 minutes of flow time; the longest flow
+  is `game-tracking.yaml` at under two minutes). The flows added since the first green run on
+  2026-09-29 (22 of 22) were `error-way-back.yaml` (same day), `admin-season-manage.yaml` (#614,
+  2026-09-30, dev-login as the seeded ADMIN, create → edit → delete a season, then the league
+  delete refused for teams) and `announcement-reply.yaml` (#34, 2026-10-03, post an announcement
+  as Frank, reply in the thread, delete the reply; the seed removes the "Reply Fixture"
+  announcement). Maestro 2.1.0 had hung mid-flow under Xcode 27 on 2026-09-27 and 28; no hang
+  has been seen on 2.11.0, in four full runs. Still run each flow under a time limit with one
+  retry: a hung driver otherwise stalls the whole suite. **After a
   Maestro upgrade, run the full suite before trusting it**: 2.1 → 2.11 changed what
   `hideKeyboard` does and broke two flows. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
