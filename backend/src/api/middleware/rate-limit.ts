@@ -112,3 +112,37 @@ export const calendarFeedRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many calendar feed requests, please try again later' },
 });
+
+/**
+ * Key for the authenticated export routes: the caller, not the IP.
+ *
+ * Exports are served to signed-in users only, and a team on shared gym Wi-Fi
+ * shares one egress IP, so the budget is per account. The IP is the fallback
+ * for the (unreachable) case of no `req.user`.
+ */
+export function exportUserKey(req: Request): string {
+  const userId = req.user?.id;
+  if (typeof userId === 'string' && userId.length > 0) {
+    return `export-user:${userId}`;
+  }
+  return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+}
+
+/**
+ * Rate limit shared by the three stats export routes (per-game CSV, per-game
+ * box-score PDF, team season-stats CSV): 20 exports per minute per user.
+ *
+ * The PDF is rendered synchronously by PDFKit, so each export spends a few
+ * milliseconds of event-loop time on the single API task. No client surfaces
+ * these routes yet (issue #50): the only way to run many exports is a
+ * signed-in caller looping the URL, and this is the brake on that. A human
+ * downloading a season's worth of box scores stays well under the ceiling.
+ */
+export const exportRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: exportUserKey,
+  message: { error: 'Too many export requests, please try again later' },
+});

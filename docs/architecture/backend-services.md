@@ -43,6 +43,21 @@ Best-effort cache only — every helper fails open. The ioredis `retryStrategy` 
 - `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass) — a downgraded/expired subscription stops the feed with 403 instead of serving forever (audit #43).
 - The calendar router is mounted on `/teams` ahead of the main teams router so the public `GET /teams/:id/calendar.ics` skips auth. Because of that ordering, `authenticate` is attached **per route** to `subscribe`/`revoke` — never `router.use(authenticate)` there, or every `/teams/*` request verifies the JWT twice (audit #71).
 
+## Rate limits (`api/middleware/rate-limit.ts`)
+All limiters are `express-rate-limit` with the default in-process `MemoryStore`, which is one of the reasons the API is single-replica (see `utils/replica-guard.ts`; the shared store is #452). Every 429 body is `{ error }` and carries the standard `RateLimit-*` headers.
+
+| Limiter | Routes | Key | Budget |
+| --- | --- | --- | --- |
+| `apiRateLimit` | everything under `/api/v1` (mounted in `index.ts`) | IP | 100 / min |
+| `authRateLimit` | `/auth/login`, `/callback`, `/debug`, `/dev-users`, `/dev-login` | IP | 20 / 15 min (100 in development) |
+| `refreshRateLimit` | `POST /auth/refresh` | sha256 of the refresh token, IP fallback | 60 / 15 min |
+| `writeRateLimit` | `POST /invitations/by-token/:token/accept` | IP | 30 / min |
+| `invitationTokenRateLimit` | `GET /invitations/by-token/:token` | the token | 30 / 15 min |
+| `calendarFeedRateLimit` | `GET /teams/:id/calendar.ics` | IP | 60 / hour |
+| `exportRateLimit` | `GET /games/:id/export.csv`, `GET /games/:id/boxscore.pdf`, `GET /teams/:id/season-stats.csv` | `req.user.id` (`exportUserKey`), IP fallback | 20 / min, shared by the three routes |
+
+- **Why the export limiter is per user (#50).** The box-score PDF is rendered synchronously by PDFKit on the single API task, so the original issue asked for a worker thread. Verified 2026-08-30 and again 2026-10-03: the document is a header plus one row per rostered player (milliseconds), and no mobile or web code calls any export route, so the only way to run many exports is a signed-in caller looping the URL. A per-account budget bounds that without penalising a team on shared gym Wi-Fi. Re-open the worker-thread version only when a client surfaces export and concurrent volume is observed. Tests: `tests/middleware/rate-limit.test.ts` (bare app, key and budget) and `tests/api/stats-export.test.ts` (real router chain, 429 on the 21st export).
+
 ## Push notifications (`services/notification-service.ts`)
 `sendMessages` inspects Expo tickets immediately and schedules `checkReceipts()` ~15 min later (unref'd timer); any ticket/receipt with `DeviceNotRegistered` deletes that `PushToken` (`pruneDeadTokens`). Other receipt errors are logged only (audit #60). The jest mock in `tests/__mocks__/expo-server-sdk.js` stubs both the send and receipt APIs.
 

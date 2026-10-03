@@ -50,6 +50,7 @@ afterAll((done) => {
 describe('Stats Export API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthUser.id = TEST_USER_ID;
     mockAuthUser.subscriptionTier = 'PREMIUM';
     mockAuthUser.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   });
@@ -129,6 +130,48 @@ describe('Stats Export API', () => {
       const res = await request(app).get(`/api/v1/games/${TEST_GAME_ID}/boxscore.pdf`);
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('per-user export rate limit (issue #50)', () => {
+    it('answers 429 on the 21st export in a minute by the same user, across all three routes', async () => {
+      // A fresh user id so the counts the other tests consumed do not apply.
+      mockAuthUser.id = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+      mockExport.exportGameEventsCsv.mockImplementation(async () => ({
+        filename: 'game.csv',
+        stream: Readable.from(['a,b\n']),
+        contentType: 'text/csv; charset=utf-8',
+      }));
+      mockExport.exportGameBoxScorePdf.mockImplementation(async () => ({
+        filename: 'box.pdf',
+        stream: Readable.from([Buffer.from('%PDF-1.4')]),
+        contentType: 'application/pdf',
+      }));
+      mockExport.exportTeamSeasonStatsCsv.mockImplementation(async () => ({
+        filename: 'season.csv',
+        stream: Readable.from(['a,b\n']),
+        contentType: 'text/csv; charset=utf-8',
+      }));
+
+      const paths = [
+        `/api/v1/games/${TEST_GAME_ID}/export.csv`,
+        `/api/v1/games/${TEST_GAME_ID}/boxscore.pdf`,
+        `/api/v1/teams/${TEST_TEAM_ID}/season-stats.csv`,
+      ];
+      for (let i = 0; i < 20; i++) {
+        const res = await request(app).get(paths[i % paths.length]);
+        expect(res.status).toBe(200);
+      }
+
+      const blocked = await request(app).get(`/api/v1/games/${TEST_GAME_ID}/boxscore.pdf`);
+      expect(blocked.status).toBe(429);
+      expect(blocked.body).toEqual({ error: 'Too many export requests, please try again later' });
+      expect(mockExport.exportGameBoxScorePdf).toHaveBeenCalledTimes(7);
+
+      // Another account on the same IP is not affected.
+      mockAuthUser.id = TEST_USER_ID;
+      const other = await request(app).get(`/api/v1/games/${TEST_GAME_ID}/boxscore.pdf`);
+      expect(other.status).toBe(200);
     });
   });
 

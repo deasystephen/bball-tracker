@@ -18,6 +18,7 @@ import {
 } from './schemas';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
+import { exportRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
@@ -193,8 +194,9 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * GET /api/v1/games/:id/export.csv
  * Export full event log as CSV
  * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
+ * Rate-limited per user with the other export routes (`exportRateLimit`).
  */
-router.get('/:id/export.csv', validateUuidParams('id'), async (req, res) => {
+router.get('/:id/export.csv', exportRateLimit, validateUuidParams('id'), async (req, res) => {
   try {
     const exportFile = await StatsExportService.exportGameEventsCsv(
       req.params.id as string,
@@ -232,12 +234,13 @@ router.get('/:id/export.csv', validateUuidParams('id'), async (req, res) => {
  * Export box score as PDF
  * Note: entitlement gating (Coach Premium) deferred to v2.2; open for now.
  *
- * PERFORMANCE NOTE: PDFKit is synchronous/CPU-bound and will block the Node
- * event loop while rendering. At GA scale (many concurrent exports) this must
- * be moved off the main thread via worker_threads or a background job.
- * Tracked in issue #50.
+ * PDFKit renders synchronously on the event loop, but the document is a
+ * header plus one row per rostered player (milliseconds), and no client calls
+ * this route yet. The per-user `exportRateLimit` bounds a caller looping it
+ * (issue #50). Move rendering to a worker only once a client ships and
+ * concurrent export volume is observed.
  */
-router.get('/:id/boxscore.pdf', validateUuidParams('id'), async (req, res) => {
+router.get('/:id/boxscore.pdf', exportRateLimit, validateUuidParams('id'), async (req, res) => {
   try {
     const exportFile = await StatsExportService.exportGameBoxScorePdf(
       req.params.id as string,
