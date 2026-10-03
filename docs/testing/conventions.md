@@ -50,7 +50,22 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)
 - They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,
-  next to the fixtures the Maestro flows depend on.
+  next to the fixtures the Maestro flows depend on. `npm test` runs them with everything else;
+  `npm run test:db` runs only them (`docker-compose up -d`, then `npx prisma migrate deploy` once).
+  CI provides the database on every backend PR (`ci.yml` starts `postgres:18` and exports
+  `DATABASE_URL`). A suite that finds no database **fails** with the start-up command; it never skips.
+- **Why they exist (#458):** every other suite mocks Prisma, so an authorization assertion there is
+  `toEqual` on the `where` object the author wrote. It cannot catch an `OR` where an `AND` was meant,
+  a relation filter that matches a different row set than assumed, or NULL semantics. Every access
+  clause (`teamAccessWhere`, `getReadableLeagueIds`, `listTeams`, `listGames`, player stats) has a
+  suite here with one caller per branch, each qualifying through exactly one, so a dropped branch
+  fails a test and a widened one fails a negative. When adding a clause, add it here too, and prove
+  the suite bites once by breaking a branch on purpose.
+- **Build fixtures with `tests/support/db-fixtures.ts#DbFixtures`** (`new DbFixtures(prisma, '<label>')`):
+  `requireDatabase()`, `user(key, role)`, `org(key)` (league + active season + team + head-coach
+  role; `{ league }` adds a sibling team to an existing one), `staff`, `member`, `leagueAdmin`,
+  `guardian`, `personalLeague`, `game`, and `cleanup()` in `afterAll`. Two independent orgs are two
+  `org()` calls. The older suites inline the same builders; new ones use the helper.
 - **Name every row with the run id** (`const RUN = randomUUID().slice(0, 8)`): user name
   `<key>-<run>` and email `<local>.<run>@example.test`, league `ZZ-<label>-<run>`, team
   `<label>-<run>`. Never use an `@example.com` address in a suite: that domain is the seed's.

@@ -49,6 +49,7 @@ npm run lint             # ESLint (--max-warnings 0)
 npm run type-check       # Type check without build
 npm test                 # Jest
 npm test -- --testPathPattern="game"   # One test file
+npm run test:db          # Only the real-database suites (needs docker-compose Postgres, migrated)
 npm run prisma:generate  # Regenerate the Prisma client after schema changes
 npm run prisma:migrate   # Run database migrations
 npm run prisma:studio    # Prisma Studio GUI

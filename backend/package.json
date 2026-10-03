@@ -15,6 +15,7 @@
     "type-check": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:db": "jest tests/integration",
     "db:seed": "npx prisma db seed",
     "db:reset": "tsx prisma/reset.ts",
     "db:fresh": "tsx prisma/reset.ts && npx prisma db seed"
