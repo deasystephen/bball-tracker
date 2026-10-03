@@ -8,6 +8,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { setUserProperties } from '../services/analytics';
 
 export type SubscriptionTier = 'FREE' | 'PREMIUM' | 'LEAGUE';
 
@@ -42,7 +43,10 @@ export function useUsage() {
     queryKey: usageKeys.me(),
     queryFn: async () => {
       const response = await apiClient.get<UsageResponse>('/auth/me/usage');
-      return response.data.usage;
+      const usage = response.data.usage;
+      // The usage endpoint is the source for the `tier` user property (#616).
+      if (usage?.tier) setUserProperties({ tier: usage.tier });
+      return usage;
     },
     // Usage is cheap to refetch and changes when teams are added/removed;
     // a short stale time keeps the meter fresh without hammering the API.

@@ -4,11 +4,14 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import type {
   Game,
   GameEvent,
   GameEventFilters,
+  GameEventType,
   CreateGameEventInput,
+  ShotMetadata,
 } from '../types/game';
 import { gameKeys } from './useGames';
 
@@ -117,6 +120,13 @@ export function useCreateGameEvent() {
       };
     },
     onSuccess: (result, variables) => {
+      const shot =
+        variables.data.eventType === 'SHOT' ? (variables.data.metadata as Partial<ShotMetadata> | undefined) : undefined;
+      trackEvent(AnalyticsEvents.GAME_EVENT_RECORDED, {
+        game_id: variables.gameId,
+        event_type: variables.data.eventType,
+        ...(shot ? { shot_made: shot.made === true, shot_points: shot.points } : {}),
+      });
       // The home score is derived server-side from the event log (audit #6);
       // trust the returned score, then refetch for everything else.
       applyScoreToGameDetail(queryClient, variables.gameId, result.score);
@@ -143,11 +153,17 @@ export function useDeleteGameEvent() {
     }: {
       gameId: string;
       eventId: string;
+      /** For analytics only: the tracker knows what it is undoing, the server call does not. */
+      eventType?: GameEventType;
     }): Promise<DeleteGameEventResult> => {
       const response = await apiClient.delete(`/games/${gameId}/events/${eventId}`);
       return { score: response.data?.score as GameScore };
     },
     onSuccess: (result, variables) => {
+      trackEvent(AnalyticsEvents.GAME_EVENT_UNDONE, {
+        game_id: variables.gameId,
+        ...(variables.eventType ? { event_type: variables.eventType } : {}),
+      });
       applyScoreToGameDetail(queryClient, variables.gameId, result.score);
       queryClient.invalidateQueries({
         queryKey: gameEventKeys.listsFor(variables.gameId),

@@ -18,6 +18,8 @@ jest.mock('../../services/analytics', () => ({
   trackEvent: jest.fn(),
   identifyUser: jest.fn(),
   resetUser: jest.fn(),
+  setUserProperties: jest.fn(),
+  appVersion: () => 'test',
   AnalyticsEvents: { USER_LOGGED_IN: 'in', USER_LOGGED_OUT: 'out' },
 }));
 

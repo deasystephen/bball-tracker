@@ -79,13 +79,20 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
     `backend/src/utils/sentry.ts`).
   - Mobile reports carry **no** user id: `setSentryUser` in `mobile/services/sentry.ts` is never
     called. They hold device model, OS version, app release and redacted breadcrumbs.
-- **Usage analytics (Amplitude)** are kept for the window of the Amplitude plan. Each of the six
-  events carries the internal user id, a device id, `identifierForVendor`, device and OS details,
+- **Usage analytics (Amplitude)** are kept for the window of the Amplitude plan. Every event
+  (the catalogue in `docs/architecture/analytics.md`: screens viewed as route patterns, and the
+  teams, rosters, invitations, games and game events the person created, changed or deleted)
+  carries the internal user id, a device id, `identifierForVendor`, device and OS details,
   language, carrier, and the IP address of the request, from which Amplitude derives **city,
-  region and country**. That set is fixed in code (`AMPLITUDE_TRACKING_OPTIONS`,
-  `mobile/services/analytics.ts`) and pinned by a test. No name, email or photo is sent, and the
-  advertising id is never sent. Whether Amplitude keeps the raw IP address after the lookup is a
-  setting in the Amplitude project; confirm it there before the privacy policy states it.
+  region and country**. Event properties are internal ids, enums, counts and flags (which fields
+  changed, never their values; an error's code, never its message). The user record at Amplitude
+  also holds **user properties**: global role, head-coach / assistant-coach / parent / player
+  flags, team count, subscription tier and app version. That set is fixed in code
+  (`AMPLITUDE_TRACKING_OPTIONS`, `AnalyticsEventProps`, `AnalyticsUserProperties` in
+  `mobile/services/analytics.ts`) and pinned by tests. No name, email, jersey number, message or
+  photo is sent, and the advertising id is never sent. Whether Amplitude keeps the raw IP address
+  after the lookup is a setting in the Amplitude project; confirm it there before the privacy
+  policy states it.
 - After deletion nothing in the application maps the internal id back to a person, but the
   analytics and backend error records above remain at the vendors, keyed on that id, until their
   windows expire. To remove them sooner, use each vendor's own deletion request for that id.

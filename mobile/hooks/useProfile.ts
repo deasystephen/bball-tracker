@@ -8,6 +8,7 @@
 
 import { useMutation } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
 import type { User } from '../../shared/types';
 
@@ -43,7 +44,12 @@ export function useUpdateProfile() {
       const response = await apiClient.patch<ProfileResponse>('/auth/me', data);
       return response.data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      trackEvent(AnalyticsEvents.PROFILE_UPDATED, {
+        name_changed: variables.name !== undefined,
+        photo_changed: variables.profilePictureUrl !== undefined,
+        photo_cleared: variables.profilePictureUrl === '',
+      });
       // Merge without re-firing login analytics (setUser would).
       useAuthStore.getState().updateUser(toUserPatch(data.user));
     },

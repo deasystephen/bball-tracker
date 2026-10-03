@@ -9,6 +9,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { useIsAuthenticated } from '../store/auth-store';
 
 // Configure notification behavior
@@ -62,6 +63,8 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (existingStatus !== 'granted') {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
+    // Only when the prompt was shown; an already-granted device is not an answer.
+    trackEvent(AnalyticsEvents.PUSH_PERMISSION_ANSWERED, { granted: status === 'granted' });
   }
 
   if (finalStatus !== 'granted') {
@@ -109,6 +112,9 @@ export function useNotificationSetup() {
       (response) => {
         const data = response.notification.request.content.data ?? {};
 
+        trackEvent(AnalyticsEvents.NOTIFICATION_OPENED, {
+          target: data.gameId ? 'game' : data.teamId ? 'team' : 'none',
+        });
         if (data.gameId) {
           router.push(`/games/${data.gameId}`);
         } else if (data.teamId) {

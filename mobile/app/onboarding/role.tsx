@@ -16,6 +16,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthUser, useAuthActions } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
+import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import { useTranslation } from '../../i18n';
 import { UserRole } from '../../../shared/types';
 import { markRoleChosen, postLoginRoute, HOME_ROUTE } from '../../utils/role-onboarding';
@@ -63,6 +64,11 @@ export default function RoleSelectScreen() {
         updateUser({ role: response.data.user.role });
       }
       await markRoleChosen(user.id);
+      // "Change account type" from Profile is not onboarding; the role itself
+      // reaches Amplitude as a user property either way (auth-store).
+      if (from !== 'profile') {
+        trackEvent(AnalyticsEvents.ONBOARDING_STEP_COMPLETED, { step: 'role', role: selected });
+      }
       await finish();
     } catch (err) {
       captureException(err, { flow: 'role-onboarding' });

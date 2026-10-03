@@ -16,6 +16,7 @@ import '../services/session-logout'; // registers logout side effects with the a
 import { useNotificationSetup } from '../hooks/useNotifications';
 import { useAuthRedirect } from '../hooks/useAuthRedirect';
 import { useSessionRefresh } from '../hooks/useSessionRefresh';
+import { useScreenViewTracking } from '../hooks/useScreenViews';
 import '../i18n/config'; // Initialize i18n
 
 // Initialize Sentry as early as possible so crashes during startup are captured.
@@ -45,6 +46,12 @@ function AuthRedirectHandler() {
 /** Re-syncs role / league-admin grants from GET /auth/me on foreground. */
 function SessionRefreshHandler() {
   useSessionRefresh();
+  return null;
+}
+
+/** Sends `screen_viewed` (route pattern only) on every navigation (#616). */
+function ScreenViewHandler() {
+  useScreenViewTracking();
   return null;
 }
 
@@ -82,6 +89,7 @@ export default function RootLayout() {
               <NotificationHandler />
               <AuthRedirectHandler />
               <SessionRefreshHandler />
+              <ScreenViewHandler />
               <Stack
                 screenOptions={{
                   headerShown: false,
