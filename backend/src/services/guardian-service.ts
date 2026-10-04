@@ -74,6 +74,10 @@ export interface GuardianOfEntry {
   childName: string;
   relationship: GuardianRelationship;
   isPrimary: boolean;
+  /** True only for a managed child with no login: the one record a guardian may delete. */
+  isManaged: boolean;
+  /** The child's current team memberships; drives the per-team guardians deep link. */
+  teams: { id: string; name: string }[];
 }
 
 export interface InviteGuardianInput {

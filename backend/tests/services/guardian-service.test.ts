@@ -68,7 +68,7 @@ function invitationRow(overrides: Record<string, unknown> = {}): Record<string, 
 
 describe('GuardianService', () => {
   describe('getGuardianOf', () => {
-    it('maps guardian links to { childId, childName, relationship, isPrimary }', async () => {
+    it('maps guardian links to { childId, childName, relationship, isPrimary, isManaged, teams }', async () => {
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([
         {
           childId: 'c1',
