@@ -75,6 +75,18 @@ function useInvalidateGuardians() {
   };
 }
 
+export interface InviteGuardianResponse {
+  success: boolean;
+  invitation: PendingGuardianInvitation;
+  /** false = the invitation was created but its email failed to send. */
+  emailSent: boolean;
+}
+
+export interface InviteGuardianResult {
+  invitation: PendingGuardianInvitation;
+  emailSent: boolean;
+}
+
 export function useInviteGuardian() {
   const invalidate = useInvalidateGuardians();
   const queryClient = useQueryClient();
@@ -88,12 +100,14 @@ export function useInviteGuardian() {
       teamId: string;
       playerId: string;
       data: InviteGuardianInput;
-    }) => {
-      const response = await apiClient.post<{
-        success: boolean;
-        invitation: PendingGuardianInvitation;
-      }>(`/teams/${teamId}/members/${playerId}/guardians`, data);
-      return response.data.invitation;
+    }): Promise<InviteGuardianResult> => {
+      const response = await apiClient.post<InviteGuardianResponse>(
+        `/teams/${teamId}/members/${playerId}/guardians`,
+        data
+      );
+      // emailSent is per send: false means the invitation exists but SES
+      // refused the email, and the screen must say so (#770).
+      return { invitation: response.data.invitation, emailSent: response.data.emailSent };
     },
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_INVITED, {

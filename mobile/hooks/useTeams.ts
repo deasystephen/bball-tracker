@@ -7,7 +7,14 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents, changedFields, setUserProperties } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
 import { usageKeys } from './useUsage';
-import { playerKeys, teamKeys, invitationKeys, type TeamFilters } from './query-keys';
+import {
+  gameKeys,
+  playerKeys,
+  statsKeys,
+  teamKeys,
+  invitationKeys,
+  type TeamFilters,
+} from './query-keys';
 import type { TeamInvitationStatusRow } from '../utils/roster-status';
 import type { GuardianRelationship } from '../../shared/types';
 
@@ -343,6 +350,10 @@ export function useDeleteTeam() {
       trackEvent(AnalyticsEvents.TEAM_DELETED, { team_id: teamId });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
+      // The team's games cascade-delete server-side, and its finished games
+      // fed season totals (#729).
+      queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: statsKeys.all });
     },
   });
 }

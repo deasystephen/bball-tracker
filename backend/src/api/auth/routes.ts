@@ -112,6 +112,7 @@ if (process.env.NODE_ENV === 'development') {
           email: true,
           name: true,
           role: true,
+          notifyOnReplies: true,
         },
       });
 
@@ -302,6 +303,9 @@ router.get('/callback', async (req, res) => {
         name: user.name,
         role: user.role,
         profilePictureUrl: user.profilePictureUrl,
+        // The session user carries the reply opt-out so a fresh sign-in shows
+        // the stored value, not the absent-reads-as-on default (#768).
+        notifyOnReplies: user.notifyOnReplies,
         leagueAdminOf: await getLeagueAdminOf(user.id),
         guardianOf,
       },

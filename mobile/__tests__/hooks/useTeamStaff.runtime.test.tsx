@@ -20,6 +20,7 @@ import {
 } from '../../hooks/useTeamStaff';
 import { teamKeys } from '../../hooks/useTeams';
 import { usageKeys } from '../../hooks/useUsage';
+import { gameKeys } from '../../hooks/query-keys';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -178,6 +179,8 @@ describe('useTeamStaff runtime', () => {
 
       expect(mockedDelete).toHaveBeenCalledWith('/teams/t1/staff/coach-1');
       expectStaffInvalidation(invalidateSpy, 't1');
+      // Leaving a team's staff drops its games from GET /games (#729).
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
     });
   });
 });

@@ -883,7 +883,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH (announcement author)
 - **Steps:** Profile → Settings → "Reply notifications" off (subtitle reads "Off"). Have a player reply to one of your announcements. Turn it back on and have them reply again.
-- **Expected:** No push or email for the first reply; both for the second. The thread itself is unaffected. `PATCH /auth/me { notifyOnReplies }` in the backend log; the value survives a cold start (`GET /auth/me` carries it).
+- **Expected:** No push or email for the first reply; both for the second. The thread itself is unaffected. `PATCH /auth/me { notifyOnReplies }` in the backend log; the value survives a cold start (`GET /auth/me` carries it) and a sign-out / sign-in or a second device (the sign-in payload carries it, #768): with the toggle off, sign out and back in and Profile shows it **Off** without a tap.
 - **Notes:** ___________
 
 ---

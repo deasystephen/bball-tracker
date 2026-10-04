@@ -15,6 +15,7 @@ import {
   guardianKeys,
   type GuardianRow,
   type PendingGuardianInvitation,
+  type InviteGuardianResult,
 } from '../../hooks/useGuardians';
 import { teamKeys } from '../../hooks/useTeams';
 import { invitationKeys } from '../../hooks/useInvitations';
@@ -80,12 +81,12 @@ describe('useGuardians runtime', () => {
   });
 
   it('useInviteGuardian POSTs { email, relationship } and invalidates guardians, team and invitations', async () => {
-    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending } });
+    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: true } });
     const { wrapper, client } = createQueryWrapper();
     const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useInviteGuardian(), { wrapper });
 
-    let returned: PendingGuardianInvitation | undefined;
+    let returned: InviteGuardianResult | undefined;
     await act(async () => {
       returned = await result.current.mutateAsync({
         teamId: 't1',
@@ -94,7 +95,7 @@ describe('useGuardians runtime', () => {
       });
     });
 
-    expect(returned).toEqual(pending);
+    expect(returned).toEqual({ invitation: pending, emailSent: true });
     expect(mockedPost).toHaveBeenCalledWith('/teams/t1/members/steph/guardians', {
       email: 'sonya.curry@example.com',
       relationship: 'MOTHER',
@@ -102,6 +103,23 @@ describe('useGuardians runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: guardianKeys.player('t1', 'steph') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: invitationKeys.all });
+  });
+
+  it('useInviteGuardian surfaces emailSent: false when the email failed (#770)', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: false } });
+    const { wrapper } = createQueryWrapper();
+    const { result } = renderHook(() => useInviteGuardian(), { wrapper });
+
+    let returned: InviteGuardianResult | undefined;
+    await act(async () => {
+      returned = await result.current.mutateAsync({
+        teamId: 't1',
+        playerId: 'steph',
+        data: { email: 'sonya.curry@example.com', relationship: 'MOTHER' },
+      });
+    });
+
+    expect(returned).toEqual({ invitation: pending, emailSent: false });
   });
 
   it('useInviteGuardian surfaces API errors', async () => {

@@ -15,6 +15,7 @@ import {
   useCancelInvitation,
   invitationKeys,
 } from '../../hooks/useInvitations';
+import { gameKeys, teamKeys } from '../../hooks/query-keys';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -156,10 +157,28 @@ describe('useInvitations runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: invitationKeys.all,
     });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['teams'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.all });
+    // GET /games is membership-scoped: the new team's games must appear (#729).
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
   });
 
-  it('useAcceptInvitation does not invalidate teams when teamMember absent', async () => {
+  it('useAcceptInvitation invalidates teams and games on a guardian accept', async () => {
+    mockedPost.mockResolvedValueOnce({
+      data: { success: true, kind: 'guardian', invitation: { id: 'gi-1' } },
+    });
+    const { wrapper, client } = createQueryWrapper();
+    const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useAcceptInvitation(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync('gi-1');
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.all });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+  });
+
+  it('useAcceptInvitation does not invalidate teams or games when teamMember absent', async () => {
     const response = { success: true, invitation: { id: 'inv-1' } };
     mockedPost.mockResolvedValueOnce({ data: response });
     const { wrapper, client } = createQueryWrapper();
@@ -173,11 +192,9 @@ describe('useInvitations runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: invitationKeys.all,
     });
-    expect(
-      invalidateSpy.mock.calls.some(
-        (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(['teams'])
-      )
-    ).toBe(false);
+    const keys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
+    expect(keys).not.toContain(JSON.stringify(teamKeys.all));
+    expect(keys.some((k) => k.startsWith('["games"'))).toBe(false);
   });
 
   it('useRejectInvitation posts and invalidates all invitations', async () => {

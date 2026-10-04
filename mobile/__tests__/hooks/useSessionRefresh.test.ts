@@ -101,6 +101,28 @@ describe('useSessionRefresh', () => {
     expect(user?.email).toBe('a@b.c');
   });
 
+  it('carries notifyOnReplies: false from GET /auth/me into the store (#768)', async () => {
+    // A re-sign-in stores a login payload; the server value must win even when
+    // the cached user reads as "on".
+    useAuthStore.setState({ user: { ...baseUser, notifyOnReplies: true } });
+    mockGet.mockResolvedValue({ data: { success: true, user: { notifyOnReplies: false } } });
+
+    renderHook(() => useSessionRefresh());
+    await act(async () => {});
+
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+  });
+
+  it('leaves the cached notifyOnReplies untouched when the response omits it', async () => {
+    useAuthStore.setState({ user: { ...baseUser, notifyOnReplies: false } });
+    mockGet.mockResolvedValue({ data: { success: true, user: { role: 'PLAYER' } } });
+
+    renderHook(() => useSessionRefresh());
+    await act(async () => {});
+
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+  });
+
   it('does nothing when signed out', async () => {
     useAuthStore.setState({ accessToken: null, user: null, isAuthenticated: false });
     renderHook(() => useSessionRefresh());

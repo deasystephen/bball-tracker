@@ -29,6 +29,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - Infinite keys nest under the list root (`gameKeys.lists()`, `teamKeys.lists()`, `announcementKeys.team(id)`)
   so existing mutation invalidations cover them. `useUpdateGame` also invalidates `statsKeys.all` when a game
   becomes `FINISHED`; `useCreateTeam`/`useDeleteTeam` invalidate `usageKeys.all` (the Profile usage meter).
+- Membership-changing mutations (team or guardian invitation accept, team delete, staff add / re-role /
+  remove / leave) invalidate `gameKeys.lists()` because `GET /games` is membership-scoped; team delete also
+  invalidates `statsKeys.all` (#729). `gameKeys` and `statsKeys` live in `hooks/query-keys.ts` with the other
+  cross-hook factories (re-exported from `useGames` / `useStats`).
 - The tab bar (`app/(tabs)/_layout.tsx`) is an absolutely-positioned translucent blur overlay — content
   deliberately scrolls behind it. Every scrollable tab screen therefore sets its scroll-content
   `paddingBottom` from `hooks/useTabBarPadding.ts#useTabBarPadding()` (= `TAB_BAR_HEIGHT` 60 + bottom
@@ -162,7 +166,8 @@ never inline a role check in a screen:
   state. Home's "no teams → Create Team" card uses `canCreateTeams(user)` like the Teams tab.
 - `hooks/useSessionRefresh.ts` (mounted in `_layout.tsx`) re-fetches `GET /auth/me` when a session becomes
   active and on every foreground (AppState → `active`), throttled to once per 5 min, and merges
-  `role` / `leagueAdminOf` / `name` / `profilePictureUrl` via `auth-store.updateUser`. Failures are ignored.
+  `role` / `leagueAdminOf` / `guardianOf` / `name` / `profilePictureUrl` / `notifyOnReplies` via
+  `auth-store.updateUser`; a field absent from the response leaves the cached value alone. Failures are ignored.
 - **Team staff screen** (`app/teams/[id]/staff.tsx`, role matrix decision 2 / B2.3): reached from the "Staff"
   card on team detail (coach names + count; the hero line lists every `HEAD_COACH`-type row from `team.staff`).
   Lists `GET /teams/:id/staff` (name, role, email when the API returns it). Readable by anyone with team access;

@@ -85,10 +85,20 @@ export default function PlayerGuardiansScreen() {
     }
     setEmailError(undefined);
     try {
-      await inviteGuardian.mutateAsync({ teamId: id, playerId, data: { email: trimmed, relationship } });
+      const result = await inviteGuardian.mutateAsync({
+        teamId: id,
+        playerId,
+        data: { email: trimmed, relationship },
+      });
+      // The pending row exists server-side either way, so the form closes in
+      // both branches; a failed send is reported, never shown as "sent".
       setEmail('');
       setShowForm(false);
-      toast.showToast(`Invitation sent to ${trimmed}`, 'success');
+      if (result.emailSent === false) {
+        toast.showToast(`Invitation created, but the email to ${trimmed} failed to send.`, 'error');
+      } else {
+        toast.showToast(`Invitation sent to ${trimmed}`, 'success');
+      }
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, 'Failed to send invitation'), 'error');
     }

@@ -5,7 +5,7 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents, changedFields } from '../services/analytics';
-import { statsKeys } from './useStats';
+import { gameKeys, statsKeys } from './query-keys';
 import type {
   Game,
   GameFilters,
@@ -16,17 +16,8 @@ import type {
   RsvpSummary,
 } from '../types/game';
 
-// Query keys
-export const gameKeys = {
-  all: ['games'] as const,
-  lists: () => [...gameKeys.all, 'list'] as const,
-  list: (filters?: GameFilters) => [...gameKeys.lists(), filters] as const,
-  infinite: (filters?: Omit<GameFilters, 'offset'>) =>
-    [...gameKeys.lists(), 'infinite', filters] as const,
-  live: () => [...gameKeys.lists(), 'live'] as const,
-  details: () => [...gameKeys.all, 'detail'] as const,
-  detail: (id: string) => [...gameKeys.details(), id] as const,
-};
+// Query keys live in query-keys.ts (cross-hook invalidation without cycles).
+export { gameKeys };
 
 /** Default page size for paginated game lists (matches the server default). */
 export const GAMES_PAGE_SIZE = 20;

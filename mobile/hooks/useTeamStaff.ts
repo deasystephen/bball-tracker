@@ -8,6 +8,7 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { teamKeys, type TeamStaff } from './useTeams';
 import { usageKeys } from './useUsage';
+import { gameKeys } from './query-keys';
 
 export type StaffRoleType = 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
 
@@ -81,6 +82,8 @@ function useInvalidateStaff() {
     queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
     // Staff membership is what the usage meter counts (#43 / B2.8).
     queryClient.invalidateQueries({ queryKey: usageKeys.all });
+    // Staff membership decides which games the caller may list (#729).
+    queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
   };
 }
 

@@ -22,6 +22,7 @@ import {
   teamKeys,
   type Team,
 } from '../../hooks/useTeams';
+import { gameKeys, statsKeys } from '../../hooks/query-keys';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -138,7 +139,7 @@ describe('useTeams runtime', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
     });
 
-    it('useDeleteTeam deletes and invalidates the list', async () => {
+    it('useDeleteTeam deletes and invalidates the list, games and stats', async () => {
       mockedDelete.mockResolvedValueOnce({ data: {} });
       const { wrapper, client } = createQueryWrapper();
       const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
@@ -150,6 +151,9 @@ describe('useTeams runtime', () => {
 
       expect(mockedDelete).toHaveBeenCalledWith('/teams/t1');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
+      // The team's games cascade-delete and fed season totals (#729).
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: statsKeys.all });
     });
 
     it('useAddRosterPlayer posts the unified payload and invalidates team + invitations', async () => {
