@@ -77,6 +77,12 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   the `'all'` scope from a test:** suites run in parallel against one database, and it would
   delete the rows of a suite that is still running. Read with `findTestRows` instead.
 - The helper refuses to run when `NODE_ENV` is `production` or `DATABASE_URL` names an RDS host.
+- `npm run db:reset` and `npm run db:fresh` (`prisma/reset.ts`, a full wipe) carry the same two-signal
+  guard and one more: `prisma/reset-guard.ts#assertResetAllowed` also refuses any `DATABASE_URL` host
+  that is not loopback or the docker-compose `postgres` service, before the Prisma client is built.
+  No environment variable overrides it (the seed's `SEED_ALLOW_PRODUCTION` does not apply).
+  `tests/prisma/reset-guard.test.ts` covers the branches and checks the call precedes the first
+  `deleteMany` (#784).
 - `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
   seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
   purpose once and confirm that suite fails.
