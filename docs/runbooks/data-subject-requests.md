@@ -96,8 +96,9 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   policy states it.
 - **Application logs** (one line per API request with method, redacted path, status and
   duration, plus domain events such as `Account deleted`) carry the caller's **internal user id**
-  and `requestId` whenever the request was authenticated (`setLogContextUser` in
-  `backend/src/api/auth/middleware.ts`; `backend/src/api/middleware/request-logger.ts`). The
+  and `requestId` whenever the request was authenticated (`setLogContextUser` from
+  `backend/src/utils/log-context.ts`, called by `backend/src/api/auth/middleware.ts`;
+  `backend/src/api/middleware/request-logger.ts`). The
   `Account deleted` event logs the deleted user's id, the actor's id and the mode. At the
   production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name
   and no secret URL (paths and query strings go through `utils/redact.ts`), and email addresses

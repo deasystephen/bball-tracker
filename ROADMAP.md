@@ -45,27 +45,21 @@ the running code, live DNS, and the production AWS account rather than against
 its own description. Full assessment, including the deferral rationale for
 everything *not* on this milestone:
 [GA readiness assessment](https://claude.ai/code/artifact/d2153c41-97ca-4e54-ad17-9acbe394848f)
-(a dated snapshot — the milestone is the live source of truth). The lanes below
-are likewise a snapshot, last reconciled with the milestone on 2026-10-04, when
-the "paths a stranger walks" and "infrastructure" lanes from the rebuild had
-closed in full and moved to "Shipped so far"; for what is open today, read the
-milestone, not this list.
+(a dated snapshot — the milestone is the live source of truth).
 
-What is left groups into two lanes:
-
-- **External clocks — start first, they queue.** SES production access (#23),
-  privacy policy + ToS with a COPPA read (#25), WorkOS production environment
-  (#24), a mailbox on hooplings.com (#555) and the support inbox that needs it
-  (#450), App Store Connect metadata (#451).
-- **The deploy that unblocks onboarding.** `web/` to hooplings.com (#30) —
-  carries the legal pages, the invite funnel, and Universal Links.
+What is still open is listed only on the milestone, never here: a copy of the
+open list in this file is what went stale between the rebuild and 2026-10-04,
+when the "paths a stranger walks" and "infrastructure" lanes of that rebuild had
+closed in full (they are under "Shipped so far"). The lanes that remain are the
+external clocks that queue behind AWS, Apple, counsel and the identity provider,
+and the `web/` deploy that gives the invite email somewhere to land.
 
 Ordering is not free. The chain now starts at `#30 → #23 → #24`: each link makes
 the next safe, and skipping ahead produces user-visible breakage rather than
 just delay. Leaving SES sandbox before #30 ships, for instance, means working
 email carrying a dead link — worse than no email.
 
-Shipped so far:
+Shipped so far (closing dates are GitHub's, in UTC):
 - Self-serve team creation (#442, closed 2026-08-31): a new coach creates a
   team without an admin.
 - League and season list scoping (#443, closed 2026-08-31): list and detail

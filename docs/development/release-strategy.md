@@ -6,7 +6,7 @@ different things per package:
 | Package | How it reaches users | Trigger |
 |---|---|---|
 | `backend/` | Docker image → ECR → ECS Fargate (`api.hooplings.com`) | **Automatic** on every merge to `main` that touches `backend/` (`.github/workflows/ci.yml`; Prisma migrations run from `docker/entrypoint.sh`) |
-| `mobile/` JS-only changes | EAS **OTA update** on the `production` branch | Manual: `cd mobile && npm ci && npm run ota:production -- --message "…"`. The script runs the OTA drift guard before `eas update`; a raw `eas update` bypasses it (see Mobile below) |
+| `mobile/` JS-only changes | EAS **OTA update** on the `production` branch | Manual: `cd mobile && npm ci && npm run ota:production -- --message "…"` (see Mobile below) |
 | `mobile/` native changes (new native module, `app.config.js` plugins/entitlements, Expo SDK bump) | EAS **build** → TestFlight / App Store | Manual: `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` |
 | `web/` | Not deployed yet (`hooplings.com` has no hosting target) | — |
 
@@ -22,13 +22,11 @@ different things per package:
 
 Decide OTA vs. native build **before** merging:
 
-- **OTA** is only for JS/asset changes. Publish it with
-  `cd mobile && npm ci && npm run ota:production -- --message "…"`, never a raw
-  `eas update`: the script runs the OTA drift guard (`binary-manifest:check`,
-  #562) and then `eas update` with the production environment; a raw
-  `eas update` skips the guard. `npm ci` comes first because `eas update`
-  bundles what is installed, not what the lockfile says. The guard, the runtime
-  rules and the environment gotcha are in
+- **OTA** is only for JS/asset changes. Use the `ota:production` script from
+  the table, never a raw `eas update`: the script runs the OTA drift guard
+  (#562) first and a raw `eas update` skips it; `npm ci` comes first because
+  `eas update` bundles what is installed, not what the lockfile says. What the
+  guard checks, the runtime rules and the environment gotcha:
   [`docs/deployment/mobile-builds-and-ota.md`](../deployment/mobile-builds-and-ota.md).
 - **Native build** whenever a native dependency changes (e.g.
   `@sentry/react-native`, Reanimated, Expo SDK), or `app.config.js` gains

@@ -26,7 +26,7 @@ npm run build   # Production build
 npx eas-cli build --platform android --profile preview   # Android APK for testing
 npx eas-cli build --platform ios --profile preview        # iOS (requires Apple Developer account)
 npx eas-cli build --platform all --profile production     # Production builds for stores
-npx eas-cli update --environment preview --message "description" # OTA to preview builds; no drift guard by design (the manifest records production runtimes only)
+npx eas-cli update --environment preview --message "description" # OTA to preview builds; no `ota:preview` script wraps the guard, so this runs no drift check: publish only against a preview binary cut from the same lockfile
 npm ci && npm run ota:production -- --message "description"   # production OTA (runs the drift guard first)
 ```
 **OTA env gotcha:** `eas update` evaluates `app.config.js` on *your* machine. `getApiUrl()` keys off `APP_ENV`; if it is unset the update ships `apiUrl: http://127.0.0.1:3000` (plus no Sentry DSN) and every device that takes it shows "Network error" on all API-backed tabs. The EAS `production` environment now provides `APP_ENV`, `SENTRY_ENVIRONMENT` and `SENTRY_DSN` (visibility *sensitive*, not *secret* — secret vars are builder-only and invisible to `eas update`). Always use `--environment production` and check the CLI line "Environment variables … loaded from the production environment" lists `APP_ENV`. (`AMPLITUDE_API_KEY` is *sensitive* too.) Remember an update runs on the **second** launch after it is downloaded.

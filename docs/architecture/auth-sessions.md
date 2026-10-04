@@ -39,4 +39,4 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `tests/services/mailer.test.ts`, which fails on a template file that is missing from it. The
   mobile copy of the address is `config/env.ts#SUPPORT_EMAIL`; `__tests__/config/env.test.ts`
   fails when the two differ. No postal address is printed (owner decision 2026-09-29).
-- `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints solely under `NODE_ENV=development`.
+- `SesMailer` logs `toHash` (first 12 hex of sha256 of the lower-cased address, `hashRecipient()`) at info — never the address. The full address is emitted only via `logger.debug`, which the structured logger prints when `LOG_LEVEL=debug` (`utils/logger.ts`; the threshold, not `NODE_ENV`, gates it). An operator may switch that on in production for a diagnosis, and while it is on every outbound email writes its plain recipient to the logs (`docs/runbooks/data-subject-requests.md`, Retention; #640).
