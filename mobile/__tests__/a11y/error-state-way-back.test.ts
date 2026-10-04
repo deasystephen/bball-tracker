@@ -22,7 +22,8 @@ import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
 
-const MOBILE_ROOT = path.resolve(__dirname, '..', '..');
+import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+
 const APP_DIR = path.join(MOBILE_ROOT, 'app');
 const TABS_DIR = path.join(APP_DIR, '(tabs)');
 
@@ -76,12 +77,9 @@ export function scanErrorStates(fileName: string, text: string): Scan {
   return { withoutBack, hasOwnBackControl };
 }
 
-function sourceFiles(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return full === TABS_DIR ? [] : sourceFiles(full);
-    return entry.name.endsWith('.tsx') ? [full] : [];
-  });
+/** Pushed screens: every `.tsx` under `app/` except the tab screens. */
+function pushedScreenFiles(): string[] {
+  return sourceFiles(APP_DIR, ['.tsx']).filter((file) => !file.startsWith(TABS_DIR + path.sep));
 }
 
 function scanFile(relative: string): Scan {
@@ -89,7 +87,7 @@ function scanFile(relative: string): Scan {
 }
 
 describe('full-screen errors on pushed screens', () => {
-  const files = sourceFiles(APP_DIR).map((file) => path.relative(MOBILE_ROOT, file));
+  const files = pushedScreenFiles().map((file) => path.relative(MOBILE_ROOT, file));
 
   it('offer a way back', () => {
     // A guard that scans nothing passes for the wrong reason.

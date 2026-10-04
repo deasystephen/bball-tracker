@@ -112,6 +112,7 @@ export default function TeamStaffScreen() {
   };
 
   const changeRole = async (row: TeamStaffRow, type: StaffRoleType) => {
+    if (updateRole.isPending) return;
     try {
       await updateRole.mutateAsync({ teamId: id, userId: row.userId, roleType: type });
       toast.showToast(t('teams.roleUpdated'), 'success');
@@ -318,6 +319,8 @@ export default function TeamStaffScreen() {
                         style={styles.rowButton}
                         accessibilityRole="button"
                         accessibilityLabel={`${t('teams.changeRole')}: ${displayName(row.user)}`}
+                        // One role PATCH at a time: a second would race the first.
+                        disabled={updateRole.isPending}
                       >
                         <Ionicons name="swap-horizontal-outline" size={22} color={colors.primary} />
                       </TouchableOpacity>

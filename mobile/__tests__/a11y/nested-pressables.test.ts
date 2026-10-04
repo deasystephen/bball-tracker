@@ -22,7 +22,8 @@ import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
 
-const MOBILE_ROOT = path.resolve(__dirname, '..', '..');
+import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+
 const SCANNED_DIRS = ['app', 'components'];
 
 /** Components that render a pressable. `ListItem` does only when given `onPress`. */
@@ -98,17 +99,9 @@ export function findNestedPressables(fileName: string, text: string): Finding[] 
   return findings;
 }
 
-function sourceFiles(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(full);
-    return entry.name.endsWith('.tsx') ? [full] : [];
-  });
-}
-
 describe('nested pressables', () => {
   it('finds none in the app', () => {
-    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir)));
+    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.tsx']));
     // A guard that scans nothing passes for the wrong reason.
     expect(files.length).toBeGreaterThan(50);
 

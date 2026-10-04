@@ -29,9 +29,11 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
+// jest.setup mocks the whole api-client; keep the real error-message mapping
+// so the refused-update test asserts what production shows.
 jest.mock('../../services/api-client', () => ({
   apiClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
-  getApiErrorMessage: (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback),
+  getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
 }));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
@@ -235,8 +237,11 @@ describe('TeamStaffScreen permission gating', () => {
 
   it('Change role: a refused update toasts the server reason; Close changes nothing', async () => {
     signIn({ id: 'coach-1', role: 'COACH' });
+    // Shaped like the api-client's normalized Axios error: the toast must carry
+    // the server's reason, not Axios's generic message.
     mockUpdateRole.mutateAsync.mockRejectedValueOnce(
-      Object.assign(new Error('Cannot demote the last head coach'), {
+      Object.assign(new Error('Request failed with status code 400'), {
+        isAxiosError: true,
         apiError: { status: 400, error: 'Cannot demote the last head coach' },
       })
     );
@@ -252,6 +257,21 @@ describe('TeamStaffScreen permission gating', () => {
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith('Cannot demote the last head coach', 'error')
     );
+  });
+
+  it('Change role is disabled while a role update is in flight', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockUpdateRole.isPending = true;
+    try {
+      const { getByLabelText, queryByText } = render(<TeamStaffScreen />);
+      const button = getByLabelText('Change role: Mike Brown');
+
+      expect(button.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+      fireEvent.press(button);
+      expect(queryByText('Change role for Mike Brown')).toBeNull();
+    } finally {
+      mockUpdateRole.isPending = false;
+    }
   });
 
   it('shows the empty state when the team has no staff', () => {

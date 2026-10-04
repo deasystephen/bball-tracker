@@ -797,7 +797,7 @@ export default function ManagePlayersScreen() {
                   <View style={styles.selectedPlayerInfo}>
                     <Ionicons name="person-circle" size={40} color={colors.primary} />
                     <View style={styles.selectedPlayerDetails}>
-                      <ThemedText variant="bodyBold">{selectedPlayer.name}</ThemedText>
+                      <ThemedText variant="bodyBold">{displayName(selectedPlayer)}</ThemedText>
                       <ThemedText variant="caption" color="textSecondary">
                         {selectedPlayer.email || 'Roster player'}
                       </ThemedText>
