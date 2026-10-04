@@ -681,7 +681,7 @@ describe('InvitationService', () => {
       // otherwise syncUser would turn a later sign-up into silent membership.
       // The bounce/complaint state described the address being removed (#449).
       expect(txUserUpdateMany).toHaveBeenCalledWith({
-        where: { id: invitation.playerId, workosUserId: null },
+        where: { id: invitation.playerId, workosUserId: null, deletedAt: null },
         data: { email: null, emailSuppressedAt: null, emailSuppressedReason: null },
       });
     });
@@ -1814,7 +1814,7 @@ describe('InvitationService', () => {
       // Guarded on workosUserId: null so a mid-window claim can never be
       // flipped back to managed (red-team RT4)
       expect(txUserUpdate).toHaveBeenCalledWith({
-        where: { id: unclaimed.id, workosUserId: null },
+        where: { id: unclaimed.id, workosUserId: null, deletedAt: null },
         data: { isManaged: true, managedById: coach.id },
       });
       // Never touch name/role of a row another flow provisioned
@@ -1863,7 +1863,7 @@ describe('InvitationService', () => {
       expect(result.rostered).toBe(true);
       expect(txUserUpdate).toHaveBeenCalledTimes(2);
       expect(txUserUpdate).toHaveBeenNthCalledWith(2, {
-        where: { id: unclaimed.id, profilePictureUrl: null },
+        where: { id: unclaimed.id, profilePictureUrl: null, deletedAt: null },
         data: { profilePictureUrl: AVATAR_URL },
       });
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
@@ -1886,7 +1886,7 @@ describe('InvitationService', () => {
       expect(txUserUpdate).toHaveBeenCalledTimes(2);
       // The flags update never carries the photo, so an existing one is never overwritten
       expect(txUserUpdate).toHaveBeenNthCalledWith(1, {
-        where: { id: unclaimed.id, workosUserId: null },
+        where: { id: unclaimed.id, workosUserId: null, deletedAt: null },
         data: { isManaged: true, managedById: coach.id },
       });
       expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
@@ -2114,7 +2114,7 @@ describe('InvitationService', () => {
       // managedById belonged to the race winner's creator — left alone; the
       // write is claim-guarded (red-team RT4)
       expect(txUserUpdate).toHaveBeenCalledWith({
-        where: { id: raceWinner.id, workosUserId: null },
+        where: { id: raceWinner.id, workosUserId: null, deletedAt: null },
         data: { isManaged: true },
       });
     });
@@ -2963,10 +2963,12 @@ describe('InvitationService', () => {
       const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
       routeUserLookups(() => unclaimed);
       // The claim-guarded write hits zero rows: the player finished WorkOS
-      // signup between the read and the transaction.
+      // signup between the read and the transaction. The re-read shows a live
+      // row, so it is a claim, not a deletion (#643).
+      const reRead = jest.fn().mockResolvedValue({ deletedAt: null });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
-          user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+          user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), findUnique: reRead },
           teamMember: { findUnique: jest.fn(), create: jest.fn() },
           teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn(), create: jest.fn() },
         })
@@ -2996,6 +2998,34 @@ describe('InvitationService', () => {
       );
       // RT4 fallback also discards the uploaded avatar (#419)
       expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(reRead).toHaveBeenCalledWith({ where: { id: unclaimed.id }, select: { deletedAt: true } });
+    });
+
+    it('answers 404 and rosters nothing when the reuse target is deleted mid-transaction (#643)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
+      routeUserLookups(() => unclaimed);
+      // The guarded write hits zero rows and the re-read finds a tombstone.
+      const memberCreate = jest.fn();
+      const invitationCreate = jest.fn();
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          user: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            findUnique: jest.fn().mockResolvedValue({ deletedAt: new Date() }),
+          },
+          teamMember: { findUnique: jest.fn(), create: memberCreate },
+          teamInvitation: { updateMany: jest.fn(), create: invitationCreate },
+        })
+      );
+
+      await expect(
+        InvitationService.addRosterPlayer(team.id, { name: 'Jane', playerEmail: 'jane@example.com' }, coach.id)
+      ).rejects.toMatchObject({ statusCode: 404, message: 'Player not found' });
+
+      expect(memberCreate).not.toHaveBeenCalled();
+      expect(invitationCreate).not.toHaveBeenCalled();
+      expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
     });
 
     it('addRosterPlayer answers 404 when the team does not exist', async () => {

@@ -6,13 +6,13 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
-import { hasTeamPermission, canAccessTeam, isSystemAdmin, teamAccessWhere } from '../utils/permissions';
-import { GuardianService } from './guardian-service';
+import { hasTeamPermission, canAccessTeam, isSystemAdmin, readableTeamsWhere } from '../utils/permissions';
 import { omitRosterManagerFields, ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
 import { computeHomeScore, EVENT_PLAYER_SELECT } from './game-event-service';
+import { lockGameRow } from '../utils/game-row-lock';
 
 const GAME_INCLUDE = {
   team: {
@@ -226,9 +226,8 @@ export class GameService {
       // (staff OR member OR league admin OR guardian of a member), the same set
       // `canAccessTeam` and `listTeams` grant. It is never inlined here: a
       // copy drifted once (#589) and no mocked test could tell.
-      const childIds = await GuardianService.getChildIds(userId);
       const userTeams = await prisma.team.findMany({
-        where: teamAccessWhere(userId, childIds),
+        where: await readableTeamsWhere(userId),
         select: { id: true },
       });
 
@@ -350,29 +349,40 @@ export class GameService {
       updateData.status = data.status;
     }
 
-    if (data.homeScore !== undefined) {
-      // The home score is derived from SHOT events (see GameEventService), so
-      // a client-supplied value is only honoured for a game with no shots on
-      // record (e.g. a final score entered for a game not tracked in-app).
-      // Otherwise the derived score is re-persisted, which also self-heals
-      // games saved with an undercounted score by older clients.
-      const shots = await prisma.gameEvent.findMany({
-        where: { gameId, eventType: 'SHOT' },
-        select: { eventType: true, metadata: true },
-      });
-      updateData.homeScore = shots.length === 0 ? data.homeScore : computeHomeScore(shots);
-    }
-
     if (data.awayScore !== undefined) {
       updateData.awayScore = data.awayScore;
     }
 
-    // Update the game
-    const updatedGame = await prisma.game.update({
-      where: { id: gameId },
-      data: updateData,
-      include: GAME_INCLUDE,
-    });
+    // Update the game. The home score is derived from SHOT events (see
+    // GameEventService), so a client-supplied value is only honoured for a
+    // game with no shots on record (e.g. a final score entered for a game not
+    // tracked in-app). Otherwise the derived score is re-persisted, which also
+    // self-heals games saved with an undercounted score by older clients. The
+    // SHOT check and the write run under the same game-row lock as the event
+    // path, so a shot committed in between cannot be overwritten (#666).
+    const clientHomeScore = data.homeScore;
+    const updatedGame =
+      clientHomeScore === undefined
+        ? await prisma.game.update({
+            where: { id: gameId },
+            data: updateData,
+            include: GAME_INCLUDE,
+          })
+        : await prisma.$transaction(async (tx) => {
+            await lockGameRow(tx, gameId);
+            const shots = await tx.gameEvent.findMany({
+              where: { gameId, eventType: 'SHOT' },
+              select: { eventType: true, metadata: true },
+            });
+            return tx.game.update({
+              where: { id: gameId },
+              data: {
+                ...updateData,
+                homeScore: shots.length === 0 ? clientHomeScore : computeHomeScore(shots),
+              },
+              include: GAME_INCLUDE,
+            });
+          });
 
     // One line per status transition, named for the two that matter to an
     // operator (#617). Written before finalization so the two lines read in

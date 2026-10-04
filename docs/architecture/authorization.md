@@ -63,7 +63,12 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   and the two can never drift. **A copy did drift (#589):** `StatsService.getPlayerOverallStats` decided
   access with its own three-branch version (league admin, staff, member), so a guardian got 403 on
   `GET /stats/players/:childId`, the screen every My kids row opens. It now runs the shared clause in
-  one query (`getAccessibleTeamIds`). Before writing "who may read this team" anywhere, use
+  one query (`getAccessibleTeamIds`). The player directory had the same drift (#685): its private
+  two-branch copy (member, staff) gave league admins and guardians a 404 on `GET /players/:id` and an
+  empty `GET /players`; it now applies `teamAccessWhere` too (see Player directory). For the set form,
+  `readableTeamsWhere(userId)` resolves the guardian child ids and returns `teamAccessWhere(userId,
+  childIds)` in one call; `listTeams`, `listGames`, the stats team filter, `getReadableLeagueIds` and
+  the player directory use it instead of pairing the two calls by hand. Before writing "who may read this team" anywhere, use
   `canAccessTeam` for one team or `teamAccessWhere` for a set. Proven against real Postgres in
   `tests/integration/player-stats-access.db.test.ts` and, for `listTeams` / `listGames` with every
   filter, `tests/integration/list-access.db.test.ts`, one caller per branch (#458).
@@ -215,5 +220,7 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 `PlayerService.listPlayers(params, caller)` / `getPlayerById(id, caller)` take the authenticated caller (`{ id, role }`) and scope by it (audit #3):
 
 - **ADMIN**: unscoped; may filter by `role` / `isManaged`; `search` matches name *or* email; `email` is included.
-- **Everyone else**: only themselves plus users who share a team with them (teams they play on or are staff of); `role` / `isManaged` filters are ignored (always `PLAYER`, non-managed); `search` matches name only; `email` is omitted from list results and is `null` on detail unless it's the caller's own record. Players outside the caller's teams are a **404**, not a 403, so ids can't be enumerated.
+- **Everyone else**: only themselves plus players rostered on any team the caller may read, which is the shared `utils/permissions.ts#teamAccessWhere` clause (staff, member, league admin, guardian of a member; #685), never a local copy. `role` / `isManaged` filters are ignored (always `PLAYER`, non-managed); `search` matches name only; `email` is omitted from list results and is `null` on detail unless it's the caller's own record. Players outside those teams are a **404**, not a 403, so ids can't be enumerated. A guardian therefore reads their child only while the child is rostered somewhere. Proven per branch against real Postgres in `tests/integration/player-directory.db.test.ts`.
+- **Deleted accounts** are a 404 on detail, never listed, and `PATCH` / `DELETE /players/:id` treat a tombstone as not found for an ADMIN too; both writes carry `where: { id, deletedAt: null }` in one statement, so a deletion committing after the read is a 404 (P2025) (#643, see `account-deletion.md`).
+- **Email** on `POST /players` and `PATCH /players/:id` is trimmed and lower-cased by the schema, and the duplicate probe is `emailEquals` (case-insensitive, 400 on a match; a P2002 race is 409). A change that differs only in case from the stored address is not a change: no write, delivery state kept (#651).
 - Team rosters (`GET /teams/:id`) remain the place coaches see their managed players; `USER_SUMMARY_SELECT` now includes `isManaged` so clients can label roster-only players (audit #64).

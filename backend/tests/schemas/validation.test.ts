@@ -10,6 +10,7 @@ import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../..
 import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
 import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
 import { createGameSchema, updateGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
+import { GameEventType } from '@prisma/client';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
 import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
 import { avatarUploadUrlSchema } from '../../src/api/uploads/schemas';
@@ -178,6 +179,7 @@ describe('Schema Validation', () => {
         const result = createGameEventSchema.safeParse({
           eventType: 'SHOT',
           playerId: UUID_ID,
+          metadata: { made: true, points: 2 },
         });
         expect(result.success).toBe(true);
       });
@@ -449,22 +451,21 @@ describe('Schema Validation', () => {
   });
 
   describe('Event Type Validation', () => {
-    const validEventTypes = [
-      'SHOT',
-      'REBOUND',
-      'ASSIST',
-      'TURNOVER',
-      'FOUL',
-      'SUBSTITUTION',
-      'STEAL',
-      'BLOCK',
-      'TIMEOUT',
-    ];
+    // Every value of the Prisma enum, so a new event type the schema forgets fails here
+    const validEventTypes = Object.values(GameEventType);
+
+    // The only hand-written list: types whose metadata is required (#723,
+    // tests/schemas/game-events.test.ts). Every other type must parse with none.
+    const requiredMetadata: Partial<Record<GameEventType, Record<string, unknown>>> = {
+      SHOT: { made: true, points: 2 },
+      REBOUND: { type: 'defensive' },
+    };
 
     validEventTypes.forEach((eventType) => {
       it(`should accept ${eventType} as valid event type`, () => {
         const result = createGameEventSchema.safeParse({
           eventType,
+          ...(requiredMetadata[eventType] ? { metadata: requiredMetadata[eventType] } : {}),
         });
         expect(result.success).toBe(true);
       });

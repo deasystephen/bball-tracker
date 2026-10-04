@@ -980,7 +980,7 @@ export class InvitationService {
       return;
     }
     await tx.user.updateMany({
-      where: { id: playerId, workosUserId: null },
+      where: { id: playerId, workosUserId: null, deletedAt: null },
       data: { email: null, ...EMAIL_SUPPRESSION_CLEARED },
     });
   }
@@ -1171,7 +1171,7 @@ export class InvitationService {
       // Lowercase + insensitive match — see createInvitation (red-team RT1).
       const email = data.playerEmail.trim().toLowerCase();
       const existing = await prisma.user.findFirst({
-        where: { email: emailEquals(email) },
+        where: { email: emailEquals(email), deletedAt: null },
       });
 
       if (existing?.workosUserId) {
@@ -1297,15 +1297,24 @@ export class InvitationService {
       if (reuse) {
         // Guarded on workosUserId so a signup completing in the window can
         // never flip a freshly claimed account back to coach-managed
-        // (red-team RT4). Zero rows updated = claimed — re-branch to case 3.
+        // (red-team RT4), and on deletedAt so a deletion committing in the
+        // window is never rostered (#643). Zero rows: a tombstone (or a row
+        // gone outright) is a 404; otherwise it was claimed, re-branch to case 3.
         const { count } = await tx.user.updateMany({
-          where: { id: reuse.id, workosUserId: null },
+          where: { id: reuse.id, workosUserId: null, deletedAt: null },
           data: {
             isManaged: true,
             ...(reuse.managedById ? {} : { managedById: userId }),
           },
         });
         if (count === 0) {
+          const current = await tx.user.findUnique({
+            where: { id: reuse.id },
+            select: { deletedAt: true },
+          });
+          if (!current || current.deletedAt) {
+            throw new NotFoundError('Player not found');
+          }
           throw new ClaimedMidCreateError(reuse.id);
         }
         playerId = reuse.id;
@@ -1314,7 +1323,7 @@ export class InvitationService {
         // the race-safe check; the pre-transaction row is not trusted (#618).
         if (data.profilePictureUrl) {
           const photo = await tx.user.updateMany({
-            where: { id: reuse.id, profilePictureUrl: null },
+            where: { id: reuse.id, profilePictureUrl: null, deletedAt: null },
             data: { profilePictureUrl: data.profilePictureUrl },
           });
           photoApplied = photo.count === 1;

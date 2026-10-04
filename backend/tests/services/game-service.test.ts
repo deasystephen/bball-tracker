@@ -935,6 +935,74 @@ describe('GameService', () => {
       );
     });
 
+    it('runs the SHOT check and the write in one transaction after locking the game row (#666)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS', homeScore: 0, awayScore: 0 });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        { eventType: 'SHOT', metadata: { made: true, points: 2 } },
+      ]);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        homeScore: 2,
+        awayScore: 20,
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { homeScore: 10, awayScore: 20 }, coach.id);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      const queryRaw = mockPrisma.$queryRaw as jest.Mock;
+      expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+      expect(queryRaw.mock.calls[0].slice(1)).toEqual([game.id]);
+      // Lock → SHOT read → write, in that order
+      const lockOrder = queryRaw.mock.invocationCallOrder[0];
+      const readOrder = (mockPrisma.gameEvent.findMany as jest.Mock).mock.invocationCallOrder[0];
+      const writeOrder = (mockPrisma.game.update as jest.Mock).mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan(readOrder);
+      expect(readOrder).toBeLessThan(writeOrder);
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { homeScore: 2, awayScore: 20 } })
+      );
+      // The broadcast happens after commit and carries the committed row
+      expect(mockEmitGameScoreChange).toHaveBeenCalledWith(game.id, {
+        gameId: game.id,
+        score: { homeScore: 2, awayScore: 20 },
+      });
+    });
+
+    it('does not take the game-row lock for an update without homeScore (#666)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const game = createGame({ teamId: team.id, status: 'SCHEDULED' });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue(game);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      setupCoachWithTrackStatsOnly(team, coach);
+      (mockPrisma.game.update as jest.Mock).mockResolvedValue({
+        ...game,
+        status: 'IN_PROGRESS',
+        team: { ...team, season: { ...season, league }, staff: [] },
+      });
+
+      await GameService.updateGame(game.id, { status: 'IN_PROGRESS' }, coach.id);
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.gameEvent.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'IN_PROGRESS' } })
+      );
+    });
+
     it('emits game-score-change when the away score changes (audit #8)', async () => {
       const coach = createCoach();
       const league = createLeague();
