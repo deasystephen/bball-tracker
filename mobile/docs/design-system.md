@@ -41,8 +41,10 @@ import { ThemedText } from '../components';
 <ThemedText variant="caption">Small text</ThemedText>
 ```
 
-**Available Variants:**
+**Available Variants** (`theme/typography.ts`):
+- `display`, `displaySmall` - Hero numbers and titles
 - `h1`, `h2`, `h3`, `h4` - Headings
+- `statNumber`, `statLabel` - Stat tiles
 - `body`, `bodyBold` - Body text
 - `caption`, `captionBold` - Small text
 - `footnote`, `footnoteBold` - Tiny text
@@ -58,13 +60,15 @@ padding: spacing.md  // 16px
 margin: spacing.lg    // 24px
 ```
 
-**Available Sizes:**
+**Available Sizes** (`theme/spacing.ts`):
+- `xxs`: 2px
 - `xs`: 4px
 - `sm`: 8px
 - `md`: 16px
 - `lg`: 24px
 - `xl`: 32px
 - `xxl`: 48px
+- `xxxl`: 64px
 
 ## Responsive Design
 
@@ -121,9 +125,10 @@ View component that adapts to theme:
 ```typescript
 import { ThemedView } from '../components';
 
-<ThemedView variant="background">      // Main background
-<ThemedView variant="card">            // Card background
+<ThemedView variant="background">      // Main background (default)
 <ThemedView variant="secondary">       // Secondary background
+<ThemedView variant="tertiary">        // Tertiary background
+<ThemedView variant="card">            // Card background
 ```
 
 ### ThemedText
@@ -136,6 +141,17 @@ import { ThemedText } from '../components';
 <ThemedText variant="h1" color="primary">Title</ThemedText>
 <ThemedText variant="body" color="textSecondary">Description</ThemedText>
 ```
+
+## Required shared components
+
+These are CLAUDE.md rules for every screen (the authority is `.claude/rules/mobile.md` and the repo's `docs/architecture/mobile-app.md`; this list only names them). Two of them, nested pressables and `ErrorState` `onBack`, are enforced by source-scanning tests; the others are reviewed by hand:
+
+- `DateTimePickerSheet` for every date or time choice
+- `ActionMenu` for every per-row menu (never an `Alert` menu)
+- `SortPills` for sort pill rows
+- `useTabBarPadding()` for the bottom padding of every scrollable tab screen
+- `ErrorState` with `onBack={useGoBack(parent)}` on a pushed screen that replaces itself with an error
+- Never put a pressable inside a pressable
 
 ## Best Practices
 
@@ -151,21 +167,20 @@ import { ThemedText } from '../components';
 import React from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { ThemedView, ThemedText } from '../components';
-import { useTheme } from '../hooks/useTheme';
 import { useTranslation } from '../i18n';
-import { spacing, getHorizontalPadding } from '../utils/responsive';
+import { spacing } from '../theme';
+import { getHorizontalPadding } from '../utils/responsive';
 
 export default function MyScreen() {
-  const { colors } = useTheme();
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
 
   return (
     <ThemedView variant="background" style={styles.container}>
-      <ScrollView style={{ padding }}>
-        <ThemedText variant="h1">{t('common.title')}</ThemedText>
+      <ScrollView style={{ padding }} contentContainerStyle={{ gap: spacing.md }}>
+        <ThemedText variant="h1">{t('teams.title')}</ThemedText>
         <ThemedText variant="body" color="textSecondary">
-          {t('common.description')}
+          {t('teams.playerEmptyMessage')}
         </ThemedText>
       </ScrollView>
     </ThemedView>

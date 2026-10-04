@@ -215,10 +215,15 @@ user-visible outcome.
   was co-deferred here but has since shipped — server jersey-asc order + team-overview
   Jersey #/Name sort toggle, 2026-08-29; see CLAUDE.md "Roster ordering".)
 - **Claim-by-code, parent-to-parent invites** — guardian spec v1 exclusions stand.
-- **Email delivery tracking beyond per-send flags** (bounce webhooks) — needs SES prod access
-  first (#23).
-- **Invite-funnel analytics** — captured in TODOS.md (review decision), post-ship.
-- **Deprecated endpoint removal** — follow-up PR after OTA adoption is confirmed.
+- **Email delivery tracking beyond per-send flags** — shipped under #449 (SES event pipeline:
+  bounce, complaint and delivery events reach the roster flags through a configuration set and
+  SQS; merged and deployed, closed 2026-09-29). SES production access, tracked on #23, is still
+  open, so the account remains in the sandbox.
+- **Invite-funnel analytics** — shipped under #616 (closed 2026-10-03) as `invitation_sent`
+  (with `resend: true` for a resend) and `invitation_accepted` (`source: in_app | link`). The
+  remaining claimed-via-login signal (`invite_claimed_via_login`) is tracked in #790.
+- **Deprecated endpoint removal** — done in PR #603 (#418), merged and deployed 2026-09-29, once
+  OTA adoption of the unified Add Player flow was confirmed.
 
 ## Rollout (no data surgery — T4)
 

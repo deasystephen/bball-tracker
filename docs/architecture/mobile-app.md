@@ -9,6 +9,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **store/**: Zustand stores (auth, user state)
 - **hooks/**: Custom React hooks
 - **i18n/**: Internationalization
+- **docs/design-system.md**: theme tokens (colors, typography, spacing), themed components, responsive helpers and the list of mandatory shared components (`mobile/docs/design-system.md`)
 - **assets/brand/**: Hooplings icon SVG masters ("Courtside Capy" capybara mark) + `render-icons.mjs`,
   which regenerates `assets/{icon,adaptive-icon,splash-icon,favicon}.png` (`node assets/brand/render-icons.mjs`
   from `mobile/`). Edit the SVGs, never the PNGs. Icon/splash changes are baked into the native binary —

@@ -1,3 +1,13 @@
+> **Historical design (January 2026), superseded.** This is the pre-implementation proposal.
+> The as-built behaviour is in `docs/architecture/roster-and-invitations.md` and
+> `docs/architecture/guardians.md`. In particular the `@@unique([teamId, playerId, status])`
+> below was replaced by a partial unique index on PENDING rows only
+> (`backend/prisma/migrations/20260823060000_partial_unique_pending_invitation`); see the
+> comment on `TeamInvitation` in `backend/prisma/schema.prisma`. The accept route it describes
+> (`POST /invitations/accept/:token` with a `playerId`) never shipped in that form: the public
+> routes are `GET /invitations/by-token/:token` and `POST /invitations/by-token/:token/accept`,
+> and the token is a bearer secret. Do not implement from this file.
+
 # Team Invitation System Design
 
 ## Overview
