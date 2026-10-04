@@ -6,7 +6,14 @@
  * integration test covers the full transport path.
  */
 
+// Spy on Sentry capture while keeping the rest of the util real.
+jest.mock('../../src/utils/sentry', () => ({
+  ...jest.requireActual('../../src/utils/sentry'),
+  captureException: jest.fn(),
+}));
+
 import {
+  authenticateSocket,
   buildGameSnapshot,
   handleJoinGame,
   gameRoom,
@@ -14,6 +21,9 @@ import {
   resolveSocketUser,
   type GameSocket,
 } from '../../src/websocket/game-events';
+import { WorkOSService } from '../../src/services/workos-service';
+import { ServiceUnavailableError } from '../../src/utils/errors';
+import { captureException } from '../../src/utils/sentry';
 import { mockPrisma } from '../setup';
 import {
   createGame,
@@ -245,6 +255,50 @@ describe('websocket/game-events', () => {
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
+    });
+  });
+
+  describe('authenticateSocket', () => {
+    const mockCaptureException = captureException as jest.Mock;
+
+    function makeHandshakeSocket(token: string): GameSocket {
+      return {
+        handshake: { auth: { token }, headers: {} },
+        data: {},
+      } as unknown as GameSocket;
+    }
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('reports a JWKS/WorkOS outage to Sentry and rejects with Service unavailable (#672)', async () => {
+      jest
+        .spyOn(WorkOSService, 'verifyToken')
+        .mockRejectedValue(new ServiceUnavailableError('JWKS unreachable'));
+      const next = jest.fn();
+
+      await authenticateSocket(makeHandshakeSocket('workos-token'), next);
+
+      expect(mockCaptureException).toHaveBeenCalledTimes(1);
+      expect(mockCaptureException).toHaveBeenCalledWith(
+        expect.any(ServiceUnavailableError),
+        { flow: 'socket-auth' }
+      );
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
+      expect((next.mock.calls[0][0] as Error).message).toBe('Service unavailable');
+    });
+
+    it('does not report a rejected token to Sentry (expected client outcome)', async () => {
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue(null);
+      const next = jest.fn();
+
+      await authenticateSocket(makeHandshakeSocket('expired-token'), next);
+
+      expect(mockCaptureException).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledTimes(1);
+      expect((next.mock.calls[0][0] as Error).message).toBe('Unauthorized');
     });
   });
 });

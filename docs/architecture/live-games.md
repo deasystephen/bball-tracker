@@ -55,7 +55,11 @@ first (#452), capacity second.
 current score so a client can drop events and still converge.
 
 - Handshake auth: bearer token via `socket.handshake.auth.token` (or
-  `Authorization` header). Checked once at connect; see `authenticateSocket`.
+  `Authorization` header). Checked once at connect; see `authenticateSocket`. A rejected or
+  expired token is `connect_error: Unauthorized` and is log-only (an expected client outcome). An
+  error thrown during verification (a JWKS/WorkOS outage, surfaced as `connect_error: Service
+  unavailable`) is reported to Sentry with `captureException(error, { flow: 'socket-auth' })`,
+  because middleware rejections never reach the Express chain and `sentryErrorHandler` (#672).
 - Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
   handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
   max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
