@@ -350,9 +350,18 @@ router.get('/callback', async (req, res) => {
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: error.message });
     } else if (error instanceof ConflictError) {
-      // Email already bound to another login — an expected (if rare) outcome,
-      // not a defect; the user needs support, not a Sentry issue.
+      // Email already bound to a different WorkOS user. Never a normal client
+      // outcome: it is the signature of the WorkOS key cutover (#24), where every
+      // production row still carries a staging WorkOS id and every sign-in would
+      // land here. Kept at `error` (the alarms key on @level:error) and in Sentry,
+      // unlike the 4xx rule logRouteError applies (#656).
       res.status(409).json({ error: error.message });
+      captureException(error, { flow: 'auth-callback-conflict' });
+      logger.error('Auth callback email linked to a different WorkOS user', {
+        status: 409,
+        error: error.message,
+      });
+      return;
     } else {
       // Unexpected failure (e.g. DB/WorkOS outage) — report to Sentry so we're
       // alerted instead of only finding it in CloudWatch logs after a user hits it.

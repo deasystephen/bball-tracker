@@ -10,6 +10,7 @@ import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import prisma from '../../src/models';
 import { authRateLimit } from '../../src/api/middleware/rate-limit';
+import { logger } from '../../src/utils/logger';
 
 // Mock the WorkOS service
 jest.mock('../../src/services/workos-service');
@@ -357,6 +358,8 @@ describe('Auth API', () => {
     });
 
     it('should return 409 (not 500) when the email is bound to another login', async () => {
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
       mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
         user: mockWorkOSUser,
         accessToken: 'mock-access-token',
@@ -372,7 +375,18 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(409);
       expect(response.body.error).toContain('already linked');
-      expect(mockCaptureException).not.toHaveBeenCalled();
+      // Not a routine 4xx: the WorkOS key cutover (#24) would send every
+      // sign-in here, so it stays on the error stream and in Sentry (#656 review).
+      expect(mockCaptureException).toHaveBeenCalledWith(expect.any(ConflictError), {
+        flow: 'auth-callback-conflict',
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Auth callback email linked to a different WorkOS user',
+        expect.objectContaining({ status: 409 })
+      );
+      expect(warnSpy).not.toHaveBeenCalledWith('Error in auth callback', expect.anything());
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     });
 
     // Audit #5: the verifier travels with the code so WorkOS can enforce PKCE.

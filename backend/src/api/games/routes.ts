@@ -217,6 +217,13 @@ router.get('/:id/export.csv', exportRateLimit, validateUuidParams('id'), async (
     });
     exportFile.stream.pipe(res);
   } catch (error) {
+    if (res.headersSent) {
+      // The stream already started the response: answering again would throw
+      // ERR_HTTP_HEADERS_SENT and lose this line, so log, end it and stop.
+      logRouteError(res, 'Error exporting game CSV', error);
+      res.end();
+      return;
+    }
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -261,6 +268,13 @@ router.get('/:id/boxscore.pdf', exportRateLimit, validateUuidParams('id'), async
     });
     exportFile.stream.pipe(res);
   } catch (error) {
+    if (res.headersSent) {
+      // The stream already started the response: answering again would throw
+      // ERR_HTTP_HEADERS_SENT and lose this line, so log, end it and stop.
+      logRouteError(res, 'Error exporting box score PDF', error);
+      res.end();
+      return;
+    }
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
