@@ -23,13 +23,23 @@ const RSVP_INCLUDE = {
 
 export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCLUDE }>;
 /**
- * `GET /games/:id/rsvps` row. `user.email` is present only for callers with
- * `canManageRoster` on the game's team (plus the caller's own row); everyone
- * else gets `{ id, name }` (role matrix B2.5).
+ * `GET /games/:id/rsvps` row and `POST /games/:id/rsvp` response. `user.email`
+ * is present only for callers with `canManageRoster` on the game's team (plus
+ * the caller's own row); everyone else gets `{ id, name }` (role matrix B2.5).
  */
 export type RsvpView = Omit<RsvpWithUser, 'user'> & {
   user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
 };
+
+/**
+ * The B2.5 projection, shared by the read and the write path so they cannot
+ * drift (#661): roster managers and the row's own user keep `user.email`.
+ */
+export function toRsvpView(row: RsvpWithUser, callerId: string, canManageRoster: boolean): RsvpView {
+  if (canManageRoster || row.user.id === callerId) return row;
+  const { user, ...rest } = row;
+  return { ...rest, user: { id: user.id, name: user.name } };
+}
 
 export interface RsvpSummary {
   yes: number;
@@ -51,7 +61,7 @@ export class RsvpService {
     userId: string,
     status: RsvpStatus,
     playerId?: string
-  ): Promise<RsvpWithUser> {
+  ): Promise<RsvpView> {
     // Verify game exists and get team info
     const game = await prisma.game.findUnique({
       where: { id: gameId },
@@ -149,7 +159,14 @@ export class RsvpService {
         });
     }
 
-    return rsvp;
+    // A guardian answering for a child gets the child's row back: project it
+    // the way GET /games/:id/rsvps would for the same caller (#661). The
+    // confirmation above already read the unprojected row.
+    if (!onBehalfOfChild) {
+      return rsvp;
+    }
+    const canManageRoster = await hasTeamPermission(userId, game.teamId, 'canManageRoster');
+    return toRsvpView(rsvp, userId, canManageRoster);
   }
 
   /**
@@ -187,12 +204,7 @@ export class RsvpService {
     ]);
 
     // Roster managers see everyone's email; other team members only their own.
-    const rsvps: RsvpView[] = canManageRoster
-      ? rows
-      : rows.map(({ user, ...rsvp }) => ({
-          ...rsvp,
-          user: user.id === userId ? user : { id: user.id, name: user.name },
-        }));
+    const rsvps: RsvpView[] = rows.map((row) => toRsvpView(row, userId, canManageRoster));
 
     const summary: RsvpSummary = {
       yes: 0,

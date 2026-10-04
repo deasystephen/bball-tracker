@@ -249,13 +249,6 @@ export type TeamStaffWithRelations = Prisma.TeamStaffGetPayload<{
   include: typeof TEAM_STAFF_INCLUDE;
 }>;
 export type TeamRoleSummary = Prisma.TeamRoleGetPayload<{ select: typeof TEAM_ROLE_SELECT }>;
-/**
- * `GET /teams/:id/staff` row. `user.email` is present only when the caller
- * has `canManageRoster` on the team (same rule as member emails, audit #80).
- */
-export type TeamStaffView = Omit<TeamStaffWithRelations, 'user'> & {
-  user: Omit<TeamStaffWithRelations['user'], 'email'> & { email?: string | null };
-};
 
 export interface TeamList {
   teams: TeamListItem[];
@@ -939,10 +932,11 @@ export class TeamService {
 
   /**
    * List a team's staff (every role assignment) with user + role.
-   * Any team member/staff/admin may read; emails are only included for
-   * callers who can manage the roster.
+   * Any team member/staff/admin may read, and every reader gets the staff
+   * emails (coach contact info), as on `GET /teams/:id` and `GET /games/:id`
+   * (CLAUDE.md, emails in payloads; #683).
    */
-  static async listStaff(teamId: string, userId: string): Promise<TeamStaffView[]> {
+  static async listStaff(teamId: string, userId: string): Promise<TeamStaffWithRelations[]> {
     const team = await prisma.team.findUnique({ where: { id: teamId } });
     if (!team) {
       throw new NotFoundError('Team not found');
@@ -953,21 +947,11 @@ export class TeamService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    const staff = await prisma.teamStaff.findMany({
+    return prisma.teamStaff.findMany({
       where: { teamId },
       include: TEAM_STAFF_INCLUDE,
       orderBy: [{ role: { type: 'asc' } }, { createdAt: 'asc' }],
     });
-
-    const permissions = await getTeamPermissions(userId, teamId);
-    if (permissions.canManageRoster) {
-      return staff;
-    }
-
-    return staff.map(({ user, ...row }) => ({
-      ...row,
-      user: { id: user.id, name: user.name, isManaged: user.isManaged, deletedAt: user.deletedAt },
-    }));
   }
 
   /**

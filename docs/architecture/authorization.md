@@ -145,7 +145,9 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
   socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
   `GET /games/:id` (`GameDetailView`) and `GET /games/:id/rsvps` (`RsvpView`) apply the team-detail
   email rule (role matrix B2.5): `team.members[].player.email` / `rsvps[].user.email` only for callers
-  with `canManageRoster` (RSVP keeps the caller's own row intact); staff emails stay. `listGames` uses
+  with `canManageRoster` (RSVP keeps the caller's own row intact); staff emails stay. `POST /games/:id/rsvp`
+  returns the same `RsvpView`: a guardian answering for a child without `canManageRoster` gets the child as
+  `{ id, name }` (#661). One helper, `rsvp-service.ts#toRsvpView`, projects both paths. `listGames` uses
   `GAME_LIST_INCLUDE` (no people at all).
 
 ## Team staff management (role matrix B2.3 / B2.7 / B2.8, decision 2)
@@ -168,7 +170,7 @@ system `ADMIN` **or** admin of the team's league **or** head coach.
 
 Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
 
-- `GET /staff` → `{ success, staff: [{ id, teamId, userId, roleId, createdAt, updatedAt, user: { id, name, isManaged, email? }, role: TeamRole }] }`. Any team member/staff/admin may read; `user.email` only for callers with `canManageRoster`.
+- `GET /staff` → `{ success, staff: [{ id, teamId, userId, roleId, createdAt, updatedAt, user: { id, name, email, isManaged, deletedAt }, role: TeamRole }] }`. Any team member/staff/admin may read; staff emails are returned to every reader (coach contact info, same as `GET /teams/:id` and `GET /games/:id`; #683).
 - `GET /roles` → `{ success, roles: [{ id, teamId, type, name, description, canManageTeam, canManageRoster, canTrackStats, canViewStats, canShareStats }] }` (definitions only, no holders).
 - `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 if the user is already staff (one role per user; use PATCH). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
 - `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
@@ -187,6 +189,9 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 - Announcements are created and listed under `/teams/:teamId/announcements` (`canManageTeam` to
   post, `canAccessTeam` to read). `GET /announcements/:id` returns one announcement with its author
   and `_count.replies`; same gate as the list (404 unknown, 403 without access to its team).
+  Announcement payloads carry the author's `id`, `name` and `deletedAt` and never an email
+  (`ANNOUNCEMENT_INCLUDE`, #654); the announcement email looks the author's address up separately
+  for its author-name fallback.
 - Replies (`AnnouncementReply`, one level deep, never reply-to-reply) live under
   `/announcements/:id/replies`. **Anyone who can read the team may reply** (`canAccessTeam`: staff,
   rostered players, guardians of players, league admins, ADMIN); `POST` is 404 for an unknown

@@ -1063,11 +1063,18 @@ describe('InvitationService', () => {
   });
 
   describe('getInvitationById', () => {
-    it('should return invitation for user with team access', async () => {
-      const { invitation, team, player, coach, league, season } = createFullInvitation();
-      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
-      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+    const ROLE_FLAGS_OFF = {
+      canManageTeam: false,
+      canManageRoster: false,
+      canTrackStats: false,
+      canViewStats: false,
+      canShareStats: false,
+    };
 
+    /** The stored invitation row as INVITATION_SELECT returns it. */
+    function storeInvitation(): ReturnType<typeof createFullInvitation> {
+      const fixture = createFullInvitation();
+      const { invitation, team, player, coach, league, season } = fixture;
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
         ...invitation,
         team: {
@@ -1082,75 +1089,114 @@ describe('InvitationService', () => {
         player: { id: player.id, name: player.name, email: player.email },
         invitedBy: { id: coach.id, name: coach.name, email: coach.email },
       });
-      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      return fixture;
+    }
+
+    /**
+     * The caller's standing on the team: not an admin, no league admin row,
+     * plus whatever staff flags, membership and guardian link the case needs.
+     */
+    function setCaller(caller: {
+      staffFlags?: Partial<typeof ROLE_FLAGS_OFF>;
+      isMember?: boolean;
+      isGuardianOfInvitedPlayer?: boolean;
+      isGuardianOfMember?: boolean;
+    }): void {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ role: 'PLAYER' });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      const staffRows = caller.staffFlags
+        ? [{ id: 'staff-1', role: { ...ROLE_FLAGS_OFF, ...caller.staffFlags } }]
+        : [];
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(staffRows[0] ?? null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffRows);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(
+        caller.isMember ? { id: 'member-1' } : null
+      );
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(
+        caller.isGuardianOfInvitedPlayer ? { id: 'guardian-1' } : null
+      );
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(
+        caller.isGuardianOfMember ? { id: 'guardian-2' } : null
+      );
+    }
+
+    it('returns player.email to a roster manager (head coach)', async () => {
+      const { invitation, player, coach } = storeInvitation();
+      setCaller({ staffFlags: { canManageTeam: true, canManageRoster: true, canViewStats: true } });
 
       const result = await InvitationService.getInvitationById(invitation.id, coach.id);
 
       expect(result).toHaveProperty('id', invitation.id);
+      expect(result.player).toEqual({ id: player.id, name: player.name, email: player.email });
+      expect(result.invitedBy.email).toBe(coach.email);
     });
 
-    it('should return invitation for invited player', async () => {
-      const { invitation, team, player, coach, league, season } = createFullInvitation();
-
-      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
-        ...invitation,
-        team: {
-          id: team.id,
-          name: team.name,
-          season: {
-            id: season.id,
-            name: season.name,
-            league: { id: league.id, name: league.name },
-          },
-        },
-        player: { id: player.id, name: player.name, email: player.email },
-        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
-      });
-      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+    it('returns player.email to the invited player', async () => {
+      const { invitation, player } = storeInvitation();
+      setCaller({});
 
       const result = await InvitationService.getInvitationById(invitation.id, player.id);
 
       expect(result).toHaveProperty('id', invitation.id);
+      expect(result.player.email).toBe(player.email);
+    });
+
+    it('returns player.email to a guardian of the invited player who can read the team', async () => {
+      const { invitation, player } = storeInvitation();
+      setCaller({ isGuardianOfMember: true, isGuardianOfInvitedPlayer: true });
+
+      const result = await InvitationService.getInvitationById(invitation.id, 'parent-1');
+
+      expect(result.player.email).toBe(player.email);
+    });
+
+    it('strips player.email for a rostered teammate without a staff role (#679)', async () => {
+      const { invitation, player, coach } = storeInvitation();
+      setCaller({ isMember: true });
+
+      const result = await InvitationService.getInvitationById(invitation.id, 'teammate-1');
+
+      expect(result.player).toEqual({ id: player.id, name: player.name });
+      expect('email' in result.player).toBe(false);
+      // invitedBy is a staff email: every team member keeps it.
+      expect(result.invitedBy.email).toBe(coach.email);
+    });
+
+    it('strips player.email for a stats-only staff member (#679)', async () => {
+      const { invitation, player } = storeInvitation();
+      setCaller({ staffFlags: { canTrackStats: true, canViewStats: true } });
+
+      const result = await InvitationService.getInvitationById(invitation.id, 'scorekeeper-1');
+
+      expect(result.player).toEqual({ id: player.id, name: player.name });
+    });
+
+    it('strips player.email for a guardian of a different team member (#679)', async () => {
+      const { invitation, player } = storeInvitation();
+      setCaller({ isGuardianOfMember: true });
+
+      const result = await InvitationService.getInvitationById(invitation.id, 'other-parent');
+
+      expect(result.player).toEqual({ id: player.id, name: player.name });
     });
 
     it('should throw NotFoundError if invitation does not exist', async () => {
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(null);
 
-      try {
-        await InvitationService.getInvitationById('non-existent', 'user-id');
-      } catch (error) {
-        expectNotFoundError(error, 'Invitation not found');
-      }
+      await expect(InvitationService.getInvitationById('non-existent', 'user-id')).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Invitation not found',
+      });
     });
 
     it('should throw ForbiddenError if user has no access', async () => {
-      const { invitation, team, player, coach, league, season } = createFullInvitation();
+      const { invitation } = storeInvitation();
       const otherUser = createPlayer();
-
-      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
-        ...invitation,
-        team: {
-          id: team.id,
-          name: team.name,
-          season: {
-            id: season.id,
-            name: season.name,
-            league: { id: league.id, name: league.name },
-          },
-        },
-        player: { id: player.id, name: player.name, email: player.email },
-        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
-      });
-      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
-        ...team,
-        season: { ...season, league: { ...league, admins: [] } },
-      });
+      setCaller({});
 
       try {
         await InvitationService.getInvitationById(invitation.id, otherUser.id);
+        throw new Error('expected rejection');
       } catch (error) {
         expectForbiddenError(error, 'You do not have access to this invitation');
       }

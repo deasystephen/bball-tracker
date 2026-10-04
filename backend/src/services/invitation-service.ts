@@ -173,6 +173,15 @@ export type InvitationSummary = Prisma.TeamInvitationGetPayload<{
 export type InvitationWithRelations = Prisma.TeamInvitationGetPayload<{
   select: typeof INVITATION_SELECT;
 }>;
+/**
+ * `GET /invitations/:id` payload. `player.email` is present only for the
+ * invited player, their guardians and callers with `canManageRoster` on the
+ * team (roster-email rule, #679); `invitedBy.email` is a staff email and stays
+ * for every reader.
+ */
+export type InvitationDetailView = Omit<InvitationWithRelations, 'player'> & {
+  player: Omit<InvitationWithRelations['player'], 'email'> & { email?: string | null };
+};
 export type InvitationWithTeam = Prisma.TeamInvitationGetPayload<{
   select: typeof INVITATION_TEAM_SELECT;
 }>;
@@ -710,7 +719,7 @@ export class InvitationService {
   static async getInvitationById(
     invitationId: string,
     userId: string
-  ): Promise<InvitationWithRelations> {
+  ): Promise<InvitationDetailView> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
       select: INVITATION_SELECT,
@@ -728,7 +737,18 @@ export class InvitationService {
       throw new ForbiddenError('You do not have access to this invitation');
     }
 
-    return invitation;
+    // Roster-email rule (#679): the invited player, their guardians and roster
+    // managers see player.email; every other team-access caller gets
+    // { id, name }, as on GET /teams/:id and GET /games/:id.
+    const mayReadPlayerEmail =
+      isPlayer ||
+      (await isGuardianOf(userId, invitation.playerId)) ||
+      (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
+    if (mayReadPlayerEmail) {
+      return invitation;
+    }
+    const { player, ...rest } = invitation;
+    return { ...rest, player: { id: player.id, name: player.name } };
   }
 
   /**

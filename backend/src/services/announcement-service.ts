@@ -12,12 +12,19 @@ import { logger } from '../utils/logger';
 import { mailer } from './mailer';
 import { announcementTemplate } from './mailer/templates';
 
-const ANNOUNCEMENT_INCLUDE = {
+/**
+ * No `email`: every team reader (players, guardians) receives this payload, and
+ * addresses are shown only where CLAUDE.md's "emails in payloads" rule allows
+ * (#654). Same shape rule as `REPLY_INCLUDE`; `deletedAt` lets the client
+ * render the tombstone label. The announcement email's author-name fallback
+ * looks the address up separately (`emailAnnouncement`).
+ */
+export const ANNOUNCEMENT_INCLUDE = {
   author: {
     select: {
       id: true,
       name: true,
-      email: true,
+      deletedAt: true,
     },
   },
   // Reply count for the list's "N replies" footnote (#34); the thread itself
@@ -114,10 +121,19 @@ export class AnnouncementService {
     const audienceIds = await getTeamAudienceUserIds(team.id, announcement.authorId);
     if (audienceIds.length === 0) return;
 
-    const recipients = await prisma.user.findMany({
-      where: { id: { in: audienceIds }, email: { not: null }, deletedAt: null },
-      select: { id: true, name: true, email: true },
-    });
+    const [recipients, author] = await Promise.all([
+      prisma.user.findMany({
+        where: { id: { in: audienceIds }, email: { not: null }, deletedAt: null },
+        select: { id: true, name: true, email: true },
+      }),
+      // The address is the author-name fallback only; it never travels on the
+      // returned announcement (#654).
+      prisma.user.findUnique({
+        where: { id: announcement.authorId },
+        select: { name: true, email: true },
+      }),
+    ]);
+    const authorName = author?.name ?? author?.email ?? '';
 
     for (const recipient of recipients) {
       if (!recipient.email) continue;
@@ -130,7 +146,7 @@ export class AnnouncementService {
             teamName: team.name,
             title: announcement.title,
             body: announcement.body,
-            authorName: announcement.author.name ?? announcement.author.email ?? '',
+            authorName,
           },
           metadata: {
             userId: announcement.authorId,
