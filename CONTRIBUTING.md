@@ -80,6 +80,7 @@ See the [README.md](README.md) for setup instructions.
 - `mobile/` - React Native/Expo mobile application
 - `backend/` - Node.js/Express API server
 - `web/` - Next.js web app (the public `hooplings.com/invite/<token>` accept flow)
+- `shared/` - Cross-package TypeScript types shared by the backend and the mobile app (`shared/types/index.ts`)
 - `infra/` - Terraform for the AWS infrastructure and the ECS task definition
 - `docker/` - Dockerfile and entrypoint for the backend image
 - `.maestro/` - Maestro end-to-end flows for the mobile app (manual only)

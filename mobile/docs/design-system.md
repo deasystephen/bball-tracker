@@ -144,7 +144,7 @@ import { ThemedText } from '../components';
 
 ## Required shared components
 
-Every screen uses these; source-scanning tests fail a PR that does not. The authority is `.claude/rules/mobile.md` and the repo's `docs/architecture/mobile-app.md`; this list only names them:
+These are CLAUDE.md rules for every screen (the authority is `.claude/rules/mobile.md` and the repo's `docs/architecture/mobile-app.md`; this list only names them). Two of them, nested pressables and `ErrorState` `onBack`, are enforced by source-scanning tests; the others are reviewed by hand:
 
 - `DateTimePickerSheet` for every date or time choice
 - `ActionMenu` for every per-row menu (never an `Alert` menu)
@@ -178,9 +178,9 @@ export default function MyScreen() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <ScrollView style={{ padding }} contentContainerStyle={{ gap: spacing.md }}>
-        <ThemedText variant="h1">{t('common.title')}</ThemedText>
+        <ThemedText variant="h1">{t('teams.title')}</ThemedText>
         <ThemedText variant="body" color="textSecondary">
-          {t('common.description')}
+          {t('teams.playerEmptyMessage')}
         </ThemedText>
       </ScrollView>
     </ThemedView>

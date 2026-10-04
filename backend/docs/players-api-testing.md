@@ -16,14 +16,14 @@ the status shown. Never point any of this at production.
 
 ## Getting an Access Token
 
-The token must belong to a system **ADMIN** for everything in this guide to pass:
-
-- `POST /players` (pre-create an account for an email) is ADMIN or roster-managing staff only (403 otherwise).
-- `GET /players` is scoped to the caller's teams for everyone but ADMIN, and `search` matches `email`
-  only for ADMIN (non-admins: name only, and `email` is omitted from list results).
-- `GET /players/:id` returns 404 to a non-admin who shares no team with the player, and `email: null`
-  to a non-admin who does.
-- `DELETE /players/:id` of an un-rostered player older than the 24-hour grace window is ADMIN-only.
+The token must belong to a system **ADMIN** for everything in this guide to pass. The rules are the
+ones in `backend/src/services/player-service.ts` (the header comment of
+`backend/scripts/test-players-api.sh` mirrors this summary): `POST /players` is ADMIN or
+roster-managing staff only; `GET /players` is scoped to the caller's teams for everyone but ADMIN,
+excludes managed players unless an ADMIN passes `isManaged=true`, matches `search` against `email`
+only for ADMIN and omits `email` from non-admin results; `GET /players/:id` is 404 to a non-admin who
+shares no team with the player; `DELETE /players/:id` of an un-rostered player older than the
+24-hour grace window is ADMIN-only.
 
 ### Option 1: let the script dev-login for you
 
@@ -144,7 +144,11 @@ curl -X GET "http://localhost:3000/api/v1/players?limit=10&offset=0" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-`role` and `isManaged` are additional ADMIN-only filters; other callers' values are ignored.
+**Managed players are excluded by default.** `listPlayers` applies `isManaged: false` for every
+caller, so a roster row added without an email (`isManaged: true`, see "Integration with Teams API")
+never appears in `GET /players`. An ADMIN may pass `?isManaged=true` to list only the managed rows;
+non-admins can never list them. `role` (default `PLAYER`) is likewise an ADMIN-only filter; other
+callers' `role` and `isManaged` values are ignored. Deleted (tombstoned) accounts are never listed.
 
 ### 3. Get Player by ID
 
@@ -210,6 +214,14 @@ curl -X PATCH http://localhost:3000/api/v1/players/PLAYER_ID \
 **Expected: HTTP 200** with the updated player (same shape as section 1). `name`, `email` and
 `profilePictureUrl` are the editable fields.
 
+Who may update: the player themself, an ADMIN, the current managing coach of a managed player, or a
+guardian of the player (name and avatar only); anyone else gets 403
+`You can only update your own profile`. Changing `email` is **ADMIN-only**, plus the managing coach
+of a managed player that no login has claimed yet. Every other caller gets 403:
+`Your email is managed by your login provider and cannot be changed here` (own profile) or
+`You cannot change the email of a player who has signed in` (someone else's). An ADMIN who sets an
+email that already exists gets 400 `A user with this email already exists`.
+
 ### 5. Delete Player
 
 ```bash
@@ -228,7 +240,9 @@ created, while that player is on no team and is less than 24 hours old (403 othe
 ### Scenario 1: Create and List Players
 
 1. Create 3-5 test players with different names/emails
-2. List all players - verify all appear (ADMIN sees every player; a coach sees only their teams')
+2. List all players - verify all appear (ADMIN sees every non-managed player; a coach sees only
+   players on their own teams; a player added to a roster without an email is managed and shows up
+   only for an ADMIN with `?isManaged=true`)
 3. Search for a specific player by name
 4. Search for a specific player by email (ADMIN only)
 
@@ -243,7 +257,8 @@ created, while that player is on no team and is less than 24 hours old (403 othe
 1. Create a player
 2. Update player name
 3. Get player - verify name changed
-4. Try to update email to an existing email (should fail with 400)
+4. As ADMIN, try to update the email to one that already exists (400). As a coach, the same request
+   is 403 unless the player is a still-unclaimed managed player that coach created.
 
 ### Scenario 4: Delete Restrictions
 
@@ -348,7 +363,8 @@ curl -X DELETE http://localhost:3000/api/v1/players/ROSTERED_PLAYER_ID \
 `POST /teams/:teamId/players` is the unified Add Player endpoint (`addRosterPlayerSchema`). `name` is
 the only required field; `playerEmail` decides whether an invitation email goes out; `guardianEmail`
 (with `guardianRelationship`) additionally invites a parent. It creates the player row itself, so no
-prior `POST /players` is needed, and there is no `playerId` field.
+prior `POST /players` is needed, and there is no `playerId` field. The example below is the no-email
+case (a **managed** roster row, no invitation):
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/teams/TEAM_ID/players \
@@ -356,7 +372,6 @@ curl -X POST http://localhost:3000/api/v1/teams/TEAM_ID/players \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "name": "John Doe",
-    "playerEmail": "john.doe@example.com",
     "jerseyNumber": 23,
     "position": "Forward"
   }'
@@ -385,14 +400,17 @@ curl -X POST http://localhost:3000/api/v1/teams/TEAM_ID/players \
 }
 ```
 
-(The body above is the no-email case; with `playerEmail` the response also carries `invited: true`,
-an `invitation` summary without its token, and `emails.player` for that send.)
+With `playerEmail` in the request the response instead carries `invited: true`, an `invitation`
+summary (never its token), `emails.player` for that send and the email on `member.player`; the row
+is then a pre-provisioned account, not a managed one.
 
 The old `{ "playerId": "…", "jerseyNumber": 23, "position": "Forward" }` body fails validation:
 **HTTP 400** `{ "error": "Invalid input: expected string, received undefined" }` (no `name`).
 
-Then `GET /players/PLAYER_ID` shows the team in `teamMembers`. Remove the roster entry with
-`DELETE /teams/TEAM_ID/players/PLAYER_ID` (HTTP 200).
+Then `GET /players/PLAYER_ID` shows the team in `teamMembers`. Because the row is managed
+(`isManaged: true`), it is **absent from `GET /players`** unless an ADMIN passes `?isManaged=true`;
+that is expected, not a bug. Remove the roster entry with `DELETE /teams/TEAM_ID/players/PLAYER_ID`
+(HTTP 200).
 
 ## Troubleshooting
 

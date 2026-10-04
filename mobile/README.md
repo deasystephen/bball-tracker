@@ -84,7 +84,7 @@ The API host is decided in one place, `config/env.ts#getApiUrl()`, from `extra.a
 - `APP_ENV=production` or `APP_ENV=preview`: `https://api.hooplings.com`. `API_URL` overrides the host in those two environments only.
 - Anything else, including unset: `http://127.0.0.1:3000` (the local dev server). `API_URL` is ignored here.
 
-Local `npx expo run:ios` / `run:android` needs no variables. `eas build` and `eas update` read them from the EAS environment: always pass `--environment production` to `eas update`, or the update ships the dev host to every device (the "OTA env gotcha" in `docs/deployment/mobile-builds-and-ota.md`). The other `extra` keys follow the same rule: `amplitudeApiKey` (`AMPLITUDE_API_KEY`, production and preview only; analytics are off in local development) and `sentryDsn` / `sentryEnvironment` / `sentryRelease` (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`; unset locally, so no events ship). `__tests__/app-config.test.ts` pins the mapping.
+Local `npx expo run:ios` / `run:android` needs no variables. `eas build` and `eas update` read them from the EAS environment: always pass `--environment production` to `eas update`, or the update ships the dev host to every device (the "OTA env gotcha" in `docs/deployment/mobile-builds-and-ota.md`). The other `extra` keys are resolved the same way: `appEnv` (`APP_ENV`, or `development` when unset), `amplitudeApiKey` (`AMPLITUDE_API_KEY`, production and preview only; analytics are off in local development), `sentryDsn` (`SENTRY_DSN`; unset locally, so no events ship), `sentryEnvironment` (`SENTRY_ENVIRONMENT`, falling back to `APP_ENV`, then `development`) and `sentryRelease` (`SENTRY_RELEASE`, set by CI). `__tests__/app-config.test.ts` pins the mapping.
 
 ## Development
 
