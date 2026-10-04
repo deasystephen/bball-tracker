@@ -64,6 +64,30 @@ each rollout briefly splits live games.
 | **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses (reason: *Risk is tolerable to this project* — GitHub offers no "no fix" reason) or decides |
 | **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major, **every binary-coupled mobile package, Expo SDK same-major patches included** | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
 
+## Override shape (#779)
+
+A bare root entry (`"minimatch": "^3.1.3"`) applies to **every** consumer in the tree, including
+ones that declare a newer major. npm then hides the mismatch: `npm ls` prints `overridden`, never
+`invalid`, and the only symptom is a runtime `TypeError` when a consumer calls an export the old
+major lacks. Until #779 the backend forced ESLint 10 and typescript-estree (`minimatch ^10`) onto
+3.1.5, and mobile forced `@expo/fingerprint` and every `glob@10`/`glob@13` onto 5.1.9. So when a
+package has more than one major line in the tree:
+
+- **Scope to the parent that declares the old line**: `"<parent>": { "<pkg>": "^x.y.z" }`. A
+  parent rule covers the parent's **whole subtree**, so use it only when nothing below the parent
+  declares a different major (true for `glob@7`, `test-exclude`, `filelist`, the ESLint packages).
+- **Key by version when the subtree is mixed**: npm matches a key's version against each
+  consumer's *declared* range, so `"<pkg>@^5": "^5.1.8"` touches only edges that ask for 5.x. The
+  `eas-cli` block uses this (`"minimatch@^5"`) because its subtree also holds `glob@10`/`glob@13`.
+  The same form works at the root: backend's `"brace-expansion@1"` floors minimatch 3's copy and
+  leaves minimatch 10's `brace-expansion ^5` alone.
+- After `npm install`, run `npm ls <pkg> --all`. Every consumer should be on a version inside its
+  own declared range. Also compare package versions between the old and new lockfile; the change
+  should only add nested copies.
+
+The `@oclif/core > minimatch ^10` block in `mobile/package.json` is separate and stays as it is
+(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning).
+
 ## Binary-coupled packages (#562)
 
 An OTA (`eas update`) ships JavaScript from `mobile/package-lock.json` and runs
