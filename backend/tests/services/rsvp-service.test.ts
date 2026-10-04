@@ -231,6 +231,13 @@ describe('RsvpService', () => {
         date: new Date('2026-09-01T18:00:00Z'),
         team: { name: 'Home' },
       });
+      // getTeamPermissions runs alongside the guardian checks: a caller with
+      // no admin role, no league admin row, no staff row and no guardian link
+      // unless a test says otherwise.
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
       return game;
     }
 

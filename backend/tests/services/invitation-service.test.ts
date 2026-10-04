@@ -1141,13 +1141,15 @@ describe('InvitationService', () => {
       expect(result.player.email).toBe(player.email);
     });
 
-    it('returns player.email to a guardian of the invited player who can read the team', async () => {
+    it('strips player.email for a guardian of the invited player without canManageRoster (roster-email rule)', async () => {
       const { invitation, player } = storeInvitation();
       setCaller({ isGuardianOfMember: true, isGuardianOfInvitedPlayer: true });
 
       const result = await InvitationService.getInvitationById(invitation.id, 'parent-1');
 
-      expect(result.player.email).toBe(player.email);
+      // Same as GET /teams/:id and POST /games/:id/rsvp (#661): roster emails
+      // stay stripped for a guardian.
+      expect(result.player).toEqual({ id: player.id, name: player.name });
     });
 
     it('returns player.email to a system ADMIN and to an admin of the team\'s league', async () => {

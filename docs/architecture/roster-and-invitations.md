@@ -131,8 +131,8 @@ eng-review amendments recorded there).
   other callers with team access (rostered players) remain scoped to `playerId IN (caller, caller's
   children)` via `GuardianService.getChildIds` (see `guardians.md`).
   `GET /invitations/:id` keeps its `canAccessTeam`-or-invited-player gate and applies the roster-email
-  rule to `player.email` (#679): the invited player, their guardians and callers with `canManageRoster`
-  receive it; every other reader gets `player: { id, name }`. `invitedBy.email` is a staff email and
+  rule to `player.email` (#679): the invited player and callers with `canManageRoster` receive it;
+  every other reader, a guardian of the invited player included, gets `player: { id, name }`. `invitedBy.email` is a staff email and
   stays for every reader.
 - **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
   and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is

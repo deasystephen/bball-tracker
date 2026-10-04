@@ -83,25 +83,34 @@ export class RsvpService {
     // row is keyed on the player so the coach's RSVP roster stays per-player.
     const onBehalfOfChild = playerId !== undefined && playerId !== userId;
     let confirmationEmail: string | null = null;
+    // Only read on the guardian path, to project the child's row (#661).
+    let canManageRoster = false;
 
     if (onBehalfOfChild) {
-      if (!(await isGuardianOf(userId, playerId))) {
+      // Independent reads, run together so the projection's permission
+      // lookup adds no round trip; the checks below keep their order.
+      const [isGuardian, member, guardian, managesRoster] = await Promise.all([
+        isGuardianOf(userId, playerId),
+        prisma.teamMember.findUnique({
+          where: { teamId_playerId: { teamId: game.teamId, playerId } },
+          select: { id: true },
+        }),
+        prisma.user.findUnique({
+          where: { id: userId },
+          select: { email: true },
+        }),
+        hasTeamPermission(userId, game.teamId, 'canManageRoster'),
+      ]);
+
+      if (!isGuardian) {
         throw new ForbiddenError('You can only RSVP for players you are a guardian of');
       }
-
-      const member = await prisma.teamMember.findUnique({
-        where: { teamId_playerId: { teamId: game.teamId, playerId } },
-        select: { id: true },
-      });
       if (!member) {
         throw new ForbiddenError('This player is not on the team playing this game');
       }
 
-      const guardian = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true },
-      });
       confirmationEmail = guardian?.email ?? null;
+      canManageRoster = managesRoster;
     } else {
       // Verify user has access to this team
       const hasAccess = await canAccessTeam(userId, game.teamId);
@@ -165,7 +174,6 @@ export class RsvpService {
     if (!onBehalfOfChild) {
       return rsvp;
     }
-    const canManageRoster = await hasTeamPermission(userId, game.teamId, 'canManageRoster');
     return toRsvpView(rsvp, userId, canManageRoster);
   }
 

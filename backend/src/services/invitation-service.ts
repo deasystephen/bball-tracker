@@ -175,8 +175,9 @@ export type InvitationWithRelations = Prisma.TeamInvitationGetPayload<{
 }>;
 /**
  * `GET /invitations/:id` payload. `player.email` is present only for the
- * invited player, their guardians and callers with `canManageRoster` on the
- * team (roster-email rule, #679); `invitedBy.email` is a staff email and stays
+ * invited player and callers with `canManageRoster` on the team (roster-email
+ * rule, #679; a guardian without it gets `{ id, name }`, as on every roster
+ * payload); `invitedBy.email` is a staff email and stays
  * for every reader.
  */
 export type InvitationDetailView = Omit<InvitationWithRelations, 'player'> & {
@@ -737,13 +738,11 @@ export class InvitationService {
       throw new ForbiddenError('You do not have access to this invitation');
     }
 
-    // Roster-email rule (#679): the invited player, their guardians and roster
-    // managers see player.email; every other team-access caller gets
-    // { id, name }, as on GET /teams/:id and GET /games/:id.
+    // Roster-email rule (#679): the invited player and roster managers see
+    // player.email; every other team-access caller, guardians included, gets
+    // { id, name }, as on GET /teams/:id, GET /games/:id and the RSVP payloads.
     const mayReadPlayerEmail =
-      isPlayer ||
-      (await isGuardianOf(userId, invitation.playerId)) ||
-      (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
+      isPlayer || (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
     if (mayReadPlayerEmail) {
       return invitation;
     }

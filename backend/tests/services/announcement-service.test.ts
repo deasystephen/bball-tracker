@@ -289,15 +289,12 @@ describe('AnnouncementService', () => {
           id: team.id,
           name: team.name,
         });
-        // The permission checks read `role`; the email's author-name fallback
-        // looks the author up with `{ name, email }` (#654).
+        // The permission checks read `role`; a nameless author's address is
+        // looked up with `{ email }`, never carried on the payload (#654).
+        const author = { name: admin.name, email: admin.email, ...audience.author };
         (mockPrisma.user.findUnique as jest.Mock).mockImplementation(
           (args: { select?: { email?: boolean } }) =>
-            Promise.resolve(
-              args.select?.email
-                ? { name: admin.name, email: admin.email, ...audience.author }
-                : admin
-            )
+            Promise.resolve(args.select?.email ? { email: author.email } : admin)
         );
         (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
           id: 'a5',
@@ -305,7 +302,7 @@ describe('AnnouncementService', () => {
           authorId: admin.id,
           title: 'Practice',
           body: 'See you there',
-          author: { id: admin.id, name: admin.name, deletedAt: null },
+          author: { id: admin.id, name: author.name, deletedAt: null },
         });
         (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue(
           (audience.memberIds ?? []).map((playerId) => ({ playerId }))
@@ -377,6 +374,10 @@ describe('AnnouncementService', () => {
             announcementId: 'a5',
           },
         });
+        // A named author needs no address lookup.
+        expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith(
+          expect.objectContaining({ select: { email: true } })
+        );
       });
 
       it('falls back to the author email, then to an empty author name', async () => {
@@ -389,7 +390,7 @@ describe('AnnouncementService', () => {
         expect(mockedMailerSend.mock.calls[0][0].variables.authorName).toBe('coach@test.com');
         expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
           where: { id: admin.id },
-          select: { name: true, email: true },
+          select: { email: true },
         });
 
         mockedMailerSend.mockClear();

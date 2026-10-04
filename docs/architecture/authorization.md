@@ -190,8 +190,8 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
   post, `canAccessTeam` to read). `GET /announcements/:id` returns one announcement with its author
   and `_count.replies`; same gate as the list (404 unknown, 403 without access to its team).
   Announcement payloads carry the author's `id`, `name` and `deletedAt` and never an email
-  (`ANNOUNCEMENT_INCLUDE`, #654); the announcement email looks the author's address up separately
-  for its author-name fallback.
+  (`ANNOUNCEMENT_INCLUDE`, #654); the announcement email looks the author's address up separately,
+  and only when the author has no name.
 - Replies (`AnnouncementReply`, one level deep, never reply-to-reply) live under
   `/announcements/:id/replies`. **Anyone who can read the team may reply** (`canAccessTeam`: staff,
   rostered players, guardians of players, league admins, ADMIN); `POST` is 404 for an unknown
