@@ -2,7 +2,7 @@
 
 # Full Flow Testing Script (local dev backend)
 # Tests the complete flow against the CURRENT API:
-#   League (ADMIN) → Season → Team (COACH) → Managed roster player → Game → Event → verify
+#   League (ADMIN) → Season → Team (COACH) → roster-only player → Game → Event → verify
 #
 # Usage:
 #   ./scripts/test-full-flow.sh                      # dev-login as the seeded admin (NODE_ENV=development)
@@ -10,7 +10,7 @@
 #   API_BASE=http://localhost:3000/api/v1 DEV_LOGIN_EMAIL=admin@bball-tracker.com ./scripts/test-full-flow.sh
 #
 # Requires an ADMIN account because `POST /leagues` is ADMIN-only; ADMIN also bypasses the
-# COACH requirement and the FREE-tier team cap on `POST /teams`. The seeded admin
+# COACH requirement on `POST /teams`. The seeded admin
 # (`npx prisma db seed`) is admin@bball-tracker.com. Never point this at production.
 
 set -e  # Exit on error
@@ -168,24 +168,25 @@ main() {
     team_response=$(api_request "POST" "/teams" "$team_data")
     TEAM_ID=$(echo "$team_response" | jq -r '.team.id // empty')
     if [ -z "$TEAM_ID" ]; then
-        print_error "Failed to create team (COACH role or ADMIN required; FREE tier is capped at 3 teams → 402)"
+        print_error "Failed to create team (COACH role, ADMIN or league admin required)"
         echo "Response: $team_response"
         exit 1
     fi
     print_success "Team created: $(echo "$team_response" | jq -r '.team.name') (ID: $TEAM_ID)"
 
-    # Step 5: Add a managed roster player (no email / account needed)
-    # POST /teams/:id/players is gone (410) — real users join via invitations.
-    print_step "Step 5: Adding managed roster player..."
+    # Step 5: Add a roster-only (managed) player via the unified Add Player endpoint.
+    # No email in the body, so no invitation is sent. The separate managed-player route
+    # was removed in #418; POST /teams/:id/players is the only roster-add route.
+    print_step "Step 5: Adding roster-only player..."
     player_data='{"name": "Test Player 1", "jerseyNumber": 23, "position": "Forward"}'
-    player_response=$(api_request "POST" "/teams/$TEAM_ID/managed-players" "$player_data")
-    PLAYER_ID=$(echo "$player_response" | jq -r '.teamMember.playerId // .teamMember.player.id // empty')
+    player_response=$(api_request "POST" "/teams/$TEAM_ID/players" "$player_data")
+    PLAYER_ID=$(echo "$player_response" | jq -r '.member.playerId // .member.player.id // empty')
     if [ -z "$PLAYER_ID" ]; then
-        print_error "Failed to add managed player"
+        print_error "Failed to add roster-only player"
         echo "Response: $player_response"
         exit 1
     fi
-    print_success "Managed player added (ID: $PLAYER_ID)"
+    print_success "Roster-only player added (ID: $PLAYER_ID)"
 
     # Step 6: Create Game
     print_step "Step 6: Creating game..."
@@ -248,7 +249,11 @@ main() {
     echo "  Player ID:  $PLAYER_ID"
     echo "  Game ID:    $GAME_ID"
     echo ""
-    echo "Clean up with: DELETE $API_BASE/leagues/$LEAGUE_ID (cascades)"
+    echo "Clean up (a league with teams cannot be deleted, so delete in this order):"
+    echo "  DELETE $API_BASE/games/$GAME_ID"
+    echo "  DELETE $API_BASE/teams/$TEAM_ID"
+    echo "  DELETE $API_BASE/leagues/$LEAGUE_ID   (cascades the season)"
+    echo "  DELETE $API_BASE/players/$PLAYER_ID"
     echo ""
 }
 

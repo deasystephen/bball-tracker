@@ -44,12 +44,6 @@ else
     echo "⚠️  Redis container not running. Start with: docker-compose up -d"
 fi
 
-if docker ps | grep -q "bball-tracker-kafka"; then
-    echo "✅ Kafka container running"
-else
-    echo "⚠️  Kafka container not running. Start with: docker-compose up -d"
-fi
-
 # Type check
 echo ""
 echo "🔍 Running TypeScript type check..."
