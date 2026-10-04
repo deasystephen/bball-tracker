@@ -16,8 +16,10 @@ So: **to add or change an env var or secret reference, edit `infra/task-definiti
 it.** Writing the value into `infra/ecs.tf` or a `.tfvars` file changes nothing and fails silently —
 this is how a WorkOS or SES credential ends up "configured" while production keeps using the old
 one. Terraform declares no `container_image` / `task_cpu` / `task_memory` / `admin_emails`
-variables any more, precisely so there is nowhere wrong to put them. Secrets Manager ARNs to
-reference from the JSON come from `terraform output` (`infra/outputs.tf`).
+variables any more, precisely so there is nowhere wrong to put them. The Secrets Manager and IAM
+role ARNs the JSON carries each have an output in `infra/outputs.tf`, read one at a time with
+`terraform output -raw <name>`; the block under "Who owns the ECS task definition" in
+`infra/README.md` lists the names.
 
 `aws_ecs_service.app` is configured with the bare family name plus
 `ignore_changes = [task_definition]`, so `terraform apply` never disturbs the revision CI chose.
