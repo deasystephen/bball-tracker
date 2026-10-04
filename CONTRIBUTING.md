@@ -72,7 +72,7 @@ See the [README.md](README.md) for setup instructions.
 ### Code Style
 
 - **TypeScript**: Use strict mode, prefer explicit types
-- **Linting**: ESLint is the only formatting and style authority (`npm run lint` in each package; never suppress a rule, fix the code)
+- **Linting**: ESLint is the only enforced style authority (`npm run lint` in each package; never suppress a rule, fix the code). Quote style and line width are convention only (single quotes, about 100 columns, trailing commas), not enforced; there is no Prettier config, so turn off editor format-on-save for this repo
 - **Imports**: Use absolute imports where configured
 
 ### Project Structure

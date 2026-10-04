@@ -449,6 +449,19 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Notes:** Automated: `maestro test .maestro/team-staff.yaml` (read-only); Jest
   `__tests__/app/team-staff-gating.test.tsx`, `__tests__/hooks/useTeamStaff.runtime.test.tsx`.
 
+### D.9 — Head coach deletes a team
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH who is the team's **head coach**
+- **Prereq:** a team created in D.1 (do not delete a seeded team other flows depend on)
+- **Steps:**
+  1. Team detail → tap the trash icon in the hero header (accessibility label "Delete team").
+  2. In the "Delete Team" confirmation, tap **Delete**.
+- **Expected:** "Team deleted successfully", then back on the Teams tab with the team gone from the list
+  and from `GET /teams`. The trash icon is shown only to callers who may manage the team; the API itself
+  refuses anyone who is not a head coach (403), see `docs/architecture/authorization.md`.
+- **Notes:** Moved here from the deleted `mobile/TESTING.md` (#742). Jest: `__tests__/hooks/useTeams*`
+  cover `useDeleteTeam` and its `team_deleted` analytics event.
+
 ---
 
 ## E. Invitations & accept flow (NEW v2.0) 📧
