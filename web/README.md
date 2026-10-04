@@ -20,7 +20,7 @@ npm install
 npm run dev     # http://localhost:3000
 npm run lint        # ESLint CLI, --max-warnings 0
 npm run type-check  # tsc --noEmit
-npm run build       # production build
+npm run build       # production build only: it skips lint and type errors, run the two above
 ```
 
 ## Routes

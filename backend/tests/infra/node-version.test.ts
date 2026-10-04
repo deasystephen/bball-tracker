@@ -12,19 +12,20 @@
  *    `node-version-file: .nvmrc`;
  *  - `backend/package.json` `engines.node` (`>=<major>`).
  *
- * This suite fails on any disagreement, on a `setup-node` step that names a
- * different major or no version at all, and when any extraction finds nothing
+ * This suite fails on any disagreement, on a `setup-node` step that does not
+ * read `.nvmrc` (no version, another file, or a hardcoded `node-version`,
+ * which `actions/setup-node` would prefer over `node-version-file`), and when any extraction finds nothing
  * (a file that changed shape fails loudly rather than passing vacuously).
  * Modelled on `postgres-version.test.ts`.
  */
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
 
-const ROOT = path.resolve(__dirname, '../../..');
+import { ROOT, WORKFLOWS_DIR, workflowFiles } from './workflows';
+
 const DOCKERFILE = path.join(ROOT, 'docker/Dockerfile');
 const NVMRC = path.join(ROOT, '.nvmrc');
 const BACKEND_PACKAGE = path.join(ROOT, 'backend/package.json');
-const WORKFLOWS_DIR = path.join(ROOT, '.github/workflows');
 
 export const DOCKERFILE_PATTERN = /^FROM node:(\d+)-alpine\b/m;
 export const NVMRC_PATTERN = /^\s*(\d+)\s*$/;
@@ -48,8 +49,10 @@ export function extractMajor(source: string, pattern: RegExp, label: string): st
 
 /**
  * The Node major each `actions/setup-node` step in one workflow resolves to.
- * A step either reads `.nvmrc` (resolved to `nvmrcMajor`) or names a bare
- * major; anything else (no version, a range, `lts/*`, another file) throws.
+ * Every step must read `node-version-file: .nvmrc` (resolved to `nvmrcMajor`).
+ * A `node-version` key throws, even next to `node-version-file`: setup-node
+ * gives `node-version` precedence, so the step would run that version instead.
+ * No version or another file also throws.
  */
 export function setupNodeMajors(source: string, nvmrcMajor: string, label: string): string[] {
   const lines = source.split('\n');
@@ -75,10 +78,10 @@ export function setupNodeMajors(source: string, nvmrcMajor: string, label: strin
       }
       const version = candidate.match(NODE_VERSION);
       if (version) {
-        if (!/^\d+$/.test(version[1])) {
-          throw new Error(`${label}:${next + 1}: setup-node asks for "${version[1]}", not a bare major.`);
-        }
-        resolved = version[1];
+        throw new Error(
+          `${label}:${next + 1}: setup-node sets node-version "${version[1]}"; ` +
+            'read the major from the root .nvmrc with node-version-file: .nvmrc instead.',
+        );
       }
     }
     if (resolved === undefined) {
@@ -89,12 +92,6 @@ export function setupNodeMajors(source: string, nvmrcMajor: string, label: strin
     majors.push(resolved);
   });
   return majors;
-}
-
-function workflowFiles(): string[] {
-  return readdirSync(WORKFLOWS_DIR)
-    .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
-    .sort();
 }
 
 describe('Node.js major — Dockerfile / .nvmrc / engines / workflows parity', () => {
@@ -136,7 +133,7 @@ describe('Node.js major — extraction self-test', () => {
     expect(() => extractMajor('', ENGINES_PATTERN, 'engines')).toThrow(/could not find/);
   });
 
-  it('resolves setup-node steps that read .nvmrc or name a major', () => {
+  it('resolves setup-node steps that read .nvmrc', () => {
     const workflow = [
       'jobs:',
       '  a:',
@@ -149,21 +146,33 @@ describe('Node.js major — extraction self-test', () => {
       "          cache: 'npm'",
       '      - uses: actions/setup-node@v7',
       '        with:',
-      "          node-version: '20'",
+      "          node-version-file: '.nvmrc'",
       '      - run: npm ci',
     ].join('\n');
-    expect(setupNodeMajors(workflow, '22', 'wf')).toEqual(['22', '20']);
+    expect(setupNodeMajors(workflow, '22', 'wf')).toEqual(['22', '22']);
   });
 
-  it('fails a step that names no version or a non-major version', () => {
+  it('fails a step that names no version, a hardcoded version or another file', () => {
     const noVersion = ['    steps:', '      - uses: actions/setup-node@v7', '      - run: npm ci'].join('\n');
     expect(() => setupNodeMajors(noVersion, '22', 'wf')).toThrow(/names no Node version/);
+    const hardcoded = ['      - uses: actions/setup-node@v7', '        with:', "          node-version: '22'"].join('\n');
+    expect(() => setupNodeMajors(hardcoded, '22', 'wf')).toThrow(/wf:3: setup-node sets node-version "22"/);
     const lts = ['      - uses: actions/setup-node@v7', '        with:', "          node-version: 'lts/*'"].join('\n');
-    expect(() => setupNodeMajors(lts, '22', 'wf')).toThrow(/not a bare major/);
+    expect(() => setupNodeMajors(lts, '22', 'wf')).toThrow(/sets node-version "lts\/\*"/);
     const otherFile = ['      - uses: actions/setup-node@v7', '        with:', '          node-version-file: web/.nvmrc'].join(
       '\n',
     );
     expect(() => setupNodeMajors(otherFile, '22', 'wf')).toThrow(/use node-version-file: \.nvmrc/);
+  });
+
+  it('fails a step that sets both keys, since setup-node prefers node-version', () => {
+    for (const order of [
+      ['          node-version-file: .nvmrc', "          node-version: '20'"],
+      ["          node-version: '20'", '          node-version-file: .nvmrc'],
+    ]) {
+      const workflow = ['      - uses: actions/setup-node@v7', '        with:', ...order].join('\n');
+      expect(() => setupNodeMajors(workflow, '22', 'wf')).toThrow(/sets node-version "20"/);
+    }
   });
 
   it('does not borrow the version of the next step', () => {

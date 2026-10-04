@@ -28,7 +28,7 @@ Loads when a file under `infra/`, `docker/` or `.github/` is read. Detail: `docs
   the replica ceiling; change the test and the file together.
 - Third-party actions (owner not `actions/` or `github/`) are pinned to a 40-character commit SHA
   with a `# vX.Y.Z` comment in every workflow; `backend/tests/infra/action-pins.test.ts` enforces it.
-- Every `actions/setup-node` step reads `node-version-file: .nvmrc`; `.nvmrc`, `engines.node` and
+- Every `actions/setup-node` step reads `node-version-file: .nvmrc` and sets no `node-version`; `.nvmrc`, `engines.node` and
   the Dockerfile's `FROM node:<major>` agree (`backend/tests/infra/node-version.test.ts`).
 - The deploy paths are written twice (the `ci.yml` filter and `.github/scripts/deploy-contents.sh`);
   a test fails when they differ.

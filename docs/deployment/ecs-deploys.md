@@ -141,21 +141,29 @@ never rename one without updating the required checks.
 | `build-and-deploy` | `Build & Deploy to ECS` | push to `main` touching the deploy paths, manual run | is it |
 
 `web/` is not a deploy path: a web-only merge runs the web jobs and deploys nothing. The web jobs
-exist because Dependabot auto-merges `/web` patch and minor bumps once CI passes.
+exist because Dependabot auto-merges `/web` patch and minor bumps once the required checks pass.
+**Pending:** they gate that auto-merge only after the owner adds `Lint and Type Check (web)` and
+`Test Web` to the required status checks of `main` (#690); until then a red web job does not stop a
+`/web` merge. `Test Web` only builds (`next.config.ts` skips lint and type errors during the build,
+because the web leg of `lint-and-typecheck` runs both); it is a separate job so the web test
+runner (#510) has a job to extend.
 
-**Node.** Every `actions/setup-node` step, in every workflow, reads `node-version-file: .nvmrc`.
+**Node.** Every `actions/setup-node` step, in every workflow, reads `node-version-file: .nvmrc` and
+sets no `node-version` (setup-node would prefer it over the file).
 The root `.nvmrc` holds the major of the production image (`FROM node:<major>-alpine` in
 `docker/Dockerfile`), and `backend/package.json` declares the same major in `engines.node`.
 `backend/tests/infra/node-version.test.ts` fails when any of them disagree (#714). To move to a new
 major, change the Dockerfile, `.nvmrc` and `engines.node` in one PR.
 
 **Action pins.** Every action not owned by GitHub (`actions/`, `github/`) is referenced by a full
-40-character commit SHA with a trailing `# vX.Y.Z` comment, in every workflow (#712). The deploy
+40-character commit SHA with a trailing `# vX.Y.Z` comment naming the full release, in every
+workflow (#712). The deploy
 job runs `aws-actions/*` with the production AWS keys in its environment, and a tag can be moved by
 whoever controls the action's repository; a SHA cannot. Dependabot's `github-actions` ecosystem
 bumps the SHA and the comment together; those PRs are reviewed by hand. Resolve a new pin with
 `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` and, when `object.type` is `tag`, dereference it
 with `gh api repos/<owner>/<repo>/git/tags/<sha> --jq .object.sha`.
 `backend/tests/infra/action-pins.test.ts` fails on a tag or branch reference, or a pin without its
-comment. GitHub's own `actions/*` stay on major tags.
+comment, including one that names only a major such as `# v4`. GitHub's own `actions/*` stay on
+major tags.
 

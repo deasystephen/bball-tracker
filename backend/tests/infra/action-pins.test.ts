@@ -12,18 +12,17 @@
  * This suite scans every workflow under `.github/workflows/` and fails on a
  * third-party reference by tag or branch, and on a pin without its comment.
  */
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
 
-const ROOT = path.resolve(__dirname, '../../..');
-const WORKFLOWS_DIR = path.join(ROOT, '.github/workflows');
+import { WORKFLOWS_DIR, workflowFiles } from './workflows';
 
 /** Owners whose actions may stay on a version tag (GitHub's own). */
 export const FIRST_PARTY_OWNERS: ReadonlySet<string> = new Set(['actions', 'github']);
 
 const USES_LINE = /^\s*(?:-\s+)?uses:\s*['"]?([^'"\s#]+)['"]?\s*(#.*)?$/;
 const SHA = /^[0-9a-f]{40}$/;
-const VERSION_COMMENT = /^#\s*v\d+(?:\.\d+)*\b/;
+const VERSION_COMMENT = /^#\s*v\d+\.\d+\.\d+\b/;
 
 export interface PinViolation {
   file: string;
@@ -52,12 +51,6 @@ export function findPinViolations(source: string, file: string): PinViolation[] 
     }
   });
   return violations;
-}
-
-function workflowFiles(): string[] {
-  return readdirSync(WORKFLOWS_DIR)
-    .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
-    .sort();
 }
 
 describe('third-party actions are pinned to commit SHAs', () => {
@@ -93,7 +86,7 @@ describe('action pin scanner — self-test', () => {
       '      - uses: actions/checkout@v7',
       '        uses: github/codeql-action/init@v4',
       `      - uses: dorny/paths-filter@${sha} # v4.0.3`,
-      `        uses: 'aws-actions/amazon-ecr-login@${sha}' # v2`,
+      `        uses: 'aws-actions/amazon-ecr-login@${sha}' # v2.1.7`,
       '      - uses: ./.github/actions/local',
       '      - uses: docker://alpine:3.20',
     ].join('\n');
@@ -114,6 +107,14 @@ describe('action pin scanner — self-test', () => {
     const violations = findPinViolations(`      - uses: dorny/paths-filter@${sha}`, 'wf');
     expect(violations).toEqual([
       { file: 'wf', line: 1, reference: `dorny/paths-filter@${sha}`, reason: 'missing the trailing "# vX.Y.Z" comment' },
+    ]);
+  });
+
+  it('rejects a version comment that names only a major or a minor', () => {
+    const source = [`      - uses: dorny/paths-filter@${sha} # v4`, `      - uses: dorny/paths-filter@${sha} # v4.0`].join('\n');
+    expect(findPinViolations(source, 'wf').map((v) => v.reason)).toEqual([
+      'missing the trailing "# vX.Y.Z" comment',
+      'missing the trailing "# vX.Y.Z" comment',
     ]);
   });
 });
