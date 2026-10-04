@@ -113,7 +113,11 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    ```bash
    cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts export <email> > export-<date>.json
    ```
-   `NODE_ENV=production` silences Prisma's query log, which otherwise lands on stdout. Send the
+   `NODE_ENV=production` silences Prisma's query log, which otherwise lands on stdout. The script
+   matches the address exactly: case-insensitive, `_` and `%` literal (`emailEquals`, #648), after
+   trimming and lower-casing what you typed. If more than one active account matches (legacy
+   mixed-case duplicates), it exits non-zero without exporting or deleting; pick the row by id in
+   the database by hand before going on. Send the
    file to the verified address and delete your local copy. Never commit it or upload it to S3.
    The export contains: `user`, `personalLeague`, `teamMembers`, `teamStaff`, `leagueAdmins`,
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,

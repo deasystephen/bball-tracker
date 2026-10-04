@@ -27,6 +27,7 @@ import { TeamService } from '../../src/services/team-service';
 import { NotFoundError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { logger } from '../../src/utils/logger';
+import { findActiveUserIdByEmail } from '../../scripts/data-subject-lookup';
 
 jest.setTimeout(30000);
 
@@ -162,8 +163,8 @@ describe('emailEquals against Postgres', () => {
     // emailEquals must stop, or addresses containing "_" stop matching.
     const rows = await prisma.user.findMany({
       // Deliberately the raw filter — built from variables so the source guard
-      // (tests/utils/email-match-guard.test.ts scans `src/` only) is not the
-      // thing under test here.
+      // (tests/utils/email-match-guard.test.ts scans `src/` and `scripts/`,
+      // never `tests/`) is not the thing under test here.
       where: { email: { equals: address('help_under'), mode: 'insensitive' }, id: { in: userIds } },
       select: { email: true },
     });
@@ -270,6 +271,36 @@ describe('Guardian invitations', () => {
 
     expect(await GuardianService.listPendingForUser(underscore)).toEqual([]);
     expect(await GuardianService.listPendingForUser(invited?.id as string)).toHaveLength(1);
+  });
+});
+
+describe('Operator data-subject lookup (scripts/data-subject-request.ts)', () => {
+  it('resolves first_last@ to that row, never to firstXlast@', async () => {
+    const target = await mkUser('dsr_target');
+    await mkUser('dsrXtarget');
+
+    expect(await findActiveUserIdByEmail(prisma, address('dsr_target'))).toBe(target);
+  });
+
+  it('matches a mixed-case stored address from the lower-cased request, after trimming', async () => {
+    const stored = await mkUser('DSR.Mixed', { email: `DSR.Mixed.${RUN}@Example.Test` });
+
+    expect(await findActiveUserIdByEmail(prisma, `  ${address('dsr.mixed').toUpperCase()} `)).toBe(stored);
+  });
+
+  it('refuses when two active accounts hold the address in different case', async () => {
+    await mkUser('dsr.dup', { email: `dsr.dup.${RUN}@example.test` });
+    await mkUser('DSR.Dup', { email: `DSR.Dup.${RUN}@Example.Test` });
+
+    await expect(findActiveUserIdByEmail(prisma, address('dsr.dup'))).rejects.toThrow(
+      '2 active accounts match'
+    );
+  });
+
+  it('ignores a tombstoned row and reports no account', async () => {
+    await mkUser('dsr_gone', { email: null, deletedAt: new Date(), name: `dsr_gone-${RUN}` });
+
+    await expect(findActiveUserIdByEmail(prisma, address('dsr_gone'))).rejects.toThrow('No active account');
   });
 });
 

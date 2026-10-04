@@ -13,6 +13,10 @@
  * mode: the owner/guardian gate is skipped (identity was verified by hand),
  * the last-head-coach rule still applies, and the WorkOS user is deleted
  * best-effort after commit (the output says whether it succeeded).
+ *
+ * The address is matched exactly, case-insensitively, with `_` and `%`
+ * literal (`emailEquals`, #648); when more than one active account matches
+ * the script exits non-zero before exporting or deleting anything.
  */
 
 // Loads backend/.env locally (WORKOS_API_KEY is required at import time by the
@@ -20,17 +24,7 @@
 import 'dotenv/config';
 import prisma from '../src/models';
 import { AccountService } from '../src/services/account-service';
-
-async function findUserIdByEmail(email: string): Promise<string> {
-  const user = await prisma.user.findFirst({
-    where: { email: { equals: email, mode: 'insensitive' }, deletedAt: null },
-    select: { id: true },
-  });
-  if (!user) {
-    throw new Error(`No active account with email ${email}`);
-  }
-  return user.id;
-}
+import { findActiveUserIdByEmail } from './data-subject-lookup';
 
 async function main(argv: string[]): Promise<void> {
   const [command, email] = argv;
@@ -40,7 +34,7 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  const userId = await findUserIdByEmail(email);
+  const userId = await findActiveUserIdByEmail(prisma, email);
 
   if (command === 'export') {
     const data = await AccountService.exportUserData(userId);
