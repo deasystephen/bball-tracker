@@ -82,15 +82,10 @@ export const reboundMetadataSchema = z
   })
   .strict();
 
-const OTHER_GAME_EVENT_TYPES = [
-  GameEventType.ASSIST,
-  GameEventType.TURNOVER,
-  GameEventType.FOUL,
-  GameEventType.SUBSTITUTION,
-  GameEventType.STEAL,
-  GameEventType.BLOCK,
-  GameEventType.TIMEOUT,
-] as const;
+/** Every event type except the two with an exact metadata shape, derived from the Prisma enum. */
+const otherGameEventTypeSchema = z
+  .enum(GameEventType)
+  .exclude([GameEventType.SHOT, GameEventType.REBOUND]);
 
 /**
  * Schema for creating a game event, discriminated on `eventType`: SHOT and
@@ -112,7 +107,7 @@ export const createGameEventSchema = z.discriminatedUnion(
     }),
     z.object({
       ...gameEventBaseShape,
-      eventType: z.enum(OTHER_GAME_EVENT_TYPES),
+      eventType: otherGameEventTypeSchema,
       metadata: z
         .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
         .optional()

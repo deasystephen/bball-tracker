@@ -21,12 +21,13 @@ function asObject(metadata: Prisma.JsonValue | undefined): Record<string, unknow
 
 /**
  * The shot's point value: `points` when it is 1, 2 or 3; 2 when `points` is
- * absent (the documented default for legacy rows); `null` for any other value,
+ * absent or `null` (legacy rows: the pre-#723 schema accepted `null`, and both
+ * old scorers counted it as 2 via `points || 2`); `null` for any other value,
  * in which case the shot counts nowhere (neither score nor attempts).
  */
 export function shotValue(metadata: Prisma.JsonValue | undefined): ShotValue | null {
   const { points } = asObject(metadata);
-  if (points === undefined) return 2;
+  if (points == null) return 2;
   return points === 1 || points === 2 || points === 3 ? points : null;
 }
 

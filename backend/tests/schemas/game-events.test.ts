@@ -5,6 +5,7 @@
  * shape is exact; every other event type keeps a flat record of primitives.
  */
 
+import { GameEventType } from '@prisma/client';
 import { createGameEventSchema } from '../../src/api/games/schemas';
 
 const PLAYER_ID = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
@@ -88,7 +89,11 @@ describe('createGameEventSchema', () => {
   });
 
   describe('other event types', () => {
-    it.each(['ASSIST', 'STEAL', 'BLOCK', 'TURNOVER', 'FOUL', 'SUBSTITUTION', 'TIMEOUT'])(
+    it.each(
+      Object.values(GameEventType).filter(
+        (type) => type !== GameEventType.SHOT && type !== GameEventType.REBOUND
+      )
+    )(
       'accepts %s with no metadata and defaults it to {}',
       (eventType) => {
         const result = createGameEventSchema.safeParse({ eventType, playerId: PLAYER_ID });

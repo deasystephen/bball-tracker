@@ -144,6 +144,14 @@ export function perGame(total: number, games: number): number {
   return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
 }
 
+/**
+ * Clock for the `finalizeGameStats` transaction. It covers the wait for the
+ * game-row lock (queued behind in-flight event writes), two reads and four
+ * writes. Prisma's 5 s default is too tight on a slow RDS: a timeout (P2028)
+ * is swallowed by the callers and leaves a FINISHED game without a box score.
+ */
+export const FINALIZE_TRANSACTION_TIMEOUT_MS = 15_000;
+
 export class StatsService {
   /**
    * Calculate player stats from game events for a specific game.
@@ -418,17 +426,14 @@ export class StatsService {
 
       const teamStats = this.calculateTeamTotals(game.teamId, game.team.name, playerStats);
 
-      // Drop rows for players who no longer appear in the event set
-      await tx.playerStats.deleteMany({
-        where: {
+      // Replace the game's player rows in two statements rather than one
+      // upsert per player, to keep the time under the lock short. Same result:
+      // players with no remaining events drop out.
+      await tx.playerStats.deleteMany({ where: { gameId } });
+      await tx.playerStats.createMany({
+        data: playerStats.map((stats) => ({
+          playerId: stats.playerId,
           gameId,
-          playerId: { notIn: playerStats.map((stats) => stats.playerId) },
-        },
-      });
-
-      // Upsert player stats
-      for (const stats of playerStats) {
-        const values = {
           points: stats.points,
           rebounds: stats.rebounds,
           assists: stats.assists,
@@ -442,18 +447,8 @@ export class StatsService {
           threePointersAttempted: stats.threePointersAttempted,
           freeThrowsMade: stats.freeThrowsMade,
           freeThrowsAttempted: stats.freeThrowsAttempted,
-        };
-        await tx.playerStats.upsert({
-          where: {
-            playerId_gameId: {
-              playerId: stats.playerId,
-              gameId,
-            },
-          },
-          create: { playerId: stats.playerId, gameId, ...values },
-          update: values,
-        });
-      }
+        })),
+      });
 
       // Upsert team stats
       const teamValues = {
@@ -483,7 +478,7 @@ export class StatsService {
       });
 
       return { teamId: game.teamId, players: playerStats.length };
-    });
+    }, { timeout: FINALIZE_TRANSACTION_TIMEOUT_MS });
 
     logger.info('Stats finalized', {
       gameId,

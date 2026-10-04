@@ -2,7 +2,7 @@
  * Unit tests for StatsService
  */
 
-import { StatsService } from '../../src/services/stats-service';
+import { FINALIZE_TRANSACTION_TIMEOUT_MS, StatsService } from '../../src/services/stats-service';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -360,7 +360,7 @@ describe('StatsService', () => {
           player: { id: player.id, name: player.name },
         },
       ]);
-      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.playerStats.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
 
       await StatsService.finalizeGameStats(game.id);
@@ -372,6 +372,10 @@ describe('StatsService', () => {
       const lockOrder = queryRaw.mock.invocationCallOrder[0];
       expect(lockOrder).toBeLessThan((mockPrisma.gameEvent.findMany as jest.Mock).mock.invocationCallOrder[0]);
       expect(lockOrder).toBeLessThan((mockPrisma.teamStats.upsert as jest.Mock).mock.invocationCallOrder[0]);
+      // A clock long enough for a slow database, not Prisma's 5 s default (#724 review)
+      expect((mockPrisma.$transaction as jest.Mock).mock.calls[0][1]).toEqual({
+        timeout: FINALIZE_TRANSACTION_TIMEOUT_MS,
+      });
     });
 
     it('should persist player and team stats when game finishes', async () => {
@@ -394,16 +398,18 @@ describe('StatsService', () => {
         team: { ...team, members: [member] },
       });
       (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue(events);
-      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.playerStats.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
 
       await StatsService.finalizeGameStats(game.id);
 
-      expect(mockPrisma.playerStats.upsert).toHaveBeenCalled();
+      expect(mockPrisma.playerStats.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ playerId: player.id, gameId: game.id, points: 2, fieldGoalsAttempted: 1 })],
+      });
       expect(mockPrisma.teamStats.upsert).toHaveBeenCalled();
     });
 
-    it('deletes stale PlayerStats rows for players no longer in the event set (audit #27)', async () => {
+    it('replaces the PlayerStats rows, so players no longer in the event set drop out (audit #27)', async () => {
       const team = createTeam();
       const playerA = createPlayer();
       const playerB = createPlayer();
@@ -427,18 +433,20 @@ describe('StatsService', () => {
         },
       ]);
       (mockPrisma.playerStats.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
-      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.playerStats.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
 
       await StatsService.finalizeGameStats(game.id);
 
-      expect(mockPrisma.playerStats.deleteMany).toHaveBeenCalledWith({
-        where: { gameId: game.id, playerId: { notIn: [playerB.id] } },
-      });
-      expect(mockPrisma.playerStats.upsert).toHaveBeenCalledTimes(1);
-      expect((mockPrisma.playerStats.upsert as jest.Mock).mock.calls[0][0].where).toEqual({
-        playerId_gameId: { playerId: playerB.id, gameId: game.id },
-      });
+      expect(mockPrisma.playerStats.deleteMany).toHaveBeenCalledWith({ where: { gameId: game.id } });
+      expect(mockPrisma.playerStats.createMany).toHaveBeenCalledTimes(1);
+      const rows = (mockPrisma.playerStats.createMany as jest.Mock).mock.calls[0][0].data;
+      expect(rows.map((row: { playerId: string }) => row.playerId)).toEqual([playerB.id]);
+      // Delete before create, both inside the transaction
+      expect((mockPrisma.playerStats.deleteMany as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+        (mockPrisma.playerStats.createMany as jest.Mock).mock.invocationCallOrder[0]
+      );
+      expect(mockPrisma.playerStats.upsert).not.toHaveBeenCalled();
     });
 
     it('removes all stored stats when the game has no player events', async () => {
@@ -457,7 +465,7 @@ describe('StatsService', () => {
 
       expect(mockPrisma.playerStats.deleteMany).toHaveBeenCalledWith({ where: { gameId: game.id } });
       expect(mockPrisma.teamStats.deleteMany).toHaveBeenCalledWith({ where: { gameId: game.id } });
-      expect(mockPrisma.playerStats.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.playerStats.createMany).not.toHaveBeenCalled();
       expect(mockPrisma.teamStats.upsert).not.toHaveBeenCalled();
     });
 
@@ -478,7 +486,7 @@ describe('StatsService', () => {
       (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
         shot(true, 2), shot(false, 2), shot(true, 3), shot(false, 3), shot(false, 3), shot(true, 1),
       ]);
-      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.playerStats.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
 
       await StatsService.finalizeGameStats(game.id);

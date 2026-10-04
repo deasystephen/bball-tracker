@@ -11,6 +11,7 @@ describe('shot-points', () => {
     [{ made: true, points: 3 }, 3, true, 3],
     [{ made: false, points: 3 }, 3, false, 0],
     [{ made: true }, 2, true, 2],
+    [{ made: true, points: null }, 2, true, 2],
     [{ made: true, points: 4 }, null, true, 0],
     [{ made: true, points: -5 }, null, true, 0],
     [{ made: true, points: 0 }, null, true, 0],

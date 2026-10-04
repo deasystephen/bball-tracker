@@ -10,6 +10,7 @@ import { createSeasonSchema, updateSeasonSchema, seasonQuerySchema } from '../..
 import { createTeamSchema, updateTeamSchema, teamQuerySchema, addPlayerSchema, addStaffSchema, updateTeamMemberSchema, announcementQuerySchema } from '../../src/api/teams/schemas';
 import { playerQuerySchema, updatePlayerSchema } from '../../src/api/players/schemas';
 import { createGameSchema, updateGameSchema, createGameEventSchema } from '../../src/api/games/schemas';
+import { GameEventType } from '@prisma/client';
 import { createInvitationSchema } from '../../src/api/invitations/schemas';
 import { playerSeasonStatsQuerySchema } from '../../src/api/stats/schemas';
 import { avatarUploadUrlSchema } from '../../src/api/uploads/schemas';
@@ -450,20 +451,12 @@ describe('Schema Validation', () => {
   });
 
   describe('Event Type Validation', () => {
-    const validEventTypes = [
-      'SHOT',
-      'REBOUND',
-      'ASSIST',
-      'TURNOVER',
-      'FOUL',
-      'SUBSTITUTION',
-      'STEAL',
-      'BLOCK',
-      'TIMEOUT',
-    ];
+    // Every value of the Prisma enum, so a new event type the schema forgets fails here
+    const validEventTypes = Object.values(GameEventType);
 
-    // SHOT and REBOUND require their metadata (#723, tests/schemas/game-events.test.ts)
-    const requiredMetadata: Record<string, Record<string, unknown>> = {
+    // The only hand-written list: types whose metadata is required (#723,
+    // tests/schemas/game-events.test.ts). Every other type must parse with none.
+    const requiredMetadata: Partial<Record<GameEventType, Record<string, unknown>>> = {
       SHOT: { made: true, points: 2 },
       REBOUND: { type: 'defensive' },
     };

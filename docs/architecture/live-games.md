@@ -95,6 +95,16 @@ current score so a client can drop events and still converge.
   through the foreign key, so two shots that insert first and lock second
   deadlock (`40P01`; reproduced on the pre-#665 code by
   `tests/integration/stats-finalize.db.test.ts`).
+- **Why non-SHOT writes take the lock too.** A rebound or a timeout doesn't change
+  the score, so the lock looks like a cost with no benefit: every tap on a game
+  queues behind any in-flight shot recompute or finalization. It stays because the
+  `status` that decides re-finalization must be read under the same lock as the
+  write, or a `PATCH status=FINISHED` committing around a non-SHOT insert leaves a
+  box score without that event (the #724 race applies to every event type, not just
+  shots). A cheaper unlocked post-write read would still race the PATCH. The lock
+  also lets `deleteEvent` look the event up under it, so a double undo is a 404, not
+  a 500. The hold is short: one lock statement, one insert or delete, and for SHOT
+  one read and one update; finalization holds it for two reads and four writes.
 - `Game.homeScore` is **derived from the event log**: `GameEventService.createEvent`
   / `deleteEvent` recompute it from made `SHOT` events inside that transaction,
   so concurrent shots can't race to an undercount. Non-SHOT writes don't change
@@ -111,8 +121,10 @@ current score so a client can drop events and still converge.
   lives once, in `utils/shot-points.ts` (`shotValue`, `shotMade`,
   `shotPoints`), and both `computeHomeScore` and `StatsService` use it, so the
   derived score always equals the box score's team points. For rows already
-  stored, a missing `points` counts as 2, an out-of-range value counts nowhere
-  (neither score nor attempts), and only a boolean `made: true` is a make.
+  stored, a missing or `null` `points` counts as 2 (as `points || 2` did), an
+  out-of-range value counts nowhere (neither score nor attempts), and only a
+  boolean `made: true` is a make. The last two changed how such legacy rows score;
+  see `docs/architecture/stats-and-lineage.md` for the query that finds them.
 - `PATCH /games/:id { homeScore }` is honoured **only while the game has no
   SHOT events** (score entered for a game not tracked in-app). Once shots
   exist the client value is ignored and the derived score re-persisted (old
