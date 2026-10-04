@@ -12,14 +12,15 @@ Next.js web app served at `https://hooplings.com`. Hosts the public invitation a
 ## Setup
 
 ### Prerequisites
-- Node.js 22+
+- Node.js 22 (the root `.nvmrc`; CI uses it)
 
 ### Install & run
 ```bash
 npm install
 npm run dev     # http://localhost:3000
-npm run lint
-npm run build   # production build
+npm run lint        # ESLint CLI, --max-warnings 0
+npm run type-check  # tsc --noEmit
+npm run build       # production build
 ```
 
 ## Routes
@@ -53,7 +54,7 @@ In production both point at `https://api.hooplings.com`, and:
 
 ## Tests
 
-No test framework configured yet. The web test runner is #510 (Vitest + `@testing-library/react`, wired into the web CI job); bootstrap it before adding more interactive flows.
+No test framework configured yet. CI runs lint and type-check in the `lint-and-typecheck` matrix and the production build in the `test-web` job (`.github/workflows/ci.yml`, #690). The web test runner is #510 (Vitest + `@testing-library/react`, to be added as a step of `test-web`); bootstrap it before adding more interactive flows.
 
 ## Related
 

@@ -124,3 +124,38 @@ merge will deploy — that job is gated on `github.event_name == 'push' && githu
 'refs/heads/main'`, so it skips on every PR regardless of paths. Read the path filter, not the PR
 check. Verify a service-level change landed with:
 `aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-api --query 'services[0].deploymentConfiguration'`
+
+## CI jobs, Node version and action pins
+
+`.github/workflows/ci.yml` runs these jobs. Check names are what branch protection requires, so
+never rename one without updating the required checks.
+
+| Job | Check name | Runs on | Gates the deploy |
+| --- | --- | --- | --- |
+| `lint-and-typecheck` (matrix `backend`, `mobile`, `web`) | `Lint and Type Check (<project>)` | every PR and push | yes |
+| `test-backend` (Postgres service, coverage gate) | `Test Backend` | every PR and push | yes |
+| `test-mobile` (Jest, coverage gate, `expo export`) | `Test Mobile` | every PR and push | yes |
+| `test-web` (`npm run build` with the production API URLs, #690) | `Test Web` | every PR and push | yes |
+| `terraform-validate` | `Terraform fmt & validate` | every PR and push | no |
+| `detect-changes` | `Detect backend changes` | push to `main`, manual run | decides it |
+| `build-and-deploy` | `Build & Deploy to ECS` | push to `main` touching the deploy paths, manual run | is it |
+
+`web/` is not a deploy path: a web-only merge runs the web jobs and deploys nothing. The web jobs
+exist because Dependabot auto-merges `/web` patch and minor bumps once CI passes.
+
+**Node.** Every `actions/setup-node` step, in every workflow, reads `node-version-file: .nvmrc`.
+The root `.nvmrc` holds the major of the production image (`FROM node:<major>-alpine` in
+`docker/Dockerfile`), and `backend/package.json` declares the same major in `engines.node`.
+`backend/tests/infra/node-version.test.ts` fails when any of them disagree (#714). To move to a new
+major, change the Dockerfile, `.nvmrc` and `engines.node` in one PR.
+
+**Action pins.** Every action not owned by GitHub (`actions/`, `github/`) is referenced by a full
+40-character commit SHA with a trailing `# vX.Y.Z` comment, in every workflow (#712). The deploy
+job runs `aws-actions/*` with the production AWS keys in its environment, and a tag can be moved by
+whoever controls the action's repository; a SHA cannot. Dependabot's `github-actions` ecosystem
+bumps the SHA and the comment together; those PRs are reviewed by hand. Resolve a new pin with
+`gh api repos/<owner>/<repo>/git/ref/tags/<tag>` and, when `object.type` is `tag`, dereference it
+with `gh api repos/<owner>/<repo>/git/tags/<sha> --jq .object.sha`.
+`backend/tests/infra/action-pins.test.ts` fails on a tag or branch reference, or a pin without its
+comment. GitHub's own `actions/*` stay on major tags.
+

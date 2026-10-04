@@ -55,7 +55,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       # The ONLY step that sees the alerts PAT. Writes a JSON snapshot outside
       # the repo tree so the diff guard in the prompt is unaffected and the

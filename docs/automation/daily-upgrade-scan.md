@@ -27,7 +27,7 @@ the deferral list current, and post a daily summary comment on the rolling
 
 | Who | Owns | Mechanism |
 | --- | --- | --- |
-| **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI |
+| **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI. `/web` bumps are gated by the web CI jobs (`Lint and Type Check (web)`, `Test Web`; #690) |
 | **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
 | **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
 
@@ -115,8 +115,10 @@ already installed on the repo — the action exchanges the job's OIDC token for 
 short-lived App token. This is deliberate: PRs pushed with `GITHUB_TOKEN` do not
 trigger the CI workflow, so auto-merge would wait forever on required checks.
 Workflow `permissions:` are the minimum the action needs (`contents`,
-`pull-requests`, `issues`: write; `id-token`: write). Both third-party actions
-are pinned to commit SHAs.
+`pull-requests`, `issues`: write; `id-token`: write). Like every workflow, it
+pins third-party actions to commit SHAs (rule and guard test:
+`docs/deployment/ecs-deploys.md`, "CI jobs, Node version and action pins"), and
+it sets up Node from the root `.nvmrc`, the production image's major.
 
 ## Prerequisites (all in place unless noted)
 
