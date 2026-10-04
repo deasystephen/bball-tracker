@@ -12,7 +12,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   rows for players with no remaining events are deleted, and a game with **no** player events ends up with no
   `PlayerStats`/`TeamStats` rows at all.
 - **Tracked vs. finished games.** `GET /api/v1/stats/teams/:teamId` returns `gamesPlayed` (all `FINISHED`
-  games = `wins + losses`, score-based) and `trackedGames` (finished games that have a `TeamStats` row).
+  games = `wins + losses + ties`, score-based) and `trackedGames` (finished games that have a `TeamStats` row).
   Per-game averages divide by `trackedGames`, so a game created directly as `FINISHED` with a score but no
   events (or finished with no events) counts in the record but does not deflate PPG/RPG/APG. Player season
   averages already divide by the player's own `PlayerStats` row count.

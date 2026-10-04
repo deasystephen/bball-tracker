@@ -98,7 +98,11 @@ The Hooplings application is a single containerized API backed by PostgreSQL, wi
 ## Security
 
 - **Authentication**: JWT tokens with refresh tokens
-- **Authorization**: Role-based access control (Coach, Parent, Player, Admin)
+- **Authorization**: per-team staff flags (`TeamRole` on `TeamStaff` rows), league admin rows, team
+  membership and guardian links, evaluated in `backend/src/utils/permissions.ts` (`canAccessTeam`,
+  `teamAccessWhere`, `getTeamPermissions`). The global `User.role` only short-circuits `ADMIN` and
+  gates team creation; it is never an access check. League and season lists are caller-scoped and an
+  unaffiliated caller gets 404. Detail: [Authorization](authorization.md).
 - **API Security**: Rate limiting, input validation
 - **AWS Security**: IAM roles, VPC isolation, security groups
 - **Secrets Management**: AWS Secrets Manager
@@ -141,5 +145,6 @@ What exists today (as built; the runbook is `../runbooks/on-call.md`):
 - **Development**: local Docker Compose (PostgreSQL + Redis), backend and app run on the host.
 - **Production**: a single AWS ECS Fargate task behind an ALB, one RDS PostgreSQL instance and a
   single-node ElastiCache Redis. There is no staging environment; a push to `main` that touches
-  `backend/`, `infra/` or `docker/` deploys (`../deployment/ecs-deploys.md`).
+  `backend/`, `infra/`, `docker/` or `.github/workflows/ci.yml` (Markdown files excluded) deploys
+  (`../deployment/ecs-deploys.md`).
 

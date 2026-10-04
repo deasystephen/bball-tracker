@@ -114,7 +114,8 @@ export const observeError = (error: unknown): Promise<never> => {
     addBreadcrumb({
       category: 'http',
       type: 'http',
-      level: status === undefined || status >= 500 ? 'error' : 'warning',
+      // A 4xx and a cancellation are the caller's own outcome: warning crumbs, never errors.
+      level: (status !== undefined && status < 500) || isCancellation(error) ? 'warning' : 'error',
       data: {
         method: configMethod(config),
         url: pattern,

@@ -252,8 +252,10 @@ never inline a role check in a screen:
   user is left with Try Again and the swipe gesture. Pass `onBack={goBack}` with
   `const goBack = useGoBack(<parent route>)` (`hooks/useGoBack.ts`): it pops the stack, or
   replaces with the parent when there is nothing to pop (a screen opened by a link), the same
-  rule as `useAccessGuard`. Never `router.back()` alone, which does nothing without history. All
-  13 pushed screens that replace themselves with `ErrorState` do this. When there is nothing to
+  rule as `useAccessGuard`. Never `router.back()` alone, which does nothing without history. Every
+  pushed screen that replaces itself with `ErrorState` does this;
+  `__tests__/a11y/error-state-way-back.test.ts` is the enforced rule and
+  `__tests__/app/error-state-way-back.test.tsx` (`SCREENS`) is the enumerated set. When there is nothing to
   retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
   Try Again button that left the screen). Tab screens have the tab bar and need nothing.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
@@ -296,7 +298,8 @@ never inline a role check in a screen:
   method, the redacted route pattern, `status_code`, `duration`. **Captured** with tags
   `endpoint_pattern` and `status`: a network failure (no response, `status: 'network'`, axios `code`
   in context) and any 5xx. A 4xx is the user's own outcome and is a breadcrumb only; an axios
-  cancellation (`ERR_CANCELED`) is neither. A `NoSessionError` (#582) is captured **once per endpoint
+  cancellation (`ERR_CANCELED`) is a breadcrumb only (level `warning`, `reason: 'ERR_CANCELED'`) and is
+  never captured. A `NoSessionError` (#582) is captured **once per endpoint
   pattern per session end** (keyed on `getLogoutEpoch()`), so a screen that retries after sign-out
   reports one event, not a storm; every refusal still leaves a breadcrumb.
 - **`endpointPattern(url)`** (`services/sentry.ts`) is the only shape a URL takes in a tag or

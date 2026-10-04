@@ -20,7 +20,7 @@ Loads when a file under `backend/` is read. The full as-built reference for each
 - Writes onto `User` are guarded by `deletedAt IS NULL`; a new `User` relation goes into
   `USER_REFERENCE_SELECT`; a write that changes `User.email` spreads `EMAIL_SUPPRESSION_CLEARED`.
 - URLs via `utils/urls.ts`, dates in email via `utils/format-date.ts`, brand via
-  `mailer/templates/brand.ts`; every template ends with the shared footer and is listed in the
+  `services/mailer/templates/brand.ts`; every template ends with the shared footer and is listed in the
   mailer test's `renders`. Never log `req.originalUrl`; redact with `utils/redact.ts`.
 - Logging (`utils/logger.ts`, threshold `LOG_LEVEL`): a new service method that mutates data logs
   one info-level domain event with ids only (never a name, email or token; `hashRecipient()` for an

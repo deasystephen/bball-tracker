@@ -47,7 +47,7 @@ If `npx expo run:ios` stops with **"No code signing certificates are available t
    security add-certificates -k ~/Library/Keychains/login.keychain-db ~/Downloads/AppleWWDRCAG3.cer
    ```
 
-After switching branches across an Expo SDK change, run `npm ci` and `npx expo prebuild --platform ios --clean` first; `run:ios` alone reuses the existing `ios/` folder. The root `CLAUDE.md` ("Toolchain") describes a build that needs no certificate.
+After switching branches across an Expo SDK change, run `npm ci` and `npx expo prebuild --platform ios --clean` first; `run:ios` alone reuses the existing `ios/` folder. `docs/deployment/mobile-builds-and-ota.md` ("Toolchain") describes a build that needs no certificate.
 
 **Do not use** `npm start` / `npx expo start` with this project. Several native modules (Sentry, Reanimated, etc.) require a custom dev client; the legacy Expo Go flow does not work here. See `npx expo run:ios --help` for device-selection flags.
 

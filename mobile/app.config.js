@@ -2,7 +2,7 @@ const IS_PRODUCTION = process.env.APP_ENV === 'production';
 const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
 // Evaluated on the PUBLISHING machine for `eas update`: an unset APP_ENV ships
-// the dev host to every device (CLAUDE.md "OTA env gotcha"). The EAS production
+// the dev host to every device (docs/deployment/mobile-builds-and-ota.md "OTA env gotcha"). The EAS production
 // environment provides APP_ENV; `__tests__/app-config.test.ts` pins this mapping.
 const PRODUCTION_API_URL = 'https://api.hooplings.com';
 const getApiUrl = () => {

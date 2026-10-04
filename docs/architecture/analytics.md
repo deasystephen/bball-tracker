@@ -131,7 +131,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `team_id`, `game_id`, `league_id`, `season_id`, `invitation_id` | string (uuid) | the row the action touched |
+| `team_id`, `game_id`, `league_id`, `season_id`, `invitation_id`, `announcement_id` | string (uuid) | the row the action touched |
 | `screen` | string | Expo Router route pattern, `/teams/[id]` |
 | `params_kind` | string | names of the route's dynamic segments (`id`, `id,playerId`, `token`) or `none` |
 | `fields` | string | sorted, comma-joined keys of the payload that was sent (`changedFields`), never values |
@@ -153,8 +153,9 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `resend` | boolean | the invitation superseded a pending one |
 | `email_sent` | boolean or null | per-send delivery flag from the API; null when there was no address |
 | `erased` | boolean | the account row was deleted outright rather than tombstoned (#529) |
+| `own` | boolean | the caller wrote the announcement reply they deleted (#34) |
 | `granted` | boolean | push permission outcome |
-| `target` | enum | what a tapped notification opened: `game`, `team`, `none` |
+| `target` | enum | what a tapped notification opened: `game`, `announcement`, `team`, `none` |
 | `endpoint_pattern` | string | `endpointPattern(url)`: redacted route with ids collapsed to `:id` (`/api/v1/teams/:id/players`) |
 | `code` | string | server error code (`upgrade_required`, `last_head_coach`), axios code (`ECONNABORTED`), `http_error`, an Error's name, or `unknown` |
 | `feature`, `current_tier`, `required_tier` | string | the 402 body's `feature`, `currentTier`, `requiredTier` (`unknown` when absent) |
