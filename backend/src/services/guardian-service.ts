@@ -74,6 +74,10 @@ export interface GuardianOfEntry {
   childName: string;
   relationship: GuardianRelationship;
   isPrimary: boolean;
+  /** True only for a managed child with no login: the one record a guardian may delete. */
+  isManaged: boolean;
+  /** Every team-season the child is rostered on (unfiltered); drives the per-team guardians deep link. */
+  teams: { id: string; name: string }[];
 }
 
 export interface InviteGuardianInput {
@@ -155,7 +159,7 @@ export class GuardianService {
       isManaged: link.child.isManaged && link.child.workosUserId === null,
       // Lets the app deep-link to the child's guardians screen, which is
       // addressed per team (/teams/:teamId/members/:playerId/guardians).
-      teams: (link.child.teamMembers ?? []).map((m) => ({ id: m.team.id, name: m.team.name })),
+      teams: link.child.teamMembers.map((m) => ({ id: m.team.id, name: m.team.name })),
     }));
   }
 
