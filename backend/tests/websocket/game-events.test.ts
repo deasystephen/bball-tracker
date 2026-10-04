@@ -22,7 +22,7 @@ import {
   type GameSocket,
 } from '../../src/websocket/game-events';
 import { WorkOSService } from '../../src/services/workos-service';
-import { ServiceUnavailableError } from '../../src/utils/errors';
+import { ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
 import { mockPrisma } from '../setup';
 import {
@@ -263,6 +263,7 @@ describe('websocket/game-events', () => {
 
     function makeHandshakeSocket(token: string): GameSocket {
       return {
+        id: 'sock-auth-1',
         handshake: { auth: { token }, headers: {} },
         data: {},
       } as unknown as GameSocket;
@@ -283,10 +284,26 @@ describe('websocket/game-events', () => {
       expect(mockCaptureException).toHaveBeenCalledTimes(1);
       expect(mockCaptureException).toHaveBeenCalledWith(
         expect.any(ServiceUnavailableError),
-        { flow: 'socket-auth' }
+        { flow: 'socket-auth', socketId: 'sock-auth-1' }
       );
       expect(next).toHaveBeenCalledTimes(1);
       expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
+      expect((next.mock.calls[0][0] as Error).message).toBe('Service unavailable');
+    });
+
+    it('treats any other thrown error (e.g. a database failover) as an outage: captured, Service unavailable', async () => {
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'workos-user-1' } as never);
+      (mockPrisma.user.findUnique as jest.Mock).mockRejectedValue(new Error('connection terminated'));
+      const next = jest.fn();
+
+      await authenticateSocket(makeHandshakeSocket('workos-token'), next);
+
+      expect(mockCaptureException).toHaveBeenCalledTimes(1);
+      expect(mockCaptureException).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'connection terminated' }),
+        { flow: 'socket-auth', socketId: 'sock-auth-1' }
+      );
+      expect(next).toHaveBeenCalledTimes(1);
       expect((next.mock.calls[0][0] as Error).message).toBe('Service unavailable');
     });
 
@@ -295,6 +312,17 @@ describe('websocket/game-events', () => {
       const next = jest.fn();
 
       await authenticateSocket(makeHandshakeSocket('expired-token'), next);
+
+      expect(mockCaptureException).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledTimes(1);
+      expect((next.mock.calls[0][0] as Error).message).toBe('Unauthorized');
+    });
+
+    it('does not report a thrown expected client error (4xx AppError) and rejects with Unauthorized', async () => {
+      jest.spyOn(WorkOSService, 'verifyToken').mockRejectedValue(new UnauthorizedError('Token revoked'));
+      const next = jest.fn();
+
+      await authenticateSocket(makeHandshakeSocket('revoked-token'), next);
 
       expect(mockCaptureException).not.toHaveBeenCalled();
       expect(next).toHaveBeenCalledTimes(1);

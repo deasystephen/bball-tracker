@@ -249,9 +249,11 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
   environment. An event from a preview build or a simulator carries another name and does not
   trigger the first rule.
 - **Expected client errors never reach Sentry** (4xx `AppError`s are filtered in
-  `utils/sentry.ts`), so neither rule fires for an expired token or a validation error. The same
-  holds for a rejected Socket.io handshake token; a handshake that fails because JWKS is
-  unreachable is reported, tagged `flow: socket-auth` (#672).
+  `utils/sentry.ts`), so neither rule fires for an expired token or a validation error. The
+  Socket.io handshake follows the same rule: a rejected or expired token is log-only (it returns
+  null and never throws), a thrown 4xx `AppError` is filtered by `isExpectedClientError`, and
+  every other throw (JWKS unreachable, a database failover) is reported, tagged
+  `flow: socket-auth` and `socketId` (#672).
 - **Not proven by a real event.** The rule was read back after it was created and is enabled,
   but no new issue has occurred in production since. The routing to `alerts@hooplings.com` is
   not proven either, for the same reason. Its first email is the proof; check

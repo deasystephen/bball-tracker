@@ -12,7 +12,16 @@ import { AddressInfo } from 'net';
 import { Server as SocketServer } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 
+// Spy on Sentry capture while keeping the rest of the util real.
+jest.mock('../../src/utils/sentry', () => ({
+  ...jest.requireActual('../../src/utils/sentry'),
+  captureException: jest.fn(),
+}));
+
 import { setupWebSocketHandlers, emitGameEvent } from '../../src/websocket';
+import { WorkOSService } from '../../src/services/workos-service';
+import { ServiceUnavailableError } from '../../src/utils/errors';
+import { captureException } from '../../src/utils/sentry';
 import { setIo } from '../../src/websocket/io-registry';
 import {
   MAX_HANDSHAKES_PER_WINDOW,
@@ -79,6 +88,35 @@ describe('websocket integration (socket.io-client)', () => {
       expect(err.message).toBe('Unauthorized');
       client.close();
       done();
+    });
+  });
+
+  it('rejects the handshake with "Service unavailable" and reports to Sentry when JWKS is unreachable (#672)', (done) => {
+    const verifyToken = jest
+      .spyOn(WorkOSService, 'verifyToken')
+      .mockRejectedValue(new ServiceUnavailableError('JWKS unreachable'));
+
+    // A non-`dev_` token takes the WorkOS path even with NODE_ENV=development.
+    const client = connect('workos-access-token');
+    client.on('connect', () => {
+      client.close();
+      verifyToken.mockRestore();
+      done(new Error('expected the handshake to be rejected'));
+    });
+    client.on('connect_error', (err) => {
+      client.close();
+      verifyToken.mockRestore();
+      try {
+        expect(err.message).toBe('Service unavailable');
+        expect(captureException).toHaveBeenCalledTimes(1);
+        expect(captureException).toHaveBeenCalledWith(
+          expect.any(ServiceUnavailableError),
+          expect.objectContaining({ flow: 'socket-auth', socketId: expect.any(String) })
+        );
+        done();
+      } catch (assertion) {
+        done(assertion as Error);
+      }
     });
   });
 
