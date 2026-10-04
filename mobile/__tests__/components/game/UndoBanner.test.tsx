@@ -182,6 +182,20 @@ describe('UndoBanner', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
+    it('names the button "Saving" until the event is confirmed, then "Undo"', () => {
+      const { getByLabelText, queryByLabelText, rerender } = render(
+        <UndoBanner visible pending message="x" onUndo={jest.fn()} duration={5} />
+      );
+      const saving = getByLabelText('Saving');
+      expect(saving.props.accessibilityRole).toBe('button');
+      expect(saving.props.accessibilityState).toEqual({ disabled: true });
+      expect(queryByLabelText('Undo')).toBeNull();
+
+      rerender(<UndoBanner visible pending={false} message="x" onUndo={jest.fn()} duration={5} />);
+      expect(getByLabelText('Undo')).toBeTruthy();
+      expect(queryByLabelText('Saving')).toBeNull();
+    });
+
     it('gives the UNDO button a stable name and a button role', () => {
       const { getByLabelText } = render(
         <UndoBanner visible message="x" onUndo={jest.fn()} duration={5} />

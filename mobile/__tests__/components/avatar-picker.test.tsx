@@ -31,6 +31,11 @@ describe('AvatarPicker photo menu', () => {
     picker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true } as never);
     picker.launchCameraAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///cam.jpg' }] } as never);
     picker.launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///lib.jpg' }] } as never);
+    jest.replaceProperty(Platform, 'OS', 'ios');
+  });
+  afterEach(() => {
+    // Restores Platform.OS even when a test fails midway.
+    jest.restoreAllMocks();
   });
 
   it('never opens an Alert menu', () => {
@@ -113,6 +118,25 @@ describe('AvatarPicker photo menu', () => {
     expect(onImageSelected).toHaveBeenCalledWith('file:///lib.jpg');
   });
 
+  it('on iOS re-tapping the avatar during the fade-out drops the earlier choice', async () => {
+    jest.useFakeTimers();
+    try {
+      render(<AvatarPicker uri={null} name="Jamie Lee" onImageSelected={jest.fn()} />);
+      openMenu();
+      fireEvent.press(screen.getByLabelText('Take Photo'));
+      openMenu();
+      expect(menu().props.visible).toBe(true);
+
+      await act(async () => {
+        jest.advanceTimersByTime(2000);
+      });
+      // The sheet is open again to choose afresh; nothing launched under it.
+      expect(picker.launchCameraAsync).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('on iOS still opens the camera if the dismiss callback never arrives', async () => {
     jest.useFakeTimers();
     try {
@@ -151,7 +175,23 @@ describe('AvatarPicker photo menu', () => {
 
     expect(picker.launchCameraAsync).toHaveBeenCalledTimes(1);
     expect(onImageSelected).toHaveBeenCalledWith('file:///cam.jpg');
-    jest.restoreAllMocks();
+  });
+
+  it('on Android opens the library straight away and Remove Photo still clears', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    const onImageSelected = jest.fn();
+    render(<AvatarPicker uri={PHOTO} name="Jamie Lee" onImageSelected={onImageSelected} />);
+    openMenu();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Choose from Library'));
+    });
+    expect(picker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+    expect(onImageSelected).toHaveBeenLastCalledWith('file:///lib.jpg');
+
+    openMenu();
+    fireEvent.press(screen.getByLabelText('Remove Photo'));
+    expect(onImageSelected).toHaveBeenLastCalledWith(null);
+    expect(menu().props.visible).toBe(false);
   });
 
   it('keeps the one-button permission Alert when access is denied', async () => {

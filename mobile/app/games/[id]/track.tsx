@@ -158,32 +158,34 @@ export default function TrackGameScreen() {
     }
   }, [opponentScore, id, updateGame]);
 
+  // Every submit takes the next number, so a failed create can tell whether
+  // the coach has recorded anything since it was sent.
+  const submitSeq = useRef(0);
+
   // Record one event for the selected player. The selection is consumed
   // synchronously, before the POST goes out (#730): the player is deselected
   // in the same tick as the tap, which disables the shot and stat buttons, so
   // at most one event is in flight per selection. The live store is read
   // rather than the render's closure because a second tap can land before
   // React re-renders the disabled buttons; that tap finds no selection and
-  // is dropped. A failed create restores the selection so the coach can
-  // retry with one tap.
+  // is dropped. A failed create gives the selection back for a one-tap retry,
+  // but only if nothing was recorded since and no one else is selected:
+  // after "A taps, B taps, A's POST fails" re-selecting A would make the
+  // coach's next tap, meant for B, record for A. The error names the player
+  // and the play either way.
   const submitEvent = useCallback(
     async (
       eventType: CreateGameEventInput['eventType'],
-      metadata: Record<string, unknown>,
-      failMessage: string,
-      selectPrompt: string
+      metadata: CreateGameEventInput['metadata'],
+      eventLabel: string
     ) => {
       const { selectedPlayerId: playerId, selectedPlayerName: playerName } =
         useGameTrackingStore.getState();
-      if (!playerId) {
-        // This render still showed a selection: an earlier tap consumed it
-        // a moment ago. Drop the duplicate silently.
-        if (selectedPlayerId) return;
-        Alert.alert('Select Player', selectPrompt);
-        return;
-      }
+      if (!playerId) return;
 
-      const eventData = { playerId, eventType, metadata };
+      submitSeq.current += 1;
+      const seq = submitSeq.current;
+      const eventData: CreateGameEventInput = { playerId, eventType, metadata };
 
       // Record locally first (optimistic). UNDO stays disabled until the
       // server id is known (audit #7).
@@ -212,15 +214,16 @@ export default function TrackGameScreen() {
       } catch (error) {
         // Remove local event on failure
         discardEvent(local.localId);
-        // Give the selection back unless the coach has picked someone else.
-        if (!useGameTrackingStore.getState().selectedPlayerId) {
+        const nothingSince = submitSeq.current === seq;
+        if (nothingSince && !useGameTrackingStore.getState().selectedPlayerId) {
           selectPlayer(playerId, playerName);
         }
-        Alert.alert('Error', error instanceof Error ? error.message : failMessage);
+        const who = playerName || 'this player';
+        const reason = error instanceof Error && error.message ? `\n\n${error.message}` : '';
+        Alert.alert('Error', `Could not save ${eventLabel} for ${who}.${reason}`);
       }
     },
     [
-      selectedPlayerId,
       id,
       recordEvent,
       confirmEvent,
@@ -235,13 +238,11 @@ export default function TrackGameScreen() {
 
   // Handle shot recording
   const handleShot = useCallback(
-    (points: 1 | 2 | 3, made: boolean) =>
-      submitEvent(
-        'SHOT',
-        { made, points },
-        'Failed to record shot',
-        'Please select a player before recording a shot.'
-      ),
+    (points: 1 | 2 | 3, made: boolean) => {
+      // Typed here so a SHOT always carries valid ShotMetadata.
+      const metadata: ShotMetadata = { made, points };
+      return submitEvent('SHOT', metadata, formatShotDescription(metadata));
+    },
     [submitEvent]
   );
 
@@ -280,12 +281,7 @@ export default function TrackGameScreen() {
           return Promise.resolve();
       }
 
-      return submitEvent(
-        eventType,
-        metadata,
-        `Failed to record ${statLabel}`,
-        'Please select a player before recording a stat.'
-      );
+      return submitEvent(eventType, metadata, statLabel);
     },
     [submitEvent]
   );

@@ -300,8 +300,8 @@ never inline a role check in a screen:
   heard; try/catch, failures logged without the message). Four call sites: every toast announces its message
   once on mount (`Toast.tsx`; React Native announces `accessibilityRole="alert"` on neither platform, and a
   `pointerEvents="none"` toast can never take focus); `UndoBanner` announces "<message>. Undo available for N
-  seconds" once when the event is confirmed, never per countdown tick, and its button keeps the stable label
-  "Undo"; the tracker's `ScoreDisplay` and Watch Live (`app/games/[id]/live.tsx`) render the score as one
+  seconds" once when the event is confirmed, never per countdown tick, and its button is labelled "Saving"
+  until then and a stable "Undo" after; the tracker's `ScoreDisplay` and Watch Live (`app/games/[id]/live.tsx`) render the score as one
   accessible element labelled `Score: <home> <n>, <away> <m>` with `accessibilityLiveRegion="polite"`
   (TalkBack) and announce changes on iOS through `hooks/useScoreAnnouncement.ts`, which never announces the
   first score it sees (mount, the game loading) and stays silent on Android so TalkBack does not hear each
@@ -309,10 +309,16 @@ never inline a role check in a screen:
   `__tests__/app/game-live-score.test.tsx`, and the #774 cases in `Toast.test.tsx` and `UndoBanner.test.tsx`.
 - **The avatar photo menu is an `ActionMenu` (#669).** `AvatarPicker` (Profile, Manage Players) offers Take
   Photo, Choose from Library and, with a photo set, Remove Photo, plus the sheet's Close; the four-button
-  `Alert` it replaced lost Cancel on Android and could not be dismissed with Back. On iOS the camera or
-  library opens from the menu's `onDismiss` (iOS refuses to present while the modal is still closing), with
-  a 1s fallback timer in case the callback never arrives; Android opens it at once. The permission-denied
+  `Alert` it replaced lost Cancel on Android and could not be dismissed with Back. The permission-denied
   message stays a one-button `Alert`. Test: `__tests__/components/avatar-picker.test.tsx`.
+- **An `ActionMenu` item that presents native UI sets `waitForClose`.** iOS refuses to present a view
+  controller (camera, photo library, share sheet, document picker) while the menu's modal is still
+  dismissing. With `waitForClose`, `ActionMenu` remembers the pressed item, closes, and runs it from
+  `Modal.onDismiss` on iOS, with an internal fallback timer (`WAIT_FOR_CLOSE_FALLBACK_MS`, 1s) in case the
+  callback never arrives; whichever comes first runs it, exactly once. A second item press replaces the
+  pending one, and Close, the backdrop, Back, reopening the menu and unmounting all drop it. Android runs the
+  item at once. Items without the flag run immediately on both platforms, as before. Today only
+  `AvatarPicker`'s Take Photo and Choose from Library use it. Test: `__tests__/components/ActionMenu.test.tsx`.
 
 ### Mobile logging and error reporting (#617)
 - **`services/log.ts` is the app's logger.** `log.debug` / `log.info` print to the Metro console in

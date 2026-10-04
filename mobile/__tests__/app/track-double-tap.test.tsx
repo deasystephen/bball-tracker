@@ -71,6 +71,12 @@ const game: Game = {
         jerseyNumber: 7,
         player: { id: 'p1', name: 'Jamie Lee', email: 'jamie@example.test' },
       },
+      {
+        id: 'm2',
+        playerId: 'p2',
+        jerseyNumber: 11,
+        player: { id: 'p2', name: 'Alex Smith', email: 'alex@example.test' },
+      },
     ],
     season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
     staff: [
@@ -91,6 +97,7 @@ function deferred() {
 }
 
 const selectPlayer = () => fireEvent.press(screen.getByLabelText('Jamie Lee, number 7'));
+const selectAlex = () => fireEvent.press(screen.getByLabelText('Alex Smith, number 11'));
 
 describe('TrackGameScreen double tap (#730)', () => {
   beforeEach(() => {
@@ -171,8 +178,9 @@ describe('TrackGameScreen double tap (#730)', () => {
   });
 
   it('records one stat for two taps on the same stat button', async () => {
-    const pending = deferred();
-    mockMutateAsync.mockReturnValue(pending.promise);
+    const first = deferred();
+    const second = deferred();
+    mockMutateAsync.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     render(<TrackGameScreen />);
     selectPlayer();
 
@@ -200,12 +208,19 @@ describe('TrackGameScreen double tap (#730)', () => {
       data: { playerId: 'p1', eventType: 'ASSIST', metadata: {} },
     });
 
+    // Each create resolves with its own id, and each local event gets its own.
     await act(async () => {
-      pending.resolve({ event: { id: 'srv-3' } });
+      first.resolve({ event: { id: 'srv-steal' } });
     });
-    // Both creates share the one deferred promise; the newest is the undo target.
-    expect(useGameTrackingStore.getState().lastEvent?.eventType).toBe('ASSIST');
-    expect(useGameTrackingStore.getState().lastEvent?.serverId).toBe('srv-3');
+    await act(async () => {
+      second.resolve({ event: { id: 'srv-assist' } });
+    });
+    const { localEvents, lastEvent } = useGameTrackingStore.getState();
+    expect(localEvents).toHaveLength(2);
+    expect(localEvents.find((e) => e.eventType === 'STEAL')?.serverId).toBe('srv-steal');
+    expect(localEvents.find((e) => e.eventType === 'ASSIST')?.serverId).toBe('srv-assist');
+    expect(lastEvent?.eventType).toBe('ASSIST');
+    expect(lastEvent?.serverId).toBe('srv-assist');
   });
 
   it('on a failed create discards the local event, shows the error and gives the selection back', async () => {
@@ -224,8 +239,66 @@ describe('TrackGameScreen double tap (#730)', () => {
 
     expect(useGameTrackingStore.getState().localEvents).toHaveLength(0);
     expect(useGameTrackingStore.getState().lastEvent).toBeNull();
-    expect(alertSpy).toHaveBeenCalledWith('Error', 'Network down');
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Error',
+      'Could not save 2pt made for Jamie Lee.\n\nNetwork down'
+    );
     expect(useGameTrackingStore.getState().selectedPlayerId).toBe('p1');
+    alertSpy.mockRestore();
+  });
+
+  it('does not re-select an earlier player when the coach has moved on (A taps, B taps, A fails)', async () => {
+    const forJamie = deferred();
+    const forAlex = deferred();
+    mockMutateAsync.mockReturnValueOnce(forJamie.promise).mockReturnValueOnce(forAlex.promise);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    render(<TrackGameScreen />);
+
+    selectPlayer();
+    fireEvent.press(screen.getByLabelText('2-point shot made'));
+    selectAlex();
+    fireEvent.press(screen.getByLabelText('Record Steal'));
+    expect(mockMutateAsync).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      forJamie.reject(new Error('Network down'));
+    });
+
+    // Jamie is not selected behind the coach's back: the next tap must not
+    // silently record for Jamie.
+    expect(useGameTrackingStore.getState().selectedPlayerId).toBeNull();
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Error',
+      'Could not save 2pt made for Jamie Lee.\n\nNetwork down'
+    );
+    // Only Alex's steal is left, still the undo target.
+    const { localEvents, lastEvent } = useGameTrackingStore.getState();
+    expect(localEvents).toHaveLength(1);
+    expect(lastEvent?.playerId).toBe('p2');
+
+    await act(async () => {
+      forAlex.resolve({ event: { id: 'srv-alex' } });
+    });
+    expect(useGameTrackingStore.getState().lastEvent?.serverId).toBe('srv-alex');
+    alertSpy.mockRestore();
+  });
+
+  it('keeps the coach\'s new selection when an earlier create fails', async () => {
+    const pending = deferred();
+    mockMutateAsync.mockReturnValueOnce(pending.promise);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    render(<TrackGameScreen />);
+
+    selectPlayer();
+    fireEvent.press(screen.getByLabelText('Record Block'));
+    selectAlex();
+
+    await act(async () => {
+      pending.reject(new Error('Network down'));
+    });
+
+    expect(useGameTrackingStore.getState().selectedPlayerId).toBe('p2');
+    expect(alertSpy).toHaveBeenCalledWith('Error', 'Could not save Block for Jamie Lee.\n\nNetwork down');
     alertSpy.mockRestore();
   });
 

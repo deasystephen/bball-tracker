@@ -2,7 +2,7 @@
  * Avatar component with photo picker support
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,7 +10,6 @@ import {
   Image,
   TouchableOpacity,
   Alert,
-  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -95,9 +94,6 @@ interface AvatarPickerProps extends AvatarProps {
 
 type PhotoSource = 'camera' | 'library';
 
-/** Longer than the menu's fade-out; only reached if iOS never calls onDismiss. */
-const MENU_DISMISS_FALLBACK_MS = 1000;
-
 /**
  * Interactive avatar picker with camera/library support.
  *
@@ -147,57 +143,21 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   };
 
   const [menuVisible, setMenuVisible] = useState(false);
-  // iOS cannot present the camera or library while the menu's modal is still
-  // closing, so the choice waits for the menu's onDismiss there. Android has
-  // no such restriction (and no onDismiss), so it launches at once. A
-  // fallback timer launches anyway if onDismiss never arrives, so a choice is
-  // never silently lost; whichever runs first clears the pending source.
-  const pendingSource = useRef<PhotoSource | null>(null);
-  const dismissFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(
-    () => () => {
-      if (dismissFallback.current) clearTimeout(dismissFallback.current);
-    },
-    []
-  );
-
-  const handleMenuDismiss = () => {
-    if (dismissFallback.current) {
-      clearTimeout(dismissFallback.current);
-      dismissFallback.current = null;
-    }
-    const source = pendingSource.current;
-    pendingSource.current = null;
-    if (source) void pickImage(source);
-  };
-
-  const choose = (source: PhotoSource) => {
-    if (Platform.OS === 'ios') {
-      pendingSource.current = source;
-      dismissFallback.current = setTimeout(handleMenuDismiss, MENU_DISMISS_FALLBACK_MS);
-    } else {
-      void pickImage(source);
-    }
-  };
-
+  // The camera and the library are native screens: ActionMenu opens them
+  // only once its sheet has finished closing (waitForClose), which iOS needs.
   const menuItems: ActionMenuItem[] = [
-    { label: 'Take Photo', onPress: () => choose('camera') },
-    { label: 'Choose from Library', onPress: () => choose('library') },
+    { label: 'Take Photo', waitForClose: true, onPress: () => void pickImage('camera') },
+    { label: 'Choose from Library', waitForClose: true, onPress: () => void pickImage('library') },
     ...(uri
       ? [{ label: 'Remove Photo', destructive: true, onPress: () => onImageSelected(null) }]
       : []),
   ];
 
-  const handlePress = () => {
-    pendingSource.current = null;
-    setMenuVisible(true);
-  };
-
   return (
     <>
       <TouchableOpacity
-        onPress={handlePress}
+        onPress={() => setMenuVisible(true)}
         activeOpacity={0.7}
         testID="avatar-picker"
       >
@@ -220,7 +180,6 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
         title="Profile Photo"
         items={menuItems}
         onClose={() => setMenuVisible(false)}
-        onDismiss={handleMenuDismiss}
       />
     </>
   );

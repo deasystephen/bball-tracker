@@ -704,13 +704,13 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### G.3a — Double tap records one event (#730)
 - [ ] Pass / Fail / Skipped
 - **Steps:** Select a player, then double-tap "2PT MADE" as fast as you can. Repeat with "Steal". Then turn on airplane mode, select a player and tap "2PT MADE".
-- **Expected:** The buttons grey out on the first tap. The score rises by exactly 2 and the timeline gets one shot; one steal is recorded. Undo removes that one event and nothing is left behind. In airplane mode the error alert appears, no event stays in the timeline and the player is selected again, ready for a retry.
+- **Expected:** The buttons grey out on the first tap. The score rises by exactly 2 and the timeline gets one shot; one steal is recorded. Undo removes that one event and nothing is left behind. In airplane mode the error alert names the play and the player ("Could not save 2pt made for <name>."), no event stays in the timeline and the player is selected again, ready for a retry. With airplane mode on, tap a shot for one player and a stat for a second player quickly: when the first save fails, the first player is **not** selected again.
 - **Notes:** Jest drives the real press handler (`__tests__/app/track-double-tap.test.tsx`) but cannot reproduce two touches inside one frame on a device.
 
 ### G.3b — VoiceOver hears the tracker and Watch Live (#774)
 - [ ] Pass / Fail / Skipped
 - **Steps:** With VoiceOver on (and once with TalkBack on Android if available): on the tracker, select a player and record a made 2-pointer; trigger an error toast (airplane mode, record a shot); then open Watch Live as a second account and record a shot from the first.
-- **Expected:** After the shot you hear the new score ("Score: <team> <n>, <opponent> <m>") and then "<player> - 2pt made. Undo available for 5 seconds", once, not every second. The UNDO button reads as "Undo, button". The error toast is spoken. On Watch Live the score reads as one element and each update is spoken once; opening the screen does not announce the score. On Android each change is heard once, not twice.
+- **Expected:** After the shot you hear the new score ("Score: <team> <n>, <opponent> <m>") and then "<player> - 2pt made. Undo available for 5 seconds", once, not every second. The UNDO button reads as "Saving" while the event is being saved, then "Undo, button". The error toast is spoken. On Watch Live the score reads as one element and each update is spoken once; opening the screen does not announce the score. On Android each change is heard once, not twice.
 - **Notes:** ___________
 
 ### G.4 — Hot-streak milestone

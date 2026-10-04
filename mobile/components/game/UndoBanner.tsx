@@ -85,7 +85,8 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
 
   // Tell a screen reader once that the undo window has opened, when the event
   // is confirmed and UNDO becomes usable (#774). Never per countdown tick: the
-  // countdown text has no live region and the button's label stays "Undo".
+  // countdown text has no live region and, once confirmed, the button's
+  // label stays "Undo".
   const announced = useRef(false);
   useEffect(() => {
     if (!visible) {
@@ -143,7 +144,9 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
           onPress={onUndo}
           disabled={pending}
           accessibilityRole="button"
-          accessibilityLabel="Undo"
+          // "Saving" until the event is confirmed, then a stable "Undo": the
+          // per-second countdown never changes the focused element's name.
+          accessibilityLabel={pending ? 'Saving' : 'Undo'}
           accessibilityState={{ disabled: pending }}
           style={[
             styles.undoButton,

@@ -30,21 +30,16 @@ export function useScoreAnnouncement(
   awayScore: number | null | undefined
 ): void {
   const previous = useRef<string | null>(null);
-  // Team names only shape the message; a rename is not a score change, so
-  // they ride in a ref instead of the effect's dependencies.
-  const names = useRef({ home: homeTeamName, away: awayTeamName });
-  useEffect(() => {
-    names.current = { home: homeTeamName, away: awayTeamName };
-  }, [homeTeamName, awayTeamName]);
 
   useEffect(() => {
     if (homeScore == null || awayScore == null) return;
+    // Keyed on the scores only: a team rename re-runs the effect but finds
+    // the same key and says nothing.
     const key = `${homeScore}-${awayScore}`;
     const before = previous.current;
     previous.current = key;
     if (before === null || before === key) return;
     if (Platform.OS !== 'ios') return;
-    const { home, away } = names.current;
-    announce(scoreAccessibilityLabel(home, homeScore, away, awayScore));
-  }, [homeScore, awayScore]);
+    announce(scoreAccessibilityLabel(homeTeamName, homeScore, awayTeamName, awayScore));
+  }, [homeScore, awayScore, homeTeamName, awayTeamName]);
 }
