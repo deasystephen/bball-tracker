@@ -154,9 +154,11 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Work Hygiene
 
-- **GitHub issues are the only source of truth for what is left to do.** Issues, milestones and the GA board own work with state; repo docs own durable truth reviewed in PRs; Claude memory owns cross-session facts that are not derivable from the repo; artifacts are dated snapshots. Never track a task in memory, a doc or an artifact. An audit's deliverable is issues; the document is provenance.
+- **GitHub issues are the only source of truth for what is left to do.** Issues, milestones and the GA board own work with state; repo docs own durable truth reviewed in PRs; Claude memory owns cross-session facts that are not derivable from the repo; artifacts are dated snapshots. Never track a task in memory, a doc or an artifact; a within-run checklist, ticked as you go, lives in the session scratchpad directory and is never committed. An audit's deliverable is issues; the document is provenance.
 - **Before starting new work, ensure prior work is committed** and `git status` is clean. Several sessions share this checkout: never commit changes you did not make, and never `git reset`, `git stash` or `git checkout --` to get to a clean tree.
-- **End every task with a wrap-up sweep, unprompted:** tests (Jest, API, Maestro), docs (`docs/`, this file, READMEs, the E2E test plan) and open GitHub issues the change closes, unblocks or contradicts. Report what was updated, or say that nothing needed updating.
+- **Keep going when a step needs no input from me**; put status in the same message as the next action. Stop and ask, one question per turn, only when you cannot continue without me or before: merging to `main` (it deploys), `terraform apply`, `eas build`/`submit`, deleting data, force-pushing, anything in production AWS, or anything outside this repo or that changes this machine (installing or upgrading tools). A production OTA after a merge is part of the ship workflow, not a stop.
+- **End every task with a wrap-up sweep, unprompted:** tests (Jest, API, Maestro), a `/code-review` pass on the diff before the PR opens, docs (`docs/`, this file, READMEs, the E2E test plan) and open GitHub issues the change closes, unblocks or contradicts. Report what was updated, or say that nothing needed updating.
+- **Lead the closing message with what needs me**, then Changed, Verified, Wrap-up. Mark anything you could not confirm and say where you looked.
 
 ## Documentation Hygiene
 
