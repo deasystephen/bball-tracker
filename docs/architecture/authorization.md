@@ -116,7 +116,11 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT �
   row; `personalOwnerId` is unique per user and the season lives only in that user's own league, so the
   only writer that can contend is the same `userId` and it is serialized. Do not remove the lock
   believing a retry covers it. The three writes use `upsert` with a non-empty `update` that rewrites the
-  unique key to itself — writing any other field would clobber a coach's later rename.
+  unique key to itself — writing any other field would clobber a coach's later rename. Prisma compiles
+  all three to a native `INSERT … ON CONFLICT DO UPDATE`, so two concurrent provisionings converge even
+  without the lock; the lock is what serializes the tier-cap re-check, and it keeps provisioning safe
+  if an upsert ever loses the native path (a nested write does that). `tests/integration/team-create.db.test.ts`
+  runs both races against Postgres (#765).
 - The owner **does** get a real `LeagueAdmin` row (so they can rename the league and add next year's
   season, which unblocks rollover, #461), but personal leagues are filtered out of the `leagueAdminOf`
   array in `getLeagueAdminOf` (`api/auth/routes.ts`). So `canAccessAdmin` stays false and no

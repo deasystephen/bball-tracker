@@ -90,6 +90,20 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   No environment variable overrides it (the seed's `SEED_ALLOW_PRODUCTION` does not apply).
   `tests/prisma/reset-guard.test.ts` covers the branches and checks the call precedes the first
   `deleteMany` (#784).
+- **Row locks and races get a suite here too**, since the Prisma mock runs `$transaction` as a plain
+  callback and `$queryRaw` resolves whatever its SQL says. Covered: account deletion
+  (`account-deletion.db.test.ts`), the game-row lock (`stats-finalize.db.test.ts`) and `createTeam`
+  with personal-league provisioning (`team-create.db.test.ts`, #765). Three techniques:
+  - **Race by repetition:** `Promise.allSettled` of two calls, repeated over a few rounds with fresh
+    rows, and assert the row counts per round.
+  - **Hold the lock from the test** in a `prisma.$transaction`, start the call under test, then read
+    `pg_stat_activity` / `pg_blocking_pids` / `pg_locks` from the holder to prove the call is waiting
+    on it, and at which statement (the tables it already holds locks on). Hold a `User` row with
+    `FOR NO KEY UPDATE`, not `FOR UPDATE`: a `FOR UPDATE` also blocks the `KEY SHARE` lock that every
+    foreign-key insert takes on the referenced row, so the call waits even with its own lock removed.
+  - **Prove it bites:** remove the lock statement, then move it later, and watch a test fail each time.
+    A race that a native `INSERT … ON CONFLICT` already absorbs will not fail; check the emitted SQL
+    with a `query` log listener before relying on a race test as the lock's guard.
 - `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
   seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
   purpose once and confirm that suite fails.
