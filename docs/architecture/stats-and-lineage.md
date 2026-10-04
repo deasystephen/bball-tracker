@@ -11,6 +11,15 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   edits are allowed, not rejected — the stored box score just follows them). It is idempotent: `PlayerStats`
   rows for players with no remaining events are deleted, and a game with **no** player events ends up with no
   `PlayerStats`/`TeamStats` rows at all.
+- **Finalization serializes on the game row (#724).** `finalizeGameStats` reads the event log and writes
+  `PlayerStats`/`TeamStats` in one interactive transaction that first takes the same `lockGameRow`
+  `FOR UPDATE` lock as every event write (`docs/architecture/live-games.md`, Game score), with
+  `calculatePlayerStats(gameId, tx)` reading through the transaction. Overlapping post-finish edits
+  therefore finalize one after another, and the last to commit has read every committed event. The event
+  path decides whether to re-finalize from the `status` read under its own lock, not from the access-check
+  row, so a `PATCH status=FINISHED` committing around an event write is never missed: either the write saw
+  `FINISHED` and re-finalizes, or the PATCH's own finalization runs after the write and reads it.
+  `tests/integration/stats-finalize.db.test.ts` runs both races against Postgres.
 - **Tracked vs. finished games.** `GET /api/v1/stats/teams/:teamId` returns `gamesPlayed` (all `FINISHED`
   games = `wins + losses + ties`, score-based) and `trackedGames` (finished games that have a `TeamStats` row).
   Per-game averages divide by `trackedGames`, so a game created directly as `FINISHED` with a score but no

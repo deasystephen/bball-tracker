@@ -21,6 +21,8 @@ import {
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
 import { teamAccessWhere } from '../../src/utils/permissions';
+import { computeHomeScore } from '../../src/services/game-event-service';
+import type { Prisma } from '@prisma/client';
 
 describe('StatsService', () => {
   describe('calculatePlayerStats', () => {
@@ -302,7 +304,76 @@ describe('StatsService', () => {
     });
   });
 
+  describe('shared shot point rule with computeHomeScore (#723)', () => {
+    it('scores the same event log to the same team points as the derived homeScore', async () => {
+      const team = createTeam();
+      const shooter = createPlayer();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+      const log = [
+        { made: true, points: 3 },
+        { made: true, points: 2 },
+        { made: true, points: 1 },
+        { made: false, points: 3 },
+        { made: true }, // legacy row: no points → 2
+        { made: true, points: 4 }, // out of range: counts nowhere
+        { made: true, points: -5 },
+        { made: true, points: 0 },
+        { made: 'yes', points: 2 }, // non-boolean made: not a make
+      ].map((metadata) => ({
+        ...createGameEvent({ gameId: game.id, playerId: shooter.id, eventType: 'SHOT', metadata }),
+        player: { id: shooter.id, name: shooter.name },
+      }));
+
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue(log);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [createTeamMember({ teamId: team.id, playerId: shooter.id })] },
+      });
+
+      const players = await StatsService.calculatePlayerStats(game.id);
+      const teamTotals = StatsService.calculateTeamTotals(team.id, team.name, players);
+
+      const homeScore = computeHomeScore(
+        log.map((event) => ({ eventType: event.eventType, metadata: event.metadata as Prisma.JsonValue }))
+      );
+      expect(homeScore).toBe(8);
+      expect(teamTotals.points).toBe(homeScore);
+      // Out-of-range rows are not attempts either. FGA: made 3, made 2, missed 3,
+      // legacy 2, 'yes' 2 (a missed two); FTA: made 1.
+      expect(teamTotals.fieldGoalsAttempted).toBe(5);
+      expect(teamTotals.freeThrowsAttempted).toBe(1);
+    });
+  });
+
   describe('finalizeGameStats', () => {
+    it('reads the event log and writes the box score inside one transaction after locking the game row (#724)', async () => {
+      const team = createTeam();
+      const player = createPlayer();
+      const game = createGame({ teamId: team.id, status: 'FINISHED' });
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: { ...team, members: [createTeamMember({ teamId: team.id, playerId: player.id })] },
+      });
+      (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } }),
+          player: { id: player.id, name: player.name },
+        },
+      ]);
+      (mockPrisma.playerStats.upsert as jest.Mock).mockResolvedValue({});
+      (mockPrisma.teamStats.upsert as jest.Mock).mockResolvedValue({});
+
+      await StatsService.finalizeGameStats(game.id);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(typeof (mockPrisma.$transaction as jest.Mock).mock.calls[0][0]).toBe('function');
+      const queryRaw = mockPrisma.$queryRaw as jest.Mock;
+      expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
+      const lockOrder = queryRaw.mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan((mockPrisma.gameEvent.findMany as jest.Mock).mock.invocationCallOrder[0]);
+      expect(lockOrder).toBeLessThan((mockPrisma.teamStats.upsert as jest.Mock).mock.invocationCallOrder[0]);
+    });
+
     it('should persist player and team stats when game finishes', async () => {
       const league = createLeague();
       const season = createSeason({ leagueId: league.id });

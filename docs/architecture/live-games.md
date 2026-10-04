@@ -85,18 +85,42 @@ current score so a client can drop events and still converge.
 
 ## Game score (server-derived, audit #6/#8/#38)
 
+- **The game-row lock.** Every write that derives state from the event log
+  runs in one interactive transaction that **first** takes
+  `utils/game-row-lock.ts#lockGameRow` (`SELECT "status", "homeScore",
+  "awayScore" FROM "Game" … FOR UPDATE`): event create and delete, the
+  `PATCH { homeScore }` check below, and stats finalization
+  (`docs/architecture/stats-and-lineage.md`). The lock comes **before** the
+  event insert or delete: an insert holds a `KEY SHARE` lock on the game row
+  through the foreign key, so two shots that insert first and lock second
+  deadlock (`40P01`; reproduced on the pre-#665 code by
+  `tests/integration/stats-finalize.db.test.ts`).
 - `Game.homeScore` is **derived from the event log**: `GameEventService.createEvent`
-  / `deleteEvent` recompute it from made `SHOT` events (`metadata.points || 2`,
-  same rule as `StatsService`) inside the same Prisma transaction as the
-  insert/delete, after a `SELECT … FOR UPDATE` on the game row so concurrent
-  shots can't race to an undercount. Both endpoints return the post-change
-  `score` (`POST /games/:id/events` → `{ event, score }`,
+  / `deleteEvent` recompute it from made `SHOT` events inside that transaction,
+  so concurrent shots can't race to an undercount. Non-SHOT writes don't change
+  the score and return the one read under the lock, which no other writer can
+  move before they commit (#665); neither path ever returns the unlocked
+  access-check row. Both endpoints return the post-change `score`
+  (`POST /games/:id/events` → `{ event, score }`,
   `DELETE /games/:id/events/:eventId` → `{ success, score }`) and broadcast it.
+- **SHOT metadata is validated (#723).** `createGameEventSchema` is a
+  discriminated union on `eventType`: `SHOT` requires exactly
+  `{ made: boolean, points: 1 | 2 | 3 }`, `REBOUND` requires exactly
+  `{ type: 'offensive' | 'defensive' }`, and every other type keeps a flat
+  record of primitives (default `{}`). Anything else is a 400. The point rule
+  lives once, in `utils/shot-points.ts` (`shotValue`, `shotMade`,
+  `shotPoints`), and both `computeHomeScore` and `StatsService` use it, so the
+  derived score always equals the box score's team points. For rows already
+  stored, a missing `points` counts as 2, an out-of-range value counts nowhere
+  (neither score nor attempts), and only a boolean `made: true` is a make.
 - `PATCH /games/:id { homeScore }` is honoured **only while the game has no
   SHOT events** (score entered for a game not tracked in-app). Once shots
   exist the client value is ignored and the derived score re-persisted (old
   clients keep working; under-counted games self-heal on their next PATCH).
-  `awayScore` is always client-supplied (opponent points).
+  The SHOT check and the write run in one transaction under the game-row lock,
+  so a shot committed in between cannot be overwritten by the client value
+  (#666); a PATCH without `homeScore` takes no lock. `awayScore` is always
+  client-supplied (opponent points).
 - Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
   renders `game.homeScore` from the detail cache, which
   `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.

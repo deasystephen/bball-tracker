@@ -178,6 +178,7 @@ describe('Schema Validation', () => {
         const result = createGameEventSchema.safeParse({
           eventType: 'SHOT',
           playerId: UUID_ID,
+          metadata: { made: true, points: 2 },
         });
         expect(result.success).toBe(true);
       });
@@ -461,10 +462,17 @@ describe('Schema Validation', () => {
       'TIMEOUT',
     ];
 
+    // SHOT and REBOUND require their metadata (#723, tests/schemas/game-events.test.ts)
+    const requiredMetadata: Record<string, Record<string, unknown>> = {
+      SHOT: { made: true, points: 2 },
+      REBOUND: { type: 'defensive' },
+    };
+
     validEventTypes.forEach((eventType) => {
       it(`should accept ${eventType} as valid event type`, () => {
         const result = createGameEventSchema.safeParse({
           eventType,
+          ...(requiredMetadata[eventType] ? { metadata: requiredMetadata[eventType] } : {}),
         });
         expect(result.success).toBe(true);
       });

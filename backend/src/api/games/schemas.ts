@@ -54,17 +54,73 @@ export type GameQueryParams = z.infer<typeof gameQuerySchema>;
 
 import { GameEventType, RsvpStatus } from '@prisma/client';
 
-/**
- * Schema for creating a game event
- */
-export const createGameEventSchema = z.object({
+const gameEventBaseShape = {
   playerId: z.string().uuid('Invalid player ID format').optional(),
-  eventType: z.nativeEnum(GameEventType, {
-    error: 'Invalid event type',
-  }),
   timestamp: z.string().datetime('Invalid timestamp format').or(z.date()).optional(),
-  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().default({}),
-});
+};
+
+/**
+ * SHOT metadata is what `Game.homeScore` and the box score are derived from
+ * (`utils/shot-points.ts#shotPointValue`), so its shape is exact: a boolean
+ * `made` and a point value of 1, 2 or 3, nothing else (#723).
+ */
+export const shotMetadataSchema = z
+  .object({
+    made: z.boolean({ error: 'SHOT metadata.made must be a boolean' }),
+    points: z.union([z.literal(1), z.literal(2), z.literal(3)], {
+      error: 'SHOT metadata.points must be 1, 2 or 3',
+    }),
+  })
+  .strict();
+
+/** REBOUND metadata: the box score splits offensive and defensive rebounds on `type`. */
+export const reboundMetadataSchema = z
+  .object({
+    type: z.enum(['offensive', 'defensive'], {
+      error: 'REBOUND metadata.type must be offensive or defensive',
+    }),
+  })
+  .strict();
+
+const OTHER_GAME_EVENT_TYPES = [
+  GameEventType.ASSIST,
+  GameEventType.TURNOVER,
+  GameEventType.FOUL,
+  GameEventType.SUBSTITUTION,
+  GameEventType.STEAL,
+  GameEventType.BLOCK,
+  GameEventType.TIMEOUT,
+] as const;
+
+/**
+ * Schema for creating a game event, discriminated on `eventType`: SHOT and
+ * REBOUND carry the metadata the score and box score read, so it is required
+ * and exact; every other type keeps a flat record of primitives.
+ */
+export const createGameEventSchema = z.discriminatedUnion(
+  'eventType',
+  [
+    z.object({
+      ...gameEventBaseShape,
+      eventType: z.literal(GameEventType.SHOT),
+      metadata: shotMetadataSchema,
+    }),
+    z.object({
+      ...gameEventBaseShape,
+      eventType: z.literal(GameEventType.REBOUND),
+      metadata: reboundMetadataSchema,
+    }),
+    z.object({
+      ...gameEventBaseShape,
+      eventType: z.enum(OTHER_GAME_EVENT_TYPES),
+      metadata: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+        .optional()
+        .default({}),
+    }),
+  ],
+  { error: 'Invalid event type' }
+);
 
 /**
  * Schema for game event query parameters
