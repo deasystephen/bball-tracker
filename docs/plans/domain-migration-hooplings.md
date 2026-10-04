@@ -1,6 +1,6 @@
 # Domain migration: capyhoops.com → hooplings.com
 
-**Date:** 2026-09-06 · **Status:** plan, eng-reviewed (`/plan-eng-review`, decisions D1–D25 below, incl. outside-voice tensions D19–D25) · **Owner:** Stephen Deasy
+**Date:** 2026-09-06 · **Status:** Shipped 2026-09-07 — backend PR #507 (#501, merged and deployed to ECS), mobile PR #508 (#502, merged; shipped by production OTA on runtime 1.2.0), infra retirement PR #509 (#503, merged and applied: `capyhoops.com` is zone-only, `infra/README.md`); the mobile brand guard ships stricter than T12 asked (`ALLOWED_DOMAINS = []`). The web host for the apex (D5) remains open as #30. The eng-reviewed plan below (decisions D1–D25, incl. outside-voice tensions D19–D25) is kept as provenance; its task boxes are historical and were not ticked. · **Owner:** Stephen Deasy
 
 ## Goal
 

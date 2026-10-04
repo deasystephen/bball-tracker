@@ -1,6 +1,6 @@
 # PARENT role — spec (approved 2026-08-23)
 
-Source: role × capability audit (decision 1 = build). Status: **approved 2026-08-23**; implementation in progress.
+Source: role × capability audit (decision 1 = build). Status: **approved 2026-08-23; shipped in PR #398 (backend, merged 2026-08-23 and deployed to ECS) with mobile and follow-up work since** — the as-built reference is `docs/architecture/guardians.md`; this spec is kept as provenance.
 
 ## Problem
 

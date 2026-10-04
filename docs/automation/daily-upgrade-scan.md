@@ -28,7 +28,7 @@ the deferral list current, and post a daily summary comment on the rolling
 | Who | Owns | Mechanism |
 | --- | --- | --- |
 | **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI |
-| **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list; daily log | `daily-upgrade-scan.yml` |
+| **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
 | **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
 
 The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
@@ -145,6 +145,12 @@ Binary-coupled mobile packages are not maintained by hand in that list: the
 prompt points at `mobile/binary-manifest.json`, which is regenerated whenever a
 build is recorded. A new native module therefore joins the deferral set with
 the build that first contains it.
+
+Backend and web majors are not maintained by hand either: the scan runs
+`npm outdated` in `backend/` and `web/` and lists every major (prerelease
+`latest` excluded) under "Backend / Web — majors (human-owned)" in #275, with
+`current → latest`. An inline entry is needed only when a major carries an
+unblock condition worth recording (as Jest 30 and the Prisma generator do).
 
 ## Disabling
 

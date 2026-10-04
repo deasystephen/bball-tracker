@@ -24,6 +24,11 @@ This guide covers setting up and deploying the Hooplings application on AWS.
 
 ## Initial Setup
 
+Terraform in `infra/` owns the VPC, RDS, ElastiCache, S3, Secrets Manager, ALB, ECS and SES
+resources (`infra/README.md`); `terraform apply` from `infra/` creates them. The CLI examples in
+steps 2-5 below are historical scaffolding from before Terraform, kept for orientation; do not run
+them against an environment Terraform manages.
+
 ### 1. Create ECR Repository
 
 ```bash
@@ -75,8 +80,10 @@ aws secretsmanager create-secret \
 # Login to ECR
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
-# Build image
-docker build -t bball-tracker-backend -f docker/Dockerfile backend/
+# Build image. Run from the repository root with the root as the build context:
+# docker/Dockerfile COPYs backend/ and docker/ paths, and CI builds it the same way
+# (.github/workflows/ci.yml, "Build & Deploy to ECS").
+docker build -t bball-tracker-backend -f docker/Dockerfile .
 
 # Tag image
 docker tag bball-tracker-backend:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/bball-tracker-backend:latest
@@ -87,31 +94,38 @@ docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/bball-tracker-backend:l
 
 ## ECS Task Definition
 
-Create a task definition JSON file (`aws/ecs-task-definition.json`) with:
-
-- Container image from ECR
-- Environment variables
-- Secrets from Secrets Manager
-- Resource limits (CPU, memory)
-- Logging configuration (CloudWatch)
+`infra/task-definition.json` (family `bball-tracker-production-api`) is the **single source of
+truth** for the API task: its image, environment variables, Secrets Manager references, CPU and
+memory, and CloudWatch logging. Never create a second task-definition file. CI's "Build & Deploy
+to ECS" job renders it with the freshly built image tag and registers a new revision on every
+deploy ([`docs/deployment/ecs-deploys.md`](ecs-deploys.md)). What the task carries is listed under
+[Environment Variables](#environment-variables).
 
 ## Deploying to ECS
 
-```bash
-# Register task definition
-aws ecs register-task-definition --cli-input-json file://aws/ecs-task-definition.json
+A deploy is a push to `main` that touches a non-Markdown file under `backend/`, `infra/`,
+`docker/` or `.github/workflows/ci.yml`, or a `CI` run started by hand on `main`
+([`docs/deployment/ecs-deploys.md`](ecs-deploys.md)). CI registers the task-definition revision and
+updates the service. Terraform (`infra/`) owns the cluster `bball-tracker-production-cluster` and
+the service `bball-tracker-production-api` (`aws_ecs_service.app` in `infra/ecs.tf`), so the
+service is never created or updated by hand with the AWS CLI.
 
-# Create or update service
-aws ecs create-service \
-  --cluster bball-tracker-cluster \
-  --service-name bball-tracker-backend \
-  --task-definition bball-tracker-backend \
-  --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}"
-```
+**Bootstrapping a fresh environment** (the detail is in `infra/README.md`, "Who owns the ECS task
+definition"): at least one revision of the family must exist before Terraform can create the
+service, so, in this order:
 
-`--desired-count` is 1 on purpose: the API is single-replica (see [Scaling](#scaling)).
+1. Fill in the account-specific Secrets Manager ARNs in `infra/task-definition.json` and replace
+   `SENTRY_RELEASE_PLACEHOLDER` and the image tag (on a normal deploy CI does both).
+2. Register the first revision once, from the repository root:
+
+   ```bash
+   aws ecs register-task-definition --cli-input-json file://infra/task-definition.json
+   ```
+
+3. `terraform apply` from `infra/` creates the cluster and the service against that family. From
+   then on every revision comes from CI.
+
+The service's `desired_count` is 1 on purpose: the API is single-replica (see [Scaling](#scaling)).
 
 ### Deploy window: avoid scheduled game times
 
@@ -171,7 +185,8 @@ it with the new image tag and registers a revision. Terraform does **not** manag
 (#53), so a value written to `infra/ecs.tf` deploys nothing. New Secrets Manager ARNs to reference
 come from `terraform output` (see `infra/outputs.tf`).
 
-As of 2026-08-30 the API task carries:
+The API task carries the following (`infra/task-definition.json` is the live set; this inventory
+was last checked against it on 2026-10-03):
 
 - `DATABASE_URL` (secret): PostgreSQL connection string; TLS to RDS uses `certs/rds-global-bundle.pem`
   (override with `RDS_CA_BUNDLE_PATH`)
@@ -188,6 +203,11 @@ As of 2026-08-30 the API task carries:
 - `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
 - `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.hooplings.com`): SES mailer
+- `SES_CONFIGURATION_SET` (`bball-tracker-production-transactional`), `SES_EVENTS_QUEUE_URL` (the
+  SQS queue from `terraform output ses_events_queue_url`): SES event publishing and the in-process
+  bounce/complaint consumer; both are off when unset. `SES_CONFIGURATION_SET` must never be
+  deployed ahead of the `terraform apply` that creates the set (`infra/README.md`, "Email — SES,
+  DKIM, MAIL FROM, and DMARC"; `docs/architecture/email.md`)
 - `SENTRY_DSN` (secret), `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` (injected by CI from the git SHA)
 - `CORS_ORIGIN`: comma-separated list of exact browser origins allowed to call the API
   (`https://api.hooplings.com,https://hooplings.com,https://www.hooplings.com`). The apex + www
@@ -195,7 +215,10 @@ As of 2026-08-30 the API task carries:
   `hooplings.com` (#447). No wildcard. This is browser hygiene, not access control — the public
   accept route is an unauthenticated bearer-token endpoint; `tests/api/cors.test.ts` reads the
   value from `infra/task-definition.json`, so dropping the apex fails CI
-- `PORT`, `NODE_ENV=production`
+- `PORT`, `NODE_ENV` (`production`)
+- `LOG_LEVEL` (`info`): log threshold, `debug` / `info` / `warn` / `error`, read per call. Set
+  `debug` on the task briefly for a diagnosis, then revert
+  (`docs/architecture/backend-services.md#logging`)
 - `MAX_REPLICAS` (`1`): the replica ceiling the API's startup guard checks
   (`backend/src/utils/replica-guard.ts`, #446). In production a value above 1, or one that is not a
   positive integer, makes the process **exit non-zero before it listens**; unset logs an error and
@@ -232,8 +255,9 @@ Declared is not the same as live: the alarms exist in AWS only after a manual `t
 and deliver nothing until the SNS subscription is confirmed from the inbox. The apply and
 verification steps are in the runbook.
 
-Outside Terraform, and not covered by the list above: Sentry issue-alert rules and the Datadog
-monitors (see "Not yet automated" in the runbook).
+Outside Terraform, and not covered by the list above: the two Sentry issue-alert rules (runbook,
+"Sentry alert rules"). Datadog receives the API's logs and has no monitors; its default host
+monitors were deleted on 2026-09-29 (runbook, "Datadog has logs, and no monitors").
 
 ## Scaling
 
