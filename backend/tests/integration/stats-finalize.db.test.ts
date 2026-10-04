@@ -29,6 +29,7 @@ import prisma from '../../src/models';
 import { GameEventService } from '../../src/services/game-event-service';
 import { GameService } from '../../src/services/game-service';
 import { DbFixtures, Org } from '../support/db-fixtures';
+import { backendPid, waitForBlockedBy } from '../support/db-locks';
 
 jest.setTimeout(60000);
 
@@ -129,9 +130,11 @@ describe('finalizeGameStats under overlapping writes (#724)', () => {
     // derived 2; under the lock it waits before reading and sees the shot.
     await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Game" WHERE "id" = ${gameId} FOR UPDATE`;
+      const pid = await backendPid(tx);
       patch = GameService.updateGame(gameId, { homeScore: 10, awayScore: 20 }, coachId);
       patch.catch(() => undefined); // awaited below; keeps a rejection from going unhandled meanwhile
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Proceed once the PATCH is actually waiting on this lock, not after a guess.
+      await waitForBlockedBy(tx, pid, { timeoutMs: 2000 });
       await tx.gameEvent.create({
         data: { gameId, playerId: shooterA, eventType: 'SHOT', metadata: { made: true, points: 2 } },
       });

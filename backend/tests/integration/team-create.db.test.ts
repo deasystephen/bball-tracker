@@ -24,13 +24,13 @@
 
 jest.unmock('../../src/models');
 
-import type { Prisma } from '@prisma/client';
 import prisma from '../../src/models';
-import { USAGE_LIMITS } from '../../src/services/entitlements';
 import { PaymentRequiredError } from '../../src/utils/errors';
 import * as permissions from '../../src/utils/permissions';
 import { TeamService } from '../../src/services/team-service';
 import { DbFixtures } from '../support/db-fixtures';
+import { backendPid, PRISMA_TRANSACTION_TIMEOUT_MS, track, waitForBlockedBy } from '../support/db-locks';
+import { withFiniteFreeTeamLimit } from '../helpers';
 
 jest.setTimeout(60000);
 
@@ -74,45 +74,14 @@ async function personalRows(userId: string): Promise<PersonalRows> {
   return { leagues, leagueAdmins, seasons, teams };
 }
 
-/** Records when a promise settles, so a test can assert it has not yet. */
-function track<T>(promise: Promise<T>): { promise: Promise<T>; settled: () => boolean } {
-  let done = false;
-  promise.then(
-    () => (done = true),
-    () => (done = true)
-  );
-  return { promise, settled: () => done };
+/** The holder's budget: well under the 5 s the blocked create's own transaction gets. */
+const HOLDER_TIMEOUT_MS = 3000;
+if (HOLDER_TIMEOUT_MS >= PRISMA_TRANSACTION_TIMEOUT_MS) {
+  throw new Error('The lock holder must commit before the blocked transaction times out');
 }
-
-const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Tables `createTeam` writes; a backend waiting before provisioning holds no lock on any. */
 const WRITTEN_TABLES = ['League', 'LeagueAdmin', 'Season', 'TeamLineage', 'Team', 'TeamRole', 'TeamStaff'];
-
-/**
- * The backends waiting on `holderPid`, each with the written tables it holds
- * a lock on. Polls until one appears (or 5 s pass), since the waiting create
- * reaches its lock statement asynchronously.
- */
-async function waitForBlockedBy(
-  tx: Prisma.TransactionClient,
-  holderPid: number
-): Promise<{ relations: string[] }[]> {
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    const rows = await tx.$queryRaw<{ relations: string[] }[]>`
-      SELECT array(
-               SELECT DISTINCT c.relname::text FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
-               WHERE l.pid = a.pid AND l.granted AND c.relname = ANY(${WRITTEN_TABLES}::text[])
-               ORDER BY 1
-             ) AS relations
-      FROM pg_stat_activity a
-      WHERE ${holderPid}::int = ANY(pg_blocking_pids(a.pid))
-    `;
-    if (rows.length > 0 || Date.now() > deadline) return rows;
-    await pause(50);
-  }
-}
 
 beforeAll(async () => {
   await fx.requireDatabase();
@@ -212,7 +181,7 @@ describe('TeamService.createTeam against Postgres (#765)', () => {
     await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${locked} FOR NO KEY UPDATE`;
-        const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        const pid = await backendPid(tx);
 
         lockedCreate = track(TeamService.createTeam({ name: teamName('locked') }, locked));
         lockedCreate.promise.catch(() => undefined); // awaited below
@@ -224,11 +193,14 @@ describe('TeamService.createTeam against Postgres (#765)', () => {
         // before provisioning: the waiting backend holds no lock on any table
         // the create writes. With the FOR UPDATE removed it never waits; moved
         // below `resolvePersonalSeasonId`, it waits holding League and Season.
-        const waiting = await waitForBlockedBy(tx, pid);
+        const waiting = await waitForBlockedBy(tx, pid, { tables: WRITTEN_TABLES, timeoutMs: 2000 });
         expect(waiting).toEqual([{ relations: [] }]);
         expect(lockedCreate.settled()).toBe(false);
       },
-      { timeout: 15000 }
+      // The blocked create runs in createTeam's own transaction, which passes
+      // no options and so dies with P2028 after Prisma's default 5 s. The
+      // holder must commit well inside that, leaving the create time to finish.
+      { timeout: HOLDER_TIMEOUT_MS }
     );
 
     await expect(lockedCreate!.promise).resolves.toMatchObject({ name: teamName('locked') });
@@ -236,24 +208,26 @@ describe('TeamService.createTeam against Postgres (#765)', () => {
     expect((await personalRows(free)).teams).toHaveLength(1);
   });
 
-  it('serializes the tier team-cap re-check: two concurrent creates at the cap edge make one team', async () => {
-    // No tier has a finite cap today (#445); a finite FREE cap is what the
-    // lock's other job, the in-transaction re-check, exists for.
-    jest.replaceProperty(USAGE_LIMITS, 'FREE', { maxTeams: 1, maxSeasons: Infinity });
+  describe('with a finite FREE team cap of 1', () => {
+    // No tier has a finite cap today (#445); a finite cap is what the lock's
+    // other job, the in-transaction re-check, exists for.
+    withFiniteFreeTeamLimit(1);
 
-    for (let round = 1; round <= RACE_ROUNDS; round++) {
-      const coach = await fx.user(`cap${round}`, 'COACH');
+    it('serializes the tier team-cap re-check: two concurrent creates at the cap edge make one team', async () => {
+      for (let round = 1; round <= RACE_ROUNDS; round++) {
+        const coach = await fx.user(`cap${round}`, 'COACH');
 
-      const outcomes = await Promise.allSettled([
-        TeamService.createTeam({ name: teamName(`cap${round}-a`) }, coach),
-        TeamService.createTeam({ name: teamName(`cap${round}-b`) }, coach),
-      ]);
+        const outcomes = await Promise.allSettled([
+          TeamService.createTeam({ name: teamName(`cap${round}-a`) }, coach),
+          TeamService.createTeam({ name: teamName(`cap${round}-b`) }, coach),
+        ]);
 
-      const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === 'rejected');
-      expect({ round, fulfilled: outcomes.length - rejected.length }).toEqual({ round, fulfilled: 1 });
-      expect(rejected[0].reason).toBeInstanceOf(PaymentRequiredError);
-      expect((await personalRows(coach)).teams).toHaveLength(1);
-    }
+        const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === 'rejected');
+        expect({ round, fulfilled: outcomes.length - rejected.length }).toEqual({ round, fulfilled: 1 });
+        expect(rejected[0].reason).toBeInstanceOf(PaymentRequiredError);
+        expect((await personalRows(coach)).teams).toHaveLength(1);
+      }
+    });
   });
 
   it('leaves no row behind when the create fails after every row is written', async () => {

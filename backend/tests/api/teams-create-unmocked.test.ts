@@ -11,6 +11,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
+import { withFiniteFreeTeamLimit } from '../helpers';
 
 const COACH_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -33,8 +34,10 @@ jest.mock('../../src/api/auth/middleware', () => ({
   }),
 }));
 
+// Same wholesale factory as tests/api/teams.test.ts: only the cache side
+// effect is observed here, so the module is never loaded for real.
 jest.mock('../../src/services/usage-service', () => ({
-  ...jest.requireActual('../../src/services/usage-service'),
+  canCreateTeam: jest.fn().mockResolvedValue(true),
   invalidateUsage: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -53,6 +56,22 @@ const createdTeam = {
   createdAt: new Date(),
   updatedAt: new Date(),
 };
+
+/**
+ * Asserts the first `$queryRaw` is `SELECT ... FROM "User" ... FOR UPDATE` on
+ * the caller and returns its call order. The tag receives the template
+ * strings and then the interpolated values.
+ */
+function expectUserRowLockFirst(): number {
+  const queryRaw = mockPrisma.$queryRaw as jest.Mock;
+  expect(queryRaw).toHaveBeenCalled();
+  const [strings, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+  const sql = strings.join('?');
+  expect(sql).toContain('FROM "User"');
+  expect(sql).toContain('FOR UPDATE');
+  expect(values).toEqual([COACH_ID]);
+  return queryRaw.mock.invocationCallOrder[0];
+}
 
 describe('POST /api/v1/teams through the real TeamService', () => {
   beforeEach(() => {
@@ -95,8 +114,9 @@ describe('POST /api/v1/teams through the real TeamService', () => {
       data: { teamId: TEAM_ID, userId: COACH_ID, roleId: ROLE_ID },
     });
 
-    // The row lock is the transaction's first statement, before provisioning.
-    const lockOrder = (mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[0];
+    // The transaction's first statement is the caller's User-row lock, and it
+    // precedes provisioning.
+    const lockOrder = expectUserRowLockFirst();
     expect(lockOrder).toBeLessThan((mockPrisma.league.upsert as jest.Mock).mock.invocationCallOrder[0]);
 
     // Invalidated once, for the caller, after the service has read the team back.
@@ -104,6 +124,26 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     expect(mockInvalidateUsage).toHaveBeenCalledWith(COACH_ID);
     const readBack = (mockPrisma.team.findUnique as jest.Mock).mock.invocationCallOrder;
     expect(mockInvalidateUsage.mock.invocationCallOrder[0]).toBeGreaterThan(readBack[readBack.length - 1]);
+  });
+
+  describe('with a finite FREE team cap', () => {
+    withFiniteFreeTeamLimit();
+
+    it('takes the User-row lock before the in-transaction cap re-check and before provisioning', async () => {
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+
+      const res = await request(app).post('/api/v1/teams').send({ name: 'Hornets' });
+
+      expect(res.status).toBe(201);
+      // Two team counts: the route middleware's pre-check, then the service's
+      // authoritative re-check inside the transaction.
+      const counts = (mockPrisma.teamStaff.findMany as jest.Mock).mock.invocationCallOrder;
+      expect(counts).toHaveLength(2);
+      const lockOrder = expectUserRowLockFirst();
+      expect(counts[0]).toBeLessThan(lockOrder);
+      expect(lockOrder).toBeLessThan(counts[1]);
+      expect(counts[1]).toBeLessThan((mockPrisma.league.upsert as jest.Mock).mock.invocationCallOrder[0]);
+    });
   });
 
   it('does not invalidate the usage cache when the service fails', async () => {

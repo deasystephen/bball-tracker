@@ -96,11 +96,15 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   with personal-league provisioning (`team-create.db.test.ts`, #765). Three techniques:
   - **Race by repetition:** `Promise.allSettled` of two calls, repeated over a few rounds with fresh
     rows, and assert the row counts per round.
-  - **Hold the lock from the test** in a `prisma.$transaction`, start the call under test, then read
-    `pg_stat_activity` / `pg_blocking_pids` / `pg_locks` from the holder to prove the call is waiting
-    on it, and at which statement (the tables it already holds locks on). Hold a `User` row with
-    `FOR NO KEY UPDATE`, not `FOR UPDATE`: a `FOR UPDATE` also blocks the `KEY SHARE` lock that every
-    foreign-key insert takes on the referenced row, so the call waits even with its own lock removed.
+  - **Hold the lock from the test** in a `prisma.$transaction`, start the call under test, then call
+    `tests/support/db-locks.ts#waitForBlockedBy(tx, await backendPid(tx), { tables })`. It polls
+    `pg_blocking_pids` until the call is waiting on the holder, returns the tables it already holds
+    locks on (none means it waits before its first write), and throws a descriptive error on timeout.
+    Never use a fixed sleep for this. Hold a `User` row with `FOR NO KEY UPDATE`, not `FOR UPDATE`: a
+    `FOR UPDATE` also blocks the `KEY SHARE` lock that every foreign-key insert takes on the referenced
+    row, so the call waits even with its own lock removed. The services pass no transaction options,
+    so a blocked call dies with P2028 after Prisma's default 5 s: keep the holder's `timeout` well
+    under that (`PRISMA_TRANSACTION_TIMEOUT_MS` in the same file).
   - **Prove it bites:** remove the lock statement, then move it later, and watch a test fail each time.
     A race that a native `INSERT … ON CONFLICT` already absorbs will not fail; check the emitted SQL
     with a `query` log listener before relying on a race test as the lock's guard.

@@ -108,7 +108,7 @@ Layered: API routes → services → Prisma. Zod validates every input. Backend 
 - A `Team` row **is a team-season** (`seasonId` required); persistent identity is `lineageId`. Rollover creates a new `Team` row with the same lineage, never moves `seasonId` on a row with history.
 - `Game.homeScore` is derived from `SHOT` events inside the same transaction, after `SELECT … FOR UPDATE`; `PATCH /games/:id { homeScore }` is honoured only while the game has no shot events. The mobile tracker never sends `homeScore`.
 - Stats: `finalizeGameStats` is idempotent and re-runs on any event change to a FINISHED game. Season shooting percentages are Σmade / Σattempted, never a mean of per-game percentages. Ties are `'T'`, never a loss.
-- Cross-row writes that must not leave orphans run in one `$transaction` (team create, Add Player, account deletion, supersede-resend, personal-league provisioning). Personal-league provisioning relies on the `FOR UPDATE` lock on the caller's `User` row, not on a P2002 retry.
+- Cross-row writes that must not leave orphans run in one `$transaction` (team create, Add Player, account deletion, supersede-resend, personal-league provisioning). Personal-league provisioning upserts are native `INSERT … ON CONFLICT` and converge on their own; the `FOR UPDATE` lock on the caller's `User` row serializes the tier-cap re-check and provisioning per caller. Never add a P2002 retry.
 - Multi-statement backfills are **hand-written migrations** (nullable column → backfill → `SET NOT NULL`); run `.github/scripts/migration-backfill-guard.sh` before pushing one. Never edit or remove a migration that is already on `main`.
 - Redis is a best-effort cache; every helper fails open. Keep it that way.
 
