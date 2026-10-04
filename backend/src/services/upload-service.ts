@@ -1,6 +1,7 @@
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
+import { BadRequestError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
 const s3Client = new S3Client({
@@ -73,6 +74,63 @@ export function isManagedAvatarUrl(imageUrl: string | null | undefined): imageUr
   return typeof imageUrl === 'string' && imageUrl.startsWith(BUCKET_URL_PREFIX);
 }
 
+/**
+ * The path of `imageUrl` as the URL parser normalises it, or `null` when it
+ * does not parse. Every ownership and shape check below runs on THIS value,
+ * never on the raw string: `deleteAvatar` derives the object key from
+ * `URL.pathname`, which collapses `..` and `%2e%2e` segments, so a raw
+ * `avatars/<me>/../<other>/x.jpg` passes a string prefix check and names
+ * `<other>`'s object.
+ */
+function parsedPath(imageUrl: string): string | null {
+  try {
+    return new URL(imageUrl).pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The only key shape `generateAvatarUploadUrl` ever issues:
+ * `avatars/<userId>/<file>`, exactly two segments under `avatars/`.
+ */
+const ISSUED_KEY_PATH = /^\/avatars\/[^/]+\/[^/]+$/;
+
+/**
+ * True when `callerId` may store `imageUrl` as a `profilePictureUrl` (#717).
+ *
+ * `profilePictureUrl` is client-supplied and nothing else ties it to the
+ * caller, while `deletePreviousAvatar` later deletes whatever the row holds.
+ * Without this gate any signed-in user could store another user's avatar URL
+ * (visible in roster payloads) and clear it, deleting the other user's object.
+ *
+ * Allowed: a URL outside our bucket (WorkOS profile photos and the like are
+ * never deleted, see `isManagedAvatarUrl`), or an object under the caller's
+ * own upload prefix `avatars/<callerId>/`, the prefix `POST
+ * /uploads/avatar-url` presigns for them. The check is on the caller, not on
+ * the row being written: a coach legitimately uploads a managed player's
+ * photo under the coach's prefix and writes it onto the player's row.
+ */
+export function isOwnUploadUrl(imageUrl: string | null | undefined, callerId: string): boolean {
+  if (!isManagedAvatarUrl(imageUrl)) {
+    return true;
+  }
+  const path = parsedPath(imageUrl);
+  return path !== null && path.startsWith(`/avatars/${callerId}/`) && ISSUED_KEY_PATH.test(path);
+}
+
+/**
+ * The write-time gate for every path that persists a `profilePictureUrl`
+ * (`PATCH /auth/me`, create/update player, roster Add Player). A foreign key
+ * in our bucket is malformed input, not an authorisation decision about a
+ * resource, hence 400.
+ */
+export function assertOwnUploadUrl(imageUrl: string | null | undefined, callerId: string): void {
+  if (!isOwnUploadUrl(imageUrl, callerId)) {
+    throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+  }
+}
+
 export async function deleteAvatar(imageUrl: string): Promise<void> {
   const url = new URL(imageUrl);
   const key = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
@@ -90,12 +148,29 @@ export async function deleteAvatar(imageUrl: string): Promise<void> {
  * avatar change doesn't leave the previous object orphaned in S3 (audit #61).
  * Only objects in our bucket are touched; failures are logged, never thrown —
  * the profile update has already succeeded.
+ *
+ * Defence in depth behind `assertOwnUploadUrl` (#717): the stored URL may
+ * predate the write-time gate, so the delete is also refused unless the
+ * parsed path has the exact issued shape `/avatars/<id>/<file>`. A URL whose
+ * `..` segments would collapse the key outside `avatars/` (or into a
+ * different shape) deletes nothing and leaves a warning. No owner id is
+ * checked here: the row's owner is not always the uploader (coach-uploaded
+ * player photos), which is why the gate sits at write time.
  */
 export async function deletePreviousAvatar(
   previousUrl: string | null | undefined,
   nextUrl: string | null | undefined
 ): Promise<void> {
   if (!isManagedAvatarUrl(previousUrl) || previousUrl === nextUrl) {
+    return;
+  }
+
+  const path = parsedPath(previousUrl);
+  if (path === null || !ISSUED_KEY_PATH.test(path)) {
+    // Never the URL itself: it is client-supplied and this is the hostile case.
+    logger.warn('Previous avatar URL is not an issued upload key; not deleted', {
+      reason: path === null ? 'unparsable' : 'path outside avatars/<id>/<file>',
+    });
     return;
   }
 
@@ -124,14 +199,9 @@ export async function discardOwnAvatar(
   imageUrl: string | null | undefined,
   userId: string
 ): Promise<void> {
-  if (!isManagedAvatarUrl(imageUrl)) {
-    return;
-  }
-  // Check the prefix on the parsed path, not the raw string: `deleteAvatar`
-  // takes the key from `URL.pathname`, which collapses `..` segments, so a raw
-  // `avatars/<me>/../<other>/x.jpg` would pass a string check and delete
-  // `<other>`'s object.
-  if (!new URL(imageUrl).pathname.startsWith(`/avatars/${userId}/`)) {
+  // Same ownership rule as the write-time gate, on the parsed path (see
+  // `isOwnUploadUrl`); a URL outside our bucket is not ours to delete.
+  if (!isManagedAvatarUrl(imageUrl) || !isOwnUploadUrl(imageUrl, userId)) {
     return;
   }
 

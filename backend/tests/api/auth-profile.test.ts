@@ -2,6 +2,20 @@
  * API tests for PATCH /api/v1/auth/me (self-service profile edits, audit #10)
  */
 
+// The real upload-service with only the S3 client mocked (#717): the
+// ownership gate and the delete run for real, and the assertions below are on
+// the DeleteObjectCommand keys that would have reached S3.
+import type { DeleteObjectCommandInput } from '@aws-sdk/client-s3';
+const deleteObjectCalls: DeleteObjectCommandInput[] = [];
+const mockS3Send = jest.fn().mockResolvedValue({});
+jest.mock('@aws-sdk/client-s3', () => ({
+  S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
+  DeleteObjectCommand: jest.fn().mockImplementation((input: DeleteObjectCommandInput) => {
+    deleteObjectCalls.push(input);
+    return { input };
+  }),
+}));
+
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
@@ -26,22 +40,28 @@ jest.mock('../../src/api/auth/middleware', () => ({
   }),
 }));
 
-jest.mock('../../src/services/upload-service', () => ({
-  deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
-}));
-import { deletePreviousAvatar } from '../../src/services/upload-service';
-const mockDeletePreviousAvatar = deletePreviousAvatar as jest.Mock;
-
 const AUTH = { Authorization: 'Bearer token' };
+
+/** The bucket upload-service addresses in tests (S3_AVATARS_BUCKET unset). */
+const BUCKET_BASE = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/';
+const OWN_OLD = `${BUCKET_BASE}${TEST_USER_ID}/old.jpg`;
+const OWN_NEW = `${BUCKET_BASE}${TEST_USER_ID}/new.jpg`;
+const VICTIM_ID = 'ffffffff-0000-4000-8000-000000000001';
+const VICTIM_URL = `${BUCKET_BASE}${VICTIM_ID}/photo.jpg`;
 
 describe('PATCH /api/v1/auth/me', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    deleteObjectCalls.length = 0;
     currentRole = 'COACH';
-    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/old.jpg' });
+    // The stored avatar is the caller's own previous upload; the second read
+    // (after a write) returns what the write stored, like the real row would.
+    let written: { name?: string; profilePictureUrl?: string | null; notifyOnReplies?: boolean } = {};
+    (mockPrisma.user.findUnique as jest.Mock).mockImplementation(async () => ({
+      profilePictureUrl: written.profilePictureUrl === undefined ? OWN_OLD : written.profilePictureUrl,
+    }));
     // The write is a guarded updateMany (`deletedAt: null`, #444 D9) followed
     // by a re-read; the mock re-read reflects whatever the write carried.
-    let written: { name?: string; profilePictureUrl?: string | null; notifyOnReplies?: boolean } = {};
     (mockPrisma.user.updateMany as jest.Mock).mockImplementation(async ({ data }: { data: typeof written }) => {
       written = data;
       return { count: 1 };
@@ -79,36 +99,87 @@ describe('PATCH /api/v1/auth/me', () => {
     const res = await request(app)
       .patch('/api/v1/auth/me')
       .set(AUTH)
-      .send({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/photo.jpg' });
+      .send({ profilePictureUrl: OWN_NEW });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.user.profilePictureUrl).toBe('https://bucket.s3.amazonaws.com/avatars/u/photo.jpg');
+    expect(res.body.user.profilePictureUrl).toBe(OWN_NEW);
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: TEST_USER_ID, deletedAt: null },
-        data: { profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/photo.jpg' },
+        data: { profilePictureUrl: OWN_NEW },
       })
     );
   });
 
   it('deletes the replaced avatar object (best-effort) after the update', async () => {
-    await request(app)
-      .patch('/api/v1/auth/me')
-      .set(AUTH)
-      .send({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/new.jpg' });
+    await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 
-    expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(
-      'https://bucket.s3.amazonaws.com/avatars/u/old.jpg',
-      'https://bucket.s3.amazonaws.com/avatars/u/new.jpg'
-    );
+    expect(deleteObjectCalls).toEqual([
+      { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/old.jpg` },
+    ]);
   });
 
   it('does not look up or delete the avatar on a name-only update', async () => {
     await request(app).patch('/api/v1/auth/me').set(AUTH).send({ name: 'X' });
 
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
-    expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+    expect(deleteObjectCalls).toHaveLength(0);
+  });
+
+  describe('a managed-bucket URL must be the caller\'s own upload (#717)', () => {
+    it('accepts an external https URL (a WorkOS profile photo) as before', async () => {
+      const res = await request(app)
+        .patch('/api/v1/auth/me')
+        .set(AUTH)
+        .send({ profilePictureUrl: 'https://workos.example/photo.jpg' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.user.profilePictureUrl).toBe('https://workos.example/photo.jpg');
+    });
+
+    it.each([
+      ['another user\'s avatar URL', VICTIM_URL],
+      ['a ../ hop from the own prefix into another user\'s', `${BUCKET_BASE}${TEST_USER_ID}/../${VICTIM_ID}/photo.jpg`],
+      ['an encoded ../ hop', `${BUCKET_BASE}${TEST_USER_ID}/%2e%2e/${VICTIM_ID}/photo.jpg`],
+      ['a ../ hop out of avatars/', `${BUCKET_BASE}${TEST_USER_ID}/../../any-key.jpg`],
+    ])('answers 400 and writes nothing for %s', async (_label, url) => {
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: url });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('profilePictureUrl must be an upload issued to the caller');
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('the store-then-clear sequence never deletes the other user\'s object', async () => {
+      // Step 1 of the attack: point the caller's row at the victim's URL.
+      const store = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: VICTIM_URL });
+      expect(store.status).toBe(400);
+
+      // Step 2: clear the avatar, which deletes whatever the row holds. The row
+      // still holds the caller's own previous upload, so that is all that goes.
+      const clear = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: '' });
+      expect(clear.status).toBe(200);
+
+      const keys = deleteObjectCalls.map((call) => call.Key);
+      expect(keys).toEqual([`avatars/${TEST_USER_ID}/old.jpg`]);
+      expect(keys).not.toContain(`avatars/${VICTIM_ID}/photo.jpg`);
+    });
+
+    it('a pre-gate row holding a traversal URL deletes nothing outside avatars/ when cleared', async () => {
+      // Defence in depth: the stored value predates the gate (or came from
+      // somewhere else) and would collapse to a key outside avatars/.
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        profilePictureUrl: `${BUCKET_BASE}${TEST_USER_ID}/../../any-key.jpg`,
+      });
+
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: '' });
+
+      expect(res.status).toBe(200);
+      expect(deleteObjectCalls).toHaveLength(0);
+      expect(mockS3Send).not.toHaveBeenCalled();
+    });
   });
 
   it('updates the name', async () => {
@@ -152,7 +223,7 @@ describe('PATCH /api/v1/auth/me', () => {
     );
     // A preference change never touches the avatar.
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
-    expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+    expect(deleteObjectCalls).toHaveLength(0);
 
     const on = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ notifyOnReplies: true });
     expect(on.status).toBe(200);

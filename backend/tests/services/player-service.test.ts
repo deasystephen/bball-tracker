@@ -4,11 +4,12 @@
 
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
+  assertOwnUploadUrl: jest.fn(),
 }));
 
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
-import { ConflictError, NotFoundError } from '../../src/utils/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
   createPlayer,
@@ -23,9 +24,10 @@ import {
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 
-import { deletePreviousAvatar } from '../../src/services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar } from '../../src/services/upload-service';
 
 const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typeof deletePreviousAvatar>;
+const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
 
 const ADMIN_CALLER = { id: 'admin-caller', role: 'ADMIN' };
 const COACH_CALLER = { id: 'coach-caller', role: 'COACH' };
@@ -86,6 +88,29 @@ describe('PlayerService', () => {
           }),
         })
       );
+    });
+
+    it('gates a supplied profilePictureUrl on the caller\'s own upload prefix before any write (#717)', async () => {
+      const url = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/someone-else/pic.jpg';
+      mockAssertOwnUploadUrl.mockImplementationOnce(() => {
+        throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+      });
+
+      await expect(
+        PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: url }, ADMIN_CALLER)
+      ).rejects.toBeInstanceOf(BadRequestError);
+
+      expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(url, ADMIN_CALLER.id);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('does not run the upload gate when no profilePictureUrl is supplied', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue(createPlayer());
+
+      await PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: '' }, ADMIN_CALLER);
+
+      expect(mockAssertOwnUploadUrl).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestError if email already exists', async () => {
@@ -474,6 +499,37 @@ describe('PlayerService', () => {
       await PlayerService.updatePlayer(player.id, { profilePictureUrl: newUrl }, player.id);
 
       expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(oldUrl, newUrl);
+    });
+
+    it('gates the new profilePictureUrl on the CALLER\'s prefix (a coach writes their upload onto the player) (#717)', async () => {
+      const kid = createPlayer({ profilePictureUrl: null });
+      const coach = createAdmin();
+      const url = `https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/${coach.id}/pic.jpg`;
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(kid)
+        .mockResolvedValueOnce(coach);
+      (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...kid, profilePictureUrl: url });
+
+      await PlayerService.updatePlayer(kid.id, { profilePictureUrl: url }, coach.id);
+
+      expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(url, coach.id);
+    });
+
+    it('writes nothing when the upload gate rejects the URL (#717)', async () => {
+      const player = createPlayer({ profilePictureUrl: null });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(player);
+      mockAssertOwnUploadUrl.mockImplementationOnce(() => {
+        throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+      });
+
+      await expect(
+        PlayerService.updatePlayer(player.id, { profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/y.jpg' }, player.id)
+      ).rejects.toBeInstanceOf(BadRequestError);
+
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
     });
 
     it('does not touch S3 when profilePictureUrl is not part of the update', async () => {
