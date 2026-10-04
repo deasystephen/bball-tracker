@@ -242,11 +242,17 @@ describe('findTestRows', () => {
     const found = await findTestRows(prisma, 'all');
     const selected = await prisma.user.findMany({
       where: { id: { in: found.userIds } },
-      select: { name: true, email: true },
+      select: { name: true, email: true, deletedAt: true },
     });
 
-    const wronglySelected = selected.filter(({ name, email }) =>
-      email === null ? !/-[0-9a-f]{8}$/.test(name) : !email.toLowerCase().endsWith('@example.test')
+    // Suites run in parallel against one database. A row another suite
+    // tombstoned between the two reads above comes back as "Deleted user"
+    // with no address; the scan cannot have matched it in that state (a
+    // tombstone has no email and no run-suffixed name), so it was a test row
+    // when it was selected. Only a row that is still live can be wrong.
+    const wronglySelected = selected.filter(({ name, email, deletedAt }) =>
+      deletedAt === null &&
+      (email === null ? !/-[0-9a-f]{8}$/.test(name) : !email.toLowerCase().endsWith('@example.test'))
     );
     expect(wronglySelected).toEqual([]);
 

@@ -13,7 +13,8 @@
  * account an invitation, a staff role or a guardian link lands on. So every
  * such filter goes through `emailEquals`, which escapes the pattern
  * characters; `tests/utils/email-match-guard.test.ts` fails on a raw
- * `equals` + `mode: 'insensitive'` anywhere else in `src/`.
+ * `equals` + `mode: 'insensitive'` anywhere else in `src/` or `scripts/`
+ * (the operator CLI runs against production, #648).
  *
  * `contains` + `mode: 'insensitive'` (player search) is a different thing and
  * stays as it is: a search box is meant to match loosely.
