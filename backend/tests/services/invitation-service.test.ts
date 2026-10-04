@@ -1248,6 +1248,50 @@ describe('InvitationService', () => {
     });
   });
 
+  describe('tombstone signal on invitation user summaries (#642)', () => {
+    // A tombstone reaches these slots by design: the account purge keeps
+    // invitations the user sent and answered ones they received, so clients
+    // need deletedAt to render the localized "Deleted user" label.
+    const expectDeletedAtOnUsers = (args: { select: { player: unknown; invitedBy: unknown } }): void => {
+      expect(args.select.player).toEqual({ select: expect.objectContaining({ id: true, name: true, deletedAt: true }) });
+      expect(args.select.invitedBy).toEqual({ select: expect.objectContaining({ id: true, name: true, deletedAt: true }) });
+    };
+
+    beforeEach(() => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue(null);
+    });
+
+    it('listInvitations selects deletedAt on player and invitedBy and passes a tombstoned sender through', async () => {
+      const { invitation, player, team, coach } = createFullInvitation();
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([{
+        ...invitation,
+        team: { id: team.id, name: team.name },
+        player: { id: player.id, name: player.name, email: player.email, deletedAt: null },
+        invitedBy: { id: coach.id, name: 'Deleted user', email: null, deletedAt },
+      }]);
+
+      const result = await InvitationService.listInvitations({ limit: 10, offset: 0 }, player.id);
+
+      expectDeletedAtOnUsers((mockPrisma.teamInvitation.findMany as jest.Mock).mock.calls[0][0]);
+      expect(result.invitations[0].invitedBy.deletedAt).toEqual(deletedAt);
+      expect(result.invitations[0].player.deletedAt).toBeNull();
+    });
+
+    it('getInvitationById selects deletedAt on player and invitedBy', async () => {
+      const { invitation, player } = createFullInvitation();
+      const withoutToken: Partial<typeof invitation> = { ...invitation };
+      delete withoutToken.token;
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withoutToken);
+
+      await InvitationService.getInvitationById(invitation.id, player.id);
+
+      expectDeletedAtOnUsers((mockPrisma.teamInvitation.findUnique as jest.Mock).mock.calls[0][0]);
+    });
+  });
+
   describe('getInvitationByToken', () => {
     it('should return public invitation details by token', async () => {
       const { invitation, team, coach } = createFullInvitation();
@@ -1255,7 +1299,7 @@ describe('InvitationService', () => {
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
         ...invitation,
         team: { name: team.name },
-        invitedBy: { name: coach.name },
+        invitedBy: { name: coach.name, deletedAt: null },
       });
 
       const result = await InvitationService.getInvitationByToken(invitation.token);
@@ -1263,8 +1307,25 @@ describe('InvitationService', () => {
       expect(result).toHaveProperty('id', invitation.id);
       expect(result).toHaveProperty('teamName', team.name);
       expect(result).toHaveProperty('inviterName', coach.name);
+      expect(result).toHaveProperty('inviterDeletedAt', null);
       expect(result).toHaveProperty('status', 'PENDING');
       expect(result).not.toHaveProperty('player');
+    });
+
+    it('selects only name and deletedAt for the sender and returns inviterDeletedAt for a tombstone (#642)', async () => {
+      const { invitation, team } = createFullInvitation();
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
+        ...invitation,
+        team: { name: team.name },
+        invitedBy: { name: 'Deleted user', deletedAt },
+      });
+
+      const result = await InvitationService.getInvitationByToken(invitation.token);
+
+      const args = (mockPrisma.teamInvitation.findUnique as jest.Mock).mock.calls[0][0];
+      expect(args.select.invitedBy).toEqual({ select: { name: true, deletedAt: true } });
+      expect(result.inviterDeletedAt).toBe(deletedAt.toISOString());
     });
 
     it('should throw NotFoundError if token does not match any invitation', async () => {

@@ -11,6 +11,8 @@ import type { GameEvent, GameStatus } from '@prisma/client';
 import { getIo } from './io-registry';
 import { gameRoom } from './game-events';
 import { logger } from '../utils/logger';
+// Type-only: game-event-service imports this module at runtime.
+import type { EventPlayer } from '../services/game-event-service';
 
 export interface GameScore {
   homeScore: number;
@@ -18,7 +20,8 @@ export interface GameScore {
 }
 
 export interface GameEventBroadcast {
-  event: GameEvent & { player?: { id: string; name: string } | null };
+  // Same player shape as the REST event payloads (EVENT_PLAYER_SELECT, #642).
+  event: GameEvent & { player?: EventPlayer | null };
   score: GameScore;
 }
 

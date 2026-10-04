@@ -46,7 +46,11 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 
-const USER_SUMMARY_SELECT = {
+/**
+ * User shape for roster and staff rows. Exported so game-service's game
+ * detail serves the same fields (`isManaged`, `deletedAt`) as the team detail.
+ */
+export const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
@@ -206,11 +210,28 @@ export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INC
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
 type TeamDetailMember = TeamDetail['members'][number];
 type RosterManagerOnlyField = 'email' | 'emailSuppressedAt' | 'emailSuppressedReason';
+const ROSTER_MANAGER_ONLY_FIELDS: readonly RosterManagerOnlyField[] = ['email', 'emailSuppressedAt', 'emailSuppressedReason'];
+
+/**
+ * A roster player as seen by a caller without `canManageRoster`: removes only
+ * the email and its delivery state, keeping every other selected field
+ * (`isManaged`, `deletedAt` for tombstones). Shared by `GET /teams/:id` and
+ * `GET /games/:id` so the two strips cannot drift (#642).
+ */
+export function omitRosterManagerFields<T extends { email: string | null }>(
+  player: T
+): Omit<T, RosterManagerOnlyField> {
+  const publicPlayer: Record<string, unknown> = { ...player };
+  for (const field of ROSTER_MANAGER_ONLY_FIELDS) {
+    delete publicPlayer[field];
+  }
+  return publicPlayer as Omit<T, RosterManagerOnlyField>;
+}
 /**
  * `GET /teams/:id` payload. Member `player.email` and its delivery state
  * (`emailSuppressedAt` / `emailSuppressedReason`, #449) are present only when
  * the caller has `canManageRoster` on the team (audit #80); other callers get
- * `{ id, name }` for each member's player.
+ * the player without them (`omitRosterManagerFields`).
  */
 export type TeamDetailView = Omit<TeamDetail, 'members'> & {
   members: Array<
@@ -497,7 +518,7 @@ export class TeamService {
       invitations: [],
       members: team.members.map(({ player, ...member }) => ({
         ...member,
-        player: { id: player.id, name: player.name, isManaged: player.isManaged, deletedAt: player.deletedAt },
+        player: omitRosterManagerFields(player),
       })),
     };
   }

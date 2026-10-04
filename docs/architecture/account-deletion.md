@@ -42,9 +42,16 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.
-- `deletedAt` rides on `USER_SUMMARY_SELECT` (rosters, staff, guardians) so clients derive a
-  "Deleted" chip and a localized label; pickers (`listPlayers`, `getPlayerById`, staff lookup,
-  `dev-users`, `dev-login`) filter tombstones out. `guardianOf[].isManaged` tells the app which
+- `deletedAt` rides on team-service's `USER_SUMMARY_SELECT` (rosters, staff, guardians, and the
+  members and staff of `GET /games/:id`, which imports it) and on invitation-service's own
+  `USER_SUMMARY_SELECT` (`player` and `invitedBy` on `GET /invitations` and `GET /invitations/:id`),
+  so clients derive a "Deleted" chip and a localized label. Callers without `canManageRoster` get
+  roster players through `team-service.ts#omitRosterManagerFields`, which removes only the email
+  and its delivery state. Game event players use `game-event-service.ts#EVENT_PLAYER_SELECT`
+  (`id`, `name`, `deletedAt`, no email) on the REST payloads and the `game-event` socket broadcast.
+  The public `GET /invitations/by-token/:token` carries `inviterDeletedAt` next to `inviterName`
+  (#642). Pickers (`listPlayers`, `getPlayerById`, staff lookup, `dev-users`, `dev-login`)
+  filter tombstones out. `guardianOf[].isManaged` tells the app which
   child records a guardian may delete.
 - Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats
   retained de-identified; RDS backups 7 days; backend Sentry and Amplitude keep records keyed on

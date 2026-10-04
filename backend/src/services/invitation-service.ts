@@ -94,6 +94,9 @@ const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
+  // Deleted accounts stay on sent and answered invitations as tombstones
+  // (#642); clients derive a localized label from this, never from name.
+  deletedAt: true,
 } satisfies Prisma.UserSelect;
 
 /**
@@ -251,6 +254,11 @@ export interface PublicInvitation {
   status: TeamInvitation['status'];
   teamName: string;
   inviterName: string;
+  /**
+   * Tombstone signal for the sender (#642): the sender may delete their
+   * account inside the expiry window. Clients label from this, never the name.
+   */
+  inviterDeletedAt: string | null;
   position: string | null;
   jerseyNumber: number | null;
   message: string | null;
@@ -1373,7 +1381,8 @@ export class InvitationService {
           select: { name: true },
         },
         invitedBy: {
-          select: { name: true },
+          // Public payload: name and the tombstone signal only, never email.
+          select: { name: true, deletedAt: true },
         },
       },
     });
@@ -1387,6 +1396,7 @@ export class InvitationService {
       status: invitation.status,
       teamName: invitation.team.name,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       position: invitation.position,
       jerseyNumber: invitation.jerseyNumber,
       message: invitation.message,
