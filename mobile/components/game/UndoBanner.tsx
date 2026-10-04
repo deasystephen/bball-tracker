@@ -2,7 +2,7 @@
  * Floating undo banner for undoing the last action
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -14,6 +14,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { announce } from '../../utils/announce';
 
 interface UndoBannerProps {
   visible: boolean;
@@ -82,6 +83,21 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
     return () => clearInterval(timer);
   }, [visible, pending, countdown]);
 
+  // Tell a screen reader once that the undo window has opened, when the event
+  // is confirmed and UNDO becomes usable (#774). Never per countdown tick: the
+  // countdown text has no live region and, once confirmed, the button's
+  // label stays "Undo".
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      announced.current = false;
+      return;
+    }
+    if (pending || announced.current) return;
+    announced.current = true;
+    announce(`${message}. Undo available for ${duration} seconds`);
+  }, [visible, pending, message, duration]);
+
   const containerAnimatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateY: translateY.value }],
@@ -127,6 +143,10 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
         <TouchableOpacity
           onPress={onUndo}
           disabled={pending}
+          accessibilityRole="button"
+          // "Saving" until the event is confirmed, then a stable "Undo": the
+          // per-second countdown never changes the focused element's name.
+          accessibilityLabel={pending ? 'Saving' : 'Undo'}
           accessibilityState={{ disabled: pending }}
           style={[
             styles.undoButton,

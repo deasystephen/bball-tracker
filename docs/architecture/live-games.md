@@ -143,7 +143,19 @@ current score so a client can drop events and still converge.
   "SAVING…") until then, and is `key`ed by `localId` so the 5s countdown
   restarts per event. `handleUndo` deletes `lastEvent.serverId` — never
   `events[0]` from the TanStack cache. A failed create calls
-  `discardEvent(localId)`. Invalidate event lists with
+  `discardEvent(localId)`.
+- **One event per selection (#730):** `submitEvent` in the tracker deselects
+  the player synchronously on tap, right after `recordEvent` and before the
+  POST, so the shot and stat buttons disable in the same tick and at most one
+  event is in flight per selection. It reads the selection from the live store
+  (`useGameTrackingStore.getState()`), not the render's closure, so a second
+  tap that lands before React re-renders finds no selection and is dropped
+  silently. A failed create discards the local event and shows an error naming
+  the play and the player ("Could not save 2pt made for <name>."). It
+  re-selects that player for a one-tap retry only when nothing was recorded
+  since (a per-submit counter) and nobody else is selected: after "A taps,
+  B taps, A's POST fails" re-selecting A would make the next tap, meant for
+  B, record for A. Test: `mobile/__tests__/app/track-double-tap.test.tsx`. Invalidate event lists with
   `gameEventKeys.listsFor(gameId)` (`list(gameId)` ends in `undefined`, which
   TanStack's partial matcher does not treat as a wildcard).
 - **Spectator snapshot merge (audit #73):** `useLiveGame` merges a

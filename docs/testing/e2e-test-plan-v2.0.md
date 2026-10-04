@@ -153,6 +153,13 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** `POST /api/v1/uploads/avatar-url { contentType, contentLength? }` returns a **presigned S3 POST** (`{ uploadUrl, fields, imageUrl }`, 5 MB cap enforced by the policy); the app posts the multipart form, then `PATCH /api/v1/auth/me { profilePictureUrl }` (never `PATCH /players/:id`). Avatar updates everywhere within ~3s; the previously uploaded object is deleted from the avatars bucket (audit #61). A failed S3 upload shows an error toast and does **not** persist a dangling URL (audit #39).
 - **Notes:** ___________
 
+### B.2a — Avatar photo menu is a sheet, dismissable on Android (#669)
+- [ ] Pass / Fail / Skipped
+- **Role:** any logged-in user with a profile photo (and a coach in Manage Players)
+- **Steps:** On iOS and on Android: Profile tab → tap the avatar. Close the sheet with Close, then with a tap on the backdrop, then (Android) with Back. Open it again and choose "Choose from Library", then "Take Photo".
+- **Expected:** A bottom sheet titled "Profile Photo" lists Take Photo, Choose from Library, Remove Photo (red) and Close; without a photo, Remove Photo is absent. Each dismissal leaves the photo unchanged. On iOS the library and the camera open after the sheet closes, every time (no silent no-op).
+- **Notes:** ___________
+
 ### B.2b — Edit display name
 - [ ] Pass / Fail / Skipped
 - **Role:** any logged-in user
@@ -693,6 +700,18 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:** After G.1, record a made 2-pt and tap the Undo banner. Then record two events back-to-back (made 3, then a rebound) and watch the banner.
 - **Expected:** The banner shows "SAVING…" (disabled) until the event is persisted, then "UNDO (5s)". Undo removes **that** event (not an earlier one): timeline drops it, home score decrements, spectator view updates. The second back-to-back event restarts the countdown at 5s with the new message. Tapping the banner while it still says "SAVING…" does nothing.
 - **Notes:** Audit #7 — previously undo deleted `events[0]` from the cache, i.e. the *previous* play, if tapped before the create resolved.
+
+### G.3a — Double tap records one event (#730)
+- [ ] Pass / Fail / Skipped
+- **Steps:** Select a player, then double-tap "2PT MADE" as fast as you can. Repeat with "Steal". Then turn on airplane mode, select a player and tap "2PT MADE".
+- **Expected:** The buttons grey out on the first tap. The score rises by exactly 2 and the timeline gets one shot; one steal is recorded. Undo removes that one event and nothing is left behind. In airplane mode the error alert names the play and the player ("Could not save 2pt made for <name>."), no event stays in the timeline and the player is selected again, ready for a retry. With airplane mode on, tap a shot for one player and a stat for a second player quickly: when the first save fails, the first player is **not** selected again.
+- **Notes:** Jest drives the real press handler (`__tests__/app/track-double-tap.test.tsx`) but cannot reproduce two touches inside one frame on a device.
+
+### G.3b — VoiceOver hears the tracker and Watch Live (#774)
+- [ ] Pass / Fail / Skipped
+- **Steps:** With VoiceOver on (and once with TalkBack on Android if available): on the tracker, select a player and record a made 2-pointer; trigger an error toast (airplane mode, record a shot); then open Watch Live as a second account and record a shot from the first.
+- **Expected:** After the shot you hear the new score ("Score: <team> <n>, <opponent> <m>") and then "<player> - 2pt made. Undo available for 5 seconds", once, not every second. The UNDO button reads as "Saving" while the event is being saved, then "Undo, button". The error toast is spoken. On Watch Live the score reads as one element and each update is spoken once; opening the screen does not announce the score. On Android each change is heard once, not twice.
+- **Notes:** ___________
 
 ### G.4 — Hot-streak milestone
 - [ ] Pass / Fail / Skipped
@@ -1303,3 +1322,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-08-29: roster ordering (feature/roster-jersey-sort). D.2 gained the roster sort pills (visible labels `Jersey #`/`Name`, a11y "Sort by <label>"; 2+ player gate; per-user persistence) and the Maestro flow list notes `team-detail.yaml`'s new sort assertions. Server rosters (team detail + game detail) now come back jersey-asc, nulls last, name then id tiebreak.
 - 2026-09-27: #445 — FREE team cap lifted. D.1 no longer expects a 402 on the 4th team; the Profile usage meter reads `<count> · Unlimited` for every tier. Paid tiers are reachable only through the ADMIN comp route (`PATCH /api/v1/admin/users/:userId/subscription`, exercised with `curl`; no app UI). Nothing marked passed.
 - 2026-09-29: #418 — the deprecated add-player endpoints are gone. `POST /teams/:id/managed-players` answers 404 and `POST /teams/:id/invitations` takes `{ playerId }` only; Q.4 and Q.8 now target the unified `POST /teams/:teamId/players`. No app-visible change (the app has used the unified endpoint since the 2026-08-28 OTA).
+- 2026-10-04: audit batch #669 #730 #774. B.2a (avatar photo menu is an ActionMenu, dismissable on Android), G.3a (double tap records one event) and G.3b (VoiceOver/TalkBack announcements on the tracker, toasts and Watch Live): device-only checks.

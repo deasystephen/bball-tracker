@@ -3,10 +3,18 @@
  * actions: React Native's `Alert` renders at most three buttons on Android,
  * so an Alert-based overflow menu silently truncates there (unification
  * review). Items are real pressables — visible to tests and Maestro alike.
+ *
+ * An item that presents native UI (camera, photo library, share sheet,
+ * document picker) sets `waitForClose`. iOS refuses to present a view
+ * controller while this menu's modal is still dismissing, so on iOS the
+ * menu remembers the pressed item, closes, and runs it from
+ * `Modal.onDismiss`, with a fallback timer in case that callback never
+ * arrives. Android has no such restriction (and no `onDismiss`), so it runs
+ * the item at once. Every other item runs immediately on both platforms.
  */
 
-import React from 'react';
-import { Modal, TouchableOpacity, Pressable, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { Modal, Platform, TouchableOpacity, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
@@ -16,7 +24,12 @@ export interface ActionMenuItem {
   label: string;
   destructive?: boolean;
   onPress: () => void;
+  /** Run only after the sheet has finished closing (see the file comment). */
+  waitForClose?: boolean;
 }
+
+/** Longer than the fade-out; reached only if iOS never calls onDismiss. */
+export const WAIT_FOR_CLOSE_FALLBACK_MS = 1000;
 
 export interface ActionMenuProps {
   visible: boolean;
@@ -29,8 +42,59 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
+  // The item waiting for the sheet to finish closing, and its fallback timer.
+  // At most one is ever pending: whichever of onDismiss and the timer runs
+  // first takes it, so it runs exactly once.
+  const pending = useRef<(() => void) | null>(null);
+  const fallback = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPending = useCallback(() => {
+    if (fallback.current) {
+      clearTimeout(fallback.current);
+      fallback.current = null;
+    }
+    pending.current = null;
+  }, []);
+
+  const runPending = useCallback(() => {
+    const action = pending.current;
+    clearPending();
+    action?.();
+  }, [clearPending]);
+
+  // Reopening the menu, or unmounting it, drops a choice that has not run:
+  // the person is choosing again, or the screen is gone.
+  useEffect(() => {
+    if (visible) clearPending();
+  }, [visible, clearPending]);
+  useEffect(() => clearPending, [clearPending]);
+
+  // Close, the backdrop and Android Back: nothing was chosen.
+  const dismiss = () => {
+    clearPending();
+    onClose();
+  };
+
+  const pressItem = (item: ActionMenuItem) => {
+    // A second item press replaces the first and its timer.
+    clearPending();
+    onClose();
+    if (item.waitForClose && Platform.OS === 'ios') {
+      pending.current = item.onPress;
+      fallback.current = setTimeout(runPending, WAIT_FOR_CLOSE_FALLBACK_MS);
+    } else {
+      item.onPress();
+    }
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={dismiss}
+      onDismiss={runPending}
+    >
       {/* The backdrop and the sheet MUST be siblings, never parent/child: a
           Pressable with an accessibilityLabel becomes a single accessibility
           element on iOS and swallows its entire subtree — with the sheet
@@ -39,7 +103,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
       <View style={styles.container}>
         <Pressable
           style={styles.backdrop}
-          onPress={onClose}
+          onPress={dismiss}
           accessibilityRole="button"
           accessibilityLabel="Close menu"
         />
@@ -64,10 +128,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           {items.map((item) => (
             <TouchableOpacity
               key={item.label}
-              onPress={() => {
-                onClose();
-                item.onPress();
-              }}
+              onPress={() => pressItem(item)}
               accessibilityRole="button"
               accessibilityLabel={item.label}
               style={[styles.item, { borderTopColor: colors.border }]}
@@ -81,7 +142,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
             </TouchableOpacity>
           ))}
           <TouchableOpacity
-            onPress={onClose}
+            onPress={dismiss}
             accessibilityRole="button"
             accessibilityLabel="Close"
             style={[styles.item, styles.closeItem, { borderTopColor: colors.border }]}

@@ -2,11 +2,12 @@
  * Tests for the Toast provider — concurrent toasts must stack (all visible,
  * in order) instead of overlapping at the same offset (audit #82), and the
  * whole stack must be transparent to touches so it never blocks the nav
- * controls it renders over (#464).
+ * controls it renders over (#464). Each toast is announced to screen readers
+ * once when shown, since it can never take focus (#774).
  */
 
 import React from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { AccessibilityInfo, Text, TouchableOpacity } from 'react-native';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 import { ToastProvider, useToast, MAX_VISIBLE_TOASTS } from '../../components/Toast';
@@ -93,6 +94,39 @@ describe('ToastProvider', () => {
     };
     const spy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(() => render(<Bad />)).toThrow('useToast must be used within a ToastProvider');
+    spy.mockRestore();
+  });
+
+  it('announces each toast once when shown and keeps it non-interactive (#774)', () => {
+    const spy = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibilityWithOptions')
+      .mockImplementation(() => undefined);
+    spy.mockClear();
+    const { getByTestId, getAllByTestId } = render(
+      <ToastProvider>
+        <Trigger messages={['Failed to record shot', 'Saved']} />
+      </ToastProvider>
+    );
+
+    act(() => {
+      fireEvent.press(getByTestId('fire'));
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenNthCalledWith(1, 'Failed to record shot', { queue: true });
+    expect(spy).toHaveBeenNthCalledWith(2, 'Saved', { queue: true });
+    for (const node of getAllByTestId('toast-info')) {
+      expect(node.props.pointerEvents).toBe('none');
+    }
+
+    // Nothing repeats while the toasts stay up or as they time out.
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+    act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
     spy.mockRestore();
   });
 });

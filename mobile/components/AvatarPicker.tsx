@@ -2,7 +2,7 @@
  * Avatar component with photo picker support
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { typography } from '../theme/typography';
+import { ActionMenu, type ActionMenuItem } from './ActionMenu';
 
 type AvatarSize = 'small' | 'medium' | 'large';
 
@@ -91,8 +92,15 @@ interface AvatarPickerProps extends AvatarProps {
   onImageSelected: (uri: string | null) => void;
 }
 
+type PhotoSource = 'camera' | 'library';
+
 /**
- * Interactive avatar picker with camera/library support
+ * Interactive avatar picker with camera/library support.
+ *
+ * The photo menu is an `ActionMenu`, never an `Alert` (#669): with a photo
+ * set it has three actions plus Close, and Android's `Alert` keeps at most
+ * three buttons, which dropped Cancel and left a dialog that Back could not
+ * dismiss.
  */
 export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   uri,
@@ -103,7 +111,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   const { colors } = useTheme();
   const dimension = SIZES[size];
 
-  const pickImage = async (source: 'camera' | 'library') => {
+  const pickImage = async (source: PhotoSource) => {
     const permissionResult =
       source === 'camera'
         ? await ImagePicker.requestCameraPermissionsAsync()
@@ -134,40 +142,46 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
     }
   };
 
-  const handlePress = () => {
-    const options: { text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }[] = [
-      { text: 'Take Photo', onPress: () => pickImage('camera') },
-      { text: 'Choose from Library', onPress: () => pickImage('library') },
-    ];
+  const [menuVisible, setMenuVisible] = useState(false);
 
-    if (uri) {
-      options.push({
-        text: 'Remove Photo',
-        style: 'destructive',
-        onPress: () => onImageSelected(null),
-      });
-    }
-
-    options.push({ text: 'Cancel', style: 'cancel' });
-
-    Alert.alert('Profile Photo', undefined, options);
-  };
+  // The camera and the library are native screens: ActionMenu opens them
+  // only once its sheet has finished closing (waitForClose), which iOS needs.
+  const menuItems: ActionMenuItem[] = [
+    { label: 'Take Photo', waitForClose: true, onPress: () => void pickImage('camera') },
+    { label: 'Choose from Library', waitForClose: true, onPress: () => void pickImage('library') },
+    ...(uri
+      ? [{ label: 'Remove Photo', destructive: true, onPress: () => onImageSelected(null) }]
+      : []),
+  ];
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
-      <Avatar uri={uri} name={name} size={size} />
-      <View
-        style={[
-          styles.editBadge,
-          {
-            backgroundColor: colors.primary,
-            borderColor: colors.background,
-          },
-        ]}
+    <>
+      <TouchableOpacity
+        onPress={() => setMenuVisible(true)}
+        activeOpacity={0.7}
+        testID="avatar-picker"
       >
-        <Ionicons name="camera" size={dimension < 48 ? 10 : 14} color={colors.textInverse} />
-      </View>
-    </TouchableOpacity>
+        <Avatar uri={uri} name={name} size={size} />
+        <View
+          style={[
+            styles.editBadge,
+            {
+              backgroundColor: colors.primary,
+              borderColor: colors.background,
+            },
+          ]}
+        >
+          <Ionicons name="camera" size={dimension < 48 ? 10 : 14} color={colors.textInverse} />
+        </View>
+      </TouchableOpacity>
+      {/* A sibling of the avatar button, never inside it (nested pressables). */}
+      <ActionMenu
+        visible={menuVisible}
+        title="Profile Photo"
+        items={menuItems}
+        onClose={() => setMenuVisible(false)}
+      />
+    </>
   );
 };
 
