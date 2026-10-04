@@ -299,7 +299,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       );
     });
 
-    it('a rostered teammate without a staff role gets player { id, name } and the coach\'s email', async () => {
+    it('a rostered teammate without a staff role gets the player without an email, and the coach\'s email', async () => {
       callerId = TEAMMATE.id;
       givenTeamStanding({ coach: [COACH.id], member: [TEAMMATE.id] });
       givenStaffRows([COACH.id]);
@@ -307,7 +307,8 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       const response = await request(app).get(`/api/v1/invitations/${INVITATION_ID}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.invitation.player).toEqual({ id: PLAYER.id, name: PLAYER.name });
+      // Only the email goes: deletedAt (#642) stays for the tombstone label.
+      expect(response.body.invitation.player).toEqual({ id: PLAYER.id, name: PLAYER.name, deletedAt: null });
       expect(response.body.invitation.invitedBy.email).toBe(COACH.email);
       expect(response.body.invitation).not.toHaveProperty('token');
     });
@@ -320,7 +321,12 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       const response = await request(app).get(`/api/v1/invitations/${INVITATION_ID}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.invitation.player).toEqual({ id: PLAYER.id, name: PLAYER.name, email: PLAYER.email });
+      expect(response.body.invitation.player).toEqual({
+        id: PLAYER.id,
+        name: PLAYER.name,
+        email: PLAYER.email,
+        deletedAt: null,
+      });
       expect(response.body.invitation).not.toHaveProperty('token');
     });
 

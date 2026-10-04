@@ -1086,8 +1086,8 @@ describe('InvitationService', () => {
             league: { id: league.id, name: league.name },
           },
         },
-        player: { id: player.id, name: player.name, email: player.email },
-        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
+        player: { id: player.id, name: player.name, email: player.email, deletedAt: null },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email, deletedAt: null },
       });
       return fixture;
     }
@@ -1127,7 +1127,7 @@ describe('InvitationService', () => {
       const result = await InvitationService.getInvitationById(invitation.id, coach.id);
 
       expect(result).toHaveProperty('id', invitation.id);
-      expect(result.player).toEqual({ id: player.id, name: player.name, email: player.email });
+      expect(result.player).toEqual({ id: player.id, name: player.name, email: player.email, deletedAt: null });
       expect(result.invitedBy.email).toBe(coach.email);
     });
 
@@ -1149,7 +1149,7 @@ describe('InvitationService', () => {
 
       // Same as GET /teams/:id and POST /games/:id/rsvp (#661): roster emails
       // stay stripped for a guardian.
-      expect(result.player).toEqual({ id: player.id, name: player.name });
+      expect(result.player).toEqual({ id: player.id, name: player.name, deletedAt: null });
     });
 
     it('returns player.email to a system ADMIN and to an admin of the team\'s league', async () => {
@@ -1175,7 +1175,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.getInvitationById(invitation.id, 'teammate-1');
 
-      expect(result.player).toEqual({ id: player.id, name: player.name });
+      expect(result.player).toEqual({ id: player.id, name: player.name, deletedAt: null });
       expect('email' in result.player).toBe(false);
       // invitedBy is a staff email: every team member keeps it.
       expect(result.invitedBy.email).toBe(coach.email);
@@ -1187,7 +1187,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.getInvitationById(invitation.id, 'scorekeeper-1');
 
-      expect(result.player).toEqual({ id: player.id, name: player.name });
+      expect(result.player).toEqual({ id: player.id, name: player.name, deletedAt: null });
     });
 
     it('strips player.email for a guardian of a different team member (#679)', async () => {
@@ -1196,7 +1196,7 @@ describe('InvitationService', () => {
 
       const result = await InvitationService.getInvitationById(invitation.id, 'other-parent');
 
-      expect(result.player).toEqual({ id: player.id, name: player.name });
+      expect(result.player).toEqual({ id: player.id, name: player.name, deletedAt: null });
     });
 
     it('should throw NotFoundError if invitation does not exist', async () => {
