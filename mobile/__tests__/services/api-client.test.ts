@@ -299,7 +299,7 @@ describe('api-client', () => {
     expect(captured.response!(resp)).toBe(resp);
   });
 
-  it('response error handler calls logout on 401 and always rejects', async () => {
+  it('response error handler calls clearSession on 401 and always rejects', async () => {
     loadModule();
     jest.doMock('expo-constants', () => ({
       __esModule: true,
@@ -330,7 +330,7 @@ describe('api-client', () => {
 
     const err500 = { response: { status: 500 }, message: '500' };
     await expect(captured.responseError!(err500)).rejects.toBe(err500);
-    // 500 must NOT trigger logout.
+    // 500 must NOT end the session (no clearSession call).
     expect(authMock.state.clearCalls).toBe(1);
 
     const errNoResponse = { message: 'network' };

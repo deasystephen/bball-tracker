@@ -109,6 +109,7 @@ eng-review amendments recorded there).
   `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
   create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
 - **`GET /invitations?playerId=<other user>`** (role matrix B2.4): allowed for system ADMINs (unscoped);
+  for guardians of the player (`isGuardianOf`, unscoped; see `guardians.md`);
   with `teamId`, for callers with `canManageRoster` on that team; without `teamId`, for callers with
   `canManageRoster` on at least one team the player is rostered on — results are then scoped to those
   teams (`teamId: { in: manageableTeamIds }`). Everyone else gets 403. The old check (`user.role ===
@@ -124,7 +125,8 @@ eng-review amendments recorded there).
   `updateMany … where { id, status: 'PENDING' }` inside the transaction — so the loser of a concurrent
   accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
   `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
-  other callers with team access (rostered players) remain scoped to `playerId = caller`.
+  other callers with team access (rostered players) remain scoped to `playerId IN (caller, caller's
+  children)` via `GuardianService.getChildIds` (see `guardians.md`).
 - **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
   and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is
   gone: `createInvitationSchema` requires `playerId` and strips unknown keys, so a body without

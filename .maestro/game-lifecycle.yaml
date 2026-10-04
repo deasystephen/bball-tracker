@@ -39,7 +39,8 @@ appId: com.bballtracker.mobile
 
 # End game from detail screen. The button renders below Continue Tracking and
 # sits under the fold on 874pt-class devices — scroll it into view first (60%
-# visibility per the Maestro edge-resting rule in CLAUDE.md).
+# visibility per docs/testing/maestro.md, "Don't use `centerElement: true` for
+# elements near the END of a list").
 - scrollUntilVisible:
     element:
       text: "End Game"

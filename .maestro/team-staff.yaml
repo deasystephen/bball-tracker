@@ -25,7 +25,7 @@ appId: com.bballtracker.mobile
 # The Staff card on team detail shows the head coach and links to the staff screen.
 # The card is ONE element whose accessibility label concatenates its children
 # ("Staff · 1 staff, Frank Vogel"), so a bare full-match "Frank Vogel" matches
-# nothing — composite-row rule from CLAUDE.md.
+# nothing — composite-row rule from docs/testing/maestro.md ("`text:` is a FULL-MATCH regex").
 - scrollUntilVisible:
     element:
       id: "team-staff-card"

@@ -90,8 +90,8 @@ The rule now:
   moves one of them cannot merge.
 - **The scan never edits the manifest.** Its diff guard already limits it to
   `package.json` and `package-lock.json`. Recording a build is a human step
-  (`npm run binary-manifest:record`), described in `CLAUDE.md` under
-  "Mobile Builds (EAS)".
+  (`npm run binary-manifest:record`), described in
+  `docs/deployment/mobile-builds-and-ota.md` under "OTA drift guard (#562)".
 
 What this costs: security fixes in a binary-coupled package wait for a build.
 The scan reports them under ⚠ with "needs a native build" so they are visible.

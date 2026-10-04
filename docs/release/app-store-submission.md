@@ -151,11 +151,11 @@ Facts behind the notes, for whoever maintains them:
 | --- | --- |
 | Reviewers cannot use the developer login | It renders only under `__DEV__` (`mobile/app/login.tsx`), and the backend accepts dev tokens only with `NODE_ENV=development` |
 | Team creation needs no league or season | #442; `.maestro/coach-onboarding.yaml` exercises the path end to end |
-| Player is rostered at once, email optional | `POST /teams/:teamId/players`, case 1 (CLAUDE.md "Team Invitations & Unified Add Player") |
+| Player is rostered at once, email optional | `POST /teams/:teamId/players`, case 1 (`docs/architecture/roster-and-invitations.md`, "Team Invitations & Unified Add Player") |
 | Tracking steps and labels | `.maestro/game-tracking.yaml` |
 | Account deletion path and copy | #444; `mobile/app/account/delete.tsx`, `mobile/i18n/locales/en.json` (`account.delete.*`) |
 | Guardian deletion is limited to managed child records | `guardianOf[].isManaged`; `DELETE /players/:id/account` |
-| No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (CLAUDE.md "Entitlements / Feature Gating"); the free-tier team cap was lifted in #445, so no limit is enforced on any tier |
+| No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (`docs/architecture/entitlements-and-usage.md`, "Entitlements / Feature Gating"); the free-tier team cap was lifted in #445, so no limit is enforced on any tier |
 
 The demo account must exist in the identity-provider environment the submission build talks to
 (#24 covers the production-key cutover) and needs seeded data in the production database; both
@@ -189,5 +189,5 @@ Screenshots and the review device need iOS 16.4 or newer.
 
 The purpose strings in section 1 reach users only in a native build cut after they merged. Cut
 the submission build from a commit that contains them, and confirm in the built app that the
-camera and photo prompts show the Hooplings text. See CLAUDE.md "Mobile Builds (EAS)" for the
+camera and photo prompts show the Hooplings text. See `docs/deployment/mobile-builds-and-ota.md` ("Mobile Builds (EAS)") for the
 build, runtime-version and OTA rules.

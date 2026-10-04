@@ -18,7 +18,7 @@
  *   - make it a native build: bump `version` in `app.config.js`, cut the build
  *     from the branch, verify it on a device, then record it with
  *       BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record
- *     See CLAUDE.md, "Mobile Builds (EAS)".
+ *     See docs/deployment/mobile-builds-and-ota.md, "OTA drift guard (#562)".
  *
  * The record mode lives in this file, like a Jest snapshot update, so there is
  * exactly one implementation of "which packages count".

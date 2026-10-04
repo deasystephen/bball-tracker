@@ -138,7 +138,10 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT â
   or a score on a `FINISHED` game requires `canManageRoster` (head/assistant coach, league admin, system
   admin) â€” a `canTrackStats`-only Team Manager can no longer reopen or rewrite a final. `listGames`
   resolves the caller's team set with the shared `teamAccessWhere` (it carried its own copy of the
-  clause until #458) and answers 403 for a `teamId` outside that set. Lane D owns the
+  clause until #458). A caller whose set is empty gets the empty page with no query, whatever
+  `teamId` says; a caller with a non-empty set naming a `teamId` outside it gets 403
+  (`You do not have access to this team`). Both branches are pinned in
+  `tests/integration/list-access.db.test.ts`. Lane D owns the
   socket emit block at the bottom of `updateGame`; keep authz edits at the top of the function.
   `GET /games/:id` (`GameDetailView`) and `GET /games/:id/rsvps` (`RsvpView`) apply the team-detail
   email rule (role matrix B2.5): `team.members[].player.email` / `rsvps[].user.email` only for callers

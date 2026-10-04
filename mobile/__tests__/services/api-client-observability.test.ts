@@ -4,7 +4,8 @@
  *   - every request leaves an `http` breadcrumb with the redacted route
  *     pattern, status and duration;
  *   - a network failure or a 5xx is captured with `endpoint_pattern` and
- *     `status` tags; a 4xx is a breadcrumb only; a cancellation is neither;
+ *     `status` tags; a 4xx is a breadcrumb only; a cancellation is a
+ *     `warning` breadcrumb (`reason: 'ERR_CANCELED'`) and is never captured;
  *   - a request refused for lack of a session (`NoSessionError`, #582) is
  *     captured once per endpoint pattern per session end, not per retry;
  *   - nothing captured or crumbed carries a token, an OAuth code or an email.
@@ -154,6 +155,11 @@ describe('api-client observability (#617)', () => {
     await expect(apiClient.get('/teams')).rejects.toMatchObject({ code: 'ERR_CANCELED' });
 
     expect(mockedCrumb).toHaveBeenCalledTimes(1);
+    expect(lastCrumb()).toMatchObject({
+      category: 'http',
+      level: 'warning',
+      data: { method: 'GET', url: '/api/v1/teams', reason: 'ERR_CANCELED' },
+    });
     expect(mockedCapture).not.toHaveBeenCalled();
   });
 

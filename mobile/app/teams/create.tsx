@@ -147,7 +147,7 @@ export default function CreateTeamScreen() {
       // (back should return to the Teams tab, matching games/create).
       router.replace(`/teams/${team.id}`);
     } catch (error) {
-      // 402 upgrade_required: a tier's team cap (see CLAUDE.md "Usage Metering").
+      // 402 upgrade_required: a tier's team cap (see docs/architecture/entitlements-and-usage.md, "Usage Metering & Tier Limits").
       // No tier has one since #445, so the API does not answer 402 here today;
       // the branch stays for the day a cap returns together with a purchase flow.
       Alert.alert(

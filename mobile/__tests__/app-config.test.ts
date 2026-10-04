@@ -1,7 +1,7 @@
 /**
  * app.config.js decides, at build / OTA-publish time, which API host every device
  * calls (domain migration PR3, D16). An `eas update` run with APP_ENV unset once
- * shipped apiUrl=127.0.0.1 to every device (CLAUDE.md "OTA env gotcha"); this pins
+ * shipped apiUrl=127.0.0.1 to every device (docs/deployment/mobile-builds-and-ota.md "OTA env gotcha"); this pins
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */

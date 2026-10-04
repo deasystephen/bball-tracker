@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
  *   1. `extra.apiUrl` from app.config.js — set at build/OTA publish time from
  *      APP_ENV (production/preview → the production API, otherwise the local
  *      dev server). An OTA published with APP_ENV unset ships the dev host to
- *      every device (see CLAUDE.md "OTA env gotcha"); `__tests__/app-config.test.ts`
+ *      every device (see docs/deployment/mobile-builds-and-ota.md "OTA env gotcha"); `__tests__/app-config.test.ts`
  *      pins that mapping.
  *   2. Otherwise the dev server when `__DEV__`, else the production API.
  */

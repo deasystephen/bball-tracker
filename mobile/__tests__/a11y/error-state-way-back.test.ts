@@ -106,8 +106,9 @@ describe('full-screen errors on pushed screens', () => {
   it('scans the screens known to render ErrorState', () => {
     const rendering = files.filter((file) => fs.readFileSync(path.join(MOBILE_ROOT, file), 'utf8').includes('<ErrorState'));
 
-    // Thirteen screens pass `onBack`, one keeps its header (#595).
-    expect(rendering.length).toBeGreaterThanOrEqual(14);
+    // 16 screens pass `onBack`, one keeps its header (#595, #614, #34); the
+    // enumerated set is `SCREENS` in __tests__/app/error-state-way-back.test.tsx.
+    expect(rendering.length).toBeGreaterThanOrEqual(17);
     expect(rendering).toContain(path.join('app', 'players', '[id]', 'stats.tsx'));
   });
 

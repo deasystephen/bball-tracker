@@ -1,18 +1,12 @@
 # CLAUDE.md
 
-Guidance for Claude Code in this repository. This file holds **commands, hard rules and pointers**. The as-built detail of every subsystem lives in `docs/` (index below) and loads only when a task needs it. **Keep this file under 200 lines and 40K characters**: a change that needs more than a line or two here goes into the matching `docs/` file, with a one-line pointer from here.
+Guidance for Claude Code in this repository. This file holds **commands, hard rules and pointers**. The as-built detail of every subsystem lives in `docs/` (index below) and loads only when a task needs it. **Keep this file at most 200 lines and 40K characters**: a change that needs more than a line or two here goes into the matching `docs/` file, with a one-line pointer from here.
 
 ## Project Overview
 
 Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`) that hosts the public `hooplings.com/invite/<token>` accept flow. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
 
-```
-iOS App (Expo/React Native)
-    ↓ HTTP/WebSocket
-Backend API (Node.js/Express)
-    ├── PostgreSQL (Prisma ORM)
-    └── Redis (caching)
-```
+Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Prisma, Redis cache).
 
 ## Where the detail lives
 
@@ -82,7 +76,7 @@ eas build --platform ios --profile preview          # TestFlight-style build
 eas build --platform all --profile production       # Store builds
 cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (runs the drift guard first)
 ```
-- **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand; it lists every runtime that has a binary and which build it is.
+- **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand; it lists every runtime recorded since the guard was built (1.4.0 onward) and which build it is.
 - `eas update` evaluates `app.config.js` on your machine: always pass `--environment production` and check that the CLI lists `APP_ENV` among the loaded variables, or the update ships `apiUrl: http://127.0.0.1:3000`. An update runs on the **second** launch after download.
 - Entitlements, permission purpose strings, icons and splash are native: they ship with the next `eas build`, never an OTA.
 - Use `npx eas-cli` (project dependency). The `overrides` block in `mobile/package.json` must keep `@oclif/core > minimatch ^10` scoped to `@oclif/core` only.
@@ -121,7 +115,7 @@ Layered: API routes → services → Prisma. Zod validates every input. Backend 
 Rooms and rate-limit counters are in process memory, so the API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. Do not raise capacity as a fix for load; the Redis adapter (#452) comes first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
 
 ### URLs, email and logging
-- `PUBLIC_APP_URL` (web apex) and `API_BASE_URL` (API host) are read **only** via `utils/urls.ts`. The product name in email comes only from `mailer/templates/brand.ts#APP_NAME`; the support address is `SUPPORT_EMAIL` there and in mobile `config/env.ts` (a test pins them equal).
+- `PUBLIC_APP_URL` (web apex) and `API_BASE_URL` (API host) are read **only** via `utils/urls.ts`. The product name in email comes only from `services/mailer/templates/brand.ts#APP_NAME`; the support address is `SUPPORT_EMAIL` there and in mobile `config/env.ts` (a test pins them equal).
 - Every email template ends with the shared footer and is listed in `renders` in `tests/services/mailer.test.ts`. Never format a date in a template with a bare `toLocaleDateString()`; use `utils/format-date.ts` (ECS runs in UTC).
 - Every email flag returned to a client is per send (`emails.player`, `emailSent`); a failed SES send is reported, never thrown and never silent.
 - Nothing in the app blocks a send to a bounced address; SES's suppression list is the gate and the next delivery clears the roster flag. Don't add an app-level skip.
@@ -145,8 +139,8 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Code Style
 
-- Files kebab-case; classes/types PascalCase; functions/variables camelCase; constants UPPER_SNAKE_CASE. Explicit types over `any`; async/await over raw promises; Zod for inputs.
-- **Never suppress lint errors** with `eslint-disable` and never downgrade a rule or raise `--max-warnings`: fix the code. The one exception is `declare global { namespace Express }` (see `src/api/auth/middleware.ts`). Warnings fail CI in every package.
+- Files kebab-case, except in `mobile/` where React components are `PascalCase.tsx` and hooks are `useX.ts` (named after the primary hook they export; `hooks/query-keys.ts` stays kebab-case); classes/types PascalCase; functions/variables camelCase; constants UPPER_SNAKE_CASE. Explicit types over `any`; async/await over raw promises; Zod for inputs.
+- **Never suppress lint errors** with `eslint-disable` and never downgrade a rule or raise `--max-warnings`: fix the code. The only exception is the `@typescript-eslint/no-namespace` disable on a `declare global { namespace Express }` augmentation of `Request` (today: `src/api/auth/middleware.ts` for `user`, `src/api/middleware/request-context.ts` for `requestId`). Warnings fail CI in every package.
 
 ## Testing Requirements
 
@@ -166,7 +160,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 ## Documentation Hygiene
 
 - **Keep docs in sync with code, in the same change.** Behaviour, API, schema, env-var, command and operational changes update the matching `docs/` file.
-- **This file stays small.** Add at most a one-line rule plus a pointer here; the explanation, history and test names go in the `docs/architecture/`, `docs/deployment/` or `docs/testing/` file for that subsystem (create one if none fits). Issue and audit numbers, "before this fix" history and incident narratives belong in those files or in the issue, not here. The docs-check Stop hook warns when this file exceeds 200 lines or 40K characters (the documented recommendation is under 200 lines per instruction file).
+- **This file stays small.** Add at most a one-line rule plus a pointer here; the explanation, history and test names go in the `docs/architecture/`, `docs/deployment/` or `docs/testing/` file for that subsystem (create one if none fits). Issue and audit numbers, "before this fix" history and incident narratives belong in those files or in the issue, not here. The docs-check Stop hook warns when this file exceeds 200 lines or 40K characters.
 - Forward references go stale: once referenced work lands, reword to past tense and distinguish "merged to `main`" from "deployed".
 - The Stop hook `.claude/hooks/check-docs-updated.sh` reminds when code changed without any docs update. It is advisory.
 
