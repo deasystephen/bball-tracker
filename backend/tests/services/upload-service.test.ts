@@ -31,13 +31,16 @@ jest.mock('@aws-sdk/s3-presigned-post', () => ({
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { logger } from '../../src/utils/logger';
 import {
+  assertOwnUploadUrl,
   generateAvatarUploadUrl,
   deleteAvatar,
   deletePreviousAvatar,
   discardOwnAvatar,
   isManagedAvatarUrl,
+  isOwnUploadUrl,
   MAX_AVATAR_BYTES,
 } from '../../src/services/upload-service';
+import { BadRequestError } from '../../src/utils/errors';
 
 const mockCreatePresignedPost = createPresignedPost as jest.MockedFunction<typeof createPresignedPost>;
 
@@ -176,6 +179,70 @@ describe('Upload Service', () => {
     it('swallows S3 errors (the profile update already succeeded)', async () => {
       mockSend.mockRejectedValueOnce(new Error('boom'));
       await expect(deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, null)).resolves.toBeUndefined();
+    });
+
+    describe('defence in depth behind the write-time gate (#717)', () => {
+      const a = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+      let warnSpy: jest.SpyInstance;
+      beforeEach(() => {
+        warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      });
+      afterEach(() => warnSpy.mockRestore());
+
+      it.each([
+        ['a ../ hop out of avatars/ entirely', `${BUCKET_BASE}${a}/../../any-key.jpg`],
+        ['an encoded hop out of avatars/', `${BUCKET_BASE}${a}/%2e%2e/%2e%2e/any-key.jpg`],
+        ['a key with no user segment', `${BUCKET_BASE}../loose.jpg`],
+        ['a key nested deeper than issued', `${BUCKET_BASE}${a}/extra/pic.jpg`],
+      ])('sends no DeleteObjectCommand for %s and warns without the URL', async (_label, url) => {
+        await deletePreviousAvatar(url, null);
+
+        expect(deleteObjectCalls).toHaveLength(0);
+        expect(mockSend).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/not an issued upload key/),
+          expect.not.objectContaining({ previousUrl: expect.anything() })
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('any-key');
+      });
+
+      it('still deletes a key of the issued shape', async () => {
+        await deletePreviousAvatar(`${BUCKET_BASE}${a}/pic.jpg`, null);
+        expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${a}/pic.jpg` }]);
+      });
+    });
+  });
+
+  describe('isOwnUploadUrl / assertOwnUploadUrl (#717)', () => {
+    const callerId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+    const otherId = 'ffffffff-0000-4000-8000-000000000001';
+
+    it.each([
+      ['an external https URL (WorkOS photo)', 'https://workos.example/photo.jpg'],
+      ['an external URL that merely contains our prefix text', `https://evil.example/avatars/${otherId}/pic.jpg`],
+      ['an object under the caller\'s own prefix', `${BUCKET_BASE}${callerId}/pic.jpg`],
+    ])('allows %s', (_label, url) => {
+      expect(isOwnUploadUrl(url, callerId)).toBe(true);
+      expect(() => assertOwnUploadUrl(url, callerId)).not.toThrow();
+    });
+
+    it.each([
+      ['another user\'s real avatar URL', `${BUCKET_BASE}${otherId}/pic.jpg`],
+      ['a ../ hop from the own prefix into another', `${BUCKET_BASE}${callerId}/../${otherId}/pic.jpg`],
+      ['an encoded ../ hop', `${BUCKET_BASE}${callerId}/%2e%2e/${otherId}/pic.jpg`],
+      ['a ../ hop out of avatars/', `${BUCKET_BASE}${callerId}/../../any-key.jpg`],
+      ['a prefix-sharing id', `${BUCKET_BASE}${callerId}-x/pic.jpg`],
+      ['a key nested deeper than issued', `${BUCKET_BASE}${callerId}/deeper/pic.jpg`],
+      ['the bare prefix with no file', `${BUCKET_BASE}${callerId}/`],
+    ])('rejects %s', (_label, url) => {
+      expect(isOwnUploadUrl(url, callerId)).toBe(false);
+      expect(() => assertOwnUploadUrl(url, callerId)).toThrow(BadRequestError);
+      expect(() => assertOwnUploadUrl(url, callerId)).toThrow('profilePictureUrl must be an upload issued to the caller');
+    });
+
+    it('treats null and undefined as nothing to check', () => {
+      expect(isOwnUploadUrl(null, callerId)).toBe(true);
+      expect(isOwnUploadUrl(undefined, callerId)).toBe(true);
     });
   });
 

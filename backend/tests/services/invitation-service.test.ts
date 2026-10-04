@@ -15,9 +15,11 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 
 jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
+  assertOwnUploadUrl: jest.fn(),
 }));
-import { discardOwnAvatar } from '../../src/services/upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar } from '../../src/services/upload-service';
 const mockDiscardOwnAvatar = discardOwnAvatar as jest.Mock;
+const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
 const AVATAR_URL = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/coach/photo.jpg';
 import {
   createInvitation,
@@ -1493,6 +1495,21 @@ describe('InvitationService', () => {
       expect(txMemberCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ jerseyNumber: 0 }) })
       );
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('gates a supplied profilePictureUrl on the coach\'s own upload prefix before any case runs (#717)', async () => {
+      const { coach, team } = setupCoachTeam();
+      mockAssertOwnUploadUrl.mockImplementationOnce(() => {
+        throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+      });
+
+      await expect(
+        InvitationService.addRosterPlayer(team.id, { name: 'Kid', profilePictureUrl: AVATAR_URL }, coach.id)
+      ).rejects.toBeInstanceOf(BadRequestError);
+
+      expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       expect(mockedMailerSend).not.toHaveBeenCalled();
     });
 

@@ -14,6 +14,9 @@ eng-review amendments recorded there).
   traffic to either: the first now answers 404, the second 400 (`playerId is required`). Do not
   add a tombstone for them. The unified path itself previously answered 410 — that tombstone was
   deleted deliberately. Consent model:
+  - A supplied `profilePictureUrl` is gated before any case runs: `assertOwnUploadUrl(url, coachId)`
+    rejects (400) a managed-bucket URL that is not the coach's own upload, checked on the parsed
+    path (#717, rule in `backend-services.md`, Avatar uploads).
   - **Case 1** (no email): managed `User` + `TeamMember`, one transaction. `rostered: true`.
   - **Case 2** (email with no *claimed* account — includes reusing an **unclaimed** pre-provisioned
     row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed

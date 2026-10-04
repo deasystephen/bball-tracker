@@ -15,7 +15,7 @@ import {
   ForbiddenError,
   ConflictError,
 } from '../utils/errors';
-import { deletePreviousAvatar } from './upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
 import { getPlayerTeamAccess, isGuardianOf } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 
@@ -138,6 +138,10 @@ export class PlayerService {
   static async createPlayer(data: CreatePlayerInput, caller: PlayerCaller): Promise<Player> {
     if (caller.role !== 'ADMIN' && !(await PlayerService.isRosterManager(caller.id))) {
       throw new ForbiddenError('Only administrators and team staff who manage a roster can create players');
+    }
+    // Only the caller's own upload may be stored as a managed-bucket URL (#717).
+    if (data.profilePictureUrl) {
+      assertOwnUploadUrl(data.profilePictureUrl, caller.id);
     }
 
     // Check if user with this email already exists
@@ -371,6 +375,11 @@ export class PlayerService {
       (await isGuardianOf(userId, playerId));
     if (playerId !== userId && currentUser.role !== 'ADMIN' && !isManagedByUser && !isGuardianOfPlayer) {
       throw new ForbiddenError('You can only update your own profile');
+    }
+    // Checked against the CALLER: a coach or guardian uploads under their own
+    // prefix and writes it onto the player's row (#717).
+    if (data.profilePictureUrl) {
+      assertOwnUploadUrl(data.profilePictureUrl, userId);
     }
 
     // Check if email is being changed and if it's already taken

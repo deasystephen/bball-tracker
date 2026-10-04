@@ -15,7 +15,7 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
-import { deletePreviousAvatar } from '../../services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
 import { z } from 'zod';
@@ -427,6 +427,11 @@ router.patch('/me', authenticate, async (req, res) => {
     }
 
     const { name, profilePictureUrl, notifyOnReplies } = parsed.data;
+    // A managed-bucket URL is stored only when it is the caller's own upload
+    // (#717): the stored value is what deletePreviousAvatar later deletes.
+    if (profilePictureUrl) {
+      assertOwnUploadUrl(profilePictureUrl, req.user!.id);
+    }
     // req.user does not carry the avatar; read it so the replaced S3 object
     // can be removed after the update (audit #61, best-effort).
     const previous =

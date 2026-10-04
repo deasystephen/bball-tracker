@@ -32,7 +32,7 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
-import { discardOwnAvatar } from './upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1016,6 +1016,11 @@ export class InvitationService {
     const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
     if (!canManageRoster) {
       throw new ForbiddenError("You do not have permission to manage this team's roster");
+    }
+    // Cases 1 and 2 persist the URL on the new or reused row; only the
+    // coach's own upload may be stored (#717). Case 3 discards it anyway.
+    if (data.profilePictureUrl) {
+      assertOwnUploadUrl(data.profilePictureUrl, userId);
     }
 
     const result: AddRosterPlayerResult = {
