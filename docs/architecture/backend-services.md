@@ -61,6 +61,8 @@ All limiters are `express-rate-limit` with the default in-process `MemoryStore`,
 ## Push notifications (`services/notification-service.ts`)
 `sendMessages` inspects Expo tickets immediately and schedules `checkReceipts()` ~15 min later (unref'd timer); any ticket/receipt with `DeviceNotRegistered` deletes that `PushToken` (`pruneDeadTokens`). Other receipt errors are logged only (audit #60). The jest mock in `tests/__mocks__/expo-server-sdk.js` stubs both the send and receipt APIs.
 
+The device-registration endpoints `POST` and `DELETE /auth/push-token` (schemas in `api/auth/schemas.ts`): validation, ownership, the 409 rebind rule and the deleted-account 401 are in `docs/architecture/auth-sessions.md` (Push tokens).
+
 ## Logging
 Built in #617.
 - **One JSON object per line** from `utils/logger.ts` (`console.log`; `console.error` for level `error`), picked up by the awslogs driver (`/ecs/bball-tracker-production`) and forwarded to Datadog by `infra/datadog.tf`. Query with `service:bball-tracker-api`, filter on `@level`, `@requestId`, `@userId`, `@teamId`, `@gameId`.

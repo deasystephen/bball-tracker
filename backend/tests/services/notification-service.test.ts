@@ -30,7 +30,7 @@ describe('NotificationService', () => {
     it('rejects an invalid Expo push token without touching the DB', async () => {
       await expect(
         NotificationService.registerToken('user-1', INVALID_TOKEN, 'ios')
-      ).rejects.toThrow('Invalid Expo push token');
+      ).rejects.toMatchObject({ statusCode: 400, message: 'Invalid Expo push token' });
       expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
     });
 
@@ -132,6 +132,20 @@ describe('NotificationService', () => {
         });
         expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
         expect(result.userId).toBe('user-2');
+      });
+
+      it('refuses (401) a stale rebind for a deleted account, without writing (#761)', async () => {
+        (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(
+          existingRow('previous-owner', PUSH_TOKEN_REBIND_AFTER_MS + 1000)
+        );
+        // The FOR SHARE probe on the caller's User row finds nothing live
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
+
+        await expect(
+          NotificationService.registerToken('deleted-user', VALID_TOKEN, 'ios')
+        ).rejects.toMatchObject({ statusCode: 401, message: 'User not found' });
+        expect(mockPrisma.pushToken.update).not.toHaveBeenCalled();
+        expect(mockPrisma.pushToken.upsert).not.toHaveBeenCalled();
       });
     });
   });
