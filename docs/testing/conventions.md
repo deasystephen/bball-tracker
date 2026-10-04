@@ -114,4 +114,11 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - `backend/scripts/test-players-api.sh [BASE_URL] [ACCESS_TOKEN]` exercises `/api/v1/players` against a
   local `NODE_ENV=development` backend; with no token it dev-logins as the seeded admin. Its guide,
   with the cURL equivalents and the status each one returns, is `backend/docs/players-api-testing.md`.
-  These scripts are manual only (not in CI) and must never be pointed at production.
+- `backend/scripts/test-full-flow.sh` runs League → Season → Team → roster-only player (unified
+  `POST /teams/:teamId/players`, no email so no invitation) → Game → SHOT event against a local dev
+  server, dev-logging in as the seeded admin, and checks the server-derived score. The old curl
+  walkthrough under `backend/docs/` was deleted in favour of it (#639).
+- `backend/scripts/verify-setup.sh` checks the local setup (`node_modules`, `.env`, Prisma client,
+  the two Docker containers, type check); see `backend/README.md`.
+
+These scripts are manual only (not in CI) and must never be pointed at production.

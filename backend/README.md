@@ -22,6 +22,9 @@ Node.js/TypeScript backend API for the Hooplings application.
 - PostgreSQL database (local or Docker)
 - Redis (local or Docker)
 
+`docker-compose up -d` from the repo root starts both services (PostgreSQL 18 + Redis). New to
+Docker? See [docs/setup/docker-installation.md](../docs/setup/docker-installation.md).
+
 ### Installation
 
 1. Install dependencies:
@@ -32,7 +35,10 @@ npm install
 2. Set up environment variables:
 ```bash
 cp env.example .env
-# Edit .env with your configuration
+# Replace the WORKOS_API_KEY and WORKOS_CLIENT_ID placeholders with staging keys from the
+# WorkOS dashboard. The placeholders boot, but every WorkOS login and token verification
+# fails until they are real (dev-login tokens never touch WorkOS). Every other value works
+# as-is locally.
 ```
 
 3. Set up the database:
@@ -42,14 +48,22 @@ npm run prisma:generate
 
 # Run migrations
 npm run prisma:migrate
+
+# Seed the dev-login users, teams and games (also the reset between Maestro flows)
+npx prisma db seed
 ```
 
-4. Start the development server:
+4. (Optional) Check the setup: `./scripts/verify-setup.sh` confirms `node_modules`, `.env`, the
+   generated Prisma client, the two Docker containers and a clean type check.
+
+5. Start the development server:
 ```bash
 npm run dev
 ```
 
-The server will start on `http://localhost:3000`
+The server will start on `http://localhost:3000`. `curl http://localhost:3000/health` returns
+`{"status":"ok","db":"ok","commit":"<sha>","timestamp":"<iso>"}` (`commit` is `null` locally; 503 with
+`status: "degraded"`, `db: "down"` when PostgreSQL is unreachable).
 
 ## Scripts
 
@@ -59,10 +73,14 @@ The server will start on `http://localhost:3000`
 - `npm run prisma:generate` - Generate Prisma client
 - `npm run prisma:migrate` - Run database migrations
 - `npm run prisma:studio` - Open Prisma Studio
+- `npm run db:seed` - Seed the dev-login users, teams and games
+- `npm run db:reset` - Empty the local database (refuses unless `DATABASE_URL` is local)
+- `npm run db:fresh` - Reset and seed in one step
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint errors
 - `npm run type-check` - Type check without building
 - `npm test` - Run tests
+- `npm run test:db` - Run only the real-database suites
 
 ## Project Structure
 
@@ -112,10 +130,14 @@ API routes are organized by resource under `src/api/<resource>/`. See the per-re
 
 ## Testing
 
-Run tests with:
 ```bash
-npm test
+npm test                 # Jest (unit + API integration suites)
+npm run test:db          # Only the real-database suites (needs docker-compose Postgres, migrated)
 ```
+
+Conventions (API tests, schema tests, real-database suites, migration guard) and the manual smoke
+scripts under `scripts/` are described in
+[docs/testing/conventions.md](../docs/testing/conventions.md).
 
 ## License
 
