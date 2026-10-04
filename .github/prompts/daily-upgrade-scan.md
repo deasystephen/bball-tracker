@@ -88,9 +88,16 @@ under ⏸ only):
      `<side>/package.json` patches the nested copy even when the direct parent
      (e.g. `eas-cli`, `expo`, `next`) would otherwise need a major bump. Use the
      narrowest range that satisfies the alert: `"<pkg>": "^<first_patched>"`.
-     If two vulnerable major lines coexist (e.g. js-yaml 3.x and 4.x), scope
-     the override to the parent (`"<parent>": { "<pkg>": "^x.y.z" }`) or use one
-     entry per line — never force a major jump on the nested package.
+     A bare root `"<pkg>"` entry is allowed ONLY when `npm ls <pkg> --all`
+     shows a single major line. If it shows more than one major (vulnerable or
+     not — e.g. minimatch 3.x beside 10.x, js-yaml 3.x beside 4.x), key the
+     override by the vulnerable major: `"<pkg>@^<major>": "^<first_patched>"`
+     at the root, or inside the parent that pulls it in
+     (`"<parent>": { "<pkg>@^<major>": "^x.y.z" }`). Never use a bare
+     `"<parent>": { "<pkg>": … }` either: it covers the parent's whole subtree
+     and every future major of the parent. Never force a major jump (up or
+     down) on any consumer; the gate in Step 3 checks this. Rules and worked
+     examples: `docs/automation/daily-upgrade-scan.md`, "Override shape".
      Exception: if the patched version's major differs from every installed
      copy AND the parent's peer range forbids it → ⚠ Needs attention.
   b. `first_patched` is null → **no upstream fix**. Do not touch. List under
@@ -144,6 +151,11 @@ For each side with ≥1 auto-fix item:
        mobile : npm run binary-manifest:check && npm run type-check && npm test && npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-export"
        web    : npm run lint && npm run build
      Plus for every side: `npm ci --dry-run` must succeed (lockfile in sync).
+     Plus for every package you added or changed an override for, from `<side>/`:
+       node ../.github/scripts/check-override-ranges.mjs <pkg> [<pkg> ...]
+     It must exit 0 (no consumer resolved into a different major from the
+     range it declares; `npm ls` cannot show this, an override hides it). Put
+     its output and `npm ls <pkg> --all` in the PR body.
   4. DIFF GUARD — `git diff --name-only` must contain ONLY
      `<side>/package.json` and/or `<side>/package-lock.json`.
      Anything else → abort the whole batch → ⚠ Needs attention.

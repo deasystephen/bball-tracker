@@ -60,7 +60,7 @@ each rollout briefly splits live games.
 
 | Bucket | Examples | Action |
 | --- | --- | --- |
-| **Auto-fix** | High/critical alert **with** a `first_patched` version → root `overrides` entry (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps of **JavaScript-only** packages | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
+| **Auto-fix** | High/critical alert **with** a `first_patched` version → `overrides` entry, root or version-keyed per "Override shape" below (even when `npm audit` says the fix path is a major bump of the parent); mobile caret-range patch bumps of **JavaScript-only** packages | Branch + gates + diff guard + PR + `gh pr merge --auto --squash` |
 | **Needs attention** | Alert with **no** upstream fix (e.g. `image-size` ≤2.0.2 inside Metro); a gate or the diff guard failed; snapshot missing | Reported in the log with a link; human dismisses (reason: *Risk is tolerable to this project* — GitHub offers no "no fix" reason) or decides |
 | **Defer** | Inline deferral list in the prompt (Jest 30, RN ecosystem, lottie ≥7.4, prisma generator), any major, **every binary-coupled mobile package, Expo SDK same-major patches included** | Rolling **Deferred dependency upgrades** issue (#275), body replaced daily |
 
@@ -69,24 +69,39 @@ each rollout briefly splits live games.
 A bare root entry (`"minimatch": "^3.1.3"`) applies to **every** consumer in the tree, including
 ones that declare a newer major. npm then hides the mismatch: `npm ls` prints `overridden`, never
 `invalid`, and the only symptom is a runtime `TypeError` when a consumer calls an export the old
-major lacks. Until #779 the backend forced ESLint 10 and typescript-estree (`minimatch ^10`) onto
-3.1.5, and mobile forced `@expo/fingerprint` and every `glob@10`/`glob@13` onto 5.1.9. So when a
-package has more than one major line in the tree:
+major lacks. Until #779 the backend forced ESLint 10, `@eslint/config-array` 0.23 and
+typescript-estree (all `minimatch ^10`) onto 3.1.5, and mobile forced `@expo/fingerprint` and every
+`glob@10`/`glob@13` onto 5.1.9. The rules the scan follows (`.github/prompts/daily-upgrade-scan.md`,
+Step 2a and the Step 3 gate):
 
-- **Scope to the parent that declares the old line**: `"<parent>": { "<pkg>": "^x.y.z" }`. A
-  parent rule covers the parent's **whole subtree**, so use it only when nothing below the parent
-  declares a different major (true for `glob@7`, `test-exclude`, `filelist`, the ESLint packages).
-- **Key by version when the subtree is mixed**: npm matches a key's version against each
-  consumer's *declared* range, so `"<pkg>@^5": "^5.1.8"` touches only edges that ask for 5.x. The
-  `eas-cli` block uses this (`"minimatch@^5"`) because its subtree also holds `glob@10`/`glob@13`.
-  The same form works at the root: backend's `"brace-expansion@1"` floors minimatch 3's copy and
-  leaves minimatch 10's `brace-expansion ^5` alone.
-- After `npm install`, run `npm ls <pkg> --all`. Every consumer should be on a version inside its
-  own declared range. Also compare package versions between the old and new lockfile; the change
-  should only add nested copies.
+- **A bare root `"<pkg>"` entry only when `npm ls <pkg> --all` shows one major line.** Otherwise key
+  the override by the vulnerable major: `"<pkg>@^<major>": "^<patched>"`, at the root or inside the
+  parent that pulls the copy in.
+- **No bare parent rule (`"<parent>": { "<pkg>": … }`).** It covers the parent's whole subtree and
+  every future major of the parent, so it pins consumers that ask for something else. ESLint shows
+  why: mobile's ESLint 9 declares `minimatch ^3.1.5`, but backend's `eslint@10` and
+  `@eslint/config-array@0.23` declare `^10`. A bare `"eslint"` rule written for one would break
+  the other, or break mobile at its next ESLint major. Jest 30 does the same through
+  `test-exclude@7` → `glob@10` → `minimatch ^9`.
+- **How a version key matches.** npm's matcher is `semver.intersects(<declared range>, <key range>)`,
+  not a subset test. `"minimatch@^5"` therefore matches every consumer whose range *overlaps* 5.x:
+  `5.1.2`, `^5.0.1`, but also `^3 || ^5`, `>=3` or `*`. A floor inside the key's own major
+  (`"^5.1.8"`) is safe only because each overlapping range also admits that major. Never key one
+  major and point it at another.
+- **Don't add inert entries.** If every consumer of the old line already resolves to a patched
+  version with no override, there is nothing to add. #779 removed eleven such entries.
+- **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
+  from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
+  into a different major from the range it declares, the case `npm ls` hides. It lists, but
+  passes, a same-major floor such as eas-cli's exact `5.1.2` raised to 5.1.9. Also compare the old
+  and new lockfiles: an override change should not move unrelated versions.
 
-The `@oclif/core > minimatch ^10` block in `mobile/package.json` is separate and stays as it is
-(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning).
+Current minimatch overrides: mobile's `"eas-cli": { "minimatch@^5": "^5.1.8" }` floors eas-cli's
+exact `5.1.2` pin. It is version-keyed because eas-cli's subtree also holds `glob@10`/`glob@13`,
+which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and stays as it is
+(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning). The backend has no minimatch or
+brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
+newest 1.x release, so the old root floors were inert.
 
 ## Binary-coupled packages (#562)
 
