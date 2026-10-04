@@ -87,18 +87,33 @@ export class SesMailer implements Mailer {
 }
 
 /**
- * Log an SES failure by hash and return an error safe to log anywhere (#640).
- *
- * SES error messages routinely quote the destination (the sandbox rejection
- * ends with "...failed the check in region US-EAST-1: <address>"), and every
- * caller logs the error message. So the boundary logs the error's name and HTTP
- * status (never its message) and hands callers a replacement whose message
- * carries only the error name. The original stays reachable as `cause`.
+ * A failed SES send, safe to log or report anywhere (#640). SES error
+ * messages routinely quote the destination (the sandbox rejection ends with
+ * "...failed the check in region US-EAST-1: <address>"), so this carries only
+ * the SDK error's name and HTTP status, and deliberately has no `cause`: the
+ * original would ride along into any `captureException` or serialised log.
  */
-function sanitizeSendError(err: unknown, context: Record<string, unknown>): Error {
+export class MailSendError extends Error {
+  constructor(
+    public readonly errorName: string,
+    public readonly httpStatusCode: number | undefined
+  ) {
+    super(`SES send failed: ${errorName}`);
+    this.name = 'MailSendError';
+    Object.setPrototypeOf(this, MailSendError.prototype);
+  }
+}
+
+/**
+ * Log an SES failure by hash and return a MailSendError (#640). The boundary
+ * line is `warn`: every caller already logs the failure at `error` with its
+ * own domain ids (`Failed to send … email`), so a failed send is one
+ * error-level line, not two.
+ */
+function sanitizeSendError(err: unknown, context: Record<string, unknown>): MailSendError {
   const errorName = err instanceof Error && err.name ? err.name : 'UnknownError';
   const httpStatusCode = (err as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata
     ?.httpStatusCode;
-  logger.error('SES send failed', { ...context, errorName, httpStatusCode });
-  return new Error(`SES send failed: ${errorName}`, { cause: err });
+  logger.warn('SES send failed', { ...context, errorName, httpStatusCode });
+  return new MailSendError(errorName, httpStatusCode);
 }

@@ -152,7 +152,8 @@ describe('Public Invitation Token API', () => {
     });
 
     // #718: the SSR invite page reaches the API from one egress IP, so the
-    // global IP-keyed apiRateLimit (100/min) must not gate the lookup.
+    // global IP-keyed apiRateLimit (100/min) must not gate the lookup. Its own
+    // looser IP ceiling is exhausted in invitation-lookup-rate-limit.test.ts.
     it('exempts the lookup from the global 100/min IP limit', async () => {
       mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
 

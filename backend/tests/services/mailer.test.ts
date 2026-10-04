@@ -1,5 +1,5 @@
 import { FakeMailer, createMailer, MailSendParams } from '../../src/services/mailer';
-import { SesMailer, hashRecipient } from '../../src/services/mailer/ses-mailer';
+import { MailSendError, SesMailer, hashRecipient } from '../../src/services/mailer/ses-mailer';
 import { logger } from '../../src/utils/logger';
 import { invitationTemplate } from '../../src/services/mailer/templates/invitation';
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
@@ -275,13 +275,22 @@ describe('SesMailer', () => {
         (err: unknown) => err as Error
       );
 
+      expect(thrown).toBeInstanceOf(MailSendError);
       expect(thrown.message).toBe('SES send failed: MessageRejected');
-      expect(thrown.message).not.toContain('player@example.com');
-      expect(thrown.cause).toBe(sesError);
+      expect(thrown).toMatchObject({ errorName: 'MessageRejected', httpStatusCode: 400 });
+      // No `cause`: nothing that serialises the error can reach the SES text.
+      expect(thrown.cause).toBeUndefined();
+      const ownProps = Object.fromEntries(
+        Object.getOwnPropertyNames(thrown).map((key) => [key, (thrown as unknown as Record<string, unknown>)[key]])
+      );
+      expect(JSON.stringify(thrown)).not.toContain('player@example.com');
+      expect(JSON.stringify(ownProps)).not.toContain('player@example.com');
 
-      const errorSpy = spies[3];
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      const [msg, ctx] = errorSpy.mock.calls[0] as [string, Record<string, unknown>];
+      // One boundary line at warn; the caller owns the error-level line.
+      const [warnSpy, errorSpy] = [spies[2], spies[3]];
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [msg, ctx] = warnSpy.mock.calls[0] as [string, Record<string, unknown>];
       expect(msg).toBe('SES send failed');
       expect(ctx).toEqual(
         expect.objectContaining({
@@ -300,16 +309,16 @@ describe('SesMailer', () => {
 
   it('names a non-Error SES rejection UnknownError', async () => {
     sesModule.__mockSend.mockRejectedValueOnce('boom');
-    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     try {
       await expect(
         new SesMailer({ region: 'us-east-1', fromAddress: 'x@y.com' }).send(makeParams())
       ).rejects.toThrow('SES send failed: UnknownError');
-      expect(errorSpy.mock.calls[0][1]).toEqual(
+      expect(warnSpy.mock.calls[0][1]).toEqual(
         expect.objectContaining({ errorName: 'UnknownError', httpStatusCode: undefined })
       );
     } finally {
-      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 

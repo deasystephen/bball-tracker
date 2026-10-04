@@ -106,9 +106,9 @@ AWS places the account **under review at 5% bounces or 0.1% complaints** and **p
    it as abuse and review that account's `POST /teams/:teamId/players` and
    `POST /teams/:teamId/invitations` requests in Datadog. There is no operator tool to suspend an
    account. The brakes are automatic (#715): `inviteRateLimit` caps one account at 60 of those
-   requests an hour (429 `Too many invitations sent`), and a Resend to the same player within 2
-   minutes of the previous invitation is refused (429 `resend_cooldown`, logged as
-   `Invitation resend refused (cooldown)`). An account repeatedly hitting either shows up as
+   requests an hour, guardian invites included (429 `Too many invitations sent`), and a Resend or
+   re-add to the same address within 2 minutes of the previous invitation is refused (429
+   `resend_cooldown`, logged as `Invitation resend refused (cooldown)`). An account repeatedly hitting either shows up as
    `HTTP request` lines with `statusCode:429` and its `userId`.
 
 If the account is under review, answer the AWS case with the facts in
@@ -178,8 +178,9 @@ different address.
    aws sesv2 delete-suppressed-destination --region us-east-1 --email-address '<address>'
    ```
 3. **Ask the coach to press Resend.** When the message is delivered, the delivery event clears
-   the flag on the roster. There is no database step. A Resend within 2 minutes of the previous
-   invitation to that player is refused with "Try again in N seconds" (#715); waiting is the fix.
+   the flag on the roster. There is no database step. A Resend to the same address within 2
+   minutes of the previous invitation is refused with "Try again in N seconds" (#715); waiting is
+   the fix. A corrected address is not held back.
 
 If it bounces again, the address is wrong; the coach needs a different one. If the reason was
 `COMPLAINT`, do not remove it: that person asked not to receive the mail.

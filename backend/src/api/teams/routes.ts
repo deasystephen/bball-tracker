@@ -17,7 +17,14 @@ import {
   addStaffSchema,
   updateStaffRoleSchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError, DetailedError } from '../../utils/errors';
+import {
+  AppError,
+  BadRequestError,
+  NotFoundError,
+  ForbiddenError,
+  PaymentRequiredError,
+  DetailedError,
+} from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema, inviteGuardianSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
@@ -241,8 +248,14 @@ router.post('/:teamId/players', inviteRateLimit, validateUuidParams('teamId'), a
       invitation: result.invitation && omitToken(result.invitation),
     });
   } catch (error) {
-    logger.error('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
-    if (
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    const log = error instanceof AppError ? logger.warn : logger.error;
+    log('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof DetailedError) {
+      // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
+      res.status(error.statusCode).json(error.body());
+    } else if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -283,7 +296,10 @@ router.post('/:teamId/invitations', inviteRateLimit, validateUuidParams('teamId'
       emailSent,
     });
   } catch (error) {
-    logger.error('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    const log = error instanceof AppError ? logger.warn : logger.error;
+    log('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof DetailedError) {
       // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
       res.status(error.statusCode).json(error.body());
@@ -306,6 +322,7 @@ router.post('/:teamId/invitations', inviteRateLimit, validateUuidParams('teamId'
  */
 router.post(
   '/:teamId/members/:playerId/guardians',
+  inviteRateLimit,
   validateUuidParams('teamId', 'playerId'),
   async (req, res) => {
     try {

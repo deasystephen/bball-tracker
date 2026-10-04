@@ -35,7 +35,8 @@ tombstoned as described next and the response says `erased: false`. In ONE trans
   best-effort), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
   `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
   role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
-  each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`),
+  each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`), the
+  `recipientHash` (hash of the address an invitation went to, #715) on every team invitation addressed to them,
   pending guardian invitations addressed to them (→ `EXPIRED`), and the email on **every**
   guardian invitation that carried it (overwritten with `deleted-<id>@invalid`). A self-serve
   coach's personal league is renamed to `Former coach's teams` if it still holds teams, or

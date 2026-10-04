@@ -52,11 +52,12 @@ const INVITATION_LOOKUP_RE = /^\/invitations\/by-token\/[^/]+\/?$/;
 /**
  * Requests the global IP-keyed limiter does not count (#718): only the public
  * invitation lookup. `hooplings.com/invite/<token>` renders server-side, so
- * every lookup arrives from the web server's egress IP; it has its own
- * token-keyed limiter (`invitationTokenRateLimit`), and an IP budget here
- * would turn a busy minute into "Invitation Not Found" for every visitor.
- * The accept POST stays under the IP limit: the browser calls it directly.
- * `req.path` is relative to the `/api/v1` mount point.
+ * every lookup arrives from the web server's egress IP, and 100/min would
+ * turn a busy minute into "Invitation Not Found" for every visitor. The
+ * lookup has its own looser IP ceiling (`invitationLookupIpRateLimit`) and
+ * the token-keyed `invitationTokenRateLimit` instead. The accept POST stays
+ * under the global limit: the browser calls it directly. `req.path` is
+ * relative to the `/api/v1` mount point.
  */
 export function skipGlobalApiLimit(req: Request): boolean {
   return req.method === 'GET' && INVITATION_LOOKUP_RE.test(req.path);
@@ -103,6 +104,24 @@ export function invitationTokenKey(req: Request): string {
 }
 
 /**
+ * Per-IP ceiling for the public invitation lookup (#718 review). The token
+ * key alone lets a caller loop random tokens past every limit, each one a
+ * database read, so the lookup keeps an IP budget too. It is far looser than
+ * the global 100/min because the web server renders every invite page from
+ * one egress IP: 600 per 15 minutes is a team of 40 opening their links
+ * fifteen times over, and still bounds a token-guessing loop.
+ */
+export const INVITATION_LOOKUP_IP_MAX_PER_15_MIN = 600;
+
+export const invitationLookupIpRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: INVITATION_LOOKUP_IP_MAX_PER_15_MIN,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many invitation lookups, please try again later' },
+});
+
+/**
  * Rate limit for the unauthenticated invitation lookup, keyed by token.
  * 30 requests per 15 minutes per token (the page is fetched once per view).
  */
@@ -132,19 +151,23 @@ export const calendarFeedRateLimit = rateLimit({
 });
 
 /**
- * Key for the authenticated export routes: the caller, not the IP.
- *
- * Exports are served to signed-in users only, and a team on shared gym Wi-Fi
- * shares one egress IP, so the budget is per account. The IP is the fallback
- * for the (unreachable) case of no `req.user`.
+ * Key generator for authenticated routes: the caller, not the IP. A team on
+ * shared gym Wi-Fi shares one egress IP, so these budgets are per account.
+ * The IP is the fallback for the (unreachable) case of no `req.user`. Each
+ * limiter gets its own prefix so two budgets never share a counter.
  */
-export function exportUserKey(req: Request): string {
-  const userId = req.user?.id;
-  if (typeof userId === 'string' && userId.length > 0) {
-    return `export-user:${userId}`;
-  }
-  return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+function userKey(prefix: string): (req: Request) => string {
+  return (req) => {
+    const userId = req.user?.id;
+    if (typeof userId === 'string' && userId.length > 0) {
+      return `${prefix}:${userId}`;
+    }
+    return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+  };
 }
+
+/** Key for the authenticated export routes. */
+export const exportUserKey = userKey('export-user');
 
 /**
  * Rate limit shared by the three stats export routes (per-game CSV, per-game
@@ -165,28 +188,19 @@ export const exportRateLimit = rateLimit({
   message: { error: 'Too many export requests, please try again later' },
 });
 
-/**
- * Key for the authenticated email-sending roster routes: the caller, not the
- * IP. Same shape as `exportUserKey` with its own prefix, so the two budgets
- * never share a counter.
- */
-export function inviteUserKey(req: Request): string {
-  const userId = req.user?.id;
-  if (typeof userId === 'string' && userId.length > 0) {
-    return `invite-user:${userId}`;
-  }
-  return `ip:${ipKeyGenerator(req.ip ?? '')}`;
-}
+/** Key for the authenticated email-sending roster routes. */
+export const inviteUserKey = userKey('invite-user');
 
 /**
  * Rate limit for the routes that can end in an invitation email (#715):
- * `POST /teams/:teamId/invitations` (create and Resend) and
+ * `POST /teams/:teamId/invitations` (create and Resend),
  * `POST /teams/:teamId/players` (unified Add Player, which may also invite a
- * guardian). 60 per hour per user: a coach entering a full roster with
- * guardians in one sitting uses well under half, while a looped Resend from
- * one account is capped at 60 branded emails an hour. The per-recipient
- * resend cooldown in `invitation-service.ts` bounds each address on top.
- * Mounted after `authenticate`, so `req.user` is set.
+ * guardian) and `POST /teams/:teamId/members/:playerId/guardians`. 60 per
+ * hour per user, shared: a coach entering a full roster with guardians in one
+ * sitting uses well under half, while a looping account is capped at 60
+ * branded emails an hour. The per-recipient resend cooldown in
+ * `invitation-service.ts` bounds each address on top. Mounted after
+ * `authenticate`, so `req.user` is set.
  */
 export const inviteRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,

@@ -211,6 +211,12 @@ export class AccountService {
         where: { playerId: userId, status: 'PENDING' },
         data: { status: 'CANCELLED' },
       });
+      // The invitation rows outlive the account; the hash of the address they
+      // were sent to (#715 resend cooldown) does not.
+      await tx.teamInvitation.updateMany({
+        where: { playerId: userId, recipientHash: { not: null } },
+        data: { recipientHash: null },
+      });
 
       const emailMatch: Prisma.GuardianInvitationWhereInput[] = row.email
         ? [{ invitedEmail: emailEquals(row.email) }]

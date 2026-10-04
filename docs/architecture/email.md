@@ -63,9 +63,12 @@ mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQ
 - **Send failures are logged by hash at the mailer boundary (#640).** SES error messages quote
   the destination (the sandbox rejection ends with `...failed the check in region US-EAST-1:
   <address>`), so `SesMailer.send` catches the SDK error, logs `SES send failed` with `template`,
-  `toHash`, `errorName` and `httpStatusCode`, and rethrows `SES send failed: <errorName>` with the
-  original as `cause`. The callers' `Failed to send … email` lines therefore carry no address.
-  No `SesMailer` line logs the address at any level, `debug` included.
+  `toHash`, `errorName` and `httpStatusCode` at **warn**, and rethrows a `MailSendError`
+  (`SES send failed: <errorName>`, with `errorName` and `httpStatusCode` as fields). It has **no
+  `cause`**: the original would ride along into any `captureException` or serialised log. The
+  caller's `Failed to send … email` line, with its domain ids, is the one `error`-level line per
+  failed send, and it carries no address. No `SesMailer` line logs the address at any level,
+  `debug` included.
 - **Announcement email goes to the same audience as push** — players, staff and guardians of
   players, deduplicated, minus the author — through `utils/team-audience.ts#getTeamAudienceUserIds`,
   which `NotificationService.sendToTeam` uses too (before #449 email went to players only). Sends

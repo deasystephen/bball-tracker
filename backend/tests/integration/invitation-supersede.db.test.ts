@@ -19,6 +19,7 @@ import prisma from '../../src/models';
 import { InvitationService, INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/invitation-service';
 import { ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
+import { hashRecipient } from '../../src/services/mailer/ses-mailer';
 
 jest.setTimeout(30000);
 
@@ -44,7 +45,7 @@ async function mkInvitee(local: string): Promise<string> {
 
 async function mkInvitation(
   playerId: string,
-  opts: { status: 'PENDING' | 'EXPIRED'; createdAt: Date; expiresAt: Date }
+  opts: { status: 'PENDING' | 'EXPIRED' | 'CANCELLED'; createdAt: Date; expiresAt: Date; recipientHash?: string | null }
 ): Promise<string> {
   const row = await prisma.teamInvitation.create({
     data: {
@@ -199,6 +200,53 @@ describe('resend cooldown (#715)', () => {
     expect(rows.find((r) => r.id === liveId)?.status).toBe('EXPIRED');
     expect(rows.find((r) => r.id === invitation.id)).toEqual(
       expect.objectContaining({ status: 'PENDING', jerseyNumber: 23 })
+    );
+  });
+
+  it('does not hold back a resend to a corrected address, and records the new hash', async () => {
+    const playerId = await mkInvitee('fixedaddr');
+    const liveId = await mkInvitation(playerId, {
+      status: 'PENDING',
+      createdAt: new Date(Date.now() - 30 * 1000),
+      expiresAt: new Date(Date.now() + 7 * DAY_MS),
+      recipientHash: hashRecipient(`typo.${RUN}@example.test`),
+    });
+
+    const { invitation } = await InvitationService.createInvitation(
+      teamId,
+      { playerId, supersede: true },
+      coachId
+    );
+
+    const created = await prisma.teamInvitation.findUniqueOrThrow({
+      where: { id: invitation.id },
+      select: { recipientHash: true },
+    });
+    expect(created.recipientHash).toBe(hashRecipient(`fixedaddr.${RUN}@example.test`));
+    expect((await rowsFor(playerId)).find((r) => r.id === liveId)?.status).toBe('EXPIRED');
+  });
+
+  it('a resend after a cancel inherits nothing from older rows (#678 review)', async () => {
+    const playerId = await mkInvitee('cancelled');
+    await mkInvitation(playerId, {
+      status: 'EXPIRED',
+      createdAt: new Date(Date.now() - 60 * DAY_MS),
+      expiresAt: new Date(Date.now() - 53 * DAY_MS),
+    });
+    await mkInvitation(playerId, {
+      status: 'CANCELLED',
+      createdAt: new Date(Date.now() - DAY_MS),
+      expiresAt: new Date(Date.now() + 6 * DAY_MS),
+    });
+
+    const { invitation } = await InvitationService.createInvitation(
+      teamId,
+      { playerId, supersede: true },
+      coachId
+    );
+
+    expect((await rowsFor(playerId)).find((r) => r.id === invitation.id)).toEqual(
+      expect.objectContaining({ jerseyNumber: null, position: null, message: null })
     );
   });
 });

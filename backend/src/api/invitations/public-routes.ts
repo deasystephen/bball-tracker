@@ -17,6 +17,7 @@ import { GuardianService } from '../../services/guardian-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
 import {
+  invitationLookupIpRateLimit,
   invitationTokenRateLimit,
   writeRateLimit,
 } from '../middleware/rate-limit';
@@ -51,11 +52,13 @@ async function resolveByKind<T, G>(
  * Returns invitation details for display on the web landing page.
  * Intentionally returns a limited view (no player PII).
  *
- * Rate-limited per token, not per IP: the web invite page fetches this
- * server-side from one egress IP (audit #36). The accept route below stays on
- * the IP-keyed writeRateLimit because the browser calls it directly.
+ * Rate-limited per token (audit #36) plus a loose per-IP ceiling (#718): the
+ * web invite page fetches this server-side from one egress IP, so it is
+ * exempt from the global 100/min IP limit, but a loop of random tokens still
+ * hits invitationLookupIpRateLimit. The accept route below stays on the
+ * IP-keyed writeRateLimit because the browser calls it directly.
  */
-router.get('/by-token/:token', invitationTokenRateLimit, async (req, res) => {
+router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
 
   if (!validateToken(token as string)) {

@@ -7,6 +7,7 @@ import { GuardianService } from '../../src/services/guardian-service';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
+import { hashRecipient, MailSendError } from '../../src/services/mailer/ses-mailer';
 
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
@@ -254,7 +255,7 @@ describe('InvitationService', () => {
       expect(result.emailSent).toBe(false);
     });
 
-    // #640: SesMailer rethrows a sanitized error (name only, original as
+    // #640: SesMailer rethrows a MailSendError (name and status only, no
     // `cause`), so the caller's failure line carries no address.
     it('logs a failed send without the recipient address', async () => {
       const coach = createCoach();
@@ -277,12 +278,7 @@ describe('InvitationService', () => {
         player: { id: player.id, name: player.name, email: player.email },
         invitedBy: { id: coach.id, name: coach.name, email: coach.email },
       });
-      const sesError = new Error(
-        'Email address is not verified. The following identities failed the check in region US-EAST-1: kid.parent@example.test'
-      );
-      mockedMailerSend.mockRejectedValueOnce(
-        new Error('SES send failed: MessageRejected', { cause: sesError })
-      );
+      mockedMailerSend.mockRejectedValueOnce(new MailSendError('MessageRejected', 400));
       const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
       try {
         const result = await InvitationService.createInvitation(
@@ -1708,7 +1704,7 @@ describe('InvitationService', () => {
         cb({
           user: { create: txUserCreate },
           teamMember: { findUnique: txMemberFind, create: txMemberCreate },
-          teamInvitation: { updateMany: txInvUpdateMany, create: txInvCreate },
+          teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: txInvUpdateMany, create: txInvCreate },
         })
       );
 
@@ -1761,6 +1757,7 @@ describe('InvitationService', () => {
             }),
           },
           teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null), // no earlier invitation: no cooldown (#715)
             updateMany: jest.fn().mockResolvedValue({ count: 0 }),
             create: jest
               .fn()
@@ -1798,6 +1795,7 @@ describe('InvitationService', () => {
             }),
           },
           teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null), // no earlier invitation: no cooldown (#715)
             updateMany: jest.fn().mockResolvedValue({ count: 0 }),
             create: jest
               .fn()
@@ -1840,6 +1838,7 @@ describe('InvitationService', () => {
             }),
           },
           teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null), // no earlier invitation: no cooldown (#715)
             updateMany: jest.fn().mockResolvedValue({ count: 0 }),
             create: jest
               .fn()
@@ -2095,6 +2094,7 @@ describe('InvitationService', () => {
             }),
           },
           teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null), // no earlier invitation: no cooldown (#715)
             updateMany: jest.fn().mockResolvedValue({ count: 0 }),
             create: jest
               .fn()
@@ -2211,13 +2211,20 @@ describe('InvitationService', () => {
         createTeamMember({ teamId: team.id, playerId: managedPlayer.id })
       );
       // tx findFirst calls, in order: the ACCEPTED-row guard; the newest row
-      // for the cooldown (#715, older than the window here); the superseded
-      // row whose coach-set fields the replacement must inherit.
+      // for the pair (cooldown #715, older than the window here), which is
+      // the PENDING row being superseded and the source of the inherited
+      // coach-set fields.
       const txFindFirst = jest
         .fn()
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ createdAt: new Date(Date.now() - 10 * 60 * 1000) })
-        .mockResolvedValueOnce({ jerseyNumber: 23, position: 'Guard', message: 'Welcome!' });
+        .mockResolvedValueOnce({
+          status: 'PENDING',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+          recipientHash: null,
+          jerseyNumber: 23,
+          position: 'Guard',
+          message: 'Welcome!',
+        });
       const txExpire = jest.fn().mockResolvedValue({ count: 1 });
       const txCreate = jest.fn().mockResolvedValue({
         ...fresh,
@@ -2270,8 +2277,14 @@ describe('InvitationService', () => {
       const txFindFirst = jest
         .fn()
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ createdAt: new Date(Date.now() - 10 * 60 * 1000) })
-        .mockResolvedValueOnce({ jerseyNumber: 23, position: 'Guard', message: null });
+        .mockResolvedValueOnce({
+          status: 'PENDING',
+          createdAt: new Date(Date.now() - 10 * 60 * 1000),
+          recipientHash: null,
+          jerseyNumber: 23,
+          position: 'Guard',
+          message: null,
+        });
       const txCreate = jest.fn().mockResolvedValue({
         ...fresh,
         team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
@@ -2399,15 +2412,35 @@ describe('InvitationService', () => {
       expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
     });
 
+    type LatestRow = {
+      status: 'PENDING' | 'EXPIRED' | 'CANCELLED' | 'REJECTED';
+      createdAt: Date;
+      recipientHash: string | null;
+      jerseyNumber: number | null;
+      position: string | null;
+      message: string | null;
+    };
+    const PLAYER_EMAIL = 'jane@example.test';
+    const latestRow = (overrides: Partial<LatestRow>): LatestRow => ({
+      status: 'PENDING',
+      createdAt: new Date(Date.now() - 8 * 86400000),
+      recipientHash: hashRecipient(PLAYER_EMAIL),
+      jerseyNumber: 23,
+      position: 'Guard',
+      message: 'Welcome!',
+      ...overrides,
+    });
+
     /**
      * Wire a supersede for a rostered managed player. The tx `findFirst` is
-     * dispatched on its filter: the ACCEPTED guard, the cooldown's newest row
-     * (no status filter, #715) and the inheritance source (#678).
+     * dispatched on its filter: the ACCEPTED guard, or the newest row for the
+     * pair (no status filter), which drives the cooldown (#715) and is the
+     * only inheritance source (#678).
      */
     const setupSupersede = (opts: {
       outerPending: ReturnType<typeof createInvitation> | null;
-      latestCreatedAt: Date | null;
-      inheritFrom: { jerseyNumber: number | null; position: string | null; message: string | null } | null;
+      latest: LatestRow | null;
+      email?: string;
     }): {
       team: ReturnType<typeof createTeam>;
       coach: ReturnType<typeof createCoach>;
@@ -2422,7 +2455,7 @@ describe('InvitationService', () => {
       const team = createTeam({ seasonId: season.id });
       const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
       const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
-      const player = { ...createPlayer({ email: 'jane@example.test' }), workosUserId: null };
+      const player = { ...createPlayer({ email: opts.email ?? PLAYER_EMAIL }), workosUserId: null };
       const fresh = createInvitation({ teamId: team.id, playerId: player.id });
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
@@ -2432,13 +2465,9 @@ describe('InvitationService', () => {
         createTeamMember({ teamId: team.id, playerId: player.id })
       );
       (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(opts.outerPending);
-      const txFindFirst = jest.fn().mockImplementation(async (args: { where: { status?: unknown } }) => {
-        if (args.where.status === 'ACCEPTED') return null;
-        if (args.where.status === undefined) {
-          return opts.latestCreatedAt ? { createdAt: opts.latestCreatedAt } : null;
-        }
-        return opts.inheritFrom;
-      });
+      const txFindFirst = jest.fn().mockImplementation(async (args: { where: { status?: unknown } }) =>
+        args.where.status === 'ACCEPTED' ? null : opts.latest
+      );
       const txExpire = jest.fn().mockResolvedValue({ count: opts.outerPending ? 1 : 0 });
       const txCreate = jest.fn().mockImplementation(async (args: { data: Record<string, unknown> }) => ({
         ...fresh,
@@ -2467,8 +2496,7 @@ describe('InvitationService', () => {
       });
       const { team, coach, player, txFindFirst, txExpire, txCreate } = setupSupersede({
         outerPending: lapsed,
-        latestCreatedAt: new Date(Date.now() - 8 * 86400000),
-        inheritFrom: { jerseyNumber: 23, position: 'Guard', message: 'Welcome!' },
+        latest: latestRow({ status: 'PENDING' }),
       });
       const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
       try {
@@ -2481,12 +2509,18 @@ describe('InvitationService', () => {
 
         // No lazy markExpired outside the transaction
         expect(mockPrisma.teamInvitation.updateMany).not.toHaveBeenCalled();
-        // Inheritance reads the newest PENDING-or-EXPIRED row, never
-        // ACCEPTED/REJECTED/CANCELLED
+        // One read of the newest row for the pair, any status
         expect(txFindFirst).toHaveBeenCalledWith({
-          where: { teamId: team.id, playerId: player.id, status: { in: ['PENDING', 'EXPIRED'] } },
+          where: { teamId: team.id, playerId: player.id },
           orderBy: { createdAt: 'desc' },
-          select: { jerseyNumber: true, position: true, message: true },
+          select: {
+            status: true,
+            createdAt: true,
+            recipientHash: true,
+            jerseyNumber: true,
+            position: true,
+            message: true,
+          },
         });
         expect(txExpire).toHaveBeenCalledWith({
           where: { teamId: team.id, playerId: player.id, status: 'PENDING' },
@@ -2494,7 +2528,12 @@ describe('InvitationService', () => {
         });
         expect(txCreate).toHaveBeenCalledWith(
           expect.objectContaining({
-            data: expect.objectContaining({ jerseyNumber: 23, position: 'Guard', message: 'Welcome!' }),
+            data: expect.objectContaining({
+              jerseyNumber: 23,
+              position: 'Guard',
+              message: 'Welcome!',
+              recipientHash: hashRecipient(PLAYER_EMAIL),
+            }),
           })
         );
         expect(infoSpy).toHaveBeenCalledWith(
@@ -2509,8 +2548,7 @@ describe('InvitationService', () => {
     it('a bare resend after the player already flipped the row to EXPIRED still inherits (#678)', async () => {
       const { team, coach, player, txExpire, txCreate } = setupSupersede({
         outerPending: null, // acceptInvitationByToken already marked it EXPIRED
-        latestCreatedAt: new Date(Date.now() - 8 * 86400000),
-        inheritFrom: { jerseyNumber: 0, position: 'Center', message: 'See you Monday' },
+        latest: latestRow({ status: 'EXPIRED', jerseyNumber: 0, position: 'Center', message: 'See you Monday' }),
       });
 
       await InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true }, coach.id);
@@ -2522,6 +2560,23 @@ describe('InvitationService', () => {
         })
       );
     });
+
+    it.each(['CANCELLED', 'REJECTED'] as const)(
+      'a bare resend after the newest row was %s inherits nothing (#678 review)',
+      async (status) => {
+        const { team, coach, player, txCreate } = setupSupersede({
+          outerPending: null,
+          latest: latestRow({ status, createdAt: new Date(Date.now() - 10 * 60 * 1000) }),
+        });
+
+        await InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true }, coach.id);
+
+        const data = (txCreate.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+        expect(data.jerseyNumber).toBeUndefined();
+        expect(data.position).toBeUndefined();
+        expect(data.message).toBeUndefined();
+      }
+    );
 
     it('a plain (non-supersede) create still lazily expires a lapsed row before inserting', async () => {
       const coach = createCoach();
@@ -2551,13 +2606,12 @@ describe('InvitationService', () => {
       });
     });
 
-    // #715: one email per player per cooldown window through Resend.
+    // #715: one email per address per cooldown window.
     it('refuses a resend inside the cooldown with 429, expiring nothing and sending nothing (#715)', async () => {
       const live = createInvitation({ expiresAt: new Date(Date.now() + 86400000) });
       const { team, coach, player, txExpire, txCreate } = setupSupersede({
         outerPending: live,
-        latestCreatedAt: new Date(Date.now() - 30 * 1000),
-        inheritFrom: { jerseyNumber: 5, position: null, message: null },
+        latest: latestRow({ createdAt: new Date(Date.now() - 30 * 1000) }),
       });
       const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
       try {
@@ -2592,12 +2646,63 @@ describe('InvitationService', () => {
       }
     });
 
+    it('applies the cooldown to a pre-#715 row that has no recipient hash', async () => {
+      const { team, coach, player } = setupSupersede({
+        outerPending: createInvitation({ expiresAt: new Date(Date.now() + 86400000) }),
+        latest: latestRow({ createdAt: new Date(Date.now() - 30 * 1000), recipientHash: null }),
+      });
+
+      await expect(
+        InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true }, coach.id)
+      ).rejects.toBeInstanceOf(ResendCooldownError);
+    });
+
+    // Fix email address → Save & send invitation: the previous mail went to
+    // the old (wrong) address, so the corrected one is not held back.
+    it('skips the cooldown when the player address changed since the newest row was sent (#715 review)', async () => {
+      const live = createInvitation({ expiresAt: new Date(Date.now() + 86400000) });
+      const { team, coach, player, txExpire, txCreate } = setupSupersede({
+        outerPending: live,
+        email: 'jane.fixed@example.test',
+        latest: latestRow({ createdAt: new Date(Date.now() - 30 * 1000), recipientHash: hashRecipient('jane@exmaple.test') }),
+      });
+
+      const result = await InvitationService.createInvitation(
+        team.id,
+        { playerId: player.id, supersede: true },
+        coach.id
+      );
+
+      expect(result.emailSent).toBe(true);
+      expect(txExpire).toHaveBeenCalled();
+      expect(txCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ recipientHash: hashRecipient('jane.fixed@example.test') }),
+        })
+      );
+      expect(mockedMailerSend).toHaveBeenCalledWith(expect.objectContaining({ to: 'jane.fixed@example.test' }));
+    });
+
+    it('treats a case-only address change as the same recipient', async () => {
+      const { team, coach, player } = setupSupersede({
+        outerPending: createInvitation({ expiresAt: new Date(Date.now() + 86400000) }),
+        email: 'Jane@Example.TEST',
+        latest: latestRow({ createdAt: new Date(Date.now() - 30 * 1000) }),
+      });
+
+      await expect(
+        InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true }, coach.id)
+      ).rejects.toBeInstanceOf(ResendCooldownError);
+    });
+
     it('allows a resend once the cooldown has passed (#715)', async () => {
       const live = createInvitation({ expiresAt: new Date(Date.now() + 86400000) });
       const { team, coach, player, txExpire, txCreate } = setupSupersede({
         outerPending: live,
-        latestCreatedAt: new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 1000),
-        inheritFrom: { jerseyNumber: 5, position: null, message: null },
+        latest: latestRow({
+          createdAt: new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 1000),
+          jerseyNumber: 5,
+        }),
       });
 
       const result = await InvitationService.createInvitation(
@@ -2615,20 +2720,87 @@ describe('InvitationService', () => {
     });
 
     it('the cooldown counts the newest row of any status, so a cancel does not reset it (#715)', async () => {
-      const { team, coach, player, txFindFirst } = setupSupersede({
+      const { team, coach, player } = setupSupersede({
         outerPending: null, // the coach cancelled the live invitation
-        latestCreatedAt: new Date(Date.now() - 10 * 1000),
-        inheritFrom: null,
+        latest: latestRow({ status: 'CANCELLED', createdAt: new Date(Date.now() - 10 * 1000) }),
       });
 
       await expect(
         InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true }, coach.id)
       ).rejects.toBeInstanceOf(ResendCooldownError);
-      expect(txFindFirst).toHaveBeenCalledWith({
-        where: { teamId: team.id, playerId: player.id },
-        orderBy: { createdAt: 'desc' },
-        select: { createdAt: true },
+    });
+
+    // #715 review: Add Player case 2 is the other expire-and-recreate path
+    // (remove a managed player, add them again with the same address).
+    it('applies the cooldown to Add Player re-adding the same address (case 2)', async () => {
+      const coach = createCoach();
+      const team = createTeam();
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const removed = { ...createPlayer({ email: PLAYER_EMAIL }), workosUserId: null, managedById: coach.id };
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(removed);
+      const txFindFirst = jest.fn().mockResolvedValue(latestRow({ status: 'CANCELLED', createdAt: new Date(Date.now() - 20 * 1000) }));
+      const txInvUpdateMany = jest.fn();
+      const txMemberCreate = jest.fn();
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+          teamMember: { findUnique: jest.fn().mockResolvedValue(null), create: txMemberCreate },
+          teamInvitation: { findFirst: txFindFirst, updateMany: txInvUpdateMany, create: jest.fn() },
+        })
+      );
+
+      await expect(
+        InvitationService.addRosterPlayer(team.id, { name: 'Jane', playerEmail: PLAYER_EMAIL }, coach.id)
+      ).rejects.toBeInstanceOf(ResendCooldownError);
+      expect(txFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: team.id, playerId: removed.id }, orderBy: { createdAt: 'desc' } })
+      );
+      expect(txInvUpdateMany).not.toHaveBeenCalled();
+      expect(txMemberCreate).not.toHaveBeenCalled();
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('Add Player case 2 for a different address than the last invitation is not held back', async () => {
+      const coach = createCoach();
+      const team = createTeam();
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const removed = { ...createPlayer({ email: PLAYER_EMAIL }), workosUserId: null, managedById: coach.id };
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(removed);
+      const txInvCreate = jest.fn().mockResolvedValue({
+        ...createInvitation({ teamId: team.id, playerId: removed.id }),
+        team: { id: team.id, name: team.name, season: null },
+        player: { id: removed.id, name: removed.name, email: removed.email },
+        invitedBy: { id: coach.id, name: coach.name, email: coach.email },
       });
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({
+          user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+          teamMember: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue(createTeamMember({ teamId: team.id, playerId: removed.id })),
+          },
+          teamInvitation: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(latestRow({ status: 'CANCELLED', createdAt: new Date(Date.now() - 20 * 1000), recipientHash: hashRecipient('other@example.test') })),
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            create: txInvCreate,
+          },
+        })
+      );
+
+      const result = await InvitationService.addRosterPlayer(team.id, { name: 'Jane', playerEmail: PLAYER_EMAIL }, coach.id);
+
+      expect(result.invited).toBe(true);
+      expect(txInvCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ recipientHash: hashRecipient(PLAYER_EMAIL) }) })
+      );
     });
   });
 
@@ -2688,7 +2860,7 @@ describe('InvitationService', () => {
             findUnique: jest.fn().mockResolvedValue(createTeamMember({ teamId: team.id, playerId: unclaimed.id })),
             create: txMemberCreate,
           },
-          teamInvitation: { updateMany: jest.fn(), create: txInvCreate },
+          teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn(), create: txInvCreate },
         })
       );
 
@@ -2796,7 +2968,7 @@ describe('InvitationService', () => {
         cb({
           user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
           teamMember: { findUnique: jest.fn(), create: jest.fn() },
-          teamInvitation: { updateMany: jest.fn(), create: jest.fn() },
+          teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn(), create: jest.fn() },
         })
       );
       // Case-3 fallback path (outside the aborted transaction)
@@ -2852,6 +3024,7 @@ describe('InvitationService', () => {
             }),
           },
           teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null), // no earlier invitation: no cooldown (#715)
             updateMany: txInvUpdateMany,
             create: jest.fn().mockResolvedValue(
               relationRow(
