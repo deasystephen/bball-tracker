@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build (v1.2.0; build #25 or newer, cut from `main` at or after `b14901a` / #401 — #24 and older are 1.1.0 binaries without `expo-secure-store` or the `applinks:hooplings.com` entitlement, and OTAs no longer reach them), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build on OTA runtime 1.5.0 (v1.5.0, Expo SDK 57; build #33 or newer, cut 2026-09-29 from `b408645` / #576, see `mobile/binary-manifest.json`), with the latest production OTA applied — #32 and older are 1.4.0-or-earlier binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
 **Checkboxes:** count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`; none are pre-ticked. This line states no total on purpose, so a PR that adds a section does not need to touch it.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy

@@ -115,7 +115,10 @@ definition"): at least one revision of the family must exist before Terraform ca
 service, so, in this order:
 
 1. Fill in the account-specific Secrets Manager ARNs in `infra/task-definition.json` and replace
-   `SENTRY_RELEASE_PLACEHOLDER` and the image tag (on a normal deploy CI does both).
+   its two placeholders: `IMAGE_PLACEHOLDER` (the whole `image` value) with the full ECR image
+   reference, `<account-id>.dkr.ecr.us-east-1.amazonaws.com/bball-tracker-backend:<tag>`, and
+   `SENTRY_RELEASE_PLACEHOLDER` with the git SHA the image was built from. On a normal deploy CI
+   does both (`sed` for the release, `amazon-ecs-render-task-definition` for the image).
 2. Register the first revision once, from the repository root:
 
    ```bash

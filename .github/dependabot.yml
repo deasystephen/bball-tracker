@@ -101,11 +101,14 @@ updates:
       # react-test-renderer must equal the react version exactly.
       - dependency-name: "react-test-renderer"
       # lottie-react-native is pinned by the Expo SDK (SDK 57: ~7.3.8, see
-      # expo/bundledNativeModules.json) and has native code, so it is already
-      # held by the rules above; this entry is kept so the hold survives if the
-      # SDK ever stops pinning it. The react-native >=0.84 requirement of
-      # lottie >=7.4.0 that first motivated it (PR #314, #330) has been met
-      # since the SDK 57 / RN 0.86 bump (#576); re-evaluate at each SDK bump.
+      # expo/bundledNativeModules.json) and has native code, so every version
+      # is held HERE: none of the rules above matches it (it is not in the
+      # pinned-module list, `expo-*` does not cover it, and the wildcard below
+      # ignores majors only), so this entry is the only thing stopping
+      # Dependabot from proposing a minor or patch bump that the binary cannot
+      # run. The react-native >=0.84 requirement of lottie >=7.4.0 that first
+      # motivated it (PR #314, #330) is historical since the SDK 57 / RN 0.86
+      # bump (#576); re-evaluate at each SDK bump.
       - dependency-name: "lottie-react-native"
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]

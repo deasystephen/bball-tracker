@@ -93,10 +93,13 @@ AWS places the account **under review at 5% bounces or 0.1% complaints** and **p
 2. **Find where the bounces come from.** One team with a roster of mistyped addresses looks very
    different from bounces spread across every team. In Datadog:
    `service:bball-tracker-api "SES permanent bounce recorded"`, then match the `messageId` values
-   against `"Email sent via SES"` lines, which carry `event_type` (`invitation.created`,
-   `guardian_invitation.created`, `rsvp.upserted`, `announcement.created`, `announcement.replied`)
-   and, for invitations, announcements and announcement replies, `teamId` (reply events also
-   carry `announcementId` and `replyId`).
+   against `"Email sent via SES"` lines, which carry `event_type` and the send's metadata:
+   `invitation.created`, `guardian_invitation.created`, `announcement.created` and
+   `announcement.replied` carry `teamId` (replies also `announcementId` and `replyId`);
+   `rsvp.upserted` carries `gameId` and `rsvpStatus` instead, so attribute an RSVP bounce to a
+   team through the game (`SELECT "teamId" FROM "Game" WHERE id = '<gameId>'`, or the game's
+   detail screen). The sources are the `metadata` objects passed to `mailer.send` in
+   `backend/src/services/`.
 3. **Stop the source, not the service.** Bounced addresses are already suppressed, so the rate
    recovers as normal mail is delivered. If one team keeps adding bad addresses, contact its
    coach. If the volume looks automated (many invitations from one account within minutes), treat
