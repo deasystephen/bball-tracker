@@ -703,6 +703,17 @@ export class GuardianService {
     const parentId = parent.id;
 
     return prisma.$transaction(async (tx) => {
+      // The parent was resolved outside this transaction, unlocked. Lock the
+      // row (FOR SHARE, `deletedAt IS NULL`) like push-token registration: a
+      // deletion that committed in between leaves no row and a 404, and one
+      // that has not started waits on this lock, so no Guardian link or role
+      // write ever lands on a tombstone (#643).
+      const live = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User" WHERE "id" = ${parentId} AND "deletedAt" IS NULL FOR SHARE`;
+      if (live.length === 0) {
+        throw new NotFoundError('Account not found');
+      }
+
       const { count } = await tx.guardianInvitation.updateMany({
         where: { id: invitation.id, status: 'PENDING' },
         data: { status: 'ACCEPTED', acceptedAt: new Date() },
@@ -740,7 +751,15 @@ export class GuardianService {
           tx.teamStaff.count({ where: { userId: parentId } }),
         ]);
         if (memberships === 0 && staffRows === 0) {
-          await tx.user.update({ where: { id: parentId }, data: { role: 'PARENT' } });
+          // Guarded on `deletedAt IS NULL` (#643); zero rows aborts the
+          // transaction, so the Guardian row above is rolled back with it.
+          const promoted = await tx.user.updateMany({
+            where: { id: parentId, deletedAt: null },
+            data: { role: 'PARENT' },
+          });
+          if (promoted.count === 0) {
+            throw new NotFoundError('Account not found');
+          }
         }
       }
 

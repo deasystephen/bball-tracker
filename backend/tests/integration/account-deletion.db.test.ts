@@ -35,6 +35,8 @@ import { AccountService, DELETED_USER_NAME, DELETED_LEAGUE_NAME } from '../../sr
 import { WorkOSService } from '../../src/services/workos-service';
 import { LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
 import { lastHeadCoachTeams } from '../../src/utils/permissions';
+import { PlayerService } from '../../src/services/player-service';
+import { InvitationService } from '../../src/services/invitation-service';
 
 jest.setTimeout(30000);
 
@@ -607,5 +609,95 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     expect(data.playerStats).toHaveLength(1);
     expect(data.teamMembers[0].team).toMatchObject({ id: teamActive.teamId, season: { league: { name: `ZZ-Active-${RUN}` } } });
     expect(data.user).not.toHaveProperty('workosUserId');
+  });
+});
+
+/**
+ * Writes that read the target unlocked before writing must never land on a
+ * tombstone (#643). The race is modelled by handing each write path a row
+ * that was live when it was read and is a tombstone by the time it writes.
+ */
+describe('User writes are guarded by deletedAt (#643, real Postgres)', () => {
+  /** A real tombstone: deleteAccount keeps the row because a membership survives. */
+  async function tombstone(key: string): Promise<string> {
+    const userId = await mkUser(key, 'PLAYER');
+    await prisma.teamMember.create({ data: { teamId: teamActive.teamId, playerId: userId } });
+    const result = await AccountService.deleteAccount(userId, { actorId: userId, mode: 'self' });
+    expect(result.erased).toBe(false);
+    return userId;
+  }
+
+  async function admin(key: string): Promise<string> {
+    const u = await prisma.user.create({
+      data: { name: `${key}-${RUN}`, email: `${key}.${RUN}@example.test`, role: 'ADMIN' },
+      select: { id: true },
+    });
+    ids.users[key] = u.id;
+    return u.id;
+  }
+
+  it('PATCH /players/:id by an ADMIN cannot re-populate a tombstone', async () => {
+    const tomb = await tombstone('tombEdit');
+    const adminId = await admin('adminEdit');
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: tomb } });
+
+    await expect(
+      PlayerService.updatePlayer(tomb, { name: 'Jordan Lee', email: `jordan.${RUN}@example.test` }, adminId)
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: tomb } });
+    expect(after).toMatchObject({ name: DELETED_USER_NAME, email: null, profilePictureUrl: null });
+    expect(after.updatedAt).toEqual(before.updatedAt);
+  });
+
+  it('DELETE /players/:id answers 404 for a tombstone instead of a foreign-key 500', async () => {
+    const tomb = await tombstone('tombDelete');
+    const adminId = await admin('adminDelete');
+    await prisma.teamMember.deleteMany({ where: { playerId: tomb } });
+    await prisma.announcementReply.create({
+      data: {
+        announcementId: (
+          await prisma.announcement.create({
+            data: { teamId: teamActive.teamId, authorId: ids.users.teammate, title: `Del-${RUN}`, body: 'x' },
+          })
+        ).id,
+        authorId: tomb,
+        body: `Kept-${RUN}`,
+      },
+    });
+
+    await expect(PlayerService.deletePlayer(tomb, adminId)).rejects.toBeInstanceOf(NotFoundError);
+    expect(await prisma.user.findUnique({ where: { id: tomb } })).not.toBeNull();
+  });
+
+  it('Add Player case 2 never rosters a reuse target deleted between the read and the transaction', async () => {
+    const tomb = await tombstone('tombReuse');
+    const adminId = await admin('adminReuse');
+    type CreateRostered = (
+      teamId: string,
+      data: { name: string; playerEmail?: string },
+      userId: string,
+      reuse: { id: string; managedById: string | null },
+      email: string
+    ) => Promise<unknown>;
+    const createRostered = (
+      InvitationService as unknown as { createRosteredInvitedPlayer: CreateRostered }
+    ).createRosteredInvitedPlayer.bind(InvitationService);
+
+    // `reuse` is what the unlocked read returned while the row was still live.
+    await expect(
+      createRostered(
+        teamOther.teamId,
+        { name: 'Sam', playerEmail: `sam.${RUN}@example.test` },
+        adminId,
+        { id: tomb, managedById: null },
+        `sam.${RUN}@example.test`
+      )
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: tomb } });
+    expect(row).toMatchObject({ isManaged: false, managedById: null, name: DELETED_USER_NAME });
+    expect(await prisma.teamMember.count({ where: { teamId: teamOther.teamId, playerId: tomb } })).toBe(0);
+    expect(await prisma.teamInvitation.count({ where: { teamId: teamOther.teamId, playerId: tomb } })).toBe(0);
   });
 });

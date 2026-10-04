@@ -34,8 +34,14 @@ Removing the last guardian never deletes the child.
   `findFirst({ email: emailEquals(invitedEmail), deletedAt: null })`, and only when nothing matches
   creates the PARENT account, with the same P2002 catch-and-reuse as `inviteGuardian`. Accept therefore
   never creates a second account for an address that already has one in a different case (`User.email`
-  is byte-unique only; `POST /players` and `syncUser` store the address as given). Proven against
-  Postgres in `tests/integration/email-match.db.test.ts` (Guardian invitations).
+  is byte-unique only; `syncUser` stores the address as given, and `POST /players` lower-cased only
+  from #651). Proven against
+  Postgres in `tests/integration/email-match.db.test.ts` (Guardian invitations). **Tombstones (#643):**
+  the parent is resolved before the transaction, unlocked, so the transaction first locks the row
+  (`FOR SHARE`, `deletedAt IS NULL`, like push-token registration) and answers 404 `Account not found`
+  when the account was deleted in between; the `PARENT` promotion is `updateMany({ where: { id,
+  deletedAt: null } })` and zero rows aborts the transaction, so no `Guardian` row ever points at a
+  tombstone.
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).

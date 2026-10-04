@@ -37,8 +37,16 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Every write onto a `User` row is guarded by `deletedAt IS NULL`**: `PATCH /auth/me`,
   `PATCH /auth/me/role` (`updateMany` + re-read, 401 on zero rows), push-token registration (`FOR
   SHARE` probe inside the upsert transaction) and both `syncUser` branches (`updateMany`, fall
-  through to create on zero rows). A request that authenticated a moment before the deletion
-  committed must not re-identify the tombstone. Keep that invariant on any new write path.
+  through to create on zero rows). Since #643 also `PATCH /players/:id` (tombstone 404 for an ADMIN
+  too, then `updateMany` + re-read, 404 on zero rows), `DELETE /players/:id` (tombstone 404 instead
+  of a foreign-key 500), guardian accept (`FOR SHARE` probe on the parent, guarded `PARENT`
+  promotion) and Add Player case 2 (the reuse `updateMany` and photo fill carry `deletedAt: null`;
+  zero rows on a tombstone is 404, on a claimed row the case-3 re-branch) plus
+  `stripUnclaimedEmail`. A request that authenticated a moment before the deletion
+  committed must not re-identify the tombstone. Keep that invariant on any new write path:
+  `tests/utils/user-write-guard.test.ts` fails on any `user.update(` / `user.updateMany(` in
+  `src/` whose `where` lacks `deletedAt` (only `account-service.ts`, which writes the tombstone, is
+  allowlisted). Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.

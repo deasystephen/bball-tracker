@@ -12,8 +12,21 @@ const safeUrlSchema = z.string().url('Invalid URL format').refine(
   { message: 'URL must use http or https protocol' }
 );
 
+/**
+ * Stored form of an address: trimmed and lower-cased before validation, as
+ * every account-creating path stores it (#651). WorkOS presents lower-case
+ * addresses and `syncUser` claims by exact match, so a mixed-case row would be
+ * an unclaimable duplicate.
+ */
+const playerEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email('Invalid email format')
+  .max(255, 'Email too long');
+
 export const createPlayerSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: playerEmailSchema,
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
   // Optional fields
   profilePictureUrl: safeUrlSchema.optional().or(z.literal('')),
@@ -24,7 +37,7 @@ export const createPlayerSchema = z.object({
  */
 export const updatePlayerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name too long').optional(),
-  email: z.string().email('Invalid email format').optional(),
+  email: playerEmailSchema.optional(),
   profilePictureUrl: safeUrlSchema.optional().or(z.literal('')),
 });
 
