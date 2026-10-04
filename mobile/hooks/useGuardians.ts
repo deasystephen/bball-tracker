@@ -7,8 +7,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { teamKeys } from './useTeams';
-import { invitationKeys } from './useInvitations';
+import { gameKeys, invitationKeys, teamKeys } from './query-keys';
+import { useAuthStore } from '../store/auth-store';
 import type { GuardianRelationship } from '../../shared/types';
 
 export interface GuardianRow {
@@ -75,6 +75,15 @@ function useInvalidateGuardians() {
   };
 }
 
+export interface InviteGuardianResponse {
+  success: boolean;
+  invitation: PendingGuardianInvitation;
+  /** false = the invitation was created but its email failed to send. */
+  emailSent: boolean;
+}
+
+export type InviteGuardianResult = Omit<InviteGuardianResponse, 'success'>;
+
 export function useInviteGuardian() {
   const invalidate = useInvalidateGuardians();
   const queryClient = useQueryClient();
@@ -88,12 +97,14 @@ export function useInviteGuardian() {
       teamId: string;
       playerId: string;
       data: InviteGuardianInput;
-    }) => {
-      const response = await apiClient.post<{
-        success: boolean;
-        invitation: PendingGuardianInvitation;
-      }>(`/teams/${teamId}/members/${playerId}/guardians`, data);
-      return response.data.invitation;
+    }): Promise<InviteGuardianResult> => {
+      const response = await apiClient.post<InviteGuardianResponse>(
+        `/teams/${teamId}/members/${playerId}/guardians`,
+        data
+      );
+      // emailSent is per send: false means the invitation exists but SES
+      // refused the email, and the screen must say so (#770).
+      return response.data;
     },
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_INVITED, {
@@ -108,6 +119,7 @@ export function useInviteGuardian() {
 
 export function useRemoveGuardian() {
   const invalidate = useInvalidateGuardians();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
@@ -124,6 +136,12 @@ export function useRemoveGuardian() {
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_REMOVED, { team_id: variables.teamId });
       invalidate(variables.teamId, variables.playerId);
+      // A guardian leaving (removing their own link) loses the child's teams
+      // and games; GET /teams and GET /games are membership-scoped (#729).
+      if (variables.guardianUserId === useAuthStore.getState().user?.id) {
+        queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+      }
     },
   });
 }

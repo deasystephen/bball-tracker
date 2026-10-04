@@ -43,7 +43,7 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
   match `removeLeagueAdmin`; revisit if delegated league administration becomes a product decision).
   The session user payload on `GET /auth/me`, `GET /auth/callback` and `POST /auth/dev-login` carries
-  `leagueAdminOf: string[]` (league ids from `LeagueAdmin` rows, sorted; empty for most users, and **not**
+  `notifyOnReplies` (#768), `guardianOf` and `leagueAdminOf: string[]` (league ids from `LeagueAdmin` rows, sorted; empty for most users, and **not**
   populated for system ADMINs, who are implied admins of every league via `role === 'ADMIN'`).
 - **Global role is never an access check.** The self-selectable `User.role` (`COACH` / `PLAYER`) is
   only read by services to (a) short-circuit for `ADMIN` and (b) allow team creation. Everything

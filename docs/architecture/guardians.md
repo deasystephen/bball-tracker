@@ -22,6 +22,10 @@ Removing the last guardian never deletes the child.
   again by `omitToken`. Uniqueness is the hand-written partial index
   `GuardianInvitation_pending_childId_invitedEmail_key … WHERE status = 'PENDING'` (migration
   `20260823120000_guardian_invitation`); a stale PENDING row is flipped to EXPIRED on re-invite.
+  The response carries the per-send `emailSent`; `hooks/useGuardians.ts#useInviteGuardian` resolves with
+  `{ invitation, emailSent }` and the Guardians screen shows an error toast ("Invitation created, but the email
+  to … failed to send.") instead of "Invitation sent" when it is `false`, like the roster flows (#770). The
+  screen has no resend yet (#420), so the toast does not point at one.
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
   `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `teamName`, `inviterName`,
   `relationship`, `status`, `expiresAt`) and `POST /invitations/by-token/:token/accept` returns

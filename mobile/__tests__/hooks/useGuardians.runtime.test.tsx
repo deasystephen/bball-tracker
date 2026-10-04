@@ -15,9 +15,12 @@ import {
   guardianKeys,
   type GuardianRow,
   type PendingGuardianInvitation,
+  type InviteGuardianResult,
 } from '../../hooks/useGuardians';
 import { teamKeys } from '../../hooks/useTeams';
 import { invitationKeys } from '../../hooks/useInvitations';
+import { gameKeys } from '../../hooks/query-keys';
+import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -49,7 +52,10 @@ const pending: PendingGuardianInvitation = {
 };
 
 describe('useGuardians runtime', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    useAuthStore.setState({ user: { id: 'coach-1' } as never, isAuthenticated: true });
+  });
 
   it('usePlayerGuardians fetches GET /teams/:id/members/:playerId/guardians', async () => {
     mockedGet.mockResolvedValueOnce({
@@ -80,12 +86,12 @@ describe('useGuardians runtime', () => {
   });
 
   it('useInviteGuardian POSTs { email, relationship } and invalidates guardians, team and invitations', async () => {
-    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending } });
+    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: true } });
     const { wrapper, client } = createQueryWrapper();
     const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useInviteGuardian(), { wrapper });
 
-    let returned: PendingGuardianInvitation | undefined;
+    let returned: InviteGuardianResult | undefined;
     await act(async () => {
       returned = await result.current.mutateAsync({
         teamId: 't1',
@@ -94,7 +100,7 @@ describe('useGuardians runtime', () => {
       });
     });
 
-    expect(returned).toEqual(pending);
+    expect(returned).toEqual(expect.objectContaining({ invitation: pending, emailSent: true }));
     expect(mockedPost).toHaveBeenCalledWith('/teams/t1/members/steph/guardians', {
       email: 'sonya.curry@example.com',
       relationship: 'MOTHER',
@@ -102,6 +108,23 @@ describe('useGuardians runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: guardianKeys.player('t1', 'steph') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: invitationKeys.all });
+  });
+
+  it('useInviteGuardian surfaces emailSent: false when the email failed (#770)', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: false } });
+    const { wrapper } = createQueryWrapper();
+    const { result } = renderHook(() => useInviteGuardian(), { wrapper });
+
+    let returned: InviteGuardianResult | undefined;
+    await act(async () => {
+      returned = await result.current.mutateAsync({
+        teamId: 't1',
+        playerId: 'steph',
+        data: { email: 'sonya.curry@example.com', relationship: 'MOTHER' },
+      });
+    });
+
+    expect(returned).toEqual(expect.objectContaining({ invitation: pending, emailSent: false }));
   });
 
   it('useInviteGuardian surfaces API errors', async () => {
@@ -131,5 +154,24 @@ describe('useGuardians runtime', () => {
     expect(mockedDelete).toHaveBeenCalledWith('/teams/t1/members/steph/guardians/dell');
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: guardianKeys.player('t1', 'steph') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
+    // A coach removing someone else's link does not change the caller's membership.
+    const keys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
+    expect(keys).not.toContain(JSON.stringify(gameKeys.lists()));
+    expect(keys).not.toContain(JSON.stringify(teamKeys.lists()));
+  });
+
+  it('useRemoveGuardian on self (Leave) also invalidates the teams and games lists (#729)', async () => {
+    useAuthStore.setState({ user: { id: 'dell' } as never, isAuthenticated: true });
+    mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+    const { wrapper, client } = createQueryWrapper();
+    const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useRemoveGuardian(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ teamId: 't1', playerId: 'steph', guardianUserId: 'dell' });
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
   });
 });

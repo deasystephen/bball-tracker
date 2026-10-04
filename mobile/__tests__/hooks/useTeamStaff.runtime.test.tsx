@@ -20,6 +20,8 @@ import {
 } from '../../hooks/useTeamStaff';
 import { teamKeys } from '../../hooks/useTeams';
 import { usageKeys } from '../../hooks/useUsage';
+import { gameKeys } from '../../hooks/query-keys';
+import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
@@ -59,7 +61,10 @@ const expectStaffInvalidation = (invalidateSpy: jest.SpyInstance, teamId: string
 };
 
 describe('useTeamStaff runtime', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    useAuthStore.setState({ user: { id: 'me' } as never, isAuthenticated: true });
+  });
 
   describe('queries', () => {
     it('useTeamStaff fetches GET /teams/:id/staff and unwraps `staff`', async () => {
@@ -120,6 +125,8 @@ describe('useTeamStaff runtime', () => {
       });
       expect(returned).toEqual(row);
       expectStaffInvalidation(invalidateSpy, 't1');
+      // Membership of the caller is unchanged: no games refetch (#729 review).
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
     });
 
     it('useAddStaff posts by userId', async () => {
@@ -164,6 +171,8 @@ describe('useTeamStaff runtime', () => {
 
       expect(mockedPatch).toHaveBeenCalledWith('/teams/t1/staff/coach-1', { roleType: 'HEAD_COACH' });
       expectStaffInvalidation(invalidateSpy, 't1');
+      // Membership of the caller is unchanged: no games refetch (#729 review).
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
     });
 
     it('useRemoveStaff deletes /staff/:userId and invalidates', async () => {
@@ -178,6 +187,22 @@ describe('useTeamStaff runtime', () => {
 
       expect(mockedDelete).toHaveBeenCalledWith('/teams/t1/staff/coach-1');
       expectStaffInvalidation(invalidateSpy, 't1');
+      // Removing another coach leaves the caller's games unchanged.
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+    });
+
+    it('useRemoveStaff on self (Leave team) also invalidates the games lists (#729)', async () => {
+      mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+      const { wrapper, client } = createQueryWrapper();
+      const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useRemoveStaff(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ teamId: 't1', userId: 'me' });
+      });
+
+      expectStaffInvalidation(invalidateSpy, 't1');
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
     });
   });
 });

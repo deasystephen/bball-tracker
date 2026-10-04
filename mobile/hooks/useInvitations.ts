@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
+import { gameKeys, teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
@@ -234,14 +234,13 @@ export function useAcceptInvitation() {
       });
       // Invalidate all invitation queries
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
-      // Invalidate team members if teamMember was returned
-      if (data.teamMember) {
-        queryClient.invalidateQueries({ queryKey: ['teams'] });
-      }
-      // A guardian accept unlocks the child's teams / games (PARENT role).
-      if (data.kind === 'guardian') {
-        queryClient.invalidateQueries({ queryKey: ['teams'] });
-        queryClient.invalidateQueries({ queryKey: ['games'] });
+      // A team accept (teamMember returned) or a guardian accept (the child's
+      // teams, PARENT role) changes membership, and GET /games is
+      // membership-scoped, so teams and games move. gameKeys.all also refreshes
+      // a game detail cached (e.g. as a 403) before the accept (#729).
+      if (data.teamMember || data.kind === 'guardian') {
+        queryClient.invalidateQueries({ queryKey: teamKeys.all });
+        queryClient.invalidateQueries({ queryKey: gameKeys.all });
       }
     },
   });

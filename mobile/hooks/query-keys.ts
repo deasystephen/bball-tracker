@@ -6,6 +6,8 @@
  * a drifted literal silently stops invalidating.
  */
 
+import type { GameFilters } from '../types/game';
+
 export interface TeamFilters {
   seasonId?: string;
   leagueId?: string;
@@ -59,4 +61,32 @@ export const playerKeys = {
   list: (params?: PlayersQueryParams) => [...playerKeys.lists(), params] as const,
   details: () => [...playerKeys.all, 'detail'] as const,
   detail: (id: string) => [...playerKeys.details(), id] as const,
+};
+
+// GET /games is membership-scoped (teamAccessWhere), so every mutation that
+// changes the caller's team membership invalidates gameKeys.lists() — which
+// covers list, infinite and live (#729).
+export const gameKeys = {
+  all: ['games'] as const,
+  lists: () => [...gameKeys.all, 'list'] as const,
+  list: (filters?: GameFilters) => [...gameKeys.lists(), filters] as const,
+  infinite: (filters?: Omit<GameFilters, 'offset'>) =>
+    [...gameKeys.lists(), 'infinite', filters] as const,
+  live: () => [...gameKeys.lists(), 'live'] as const,
+  details: () => [...gameKeys.all, 'detail'] as const,
+  detail: (id: string) => [...gameKeys.details(), id] as const,
+};
+
+export const statsKeys = {
+  all: ['stats'] as const,
+  boxScores: () => [...statsKeys.all, 'boxScore'] as const,
+  boxScore: (gameId: string) => [...statsKeys.boxScores(), gameId] as const,
+  playerGame: (gameId: string, playerId: string) =>
+    [...statsKeys.all, 'playerGame', gameId, playerId] as const,
+  playerOverall: (playerId: string) =>
+    [...statsKeys.all, 'playerOverall', playerId] as const,
+  playerSeason: (playerId: string, teamId: string) =>
+    [...statsKeys.all, 'playerSeason', playerId, teamId] as const,
+  teamSeason: (teamId: string) => [...statsKeys.all, 'teamSeason', teamId] as const,
+  teamRoster: (teamId: string) => [...statsKeys.all, 'teamRoster', teamId] as const,
 };

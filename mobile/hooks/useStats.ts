@@ -4,6 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
+import { statsKeys } from './query-keys';
 import type {
   BoxScore,
   PlayerGameStats,
@@ -12,20 +13,8 @@ import type {
   PlayerOverallStats,
 } from '../types/stats';
 
-// Query keys
-export const statsKeys = {
-  all: ['stats'] as const,
-  boxScores: () => [...statsKeys.all, 'boxScore'] as const,
-  boxScore: (gameId: string) => [...statsKeys.boxScores(), gameId] as const,
-  playerGame: (gameId: string, playerId: string) =>
-    [...statsKeys.all, 'playerGame', gameId, playerId] as const,
-  playerOverall: (playerId: string) =>
-    [...statsKeys.all, 'playerOverall', playerId] as const,
-  playerSeason: (playerId: string, teamId: string) =>
-    [...statsKeys.all, 'playerSeason', playerId, teamId] as const,
-  teamSeason: (teamId: string) => [...statsKeys.all, 'teamSeason', teamId] as const,
-  teamRoster: (teamId: string) => [...statsKeys.all, 'teamRoster', teamId] as const,
-};
+// Query keys live in query-keys.ts (cross-hook invalidation without cycles).
+export { statsKeys };
 
 // Longer stale time for stats since they only change when games end
 const STATS_STALE_TIME = 10 * 60 * 1000; // 10 minutes

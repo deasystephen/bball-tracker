@@ -308,6 +308,26 @@ describe('Auth API', () => {
       expect(response.body.user.guardianOf).toEqual([]);
     });
 
+    it('carries the stored notifyOnReplies opt-out in the session user (#768)', async () => {
+      mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockResolvedValue({
+        ...mockUser,
+        notifyOnReplies: false,
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+
+      const response = await request(app)
+        .get('/api/v1/auth/callback')
+        .query({ code: 'auth-code-123' });
+
+      expect(response.status).toBe(200);
+      // Absent would read as "on" in the Profile toggle after a re-sign-in.
+      expect(response.body.user).toHaveProperty('notifyOnReplies', false);
+    });
+
     it('returns the league ids the user administers as leagueAdminOf (decision 3)', async () => {
       mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
         user: mockWorkOSUser,

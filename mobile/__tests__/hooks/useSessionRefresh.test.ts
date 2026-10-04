@@ -3,11 +3,15 @@
  * GET /auth/me when the app foregrounds, throttled to once per 5 minutes.
  */
 
+import React from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, act } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { useSessionRefresh, SESSION_REFRESH_INTERVAL_MS } from '../../hooks/useSessionRefresh';
 import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
+import { queryClient } from '../../services/query-client';
+import { useUpdateProfile } from '../../hooks/useProfile';
 import { UserRole } from '../../../shared/types';
 
 jest.mock('../../services/analytics', () => ({
@@ -20,6 +24,7 @@ jest.mock('../../services/analytics', () => ({
 }));
 
 const mockGet = apiClient.get as jest.Mock;
+const mockPatch = apiClient.patch as jest.Mock;
 
 type Listener = (state: string) => void;
 let listeners: Listener[] = [];
@@ -65,6 +70,7 @@ describe('useSessionRefresh', () => {
   });
 
   afterEach(() => {
+    queryClient.getMutationCache().clear();
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -99,6 +105,65 @@ describe('useSessionRefresh', () => {
     expect(user?.profilePictureUrl).toBe('https://img/x.png');
     // Only the synced fields are merged; identity fields stay as cached.
     expect(user?.email).toBe('a@b.c');
+  });
+
+  it('carries notifyOnReplies: false from GET /auth/me into the store (#768)', async () => {
+    // A re-sign-in stores a login payload; the server value must win even when
+    // the cached user reads as "on".
+    useAuthStore.setState({ user: { ...baseUser, notifyOnReplies: true } });
+    mockGet.mockResolvedValue({ data: { success: true, user: { notifyOnReplies: false } } });
+
+    renderHook(() => useSessionRefresh());
+    await act(async () => {});
+
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+  });
+
+  it('leaves the cached notifyOnReplies untouched when the response omits it', async () => {
+    useAuthStore.setState({ user: { ...baseUser, notifyOnReplies: false } });
+    mockGet.mockResolvedValue({ data: { success: true, user: { role: 'PLAYER' } } });
+
+    renderHook(() => useSessionRefresh());
+    await act(async () => {});
+
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+  });
+
+  it('a profile edit made while GET /auth/me is in flight wins over the stale response', async () => {
+    useAuthStore.setState({ user: { ...baseUser, notifyOnReplies: true } });
+    let resolveMe: (v: unknown) => void = () => undefined;
+    mockGet.mockReturnValue(new Promise((r) => { resolveMe = r; }));
+    mockPatch.mockResolvedValue({
+      data: {
+        success: true,
+        user: { ...baseUser, profilePictureUrl: null, notifyOnReplies: false, createdAt: '' },
+      },
+    });
+
+    // The sync request goes out first...
+    renderHook(() => useSessionRefresh());
+    // ...then the user flips the toggle off; its PATCH lands first.
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useUpdateProfile(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ notifyOnReplies: false });
+    });
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+
+    // The GET answers with the pre-edit value: it must not undo the toggle,
+    // but non-profile fields still sync.
+    await act(async () => {
+      resolveMe({ data: { success: true, user: { notifyOnReplies: true, role: 'COACH' } } });
+    });
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(false);
+    expect(useAuthStore.getState().user?.role).toBe('COACH');
+
+    // A later sync, with no edit since it was sent, carries the server value again.
+    mockGet.mockResolvedValue({ data: { success: true, user: { notifyOnReplies: true } } });
+    jest.setSystemTime(Date.now() + SESSION_REFRESH_INTERVAL_MS + 1);
+    await fireAppState('active');
+    expect(useAuthStore.getState().user?.notifyOnReplies).toBe(true);
   });
 
   it('does nothing when signed out', async () => {

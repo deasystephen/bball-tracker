@@ -16,6 +16,7 @@ import {
 } from './schemas';
 import { GuardianService } from '../../services/guardian-service';
 import prisma from '../../models';
+import type { Prisma } from '@prisma/client';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
@@ -29,6 +30,41 @@ import { listDevUsers } from './dev-users';
 import { z } from 'zod';
 
 const router = Router();
+
+/**
+ * The session user's own columns, single-sourced for every payload that
+ * carries the signed-in user: `GET /auth/callback`, `POST /auth/dev-login`,
+ * `GET /auth/me` and `PATCH /auth/me` (#768: a field hand-copied into one of
+ * them and not the others silently reads as its default on the client).
+ */
+const SESSION_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  profilePictureUrl: true,
+  notifyOnReplies: true,
+  createdAt: true,
+} satisfies Prisma.UserSelect;
+
+type SessionUserRow = Prisma.UserGetPayload<{ select: typeof SESSION_USER_SELECT }>;
+
+/**
+ * Narrow a full `User` row (as `syncUser` returns) to the session columns.
+ * The return type makes a column added to `SESSION_USER_SELECT` a compile
+ * error here until it is copied.
+ */
+function pickSessionUser(user: SessionUserRow): SessionUserRow {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    profilePictureUrl: user.profilePictureUrl,
+    notifyOnReplies: user.notifyOnReplies,
+    createdAt: user.createdAt,
+  };
+}
 
 /**
  * League ids the user administers (`LeagueAdmin` rows). Returned as
@@ -51,6 +87,22 @@ async function getLeagueAdminOf(userId: string): Promise<string[]> {
     orderBy: { leagueId: 'asc' },
   });
   return rows.map(r => r.leagueId);
+}
+
+type SessionUserPayload = SessionUserRow & {
+  leagueAdminOf: string[];
+  guardianOf: Awaited<ReturnType<typeof GuardianService.getGuardianOf>>;
+};
+
+/** The signed-in user payload: session columns plus league-admin and guardian links. */
+async function buildSessionUser(user: SessionUserRow): Promise<SessionUserPayload> {
+  return {
+    ...pickSessionUser(user),
+    leagueAdminOf: await getLeagueAdminOf(user.id),
+    // Children the caller is a guardian of (PARENT role) — the mobile app
+    // shows "Parent" affordances whenever this is non-empty.
+    guardianOf: await GuardianService.getGuardianOf(user.id),
+  };
 }
 
 // Apply stricter rate limiting to the credential-handling endpoints only.
@@ -107,12 +159,7 @@ if (process.env.NODE_ENV === 'development') {
       // Find user by email
       const user = await prisma.user.findUnique({
         where: { email, deletedAt: null },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-        },
+        select: SESSION_USER_SELECT,
       });
 
       if (!user) {
@@ -131,11 +178,7 @@ if (process.env.NODE_ENV === 'development') {
 
       return res.json({
         success: true,
-        user: {
-          ...user,
-          leagueAdminOf: await getLeagueAdminOf(user.id),
-          guardianOf: await GuardianService.getGuardianOf(user.id),
-        },
+        user: await buildSessionUser(user),
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
@@ -292,19 +335,11 @@ router.get('/callback', async (req, res) => {
 
     // In production, you'd set this as an HTTP-only cookie or return it securely
     // For now, return user info and token (mobile app will handle token storage)
-    const guardianOf = await GuardianService.getGuardianOf(user.id);
-
     res.json({
       success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        profilePictureUrl: user.profilePictureUrl,
-        leagueAdminOf: await getLeagueAdminOf(user.id),
-        guardianOf,
-      },
+      // Same shape as GET /auth/me, so a fresh sign-in carries every session
+      // field (e.g. the notifyOnReplies opt-out, #768).
+      user: await buildSessionUser(user),
       accessToken, // Mobile app will store this securely
       // Short-lived access token + rotating refresh token. Without the refresh
       // token the client is dead as soon as the access token expires (#349).
@@ -383,29 +418,14 @@ router.get('/me', authenticate, async (req, res) => {
     // middleware's select omits.
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        profilePictureUrl: true,
-        notifyOnReplies: true,
-        createdAt: true,
-      },
+      select: SESSION_USER_SELECT,
     });
 
     if (!user) {
       throw new UnauthorizedError('User not found');
     }
 
-    // Children the caller is a guardian of (PARENT role) — the mobile app
-    // shows "Parent" affordances whenever this is non-empty.
-    const guardianOf = await GuardianService.getGuardianOf(user.id);
-
-    res.json({
-      success: true,
-      user: { ...user, leagueAdminOf: await getLeagueAdminOf(user.id), guardianOf },
-    });
+    res.json({ success: true, user: await buildSessionUser(user) });
   } catch (error) {
     logger.error('Error getting user', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof UnauthorizedError) {
@@ -462,7 +482,7 @@ router.patch('/me', authenticate, async (req, res) => {
     }
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },
-      select: { id: true, email: true, name: true, role: true, profilePictureUrl: true, notifyOnReplies: true, createdAt: true },
+      select: SESSION_USER_SELECT,
     });
 
     if (profilePictureUrl !== undefined) {
