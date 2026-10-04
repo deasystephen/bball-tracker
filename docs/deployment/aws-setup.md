@@ -14,8 +14,8 @@ This guide covers setting up and deploying the Hooplings application on AWS.
 - **ECS (Fargate)**: Container orchestration for backend
 - **RDS PostgreSQL**: Managed database
 - **ElastiCache Redis**: Managed Redis cache
-- **S3**: Object storage
-- **CloudFront**: CDN for static assets
+- **S3**: Object storage for user avatars (public-read `avatars/` prefix, presigned-POST uploads;
+  `infra/s3.tf`). No CDN sits in front of it
 - **Application Load Balancer**: Load balancing
 - **ECR**: Container registry
 - **CloudWatch**: Logging and monitoring

@@ -36,44 +36,67 @@ Milestone: [`v2.0 GA`](../../milestone/1)
 **Launch gate.** A person we have never met installs from TestFlight, signs up,
 creates a team, invites a parent, and that parent accepts from an email — with
 no admin intervention at any step. Until that runs clean, the cohort does not
-widen. Two of those steps are broken today (#442, #30).
+widen. One step is still missing: the parent's accept-from-email link has
+nowhere to land until `web/` is deployed (#30).
 
 The blocker set was rebuilt on 2026-08-30 by checking every open issue against
 the running code, live DNS, and the production AWS account rather than against
 its own description. Full assessment, including the deferral rationale for
 everything *not* on this milestone:
 [GA readiness assessment](https://claude.ai/code/artifact/d2153c41-97ca-4e54-ad17-9acbe394848f)
-(a dated snapshot — the milestone is the live source of truth).
+(a dated snapshot — the milestone is the live source of truth). The lanes below
+were last reconciled with the milestone on 2026-10-04; the "paths a stranger
+walks" and "infrastructure" lanes from the rebuild have closed in full and moved
+to "Shipped so far".
 
-Blockers group into four lanes, three of which run in parallel:
+What is left groups into three lanes:
 
 - **External clocks — start first, they queue.** SES production access (#23),
   privacy policy + ToS with a COPPA read (#25), WorkOS production environment
   (#24), a mailbox on hooplings.com (#555) and the support inbox that needs it
   (#450), App Store Connect metadata (#451).
-- **The paths a stranger walks.** Self-serve team creation (#442), league and
-  season list scoping (#443), account deletion (#444), the dead-end free-tier
-  team cap (#445).
-- **Infrastructure.** Pin autoscaling to one task (#446), apex CORS (#447),
-  production alerting (#448), SES bounce handling (#449), task-definition
-  split-brain (#53).
 - **The deploy that unblocks onboarding.** `web/` to hooplings.com (#30) —
   carries the legal pages, the invite funnel, and Universal Links.
+- **First-run experience.** Coach onboarding quickstart with empty states and a
+  sample-team flow (#31), and the Home tab redesign with a cross-team "Up next"
+  schedule (#615, design first). Both sit on the milestone because a stranger's
+  first session is part of the launch gate, not because either blocks a deploy.
 
-Ordering is not free. `#53 → #447 → #30 → #23 → #24` is a genuine chain: each
-link makes the next safe, and skipping ahead produces user-visible breakage
-rather than just delay. Leaving SES sandbox before #30 ships, for instance,
-means working email carrying a dead link — worse than no email.
+Ordering is not free. `#30 → #23 → #24` is a genuine chain: each link makes the
+next safe, and skipping ahead produces user-visible breakage rather than just
+delay. Leaving SES sandbox before #30 ships, for instance, means working email
+carrying a dead link — worse than no email. The two links that used to precede
+it have landed: the task-definition split-brain was reconciled (#53, closed
+2026-08-30; `infra/task-definition.json` is the only source of truth) and the
+apex origins were added to CORS (#447, closed 2026-09-06).
 
 Shipped so far:
+- Self-serve team creation (#442, closed 2026-08-31): a new coach creates a
+  team without an admin.
+- League and season list scoping (#443, closed 2026-08-31): list and detail
+  endpoints are caller-scoped; an unaffiliated caller gets 404.
+- Account deletion (#444, closed 2026-09-08): self-serve `DELETE /auth/me`,
+  guardian deletion of a managed child's record, operator script and runbook
+  (`docs/runbooks/data-subject-requests.md`).
+- FREE-tier team cap lifted (#445, closed 2026-09-27): no dead-end paywall
+  until a purchase flow exists; see "Tier design" below.
+- Autoscaling pinned to one task (#446, closed 2026-09-27): `max_capacity`
+  validated to 1, `MAX_REPLICAS=1`, startup guard.
+- Apex CORS (#447, closed 2026-09-06) and the task-definition split-brain
+  (#53, closed 2026-08-30), the first two links of the old ordering chain.
+- Production alerting (#448, closed 2026-09-29): fifteen CloudWatch alarms
+  emailing an SNS subscription, applied and verified live
+  (`docs/runbooks/on-call.md`).
+- SES bounce and complaint handling (#449, closed 2026-09-29): event
+  publishing, suppression flags on the roster and reputation alarms.
 - Socket.io handlers for live game event broadcast (#26) — backend rooms,
   snapshot on join, `game-event` + `game-status-change` broadcasts.
   Single-replica only; see follow-ups #48 (public spectator mode), #49
   (mid-session JWT reauth) and #452 (Redis adapter — the multi-replica
   prerequisite, which #26 was closed without doing).
 - Sentry error tracking for backend + mobile (#28), with PII scrubbing and
-  release-tagged events. Note this is error capture, not alerting: nothing
-  currently notifies a human (#448).
+  release-tagged events. This is error capture; alerting that notifies a human
+  arrived separately with #448 above.
 
 ### v2.1 — Parity
 
@@ -89,7 +112,9 @@ Shipped so far:
   token-auth, rate-limited, revocable.
 - Stats export endpoints (#36) — streaming CSV (game events, season stats)
   and PDF box score, with RFC 5987 filenames and CSV-injection escaping.
-  See follow-up #50 (move PDF off the event loop).
+  #50 was closed on 2026-10-03 with a per-user export rate limit (20/min,
+  PR #636) instead of a worker thread; a worker thread is reconsidered only if
+  a client surfaces export and concurrent volume is observed.
 
 ### v2.2 — Monetization
 

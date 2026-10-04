@@ -66,7 +66,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 
 - An account with no history — never on a roster, no game events or statistics, no invitations
   sent or received, no announcements — is **erased**: the record is deleted and nothing about it
-  remains in the application database.
+  remains in the application database. Outside the database, the request-log lines and the
+  vendor records described below still carry the internal id until their windows expire.
 - Otherwise the tombstone keeps only the internal id, the role, the creation date and the
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
@@ -93,10 +94,23 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   photo is sent, and the advertising id is never sent. Whether Amplitude keeps the raw IP address
   after the lookup is a setting in the Amplitude project; confirm it there before the privacy
   policy states it.
+- **Application logs** (one line per API request with method, redacted path, status and
+  duration, plus domain events such as `Account deleted`) carry the caller's **internal user id**
+  and `requestId` whenever the request was authenticated (`setLogContextUser` in
+  `backend/src/api/auth/middleware.ts`; `backend/src/api/middleware/request-logger.ts`). The
+  `Account deleted` event logs the deleted user's id, the actor's id and the mode. Log lines never
+  carry a name, an email address (addresses are hashed with `hashRecipient()`) or a secret URL
+  (paths and query strings go through `utils/redact.ts`). They are kept **30 days** in CloudWatch
+  Logs (`retention_in_days` on `/ecs/bball-tracker-production` in `infra/ecs.tf`), and every line
+  is also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log
+  group), where it is kept for **15 days**, the log index retention of the Datadog org (default
+  index; confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line).
+  Supersedes D8 of `docs/plans/account-deletion.md` on this point, which named only the hashing.
 - After deletion nothing in the application maps the internal id back to a person, but the
-  analytics and backend error records above remain at the vendors, keyed on that id, until their
-  windows expire. To remove them sooner, use each vendor's own deletion request for that id.
-- Application logs hash email addresses.
+  analytics, backend error and log records above remain at the vendors (Amplitude, Sentry,
+  Datadog) and in CloudWatch, keyed on that id, until their windows expire. To remove them sooner,
+  use each vendor's own deletion request for that id (CloudWatch has none short of deleting the
+  log stream).
 - Email delivery logs at SES keep hashed recipients only.
 
 ## Operator procedure (request by email)

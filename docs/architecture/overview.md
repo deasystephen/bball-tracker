@@ -73,8 +73,13 @@ The Hooplings application is a single containerized API backed by PostgreSQL, wi
   - Usage-metering counts (60s TTL, see `services/usage-service.ts`)
 
 ### File Storage
-- **AWS S3**: Object storage for images, videos, documents
-- **CloudFront CDN**: Content delivery for static assets
+- **AWS S3**: one bucket (`S3_AVATARS_BUCKET`, `infra/s3.tf`) holding user and
+  player avatar images (JPEG/PNG, 5 MB cap). Uploads go through size-capped
+  presigned POST policies issued by `services/upload-service.ts`; objects under
+  `avatars/*` are public-read at `https://<bucket>.s3.amazonaws.com/avatars/<key>`
+  via the `avatars_public_read` bucket policy. There is no CDN in front of the
+  bucket and no other object class (no video or document storage).
+  Detail: [Backend services](backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads).
 
 ## Data Flow
 
