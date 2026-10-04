@@ -35,7 +35,7 @@ So:
 
 - **To change an env var, a secret reference, or task cpu/memory** - edit `task-definition.json` and
   merge to main. Putting it in `ecs.tf` instead deploys nothing, silently.
-- **New Secrets Manager ARNs** to reference from the JSON come from `terraform output -raw <name>_secret_arn` (one output per secret in `infra/outputs.tf`).
+- **New Secrets Manager ARNs** to reference from the JSON come from `terraform output -raw <name>`; the output names are the ones in the block below (one per secret and per IAM role in `infra/outputs.tf`).
 - `aws_ecs_service.app` is configured with the bare family name and carries
   `ignore_changes = [task_definition]`, so `terraform apply` never disturbs the revision CI chose.
 - **Bootstrapping a fresh environment:** at least one revision of the family must exist before the
@@ -50,11 +50,14 @@ update the file:
 
 ```bash
 # `terraform output` takes at most one name; read each literal on its own.
+# The outputs exist in state only after the `terraform apply` that added them,
+# so a missing name stops the loop instead of printing an empty value.
 for name in redis_url s3_avatars_bucket_name \
             ecs_execution_role_arn ecs_task_role_arn \
             database_url_secret_arn jwt_secret_arn workos_api_key_secret_arn \
             workos_client_id_secret_arn sentry_dsn_secret_arn; do
-  printf '%s=%s\n' "$name" "$(terraform output -raw "$name")"
+  value=$(terraform output -raw "$name") || exit 1
+  printf '%s=%s\n' "$name" "$value"
 done
 ```
 

@@ -85,9 +85,10 @@ output "ecs_task_definition_family" {
   value       = local.task_definition_family
 }
 
-# Every literal that infra/task-definition.json carries and Terraform owns has
-# an output here, so a replaced resource can be re-read with
-# `terraform output -raw <name>` (one name per invocation).
+# The IAM role and Secrets Manager ARNs that infra/task-definition.json carries
+# each have an output here, so a replaced resource can be re-read with
+# `terraform output -raw <name>` (one name per invocation). The output names
+# are listed in infra/README.md ("Who owns the ECS task definition").
 output "ecs_execution_role_arn" {
   description = "ARN of the ECS task execution role (executionRoleArn in infra/task-definition.json)"
   value       = aws_iam_role.ecs_execution.arn
