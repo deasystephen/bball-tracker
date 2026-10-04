@@ -85,8 +85,41 @@ output "ecs_task_definition_family" {
   value       = local.task_definition_family
 }
 
+# Every literal that infra/task-definition.json carries and Terraform owns has
+# an output here, so a replaced resource can be re-read with
+# `terraform output -raw <name>` (one name per invocation).
+output "ecs_execution_role_arn" {
+  description = "ARN of the ECS task execution role (executionRoleArn in infra/task-definition.json)"
+  value       = aws_iam_role.ecs_execution.arn
+}
+
+output "ecs_task_role_arn" {
+  description = "ARN of the ECS task role (taskRoleArn in infra/task-definition.json)"
+  value       = aws_iam_role.ecs_task.arn
+}
+
+output "database_url_secret_arn" {
+  description = "Full ARN of the DATABASE_URL secret (used in infra/task-definition.json)"
+  value       = aws_secretsmanager_secret.database_url.arn
+}
+
+output "jwt_secret_arn" {
+  description = "Full ARN of the JWT_SECRET secret (used in infra/task-definition.json)"
+  value       = aws_secretsmanager_secret.jwt_secret.arn
+}
+
+output "workos_api_key_secret_arn" {
+  description = "Full ARN of the WORKOS_API_KEY secret (used in infra/task-definition.json)"
+  value       = aws_secretsmanager_secret.workos_api_key.arn
+}
+
+output "workos_client_id_secret_arn" {
+  description = "Full ARN of the WORKOS_CLIENT_ID secret (used in infra/task-definition.json)"
+  value       = aws_secretsmanager_secret.workos_client_id.arn
+}
+
 output "sentry_dsn_secret_arn" {
-  description = "Full ARN of the Sentry DSN secret (used in infra/task-definition.json)"
+  description = "Full ARN of the SENTRY_DSN secret (used in infra/task-definition.json)"
   value       = aws_secretsmanager_secret.sentry_dsn.arn
 }
 
