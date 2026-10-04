@@ -23,7 +23,8 @@ judgment:
 2. **Mobile caret-range patch bumps** — Dependabot's regenerated mobile lockfile
    drops `overrides` entries and fails `npm ci` (see PR #290 / #300), so mobile
    lockfile-only bumps are yours.
-3. **Deferral-list upkeep** and the **daily log**.
+3. **Deferral-list upkeep** (including the report-only inventory of backend
+   and web majors, which Dependabot ignores) and the **daily log**.
 
 ## Inline deferral list (authoritative)
 
@@ -63,8 +64,8 @@ NEVER bump these. Surface them in the deferred tracking issue + daily log only.
   - cat "$ALERTS_JSON"            (open alerts: severity, package, manifest,
                                    vulnerable_range, first_patched, html_url)
   - cd mobile && npm ci && npm outdated --json
-  - cd backend && npm ci          (only needed if a backend override is required)
-  - cd web && npm ci              (only needed if a web override is required)
+  - cd backend && npm ci && npm outdated --json
+  - cd web && npm ci && npm outdated --json
   - gh pr list --state open --search "in:title chore(deps)" --json number,title,headRefName,author
   - gh issue list --state open --search "Deferred dependency upgrades" --json number,title
   - gh issue list --state open --search "Daily upgrade scan log" --json number,title
@@ -114,6 +115,18 @@ under ⏸ only):
     that item and DEFER it. Never edit `mobile/binary-manifest.json` and never
     run `binary-manifest:record`; only a human records a verified build.
 
+### Backend / web majors (report only)
+
+  - From the `backend/` and `web/` `npm outdated --json` output: every entry
+    whose `latest` major differs from its `current` major → DEFER. Skip an
+    entry whose `latest` is a prerelease (e.g. `prisma 8.0.0-rc.*`).
+  - Never bump one and never open a PR for one: Dependabot owns patch/minor
+    on both sides and ignores majors; the human owns majors. Your job is to
+    make them visible on the deferred tracking issue (Step 4) so they are
+    triaged before an advisory forces the jump.
+  - Patch/minor entries on backend and web are Dependabot's lane: do not list
+    them, do not act on them.
+
 ## Step 3 — Apply AUTO-FIX (one PR per side)
 
 If `DRY_RUN=true`: do everything up to the commit, then `git checkout -- .`
@@ -146,8 +159,13 @@ For each side with ≥1 auto-fix item:
 Find the open issue titled exactly **Deferred dependency upgrades**. Create it
 if missing (label `automation`); otherwise REPLACE its body. Body: bullet list
 of every DEFER item with `current → latest`, the unblock condition, and any
-open moderate/low alerts with no action planned. Include "Last refreshed:
-YYYY-MM-DD". Skip when `DRY_RUN=true`.
+open moderate/low alerts with no action planned. It MUST contain a section
+headed **`## Backend / Web — majors (human-owned)`** listing every package
+from "Backend / web majors (report only)" as `<pkg> current → latest`, grouped
+by side, with a one-line unblock note where one is known (the inline list's
+jest and prisma-generator entries keep their notes). Do not attribute these
+sides to Dependabot, which ignores majors on both. Include
+"Last refreshed: YYYY-MM-DD". Skip when `DRY_RUN=true`.
 
 ## Step 5 — Expo SDK divergence (informational)
 
@@ -206,6 +224,8 @@ even after a fatal error.
   - Never use `--no-verify`.
   - Never enable auto-merge on anything outside the AUTO-FIX bucket.
   - Never bump anything in the deferral list.
+  - Never bump, and never open a PR for, a backend or web major: report it
+    on the deferred tracking issue only.
   - Never open a PR that duplicates an open Dependabot PR.
   - Time budget ~30 min. Priority: security overrides > mobile patches >
     tracking issue > daily log > step summary (never skip the summary).

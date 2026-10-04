@@ -26,8 +26,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   *Open in "<app>"?* (Cancel / Open) — even for the app's own scheme — and that modal blocks every
   subsequent command, so the flow fails on whatever comes next with no hint of the cause. Follow every
   `openLink` with a conditional `runFlow: { when: { visible: "Open" }, commands: [ tapOn: "Open" ] }`;
-  conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml` does
-  this; `.maestro/auth-callback.yaml` does **not** and is expected to fail for this reason.
+  conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml`
+  (after `hooplings://teams` and `hooplings://games`), `.maestro/error-way-back.yaml` (after its
+  two `hooplings://teams/…` and `hooplings://games/…` links) and `.maestro/auth-callback.yaml`
+  (after the `hooplings://auth/callback?error=…` link) all do this.
 - There is no tab bar on pushed routes. `app/_layout.tsx` is a `Stack` with `(tabs)` as one screen, so
   `teams/[id]`, its roster, `games/[id]` and friends render **above** the tabs — `tapOn: "Teams tab"`
   cannot work there. Reaching a tab from a pushed screen means popping back, or a deep link.

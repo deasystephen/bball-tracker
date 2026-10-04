@@ -119,9 +119,18 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
      --deletion-protection
    ```
 
-   **Match the size class to whatever production is running.** Run
-   `terraform output db_instance_class` (or check `terraform.tfvars`) if you're
-   not sure.
+   **Match the size class to whatever production is running.** If you're not
+   sure, read it off the live instance:
+
+   ```bash
+   aws rds describe-db-instances \
+     --db-instance-identifier bball-tracker-production-postgres \
+     --query 'DBInstances[0].DBInstanceClass' --output text
+   ```
+
+   (Terraform does not expose `var.db_instance_class` as an output; the value
+   lives in the gitignored `infra/terraform.tfvars`, or defaults to
+   `db.t3.micro` from `infra/variables.tf`.)
 
 3. **Wait for it to come up.** The restore finishes when the instance is
    `available`. Poll:
@@ -194,7 +203,8 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
    curl -fsS https://api.hooplings.com/health
    ```
 
-   In Sentry, watch the `prod` environment for new error spikes. In CloudWatch,
+   In Sentry (project `bball-tracker-backend`), watch the `production`
+   environment for new error spikes. In CloudWatch,
    the ECS service's task count should match desired count and ALB 5xx should
    be flat.
 

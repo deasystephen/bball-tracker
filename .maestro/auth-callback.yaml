@@ -22,9 +22,7 @@ appId: com.bballtracker.mobile
 # iOS raises a system confirmation ("Open in <app>?") for custom-scheme URLs —
 # even the app's own scheme — and the modal blocks every later command.
 # Conditional because the simulator may remember the choice. Same handling as
-# coach-onboarding.yaml; this flow predates the rule in docs/testing/maestro.md
-# ("`openLink` triggers an iOS system dialog") and was the documented
-# expected-failure until now.
+# coach-onboarding.yaml (docs/testing/maestro.md, "openLink").
 - runFlow:
     when:
       visible: "Open"

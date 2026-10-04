@@ -28,7 +28,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 ## Tech Stack
 
 ### Mobile (iOS)
-- React Native 0.83 with Expo SDK 55 (React 19.2)
+- React Native with Expo; the Expo SDK, React Native and React versions are whatever `mobile/package.json` says (Expo SDK 57 / React Native 0.86 / React 19.2 since 2026-09-29, #576)
 - Expo Router (file-based navigation)
 - TanStack Query (server state)
 - Zustand (client state)

@@ -50,7 +50,11 @@ through a pull request.
    gh pr checks <n> --watch
    ```
    Required checks: lint / type-check / Jest for backend and mobile, the Metro
-   `expo export` smoke build, and CodeQL.
+   `expo export` smoke build, CodeQL, and the **Migration backfill guard**
+   (`.github/workflows/migration-backfill-guard.yml`; see
+   `docs/testing/migration-backfill-guard.md`, and run
+   `.github/scripts/migration-backfill-guard.sh` locally before pushing a
+   hand-written backfill migration).
 
 6. **Merge with squash and delete the branch:**
    ```bash

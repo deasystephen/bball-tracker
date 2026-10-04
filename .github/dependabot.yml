@@ -32,8 +32,9 @@ updates:
       backend-minor:
         update-types: ["minor"]
     ignore:
-      # Major bumps are reviewed manually per the deferral list in
-      # docs/automation/daily-upgrade-scan.md
+      # Major bumps are reviewed manually; the daily scan lists them on the
+      # rolling "Deferred dependency upgrades" issue (#275), see
+      # docs/automation/daily-upgrade-scan.md.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
@@ -69,9 +70,9 @@ updates:
       # Expo-managed native modules: versions are pinned by the Expo SDK
       # (expo/bundledNativeModules.json), not by npm. Letting dependabot bump
       # these ahead of the current SDK breaks the native build (see #175, where
-      # it proposed reanimated 4.4.1 / worklets 0.9.2 against an SDK-55 project
-      # that pins reanimated 4.2.1 / worklets 0.7.4). They move only via an
-      # `expo install` / SDK upgrade. This enforces, at the dependabot level,
+      # it proposed reanimated 4.4.1 / worklets 0.9.2 against the SDK 55 project
+      # of the time, which pinned reanimated 4.2.1 / worklets 0.7.4). They move
+      # only via an `expo install` / SDK upgrade. This enforces, at the dependabot level,
       # the RN-ecosystem deferral already documented as authoritative in
       # docs/automation/daily-upgrade-scan.md — re-evaluate at each SDK bump.
       - dependency-name: "@react-native-async-storage/async-storage"
@@ -99,10 +100,15 @@ updates:
       - dependency-name: "react-dom"
       # react-test-renderer must equal the react version exactly.
       - dependency-name: "react-test-renderer"
-      # lottie-react-native has native code too (all versions are held by the
-      # rule above); in addition >=7.4.0 requires react-native >=0.84 and we
-      # are on the SDK 55 / RN 0.83 line. Re-evaluate at the SDK 57 bump
-      # (see PR #314).
+      # lottie-react-native is pinned by the Expo SDK (SDK 57: ~7.3.8, see
+      # expo/bundledNativeModules.json) and has native code, so every version
+      # is held HERE: none of the rules above matches it (it is not in the
+      # pinned-module list, `expo-*` does not cover it, and the wildcard below
+      # ignores majors only), so this entry is the only thing stopping
+      # Dependabot from proposing a minor or patch bump that the binary cannot
+      # run. The react-native >=0.84 requirement of lottie >=7.4.0 that first
+      # motivated it (PR #314, #330) is historical since the SDK 57 / RN 0.86
+      # bump (#576); re-evaluate at each SDK bump.
       - dependency-name: "lottie-react-native"
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
@@ -130,6 +136,8 @@ updates:
       web-minor:
         update-types: ["minor"]
     ignore:
+      # Major bumps are reviewed manually; the daily scan lists them on the
+      # rolling "Deferred dependency upgrades" issue (#275).
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 

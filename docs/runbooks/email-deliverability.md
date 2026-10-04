@@ -18,7 +18,7 @@ Mail that people read, at `hooplings.com` itself, is a separate path through Goo
 | Sender | `noreply@mail.hooplings.com`, SES v2, `us-east-1` |
 | Reply-To | `support@hooplings.com` on every message (#450). The sender's domain has one MX, the SES bounce handler, so without it a reply reaches nobody. Every footer names the address and says that a reply goes to support, not to the coach |
 | Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=none` with reports to `dmarc@hooplings.com` |
-| What is sent | Transactional only: team and guardian invitations, RSVP confirmations, team announcements. No marketing. |
+| What is sent | Transactional only: team and guardian invitations, RSVP confirmations, team announcements, and reply notifications to an announcement's author (#34; opt-out via the Profile reply-notifications toggle, `User.notifyOnReplies`; send rules in `docs/architecture/email.md`, "Reply email"). No marketing. |
 | Suppression | SES **account-level suppression list**, reasons `BOUNCE` and `COMPLAINT` |
 | Configuration set | `bball-tracker-production-transactional` — named on every send |
 | Events published | `BOUNCE`, `COMPLAINT`, `DELIVERY`, `REJECT` |
@@ -93,8 +93,13 @@ AWS places the account **under review at 5% bounces or 0.1% complaints** and **p
 2. **Find where the bounces come from.** One team with a roster of mistyped addresses looks very
    different from bounces spread across every team. In Datadog:
    `service:bball-tracker-api "SES permanent bounce recorded"`, then match the `messageId` values
-   against `"Email sent via SES"` lines, which carry `event_type` and, for invitations and
-   announcements, `teamId`.
+   against `"Email sent via SES"` lines, which carry `event_type` and the send's metadata:
+   `invitation.created`, `guardian_invitation.created`, `announcement.created` and
+   `announcement.replied` carry `teamId` (replies also `announcementId` and `replyId`);
+   `rsvp.upserted` carries `gameId` and `rsvpStatus` instead, so attribute an RSVP bounce to a
+   team through the game (`SELECT "teamId" FROM "Game" WHERE id = '<gameId>'`, or the game's
+   detail screen). The sources are the `metadata` objects passed to `mailer.send` in
+   `backend/src/services/`.
 3. **Stop the source, not the service.** Bounced addresses are already suppressed, so the rate
    recovers as normal mail is delivered. If one team keeps adding bad addresses, contact its
    coach. If the volume looks automated (many invitations from one account within minutes), treat
@@ -282,7 +287,9 @@ these are the answers, and each one is a resource in this repository.
 
 > **Use case.** Hooplings is a youth basketball team management app. It sends transactional email
 > only: invitations to join a team, invitations for a parent or guardian to follow a player,
-> RSVP confirmations, and announcements from a coach to the team. There is no marketing email and
+> RSVP confirmations, announcements from a coach to the team, and a notification to the author of
+> an announcement when a team member replies to it (the author can turn these off in the app).
+> There is no marketing email and
 > no purchased or imported list. Every recipient address is entered by a team's coach for a named
 > player or parent, or belongs to a user who signed up.
 >
@@ -304,4 +311,5 @@ these are the answers, and each one is a resource in this repository.
 > domain so SPF aligns, and a DMARC record.
 >
 > **Volume.** Expected volume is low: a team of about 15 players produces 15 to 45 invitations
-> when its roster is created, and a few announcements a week.
+> when its roster is created, a few announcements a week, and a handful of reply notifications
+> per announcement thread.
