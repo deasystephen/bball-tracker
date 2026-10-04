@@ -38,15 +38,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `PATCH /auth/me/role` (`updateMany` + re-read, 401 on zero rows), push-token registration (`FOR
   SHARE` probe inside the upsert transaction) and both `syncUser` branches (`updateMany`, fall
   through to create on zero rows). Since #643 also `PATCH /players/:id` (tombstone 404 for an ADMIN
-  too, then `updateMany` + re-read, 404 on zero rows), `DELETE /players/:id` (tombstone 404 instead
-  of a foreign-key 500), guardian accept (`FOR SHARE` probe on the parent, guarded `PARENT`
-  promotion) and Add Player case 2 (the reuse `updateMany` and photo fill carry `deletedAt: null`;
+  too; one `update` with `where: { id, deletedAt: null }`, P2025 is 404), `DELETE /players/:id`
+  (tombstone 404 and a `delete` with the same guarded `where`; before, it hard-deleted the tombstone
+  and the `onDelete: Cascade` relations such as `AnnouncementReply.author` silently took the retained
+  rows with it), guardian accept (`FOR NO KEY UPDATE` probe on the parent, a write lock because the
+  same transaction may promote the row to `PARENT`; a share lock deadlocked two concurrent accepts by
+  one parent) and Add Player case 2 (the reuse `updateMany` and photo fill carry `deletedAt: null`;
   zero rows on a tombstone is 404, on a claimed row the case-3 re-branch) plus
   `stripUnclaimedEmail`. A request that authenticated a moment before the deletion
   committed must not re-identify the tombstone. Keep that invariant on any new write path:
-  `tests/utils/user-write-guard.test.ts` fails on any `user.update(` / `user.updateMany(` in
-  `src/` whose `where` lacks `deletedAt` (only `account-service.ts`, which writes the tombstone, is
-  allowlisted). Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
+  `tests/utils/user-write-guard.test.ts` fails on any `user.update(`, `user.updateMany(`,
+  `user.delete(`, `user.deleteMany(` or `user.upsert(` in `src/` whose `where` is not an object
+  literal naming `deletedAt`. Only `account-service.ts` is allowlisted: it writes the tombstone,
+  scrubs `managedById`, and hard-deletes an account nothing references, under its own `FOR UPDATE`
+  lock. Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.

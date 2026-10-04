@@ -37,6 +37,7 @@ import { LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
 import { lastHeadCoachTeams } from '../../src/utils/permissions';
 import { PlayerService } from '../../src/services/player-service';
 import { InvitationService } from '../../src/services/invitation-service';
+import { GuardianService } from '../../src/services/guardian-service';
 
 jest.setTimeout(30000);
 
@@ -650,7 +651,7 @@ describe('User writes are guarded by deletedAt (#643, real Postgres)', () => {
     expect(after.updatedAt).toEqual(before.updatedAt);
   });
 
-  it('DELETE /players/:id answers 404 for a tombstone instead of a foreign-key 500', async () => {
+  it('DELETE /players/:id answers 404 for a tombstone instead of hard-deleting it and cascading its kept rows away', async () => {
     const tomb = await tombstone('tombDelete');
     const adminId = await admin('adminDelete');
     await prisma.teamMember.deleteMany({ where: { playerId: tomb } });
@@ -668,6 +669,45 @@ describe('User writes are guarded by deletedAt (#643, real Postgres)', () => {
 
     await expect(PlayerService.deletePlayer(tomb, adminId)).rejects.toBeInstanceOf(NotFoundError);
     expect(await prisma.user.findUnique({ where: { id: tomb } })).not.toBeNull();
+    // AnnouncementReply.author is onDelete: Cascade: a hard delete would have
+    // taken the reply the deletion promised to keep.
+    expect(await prisma.announcementReply.count({ where: { authorId: tomb } })).toBe(1);
+  });
+
+  it('two concurrent guardian accepts by one bare PLAYER parent both succeed (no lock-upgrade deadlock)', async () => {
+    const inviter = await admin('guardianInviter');
+    // Several rounds: a share-lock-then-update would deadlock on some of them.
+    for (let round = 0; round < 4; round++) {
+      const parent = await mkUser(`dualParent${round}`, 'PLAYER');
+      const parentEmail = `dualParent${round}.${RUN}@example.test`;
+      const invitationIds: string[] = [];
+      for (const n of [1, 2]) {
+        const child = await mkUser(`dualKid${round}x${n}`, 'PLAYER');
+        const invitation = await prisma.guardianInvitation.create({
+          data: {
+            childId: child,
+            invitedById: inviter,
+            invitedEmail: parentEmail,
+            relationship: 'GUARDIAN',
+            token: `tok-${RUN}-dual-${round}-${n}`,
+            expiresAt: new Date(Date.now() + 86_400_000),
+          },
+          select: { id: true },
+        });
+        invitationIds.push(invitation.id);
+      }
+
+      const results = await Promise.allSettled(
+        invitationIds.map((id) => GuardianService.acceptInvitation(id, parent))
+      );
+
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(await prisma.guardian.count({ where: { parentId: parent } })).toBe(2);
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parent } })).role).toBe('PARENT');
+      expect(
+        await prisma.guardianInvitation.count({ where: { id: { in: invitationIds }, status: 'ACCEPTED' } })
+      ).toBe(2);
+    }
   });
 
   it('Add Player case 2 never rosters a reuse target deleted between the read and the transaction', async () => {

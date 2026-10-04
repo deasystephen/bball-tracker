@@ -665,6 +665,11 @@ describe('GuardianService', () => {
         data: { role: 'PARENT' },
       });
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      // A write lock, not FOR SHARE: two accepts by one parent must serialise,
+      // not deadlock on the share-to-update upgrade (#643 review).
+      const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+      expect(sql).toContain('FOR NO KEY UPDATE');
+      expect(sql).toContain('"deletedAt" IS NULL');
     });
 
     it('404s and creates no Guardian link when the parent was deleted after it was resolved (#643)', async () => {

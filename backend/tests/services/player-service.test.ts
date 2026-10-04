@@ -51,11 +51,13 @@ const unmanageableMembership = (teamId = 'team-2'): MembershipRow => ({
   team: { season: { league: { admins: [] } }, staff: [] },
 });
 
-/** updatePlayer writes through a `deletedAt`-guarded updateMany, then re-reads the row (#643). */
+/** updatePlayer writes in one statement, `update` with `where: { id, deletedAt: null }` (#643). */
 function mockGuardedWrite(row: unknown): void {
-  (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
-  (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(row);
+  (mockPrisma.user.update as jest.Mock).mockResolvedValue(row);
 }
+
+const p2025 = (): Prisma.PrismaClientKnownRequestError =>
+  new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' });
 
 describe('PlayerService', () => {
   describe('createPlayer', () => {
@@ -593,7 +595,7 @@ describe('PlayerService', () => {
         PlayerService.updatePlayer(player.id, { profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/y.jpg' }, player.id)
       ).rejects.toBeInstanceOf(BadRequestError);
 
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
       expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
     });
 
@@ -628,7 +630,7 @@ describe('PlayerService', () => {
       );
 
       expect(result).toHaveProperty('name', 'New Name');
-      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: player.id, deletedAt: null },
           data: expect.objectContaining({ name: 'New Name' }),
@@ -677,7 +679,7 @@ describe('PlayerService', () => {
 
       expect(result).toHaveProperty('email', 'new@test.com');
       // The recovery path for a bounced address: a corrected one starts clean (#449).
-      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { email: 'new@test.com', emailSuppressedAt: null, emailSuppressedReason: null },
         })
@@ -699,7 +701,7 @@ describe('PlayerService', () => {
         adminUser.id
       );
 
-      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { name: 'Renamed' } })
       );
     });
@@ -714,7 +716,7 @@ describe('PlayerService', () => {
       await expect(
         PlayerService.updatePlayer(player.id, { email: 'squat@test.com' }, player.id)
       ).rejects.toMatchObject({ statusCode: 403 });
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('lets the managing coach set the email of an unclaimed managed player', async () => {
@@ -745,7 +747,7 @@ describe('PlayerService', () => {
       await expect(
         PlayerService.updatePlayer(claimed.id, { email: 'victim@test.com' }, coach.id)
       ).rejects.toMatchObject({ statusCode: 403 });
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('still lets the managing coach rename a claimed managed player', async () => {
@@ -782,7 +784,7 @@ describe('PlayerService', () => {
         await expect(
           PlayerService.updatePlayer(managed.id, { name: 'Hijacked' }, coach.id)
         ).rejects.toMatchObject({ statusCode: 403, message: 'You can only update your own profile' });
-        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
         expect(mockPrisma.teamMember.findMany).toHaveBeenCalledWith(
           expect.objectContaining({ where: { playerId: managed.id } })
         );
@@ -876,7 +878,7 @@ describe('PlayerService', () => {
       await expect(
         PlayerService.updatePlayer(kid.id, { email: 'kid@test.com' }, parent.id)
       ).rejects.toMatchObject({ statusCode: 403 });
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('forbids a non-guardian PARENT from editing an unrelated player', async () => {
@@ -973,24 +975,25 @@ describe('PlayerService', () => {
       ).rejects.toMatchObject({ statusCode: 404, message: 'Player not found' });
 
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
     });
 
-    it('throws NotFound when the guarded write updates zero rows (deleted between read and write) (#643)', async () => {
+    it('throws NotFound when the guarded write matches no row (deleted between read and write) (#643)', async () => {
       const player = createPlayer({ name: 'Old Name' });
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(player)
         .mockResolvedValueOnce(player);
-      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      // Prisma answers P2025 when `{ id, deletedAt: null }` matches nothing.
+      (mockPrisma.user.update as jest.Mock).mockRejectedValueOnce(p2025());
 
       await expect(
         PlayerService.updatePlayer(player.id, { name: 'New', profilePictureUrl: 'https://cdn/x.png' }, player.id)
       ).rejects.toMatchObject({ statusCode: 404, message: 'Player not found' });
 
-      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: player.id, deletedAt: null } })
       );
+      // One statement: no re-read that could return a row the write never touched.
       expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
     });
@@ -1002,7 +1005,7 @@ describe('PlayerService', () => {
         .mockResolvedValueOnce(player)
         .mockResolvedValueOnce(adminUser);
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValueOnce(null);
-      (mockPrisma.user.updateMany as jest.Mock).mockRejectedValueOnce(
+      (mockPrisma.user.update as jest.Mock).mockRejectedValueOnce(
         new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' })
       );
 
@@ -1011,7 +1014,7 @@ describe('PlayerService', () => {
       ).rejects.toBeInstanceOf(ConflictError);
     });
 
-    it('probes a new address case-insensitively and never matches the player itself (#651)', async () => {
+    it('probes a new address case-insensitively (#651)', async () => {
       const player = createPlayer({ email: 'old@test.com' });
       const adminUser = createAdmin();
       (mockPrisma.user.findUnique as jest.Mock)
@@ -1024,10 +1027,10 @@ describe('PlayerService', () => {
       ).rejects.toBeInstanceOf(BadRequestError);
 
       expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
-        where: { email: emailEquals('jordan@example.com'), id: { not: player.id } },
+        where: { email: emailEquals('jordan@example.com') },
         select: { id: true },
       });
-      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('treats a case-only email change as unchanged: no probe, no email write, suppression kept (#651)', async () => {
@@ -1046,9 +1049,10 @@ describe('PlayerService', () => {
       );
 
       expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
-      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: player.id, deletedAt: null },
         data: { name: 'Jordan' },
+        select: expect.any(Object),
       });
     });
 
@@ -1083,11 +1087,8 @@ describe('PlayerService', () => {
       const result = await PlayerService.deletePlayer(player.id, 'admin-id');
 
       expect(result).toEqual({ success: true });
-      expect(mockPrisma.user.delete).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: player.id },
-        })
-      );
+      // Guarded like every User write (#643).
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: player.id, deletedAt: null } });
     });
 
     it('treats a tombstone as not found, even for an admin (#643)', async () => {
@@ -1101,6 +1102,19 @@ describe('PlayerService', () => {
         message: 'Player not found',
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the row is tombstoned between the read and the delete (#643)', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+
+      await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Player not found',
+      });
     });
 
     it('should throw NotFoundError if admin user does not exist', async () => {

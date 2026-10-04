@@ -16,12 +16,7 @@ import {
   ConflictError,
 } from '../utils/errors';
 import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
-import {
-  getGuardianChildIds,
-  getPlayerTeamAccess,
-  isGuardianOf,
-  teamAccessWhere,
-} from '../utils/permissions';
+import { getPlayerTeamAccess, isGuardianOf, readableTeamsWhere } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail } from '../utils/email-match';
 
@@ -107,8 +102,7 @@ export interface PlayerCaller {
  * left league admins and guardians with a 404 on the directory (#685).
  */
 async function sharesTeamWith(userId: string): Promise<Prisma.UserWhereInput> {
-  const childIds = await getGuardianChildIds(userId);
-  return { teamMembers: { some: { team: teamAccessWhere(userId, childIds) } } };
+  return { teamMembers: { some: { team: await readableTeamsWhere(userId) } } };
 }
 
 export interface PlayerList {
@@ -166,7 +160,7 @@ export class PlayerService {
         select: PLAYER_SELECT,
       });
     } catch (error) {
-      throw PlayerService.mapUniqueViolation(error);
+      throw PlayerService.mapWriteError(error);
     }
   }
 
@@ -211,10 +205,19 @@ export class PlayerService {
     );
   }
 
-  /** Convert a Prisma unique-constraint violation on `email` into a 409. */
-  private static mapUniqueViolation(error: unknown): unknown {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return new ConflictError('A user with this email already exists');
+  /**
+   * Map the Prisma errors of a guarded player write: P2002 (unique `email`)
+   * is a 409; P2025 (no row matched `{ id, deletedAt: null }`, i.e. the row
+   * is gone or became a tombstone after it was read) is a 404 (#643).
+   */
+  private static mapWriteError(error: unknown): unknown {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        return new ConflictError('A user with this email already exists');
+      }
+      if (error.code === 'P2025') {
+        return new NotFoundError('Player not found');
+      }
     }
     return error;
   }
@@ -406,7 +409,7 @@ export class PlayerService {
       }
 
       const existingUser = await prisma.user.findFirst({
-        where: { email: emailEquals(data.email), id: { not: playerId } },
+        where: { email: emailEquals(data.email) },
         select: { id: true },
       });
 
@@ -416,11 +419,11 @@ export class PlayerService {
     }
 
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
-    // deletion that commits in between leaves zero rows and a 404 instead of a
-    // rewritten tombstone.
-    let updated: Prisma.BatchPayload;
+    // deletion that commits in between matches no row (P2025, a 404) instead
+    // of rewriting the tombstone. One statement: write and returned row agree.
+    let updatedPlayer: Player;
     try {
-      updated = await prisma.user.updateMany({
+      updatedPlayer = await prisma.user.update({
         where: { id: playerId, deletedAt: null },
         data: {
           ...(data.name && { name: data.name }),
@@ -430,17 +433,11 @@ export class PlayerService {
             profilePictureUrl: data.profilePictureUrl || null,
           }),
         },
+        select: PLAYER_SELECT,
       });
     } catch (error) {
-      throw PlayerService.mapUniqueViolation(error);
+      throw PlayerService.mapWriteError(error);
     }
-    if (updated.count === 0) {
-      throw new NotFoundError('Player not found');
-    }
-    const updatedPlayer: Player = await prisma.user.findUniqueOrThrow({
-      where: { id: playerId },
-      select: PLAYER_SELECT,
-    });
 
     if (data.profilePictureUrl !== undefined) {
       await deletePreviousAvatar(player.profilePictureUrl, updatedPlayer.profilePictureUrl);
@@ -473,8 +470,10 @@ export class PlayerService {
       },
     });
 
-    // A tombstone is not found, for an admin too (#643): it is kept because
-    // other rows reference it, so a hard delete would only hit a foreign key.
+    // A tombstone is not found, for an admin too (#643). It is kept because
+    // rows the deletion promised to retain reference it, and several of those
+    // relations cascade (an announcement reply's author, for one): a hard
+    // delete would silently erase the retained rows with it.
     if (!player || player.deletedAt) {
       throw new NotFoundError('Player not found');
     }
@@ -503,10 +502,15 @@ export class PlayerService {
       );
     }
 
-    // Delete player
-    await prisma.user.delete({
-      where: { id: playerId },
-    });
+    // Guarded like every User write (#643): a deletion that tombstoned the
+    // row after the unlocked read above matches nothing (P2025, a 404).
+    try {
+      await prisma.user.delete({
+        where: { id: playerId, deletedAt: null },
+      });
+    } catch (error) {
+      throw PlayerService.mapWriteError(error);
+    }
 
     return { success: true };
   }

@@ -14,6 +14,7 @@ import {
   isGuardianOf,
   isGuardianOfTeamMember,
   teamAccessWhere,
+  readableTeamsWhere,
   canWriteLeague,
   getGuardianChildIds,
   lastHeadCoachTeams,
@@ -339,6 +340,24 @@ describe('permissions — guardian branches', () => {
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue(undefined);
 
       await expect(getGuardianChildIds('parent-1')).resolves.toEqual([]);
+    });
+  });
+
+  describe('readableTeamsWhere', () => {
+    it('resolves the guardian child ids and returns the shared clause', async () => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([{ childId: 'kid-1' }]);
+
+      await expect(readableTeamsWhere('parent-1')).resolves.toEqual(teamAccessWhere('parent-1', ['kid-1']));
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith({
+        where: { parentId: 'parent-1' },
+        select: { childId: true },
+      });
+    });
+
+    it('omits the guardian branch for a caller with no children', async () => {
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+
+      await expect(readableTeamsWhere('coach-1')).resolves.toEqual(teamAccessWhere('coach-1', []));
     });
   });
 

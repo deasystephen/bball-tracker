@@ -704,12 +704,15 @@ export class GuardianService {
 
     return prisma.$transaction(async (tx) => {
       // The parent was resolved outside this transaction, unlocked. Lock the
-      // row (FOR SHARE, `deletedAt IS NULL`) like push-token registration: a
-      // deletion that committed in between leaves no row and a 404, and one
-      // that has not started waits on this lock, so no Guardian link or role
-      // write ever lands on a tombstone (#643).
+      // row (`deletedAt IS NULL`): a deletion that committed in between leaves
+      // no row and a 404, and one that has not started waits on this lock, so
+      // no Guardian link or role write ever lands on a tombstone (#643).
+      // FOR NO KEY UPDATE, not FOR SHARE: this transaction may UPDATE the row
+      // (the PARENT promotion), and two accepts by the same parent that both
+      // held a share lock would deadlock on that upgrade. This lock serialises
+      // them, and still conflicts with deleteAccount's FOR UPDATE.
       const live = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "User" WHERE "id" = ${parentId} AND "deletedAt" IS NULL FOR SHARE`;
+        SELECT "id" FROM "User" WHERE "id" = ${parentId} AND "deletedAt" IS NULL FOR NO KEY UPDATE`;
       if (live.length === 0) {
         throw new NotFoundError('Account not found');
       }

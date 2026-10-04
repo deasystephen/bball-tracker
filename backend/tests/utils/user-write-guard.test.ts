@@ -6,11 +6,14 @@
  * so a write that raced the deletion, or an admin editing a stale id, would
  * re-populate an erased account. The rule lives in CLAUDE.md and
  * `docs/architecture/account-deletion.md`; this suite turns it from remembered
- * into enforced: any `user.update(` / `user.updateMany(` in `src/` whose
- * `where` is not an object literal naming `deletedAt` fails.
+ * into enforced: any `user.update(`, `user.updateMany(`, `user.delete(`,
+ * `user.deleteMany(` or `user.upsert(` in `src/` whose `where` is not an
+ * object literal naming `deletedAt` fails.
  *
- * Allowlisted: `services/account-service.ts`, which writes the tombstone
- * itself and scrubs `managedById` off the rows the deleted account managed.
+ * Allowlisted: `services/account-service.ts` only. It writes the tombstone
+ * itself, scrubs `managedById` off the rows the deleted account managed, and
+ * hard-deletes an account nothing references any more (#529), all under the
+ * FOR UPDATE lock it takes on the row. No other file hard-deletes a User.
  */
 import { readdirSync, readFileSync, statSync } from 'fs';
 import path from 'path';
@@ -19,7 +22,7 @@ const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
 const ALLOWLIST = new Set([path.join(SRC, 'services/account-service.ts')]);
 
-const USER_WRITE = /\buser\.(update|updateMany)\(/g;
+const USER_WRITE = /\buser\.(update|updateMany|delete|deleteMany|upsert)\(/g;
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -50,8 +53,8 @@ function balanced(source: string, open: number): string {
 }
 
 /**
- * Every `user.update(` / `user.updateMany(` call whose `where` is not an
- * object literal containing `deletedAt`, as the call's argument text.
+ * Every `User` write call (see `USER_WRITE`) whose `where` is not an object
+ * literal containing `deletedAt`, as the call's argument text.
  */
 export function findUnguardedUserWrites(source: string): string[] {
   const code = stripComments(source);
@@ -116,6 +119,11 @@ describe('the guard pattern', () => {
     ['// prisma.user.update({ where: { id } })', 0],
     ['prisma.teamUser.update({ where: { id } })', 0],
     ['prisma.user.findUnique({ where: { id } })', 0],
+    ['prisma.user.delete({ where: { id } })', 1],
+    ['tx.user.deleteMany({ where: { managedById: id } })', 1],
+    ["prisma.user.upsert({ where: { email }, create: {}, update: {} })", 1],
+    ['prisma.user.delete({ where: { id, deletedAt: null } })', 0],
+    ['prisma.user.deleteMany({ where: { id: { in: ids }, deletedAt: null } })', 0],
   ])('%j → %i offender(s)', (source, count) => {
     expect(findUnguardedUserWrites(source)).toHaveLength(count);
   });

@@ -38,8 +38,10 @@ Removing the last guardian never deletes the child.
   from #651). Proven against
   Postgres in `tests/integration/email-match.db.test.ts` (Guardian invitations). **Tombstones (#643):**
   the parent is resolved before the transaction, unlocked, so the transaction first locks the row
-  (`FOR SHARE`, `deletedAt IS NULL`, like push-token registration) and answers 404 `Account not found`
-  when the account was deleted in between; the `PARENT` promotion is `updateMany({ where: { id,
+  (`FOR NO KEY UPDATE`, `deletedAt IS NULL`) and answers 404 `Account not found` when the account was
+  deleted in between. It is a write lock, not push-token registration's `FOR SHARE`, because the same
+  transaction may update the row: two concurrent accepts by one parent holding share locks deadlocked
+  on the upgrade; now they serialise; the `PARENT` promotion is `updateMany({ where: { id,
   deletedAt: null } })` and zero rows aborts the transaction, so no `Guardian` row ever points at a
   tombstone.
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
