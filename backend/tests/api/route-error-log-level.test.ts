@@ -97,7 +97,7 @@ describe('route catch log level (#656)', () => {
     // GET /teams/:id answers only 400/403/404 itself; anything else is a 500
     // and must surface on the error stream even though the error is an AppError.
     // This pins CURRENT behaviour, not the desired one: answering every AppError
-    // with its own status is a separate follow-up (#656 review).
+    // with its own status is the follow-up #831.
     mockTeamService.getTeamById.mockRejectedValue(new ConflictError('unexpected conflict'));
 
     const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
