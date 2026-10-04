@@ -217,7 +217,9 @@ user-visible outcome.
 - **Claim-by-code, parent-to-parent invites** — guardian spec v1 exclusions stand.
 - **Email delivery tracking beyond per-send flags** (bounce webhooks) — needs SES prod access
   first (#23).
-- **Invite-funnel analytics** — captured in TODOS.md (review decision), post-ship.
+- **Invite-funnel analytics** — shipped under #616 (closed 2026-10-03) as `invitation_sent`
+  (with `resend: true` for a resend) and `invitation_accepted` (`source: in_app | link`). The
+  remaining claimed-via-login signal (`invite_claimed_via_login`) is tracked in #790.
 - **Deprecated endpoint removal** — follow-up PR after OTA adoption is confirmed.
 
 ## Rollout (no data surgery — T4)

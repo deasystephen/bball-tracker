@@ -53,7 +53,7 @@ In production both point at `https://api.hooplings.com`, and:
 
 ## Tests
 
-No test framework configured yet. Tracked in #51 follow-up; bootstrap Vitest + RTL before adding more interactive flows.
+No test framework configured yet. The web test runner is #510 (Vitest + `@testing-library/react`, wired into the web CI job); bootstrap it before adding more interactive flows.
 
 ## Related
 
@@ -61,3 +61,4 @@ No test framework configured yet. Tracked in #51 follow-up; bootstrap Vitest + R
 - Backend mailer + template: `backend/src/services/mailer/templates/invitation.ts`
 - Mobile counterpart screen: `mobile/app/invite/[token].tsx`
 - Issue tracking the Android fingerprint: #139
+- Issue tracking the web test runner: #510

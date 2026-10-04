@@ -103,3 +103,9 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - The script and the workflow live under `.github/`, outside the path filter that makes a merge
   deploy. The Postgres image is read from `docker-compose.yml`, so the major stays pinned in
   the places `tests/infra/postgres-version.test.ts` already checks.
+
+## Manual API smoke scripts (`backend/scripts/`)
+- `backend/scripts/test-players-api.sh [BASE_URL] [ACCESS_TOKEN]` exercises `/api/v1/players` against a
+  local `NODE_ENV=development` backend; with no token it dev-logins as the seeded admin. Its guide,
+  with the cURL equivalents and the status each one returns, is `backend/docs/players-api-testing.md`.
+  These scripts are manual only (not in CI) and must never be pointed at production.

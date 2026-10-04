@@ -10,7 +10,7 @@ React Native mobile application built with Expo for iOS and Android.
   - Zustand (client state)
   - TanStack Query (server state)
 - **HTTP Client**: Axios
-- **Storage**: AsyncStorage (via Zustand persist)
+- **Storage**: session tokens in the iOS Keychain / Android Keystore via `expo-secure-store`; `user` and flags in AsyncStorage (Zustand persist through `services/secure-storage.ts`)
 
 ## Setup
 
@@ -79,24 +79,20 @@ mobile/
 
 ## Environment Variables
 
-Configure environment-specific settings in the existing `app.config.js` (it already defines the EAS Update URL and an `extra` block):
+The API host is decided in one place, `config/env.ts#getApiUrl()`, from `extra.apiUrl` in `app.config.js`. That value is fixed at build or OTA-publish time from `APP_ENV`:
 
-```javascript
-export default {
-  expo: {
-    extra: {
-      apiUrl: process.env.API_URL || 'http://localhost:3000',
-    },
-  },
-};
-```
+- `APP_ENV=production` or `APP_ENV=preview`: `https://api.hooplings.com`. `API_URL` overrides the host in those two environments only.
+- Anything else, including unset: `http://127.0.0.1:3000` (the local dev server). `API_URL` is ignored here.
+
+Local `npx expo run:ios` / `run:android` needs no variables. `eas build` and `eas update` read them from the EAS environment: always pass `--environment production` to `eas update`, or the update ships the dev host to every device (the "OTA env gotcha" in `docs/deployment/mobile-builds-and-ota.md`). The other `extra` keys follow the same rule: `amplitudeApiKey` (`AMPLITUDE_API_KEY`, production and preview only; analytics are off in local development) and `sentryDsn` / `sentryEnvironment` / `sentryRelease` (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`; unset locally, so no events ship). `__tests__/app-config.test.ts` pins the mapping.
 
 ## Development
 
 - The app uses Expo Router for navigation
-- Authentication state is managed with Zustand and persisted to AsyncStorage
+- Authentication state is managed with Zustand; the tokens are persisted to the Keychain/Keystore (`expo-secure-store`) and the rest (`user`, flags) to AsyncStorage via `services/secure-storage.ts`. Detail: `docs/architecture/auth-sessions.md`
 - API calls use TanStack Query for caching and state management
 - All API requests automatically include the auth token from the store
+- Architecture, routing and the mobile rules: the repo's `docs/architecture/mobile-app.md`; theme tokens and the mandatory shared components: `mobile/docs/design-system.md`
 
 ## License
 
