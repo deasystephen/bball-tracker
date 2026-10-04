@@ -6,9 +6,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { teamKeys, type TeamStaff } from './useTeams';
+import type { TeamStaff } from './useTeams';
 import { usageKeys } from './useUsage';
-import { gameKeys } from './query-keys';
+import { gameKeys, teamKeys } from './query-keys';
+import { useAuthStore } from '../store/auth-store';
 
 export type StaffRoleType = 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
 
@@ -82,8 +83,6 @@ function useInvalidateStaff() {
     queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
     // Staff membership is what the usage meter counts (#43 / B2.8).
     queryClient.invalidateQueries({ queryKey: usageKeys.all });
-    // Staff membership decides which games the caller may list (#729).
-    queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
   };
 }
 
@@ -140,6 +139,7 @@ export function useUpdateStaffRole() {
 
 export function useRemoveStaff() {
   const invalidate = useInvalidateStaff();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ teamId, userId }: { teamId: string; userId: string }) => {
@@ -148,6 +148,12 @@ export function useRemoveStaff() {
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.STAFF_REMOVED, { team_id: variables.teamId });
       invalidate(variables.teamId);
+      // Leaving a team's staff ("Leave team") changes which games the caller
+      // may list (GET /games is membership-scoped, #729). Removing someone
+      // else does not, so only self-removal refetches the games lists.
+      if (variables.userId === useAuthStore.getState().user?.id) {
+        queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+      }
     },
   });
 }

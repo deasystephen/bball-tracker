@@ -236,10 +236,11 @@ export function useAcceptInvitation() {
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
       // A team accept (teamMember returned) or a guardian accept (the child's
       // teams, PARENT role) changes membership, and GET /games is
-      // membership-scoped, so both the teams and the games lists move (#729).
+      // membership-scoped, so teams and games move. gameKeys.all also refreshes
+      // a game detail cached (e.g. as a 403) before the accept (#729).
       if (data.teamMember || data.kind === 'guardian') {
         queryClient.invalidateQueries({ queryKey: teamKeys.all });
-        queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: gameKeys.all });
       }
     },
   });

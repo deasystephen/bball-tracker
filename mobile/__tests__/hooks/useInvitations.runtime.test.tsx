@@ -158,8 +158,9 @@ describe('useInvitations runtime', () => {
       queryKey: invitationKeys.all,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.all });
-    // GET /games is membership-scoped: the new team's games must appear (#729).
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+    // GET /games is membership-scoped: the new team's games must appear, and
+    // a game detail cached before the accept refreshes too (#729).
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.all });
   });
 
   it('useAcceptInvitation invalidates teams and games on a guardian accept', async () => {
@@ -175,7 +176,7 @@ describe('useInvitations runtime', () => {
     });
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.all });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.all });
   });
 
   it('useAcceptInvitation does not invalidate teams or games when teamMember absent', async () => {

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { apiClient } from '../services/api-client';
+import { queryClient } from '../services/query-client';
+import { isProfileEditSince, PROFILE_EDIT_FIELDS } from './useProfile';
 import { useAuthStore, useIsAuthenticated } from '../store/auth-store';
 import type { User } from '../../shared/types';
 
@@ -55,8 +57,13 @@ export function useSessionRefresh(): void {
         const response = await apiClient.get<MeResponse>('/auth/me');
         const fresh = response.data?.user;
         if (!fresh || !useAuthStore.getState().isAuthenticated) return;
+        // A profile edit that started after this request went out (or is
+        // still in flight) wins: its PATCH response already updated the store,
+        // and this GET may carry the pre-edit values.
+        const skipProfileFields = isProfileEditSince(queryClient, now);
         const patch: Partial<User> = {};
         for (const field of SYNCED_FIELDS) {
+          if (skipProfileFields && (PROFILE_EDIT_FIELDS as readonly string[]).includes(field)) continue;
           const value = fresh[field];
           if (value !== undefined) {
             Object.assign(patch, { [field]: value });

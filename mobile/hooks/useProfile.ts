@@ -6,7 +6,7 @@
  * every ADMIN/COACH avatar change (audit #10).
  */
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, type QueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
@@ -42,8 +42,27 @@ export function toUserPatch(user: ProfileResponse['user']): Partial<User> {
   };
 }
 
+/** Mutation key of `useUpdateProfile`, so non-React code can see an edit in flight. */
+export const PROFILE_UPDATE_MUTATION_KEY = ['profile', 'update'] as const;
+
+/** The auth-store fields `useUpdateProfile` writes. */
+export const PROFILE_EDIT_FIELDS = ['name', 'profilePictureUrl', 'notifyOnReplies'] as const;
+
+/**
+ * True when a profile edit is pending, or was submitted at or after `since`.
+ * A `GET /auth/me` sent at `since` may then carry the pre-edit values, so its
+ * profile fields must not overwrite the edit's local result (#768 review).
+ */
+export function isProfileEditSince(client: QueryClient, since: number): boolean {
+  return client
+    .getMutationCache()
+    .findAll({ mutationKey: PROFILE_UPDATE_MUTATION_KEY })
+    .some((m) => m.state.status === 'pending' || m.state.submittedAt >= since);
+}
+
 export function useUpdateProfile() {
   return useMutation<ProfileResponse, Error, UpdateProfileInput>({
+    mutationKey: PROFILE_UPDATE_MUTATION_KEY,
     mutationFn: async (data) => {
       const response = await apiClient.patch<ProfileResponse>('/auth/me', data);
       return response.data;

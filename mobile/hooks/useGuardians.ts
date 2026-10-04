@@ -7,8 +7,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { teamKeys } from './useTeams';
-import { invitationKeys } from './useInvitations';
+import { gameKeys, invitationKeys, teamKeys } from './query-keys';
+import { useAuthStore } from '../store/auth-store';
 import type { GuardianRelationship } from '../../shared/types';
 
 export interface GuardianRow {
@@ -82,10 +82,7 @@ export interface InviteGuardianResponse {
   emailSent: boolean;
 }
 
-export interface InviteGuardianResult {
-  invitation: PendingGuardianInvitation;
-  emailSent: boolean;
-}
+export type InviteGuardianResult = Omit<InviteGuardianResponse, 'success'>;
 
 export function useInviteGuardian() {
   const invalidate = useInvalidateGuardians();
@@ -107,7 +104,7 @@ export function useInviteGuardian() {
       );
       // emailSent is per send: false means the invitation exists but SES
       // refused the email, and the screen must say so (#770).
-      return { invitation: response.data.invitation, emailSent: response.data.emailSent };
+      return response.data;
     },
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_INVITED, {
@@ -122,6 +119,7 @@ export function useInviteGuardian() {
 
 export function useRemoveGuardian() {
   const invalidate = useInvalidateGuardians();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
@@ -138,6 +136,12 @@ export function useRemoveGuardian() {
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_REMOVED, { team_id: variables.teamId });
       invalidate(variables.teamId, variables.playerId);
+      // A guardian leaving (removing their own link) loses the child's teams
+      // and games; GET /teams and GET /games are membership-scoped (#729).
+      if (variables.guardianUserId === useAuthStore.getState().user?.id) {
+        queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
+      }
     },
   });
 }
