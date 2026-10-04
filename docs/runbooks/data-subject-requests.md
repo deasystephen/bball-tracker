@@ -99,14 +99,17 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   and `requestId` whenever the request was authenticated (`setLogContextUser` in
   `backend/src/api/auth/middleware.ts`; `backend/src/api/middleware/request-logger.ts`). The
   `Account deleted` event logs the deleted user's id, the actor's id and the mode. At the
-  production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name,
-  no email address (addresses are hashed with `hashRecipient()`) and no secret URL (paths and
-  query strings go through `utils/redact.ts`); the `debug` level, which an operator may switch on
-  briefly for a diagnosis, writes the plain recipient address of each outbound email
-  (`services/mailer/ses-mailer.ts`). They are kept **30 days** in CloudWatch Logs
+  production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name
+  and no secret URL (paths and query strings go through `utils/redact.ts`), and email addresses
+  are hashed with `hashRecipient()`; however, until #640 lands, a failed send logs the raw SES
+  error message (`Failed to send … email` in the invitation, guardian, announcement, reply and
+  RSVP services), which names the recipient while SES is sandboxed, and the `debug` level, which
+  an operator may switch on briefly for a diagnosis, writes the plain recipient address of each
+  outbound email (`services/mailer/ses-mailer.ts`). They are kept **30 days** in CloudWatch Logs
   (`retention_in_days` on `/ecs/bball-tracker-production` in `infra/ecs.tf`), and every line is
-  also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log
-  group), where it is kept for **15 days**: the retention of the org's default log index, which
+  also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log group
+  that exists only while `datadog_api_key` is set in the Terraform variables; it is set in
+  production), where it is kept for **15 days**: the retention of the org's default log index, which
   nothing in `infra/` manages. It is read in Datadog under Logs → Configuration → Indexes and was
   confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line; re-check it
   there before the privacy policy repeats the number. Supersedes D8 of

@@ -113,9 +113,8 @@ Everything above is applied. The one thing left is a view preference the API
 does not expose: open the board and set the default view to "Board", grouped by
 Status. Anything already underway needs moving to "In progress" by hand.
 
-Ordering the columns do NOT encode — see ROADMAP.md:
+Ordering the columns do NOT encode — see ROADMAP.md ("Ordering is not free"):
   #30 -> #23 -> #24
 Each link makes the next safe. Leaving SES sandbox (#23) before the web app is
-deployed (#30), for instance, means working email carrying a dead link. (#53 and
-#447, which used to head this chain, closed on 2026-08-30 and 2026-09-06.)
+deployed (#30), for instance, means working email carrying a dead link.
 EOF

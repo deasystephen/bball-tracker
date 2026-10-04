@@ -36,7 +36,8 @@ Milestone: [`v2.0 GA`](../../milestone/1)
 **Launch gate.** A person we have never met installs from TestFlight, signs up,
 creates a team, invites a parent, and that parent accepts from an email — with
 no admin intervention at any step. Until that runs clean, the cohort does not
-widen. One step is still missing: the parent's accept-from-email link has
+widen. Two of those steps are still blocked: SES is sandboxed, so no email
+reaches an unverified address (#23), and the parent's accept-from-email link has
 nowhere to land until `web/` is deployed (#30).
 
 The blocker set was rebuilt on 2026-08-30 by checking every open issue against
@@ -45,11 +46,12 @@ its own description. Full assessment, including the deferral rationale for
 everything *not* on this milestone:
 [GA readiness assessment](https://claude.ai/code/artifact/d2153c41-97ca-4e54-ad17-9acbe394848f)
 (a dated snapshot — the milestone is the live source of truth). The lanes below
-were last reconciled with the milestone on 2026-10-04; the "paths a stranger
-walks" and "infrastructure" lanes from the rebuild have closed in full and moved
-to "Shipped so far".
+are likewise a snapshot, last reconciled with the milestone on 2026-10-04, when
+the "paths a stranger walks" and "infrastructure" lanes from the rebuild had
+closed in full and moved to "Shipped so far"; for what is open today, read the
+milestone, not this list.
 
-What is left groups into three lanes:
+What is left groups into two lanes:
 
 - **External clocks — start first, they queue.** SES production access (#23),
   privacy policy + ToS with a COPPA read (#25), WorkOS production environment
@@ -57,18 +59,11 @@ What is left groups into three lanes:
   (#450), App Store Connect metadata (#451).
 - **The deploy that unblocks onboarding.** `web/` to hooplings.com (#30) —
   carries the legal pages, the invite funnel, and Universal Links.
-- **First-run experience.** Coach onboarding quickstart with empty states and a
-  sample-team flow (#31), and the Home tab redesign with a cross-team "Up next"
-  schedule (#615, design first). Both sit on the milestone because a stranger's
-  first session is part of the launch gate, not because either blocks a deploy.
 
-Ordering is not free. `#30 → #23 → #24` is a genuine chain: each link makes the
-next safe, and skipping ahead produces user-visible breakage rather than just
-delay. Leaving SES sandbox before #30 ships, for instance, means working email
-carrying a dead link — worse than no email. The two links that used to precede
-it have landed: the task-definition split-brain was reconciled (#53, closed
-2026-08-30; `infra/task-definition.json` is the only source of truth) and the
-apex origins were added to CORS (#447, closed 2026-09-06).
+Ordering is not free. The chain now starts at `#30 → #23 → #24`: each link makes
+the next safe, and skipping ahead produces user-visible breakage rather than
+just delay. Leaving SES sandbox before #30 ships, for instance, means working
+email carrying a dead link — worse than no email.
 
 Shipped so far:
 - Self-serve team creation (#442, closed 2026-08-31): a new coach creates a
@@ -83,7 +78,8 @@ Shipped so far:
 - Autoscaling pinned to one task (#446, closed 2026-09-27): `max_capacity`
   validated to 1, `MAX_REPLICAS=1`, startup guard.
 - Apex CORS (#447, closed 2026-09-06) and the task-definition split-brain
-  (#53, closed 2026-08-30), the first two links of the old ordering chain.
+  (#53, closed 2026-08-30; `infra/task-definition.json` is the only source of
+  truth), the two links that used to head the ordering chain.
 - Production alerting (#448, closed 2026-09-29): fifteen CloudWatch alarms
   emailing an SNS subscription, applied and verified live
   (`docs/runbooks/on-call.md`).

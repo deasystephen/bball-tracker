@@ -22,11 +22,12 @@ npm run build   # Production build
 
 ## Mobile Builds (EAS)
 ```bash
-eas build --platform android --profile preview   # Android APK for testing
-eas build --platform ios --profile preview        # iOS (requires Apple Developer account)
-eas build --platform all --profile production     # Production builds for stores
-eas update --environment preview --message "description" # OTA update to preview builds
-npm ci && npm run ota:production -- --message "description"   # production OTA (runs the drift guard first; from mobile/ like the lines above)
+# All from mobile/, with the project's eas-cli (never a global `eas`)
+npx eas-cli build --platform android --profile preview   # Android APK for testing
+npx eas-cli build --platform ios --profile preview        # iOS (requires Apple Developer account)
+npx eas-cli build --platform all --profile production     # Production builds for stores
+npx eas-cli update --environment preview --message "description" # OTA to preview builds; no drift guard by design (the manifest records production runtimes only)
+npm ci && npm run ota:production -- --message "description"   # production OTA (runs the drift guard first)
 ```
 **OTA env gotcha:** `eas update` evaluates `app.config.js` on *your* machine. `getApiUrl()` keys off `APP_ENV`; if it is unset the update ships `apiUrl: http://127.0.0.1:3000` (plus no Sentry DSN) and every device that takes it shows "Network error" on all API-backed tabs. The EAS `production` environment now provides `APP_ENV`, `SENTRY_ENVIRONMENT` and `SENTRY_DSN` (visibility *sensitive*, not *secret* — secret vars are builder-only and invisible to `eas update`). Always use `--environment production` and check the CLI line "Environment variables … loaded from the production environment" lists `APP_ENV`. (`AMPLITUDE_API_KEY` is *sensitive* too.) Remember an update runs on the **second** launch after it is downloaded.
 **Universal Links need a native build:** `app.config.js` sets `ios.associatedDomains: ['applinks:hooplings.com']` (audit #37) so iOS trusts the AASA file and `hooplings.com/invite/<token>` opens the app. Entitlements are baked into the binary at build time — an `eas update` (OTA) cannot add or change them, so any change here means cutting a new `eas build` and going through TestFlight again. The `hooplings.com` web deploy must also be serving `/.well-known/apple-app-site-association` for the link to resolve.
