@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { NotificationService } from '../../src/services/notification-service';
-import { ConflictError, UnauthorizedError } from '../../src/utils/errors';
+import { BadRequestError, ConflictError, ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
@@ -65,6 +65,14 @@ describe('Push Token API', () => {
       expect(response.status).toBe(400);
     });
 
+    it('returns 400 Token is required when there is no body at all', async () => {
+      const response = await request(app).post('/api/v1/auth/push-token');
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Token is required');
+      expect(mockNotificationService.registerToken).not.toHaveBeenCalled();
+    });
+
     it('should return 400 for invalid platform', async () => {
       const response = await request(app)
         .post('/api/v1/auth/push-token')
@@ -75,7 +83,7 @@ describe('Push Token API', () => {
 
     it('should return 400 for invalid Expo push token', async () => {
       mockNotificationService.registerToken.mockRejectedValue(
-        new Error('Invalid Expo push token')
+        new BadRequestError('Invalid Expo push token')
       );
 
       const response = await request(app)
@@ -119,6 +127,17 @@ describe('Push Token API', () => {
         .send({ token: 'ExponentPushToken[abc123]', platform: 'ios' });
 
       expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: 'Failed to register push token' });
+    });
+
+    it('keeps the status of a 5xx AppError but answers the generic body', async () => {
+      mockNotificationService.registerToken.mockRejectedValue(new ServiceUnavailableError('Database unavailable'));
+
+      const response = await request(app)
+        .post('/api/v1/auth/push-token')
+        .send({ token: 'ExponentPushToken[abc123]', platform: 'ios' });
+
+      expect(response.status).toBe(503);
       expect(response.body).toEqual({ error: 'Failed to register push token' });
     });
   });

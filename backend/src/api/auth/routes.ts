@@ -661,7 +661,7 @@ router.get('/me/usage', authenticate, async (req, res) => {
  */
 router.post('/push-token', authenticate, async (req, res) => {
   try {
-    const validationResult = registerPushTokenSchema.safeParse(req.body);
+    const validationResult = registerPushTokenSchema.safeParse(req.body ?? {});
     if (!validationResult.success) {
       return res.status(400).json({
         error: validationResult.error.issues.map((e: { message: string }) => e.message).join(', '),
@@ -676,19 +676,19 @@ router.post('/push-token', authenticate, async (req, res) => {
       pushToken: { id: pushToken.id, platform: pushToken.platform },
     });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Invalid Expo push token') {
-      return res.status(400).json({ error: error.message });
-    }
-    // UnauthorizedError (account deleted after authenticate, #761) -> 401,
-    // ConflictError (token freshly bound elsewhere, B2.9) -> 409. Expected
-    // outcomes, so not logged at error level; the service logs the 409 at warn.
-    if (error instanceof AppError) {
+    // Expected refusals: invalid Expo token (400), account deleted after
+    // authenticate (401, #761), token freshly bound elsewhere (409, B2.9).
+    if (error instanceof AppError && error.statusCode < 500) {
+      logger.warn('Push token registration refused', { status: error.statusCode, reason: error.message });
       return res
         .status(error.statusCode)
         .json(error instanceof DetailedError ? error.body() : { error: error.message });
     }
     logger.error('Error registering push token', { error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ error: 'Failed to register push token' });
+    captureException(error, { flow: 'push-token-register' });
+    return res
+      .status(error instanceof AppError ? error.statusCode : 500)
+      .json({ error: 'Failed to register push token' });
   }
 });
 
@@ -696,10 +696,7 @@ router.post('/push-token', authenticate, async (req, res) => {
  * DELETE /api/v1/auth/push-token
  * Remove a push notification token. Only tokens registered by the caller are
  * deleted; a token owned by another user is left untouched (audit #47).
- * The body is `{ token: string }`; a non-string `token` is a 400 and never
- * reaches Prisma, where an object would act as a filter and delete every
- * token the caller owns (#649). A missing body or token is 400
- * `Token is required`.
+ * The body is `{ token: string }` (#649, see docs/architecture/auth-sessions.md).
  */
 router.delete('/push-token', authenticate, async (req, res) => {
   try {

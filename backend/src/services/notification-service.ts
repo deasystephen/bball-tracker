@@ -6,7 +6,7 @@ import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-ser
 import { Prisma, PushToken } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
-import { ConflictError, UnauthorizedError } from '../utils/errors';
+import { BadRequestError, ConflictError, UnauthorizedError } from '../utils/errors';
 import { getTeamAudienceUserIds } from '../utils/team-audience';
 
 const expo = new Expo();
@@ -46,45 +46,49 @@ export class NotificationService {
    *   (logout does this) first.
    * - token bound to a different user and stale (> 24h) → rebind to the
    *   caller (old build that never unregistered).
+   *
+   * Every path runs inside one transaction that first locks the caller's
+   * `User` row (FOR SHARE, `deletedAt IS NULL`), so a registration that
+   * authenticated just before AccountService.deleteAccount committed can
+   * neither attach a device to the tombstone nor take one over through the
+   * stale-rebind branch (#444 D9, #761): the deletion holds FOR UPDATE on
+   * the same row, so this either runs before it (and the deletion then
+   * removes the token) or sees `deletedAt` set and throws 401.
    */
   static async registerToken(userId: string, token: string, platform: string): Promise<PushToken> {
     if (!Expo.isExpoPushToken(token)) {
-      throw new Error('Invalid Expo push token');
+      throw new BadRequestError('Invalid Expo push token');
     }
 
-    const existing = await prisma.pushToken.findUnique({ where: { token } });
-
-    if (existing && existing.userId !== userId) {
-      const ageMs = Date.now() - existing.updatedAt.getTime();
-      if (ageMs < PUSH_TOKEN_REBIND_AFTER_MS) {
-        logger.warn('Refused to rebind push token registered to another user', {
-          tokenOwnerId: existing.userId,
-          callerId: userId,
-        });
-        throw new ConflictError('Push token is registered to another account');
-      }
-
-      logger.info('Rebinding stale push token to a new user', {
-        previousOwnerId: existing.userId,
-        callerId: userId,
-      });
-      return prisma.pushToken.update({
-        where: { token },
-        data: { userId, platform },
-      });
-    }
-
-    // Lock the caller's User row (FOR SHARE) for the duration of the write so
-    // a registration that authenticated just before AccountService.deleteAccount
-    // committed cannot attach a device to the tombstone (#444, D9): the
-    // deletion holds FOR UPDATE on the same row, so this either runs before it
-    // (and the deletion then removes the token) or sees `deletedAt` set.
     return prisma.$transaction(async (tx) => {
       const live = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "User" WHERE "id" = ${userId} AND "deletedAt" IS NULL FOR SHARE`;
       if (live.length === 0) {
         throw new UnauthorizedError('User not found');
       }
+
+      const existing = await tx.pushToken.findUnique({ where: { token } });
+
+      if (existing && existing.userId !== userId) {
+        const ageMs = Date.now() - existing.updatedAt.getTime();
+        if (ageMs < PUSH_TOKEN_REBIND_AFTER_MS) {
+          logger.warn('Refused to rebind push token registered to another user', {
+            tokenOwnerId: existing.userId,
+            callerId: userId,
+          });
+          throw new ConflictError('Push token is registered to another account');
+        }
+
+        logger.info('Rebinding stale push token to a new user', {
+          previousOwnerId: existing.userId,
+          callerId: userId,
+        });
+        return tx.pushToken.update({
+          where: { token },
+          data: { userId, platform },
+        });
+      }
+
       return tx.pushToken.upsert({
         where: { token },
         create: {

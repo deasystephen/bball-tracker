@@ -79,11 +79,7 @@ export const updateProfileSchema = z
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
-/**
- * An Expo push token as the client sends it (#649). A non-string value is
- * refused here: Prisma reads an object `token` (`{}`, `{ contains: '' }`) as a
- * filter, so it must never reach `NotificationService.removeToken`.
- */
+/** A string only: an object `token` would act as a Prisma filter (#649). */
 const pushTokenValueSchema = z
   .string({ error: (issue) => (issue.input === undefined ? 'Token is required' : 'Token must be a string') })
   .min(1, 'Token is required');
