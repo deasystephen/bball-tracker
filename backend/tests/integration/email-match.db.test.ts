@@ -272,6 +272,60 @@ describe('Guardian invitations', () => {
     expect(await GuardianService.listPendingForUser(underscore)).toEqual([]);
     expect(await GuardianService.listPendingForUser(invited?.id as string)).toHaveLength(1);
   });
+
+  // Accept used to re-resolve the adult with an exact-case findUnique on the
+  // lower-cased invitedEmail, so a mixed-case stored account was missed and a
+  // second PARENT account was created for the same address (#663).
+  async function pendingToken(invitedEmail: string): Promise<string> {
+    const row = await prisma.guardianInvitation.findFirstOrThrow({
+      where: { childId: kidId, invitedEmail, status: 'PENDING' },
+      select: { token: true },
+    });
+    return row.token;
+  }
+
+  it('accept by token lands on the existing mixed-case account, creating no second one', async () => {
+    const stored = `Case.Parent.${RUN}@Example.Test`;
+    const existing = await mkUser('Case.Parent', { email: stored, role: 'COACH', workosUserId: `workos-case-parent-${RUN}` });
+
+    await GuardianService.inviteGuardian(teamId, kidId, { email: address('case.parent'), relationship: 'FATHER' }, coachId);
+    const result = await GuardianService.acceptInvitationByToken(await pendingToken(address('case.parent')));
+
+    expect(result.guardian.parentId).toBe(existing);
+    expect(await prisma.user.count({ where: { email: emailEquals(address('case.parent')) } })).toBe(1);
+    expect(await prisma.guardian.count({ where: { childId: kidId, parentId: existing } })).toBe(1);
+    // An existing account keeps its role.
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: existing }, select: { role: true } })).role).toBe('COACH');
+  });
+
+  it('accept by id links the verified caller, whatever case their address is stored in', async () => {
+    const stored = `Case.Guardian.${RUN}@Example.Test`;
+    const existing = await mkUser('Case.Guardian', { email: stored, workosUserId: `workos-case-guardian-${RUN}` });
+
+    const invitation = await GuardianService.inviteGuardian(
+      teamId,
+      kidId,
+      { email: address('case.guardian'), relationship: 'GUARDIAN' },
+      coachId
+    );
+    const result = await GuardianService.acceptInvitation(invitation.id, existing);
+
+    expect(result.guardian.parentId).toBe(existing);
+    expect(await prisma.user.count({ where: { email: emailEquals(address('case.guardian')) } })).toBe(1);
+    expect(await prisma.guardian.count({ where: { childId: kidId, parentId: existing } })).toBe(1);
+  });
+
+  it('accept by token for an address with "_" never lands on the look-alike account', async () => {
+    const decoy = await mkUser('granXlee');
+    await GuardianService.inviteGuardian(teamId, kidId, { email: address('gran_lee'), relationship: 'OTHER' }, coachId);
+    const created = await trackByEmail(address('gran_lee'));
+
+    const result = await GuardianService.acceptInvitationByToken(await pendingToken(address('gran_lee')));
+
+    expect(result.guardian.parentId).toBe(created?.id);
+    expect(result.guardian.parentId).not.toBe(decoy);
+    expect(await prisma.guardian.count({ where: { childId: kidId, parentId: decoy } })).toBe(0);
+  });
 });
 
 describe('Operator data-subject lookup (scripts/data-subject-request.ts)', () => {
