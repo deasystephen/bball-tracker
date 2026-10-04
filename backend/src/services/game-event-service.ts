@@ -10,6 +10,8 @@ import { hasTeamPermission, canAccessTeam } from '../utils/permissions';
 import { emitGameEvent, emitGameEventRemoved, GameScore } from '../websocket/emit';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
+import { lockGameRow, LockedGame } from '../utils/game-row-lock';
+import { shotPoints } from '../utils/shot-points';
 
 const GAME_ACCESS_INCLUDE = {
   team: {
@@ -76,16 +78,12 @@ interface GameAccess {
   canManageTeam: boolean;
 }
 
-interface ShotMetadata {
-  made?: boolean;
-  points?: number;
-}
-
 /**
  * Sum the home team's points from its SHOT events.
  *
- * Mirrors the scoring rule in `StatsService` (`points || 2`, counted only when
- * `made`). Non-SHOT events are ignored so callers may pass the full event log.
+ * Uses the shared point rule in `utils/shot-points.ts`, the same one
+ * `StatsService` scores the box score with (#723). Non-SHOT events are ignored
+ * so callers may pass the full event log.
  */
 export function computeHomeScore(
   events: ReadonlyArray<{ eventType: GameEventType; metadata: Prisma.JsonValue }>
@@ -93,10 +91,7 @@ export function computeHomeScore(
   let total = 0;
   for (const event of events) {
     if (event.eventType !== GameEventType.SHOT) continue;
-    const meta = (event.metadata ?? {}) as ShotMetadata;
-    if (meta.made) {
-      total += meta.points || 2;
-    }
+    total += shotPoints(event.metadata);
   }
   return total;
 }
@@ -104,16 +99,15 @@ export function computeHomeScore(
 /**
  * Recompute and persist `homeScore` from the game's SHOT events.
  *
- * Must run inside an interactive transaction: the game row is locked with
- * `FOR UPDATE` so two concurrent shot writes can't both read a log that's
- * missing the other's insert and race to persist an undercounted score.
+ * Must run inside an interactive transaction that already holds
+ * `lockGameRow(tx, gameId)`, taken before the event insert/delete, so two
+ * concurrent shot writes can't both read a log that's missing the other's
+ * insert and race to persist an undercounted score.
  */
-export async function recomputeHomeScore(
+async function recomputeHomeScore(
   tx: Prisma.TransactionClient,
   gameId: string
 ): Promise<GameScore> {
-  await tx.$queryRaw`SELECT "id" FROM "Game" WHERE "id" = ${gameId} FOR UPDATE`;
-
   const shots = await tx.gameEvent.findMany({
     where: { gameId, eventType: GameEventType.SHOT },
     select: { eventType: true, metadata: true },
@@ -128,11 +122,20 @@ export async function recomputeHomeScore(
   });
 }
 
+/** The broadcast score of a game row read under `lockGameRow`. */
+function scoreOf(locked: LockedGame): GameScore {
+  return { homeScore: locked.homeScore, awayScore: locked.awayScore };
+}
+
 export class GameEventService {
   /**
    * Keep the stored box score in sync when events change on a game that is
-   * already FINISHED. Failures are logged, not surfaced: the event write has
-   * already succeeded and the next finalize will converge anyway.
+   * already FINISHED. `status` is the one read under the game-row lock in the
+   * event write's own transaction, so a `PATCH status=FINISHED` that commits
+   * around the write is never missed (#724): either the write saw FINISHED and
+   * re-finalizes here, or the PATCH committed after it and its own finalize
+   * (which takes the same lock) reads a log that already holds the event.
+   * Failures are logged, not surfaced: the event write has already succeeded.
    */
   private static async syncFinalizedStats(game: { id: string; status: GameStatus }): Promise<void> {
     try {
@@ -173,9 +176,12 @@ export class GameEventService {
   /**
    * Create a new game event
    *
-   * SHOT events change the home score, which is derived server-side from the
-   * event log inside the same transaction as the insert (the client never
-   * supplies it). The returned/broadcast `score` is the post-insert value.
+   * The insert runs in one transaction that first locks the game row. SHOT
+   * events change the home score, which is derived server-side from the event
+   * log inside that transaction (the client never supplies it); every other
+   * type returns the score read under the lock, which no other writer can
+   * change before this one commits (#665). Either way the returned/broadcast
+   * `score` is the post-insert value.
    *
    * @param gameId Game ID
    * @param data Event creation data
@@ -218,29 +224,24 @@ export class GameEventService {
       metadata: (data.metadata || {}) as Prisma.InputJsonValue,
     };
 
-    const result: CreateGameEventResult =
-      data.eventType === GameEventType.SHOT
-        ? await prisma.$transaction(async (tx) => {
-            const event = await tx.gameEvent.create({
-              data: createData,
-              include: GAME_EVENT_INCLUDE,
-            });
-            const score = await recomputeHomeScore(tx, gameId);
-            return { event, score };
-          })
-        : {
-            event: await prisma.gameEvent.create({
-              data: createData,
-              include: GAME_EVENT_INCLUDE,
-            }),
-            score: { homeScore: game.homeScore, awayScore: game.awayScore },
-          };
+    const { result, status } = await prisma.$transaction(async (tx) => {
+      const locked = await lockGameRow(tx, gameId);
+      const event = await tx.gameEvent.create({
+        data: createData,
+        include: GAME_EVENT_INCLUDE,
+      });
+      const score =
+        data.eventType === GameEventType.SHOT
+          ? await recomputeHomeScore(tx, gameId)
+          : scoreOf(locked);
+      return { result: { event, score } satisfies CreateGameEventResult, status: locked.status };
+    });
 
     // Broadcast to spectators in the game room. `emitGameEvent` no-ops if
     // Socket.io isn't initialized (e.g., in tests or CLI scripts).
     emitGameEvent(gameId, result);
 
-    await this.syncFinalizedStats(game);
+    await this.syncFinalizedStats({ id: gameId, status });
 
     return result;
   }
@@ -323,8 +324,10 @@ export class GameEventService {
   /**
    * Delete a game event
    *
-   * Deleting a SHOT recomputes `homeScore` inside the same transaction. The
-   * removal (with the post-delete score) is broadcast as `game-event-removed`.
+   * The lookup and delete run in one transaction that first locks the game
+   * row. Deleting a SHOT recomputes `homeScore` inside it; any other type
+   * returns the score read under the lock (#665). The removal (with the
+   * post-delete score) is broadcast as `game-event-removed`.
    *
    * @param gameId Game ID
    * @param eventId Event ID
@@ -335,39 +338,37 @@ export class GameEventService {
     eventId: string,
     userId: string
   ): Promise<DeleteGameEventResult> {
-    const { game, canTrackStats } = await this.verifyGameAccess(gameId, userId);
+    const { canTrackStats } = await this.verifyGameAccess(gameId, userId);
 
     // Must have canTrackStats permission to delete events (for undo functionality)
     if (!canTrackStats) {
       throw new ForbiddenError('You do not have permission to delete game events');
     }
 
-    const event = await prisma.gameEvent.findUnique({
-      where: { id: eventId },
-    });
+    const { score, status } = await prisma.$transaction(async (tx) => {
+      const locked = await lockGameRow(tx, gameId);
 
-    if (!event) {
-      throw new NotFoundError('Game event not found');
-    }
-
-    if (event.gameId !== gameId) {
-      throw new NotFoundError('Game event not found');
-    }
-
-    let score: GameScore;
-    if (event.eventType === GameEventType.SHOT) {
-      score = await prisma.$transaction(async (tx) => {
-        await tx.gameEvent.delete({ where: { id: eventId } });
-        return recomputeHomeScore(tx, gameId);
+      // Looked up under the lock, so a concurrent undo of the same event
+      // gets a 404 rather than a failed delete.
+      const event = await tx.gameEvent.findUnique({
+        where: { id: eventId },
       });
-    } else {
-      await prisma.gameEvent.delete({ where: { id: eventId } });
-      score = { homeScore: game.homeScore, awayScore: game.awayScore };
-    }
+
+      if (!event || event.gameId !== gameId) {
+        throw new NotFoundError('Game event not found');
+      }
+
+      await tx.gameEvent.delete({ where: { id: eventId } });
+      const score: GameScore =
+        event.eventType === GameEventType.SHOT
+          ? await recomputeHomeScore(tx, gameId)
+          : scoreOf(locked);
+      return { score, status: locked.status };
+    });
 
     emitGameEventRemoved(gameId, { gameId, eventId, score });
 
-    await this.syncFinalizedStats(game);
+    await this.syncFinalizedStats({ id: gameId, status });
 
     return { success: true, score };
   }
