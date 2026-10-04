@@ -1150,6 +1150,23 @@ describe('InvitationService', () => {
       expect(result.player.email).toBe(player.email);
     });
 
+    it('returns player.email to a system ADMIN and to an admin of the team\'s league', async () => {
+      const { invitation, player } = storeInvitation();
+
+      setCaller({});
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ role: 'ADMIN' });
+      const asAdmin = await InvitationService.getInvitationById(invitation.id, 'admin-1');
+      expect(asAdmin.player.email).toBe(player.email);
+
+      setCaller({});
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        id: invitation.teamId,
+        season: { league: { admins: [{ userId: 'league-admin-1' }] } },
+      });
+      const asLeagueAdmin = await InvitationService.getInvitationById(invitation.id, 'league-admin-1');
+      expect(asLeagueAdmin.player.email).toBe(player.email);
+    });
+
     it('strips player.email for a rostered teammate without a staff role (#679)', async () => {
       const { invitation, player, coach } = storeInvitation();
       setCaller({ isMember: true });
