@@ -34,6 +34,7 @@ const mockInvitationDetails = {
   status: 'PENDING' as const,
   teamName: 'Lakers',
   inviterName: 'Coach Smith',
+  inviterDeletedAt: null,
   position: 'Guard',
   jerseyNumber: 23,
   message: 'Join our team!',
@@ -56,7 +57,23 @@ describe('Public Invitation Token API', () => {
       expect(res.body.invitation.teamName).toBe('Lakers');
       expect(res.body.invitation.inviterName).toBe('Coach Smith');
       expect(res.body.invitation).not.toHaveProperty('player');
+      expect(res.body.invitation.inviterDeletedAt).toBeNull();
       expect(mockInvitationService.getInvitationByToken).toHaveBeenCalledWith(VALID_TOKEN);
+    });
+
+    it('carries the tombstone signal for a sender who deleted their account, and never an email (#642)', async () => {
+      const inviterDeletedAt = '2026-09-01T00:00:00.000Z';
+      mockInvitationService.getInvitationByToken.mockResolvedValue({
+        ...mockInvitationDetails,
+        inviterName: 'Deleted user',
+        inviterDeletedAt,
+      });
+
+      const res = await request(app).get(`/api/v1/invitations/by-token/${VALID_TOKEN}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation.inviterDeletedAt).toBe(inviterDeletedAt);
+      expect(JSON.stringify(res.body)).not.toContain('email');
     });
 
     it('tags a team invitation with kind: "team"', async () => {

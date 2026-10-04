@@ -46,7 +46,11 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 
-const USER_SUMMARY_SELECT = {
+/**
+ * User shape for roster and staff rows. Exported so game-service's game
+ * detail serves the same fields (`isManaged`, `deletedAt`) as the team detail.
+ */
+export const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
@@ -206,11 +210,28 @@ export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INC
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
 type TeamDetailMember = TeamDetail['members'][number];
 type RosterManagerOnlyField = 'email' | 'emailSuppressedAt' | 'emailSuppressedReason';
+const ROSTER_MANAGER_ONLY_FIELDS: readonly RosterManagerOnlyField[] = ['email', 'emailSuppressedAt', 'emailSuppressedReason'];
+
+/**
+ * A roster player as seen by a caller without `canManageRoster`: removes only
+ * the email and its delivery state, keeping every other selected field
+ * (`isManaged`, `deletedAt` for tombstones). Shared by `GET /teams/:id` and
+ * `GET /games/:id` so the two strips cannot drift (#642).
+ */
+export function omitRosterManagerFields<T extends { email: string | null }>(
+  player: T
+): Omit<T, RosterManagerOnlyField> {
+  const publicPlayer: Record<string, unknown> = { ...player };
+  for (const field of ROSTER_MANAGER_ONLY_FIELDS) {
+    delete publicPlayer[field];
+  }
+  return publicPlayer as Omit<T, RosterManagerOnlyField>;
+}
 /**
  * `GET /teams/:id` payload. Member `player.email` and its delivery state
  * (`emailSuppressedAt` / `emailSuppressedReason`, #449) are present only when
  * the caller has `canManageRoster` on the team (audit #80); other callers get
- * `{ id, name }` for each member's player.
+ * the player without them (`omitRosterManagerFields`).
  */
 export type TeamDetailView = Omit<TeamDetail, 'members'> & {
   members: Array<
@@ -228,13 +249,6 @@ export type TeamStaffWithRelations = Prisma.TeamStaffGetPayload<{
   include: typeof TEAM_STAFF_INCLUDE;
 }>;
 export type TeamRoleSummary = Prisma.TeamRoleGetPayload<{ select: typeof TEAM_ROLE_SELECT }>;
-/**
- * `GET /teams/:id/staff` row. `user.email` is present only when the caller
- * has `canManageRoster` on the team (same rule as member emails, audit #80).
- */
-export type TeamStaffView = Omit<TeamStaffWithRelations, 'user'> & {
-  user: Omit<TeamStaffWithRelations['user'], 'email'> & { email?: string | null };
-};
 
 export interface TeamList {
   teams: TeamListItem[];
@@ -497,7 +511,7 @@ export class TeamService {
       invitations: [],
       members: team.members.map(({ player, ...member }) => ({
         ...member,
-        player: { id: player.id, name: player.name, isManaged: player.isManaged, deletedAt: player.deletedAt },
+        player: omitRosterManagerFields(player),
       })),
     };
   }
@@ -918,10 +932,11 @@ export class TeamService {
 
   /**
    * List a team's staff (every role assignment) with user + role.
-   * Any team member/staff/admin may read; emails are only included for
-   * callers who can manage the roster.
+   * Any team member/staff/admin may read, and every reader gets the staff
+   * emails (coach contact info), as on `GET /teams/:id` and `GET /games/:id`
+   * (CLAUDE.md, emails in payloads; #683).
    */
-  static async listStaff(teamId: string, userId: string): Promise<TeamStaffView[]> {
+  static async listStaff(teamId: string, userId: string): Promise<TeamStaffWithRelations[]> {
     const team = await prisma.team.findUnique({ where: { id: teamId } });
     if (!team) {
       throw new NotFoundError('Team not found');
@@ -932,21 +947,11 @@ export class TeamService {
       throw new ForbiddenError('You do not have access to this team');
     }
 
-    const staff = await prisma.teamStaff.findMany({
+    return prisma.teamStaff.findMany({
       where: { teamId },
       include: TEAM_STAFF_INCLUDE,
       orderBy: [{ role: { type: 'asc' } }, { createdAt: 'asc' }],
     });
-
-    const permissions = await getTeamPermissions(userId, teamId);
-    if (permissions.canManageRoster) {
-      return staff;
-    }
-
-    return staff.map(({ user, ...row }) => ({
-      ...row,
-      user: { id: user.id, name: user.name, isManaged: user.isManaged, deletedAt: user.deletedAt },
-    }));
   }
 
   /**

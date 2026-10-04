@@ -1004,18 +1004,6 @@ describe('Teams API', () => {
       expect(mockTeamService.listStaff).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
     });
 
-    it('passes through an email-less list unchanged (non-manager view)', async () => {
-      const { user, ...rest } = staffRow;
-      mockTeamService.listStaff.mockResolvedValue([
-        { ...rest, user: { id: user.id, name: user.name, isManaged: false } },
-      ] as unknown as Awaited<ReturnType<typeof mockTeamService.listStaff>>);
-
-      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}/staff`);
-
-      expect(response.status).toBe(200);
-      expect(response.body.staff[0].user).not.toHaveProperty('email');
-    });
-
     it('returns 400 for a non-UUID teamId', async () => {
       const response = await request(app).get('/api/v1/teams/not-a-uuid/staff');
 

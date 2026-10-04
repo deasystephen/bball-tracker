@@ -65,7 +65,8 @@ describe('RSVP API', () => {
       mockRsvpService.upsertRsvp.mockResolvedValue({
         ...mockRsvp,
         userId: childId,
-        user: { id: childId, name: 'Kid', email: null },
+        // The service projects the child's row (B2.5, #661): no email key.
+        user: { id: childId, name: 'Kid' },
       } as unknown as Awaited<ReturnType<typeof mockRsvpService.upsertRsvp>>);
 
       const response = await request(app)
@@ -74,6 +75,7 @@ describe('RSVP API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.rsvp.userId).toBe(childId);
+      expect(response.body.rsvp.user.email).toBeUndefined();
       expect(mockRsvpService.upsertRsvp).toHaveBeenCalledWith(TEST_GAME_ID, TEST_USER_ID, 'YES', childId);
     });
 

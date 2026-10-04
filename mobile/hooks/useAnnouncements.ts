@@ -16,7 +16,6 @@ export interface Announcement {
   author: {
     id: string;
     name: string;
-    email?: string;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
   };

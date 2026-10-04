@@ -209,6 +209,44 @@ describe('Games API', () => {
       expect(response.body.game.id).toBe(TEST_GAME_ID);
     });
 
+    it('passes the tombstone signal (deletedAt, isManaged) on members, staff and event players, with or without member emails (#642)', async () => {
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      const staffUser = { id: TEST_USER_ID, name: 'Test User', email: 'test@example.com', isManaged: false, deletedAt: null };
+      const tombstone = { id: 'd4e5f6a7-b8c9-4123-a567-890abcdef012', name: 'Deleted user', isManaged: false, deletedAt };
+      const detail = (player: Record<string, unknown>): unknown => ({
+        ...mockGame,
+        team: {
+          ...mockGame.team,
+          staff: [{ user: staffUser }],
+          members: [{ playerId: tombstone.id, player }],
+        },
+        events: [{ id: 'e5f6a7b8-c9d0-4234-a678-90abcdef0123', player: { id: tombstone.id, name: 'Deleted user', deletedAt } }],
+      });
+
+      // Roster manager: email present (null for a tombstone), deletedAt present
+      mockGameService.getGameById.mockResolvedValueOnce(
+        detail({ ...tombstone, email: null }) as Awaited<ReturnType<typeof mockGameService.getGameById>>
+      );
+      const manager = await request(app).get(`/api/v1/games/${TEST_GAME_ID}`);
+      expect(manager.status).toBe(200);
+      expect(manager.body.game.team.members[0].player).toEqual({
+        ...tombstone,
+        email: null,
+        deletedAt: deletedAt.toISOString(),
+      });
+      expect(manager.body.game.team.staff[0].user).toEqual(staffUser);
+      expect(manager.body.game.events[0].player).toEqual({ id: tombstone.id, name: 'Deleted user', deletedAt: deletedAt.toISOString() });
+
+      // Non-manager: the service strips email only
+      mockGameService.getGameById.mockResolvedValueOnce(
+        detail(tombstone) as Awaited<ReturnType<typeof mockGameService.getGameById>>
+      );
+      const player = await request(app).get(`/api/v1/games/${TEST_GAME_ID}`);
+      expect(player.status).toBe(200);
+      expect(player.body.game.team.members[0].player).toEqual({ ...tombstone, deletedAt: deletedAt.toISOString() });
+      expect(player.body.game.team.members[0].player).not.toHaveProperty('email');
+    });
+
     it('should return 404 for non-existent game', async () => {
       mockGameService.getGameById.mockRejectedValue(new NotFoundError('Game not found'));
 

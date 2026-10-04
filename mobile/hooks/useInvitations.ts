@@ -42,7 +42,7 @@ export interface TeamInvitation {
   player: {
     id: string;
     name: string;
-    email: string;
+    email?: string | null;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
   };

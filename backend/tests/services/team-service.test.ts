@@ -2,7 +2,7 @@
  * Unit tests for TeamService
  */
 
-import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
@@ -581,6 +581,21 @@ describe('TeamService', () => {
       }
       // jersey etc. preserved
       expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
+    });
+
+    it('omitRosterManagerFields removes only email and its delivery state (#642)', () => {
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      expect(
+        omitRosterManagerFields({
+          id: 'u1',
+          name: 'Deleted user',
+          email: null,
+          isManaged: true,
+          deletedAt,
+          emailSuppressedAt: null,
+          emailSuppressedReason: null,
+        })
+      ).toEqual({ id: 'u1', name: 'Deleted user', isManaged: true, deletedAt });
     });
 
     it('joins invite statuses without the token and only PENDING/ACCEPTED rows (unification spec)', async () => {
@@ -1529,7 +1544,7 @@ describe('TeamService', () => {
       expect(result[0].role).toEqual(expect.objectContaining({ type: 'HEAD_COACH' }));
     });
 
-    it('strips emails for a caller without canManageRoster (team manager)', async () => {
+    it('returns staff emails to a caller without canManageRoster (team manager, #683)', async () => {
       const { team, coach, headCoachRole, coachStaff } = createFullTeam();
       const manager = createCoach();
       const managerRole = createTeamRole({ teamId: team.id, type: 'TEAM_MANAGER' });
@@ -1542,17 +1557,30 @@ describe('TeamService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(manager);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(managerStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockImplementation(({ include }) =>
-        Promise.resolve(include?.user ? rows : [{ ...managerStaff, role: managerRole }])
-      );
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows);
 
       const result = await TeamService.listStaff(team.id, manager.id);
 
-      expect(result).toHaveLength(2);
-      for (const row of result) {
-        expect(row.user).not.toHaveProperty('email');
-        expect(row.user).toEqual(expect.objectContaining({ id: expect.any(String), name: expect.any(String) }));
-      }
+      expect(result).toEqual(rows);
+      expect(result.map((row) => row.user.email)).toEqual([coach.email, manager.email]);
+    });
+
+    it('returns staff emails to a rostered player with no staff row (#683)', async () => {
+      const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+      const player = createPlayer();
+      const rows = [
+        { ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email, isManaged: false }, role: headCoachRole },
+      ];
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, season: { league: { admins: [] } } });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ teamId: team.id, playerId: player.id });
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows);
+
+      const result = await TeamService.listStaff(team.id, player.id);
+
+      expect(result[0].user.email).toBe(coach.email);
     });
 
     it('throws NotFoundError when the team does not exist', async () => {

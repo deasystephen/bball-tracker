@@ -4,8 +4,16 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
-import { updateRoleSchema, updateProfileSchema, SELF_SELECTABLE_ROLES, loginQuerySchema, callbackQuerySchema } from './schemas';
+import { AppError, DetailedError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
+import {
+  updateRoleSchema,
+  updateProfileSchema,
+  SELF_SELECTABLE_ROLES,
+  loginQuerySchema,
+  callbackQuerySchema,
+  registerPushTokenSchema,
+  removePushTokenSchema,
+} from './schemas';
 import { GuardianService } from '../../services/guardian-service';
 import prisma from '../../models';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
@@ -646,16 +654,14 @@ router.get('/me/usage', authenticate, async (req, res) => {
  * A token already bound to a *different* account is rejected with **409**
  * unless that binding is older than 24h (see
  * `NotificationService.registerToken`); the previous owner unregisters via
- * `DELETE /auth/push-token` (logout does this) to hand the device over.
+ * `DELETE /auth/push-token` (logout does this) to hand the device over. A
+ * caller whose account was deleted between `authenticate` and the write gets
+ * **401** `User not found`, the same body `authenticate` answers for a
+ * deleted account (#761).
  */
-const pushTokenSchema = z.object({
-  token: z.string().min(1, 'Token is required'),
-  platform: z.enum(['ios', 'android']),
-});
-
 router.post('/push-token', authenticate, async (req, res) => {
   try {
-    const validationResult = pushTokenSchema.safeParse(req.body);
+    const validationResult = registerPushTokenSchema.safeParse(req.body ?? {});
     if (!validationResult.success) {
       return res.status(400).json({
         error: validationResult.error.issues.map((e: { message: string }) => e.message).join(', '),
@@ -670,14 +676,19 @@ router.post('/push-token', authenticate, async (req, res) => {
       pushToken: { id: pushToken.id, platform: pushToken.platform },
     });
   } catch (error) {
+    // Expected refusals: invalid Expo token (400), account deleted after
+    // authenticate (401, #761), token freshly bound elsewhere (409, B2.9).
+    if (error instanceof AppError && error.statusCode < 500) {
+      logger.warn('Push token registration refused', { status: error.statusCode, reason: error.message });
+      return res
+        .status(error.statusCode)
+        .json(error instanceof DetailedError ? error.body() : { error: error.message });
+    }
     logger.error('Error registering push token', { error: error instanceof Error ? error.message : String(error) });
-    if (error instanceof Error && error.message === 'Invalid Expo push token') {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error instanceof ConflictError) {
-      return res.status(409).json({ error: error.message });
-    }
-    return res.status(500).json({ error: 'Failed to register push token' });
+    captureException(error, { flow: 'push-token-register' });
+    return res
+      .status(error instanceof AppError ? error.statusCode : 500)
+      .json({ error: 'Failed to register push token' });
   }
 });
 
@@ -685,15 +696,18 @@ router.post('/push-token', authenticate, async (req, res) => {
  * DELETE /api/v1/auth/push-token
  * Remove a push notification token. Only tokens registered by the caller are
  * deleted; a token owned by another user is left untouched (audit #47).
+ * The body is `{ token: string }` (#649, see docs/architecture/auth-sessions.md).
  */
 router.delete('/push-token', authenticate, async (req, res) => {
   try {
-    const { token } = req.body;
-    if (!token) {
-      return res.status(400).json({ error: 'Token is required' });
+    const validationResult = removePushTokenSchema.safeParse(req.body ?? {});
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: validationResult.error.issues.map((e: { message: string }) => e.message).join(', '),
+      });
     }
 
-    await NotificationService.removeToken(req.user!.id, token);
+    await NotificationService.removeToken(req.user!.id, validationResult.data.token);
 
     return res.json({ success: true });
   } catch (error) {

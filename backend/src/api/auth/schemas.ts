@@ -78,3 +78,19 @@ export const updateProfileSchema = z
   );
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
+/** A string only: an object `token` would act as a Prisma filter (#649). */
+const pushTokenValueSchema = z
+  .string({ error: (issue) => (issue.input === undefined ? 'Token is required' : 'Token must be a string') })
+  .min(1, 'Token is required');
+
+/** POST /auth/push-token */
+export const registerPushTokenSchema = z.object({
+  token: pushTokenValueSchema,
+  platform: z.enum(['ios', 'android']),
+});
+
+/** DELETE /auth/push-token: unregister the one token this device registered. */
+export const removePushTokenSchema = z.object({
+  token: pushTokenValueSchema,
+});

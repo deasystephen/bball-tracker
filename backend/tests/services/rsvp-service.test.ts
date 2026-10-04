@@ -231,6 +231,13 @@ describe('RsvpService', () => {
         date: new Date('2026-09-01T18:00:00Z'),
         team: { name: 'Home' },
       });
+      // getTeamPermissions runs alongside the guardian checks: a caller with
+      // no admin role, no league admin row, no staff row and no guardian link
+      // unless a test says otherwise.
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
       return game;
     }
 
@@ -268,17 +275,23 @@ describe('RsvpService', () => {
       (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
+      // The guardian holds no staff row: view-only, no canManageRoster.
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
         id: 'r-1',
         gameId: game.id,
         userId: CHILD_ID,
         status: 'YES',
-        user: { id: CHILD_ID, name: 'Kid', email: null },
+        user: { id: CHILD_ID, name: 'Kid', email: 'kid@test.com' },
       });
 
       const result = await RsvpService.upsertRsvp(game.id, 'parent-1', 'YES', CHILD_ID);
 
       expect(result.userId).toBe(CHILD_ID);
+      // Same B2.5 projection as GET /games/:id/rsvps (#661): the child's address stays out.
+      expect(result.user).toEqual({ id: CHILD_ID, name: 'Kid' });
+      expect('email' in result.user).toBe(false);
       expect(mockPrisma.gameRsvp.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { gameId_userId: { gameId: game.id, userId: CHILD_ID } },
@@ -288,6 +301,40 @@ describe('RsvpService', () => {
       expect(mockedMailerSend).toHaveBeenCalledTimes(1);
       expect(mockedMailerSend.mock.calls[0][0].to).toBe('parent@test.com');
       expect(mockedMailerSend.mock.calls[0][0].variables.playerName).toBe('Kid');
+    });
+
+    it('keeps the child\'s email for a guardian who is also a roster manager on the team (#661)', async () => {
+      const game = setGame();
+      (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        {
+          role: {
+            canManageTeam: true,
+            canManageRoster: true,
+            canTrackStats: true,
+            canViewStats: true,
+            canShareStats: true,
+          },
+        },
+      ]);
+      const row = {
+        id: 'r-1',
+        gameId: game.id,
+        userId: CHILD_ID,
+        status: 'YES',
+        user: { id: CHILD_ID, name: 'Kid', email: 'kid@test.com' },
+      };
+      (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue(row);
+
+      const result = await RsvpService.upsertRsvp(game.id, 'coach-parent', 'YES', CHILD_ID);
+
+      expect(result).toEqual(row);
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: game.teamId, userId: 'coach-parent' } })
+      );
     });
 
     it('skips the confirmation email when the guardian has no email', async () => {

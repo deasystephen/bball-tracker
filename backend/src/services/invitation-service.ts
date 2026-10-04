@@ -24,6 +24,7 @@ import {
   isGuardianOf,
 } from '../utils/permissions';
 import { GuardianService } from './guardian-service';
+import { omitRosterManagerFields } from './team-service';
 import { mailer } from './mailer';
 import { invitationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
@@ -94,6 +95,9 @@ const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
+  // Deleted accounts stay on sent and answered invitations as tombstones
+  // (#642); clients derive a localized label from this, never from name.
+  deletedAt: true,
 } satisfies Prisma.UserSelect;
 
 /**
@@ -170,6 +174,17 @@ export type InvitationSummary = Prisma.TeamInvitationGetPayload<{
 export type InvitationWithRelations = Prisma.TeamInvitationGetPayload<{
   select: typeof INVITATION_SELECT;
 }>;
+/**
+ * `GET /invitations/:id` payload. `player.email` is present only for the
+ * invited player and callers with `canManageRoster` on the team (roster-email
+ * rule, #679; a guardian without it gets the player without `email`, as on
+ * every roster payload). Every other selected field (`deletedAt`, #642) stays,
+ * through the same `omitRosterManagerFields` as `GET /teams/:id`.
+ * `invitedBy.email` is a staff email and stays for every reader.
+ */
+export type InvitationDetailView = Omit<InvitationWithRelations, 'player'> & {
+  player: Omit<InvitationWithRelations['player'], 'email'> & { email?: string | null };
+};
 export type InvitationWithTeam = Prisma.TeamInvitationGetPayload<{
   select: typeof INVITATION_TEAM_SELECT;
 }>;
@@ -251,6 +266,11 @@ export interface PublicInvitation {
   status: TeamInvitation['status'];
   teamName: string;
   inviterName: string;
+  /**
+   * Tombstone signal for the sender (#642): the sender may delete their
+   * account inside the expiry window. Clients label from this, never the name.
+   */
+  inviterDeletedAt: string | null;
   position: string | null;
   jerseyNumber: number | null;
   message: string | null;
@@ -702,7 +722,7 @@ export class InvitationService {
   static async getInvitationById(
     invitationId: string,
     userId: string
-  ): Promise<InvitationWithRelations> {
+  ): Promise<InvitationDetailView> {
     const invitation = await prisma.teamInvitation.findUnique({
       where: { id: invitationId },
       select: INVITATION_SELECT,
@@ -720,7 +740,16 @@ export class InvitationService {
       throw new ForbiddenError('You do not have access to this invitation');
     }
 
-    return invitation;
+    // Roster-email rule (#679): the invited player and roster managers see
+    // player.email; every other team-access caller, guardians included, gets
+    // the player without it, as on GET /teams/:id, GET /games/:id and the RSVP
+    // payloads. Only the email goes; deletedAt (#642) stays.
+    const mayReadPlayerEmail =
+      isPlayer || (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
+    if (mayReadPlayerEmail) {
+      return invitation;
+    }
+    return { ...invitation, player: omitRosterManagerFields(invitation.player) };
   }
 
   /**
@@ -1373,7 +1402,8 @@ export class InvitationService {
           select: { name: true },
         },
         invitedBy: {
-          select: { name: true },
+          // Public payload: name and the tombstone signal only, never email.
+          select: { name: true, deletedAt: true },
         },
       },
     });
@@ -1387,6 +1417,7 @@ export class InvitationService {
       status: invitation.status,
       teamName: invitation.team.name,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       position: invitation.position,
       jerseyNumber: invitation.jerseyNumber,
       message: invitation.message,

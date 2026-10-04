@@ -528,6 +528,12 @@ describe('GameEventService', () => {
 
       expect(result.events).toHaveLength(2);
       expect(result.total).toBe(2);
+      // Event players carry the tombstone signal for the timeline, never email (#642).
+      expect(mockPrisma.gameEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { player: { select: { id: true, name: true, deletedAt: true } } },
+        })
+      );
     });
 
     it('should apply eventType and playerId filters to the where clause', async () => {

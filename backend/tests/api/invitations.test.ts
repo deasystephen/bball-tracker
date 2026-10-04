@@ -55,8 +55,8 @@ describe('Invitations API', () => {
       name: 'Lakers',
       league: { id: 'f6a7b8c9-d0e1-4345-a789-0abcdef01234', name: 'Spring League', season: 'Spring', year: 2024 },
     },
-    player: { id: TEST_PLAYER_ID, name: 'John Player', email: 'john@example.com' },
-    invitedBy: { id: TEST_COACH_ID, name: 'Coach Smith', email: 'coach@example.com' },
+    player: { id: TEST_PLAYER_ID, name: 'John Player', email: 'john@example.com', deletedAt: null },
+    invitedBy: { id: TEST_COACH_ID, name: 'Coach Smith', email: 'coach@example.com', deletedAt: null },
   };
 
   const mockTeamMember = {
@@ -75,6 +75,23 @@ describe('Invitations API', () => {
   });
 
   describe('GET /api/v1/invitations', () => {
+    it('passes deletedAt through on invitedBy and player (tombstoned sender, #642)', async () => {
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      mockInvitationService.listInvitations.mockResolvedValue({
+        invitations: [{
+          ...mockInvitation,
+          invitedBy: { id: TEST_COACH_ID, name: 'Deleted user', email: null, deletedAt },
+        }],
+        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
+      } as unknown as Awaited<ReturnType<typeof mockInvitationService.listInvitations>>);
+
+      const response = await request(app).get('/api/v1/invitations');
+
+      expect(response.status).toBe(200);
+      expect(response.body.invitations[0].invitedBy.deletedAt).toBe(deletedAt.toISOString());
+      expect(response.body.invitations[0].player.deletedAt).toBeNull();
+    });
+
     it('includes pending guardian invitations addressed to the caller on the unfiltered list (PARENT role)', async () => {
       mockInvitationService.listInvitations.mockResolvedValue({
         invitations: [],
@@ -214,6 +231,8 @@ describe('Invitations API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.invitation.id).toBe(TEST_INVITATION_ID);
       expect(response.body.invitation).not.toHaveProperty('token');
+      expect(response.body.invitation.invitedBy.deletedAt).toBeNull();
+      expect(response.body.invitation.player.deletedAt).toBeNull();
     });
 
     it('should return 404 for non-existent invitation', async () => {
