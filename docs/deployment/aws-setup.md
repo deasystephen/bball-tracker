@@ -60,10 +60,11 @@ aws elasticache create-cache-cluster \
   --num-cache-nodes 1
 ```
 
-### 4. Create S3 Bucket
+### 4. Create the avatars S3 bucket
 
 ```bash
-aws s3 mb s3://bball-tracker-storage --region us-east-1
+# Terraform owns this bucket (infra/s3.tf, `${app_name}-avatars-${environment}`); shown for orientation only
+aws s3 mb s3://bball-tracker-avatars-production --region us-east-1
 ```
 
 ### 5. Store Secrets in Secrets Manager

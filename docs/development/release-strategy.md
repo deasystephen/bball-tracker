@@ -25,16 +25,10 @@ Decide OTA vs. native build **before** merging:
 - **OTA** is only for JS/asset changes. Publish it with
   `cd mobile && npm ci && npm run ota:production -- --message "…"`, never a raw
   `eas update`: the script runs the OTA drift guard (`binary-manifest:check`,
-  #562), which refuses to ship JavaScript against native-module versions no
-  binary of the current runtime was compiled with, and only then runs
-  `eas update` against the `production` branch and environment for iOS,
-  non-interactively. A raw `eas update` skips the guard. `npm ci` comes first
-  because `eas update` bundles what is installed in `node_modules`, not what the
-  lockfile says. `--environment production` matters because `eas update`
-  evaluates `app.config.js` on your machine: it loads `APP_ENV`, `SENTRY_DSN`
-  and `AMPLITUDE_API_KEY` from EAS (otherwise the update ships
-  `apiUrl: http://127.0.0.1:3000`). Updates apply on the **second** launch after
-  download. Guard and runtime detail:
+  #562) and then `eas update` with the production environment; a raw
+  `eas update` skips the guard. `npm ci` comes first because `eas update`
+  bundles what is installed, not what the lockfile says. The guard, the runtime
+  rules and the environment gotcha are in
   [`docs/deployment/mobile-builds-and-ota.md`](../deployment/mobile-builds-and-ota.md).
 - **Native build** whenever a native dependency changes (e.g.
   `@sentry/react-native`, Reanimated, Expo SDK), or `app.config.js` gains

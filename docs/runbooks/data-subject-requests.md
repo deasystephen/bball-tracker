@@ -98,14 +98,19 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   duration, plus domain events such as `Account deleted`) carry the caller's **internal user id**
   and `requestId` whenever the request was authenticated (`setLogContextUser` in
   `backend/src/api/auth/middleware.ts`; `backend/src/api/middleware/request-logger.ts`). The
-  `Account deleted` event logs the deleted user's id, the actor's id and the mode. Log lines never
-  carry a name, an email address (addresses are hashed with `hashRecipient()`) or a secret URL
-  (paths and query strings go through `utils/redact.ts`). They are kept **30 days** in CloudWatch
-  Logs (`retention_in_days` on `/ecs/bball-tracker-production` in `infra/ecs.tf`), and every line
-  is also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log
-  group), where it is kept for **15 days**, the log index retention of the Datadog org (default
-  index; confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line).
-  Supersedes D8 of `docs/plans/account-deletion.md` on this point, which named only the hashing.
+  `Account deleted` event logs the deleted user's id, the actor's id and the mode. At the
+  production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name,
+  no email address (addresses are hashed with `hashRecipient()`) and no secret URL (paths and
+  query strings go through `utils/redact.ts`); the `debug` level, which an operator may switch on
+  briefly for a diagnosis, writes the plain recipient address of each outbound email
+  (`services/mailer/ses-mailer.ts`). They are kept **30 days** in CloudWatch Logs
+  (`retention_in_days` on `/ecs/bball-tracker-production` in `infra/ecs.tf`), and every line is
+  also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log
+  group), where it is kept for **15 days**: the retention of the org's default log index, which
+  nothing in `infra/` manages. It is read in Datadog under Logs → Configuration → Indexes and was
+  confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line; re-check it
+  there before the privacy policy repeats the number. Supersedes D8 of
+  `docs/plans/account-deletion.md` on this point, which named only the hashing.
 - After deletion nothing in the application maps the internal id back to a person, but the
   analytics, backend error and log records above remain at the vendors (Amplitude, Sentry,
   Datadog) and in CloudWatch, keyed on that id, until their windows expire. To remove them sooner,
