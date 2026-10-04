@@ -15,7 +15,6 @@ import {
 } from '../api/teams/schemas';
 import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
-import { GuardianService } from './guardian-service';
 import {
   NotFoundError,
   BadRequestError,
@@ -41,7 +40,7 @@ import {
   canManageStaff,
   countDistinctStaffTeams,
   lastHeadCoachTeams,
-  teamAccessWhere,
+  readableTeamsWhere,
   canWriteLeague,
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
@@ -544,10 +543,9 @@ export class TeamService {
     if (!isSysAdmin) {
       // Guardians (PARENT role) see the teams their children play on — the
       // same read set `canAccessTeam` grants (docs/plans/parent-role-spec.md).
-      const childIds = await GuardianService.getChildIds(userId);
       // Shared with the league-access predicates in `utils/permissions` so the
       // two definitions of "teams this caller may see" can never drift.
-      conditions.push(teamAccessWhere(userId, childIds));
+      conditions.push(await readableTeamsWhere(userId));
     }
 
     const where: Prisma.TeamWhereInput = conditions.length > 0 ? { AND: conditions } : {};

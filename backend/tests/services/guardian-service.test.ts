@@ -555,7 +555,8 @@ describe('GuardianService', () => {
       guardian: { findUnique: jest.Mock; count: jest.Mock; create: jest.Mock };
       teamMember: { count: jest.Mock };
       teamStaff: { count: jest.Mock };
-      user: { update: jest.Mock };
+      user: { updateMany: jest.Mock };
+      $queryRaw: jest.Mock;
     };
 
     function setTx(overrides: Partial<{
@@ -564,6 +565,8 @@ describe('GuardianService', () => {
       guardianCount: number;
       memberships: number;
       staffRows: number;
+      parentLive: boolean;
+      promotedCount: number;
     }> = {}): Tx {
       const tx: Tx = {
         guardianInvitation: {
@@ -577,7 +580,9 @@ describe('GuardianService', () => {
         },
         teamMember: { count: jest.fn().mockResolvedValue(overrides.memberships ?? 0) },
         teamStaff: { count: jest.fn().mockResolvedValue(overrides.staffRows ?? 0) },
-        user: { update: jest.fn().mockResolvedValue({}) },
+        user: { updateMany: jest.fn().mockResolvedValue({ count: overrides.promotedCount ?? 1 }) },
+        // The FOR SHARE probe on the parent row (#643): empty = tombstoned meanwhile.
+        $queryRaw: jest.fn().mockResolvedValue(overrides.parentLive === false ? [] : [{ id: 'parent' }]),
       };
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: (t: Tx) => unknown) => cb(tx));
       return tx;
@@ -654,7 +659,46 @@ describe('GuardianService', () => {
       expect(tx.guardianInvitation.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'inv-1', status: 'PENDING' } })
       );
-      expect(tx.user.update).toHaveBeenCalledWith({ where: { id: 'parent-1' }, data: { role: 'PARENT' } });
+      // Guarded on deletedAt (#643): the role write never lands on a tombstone.
+      expect(tx.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'parent-1', deletedAt: null },
+        data: { role: 'PARENT' },
+      });
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      // A write lock, not FOR SHARE: two accepts by one parent must serialise,
+      // not deadlock on the share-to-update upgrade (#643 review).
+      const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+      expect(sql).toContain('FOR NO KEY UPDATE');
+      expect(sql).toContain('"deletedAt" IS NULL');
+    });
+
+    it('404s and creates no Guardian link when the parent was deleted after it was resolved (#643)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'coach-2', role: 'COACH' });
+      const tx = setTx({ parentLive: false });
+
+      try {
+        await GuardianService.acceptInvitationByToken('tok');
+        fail('expected to throw');
+      } catch (err) {
+        expectNotFoundError(err, 'Account not found');
+      }
+      expect(tx.guardianInvitation.updateMany).not.toHaveBeenCalled();
+      expect(tx.guardian.create).not.toHaveBeenCalled();
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('aborts the transaction when the guarded role write updates zero rows (#643)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PLAYER' });
+      setTx({ promotedCount: 0 });
+
+      try {
+        await GuardianService.acceptInvitationByToken('tok');
+        fail('expected to throw');
+      } catch (err) {
+        expectNotFoundError(err, 'Account not found');
+      }
     });
 
     it('is not primary when the child already has a guardian', async () => {
@@ -674,7 +718,7 @@ describe('GuardianService', () => {
 
       await GuardianService.acceptInvitationByToken('tok');
 
-      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
       expect(tx.teamMember.count).not.toHaveBeenCalled();
     });
 
@@ -685,7 +729,7 @@ describe('GuardianService', () => {
 
       await GuardianService.acceptInvitationByToken('tok');
 
-      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('keeps a PLAYER who is team staff as PLAYER', async () => {
@@ -695,7 +739,7 @@ describe('GuardianService', () => {
 
       await GuardianService.acceptInvitationByToken('tok');
 
-      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('reuses an existing Guardian link instead of creating a duplicate', async () => {
@@ -852,7 +896,8 @@ describe('GuardianService', () => {
           count: jest.fn().mockResolvedValue(0),
           create: jest.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'g', ...data })),
         },
-        user: { update: jest.fn() },
+        user: { updateMany: jest.fn() },
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 'parent-1' }]),
       };
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
@@ -870,7 +915,7 @@ describe('GuardianService', () => {
         where: { id: 'parent-1', deletedAt: null },
         select: { id: true, role: true },
       });
-      expect(tx.user.update).not.toHaveBeenCalled();
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
     });
 
     it('acceptInvitation throws NotFoundError when the verified caller was deleted in the meantime', async () => {

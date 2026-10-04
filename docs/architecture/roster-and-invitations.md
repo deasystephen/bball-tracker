@@ -75,7 +75,9 @@ eng-review amendments recorded there).
 - **Email matching is case-insensitive and new accounts store lowercase** (red-team RT1):
   WorkOS normalizes to lowercase and `syncUser` claims by exact match, so all invite/add flows
   look up case-insensitively and create with `trim().toLowerCase()` — a mixed-case entry
-  must never create an unclaimable duplicate or bypass the case-3 consent branch.
+  must never create an unclaimable duplicate or bypass the case-3 consent branch. `POST /players`
+  and `PATCH /players/:id { email }` follow the same rule since #651: the schema trims and
+  lower-cases, and the duplicate probe is `emailEquals`.
 - **Every "which row holds this email" filter is `utils/email-match.ts#emailEquals(address)`
   (#572) — never a hand-written `{ equals, mode: 'insensitive' }`.** Prisma compiles that filter
   to `ILIKE` with the value as an **unescaped pattern**, so `_` matched any character and `%` any

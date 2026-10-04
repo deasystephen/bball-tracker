@@ -16,8 +16,9 @@ import {
   ConflictError,
 } from '../utils/errors';
 import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
-import { getPlayerTeamAccess, isGuardianOf } from '../utils/permissions';
+import { getPlayerTeamAccess, isGuardianOf, readableTeamsWhere } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
+import { emailEquals, isSameEmail } from '../utils/email-match';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -95,22 +96,13 @@ export interface PlayerCaller {
 }
 
 /**
- * Prisma filter for "users who share at least one team with `userId`" —
- * i.e. members of any team the caller plays on or is staff of.
+ * Prisma filter for "users rostered on at least one team `userId` may read".
+ * The team clause is the shared `teamAccessWhere` (staff OR member OR league
+ * admin OR guardian of a member), never a local copy: a two-branch copy here
+ * left league admins and guardians with a 404 on the directory (#685).
  */
-function sharesTeamWith(userId: string): Prisma.UserWhereInput {
-  return {
-    teamMembers: {
-      some: {
-        team: {
-          OR: [
-            { members: { some: { playerId: userId } } },
-            { staff: { some: { userId } } },
-          ],
-        },
-      },
-    },
-  };
+async function sharesTeamWith(userId: string): Promise<Prisma.UserWhereInput> {
+  return { teamMembers: { some: { team: await readableTeamsWhere(userId) } } };
 }
 
 export interface PlayerList {
@@ -144,9 +136,11 @@ export class PlayerService {
       assertOwnUploadUrl(data.profilePictureUrl, caller.id);
     }
 
-    // Check if user with this email already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: data.email },
+    // Case-insensitive, so a legacy mixed-case row is found too (#651). The
+    // schema has already trimmed and lower-cased the address.
+    const existingUser = await prisma.user.findFirst({
+      where: { email: emailEquals(data.email) },
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -166,7 +160,7 @@ export class PlayerService {
         select: PLAYER_SELECT,
       });
     } catch (error) {
-      throw PlayerService.mapUniqueViolation(error);
+      throw PlayerService.mapWriteError(error);
     }
   }
 
@@ -211,10 +205,19 @@ export class PlayerService {
     );
   }
 
-  /** Convert a Prisma unique-constraint violation on `email` into a 409. */
-  private static mapUniqueViolation(error: unknown): unknown {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return new ConflictError('A user with this email already exists');
+  /**
+   * Map the Prisma errors of a guarded player write: P2002 (unique `email`)
+   * is a 409; P2025 (no row matched `{ id, deletedAt: null }`, i.e. the row
+   * is gone or became a tombstone after it was read) is a 404 (#643).
+   */
+  private static mapWriteError(error: unknown): unknown {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        return new ConflictError('A user with this email already exists');
+      }
+      if (error.code === 'P2025') {
+        return new NotFoundError('Player not found');
+      }
     }
     return error;
   }
@@ -223,7 +226,8 @@ export class PlayerService {
    * Get a player by ID.
    *
    * System admins can look up any player. Everyone else can only see
-   * themselves or players who share a team with them; anything else is a 404
+   * themselves or players on a team they may read (`teamAccessWhere`: staff,
+   * member, league admin, guardian of a member); anything else is a 404
    * so player ids cannot be enumerated (audit #3). `email` is only returned
    * to admins and to the player themselves.
    * @param playerId Player ID
@@ -250,7 +254,7 @@ export class PlayerService {
 
     if (!isAdmin && !isSelf) {
       const shared = await prisma.user.findFirst({
-        where: { id: playerId, ...sharesTeamWith(caller.id) },
+        where: { id: playerId, ...(await sharesTeamWith(caller.id)) },
         select: { id: true },
       });
       if (!shared) {
@@ -265,8 +269,8 @@ export class PlayerService {
   /**
    * List players with optional filters.
    *
-   * Non-admin callers are scoped to themselves plus users who share a team
-   * with them; the `role` / `isManaged` filters are admin-only (ignored for
+   * Non-admin callers are scoped to themselves plus players on any team they
+   * may read (`teamAccessWhere`); the `role` / `isManaged` filters are admin-only (ignored for
    * everyone else), `search` matches name only for non-admins, and `email` is
    * omitted from non-admin results (audit #3).
    * @param params Query parameters
@@ -288,7 +292,7 @@ export class PlayerService {
     const conditions: Prisma.UserWhereInput[] = [];
 
     if (!isAdmin) {
-      conditions.push({ OR: [{ id: caller.id }, sharesTeamWith(caller.id)] });
+      conditions.push({ OR: [{ id: caller.id }, await sharesTeamWith(caller.id)] });
     }
 
     if (search) {
@@ -343,7 +347,9 @@ export class PlayerService {
       where: { id: playerId },
     });
 
-    if (!player) {
+    // A deleted account is a tombstone (#444, D14): 404 like an unknown id,
+    // for an admin too, so an edit can never re-populate an erased row (#643)
+    if (!player || player.deletedAt) {
       throw new NotFoundError('Player not found');
     }
 
@@ -351,6 +357,11 @@ export class PlayerService {
     if (player.role !== 'PLAYER') {
       throw new NotFoundError('Player not found');
     }
+
+    // The schema lower-cases the address; a case-only difference from a legacy
+    // mixed-case row is not a change (#651), so it neither writes nor clears
+    // the delivery state.
+    const emailChanged = Boolean(data.email) && !isSameEmail(data.email, player.email);
 
     // Check permissions - allow admins, the player themselves, or the managing coach
     const currentUser = await prisma.user.findUnique({
@@ -383,7 +394,7 @@ export class PlayerService {
     }
 
     // Check if email is being changed and if it's already taken
-    if (data.email && data.email !== player.email) {
+    if (data.email && emailChanged) {
       // Email is the login identity: it is bound to WorkOS by `syncUser`, so
       // rewriting it can pre-bind someone else's future sign-up to this row
       // (audit #2). Only admins may change it, plus the managing coach of a
@@ -397,8 +408,9 @@ export class PlayerService {
         );
       }
 
-      const existingUser = await prisma.user.findUnique({
-        where: { email: data.email },
+      const existingUser = await prisma.user.findFirst({
+        where: { email: emailEquals(data.email) },
+        select: { id: true },
       });
 
       if (existingUser) {
@@ -406,15 +418,17 @@ export class PlayerService {
       }
     }
 
+    // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
+    // deletion that commits in between matches no row (P2025, a 404) instead
+    // of rewriting the tombstone. One statement: write and returned row agree.
     let updatedPlayer: Player;
     try {
       updatedPlayer = await prisma.user.update({
-        where: { id: playerId },
+        where: { id: playerId, deletedAt: null },
         data: {
           ...(data.name && { name: data.name }),
           // A corrected address starts clean: the bounce belonged to the old one (#449).
-          ...(data.email &&
-            data.email !== player.email && { email: data.email, ...EMAIL_SUPPRESSION_CLEARED }),
+          ...(data.email && emailChanged && { email: data.email, ...EMAIL_SUPPRESSION_CLEARED }),
           ...(data.profilePictureUrl !== undefined && {
             profilePictureUrl: data.profilePictureUrl || null,
           }),
@@ -422,7 +436,7 @@ export class PlayerService {
         select: PLAYER_SELECT,
       });
     } catch (error) {
-      throw PlayerService.mapUniqueViolation(error);
+      throw PlayerService.mapWriteError(error);
     }
 
     if (data.profilePictureUrl !== undefined) {
@@ -456,7 +470,11 @@ export class PlayerService {
       },
     });
 
-    if (!player) {
+    // A tombstone is not found, for an admin too (#643). It is kept because
+    // rows the deletion promised to retain reference it, and several of those
+    // relations cascade (an announcement reply's author, for one): a hard
+    // delete would silently erase the retained rows with it.
+    if (!player || player.deletedAt) {
       throw new NotFoundError('Player not found');
     }
 
@@ -484,10 +502,15 @@ export class PlayerService {
       );
     }
 
-    // Delete player
-    await prisma.user.delete({
-      where: { id: playerId },
-    });
+    // Guarded like every User write (#643): a deletion that tombstoned the
+    // row after the unlocked read above matches nothing (P2025, a 404).
+    try {
+      await prisma.user.delete({
+        where: { id: playerId, deletedAt: null },
+      });
+    } catch (error) {
+      throw PlayerService.mapWriteError(error);
+    }
 
     return { success: true };
   }

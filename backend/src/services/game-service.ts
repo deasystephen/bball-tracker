@@ -6,8 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
-import { hasTeamPermission, canAccessTeam, isSystemAdmin, teamAccessWhere } from '../utils/permissions';
-import { GuardianService } from './guardian-service';
+import { hasTeamPermission, canAccessTeam, isSystemAdmin, readableTeamsWhere } from '../utils/permissions';
 import { omitRosterManagerFields, ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
@@ -227,9 +226,8 @@ export class GameService {
       // (staff OR member OR league admin OR guardian of a member), the same set
       // `canAccessTeam` and `listTeams` grant. It is never inlined here: a
       // copy drifted once (#589) and no mocked test could tell.
-      const childIds = await GuardianService.getChildIds(userId);
       const userTeams = await prisma.team.findMany({
-        where: teamAccessWhere(userId, childIds),
+        where: await readableTeamsWhere(userId),
         select: { id: true },
       });
 

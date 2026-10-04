@@ -5,7 +5,7 @@
 import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { logger } from '../utils/logger';
-import { canAccessTeam, getGuardianChildIds, teamAccessWhere } from '../utils/permissions';
+import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { GameEventType, GameStatus, Prisma } from '@prisma/client';
 import { lockGameRow } from '../utils/game-row-lock';
 import { shotMade, shotValue } from '../utils/shot-points';
@@ -1156,9 +1156,8 @@ export class StatsService {
       return new Set(teamIds);
     }
 
-    const childIds = await getGuardianChildIds(userId);
     const readable = await prisma.team.findMany({
-      where: { AND: [{ id: { in: teamIds } }, teamAccessWhere(userId, childIds)] },
+      where: { AND: [{ id: { in: teamIds } }, await readableTeamsWhere(userId)] },
       select: { id: true },
     });
 

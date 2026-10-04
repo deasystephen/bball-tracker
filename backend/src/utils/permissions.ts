@@ -365,6 +365,15 @@ export function teamAccessWhere(userId: string, childIds: string[]): Prisma.Team
 }
 
 /**
+ * "Teams this caller may read" as a Prisma filter: resolves the caller's
+ * guardian child ids and returns `teamAccessWhere(userId, childIds)`. Use this
+ * instead of pairing the two calls by hand at each site (#685 review).
+ */
+export async function readableTeamsWhere(userId: string): Promise<Prisma.TeamWhereInput> {
+  return teamAccessWhere(userId, await getGuardianChildIds(userId));
+}
+
+/**
  * League ids the caller may READ, for the list endpoints (#443).
  *
  * Resolved from the TEAM side rather than by scanning `League` with nested
@@ -376,13 +385,13 @@ export function teamAccessWhere(userId: string, childIds: string[]): Prisma.Team
  * it entirely for them.
  */
 export async function getReadableLeagueIds(userId: string): Promise<string[]> {
-  const childIds = await getGuardianChildIds(userId);
+  const readableTeams = await readableTeamsWhere(userId);
 
   const [adminRows, personalLeague, teamRows] = await Promise.all([
     prisma.leagueAdmin.findMany({ where: { userId }, select: { leagueId: true } }),
     prisma.league.findUnique({ where: { personalOwnerId: userId }, select: { id: true } }),
     prisma.team.findMany({
-      where: teamAccessWhere(userId, childIds),
+      where: readableTeams,
       select: { season: { select: { leagueId: true } } },
     }),
   ]);
