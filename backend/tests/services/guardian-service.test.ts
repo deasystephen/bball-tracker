@@ -83,6 +83,13 @@ describe('GuardianService', () => {
           // Claimed account: managed flag already cleared by syncUser, and it has a login
           child: { name: 'Kid Two', isManaged: false, workosUserId: 'workos_kid', teamMembers: [] },
         },
+        {
+          childId: 'c3',
+          relationship: 'MOTHER',
+          isPrimary: false,
+          // Managed flag still set but the child has a login: not deletable by a guardian
+          child: { name: 'Kid Three', isManaged: true, workosUserId: 'workos_kid3', teamMembers: [] },
+        },
       ]);
 
       const result = await GuardianService.getGuardianOf('parent-1');
@@ -91,6 +98,7 @@ describe('GuardianService', () => {
       expect(result).toEqual([
         { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true, isManaged: true, teams: [{ id: 't1', name: 'Warriors' }] },
         { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false, isManaged: false, teams: [] },
+        { childId: 'c3', childName: 'Kid Three', relationship: 'MOTHER', isPrimary: false, isManaged: false, teams: [] },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'parent-1' } })
