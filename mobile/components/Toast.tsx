@@ -5,6 +5,11 @@
  * renders over the top of the screen, where it covers hero back/edit/delete
  * controls, and an interactive card swallows taps meant for them for its whole
  * 3s lifetime (#464). Taps must pass through; dismissal is time-based only.
+ *
+ * Because a toast can never take focus, a screen reader would never reach it,
+ * and React Native does not announce `accessibilityRole="alert"` on either
+ * platform. Each toast therefore announces its message once on mount through
+ * `utils/announce.ts` (#774).
  */
 
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
@@ -27,6 +32,7 @@ import { spacing } from '../theme/spacing';
 import { borderRadius } from '../theme/border-radius';
 import { shadows } from '../theme/shadows';
 import { typography } from '../theme/typography';
+import { announce } from '../utils/announce';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -93,6 +99,11 @@ function ToastItem({
       })
     );
   }, [toast.id, onDismiss, translateY, opacity]);
+
+  // Speak the message once, when the toast appears (#774).
+  React.useEffect(() => {
+    announce(toast.message);
+  }, [toast.message]);
 
   // Animate in on mount
   React.useEffect(() => {

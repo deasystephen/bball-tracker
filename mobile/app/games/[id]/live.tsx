@@ -32,6 +32,7 @@ import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import type { GameStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../../hooks/useScoreAnnouncement';
 
 export default function GameLiveScreen() {
   const router = useRouter();
@@ -43,6 +44,18 @@ export default function GameLiveScreen() {
 
   const { data: game, isLoading, error, refetch } = useGame(id);
   const live = useLiveGame(id);
+
+  // Prefer live snapshot once available, fall back to REST game. Computed
+  // before the early returns so the score announcement hook always runs.
+  const homeScore =
+    live.status !== null ? live.score.homeScore : game?.homeScore;
+  const awayScore =
+    live.status !== null ? live.score.awayScore : game?.awayScore;
+  const homeTeamName = game?.team?.name || 'Your Team';
+  const awayTeamName = game?.opponent ?? '';
+  // VoiceOver hears score updates through this; TalkBack through the live
+  // region on the score container (#774).
+  useScoreAnnouncement(homeTeamName, homeScore, awayTeamName, awayScore);
 
   const gradientColors =
     colorScheme === 'dark'
@@ -63,12 +76,7 @@ export default function GameLiveScreen() {
     );
   }
 
-  // Prefer live snapshot once available, fall back to REST game.
   const status: GameStatus = live.status ?? game.status;
-  const homeScore =
-    live.status !== null ? live.score.homeScore : game.homeScore;
-  const awayScore =
-    live.status !== null ? live.score.awayScore : game.awayScore;
   const isLive = status === 'IN_PROGRESS';
   const isFinished = status === 'FINISHED';
   const isScheduled = status === 'SCHEDULED';
@@ -130,13 +138,23 @@ export default function GameLiveScreen() {
           </View>
         </View>
 
-        <View style={styles.scoreContainer}>
+        <View
+          style={styles.scoreContainer}
+          accessible
+          accessibilityLabel={scoreAccessibilityLabel(
+            homeTeamName,
+            homeScore ?? 0,
+            awayTeamName,
+            awayScore ?? 0
+          )}
+          accessibilityLiveRegion="polite"
+        >
           <View style={styles.teamScore}>
             <ThemedText variant="caption" style={styles.headerTeamName}>
-              {game.team?.name || 'Your Team'}
+              {homeTeamName}
             </ThemedText>
             <ThemedText variant="body" style={styles.headerScore}>
-              {homeScore}
+              {homeScore ?? 0}
             </ThemedText>
           </View>
           <View style={styles.scoreDivider}>
@@ -147,7 +165,7 @@ export default function GameLiveScreen() {
               {game.opponent}
             </ThemedText>
             <ThemedText variant="body" style={styles.headerScore}>
-              {awayScore}
+              {awayScore ?? 0}
             </ThemedText>
           </View>
         </View>

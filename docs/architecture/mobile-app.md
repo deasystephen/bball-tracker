@@ -295,6 +295,24 @@ never inline a role check in a screen:
   column overlays the top-left hero back arrow and top-right hero actions, and an interactive card swallowed
   taps meant for them for its whole 3s lifetime (#464 — surfaced as "back is a no-op after creating a team").
   Don't add touch handlers to a toast; anything tappable belongs elsewhere.
+- **Screen-reader announcements (#774).** `utils/announce.ts#announce(message)` is the only caller of
+  `AccessibilityInfo.announceForAccessibility*` (queued on iOS so a score change and the undo window are both
+  heard; try/catch, failures logged without the message). Four call sites: every toast announces its message
+  once on mount (`Toast.tsx`; React Native announces `accessibilityRole="alert"` on neither platform, and a
+  `pointerEvents="none"` toast can never take focus); `UndoBanner` announces "<message>. Undo available for N
+  seconds" once when the event is confirmed, never per countdown tick, and its button keeps the stable label
+  "Undo"; the tracker's `ScoreDisplay` and Watch Live (`app/games/[id]/live.tsx`) render the score as one
+  accessible element labelled `Score: <home> <n>, <away> <m>` with `accessibilityLiveRegion="polite"`
+  (TalkBack) and announce changes on iOS through `hooks/useScoreAnnouncement.ts`, which never announces the
+  first score it sees (mount, the game loading) and stays silent on Android so TalkBack does not hear each
+  change twice. Tests: `__tests__/utils/announce.test.ts`, `__tests__/components/game/ScoreAnnouncement.test.tsx`,
+  `__tests__/app/game-live-score.test.tsx`, and the #774 cases in `Toast.test.tsx` and `UndoBanner.test.tsx`.
+- **The avatar photo menu is an `ActionMenu` (#669).** `AvatarPicker` (Profile, Manage Players) offers Take
+  Photo, Choose from Library and, with a photo set, Remove Photo, plus the sheet's Close; the four-button
+  `Alert` it replaced lost Cancel on Android and could not be dismissed with Back. On iOS the camera or
+  library opens from the menu's `onDismiss` (iOS refuses to present while the modal is still closing), with
+  a 1s fallback timer in case the callback never arrives; Android opens it at once. The permission-denied
+  message stays a one-button `Alert`. Test: `__tests__/components/avatar-picker.test.tsx`.
 
 ### Mobile logging and error reporting (#617)
 - **`services/log.ts` is the app's logger.** `log.debug` / `log.info` print to the Metro console in

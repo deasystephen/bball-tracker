@@ -29,7 +29,7 @@ import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
 import { formatShotDescription } from '../../../utils/shot-label';
 import { getGameResult } from '../../../utils/game-result';
-import type { ShotMetadata } from '../../../types/game';
+import type { CreateGameEventInput, ShotMetadata } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
 
 const UNDO_DURATION = 5; // seconds
@@ -68,7 +68,6 @@ export default function TrackGameScreen() {
   // Store
   const {
     selectedPlayerId,
-    selectedPlayerName,
     lastEvent,
     hotPlayers,
     lastMilestone,
@@ -159,27 +158,42 @@ export default function TrackGameScreen() {
     }
   }, [opponentScore, id, updateGame]);
 
-  // Handle shot recording
-  const handleShot = useCallback(
-    async (points: 1 | 2 | 3, made: boolean) => {
-      if (!selectedPlayerId) {
-        Alert.alert('Select Player', 'Please select a player before recording a shot.');
+  // Record one event for the selected player. The selection is consumed
+  // synchronously, before the POST goes out (#730): the player is deselected
+  // in the same tick as the tap, which disables the shot and stat buttons, so
+  // at most one event is in flight per selection. The live store is read
+  // rather than the render's closure because a second tap can land before
+  // React re-renders the disabled buttons; that tap finds no selection and
+  // is dropped. A failed create restores the selection so the coach can
+  // retry with one tap.
+  const submitEvent = useCallback(
+    async (
+      eventType: CreateGameEventInput['eventType'],
+      metadata: Record<string, unknown>,
+      failMessage: string,
+      selectPrompt: string
+    ) => {
+      const { selectedPlayerId: playerId, selectedPlayerName: playerName } =
+        useGameTrackingStore.getState();
+      if (!playerId) {
+        // This render still showed a selection: an earlier tap consumed it
+        // a moment ago. Drop the duplicate silently.
+        if (selectedPlayerId) return;
+        Alert.alert('Select Player', selectPrompt);
         return;
       }
 
-      const eventData = {
-        playerId: selectedPlayerId,
-        eventType: 'SHOT' as const,
-        metadata: { made, points },
-      };
+      const eventData = { playerId, eventType, metadata };
 
       // Record locally first (optimistic). UNDO stays disabled until the
       // server id is known (audit #7).
-      const local = recordEvent(eventData, selectedPlayerName || undefined);
+      const local = recordEvent(eventData, playerName || undefined);
+      selectPlayer(null, null);
 
       try {
-        // Create event on server. The response carries the server-derived
-        // score, which the mutation writes into the game cache.
+        // Create event on server. A SHOT response carries the
+        // server-derived score, which the mutation writes into the game
+        // cache.
         const { event } = await createEvent.mutateAsync({
           gameId: id,
           data: eventData,
@@ -193,23 +207,20 @@ export default function TrackGameScreen() {
 
         setUndoTimer(timerId);
 
-        // Deselect player to prevent accidental double-taps
-        selectPlayer(null, null);
-
         // Refetch events to sync
         refetchEvents();
       } catch (error) {
         // Remove local event on failure
         discardEvent(local.localId);
-        Alert.alert(
-          'Error',
-          error instanceof Error ? error.message : 'Failed to record shot'
-        );
+        // Give the selection back unless the coach has picked someone else.
+        if (!useGameTrackingStore.getState().selectedPlayerId) {
+          selectPlayer(playerId, playerName);
+        }
+        Alert.alert('Error', error instanceof Error ? error.message : failMessage);
       }
     },
     [
       selectedPlayerId,
-      selectedPlayerName,
       id,
       recordEvent,
       confirmEvent,
@@ -222,14 +233,21 @@ export default function TrackGameScreen() {
     ]
   );
 
+  // Handle shot recording
+  const handleShot = useCallback(
+    (points: 1 | 2 | 3, made: boolean) =>
+      submitEvent(
+        'SHOT',
+        { made, points },
+        'Failed to record shot',
+        'Please select a player before recording a shot.'
+      ),
+    [submitEvent]
+  );
+
   // Handle other stats (rebounds, steals, blocks, assists)
   const handleStat = useCallback(
-    async (statType: StatType) => {
-      if (!selectedPlayerId) {
-        Alert.alert('Select Player', 'Please select a player before recording a stat.');
-        return;
-      }
-
+    (statType: StatType) => {
       // Map stat type to event type and metadata
       let eventType: 'REBOUND' | 'STEAL' | 'BLOCK' | 'ASSIST';
       let metadata: Record<string, unknown> = {};
@@ -259,61 +277,17 @@ export default function TrackGameScreen() {
           statLabel = 'Assist';
           break;
         default:
-          return;
+          return Promise.resolve();
       }
 
-      const eventData = {
-        playerId: selectedPlayerId,
+      return submitEvent(
         eventType,
         metadata,
-      };
-
-      // Record locally first (optimistic). UNDO stays disabled until the
-      // server id is known (audit #7).
-      const local = recordEvent(eventData, selectedPlayerName || undefined);
-
-      try {
-        // Create event on server
-        const { event } = await createEvent.mutateAsync({
-          gameId: id,
-          data: eventData,
-        });
-        confirmEvent(local.localId, event.id);
-
-        // Set up undo timer
-        const timerId = setTimeout(() => {
-          clearLastEvent();
-        }, UNDO_DURATION * 1000);
-
-        setUndoTimer(timerId);
-
-        // Deselect player to prevent accidental double-taps
-        selectPlayer(null, null);
-
-        // Refetch events to sync
-        refetchEvents();
-      } catch (error) {
-        // Remove local event on failure
-        discardEvent(local.localId);
-        Alert.alert(
-          'Error',
-          error instanceof Error ? error.message : `Failed to record ${statLabel}`
-        );
-      }
+        `Failed to record ${statLabel}`,
+        'Please select a player before recording a stat.'
+      );
     },
-    [
-      selectedPlayerId,
-      selectedPlayerName,
-      id,
-      recordEvent,
-      confirmEvent,
-      createEvent,
-      clearLastEvent,
-      setUndoTimer,
-      selectPlayer,
-      refetchEvents,
-      discardEvent,
-    ]
+    [submitEvent]
   );
 
   // Handle undo — deletes the exact server event the banner refers to. The

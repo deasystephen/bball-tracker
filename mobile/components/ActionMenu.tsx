@@ -23,14 +23,27 @@ export interface ActionMenuProps {
   title: string;
   items: ActionMenuItem[];
   onClose: () => void;
+  /**
+   * iOS only: runs once the sheet has finished closing. An item that
+   * presents a native view controller (the camera or photo library) must
+   * wait for it, because iOS refuses to present while the modal is still
+   * dismissing (`AvatarPicker`). Android never calls it.
+   */
+  onDismiss?: () => void;
 }
 
-export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) {
+export function ActionMenu({ visible, title, items, onClose, onDismiss }: ActionMenuProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      onDismiss={onDismiss}
+    >
       {/* The backdrop and the sheet MUST be siblings, never parent/child: a
           Pressable with an accessibilityLabel becomes a single accessibility
           element on iOS and swallows its entire subtree — with the sheet

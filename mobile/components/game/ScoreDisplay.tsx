@@ -16,6 +16,7 @@ import Animated, {
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, typography } from '../../theme';
+import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../hooks/useScoreAnnouncement';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -37,6 +38,10 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
   showEndButton = true,
 }) => {
   const { colors, colorScheme } = useTheme();
+
+  // VoiceOver hears score changes through this; TalkBack through the live
+  // region on the score row (#774).
+  useScoreAnnouncement(homeTeamName, homeScore, awayTeamName, awayScore);
 
   const gradientColors = colorScheme === 'dark'
     ? ['#0D1117', '#161B22'] as const
@@ -130,7 +135,9 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
 
       <View
         style={styles.scoreRow}
-        accessibilityLabel={`Score: ${homeTeamName} ${homeScore}, ${awayTeamName} ${awayScore}`}
+        accessible
+        accessibilityLabel={scoreAccessibilityLabel(homeTeamName, homeScore, awayTeamName, awayScore)}
+        accessibilityLiveRegion="polite"
       >
         <View style={styles.teamScore}>
           <ThemedText
