@@ -20,6 +20,7 @@ import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/erro
 import { validateUuidParams } from '../middleware/validate-params';
 import { exportRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
@@ -48,7 +49,6 @@ router.post('/', async (req, res) => {
       game,
     });
   } catch (error) {
-    logger.error('Error creating game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof ForbiddenError ||
@@ -58,6 +58,7 @@ router.post('/', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to create game' });
     }
+    logRouteError(res, 'Error creating game', error);
   }
 });
 
@@ -82,7 +83,6 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing games', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof ForbiddenError ||
@@ -92,6 +92,7 @@ router.get('/', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to list games' });
     }
+    logRouteError(res, 'Error listing games', error);
   }
 });
 
@@ -108,7 +109,6 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    logger.error('Error getting game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -118,6 +118,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to get game' });
     }
+    logRouteError(res, 'Error getting game', error);
   }
 });
 
@@ -146,7 +147,6 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    logger.error('Error updating game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -156,6 +156,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to update game' });
     }
+    logRouteError(res, 'Error updating game', error);
   }
 });
 
@@ -172,7 +173,6 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Game deleted successfully',
     });
   } catch (error) {
-    logger.error('Error deleting game', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -182,6 +182,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to delete game' });
     }
+    logRouteError(res, 'Error deleting game', error);
   }
 });
 
@@ -216,7 +217,6 @@ router.get('/:id/export.csv', exportRateLimit, validateUuidParams('id'), async (
     });
     exportFile.stream.pipe(res);
   } catch (error) {
-    logger.error('Error exporting game CSV', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -226,6 +226,7 @@ router.get('/:id/export.csv', exportRateLimit, validateUuidParams('id'), async (
     } else {
       res.status(500).json({ error: 'Failed to export game CSV' });
     }
+    logRouteError(res, 'Error exporting game CSV', error);
   }
 });
 
@@ -260,7 +261,6 @@ router.get('/:id/boxscore.pdf', exportRateLimit, validateUuidParams('id'), async
     });
     exportFile.stream.pipe(res);
   } catch (error) {
-    logger.error('Error exporting box score PDF', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -270,6 +270,7 @@ router.get('/:id/boxscore.pdf', exportRateLimit, validateUuidParams('id'), async
     } else {
       res.status(500).json({ error: 'Failed to export box score PDF' });
     }
+    logRouteError(res, 'Error exporting box score PDF', error);
   }
 });
 
@@ -303,7 +304,6 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
       score,
     });
   } catch (error) {
-    logger.error('Error creating game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -313,6 +313,7 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
     } else {
       res.status(500).json({ error: 'Failed to create game event' });
     }
+    logRouteError(res, 'Error creating game event', error);
   }
 });
 
@@ -341,7 +342,6 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing game events', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -351,6 +351,7 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
     } else {
       res.status(500).json({ error: 'Failed to list game events' });
     }
+    logRouteError(res, 'Error listing game events', error);
   }
 });
 
@@ -371,7 +372,6 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
       event,
     });
   } catch (error) {
-    logger.error('Error getting game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -381,6 +381,7 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
     } else {
       res.status(500).json({ error: 'Failed to get game event' });
     }
+    logRouteError(res, 'Error getting game event', error);
   }
 });
 
@@ -402,7 +403,6 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
       score,
     });
   } catch (error) {
-    logger.error('Error deleting game event', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -412,6 +412,7 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
     } else {
       res.status(500).json({ error: 'Failed to delete game event' });
     }
+    logRouteError(res, 'Error deleting game event', error);
   }
 });
 
@@ -444,7 +445,6 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
       rsvp,
     });
   } catch (error) {
-    logger.error('Error upserting RSVP', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -454,6 +454,7 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to update RSVP' });
     }
+    logRouteError(res, 'Error upserting RSVP', error);
   }
 });
 
@@ -473,7 +474,6 @@ router.get('/:gameId/rsvps', validateUuidParams('gameId'), async (req, res) => {
       ...result,
     });
   } catch (error) {
-    logger.error('Error getting RSVPs', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -482,6 +482,7 @@ router.get('/:gameId/rsvps', validateUuidParams('gameId'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to get RSVPs' });
     }
+    logRouteError(res, 'Error getting RSVPs', error);
   }
 });
 

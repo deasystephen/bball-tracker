@@ -15,7 +15,7 @@ import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
-import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 import {
   invitationLookupIpRateLimit,
   invitationTokenRateLimit,
@@ -76,14 +76,12 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
     );
     res.json({ success: true, invitation });
   } catch (error) {
-    logger.error('Error fetching invitation by token', {
-      error: error instanceof Error ? error.message : String(error),
-    });
     if (error instanceof NotFoundError) {
       res.status(404).json({ error: 'Invitation not found' });
     } else {
       res.status(500).json({ error: 'Failed to fetch invitation' });
     }
+    logRouteError(res, 'Error fetching invitation by token', error);
   }
 });
 
@@ -124,9 +122,6 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
     );
     res.json({ success: true, ...result });
   } catch (error) {
-    logger.error('Error accepting invitation by token', {
-      error: error instanceof Error ? error.message : String(error),
-    });
     if (error instanceof BadRequestError) {
       res.status(400).json({ error: (error as BadRequestError).message });
     } else if (error instanceof NotFoundError) {
@@ -134,6 +129,7 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to accept invitation' });
     }
+    logRouteError(res, 'Error accepting invitation by token', error);
   }
 });
 
