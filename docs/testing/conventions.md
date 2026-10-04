@@ -93,6 +93,14 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
   seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
   purpose once and confirm that suite fails.
+- **The seed's logic lives in `tests/support/`, not in `prisma/seed.ts`.** `prisma/*.ts` is outside
+  `tsc` and ESLint and no test runs the seed, so anything in it that must agree with service code
+  goes in `seed-fixtures.ts` (fixed ids, event logs, seeded games; pure) or `seed-resets.ts`
+  (database resets: tombstone sweep, seeded-game restore, finished-game events), and the seed calls
+  service functions (`createDefaultTeamRoles`, `computeHomeScore`) instead of copying them (#787).
+  `seed-fixtures.test.ts` pins the data and scans the seed's source for copies;
+  `tests/integration/seed-resets.db.test.ts` runs the resets on run-id rows. A reset that sweeps
+  globally takes a scope, so its test touches only its own rows.
 
 ## Migration backfill guard (#493)
 - `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The
