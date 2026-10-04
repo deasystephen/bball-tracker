@@ -91,3 +91,15 @@ afterAll((done) => {
   }
 });
 
+
+// #749: the ALB (idle timeout 60 s, `aws_lb.main` in infra/ecs.tf) reuses
+// keep-alive connections; Node must hold them open longer or the ALB answers
+// 502 on a connection the task is closing.
+describe('HTTP server keep-alive vs the ALB idle timeout', () => {
+  const ALB_IDLE_TIMEOUT_MS = 60_000;
+
+  it('keeps idle connections open longer than the ALB does', () => {
+    expect(httpServer.keepAliveTimeout).toBeGreaterThan(ALB_IDLE_TIMEOUT_MS);
+    expect(httpServer.headersTimeout).toBeGreaterThan(httpServer.keepAliveTimeout);
+  });
+});

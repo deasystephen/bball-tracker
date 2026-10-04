@@ -374,20 +374,24 @@ model TeamMember {
 }
 
 model TeamInvitation {
-  id           String           @id @default(uuid())
-  teamId       String
-  playerId     String
-  invitedById  String
-  status       InvitationStatus @default(PENDING)
-  token        String           @unique
-  jerseyNumber Int?
-  position     String?
-  message      String?
-  expiresAt    DateTime
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  acceptedAt   DateTime?
-  rejectedAt   DateTime?
+  id            String           @id @default(uuid())
+  teamId        String
+  playerId      String
+  invitedById   String
+  status        InvitationStatus @default(PENDING)
+  token         String           @unique
+  jerseyNumber  Int?
+  position      String?
+  message       String?
+  expiresAt     DateTime
+  /// hashRecipient() of the address the invitation email went to (null: no
+  /// email, a row from before #715, or cleared by account deletion). The
+  /// resend cooldown applies only while the player's address is unchanged.
+  recipientHash String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
 
   team      Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   player    User @relation("PlayerInvitations", fields: [playerId], references: [id], onDelete: Cascade)

@@ -17,7 +17,14 @@ import {
   addStaffSchema,
   updateStaffRoleSchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError, PaymentRequiredError } from '../../utils/errors';
+import {
+  AppError,
+  BadRequestError,
+  NotFoundError,
+  ForbiddenError,
+  PaymentRequiredError,
+  DetailedError,
+} from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema, inviteGuardianSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
@@ -26,7 +33,7 @@ import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
 import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitlements';
-import { exportRateLimit } from '../middleware/rate-limit';
+import { exportRateLimit, inviteRateLimit } from '../middleware/rate-limit';
 import { Feature } from '../../services/entitlements';
 import { logger } from '../../utils/logger';
 import { buildContentDisposition } from '../../utils/content-disposition';
@@ -218,7 +225,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * (This path previously answered 410 — the pre-2026 direct roster-add was
  * removed in favor of invitations. The unified flow deliberately reclaims it.)
  */
-router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) => {
+router.post('/:teamId/players', inviteRateLimit, validateUuidParams('teamId'), async (req, res) => {
   try {
     const validationResult = addRosterPlayerSchema.safeParse(req.body);
     if (!validationResult.success) {
@@ -241,8 +248,14 @@ router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) =
       invitation: result.invitation && omitToken(result.invitation),
     });
   } catch (error) {
-    logger.error('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
-    if (
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    const log = error instanceof AppError ? logger.warn : logger.error;
+    log('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof DetailedError) {
+      // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
+      res.status(error.statusCode).json(error.body());
+    } else if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -259,7 +272,7 @@ router.post('/:teamId/players', validateUuidParams('teamId'), async (req, res) =
  * Invite an existing user by `playerId` (coach only); with `supersede` this is
  * Resend. New players go through POST /teams/:teamId/players.
  */
-router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, res) => {
+router.post('/:teamId/invitations', inviteRateLimit, validateUuidParams('teamId'), async (req, res) => {
   try {
     // Validate request body
     const validationResult = createInvitationSchema.safeParse(req.body);
@@ -283,8 +296,14 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
       emailSent,
     });
   } catch (error) {
-    logger.error('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
-    if (
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    const log = error instanceof AppError ? logger.warn : logger.error;
+    log('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
+    if (error instanceof DetailedError) {
+      // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
+      res.status(error.statusCode).json(error.body());
+    } else if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -303,6 +322,7 @@ router.post('/:teamId/invitations', validateUuidParams('teamId'), async (req, re
  */
 router.post(
   '/:teamId/members/:playerId/guardians',
+  inviteRateLimit,
   validateUuidParams('teamId', 'playerId'),
   async (req, res) => {
     try {

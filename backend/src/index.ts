@@ -21,6 +21,13 @@ import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 
 const app = express();
 const httpServer = createServer(app);
+// The ALB reuses keep-alive connections to the task for up to its idle timeout
+// (60 s, the AWS default; `aws_lb.main` in infra/ecs.tf). Node's default of 5 s
+// closes idle connections first, and a request the ALB has already sent on
+// such a connection becomes an ELB 502 the app never sees (#749). Keep both
+// values strictly above the ALB's, and headersTimeout above keepAliveTimeout.
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 66_000;
 // CORS_ORIGIN is a comma-separated list of exact browser origins (scheme + host).
 // Always hand cors() the ARRAY: given a plain string the library stamps that value
 // on every response regardless of the request Origin, whereas an array reflects the

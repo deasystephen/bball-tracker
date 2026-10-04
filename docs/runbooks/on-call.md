@@ -100,7 +100,11 @@ responses the application itself produced.
 
 1. **Which one fired?** ELB 5xx together with an [API is down](#api-is-down) alarm is the same
    incident — work that section. ELB 5xx alone usually means requests exceeding the ALB's idle
-   timeout (504) or the task closing connections while restarting (502).
+   timeout (504) or the task closing connections while restarting (502). Sporadic 502s with a
+   healthy target and no restart point at a keep-alive mismatch: Node must hold idle connections
+   longer than the ALB's 60 s idle timeout, so check `httpServer.keepAliveTimeout` /
+   `headersTimeout` in `backend/src/index.ts` (65 s / 66 s since #749) and the ALB's
+   `idle_timeout` before chasing target health (`docs/deployment/ecs-deploys.md`, Keep-alive).
 2. **Target 5xx: open Sentry**, project `bball-tracker-backend`, environment `production`, sorted
    by last seen. Expected client errors (4xx) are filtered out before they reach Sentry, so what
    is there is a real defect. Check whether the first event lines up with a deploy.

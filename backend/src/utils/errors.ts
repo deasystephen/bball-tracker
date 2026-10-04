@@ -107,6 +107,28 @@ export class LastHeadCoachError extends DetailedError<LastHeadCoachDetails> {
   }
 }
 
+export interface ResendCooldownDetails extends Record<string, unknown> {
+  /** Seconds until the same player can be sent a fresh invitation. */
+  retryAfterSeconds: number;
+}
+
+/**
+ * 429 — an invitation for this player was created moments ago, so a resend
+ * (supersede) is refused without expiring the live row or sending email
+ * (#715). Bounds how often one recipient can be mailed through Resend.
+ */
+export class ResendCooldownError extends DetailedError<ResendCooldownDetails> {
+  constructor(retryAfterSeconds: number) {
+    super(
+      'resend_cooldown',
+      { retryAfterSeconds },
+      `An invitation was just sent to this player. Try again in ${retryAfterSeconds} seconds.`,
+      429
+    );
+    Object.setPrototypeOf(this, ResendCooldownError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
