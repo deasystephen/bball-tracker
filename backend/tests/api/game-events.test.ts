@@ -40,7 +40,7 @@ describe('Game Events API', () => {
     timestamp: new Date('2024-03-15T18:30:00Z'),
     metadata: { made: true, points: 2 },
     createdAt: new Date(),
-    player: { id: TEST_PLAYER_ID, name: 'Test Player' },
+    player: { id: TEST_PLAYER_ID, name: 'Test Player', deletedAt: null },
   };
 
   beforeEach(() => {
@@ -172,6 +172,8 @@ describe('Game Events API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.events).toHaveLength(1);
       expect(response.body.total).toBe(1);
+      // Tombstone signal for the timeline label; no email on event players (#642)
+      expect(response.body.events[0].player).toEqual({ id: TEST_PLAYER_ID, name: 'Test Player', deletedAt: null });
     });
 
     it('should filter events by eventType', async () => {

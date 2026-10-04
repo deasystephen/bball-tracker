@@ -94,6 +94,9 @@ const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,
+  // Deleted accounts stay on sent and answered invitations as tombstones
+  // (#642); clients derive a localized label from this, never from name.
+  deletedAt: true,
 } satisfies Prisma.UserSelect;
 
 /**

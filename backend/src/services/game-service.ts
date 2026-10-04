@@ -8,7 +8,7 @@ import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin, teamAccessWhere } from '../utils/permissions';
 import { GuardianService } from './guardian-service';
-import { ROSTER_MEMBERS_ORDER_BY } from './team-service';
+import { ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
@@ -24,13 +24,7 @@ const GAME_INCLUDE = {
       },
       staff: {
         include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          user: { select: USER_SUMMARY_SELECT },
           role: true,
         },
       },
@@ -44,13 +38,9 @@ const GAME_DETAIL_INCLUDE = {
       ...GAME_INCLUDE.team.include,
       members: {
         include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          // Same user shape as the team detail (isManaged, deletedAt for
+          // tombstones, #642); email is stripped below for non-managers.
+          player: { select: USER_SUMMARY_SELECT },
         },
         // Same roster order as team-service TEAM_INCLUDE.members.
         orderBy: ROSTER_MEMBERS_ORDER_BY,
@@ -63,6 +53,8 @@ const GAME_DETAIL_INCLUDE = {
         select: {
           id: true,
           name: true,
+          // Tombstone signal for the timeline label (#642); never email here.
+          deletedAt: true,
         },
       },
     },
@@ -99,7 +91,8 @@ type GameDetailMember = GameDetail['team']['members'][number];
 /**
  * `GET /games/:id` payload. Mirrors `TeamDetailView`: member `player.email`
  * is present only when the caller has `canManageRoster` on the game's team
- * (role matrix B2.5); players and stats-only staff get `{ id, name }`. Staff
+ * (role matrix B2.5); players and stats-only staff get the same player
+ * object without `email` (`isManaged` and `deletedAt` stay, #642). Staff
  * emails stay (coach contact info), as on the team detail.
  */
 export type GameDetailView = Omit<GameDetail, 'team'> & {
@@ -186,7 +179,7 @@ export class GameService {
     }
 
     // Same rule as TeamService.getTeamById: roster managers see member
-    // emails, everyone else gets names only.
+    // emails, everyone else gets the player without email.
     const canManageRoster = await hasTeamPermission(userId, game.teamId, 'canManageRoster');
     if (canManageRoster) {
       return game;
@@ -198,7 +191,7 @@ export class GameService {
         ...game.team,
         members: game.team.members.map(({ player, ...member }) => ({
           ...member,
-          player: { id: player.id, name: player.name },
+          player: { id: player.id, name: player.name, isManaged: player.isManaged, deletedAt: player.deletedAt },
         })),
       },
     };

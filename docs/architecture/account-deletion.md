@@ -42,8 +42,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.
-- `deletedAt` rides on `USER_SUMMARY_SELECT` (rosters, staff, guardians) so clients derive a
-  "Deleted" chip and a localized label; pickers (`listPlayers`, `getPlayerById`, staff lookup,
+- `deletedAt` rides on `USER_SUMMARY_SELECT` (rosters, staff, guardians, invitations, game detail)
+  so clients derive a "Deleted" chip and a localized label. Game detail reuses team-service's
+  exported `USER_SUMMARY_SELECT` for members and staff (non-roster-managers lose only `email`),
+  and event players on `GET /games/:id` and `GET /games/:id/events` carry `deletedAt` without
+  email (#642); pickers (`listPlayers`, `getPlayerById`, staff lookup,
   `dev-users`, `dev-login`) filter tombstones out. `guardianOf[].isManaged` tells the app which
   child records a guardian may delete.
 - Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats

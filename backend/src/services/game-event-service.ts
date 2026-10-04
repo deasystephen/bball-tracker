@@ -28,6 +28,8 @@ const GAME_EVENT_INCLUDE = {
     select: {
       id: true,
       name: true,
+      // Tombstone signal for the timeline label (#642); never email here.
+      deletedAt: true,
     },
   },
 } satisfies Prisma.GameEventInclude;

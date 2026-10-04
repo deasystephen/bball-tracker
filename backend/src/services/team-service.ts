@@ -46,7 +46,11 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 
-const USER_SUMMARY_SELECT = {
+/**
+ * User shape for roster and staff rows. Exported so game-service's game
+ * detail serves the same fields (`isManaged`, `deletedAt`) as the team detail.
+ */
+export const USER_SUMMARY_SELECT = {
   id: true,
   name: true,
   email: true,

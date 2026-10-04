@@ -3,7 +3,7 @@
  */
 
 import { GameService } from '../../src/services/game-service';
-import { ROSTER_MEMBERS_ORDER_BY } from '../../src/services/team-service';
+import { ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from '../../src/services/team-service';
 import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
 import {
@@ -159,7 +159,7 @@ describe('GameService', () => {
           ...team,
           season: { ...season, league },
           staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-          members: [{ ...member, player: { id: player.id, name: player.name, email: player.email } }],
+          members: [{ ...member, player: { id: player.id, name: player.name, email: player.email, isManaged: false, deletedAt: null } }],
         },
         events: [],
       });
@@ -175,7 +175,13 @@ describe('GameService', () => {
       const result = await GameService.getGameById(game.id, coach.id);
 
       expect(result).toHaveProperty('id', game.id);
-      expect(result.team.members[0].player).toEqual({ id: player.id, name: player.name, email: 'kid@test.com' });
+      expect(result.team.members[0].player).toEqual({
+        id: player.id,
+        name: player.name,
+        email: 'kid@test.com',
+        isManaged: false,
+        deletedAt: null,
+      });
       expect(result.team.staff[0].user.email).toBe(coach.email);
     });
 
@@ -225,7 +231,46 @@ describe('GameService', () => {
       );
     });
 
+    it('selects the team-service user summary (deletedAt, isManaged) for members and staff, and deletedAt on event players (#642)', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const game = createGame({ teamId: team.id });
+
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
+        ...game,
+        team: {
+          ...team,
+          season: { ...season, league },
+          staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+          members: [],
+        },
+        events: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league: { ...league, admins: [] } },
+      });
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+
+      await GameService.getGameById(game.id, coach.id);
+
+      // Prisma is mocked, so the include is the only guard that the tombstone
+      // signal reaches the tracker roster and the event timeline.
+      const { include } = (mockPrisma.game.findUnique as jest.Mock).mock.calls[0][0];
+      expect(USER_SUMMARY_SELECT).toMatchObject({ deletedAt: true, isManaged: true });
+      expect(include.team.include.members.include.player).toEqual({ select: USER_SUMMARY_SELECT });
+      expect(include.team.include.staff.include.user).toEqual({ select: USER_SUMMARY_SELECT });
+      expect(include.events.include.player.select).toEqual({ id: true, name: true, deletedAt: true });
+    });
+
     it('should return game for team member without other members\' emails (role matrix B2.5)', async () => {
+      const tombstonedAt = new Date('2026-09-01T00:00:00Z');
       const coach = createCoach();
       const player = createPlayer();
       const teammate = createPlayer({ email: 'teammate@test.com' });
@@ -245,8 +290,9 @@ describe('GameService', () => {
           season: { ...season, league },
           staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
           members: [
-            { ...member, player: { id: player.id, name: player.name, email: player.email } },
-            { ...teammateMember, player: { id: teammate.id, name: teammate.name, email: teammate.email } },
+            { ...member, player: { id: player.id, name: player.name, email: player.email, isManaged: false, deletedAt: null } },
+            // A tombstoned teammate (#642): deletedAt must survive the email strip.
+            { ...teammateMember, player: { id: teammate.id, name: 'Deleted user', email: 'teammate@test.com', isManaged: false, deletedAt: tombstonedAt } },
           ],
         },
         events: [],
@@ -267,6 +313,14 @@ describe('GameService', () => {
       for (const m of result.team.members) {
         expect(m.player).not.toHaveProperty('email');
       }
+      // Only email is stripped: isManaged and the tombstone signal stay (#642).
+      expect(result.team.members[0].player).toEqual({ id: player.id, name: player.name, isManaged: false, deletedAt: null });
+      expect(result.team.members[1].player).toEqual({
+        id: teammate.id,
+        name: 'Deleted user',
+        isManaged: false,
+        deletedAt: tombstonedAt,
+      });
       expect(JSON.stringify(result.team.members)).not.toContain('teammate@test.com');
       // Staff (coach) contact info stays visible, as on the team detail
       expect(result.team.staff[0].user.email).toBe(coach.email);
