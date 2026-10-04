@@ -154,11 +154,11 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Work Hygiene
 
-- **GitHub issues are the only source of truth for what is left to do.** Issues, milestones and the GA board own work with state; repo docs own durable truth reviewed in PRs; Claude memory owns cross-session facts that are not derivable from the repo; artifacts are dated snapshots. Never track a task in memory, a doc or an artifact; a within-run checklist, ticked as you go, lives in the session scratchpad directory and is never committed. An audit's deliverable is issues; the document is provenance.
+- **GitHub issues are the only source of truth for what is left to do.** Issues, milestones and the GA board own work with state; repo docs own durable truth reviewed in PRs; Claude memory owns cross-session facts that are not derivable from the repo; artifacts are dated snapshots. Never track a task in memory, a doc or an artifact; a within-run checklist lives in the session scratchpad, never in the repo. An audit's deliverable is issues; the document is provenance.
 - **Before starting new work, ensure prior work is committed** and `git status` is clean. Several sessions share this checkout: never commit changes you did not make, and never `git reset`, `git stash` or `git checkout --` to get to a clean tree.
-- **Keep going when a step needs no input from me**; put status in the same message as the next action. Stop and ask, one question per turn, only when you cannot continue without me or before: merging to `main` (it deploys), `terraform apply`, `eas build`/`submit`, deleting data, force-pushing, anything in production AWS, or anything outside this repo or that changes this machine (installing or upgrading tools). A production OTA after a merge is part of the ship workflow, not a stop.
-- **End every task with a wrap-up sweep, unprompted:** tests (Jest, API, Maestro), a `/code-review` pass on the diff before the PR opens, docs (`docs/`, this file, READMEs, the E2E test plan) and open GitHub issues the change closes, unblocks or contradicts. Report what was updated, or say that nothing needed updating.
-- **Lead the closing message with what needs me**, then Changed, Verified, Wrap-up. Mark anything you could not confirm and say where you looked.
+- **Keep going when a step needs no input from me**; status goes in the same message as the next action. Stop and ask (one question per turn) only when blocked, or before a mutating step that is hard to undo: merging to `main` (it can deploy), `terraform apply`, `eas build`/`submit`, force-pushing, deleting production data, writes to production AWS, or anything outside this repo or that changes this machine. The production OTA is not a stop (see Deploys). An unattended run (CI) has nobody to ask: follow its prompt. Detail: `docs/automation/claude-code-sessions.md`.
+- **End every task with a wrap-up sweep, unprompted:** tests (Jest, API, Maestro), docs (`docs/`, this file, READMEs, the E2E test plan), open GitHub issues the change closes, unblocks or contradicts, and local `main` levelled with `origin/main` (Git Workflow).
+- **Lead the closing message with what needs me**, then Changed, Verified, Wrap-up (what the sweep updated, or that nothing needed it). Mark anything you could not confirm and say where you looked.
 
 ## Documentation Hygiene
 
@@ -169,9 +169,9 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Git Workflow
 
-- Single long-lived branch `main`; short-lived branches (`feature/…`, `fix/…`) merge via PR (squash). Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`.
+- Single long-lived branch `main`; short-lived branches (`feature/…`, `fix/…`) merge via PR (squash). Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`. A PR opened outside `/ship` (which reviews the diff itself) gets a `/code-review` pass on the diff first.
 - Delete a branch once its PR is MERGED (`gh pr list --head <branch> --state all`, then `git branch -D <branch> && git fetch --prune`), as part of landing it.
-- **End every session with local `main` level with `origin/main`:** `git pull --ff-only` in the checkout that has `main` (or `git fetch origin main:main` when none does), then `git fetch --prune`; `git status --short --branch` must not say `behind`. Only ever fast-forward; if the tree is dirty or `main` has local commits, leave it and report it. Say in the closing message that it was done.
+- **End every session with local `main` level with `origin/main`:** `git pull --ff-only` in the checkout that has `main` (or `git fetch origin main:main` when none does), then `git fetch --prune`; `git status --short --branch` must not say `behind`. Only ever fast-forward; if the tree is dirty or `main` has local commits, leave it and report it.
 - Never write "does not close #N" in a PR body: GitHub reads it as a closing keyword.
 - Tag major pushes with annotated semver tags (`git tag -a vX.Y.Z -m "…"`; `git push origin vX.Y.Z`).
 
