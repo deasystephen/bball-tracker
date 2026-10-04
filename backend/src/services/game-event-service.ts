@@ -23,15 +23,21 @@ const GAME_ACCESS_INCLUDE = {
   },
 } satisfies Prisma.GameInclude;
 
+/**
+ * Player shape on every game event (REST list/detail, game detail timeline,
+ * socket broadcast). `deletedAt` is the tombstone signal for the timeline
+ * label (#642); never email here.
+ */
+export const EVENT_PLAYER_SELECT = {
+  id: true,
+  name: true,
+  deletedAt: true,
+} satisfies Prisma.UserSelect;
+
+export type EventPlayer = Prisma.UserGetPayload<{ select: typeof EVENT_PLAYER_SELECT }>;
+
 const GAME_EVENT_INCLUDE = {
-  player: {
-    select: {
-      id: true,
-      name: true,
-      // Tombstone signal for the timeline label (#642); never email here.
-      deletedAt: true,
-    },
-  },
+  player: { select: EVENT_PLAYER_SELECT },
 } satisfies Prisma.GameEventInclude;
 
 const GAME_SCORE_SELECT = {

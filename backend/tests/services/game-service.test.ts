@@ -4,6 +4,7 @@
 
 import { GameService } from '../../src/services/game-service';
 import { ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from '../../src/services/team-service';
+import { EVENT_PLAYER_SELECT } from '../../src/services/game-event-service';
 import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
 import {
@@ -266,7 +267,8 @@ describe('GameService', () => {
       expect(USER_SUMMARY_SELECT).toMatchObject({ deletedAt: true, isManaged: true });
       expect(include.team.include.members.include.player).toEqual({ select: USER_SUMMARY_SELECT });
       expect(include.team.include.staff.include.user).toEqual({ select: USER_SUMMARY_SELECT });
-      expect(include.events.include.player.select).toEqual({ id: true, name: true, deletedAt: true });
+      expect(include.events.include.player).toEqual({ select: EVENT_PLAYER_SELECT });
+      expect(EVENT_PLAYER_SELECT).toEqual({ id: true, name: true, deletedAt: true });
     });
 
     it('should return game for team member without other members\' emails (role matrix B2.5)', async () => {

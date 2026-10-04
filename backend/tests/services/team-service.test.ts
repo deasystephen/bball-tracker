@@ -2,7 +2,7 @@
  * Unit tests for TeamService
  */
 
-import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
@@ -581,6 +581,21 @@ describe('TeamService', () => {
       }
       // jersey etc. preserved
       expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
+    });
+
+    it('omitRosterManagerFields removes only email and its delivery state (#642)', () => {
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      expect(
+        omitRosterManagerFields({
+          id: 'u1',
+          name: 'Deleted user',
+          email: null,
+          isManaged: true,
+          deletedAt,
+          emailSuppressedAt: null,
+          emailSuppressedReason: null,
+        })
+      ).toEqual({ id: 'u1', name: 'Deleted user', isManaged: true, deletedAt });
     });
 
     it('joins invite statuses without the token and only PENDING/ACCEPTED rows (unification spec)', async () => {

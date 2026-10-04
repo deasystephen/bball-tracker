@@ -1299,7 +1299,7 @@ describe('InvitationService', () => {
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
         ...invitation,
         team: { name: team.name },
-        invitedBy: { name: coach.name },
+        invitedBy: { name: coach.name, deletedAt: null },
       });
 
       const result = await InvitationService.getInvitationByToken(invitation.token);
@@ -1307,8 +1307,25 @@ describe('InvitationService', () => {
       expect(result).toHaveProperty('id', invitation.id);
       expect(result).toHaveProperty('teamName', team.name);
       expect(result).toHaveProperty('inviterName', coach.name);
+      expect(result).toHaveProperty('inviterDeletedAt', null);
       expect(result).toHaveProperty('status', 'PENDING');
       expect(result).not.toHaveProperty('player');
+    });
+
+    it('selects only name and deletedAt for the sender and returns inviterDeletedAt for a tombstone (#642)', async () => {
+      const { invitation, team } = createFullInvitation();
+      const deletedAt = new Date('2026-09-01T00:00:00Z');
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
+        ...invitation,
+        team: { name: team.name },
+        invitedBy: { name: 'Deleted user', deletedAt },
+      });
+
+      const result = await InvitationService.getInvitationByToken(invitation.token);
+
+      const args = (mockPrisma.teamInvitation.findUnique as jest.Mock).mock.calls[0][0];
+      expect(args.select.invitedBy).toEqual({ select: { name: true, deletedAt: true } });
+      expect(result.inviterDeletedAt).toBe(deletedAt.toISOString());
     });
 
     it('should throw NotFoundError if token does not match any invitation', async () => {

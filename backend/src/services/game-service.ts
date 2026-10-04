@@ -8,11 +8,11 @@ import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin, teamAccessWhere } from '../utils/permissions';
 import { GuardianService } from './guardian-service';
-import { ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
+import { omitRosterManagerFields, ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
-import { computeHomeScore } from './game-event-service';
+import { computeHomeScore, EVENT_PLAYER_SELECT } from './game-event-service';
 
 const GAME_INCLUDE = {
   team: {
@@ -49,14 +49,7 @@ const GAME_DETAIL_INCLUDE = {
   },
   events: {
     include: {
-      player: {
-        select: {
-          id: true,
-          name: true,
-          // Tombstone signal for the timeline label (#642); never email here.
-          deletedAt: true,
-        },
-      },
+      player: { select: EVENT_PLAYER_SELECT },
     },
     orderBy: {
       timestamp: 'asc',
@@ -191,7 +184,7 @@ export class GameService {
         ...game.team,
         members: game.team.members.map(({ player, ...member }) => ({
           ...member,
-          player: { id: player.id, name: player.name, isManaged: player.isManaged, deletedAt: player.deletedAt },
+          player: omitRosterManagerFields(player),
         })),
       },
     };
