@@ -101,8 +101,9 @@ The Hooplings application is a single containerized API backed by PostgreSQL, wi
 - **Authorization**: per-team staff flags (`TeamRole` on `TeamStaff` rows), league admin rows, team
   membership and guardian links, evaluated in `backend/src/utils/permissions.ts` (`canAccessTeam`,
   `teamAccessWhere`, `getTeamPermissions`). The global `User.role` only short-circuits `ADMIN` and
-  gates team creation; it is never an access check. League and season lists are caller-scoped and an
-  unaffiliated caller gets 404. Detail: [Authorization](authorization.md).
+  gates team creation; it is never an access check. League and season lists are caller-scoped (an
+  unaffiliated caller gets an empty page) and `GET /leagues/:id` / `GET /seasons/:id` answer 404, not 403,
+  outside the caller's scope. Detail: [Authorization](authorization.md).
 - **API Security**: Rate limiting, input validation
 - **AWS Security**: IAM roles, VPC isolation, security groups
 - **Secrets Management**: AWS Secrets Manager

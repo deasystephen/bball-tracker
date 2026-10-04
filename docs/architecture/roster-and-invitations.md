@@ -126,8 +126,7 @@ eng-review amendments recorded there).
   accept gets **400** "no longer pending" instead of a P2002 500 from the `TeamMember` insert.
   `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
   other callers with team access (rostered players) remain scoped to `playerId IN (caller, caller's
-  children)` via `GuardianService.getChildIds` (see `guardians.md`); with `teamId` set and no `playerId`,
-  a non-manager caller gets the same caller-plus-children scope.
+  children)` via `GuardianService.getChildIds` (see `guardians.md`).
 - **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
   and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is
   gone: `createInvitationSchema` requires `playerId` and strips unknown keys, so a body without

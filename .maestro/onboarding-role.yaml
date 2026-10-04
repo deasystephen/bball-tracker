@@ -11,7 +11,8 @@ appId: com.bballtracker.mobile
 - assertVisible: "Select Test User"
 # The dev-user list has outgrown one screen (guardian/parent fixtures, #442's
 # Dana) and Steph sits below the fold — scroll like coach-onboarding does for
-# Dana (60% visibility per the CLAUDE.md edge-resting rule).
+# Dana (60% visibility per docs/testing/maestro.md, "Don't use `centerElement: true`
+# for elements near the END of a list").
 # No centerElement: Steph sits near the END of the list, where centering can
 # never be satisfied and the scroll spins until timeout with him plainly
 # visible (observed). 60% visibility alone is the stop condition.

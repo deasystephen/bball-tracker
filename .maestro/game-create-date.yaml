@@ -22,8 +22,9 @@ appId: com.bballtracker.mobile
 # visible (with or without centerElement), so a tap on it lands on the keyboard
 # and types into the opponent field: seen on iOS 26.5, not on iOS 27. Put the
 # keyboard away first. Enter blurs a single-line field; hideKeyboard is not
-# reliable on the simulator (CLAUDE.md). That the APP puts the keyboard away
-# before it opens the sheet is pinned by __tests__/app/game-create-date.test.tsx.
+# reliable on the simulator (docs/testing/maestro.md, "Never use `hideKeyboard`").
+# That the APP puts the keyboard away before it opens the sheet is pinned by
+# __tests__/app/game-create-date.test.tsx.
 - pressKey: Enter
 - scrollUntilVisible:
     element:

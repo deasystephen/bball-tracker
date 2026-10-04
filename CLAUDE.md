@@ -139,7 +139,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Code Style
 
-- Files kebab-case, except in `mobile/` where React components are `PascalCase.tsx` and hooks are `useX.ts` (named after their default export); classes/types PascalCase; functions/variables camelCase; constants UPPER_SNAKE_CASE. Explicit types over `any`; async/await over raw promises; Zod for inputs.
+- Files kebab-case, except in `mobile/` where React components are `PascalCase.tsx` and hooks are `useX.ts` (named after the primary hook they export; `hooks/query-keys.ts` stays kebab-case); classes/types PascalCase; functions/variables camelCase; constants UPPER_SNAKE_CASE. Explicit types over `any`; async/await over raw promises; Zod for inputs.
 - **Never suppress lint errors** with `eslint-disable` and never downgrade a rule or raise `--max-warnings`: fix the code. The only exception is the `@typescript-eslint/no-namespace` disable on a `declare global { namespace Express }` augmentation of `Request` (today: `src/api/auth/middleware.ts` for `user`, `src/api/middleware/request-context.ts` for `requestId`). Warnings fail CI in every package.
 
 ## Testing Requirements

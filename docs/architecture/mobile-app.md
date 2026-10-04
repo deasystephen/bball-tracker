@@ -253,16 +253,16 @@ never inline a role check in a screen:
   `const goBack = useGoBack(<parent route>)` (`hooks/useGoBack.ts`): it pops the stack, or
   replaces with the parent when there is nothing to pop (a screen opened by a link), the same
   rule as `useAccessGuard`. Never `router.back()` alone, which does nothing without history. Every
-  pushed screen that replaces itself with `ErrorState` does this;
-  `__tests__/a11y/error-state-way-back.test.ts` is the enforced rule and
-  `__tests__/app/error-state-way-back.test.tsx` (`SCREENS`) is the enumerated set. When there is nothing to
+  pushed screen that replaces itself with `ErrorState` does this (the guard below is the
+  authority, not a count here). When there is nothing to
   retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
   Try Again button that left the screen). Tab screens have the tab bar and need nothing.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that
   stays); an entry there must have its own control labelled "Go back". Screen tests:
-  `__tests__/app/error-state-way-back.test.tsx` (every screen, real hooks, the API failing);
+  `__tests__/app/error-state-way-back.test.tsx` (`SCREENS` enumerates every such screen; real
+  hooks, the API failing);
   Maestro `.maestro/error-way-back.yaml` (read-only, opens a team and a game that do not exist).
 - **Never put a pressable inside a pressable (#583).** On iOS an accessible element hides
   everything inside it from the accessibility tree, so a button nested in a pressable row can be

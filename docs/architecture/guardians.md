@@ -47,8 +47,7 @@ Removing the last guardian never deletes the child.
   `isManaged` is true only for a managed child with no login (`isManaged && workosUserId === null`), the
   only record a guardian may delete (`DELETE /players/:id/account`, see `account-deletion.md`); `teams`
   lists the child's current team memberships and drives the Profile "Manage guardians" deep link
-  (`/teams/:teamId/players/:playerId/guardians`). The backend `GuardianOfEntry` interface still declares
-  only the first four fields; `shared/types/index.ts#GuardianOfEntry` types the full shape.
+  (`/teams/:teamId/players/:playerId/guardians`).
 - **List scoping (mobile PR).** `TeamService.listTeams` and `GameService.listGames` add
   `{ members: { some: { playerId: { in: childIds } } } }` (via `GuardianService.getChildIds`) to the caller-access
   `OR`, so a guardian's Teams / Games / Home tabs show the children's teams. `GET /invitations` (no `teamId` /
