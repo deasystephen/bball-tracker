@@ -7,6 +7,7 @@ import {
   apiRateLimit,
   writeRateLimit,
   exportRateLimit,
+  inviteRateLimit,
 } from '../../src/api/middleware/rate-limit';
 
 describe('Rate Limiting Configuration', () => {
@@ -28,5 +29,10 @@ describe('Rate Limiting Configuration', () => {
   it('should export the per-user stats export rate limit middleware', () => {
     expect(exportRateLimit).toBeDefined();
     expect(typeof exportRateLimit).toBe('function');
+  });
+
+  it('should export the per-user invitation email rate limit middleware (#715)', () => {
+    expect(inviteRateLimit).toBeDefined();
+    expect(typeof inviteRateLimit).toBe('function');
   });
 });

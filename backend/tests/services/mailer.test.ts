@@ -228,8 +228,9 @@ describe('SesMailer', () => {
     expect(without).not.toHaveProperty('ReplyToAddresses');
   });
 
-  // Audit #48: recipient addresses must not reach info-level logs.
-  it('logs a hashed recipient at info, never the address', async () => {
+  // Audit #48 / #640: recipient addresses must not reach the logs at any
+  // level (debug is reachable in production through LOG_LEVEL since #617).
+  it('logs a hashed recipient, never the address at any level', async () => {
     const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
     const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
     try {
@@ -244,13 +245,71 @@ describe('SesMailer', () => {
       expect(ctx.toHash).toMatch(/^[0-9a-f]{12}$/);
       expect(ctx.messageId).toBe('ses-msg-123');
       expect(ctx.event_type).toBe('test');
-      expect(JSON.stringify(infoSpy.mock.calls)).not.toMatch(/example\.com/i);
-
-      // Full address only at debug (emitted solely under NODE_ENV=development).
-      expect(debugSpy).toHaveBeenCalledWith('Email recipient', { to: 'Player@Example.com', messageId: 'ses-msg-123' });
+      expect(debugSpy).not.toHaveBeenCalled();
+      expect(JSON.stringify([...infoSpy.mock.calls, ...debugSpy.mock.calls])).not.toMatch(/example\.com/i);
     } finally {
       infoSpy.mockRestore();
       debugSpy.mockRestore();
+    }
+  });
+
+  // #640: SES error messages quote the destination; the boundary logs by
+  // hash and rethrows an error whose message carries no address.
+  it('logs a failed send by hash and rethrows without the address', async () => {
+    const sesError = Object.assign(
+      new Error(
+        'Email address is not verified. The following identities failed the check in region US-EAST-1: player@example.com'
+      ),
+      { name: 'MessageRejected', $metadata: { httpStatusCode: 400 } }
+    );
+    sesModule.__mockSend.mockRejectedValueOnce(sesError);
+    const spies = (['debug', 'info', 'warn', 'error'] as const).map((level) =>
+      jest.spyOn(logger, level).mockImplementation(() => undefined)
+    );
+    try {
+      const mailerInstance = new SesMailer({ region: 'us-east-1', fromAddress: 'x@y.com' });
+      const thrown = await mailerInstance.send(makeParams()).then(
+        () => {
+          throw new Error('expected send to reject');
+        },
+        (err: unknown) => err as Error
+      );
+
+      expect(thrown.message).toBe('SES send failed: MessageRejected');
+      expect(thrown.message).not.toContain('player@example.com');
+      expect(thrown.cause).toBe(sesError);
+
+      const errorSpy = spies[3];
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [msg, ctx] = errorSpy.mock.calls[0] as [string, Record<string, unknown>];
+      expect(msg).toBe('SES send failed');
+      expect(ctx).toEqual(
+        expect.objectContaining({
+          template: invitationTemplate.name,
+          toHash: hashRecipient('player@example.com'),
+          errorName: 'MessageRejected',
+          httpStatusCode: 400,
+        })
+      );
+      const everyLogCall = spies.flatMap((spy) => spy.mock.calls);
+      expect(JSON.stringify(everyLogCall)).not.toContain('player@example.com');
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
+  it('names a non-Error SES rejection UnknownError', async () => {
+    sesModule.__mockSend.mockRejectedValueOnce('boom');
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    try {
+      await expect(
+        new SesMailer({ region: 'us-east-1', fromAddress: 'x@y.com' }).send(makeParams())
+      ).rejects.toThrow('SES send failed: UnknownError');
+      expect(errorSpy.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ errorName: 'UnknownError', httpStatusCode: undefined })
+      );
+    } finally {
+      errorSpy.mockRestore();
     }
   });
 

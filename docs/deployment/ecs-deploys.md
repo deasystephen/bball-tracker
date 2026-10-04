@@ -49,6 +49,18 @@ backend pull requests deploy on their own and Dependabot's do not (next section)
 trip on the overlap. The window only closes with the Redis adapter (#452). Operator-facing copy:
 `docs/deployment/aws-setup.md` ("Deploy window").
 
+## Keep-alive vs the ALB idle timeout (#749)
+
+The ALB keeps HTTP keep-alive connections to the task open and reuses them for up to its idle
+timeout: **60 s**, the AWS default (`aws_lb.main` in `infra/ecs.tf` sets no `idle_timeout`). The
+target must keep idle connections open **longer**, or the ALB occasionally sends a request down
+a connection Node is closing at that instant and answers the client with a 502 the application
+never saw (no request log, no Sentry event, only `HTTPCode_ELB_5XX_Count`). Node 22's default
+`keepAliveTimeout` is 5 s, so `backend/src/index.ts` sets `httpServer.keepAliveTimeout = 65_000`
+and `headersTimeout = 66_000` (headers above keep-alive, as Node requires). `tests/health.test.ts`
+pins both above a named 60 s ALB constant. If the ALB's `idle_timeout` is ever raised, raise the
+Node values above it in the same change.
+
 ## What a deploy carries (#570)
 
 **A deploy ships everything on `main` since the commit production runs, not only the change whose

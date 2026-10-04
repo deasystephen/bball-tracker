@@ -46,15 +46,33 @@ export const refreshRateLimit = rateLimit({
   message: { error: 'Too many refresh attempts, please try again later' },
 });
 
+/** `GET /invitations/by-token/:token`, relative to the `/api/v1` mount. */
+const INVITATION_LOOKUP_RE = /^\/invitations\/by-token\/[^/]+\/?$/;
+
+/**
+ * Requests the global IP-keyed limiter does not count (#718): only the public
+ * invitation lookup. `hooplings.com/invite/<token>` renders server-side, so
+ * every lookup arrives from the web server's egress IP; it has its own
+ * token-keyed limiter (`invitationTokenRateLimit`), and an IP budget here
+ * would turn a busy minute into "Invitation Not Found" for every visitor.
+ * The accept POST stays under the IP limit: the browser calls it directly.
+ * `req.path` is relative to the `/api/v1` mount point.
+ */
+export function skipGlobalApiLimit(req: Request): boolean {
+  return req.method === 'GET' && INVITATION_LOOKUP_RE.test(req.path);
+}
+
 /**
  * General API rate limit
- * 100 requests per minute per IP
+ * 100 requests per minute per IP (the public invitation lookup is exempt,
+ * see `skipGlobalApiLimit`)
  */
 export const apiRateLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipGlobalApiLimit,
   message: { error: 'Too many requests, please try again later' },
 });
 
@@ -145,4 +163,36 @@ export const exportRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: exportUserKey,
   message: { error: 'Too many export requests, please try again later' },
+});
+
+/**
+ * Key for the authenticated email-sending roster routes: the caller, not the
+ * IP. Same shape as `exportUserKey` with its own prefix, so the two budgets
+ * never share a counter.
+ */
+export function inviteUserKey(req: Request): string {
+  const userId = req.user?.id;
+  if (typeof userId === 'string' && userId.length > 0) {
+    return `invite-user:${userId}`;
+  }
+  return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+}
+
+/**
+ * Rate limit for the routes that can end in an invitation email (#715):
+ * `POST /teams/:teamId/invitations` (create and Resend) and
+ * `POST /teams/:teamId/players` (unified Add Player, which may also invite a
+ * guardian). 60 per hour per user: a coach entering a full roster with
+ * guardians in one sitting uses well under half, while a looped Resend from
+ * one account is capped at 60 branded emails an hour. The per-recipient
+ * resend cooldown in `invitation-service.ts` bounds each address on top.
+ * Mounted after `authenticate`, so `req.user` is set.
+ */
+export const inviteRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: inviteUserKey,
+  message: { error: 'Too many invitations sent, please try again later' },
 });

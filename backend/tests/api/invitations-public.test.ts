@@ -144,10 +144,20 @@ describe('Public Invitation Token API', () => {
     it('lets many distinct tokens be looked up from one IP (server-side rendering)', async () => {
       mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
 
-      // More than the per-token cap (30) from a single IP. Kept under the
-      // global apiRateLimit (100/min/IP) so the rest of this file still runs.
+      // More than the per-token cap (30) from a single IP.
       for (let i = 0; i < 35; i += 1) {
         const res = await request(app).get(`/api/v1/invitations/by-token/many-tokens-${i}-abcdefgh`);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    // #718: the SSR invite page reaches the API from one egress IP, so the
+    // global IP-keyed apiRateLimit (100/min) must not gate the lookup.
+    it('exempts the lookup from the global 100/min IP limit', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+
+      for (let i = 0; i < 120; i += 1) {
+        const res = await request(app).get(`/api/v1/invitations/by-token/ssr-egress-${i}-abcdefgh`);
         expect(res.status).toBe(200);
       }
     });

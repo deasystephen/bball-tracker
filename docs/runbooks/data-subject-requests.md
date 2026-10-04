@@ -102,11 +102,10 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   `Account deleted` event logs the deleted user's id, the actor's id and the mode. At the
   production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name
   and no secret URL (paths and query strings go through `utils/redact.ts`), and email addresses
-  are hashed with `hashRecipient()`; however, until #640 lands, a failed send logs the raw SES
-  error message (`Failed to send … email` in the invitation, guardian, announcement, reply and
-  RSVP services), which names the recipient while SES is sandboxed, and the `debug` level, which
-  an operator may switch on briefly for a diagnosis, writes the plain recipient address of each
-  outbound email (`services/mailer/ses-mailer.ts`). They are kept **30 days** in CloudWatch Logs
+  are hashed with `hashRecipient()` at every level, `debug` included. A failed send is logged by
+  error name, never the SES message that quotes the recipient (`services/mailer/ses-mailer.ts`,
+  #640). Lines written before #640 was deployed may still carry a recipient address (a raw SES
+  error, or a `debug` line if that level was on) until they age out. Log lines are kept **30 days** in CloudWatch Logs
   (`retention_in_days` on `/ecs/bball-tracker-production` in `infra/ecs.tf`), and every line is
   also forwarded to **Datadog** (`infra/datadog.tf`, an unfiltered subscription on that log group
   that exists only while `datadog_api_key` is set in the Terraform variables; it is set in

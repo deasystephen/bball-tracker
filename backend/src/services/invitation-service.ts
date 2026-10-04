@@ -14,6 +14,7 @@ import {
   BadRequestError,
   ForbiddenError,
   AppError,
+  ResendCooldownError,
 } from '../utils/errors';
 import { randomBytes } from 'crypto';
 import {
@@ -47,6 +48,15 @@ const EMAIL_SEND_TIMEOUT_MS = 5_000;
 /** Default invitation lifetime — single source for every creation path (the
  * Zod schema's expiresInDays default mirrors it). */
 const DEFAULT_INVITATION_EXPIRES_DAYS = 7;
+
+/**
+ * Per-recipient resend cooldown (#715): a supersede for a player whose latest
+ * invitation row (any status) on this team is younger than this is refused
+ * with 429, before anything is expired or mailed. Every invitation row is one
+ * email, so this caps Resend at one message per player per window, while a
+ * coach's legitimate second tap a few minutes later still goes through.
+ */
+export const INVITATION_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** One shape for invitation birth — every creation path builds its row here so
  * a future field cannot be added to only some paths (maintainability). */
@@ -446,11 +456,12 @@ export class InvitationService {
   }
 
   /**
-   * Atomic supersede (spec D4): expire the live PENDING row and create its
-   * replacement in ONE transaction, so a failed create can never leave the
-   * player with a dead link and no invitation (red-team RT2). An ACCEPTED row
-   * appearing in the window means the player just accepted — refuse rather
-   * than regress their chip to Invited.
+   * Atomic supersede (spec D4): expire the PENDING row (live or lapsed) and
+   * create its replacement in ONE transaction, so a failed create can never
+   * leave the player with a dead link and no invitation (red-team RT2). An
+   * ACCEPTED row appearing in the window means the player just accepted —
+   * refuse rather than regress their chip to Invited. A row created within
+   * INVITATION_RESEND_COOLDOWN_MS refuses the resend with 429 (#715).
    */
   private static async createInvitationRowSuperseding(
     data: Prisma.TeamInvitationUncheckedCreateInput
@@ -465,15 +476,43 @@ export class InvitationService {
           throw new BadRequestError('Player already has access to this team');
         }
 
+        // Per-recipient cooldown (#715): the newest row of ANY status, so
+        // cancelling between resends does not reset the clock. Checked
+        // before the updateMany, so a refusal expires nothing and mails no one.
+        const latest = await tx.teamInvitation.findFirst({
+          where: { teamId: data.teamId, playerId: data.playerId },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        const sinceLatestMs = latest ? Date.now() - latest.createdAt.getTime() : Infinity;
+        if (sinceLatestMs < INVITATION_RESEND_COOLDOWN_MS) {
+          const retryAfterSeconds = Math.ceil((INVITATION_RESEND_COOLDOWN_MS - sinceLatestMs) / 1000);
+          logger.info('Invitation resend refused (cooldown)', {
+            teamId: data.teamId,
+            playerId: data.playerId,
+            invitedById: data.invitedById,
+            retryAfterSeconds,
+          });
+          throw new ResendCooldownError(retryAfterSeconds);
+        }
+
         // A bare resend ({ playerId, supersede: true }) must not wipe the
         // jersey/position/message the coach set at add time: for invite-only
         // players (case 3) the roster row is born from the live invitation at
         // accept, so a superseding row created without them would roster the
         // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
         // caller omits inherit from the row being superseded; explicitly
-        // provided values still win.
+        // provided values still win. The source is the most recent PENDING
+        // *or* EXPIRED row: a lapsed invitation may already have been flipped
+        // to EXPIRED (the player opened the dead link), and it still holds
+        // the coach's values (#678). Never ACCEPTED/REJECTED/CANCELLED.
         const superseded = await tx.teamInvitation.findFirst({
-          where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
+          where: {
+            teamId: data.teamId,
+            playerId: data.playerId,
+            status: { in: ['PENDING', 'EXPIRED'] },
+          },
+          orderBy: { createdAt: 'desc' },
           select: { jerseyNumber: true, position: true, message: true },
         });
 
@@ -572,7 +611,8 @@ export class InvitationService {
    * Reject when the player is already rostered or already has a live PENDING
    * invitation. A PENDING row whose expiresAt has passed is not a blocker:
    * mark it EXPIRED and carry on (audit #23 — nothing else ever flips expired
-   * rows, so dedupe must).
+   * rows, so dedupe must). Under `supersede` the stale row is left for the
+   * supersede transaction to expire (#678).
    *
    * Options:
    * - `supersede`: a live PENDING invitation is expired instead of throwing —
@@ -614,13 +654,15 @@ export class InvitationService {
       if (live && !options.supersede) {
         throw new BadRequestError('A pending invitation already exists for this player');
       }
-      if (!live) {
-        // Stale row: lazy-expire (the old link is already dead, so this being
-        // a separate statement loses nothing).
+      if (!live && !options.supersede) {
+        // Stale row on a plain create: lazy-expire it here (the old link is
+        // already dead and a plain create inherits nothing from it).
         await this.markExpired(existingInvitation.id);
       }
-      // live + supersede: left PENDING — createInvitationRowSuperseding
-      // expires it in the same transaction as the replacement (red-team RT2).
+      // supersede (live or stale): left PENDING — createInvitationRowSuperseding
+      // expires it in the same transaction as the replacement (red-team RT2),
+      // after reading the jersey/position/message it inherits (#678), and logs
+      // "Invitation superseded".
     }
   }
 

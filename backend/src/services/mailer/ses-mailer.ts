@@ -1,4 +1,4 @@
-import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, SendEmailCommand, type SendEmailCommandOutput } from '@aws-sdk/client-sesv2';
 import { Mailer, MailSendParams, MailSendResult } from './index';
 import { createHash } from 'crypto';
 import { logger } from '../../utils/logger';
@@ -65,19 +65,40 @@ export class SesMailer implements Mailer {
       },
     });
 
-    const result = await this.client.send(command);
+    let result: SendEmailCommandOutput;
+    try {
+      result = await this.client.send(command);
+    } catch (err: unknown) {
+      throw sanitizeSendError(err, { template: template.name, toHash: hashRecipient(to), ...metadata });
+    }
     const messageId = result.MessageId ?? '';
 
+    // The address is never logged, at any level: `debug` is reachable in
+    // production through LOG_LEVEL (#617), so it obeys the same rule (#640).
     logger.info('Email sent via SES', {
       template: template.name,
       toHash: hashRecipient(to),
       messageId,
       ...metadata,
     });
-    // Full address only at debug, which `logger` emits solely under
-    // NODE_ENV=development — never in production logs.
-    logger.debug('Email recipient', { to, messageId });
 
     return { messageId };
   }
+}
+
+/**
+ * Log an SES failure by hash and return an error safe to log anywhere (#640).
+ *
+ * SES error messages routinely quote the destination (the sandbox rejection
+ * ends with "...failed the check in region US-EAST-1: <address>"), and every
+ * caller logs the error message. So the boundary logs the error's name and HTTP
+ * status (never its message) and hands callers a replacement whose message
+ * carries only the error name. The original stays reachable as `cause`.
+ */
+function sanitizeSendError(err: unknown, context: Record<string, unknown>): Error {
+  const errorName = err instanceof Error && err.name ? err.name : 'UnknownError';
+  const httpStatusCode = (err as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata
+    ?.httpStatusCode;
+  logger.error('SES send failed', { ...context, errorName, httpStatusCode });
+  return new Error(`SES send failed: ${errorName}`, { cause: err });
 }

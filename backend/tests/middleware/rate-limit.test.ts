@@ -7,7 +7,14 @@
 
 import express from 'express';
 import request from 'supertest';
-import { exportRateLimit, refreshRateLimit } from '../../src/api/middleware/rate-limit';
+import type { Request } from 'express';
+import {
+  exportRateLimit,
+  inviteRateLimit,
+  inviteUserKey,
+  refreshRateLimit,
+  skipGlobalApiLimit,
+} from '../../src/api/middleware/rate-limit';
 
 function buildApp(): express.Express {
   const app = express();
@@ -54,18 +61,17 @@ describe('refreshRateLimit', () => {
 });
 
 /**
- * Bare app for the export limiter: a header stands in for the authenticated
- * user that `router.use(authenticate)` attaches in production.
+ * Bare apps for the per-user limiters: a header stands in for the
+ * authenticated user that `router.use(authenticate)` attaches in production.
  */
-function buildExportApp(): express.Express {
-  const app = express();
+function attachTestUser(app: express.Express): void {
   app.use((req, _res, next) => {
     const userId = req.header('x-test-user');
     if (userId) {
       req.user = {
         id: userId,
         email: null,
-        name: 'Export Tester',
+        name: 'Rate Limit Tester',
         role: 'COACH',
         subscriptionTier: 'FREE',
         subscriptionExpiresAt: null,
@@ -73,6 +79,11 @@ function buildExportApp(): express.Express {
     }
     next();
   });
+}
+
+function buildExportApp(): express.Express {
+  const app = express();
+  attachTestUser(app);
   app.get('/games/:id/export.csv', exportRateLimit, (_req, res) => res.json({ ok: true }));
   app.get('/games/:id/boxscore.pdf', exportRateLimit, (_req, res) => res.json({ ok: true }));
   app.get('/teams/:id/season-stats.csv', exportRateLimit, (_req, res) => res.json({ ok: true }));
@@ -114,5 +125,54 @@ describe('exportRateLimit (issue #50)', () => {
     }
     const blocked = await request(app).get('/games/g1/export.csv');
     expect(blocked.status).toBe(429);
+  });
+});
+
+describe('inviteRateLimit (#715)', () => {
+  function buildInviteApp(): express.Express {
+    const app = express();
+    attachTestUser(app);
+    app.post('/teams/:teamId/invitations', inviteRateLimit, (_req, res) => res.status(201).json({ ok: true }));
+    app.post('/teams/:teamId/players', inviteRateLimit, (_req, res) => res.status(201).json({ ok: true }));
+    return app;
+  }
+
+  it('keys on the user id, with the IP as fallback', () => {
+    expect(inviteUserKey({ user: { id: 'u-1' }, ip: '203.0.113.7' } as unknown as Request)).toBe('invite-user:u-1');
+    expect(inviteUserKey({ ip: '203.0.113.7' } as unknown as Request)).toBe('ip:203.0.113.7');
+  });
+
+  it('shares one 60/hour budget across both routes and answers 429 on the 61st', async () => {
+    const app = buildInviteApp();
+    for (let i = 0; i < 60; i++) {
+      const path = i % 2 === 0 ? '/teams/t1/invitations' : '/teams/t1/players';
+      const res = await request(app).post(path).set('x-test-user', 'invite-looper');
+      expect(res.status).toBe(201);
+    }
+    const blocked = await request(app).post('/teams/t1/invitations').set('x-test-user', 'invite-looper');
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({ error: 'Too many invitations sent, please try again later' });
+    expect(blocked.headers['ratelimit-remaining']).toBe('0');
+
+    // Another coach on the same IP keeps their own budget.
+    const other = await request(app).post('/teams/t1/invitations').set('x-test-user', 'another-coach');
+    expect(other.status).toBe(201);
+  });
+});
+
+describe('skipGlobalApiLimit (#718)', () => {
+  const req = (method: string, path: string): Request => ({ method, path }) as unknown as Request;
+
+  it('skips the public invitation lookup', () => {
+    expect(skipGlobalApiLimit(req('GET', '/invitations/by-token/abcDEF_123-xyz'))).toBe(true);
+  });
+
+  it('does not skip the accept POST, other methods on the lookup, or any other route', () => {
+    expect(skipGlobalApiLimit(req('POST', '/invitations/by-token/abc/accept'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/invitations/by-token/abc/accept'))).toBe(false);
+    expect(skipGlobalApiLimit(req('POST', '/invitations/by-token/abc'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/teams'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/invitations'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/teams/invitations/by-token/abc'))).toBe(false);
   });
 });

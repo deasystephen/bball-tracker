@@ -52,11 +52,26 @@ eng-review amendments recorded there).
   (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
   `members[]` by `playerId`.
 - **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the
-  live PENDING row and creates a fresh one (new token — the old link dies) in the same code path
-  as create. The superseding row **inherits `jerseyNumber`/`position`/`message` from the row it
-  expires** when the request omits them (mobile Resend sends only `{ playerId, supersede }`) —
-  a case-3 accept creates the member row from the live invitation, so a bare resend must not wipe
-  the coach-set jersey (jersey-loss fix 2026-08-29); explicit values still win. With `supersede` an existing **member** is allowed (a rostered case-2 player);
+  PENDING row (live or lapsed) and creates a fresh one (new token — the old link dies) in one
+  transaction, in the same code path as create. The superseding row **inherits
+  `jerseyNumber`/`position`/`message` from the most recent PENDING-or-EXPIRED row** for the pair
+  (never an ACCEPTED, REJECTED or CANCELLED one) when the request omits them (mobile Resend sends
+  only `{ playerId, supersede }`) — a case-3 accept creates the member row from the live
+  invitation, so a bare resend must not wipe the coach-set jersey (jersey-loss fix 2026-08-29);
+  explicit values still win. EXPIRED counts because an "Invite expired" row may already have been
+  flipped, by the player opening the dead link; and under `supersede` `assertInvitable` no longer
+  lazy-expires a lapsed row before the transaction, so the transaction expires it and logs
+  `Invitation superseded` (#678).
+- **Resend cooldown (#715):** a supersede for a player whose newest invitation row on the team (any
+  status, so a Cancel between resends does not reset it) is younger than
+  `INVITATION_RESEND_COOLDOWN_MS` (2 minutes) answers **429** `resend_cooldown` (`ResendCooldownError`,
+  body `{ error, code, retryAfterSeconds }`) before anything is expired or mailed, and logs
+  `Invitation resend refused (cooldown)` with ids only. Every invitation row is one email, so this
+  caps Resend at one message per player per window. It also applies to "Fix email address → Save &
+  send invitation" within 2 minutes of the previous send: the address is saved and the coach taps
+  Resend once the window has passed (mobile shows the server's message). On top of it the
+  email-sending roster routes share the per-user `inviteRateLimit` (60 / hour; see
+  `docs/architecture/backend-services.md`, Rate limits). With `supersede` an existing **member** is allowed (a rostered case-2 player);
   a claimed account that is already a member answers 400 `Player already has access to this team`.
   Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
   not one transaction, so a lost create race on the partial unique index (double-tap resend) maps
@@ -143,8 +158,11 @@ eng-review amendments recorded there).
   one-transaction rule (no orphan player when the invite fails).
 - **Public route rate limit (audit #36).** `GET /invitations/by-token/:token` uses `invitationTokenRateLimit`
   (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `hooplings.com/invite/<token>` is
-  rendered server-side and every lookup arrives from the web server's single egress IP. The accept `POST`
-  stays on the IP-keyed `writeRateLimit` (the browser calls it directly).
+  rendered server-side and every lookup arrives from the web server's single egress IP. For the same
+  reason the lookup is **exempt from the global IP-keyed `apiRateLimit`** (`skipGlobalApiLimit`, #718):
+  otherwise the web server's 101st `/api/v1` call in a minute would turn every invite page into
+  "Invitation Not Found". The accept `POST` stays on the IP-keyed `writeRateLimit` and `apiRateLimit`
+  (the browser calls it directly).
 - Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
   `isInvitationExpired`, timestamp compare — no `Math.ceil` → `-0` "Expires today" on a dead invite, #59).
 
