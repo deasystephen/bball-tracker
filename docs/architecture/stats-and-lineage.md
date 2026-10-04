@@ -28,7 +28,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   (`gamesPlayed = wins + losses + ties`) and `recentGames[].result` is `'W' | 'L' | 'T'` (`gameResult()` in
   `stats-service.ts`). Mobile derives outcomes only through `mobile/utils/game-result.ts`
   (`getGameResult`, `getResultColor` — T is neutral `textSecondary`, `formatRecord`); never compare
-  `homeScore > awayScore` inline in a screen. Screens show the tie count only when it is non-zero.
+  `homeScore > awayScore` inline in a screen. `mobile/__tests__/utils/game-result-guard.test.ts` reads
+  `app/`, `components/`, `hooks/`, `store/` and `utils/` and fails on any score-vs-score comparison (ordering or
+  equality) or score difference outside the helper (#673). Screens show the tie count only when it is non-zero.
 
 ## Team lineage (#462, `docs/plans/team-lineage-and-competition.md`)
 

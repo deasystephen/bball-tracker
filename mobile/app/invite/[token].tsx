@@ -12,6 +12,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
 import { relationshipLabel } from '../../utils/guardian';
+import { displayName } from '../../utils/display-name';
 import { apiClient } from '../../services/api-client';
 import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
@@ -53,6 +54,10 @@ export default function InviteDeepLinkScreen() {
   const subject = guardian
     ? `${guardian.childName}${guardian.teamName ? ` (${guardian.teamName})` : ''}`
     : invitation?.teamName ?? '';
+  // Only the team payload carries the inviter's tombstone state today.
+  const inviter = invitation
+    ? displayName({ name: invitation.inviterName, deletedAt: teamInvite?.inviterDeletedAt })
+    : '';
 
   function formatExpiry(expiresAt: string) {
     return new Date(expiresAt).toLocaleDateString(undefined, {
@@ -220,7 +225,7 @@ export default function InviteDeepLinkScreen() {
           ) : (
             <DetailRow label="Team" value={teamInvite?.teamName ?? ''} />
           )}
-          <DetailRow label="From" value={invitation.inviterName} />
+          <DetailRow label="From" value={inviter} />
           {teamInvite?.position != null && (
             <DetailRow label="Position" value={teamInvite.position} />
           )}

@@ -31,6 +31,13 @@ A bug where the API rejected valid league IDs (`downtown-youth-league`) wasn't c
 
 The fix: Add API integration tests AND schema validation tests for every endpoint.
 
+## Mobile source-scanning guards
+- Guard tests that read mobile source walk it through `mobile/__tests__/helpers/source-files.ts`
+  (`MOBILE_ROOT`, `sourceFiles(dir, extensions)`, `scanLines(fileName, text, pattern)`); a new guard uses
+  it rather than copying a walker. Users today: `__tests__/a11y/{nested-pressables,error-state-way-back}`
+  and `__tests__/utils/{game-result-guard,display-name-guard}`. Each guard asserts it scanned a
+  plausible number of files and carries a self-test table of lines it must report and accept.
+
 ## Mobile copy & i18n
 - **Screen tests render the real i18n instance.** Never stub `useTranslation` to return the key
   (`t: (k) => k`): that is how the #431 rebrand missed `roleOnboarding.title` for a week (#474) —

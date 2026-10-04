@@ -12,6 +12,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 import ManagePlayersScreen from '../../app/teams/[id]/players';
 import { useAuthStore } from '../../store/auth-store';
+import { i18n } from '../../i18n';
 import type { Team, TeamMember, TeamStaff } from '../../hooks/useTeams';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -329,6 +330,22 @@ describe('ManagePlayersScreen — email delivery issues (#449)', () => {
       expect(screen.queryByTestId('edit-player-email-save')).toBeNull();
       expect(mockUpdatePlayer.mutateAsync).not.toHaveBeenCalled();
     });
+  });
+
+  it('titles a deleted account\'s options sheet with the localized label, never the stored literal (#674)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const screen = render(<ManagePlayersScreen />);
+      const before = screen.getAllByText('Usuario eliminado').length;
+
+      fireEvent.press(screen.getByLabelText('Player options: Usuario eliminado'));
+
+      // The sheet title is one more "Usuario eliminado"; the English literal never shows.
+      expect(screen.getAllByText('Usuario eliminado')).toHaveLength(before + 1);
+      expect(screen.queryByText('Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('renders no email chip when the payload carries no delivery state (older backend, non-manager strip)', () => {

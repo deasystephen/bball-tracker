@@ -12,6 +12,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { formatShotDescription } from '../../utils/shot-label';
 import type { GameEvent, ShotMetadata, ReboundMetadata } from '../../types/game';
+import { displayName } from '../../utils/display-name';
 
 interface EventTimelineProps {
   events: GameEvent[];
@@ -139,7 +140,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
         <View style={styles.eventContent}>
           <View style={styles.eventHeader}>
             <ThemedText variant="bodyBold" numberOfLines={1}>
-              {item.player?.name || 'Unknown Player'}
+              {displayName(item.player) || 'Unknown Player'}
             </ThemedText>
             <ThemedText variant="caption" color="textTertiary">
               {formatTime(item.timestamp || item.createdAt)}

@@ -16,6 +16,8 @@ export interface Announcement {
   author: {
     id: string;
     name: string;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt?: string | null;
   };
   /** Reply count (#34); absent from responses older than the thread feature. */
   _count?: { replies: number };

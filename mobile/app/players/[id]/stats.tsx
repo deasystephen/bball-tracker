@@ -29,6 +29,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { displayName } from '../../../utils/display-name';
 
 export default function PlayerStatsScreen() {
   const router = useRouter();
@@ -93,7 +94,6 @@ export default function PlayerStatsScreen() {
             borderBottomColor: colors.border,
           },
         ]}
-        // @ts-ignore - web-specific attribute
         data-hide-on-print="true"
       >
         <TouchableOpacity
@@ -124,12 +124,12 @@ export default function PlayerStatsScreen() {
           <View style={styles.avatarRing}>
             <View style={styles.avatar}>
               <ThemedText variant="h1" style={styles.avatarText}>
-                {player.name.charAt(0).toUpperCase()}
+                {displayName(player).charAt(0).toUpperCase()}
               </ThemedText>
             </View>
           </View>
           <ThemedText variant="h2" style={styles.playerName}>
-            {player.name}
+            {displayName(player)}
           </ThemedText>
           <View style={styles.heroChips}>
             <View style={styles.heroChip}>

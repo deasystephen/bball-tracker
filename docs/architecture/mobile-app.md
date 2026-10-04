@@ -118,9 +118,19 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/display-name.ts#displayName(user)` (localized `account.deletedUser` when `deletedAt`
   is set, stored name otherwise — never branch on the name) and derive roster chips ONLY via
   `getRosterStatus`, whose `'deleted'` branch comes first (a tombstone has `isManaged: false`,
-  which would read as Active). A deleted roster row's menu offers only Remove player. Tests:
+  which would read as Active). A deleted roster row's menu offers only Remove player. The mobile
+  types for invitation `player`/`invitedBy`, announcement `author` and `GameEvent.player` declare
+  `deletedAt?`; until the API sends it on a payload, `displayName` falls back to the stored name. The
+  `/invite/<token>` accept screen renders the inviter as `displayName({ name: inviterName, deletedAt:
+  inviterDeletedAt })` (team by-token payload only; the guardian payload has no `inviterDeletedAt`).
+  `__tests__/utils/display-name-guard.test.ts` reads `app/` and `components/` and fails on a raw
+  `.name` read off any `…player`/`…Player`, `<x>.user` (staff rows), `invitedBy` or `author`; a bare
+  `user.name` passes only in a file that binds `user` from the auth store (#674). Tests:
   `__tests__/app/account-delete.test.tsx`, `__tests__/hooks/useAccount.runtime.test.tsx`,
-  `__tests__/utils/{display-name,roster-status}.test.ts`, `__tests__/app/profile-my-kids.test.tsx`.
+  `__tests__/utils/{display-name,display-name-guard,roster-status}.test.ts`, `__tests__/app/profile-my-kids.test.tsx`;
+  Spanish-locale tombstone renders in `__tests__/app/{players-email-issue,invitations-guardian,announcement-thread}.test.tsx`
+  (roster ⋯ sheet title, "Invited by", announcement author), `__tests__/app/invite-accept.test.tsx` (deep-link inviter)
+  and `__tests__/components/game/EventTimeline.test.tsx`.
   Maestro: `.maestro/account-delete.yaml` (Mike Brown) and `.maestro/guardian-child-delete.yaml`
   (Gloria James / Bryce James) — both delete their fixture; re-seed before every run.
 
@@ -156,7 +166,8 @@ never inline a role check in a screen:
 - **Team staff screen** (`app/teams/[id]/staff.tsx`, role matrix decision 2 / B2.3): reached from the "Staff"
   card on team detail (coach names + count; the hero line lists every `HEAD_COACH`-type row from `team.staff`).
   Lists `GET /teams/:id/staff` (name, role, email when the API returns it). Readable by anyone with team access;
-  **Add staff** (email + role chips), per-row role change and remove render only when
+  **Add staff** (email + role chips), per-row role change (a `components/ActionMenu` listing the other staff roles,
+  never an `Alert` list, disabled while a role update is pending; #688) and remove (a two-button `Alert` confirm) render only when
   `hooks/useTeams.ts#canManageStaff(team, userId, userRole, leagueAdminOf)` — ADMIN, admin of the team's league
   or a `HEAD_COACH`-type staff row (mirrors backend `canManageStaff`; flags can't tell head from assistant).
   Any staff member gets **Leave team** on their own row; the last head coach never gets a remove control. A

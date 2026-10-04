@@ -34,6 +34,7 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { formatRelativeTime } from '../../../utils/relative-time';
 import type { Announcement } from '../../../hooks/useAnnouncements';
+import { displayName } from '../../../utils/display-name';
 
 export default function AnnouncementsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -103,7 +104,7 @@ export default function AnnouncementsScreen() {
       </ThemedText>
       <View style={styles.announcementMeta}>
         <ThemedText variant="footnote" color="textTertiary">
-          {item.author.name}
+          {displayName(item.author)}
         </ThemedText>
         <ThemedText variant="footnote" color="textTertiary">
           {formatRelativeTime(item.createdAt, t)}

@@ -670,24 +670,24 @@ export default function ManagePlayersScreen() {
   const renderPendingInviteRow = (invitation: TeamInvitation) => (
     <ListItem
       key={invitation.id}
-      title={invitation.player.name}
+      title={displayName(invitation.player)}
       subtitle={invitation.player.email || undefined}
       leftElement={<Ionicons name="hourglass-outline" size={20} color={colors.textTertiary} />}
       rightElement={
         <View style={styles.rowActions}>
           <TouchableOpacity
-            onPress={() => handleResendInvite(invitation.playerId, invitation.player.name)}
+            onPress={() => handleResendInvite(invitation.playerId, displayName(invitation.player))}
             accessibilityRole="button"
-            accessibilityLabel={`Resend invitation: ${invitation.player.name}`}
+            accessibilityLabel={`Resend invitation: ${displayName(invitation.player)}`}
             style={styles.rowButton}
             disabled={createInvitation.isPending}
           >
             <Ionicons name="mail-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => handleCancelInvite(invitation.id, invitation.player.name)}
+            onPress={() => handleCancelInvite(invitation.id, displayName(invitation.player))}
             accessibilityRole="button"
-            accessibilityLabel={`Cancel invitation: ${invitation.player.name}`}
+            accessibilityLabel={`Cancel invitation: ${displayName(invitation.player)}`}
             style={styles.rowButton}
             disabled={cancelInvitation.isPending}
           >
@@ -763,7 +763,7 @@ export default function ManagePlayersScreen() {
                       .map((player) => (
                         <ListItem
                           key={player.id}
-                          title={player.name}
+                          title={displayName(player)}
                           subtitle={player.email || undefined}
                           onPress={() => {
                             setSelectedPlayer(player);
@@ -797,7 +797,7 @@ export default function ManagePlayersScreen() {
                   <View style={styles.selectedPlayerInfo}>
                     <Ionicons name="person-circle" size={40} color={colors.primary} />
                     <View style={styles.selectedPlayerDetails}>
-                      <ThemedText variant="bodyBold">{selectedPlayer.name}</ThemedText>
+                      <ThemedText variant="bodyBold">{displayName(selectedPlayer)}</ThemedText>
                       <ThemedText variant="caption" color="textSecondary">
                         {selectedPlayer.email || 'Roster player'}
                       </ThemedText>
@@ -1012,7 +1012,7 @@ export default function ManagePlayersScreen() {
         return (
           <ActionMenu
             visible
-            title={menuMember.player.name}
+            title={displayName(menuMember.player)}
             items={menuItemsFor(
               menuMember,
               getRosterStatus(menuMember, invitationsByPlayer.get(menuMember.playerId), statusNow)
@@ -1049,7 +1049,7 @@ export default function ManagePlayersScreen() {
             ]}
           >
             <ThemedText variant="h4" style={styles.editTitle}>
-              {editingMember ? `Edit ${editingMember.player.name}` : ''}
+              {editingMember ? `Edit ${displayName(editingMember.player)}` : ''}
             </ThemedText>
             <Input
               label={t('players.jerseyNumber')}

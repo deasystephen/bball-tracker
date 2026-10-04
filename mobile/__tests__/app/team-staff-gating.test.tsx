@@ -16,6 +16,7 @@ import type { TeamStaffRow } from '../../hooks/useTeamStaff';
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockShowToast = jest.fn();
 const mockAddStaff = { mutateAsync: jest.fn(), isPending: false };
+const mockUpdateRole = { mutateAsync: jest.fn(), isPending: false };
 let mockTeam: Team | undefined;
 let mockStaff: TeamStaffRow[] = [];
 
@@ -28,6 +29,12 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
+// jest.setup mocks the whole api-client; keep the real error-message mapping
+// so the refused-update test asserts what production shows.
+jest.mock('../../services/api-client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
+  getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
+}));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
   useTeam: () => ({ data: mockTeam, isLoading: false, error: null, refetch: jest.fn() }),
@@ -36,7 +43,7 @@ jest.mock('../../hooks/useTeamStaff', () => ({
   ...jest.requireActual('../../hooks/useTeamStaff'),
   useTeamStaff: () => ({ data: mockStaff, isLoading: false, error: null, refetch: jest.fn() }),
   useAddStaff: () => mockAddStaff,
-  useUpdateStaffRole: () => ({ mutateAsync: jest.fn(), isPending: false }),
+  useUpdateStaffRole: () => mockUpdateRole,
   useRemoveStaff: () => ({ mutateAsync: jest.fn(), isPending: false }),
 }));
 
@@ -201,6 +208,70 @@ describe('TeamStaffScreen permission gating', () => {
       data: { email: 'new@example.com', roleType: 'HEAD_COACH' },
     });
     expect(queryByText('Email')).toBeNull();
+  });
+
+  it('Change role opens an ActionMenu of the other roles; picking one updates the role (#688)', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockUpdateRole.mutateAsync.mockResolvedValueOnce(undefined);
+    const { getByText, getByLabelText, queryByLabelText, queryByText } = render(<TeamStaffScreen />);
+
+    fireEvent.press(getByLabelText('Change role: Mike Brown'));
+
+    expect(getByText('Change role for Mike Brown')).toBeTruthy();
+    expect(getByLabelText('Head Coach')).toBeTruthy();
+    expect(getByLabelText('Team Manager')).toBeTruthy();
+    // The row's current role is not offered; the sheet brings its own Close.
+    expect(queryByLabelText('Assistant Coach')).toBeNull();
+    expect(getByLabelText('Close')).toBeTruthy();
+
+    fireEvent.press(getByLabelText('Team Manager'));
+
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Role updated', 'success'));
+    expect(mockUpdateRole.mutateAsync).toHaveBeenCalledWith({
+      teamId: 't1',
+      userId: 'asst-1',
+      roleType: 'TEAM_MANAGER',
+    });
+    expect(queryByText('Change role for Mike Brown')).toBeNull();
+  });
+
+  it('Change role: a refused update toasts the server reason; Close changes nothing', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    // Shaped like the api-client's normalized Axios error: the toast must carry
+    // the server's reason, not Axios's generic message.
+    mockUpdateRole.mutateAsync.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 400'), {
+        isAxiosError: true,
+        apiError: { status: 400, error: 'Cannot demote the last head coach' },
+      })
+    );
+    const { getByLabelText, queryByText } = render(<TeamStaffScreen />);
+
+    fireEvent.press(getByLabelText('Change role: Frank Vogel'));
+    fireEvent.press(getByLabelText('Close'));
+    expect(queryByText('Change role for Frank Vogel')).toBeNull();
+    expect(mockUpdateRole.mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.press(getByLabelText('Change role: Frank Vogel'));
+    fireEvent.press(getByLabelText('Assistant Coach'));
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Cannot demote the last head coach', 'error')
+    );
+  });
+
+  it('Change role is disabled while a role update is in flight', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockUpdateRole.isPending = true;
+    try {
+      const { getByLabelText, queryByText } = render(<TeamStaffScreen />);
+      const button = getByLabelText('Change role: Mike Brown');
+
+      expect(button.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+      fireEvent.press(button);
+      expect(queryByText('Change role for Mike Brown')).toBeNull();
+    } finally {
+      mockUpdateRole.isPending = false;
+    }
   });
 
   it('shows the empty state when the team has no staff', () => {

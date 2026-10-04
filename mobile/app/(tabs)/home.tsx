@@ -33,6 +33,7 @@ import { getGameResult, getResultColor } from '../../utils/game-result';
 import { getTeamColor } from '../../utils/team-colors';
 import { canCreateTeams } from '../../utils/team-permissions';
 import type { Game } from '../../types/game';
+import { displayName } from '../../utils/display-name';
 
 export default function Home() {
   const router = useRouter();
@@ -254,7 +255,7 @@ export default function Home() {
             ]}
           >
             <ThemedText variant="h3" color="success">
-              {recentGames.filter((g: Game) => g.homeScore > g.awayScore).length}
+              {recentGames.filter((g: Game) => getGameResult(g.homeScore, g.awayScore) === 'W').length}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
               Wins (last 5)
@@ -395,7 +396,7 @@ export default function Home() {
                   {invitation.team.name}
                 </ThemedText>
                 <ThemedText variant="footnote" color="textSecondary">
-                  Invitation from {invitation.invitedBy.name}
+                  Invitation from {displayName(invitation.invitedBy)}
                 </ThemedText>
               </View>
               <Ionicons

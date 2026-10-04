@@ -30,6 +30,7 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { formatInvitationExpiry, isInvitationExpired } from '../../utils/invitation-expiry';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
+import { displayName } from '../../utils/display-name';
 
 export default function InvitationsScreen() {
   const { colors } = useTheme();
@@ -62,7 +63,7 @@ export default function InvitationsScreen() {
       await acceptInvitation.mutateAsync(invitation.id);
       toast.showToast(
         isForChild(invitation)
-          ? `${invitation.player.name} has been added to ${invitation.team.name}!`
+          ? `${displayName(invitation.player)} has been added to ${invitation.team.name}!`
           : `You've been added to ${invitation.team.name}!`,
         'success'
       );
@@ -247,7 +248,7 @@ export default function InvitationsScreen() {
             <ThemedText variant="h4">{item.team.name}</ThemedText>
             {forChild && (
               <ThemedText variant="captionBold" color="primary">
-                For {item.player.name}
+                For {displayName(item.player)}
               </ThemedText>
             )}
             <ThemedText variant="caption" color="textSecondary">
@@ -279,7 +280,7 @@ export default function InvitationsScreen() {
           <View style={styles.detailRow}>
             <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary">
-              Invited by {item.invitedBy.name}
+              Invited by {displayName(item.invitedBy)}
             </ThemedText>
           </View>
           {item.jerseyNumber != null && (
@@ -336,7 +337,7 @@ export default function InvitationsScreen() {
           <View style={styles.actionButtons}>
             {canAccept && (
               <Button
-                title={forChild ? `Accept for ${item.player.name}` : 'Accept'}
+                title={forChild ? `Accept for ${displayName(item.player)}` : 'Accept'}
                 onPress={() => handleAccept(item)}
                 loading={acceptInvitation.isPending}
                 style={styles.acceptButton}

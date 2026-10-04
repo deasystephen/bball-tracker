@@ -12,6 +12,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import InvitationsScreen from '../../app/(tabs)/invitations';
 import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
+import { i18n } from '../../i18n';
 import type { InvitationsResponse, TeamInvitation } from '../../hooks/useInvitations';
 
 const mockShowToast = jest.fn();
@@ -134,5 +135,28 @@ describe('InvitationsScreen guardian invitations', () => {
     };
     const { getByText } = render(<InvitationsScreen />);
     expect(getByText('No Invitations')).toBeTruthy();
+  });
+
+  it('names a deleted inviter with the localized label, never the stored literal (#674)', async () => {
+    mockData = {
+      success: true,
+      invitations: [
+        {
+          ...teamInviteForChild,
+          invitedBy: { id: 'coach-2', name: 'Deleted user', email: '', deletedAt: '2026-09-07T00:00:00Z' },
+        },
+      ],
+      guardianInvitations: [],
+      pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
+    };
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(<InvitationsScreen />);
+
+      expect(getByText('Invited by Usuario eliminado')).toBeTruthy();
+      expect(queryByText('Invited by Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

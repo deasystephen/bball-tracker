@@ -13,6 +13,11 @@ export interface TeamInvitationByToken {
   status: InvitationByTokenStatus;
   teamName: string;
   inviterName: string;
+  /**
+   * Set when the inviter's account was deleted (#642); render the inviter via
+   * `displayName`. Older API builds omit it.
+   */
+  inviterDeletedAt?: string | null;
   position: string | null;
   jerseyNumber: number | null;
   message: string | null;

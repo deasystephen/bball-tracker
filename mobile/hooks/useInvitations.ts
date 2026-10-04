@@ -43,11 +43,15 @@ export interface TeamInvitation {
     id: string;
     name: string;
     email?: string | null;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt?: string | null;
   };
   invitedBy: {
     id: string;
     name: string;
     email: string;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt?: string | null;
   };
 }
 

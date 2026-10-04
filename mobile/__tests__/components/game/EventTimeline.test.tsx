@@ -11,6 +11,7 @@ import { render } from '@testing-library/react-native';
 
 import { EventTimeline } from '../../../components/game/EventTimeline';
 import type { GameEvent, GameEventType } from '../../../types/game';
+import { i18n } from '../../../i18n';
 
 jest.mock('../../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -95,6 +96,23 @@ describe('EventTimeline', () => {
     expect(getByText('Offensive rebound')).toBeTruthy();
     expect(getByText('Assist')).toBeTruthy();
     expect(getByText('Anthony Davis')).toBeTruthy();
+  });
+
+  it('renders a deleted player through the localized label, never the stored literal (#674)', async () => {
+    const event = makeEvent('ASSIST', {}, 'Deleted user');
+    const tombstone: GameEvent = {
+      ...event,
+      player: { id: event.playerId ?? 'gone', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z' },
+    };
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(<EventTimeline events={[tombstone]} />);
+
+      expect(getByText('Usuario eliminado')).toBeTruthy();
+      expect(queryByText('Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('renders the empty state when there are no events', () => {

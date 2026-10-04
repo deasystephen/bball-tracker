@@ -45,6 +45,12 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-explicit-any': 'error',
 
+      // Mirrors the backend's tseslint.configs.recommended (expo's preset
+      // omits it): no @ts-ignore / @ts-nocheck. @ts-expect-error with a
+      // description stays allowed for compile-time negative tests
+      // (__tests__/services/analytics.test.ts).
+      '@typescript-eslint/ban-ts-comment': 'error',
+
       // react-hooks@7 ships the React Compiler lint rules. Reanimated shared
       // values must be written via `.set()` / read via `.get()` (not `.value`)
       // so that `immutability` is satisfied, and derived/seeded state must be

@@ -99,7 +99,6 @@ export const PrintButton: React.FC<PrintButtonProps> = ({
       onPress={handlePrint}
       style={[styles.button, { borderColor: colors.border }]}
       activeOpacity={0.7}
-      // @ts-ignore - web-specific prop
       data-print-show="true"
     >
       <Ionicons name="print-outline" size={20} color={colors.primary} />

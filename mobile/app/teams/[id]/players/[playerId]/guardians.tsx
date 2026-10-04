@@ -43,6 +43,7 @@ import { relationshipLabel } from '../../../../../utils/guardian';
 import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 import { useGoBack } from '../../../../../hooks/useGoBack';
+import { displayName } from '../../../../../utils/display-name';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -74,7 +75,7 @@ export default function PlayerGuardiansScreen() {
 
   const canManage = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
   const member = team?.members?.find((m) => m.playerId === playerId);
-  const playerName = member?.player.name ?? 'Player';
+  const playerName = displayName(member?.player) || 'Player';
 
   const handleInvite = async () => {
     const trimmed = email.trim();

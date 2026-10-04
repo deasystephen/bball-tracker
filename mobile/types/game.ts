@@ -78,6 +78,8 @@ export interface GameEvent {
   player?: {
     id: string;
     name: string;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt?: string | null;
   };
 }
 
