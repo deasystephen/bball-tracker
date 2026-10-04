@@ -7,7 +7,7 @@
  * swallowed via .catch and does not surface to the caller).
  */
 
-import { AnnouncementService } from '../../src/services/announcement-service';
+import { AnnouncementService, ANNOUNCEMENT_INCLUDE } from '../../src/services/announcement-service';
 import { NotificationService } from '../../src/services/notification-service';
 import { mockPrisma } from '../setup';
 import { createAdmin, createCoach, createTeam } from '../factories';
@@ -60,6 +60,11 @@ describe('AnnouncementService', () => {
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
   });
 
+  it('never selects the author email into the payload (#654)', () => {
+    expect(ANNOUNCEMENT_INCLUDE.author.select).not.toHaveProperty('email');
+    expect(ANNOUNCEMENT_INCLUDE.author.select).toEqual({ id: true, name: true, deletedAt: true });
+  });
+
   describe('getAnnouncement (#34)', () => {
     const stored = {
       id: 'a-1',
@@ -68,7 +73,7 @@ describe('AnnouncementService', () => {
       title: 'T',
       body: 'B',
       createdAt: new Date(),
-      author: { id: 'coach-1', name: 'Coach', email: 'coach@example.test' },
+      author: { id: 'coach-1', name: 'Coach', deletedAt: null },
       _count: { replies: 2 },
     };
 
@@ -170,7 +175,7 @@ describe('AnnouncementService', () => {
         authorId: admin.id,
         title: 'Game moved',
         body: longBody,
-        author: { id: admin.id, name: admin.name, email: admin.email },
+        author: { id: admin.id, name: admin.name, deletedAt: null },
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -222,7 +227,7 @@ describe('AnnouncementService', () => {
         authorId: admin.id,
         title: 'Hey',
         body: shortBody,
-        author: { id: admin.id, name: admin.name, email: admin.email },
+        author: { id: admin.id, name: admin.name, deletedAt: null },
       });
 
       await AnnouncementService.createAnnouncement(
@@ -253,7 +258,7 @@ describe('AnnouncementService', () => {
         authorId: admin.id,
         title: 't',
         body: 'b',
-        author: { id: admin.id, name: admin.name, email: admin.email },
+        author: { id: admin.id, name: admin.name, deletedAt: null },
       });
       mockedSendToTeam.mockRejectedValueOnce(new Error('push down'));
 
@@ -284,14 +289,20 @@ describe('AnnouncementService', () => {
           id: team.id,
           name: team.name,
         });
-        setSystemAdmin();
+        // The permission checks read `role`; a nameless author's address is
+        // looked up with `{ email }`, never carried on the payload (#654).
+        const author = { name: admin.name, email: admin.email, ...audience.author };
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation(
+          (args: { select?: { email?: boolean } }) =>
+            Promise.resolve(args.select?.email ? { email: author.email } : admin)
+        );
         (mockPrisma.announcement.create as jest.Mock).mockResolvedValue({
           id: 'a5',
           teamId: team.id,
           authorId: admin.id,
           title: 'Practice',
           body: 'See you there',
-          author: { id: admin.id, name: admin.name, email: admin.email, ...audience.author },
+          author: { id: admin.id, name: author.name, deletedAt: null },
         });
         (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue(
           (audience.memberIds ?? []).map((playerId) => ({ playerId }))
@@ -363,6 +374,10 @@ describe('AnnouncementService', () => {
             announcementId: 'a5',
           },
         });
+        // A named author needs no address lookup.
+        expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith(
+          expect.objectContaining({ select: { email: true } })
+        );
       });
 
       it('falls back to the author email, then to an empty author name', async () => {
@@ -373,6 +388,10 @@ describe('AnnouncementService', () => {
         await announce();
         await flushBackgroundWork();
         expect(mockedMailerSend.mock.calls[0][0].variables.authorName).toBe('coach@test.com');
+        expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+          where: { id: admin.id },
+          select: { email: true },
+        });
 
         mockedMailerSend.mockClear();
         setAudience({ memberIds: ['p1'], author: { name: null, email: null } });

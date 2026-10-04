@@ -34,7 +34,7 @@ describe('Announcements API', () => {
     title: 'Practice moved',
     body: 'Practice is moved to 5pm tomorrow.',
     createdAt: new Date(),
-    author: { id: TEST_USER_ID, name: 'Test User', email: 'test@example.com' },
+    author: { id: TEST_USER_ID, name: 'Test User', deletedAt: null },
   };
 
   beforeEach(() => {

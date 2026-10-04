@@ -130,6 +130,11 @@ eng-review amendments recorded there).
   `GET /invitations?teamId=` lists **all** of the team's invitations for staff with `canManageRoster`;
   other callers with team access (rostered players) remain scoped to `playerId IN (caller, caller's
   children)` via `GuardianService.getChildIds` (see `guardians.md`).
+  `GET /invitations/:id` keeps its `canAccessTeam`-or-invited-player gate and applies the roster-email
+  rule to `player.email` (#679): the invited player and callers with `canManageRoster` receive it;
+  every other reader, a guardian of the invited player included, gets the player without `email`
+  (`omitRosterManagerFields`, so `deletedAt` stays). `invitedBy.email` is a staff email and
+  stays for every reader.
 - **`POST /teams/:id/invitations` takes `{ playerId }` only (#418).** It invites an existing user
   and, with `supersede`, is Resend. The `{ name, email }` create-and-invite arm (audit #69) is
   gone: `createInvitationSchema` requires `playerId` and strips unknown keys, so a body without

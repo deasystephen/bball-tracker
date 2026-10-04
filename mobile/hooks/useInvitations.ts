@@ -42,7 +42,7 @@ export interface TeamInvitation {
   player: {
     id: string;
     name: string;
-    email: string;
+    email?: string | null;
   };
   invitedBy: {
     id: string;

@@ -474,7 +474,7 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
 /**
  * GET /api/v1/teams/:teamId/staff
  * List the team's staff with user + role. Any team member/staff/admin may
- * read; `user.email` is only present for callers with canManageRoster.
+ * read; staff emails are returned to every reader, same as `GET /teams/:id`.
  */
 router.get('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => {
   try {

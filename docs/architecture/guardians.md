@@ -45,9 +45,10 @@ Removing the last guardian never deletes the child.
   the member read set; roster emails stay stripped; no stat tracking / roster / announcements → 403).
   `POST /games/:id/rsvp { status, playerId? }` — `playerId` is allowed when the caller is a guardian of that
   player and the player is rostered on the game's team; the `GameRsvp` row is keyed on the **player** and the
-  confirmation email goes to the guardian. Team invitations addressed to a child may be accepted/rejected by
-  a guardian, `GET /invitations` default scope includes the caller's children, and `listInvitations?playerId=`
-  accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
+  confirmation email goes to the guardian. The response row is the child's, projected like
+  `GET /games/:id/rsvps`: no `user.email` unless the guardian also has `canManageRoster` (#661).
+  Team invitations addressed to a child may be accepted/rejected by a guardian, `GET /invitations`
+  default scope includes the caller's children, and `listInvitations?playerId=` accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
   /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on
   the coach-only team-member route). `GET /auth/me`, `/auth/callback` and `/auth/dev-login` add
   `user.guardianOf: { childId, childName, relationship, isPrimary, isManaged, teams: { id, name }[] }[]`.

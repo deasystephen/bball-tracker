@@ -16,7 +16,6 @@ export interface Announcement {
   author: {
     id: string;
     name: string;
-    email?: string;
   };
   /** Reply count (#34); absent from responses older than the thread feature. */
   _count?: { replies: number };
