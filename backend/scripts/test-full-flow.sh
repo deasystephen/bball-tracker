@@ -9,9 +9,9 @@
 #   TOKEN="<access token>" ./scripts/test-full-flow.sh   # use a real WorkOS access token (must be ADMIN)
 #   API_BASE=http://localhost:3000/api/v1 DEV_LOGIN_EMAIL=admin@bball-tracker.com ./scripts/test-full-flow.sh
 #
-# Requires an ADMIN account because `POST /leagues` is ADMIN-only; ADMIN also bypasses the
-# COACH requirement on `POST /teams`. The seeded admin
-# (`npx prisma db seed`) is admin@bball-tracker.com. Never point this at production.
+# Requires an ADMIN account because `POST /leagues` is ADMIN-only; ADMIN also bypasses
+# the COACH requirement on `POST /teams`. The seeded admin (`npx prisma db seed`) is
+# admin@bball-tracker.com. Never point this at production.
 
 set -e  # Exit on error
 
@@ -249,11 +249,10 @@ main() {
     echo "  Player ID:  $PLAYER_ID"
     echo "  Game ID:    $GAME_ID"
     echo ""
-    echo "Clean up (a league with teams cannot be deleted, so delete in this order):"
-    echo "  DELETE $API_BASE/games/$GAME_ID"
-    echo "  DELETE $API_BASE/teams/$TEAM_ID"
-    echo "  DELETE $API_BASE/leagues/$LEAGUE_ID   (cascades the season)"
-    echo "  DELETE $API_BASE/players/$PLAYER_ID"
+    echo "Clean up:"
+    echo "  DELETE $API_BASE/teams/$TEAM_ID       (cascades its games and events)"
+    echo "  DELETE $API_BASE/leagues/$LEAGUE_ID   (refuses while any team exists; cascades the season)"
+    echo "  DELETE $API_BASE/players/$PLAYER_ID   (refuses while it has memberships or game events)"
     echo ""
 }
 

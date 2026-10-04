@@ -35,8 +35,10 @@ npm install
 2. Set up environment variables:
 ```bash
 cp env.example .env
-# Fill WORKOS_API_KEY and WORKOS_CLIENT_ID from the WorkOS dashboard (staging keys);
-# the server refuses to boot without them. Every other value works as-is locally.
+# Replace the WORKOS_API_KEY and WORKOS_CLIENT_ID placeholders with staging keys from the
+# WorkOS dashboard. The placeholders boot, but every WorkOS login and token verification
+# fails until they are real (dev-login tokens never touch WorkOS). Every other value works
+# as-is locally.
 ```
 
 3. Set up the database:
@@ -71,10 +73,14 @@ The server will start on `http://localhost:3000`. `curl http://localhost:3000/he
 - `npm run prisma:generate` - Generate Prisma client
 - `npm run prisma:migrate` - Run database migrations
 - `npm run prisma:studio` - Open Prisma Studio
+- `npm run db:seed` - Seed the dev-login users, teams and games
+- `npm run db:reset` - Empty the local database (refuses unless `DATABASE_URL` is local)
+- `npm run db:fresh` - Reset and seed in one step
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint errors
 - `npm run type-check` - Type check without building
 - `npm test` - Run tests
+- `npm run test:db` - Run only the real-database suites
 
 ## Project Structure
 
