@@ -34,11 +34,19 @@ describe('GameEventService', () => {
 
   beforeEach(() => {
     finalizeSpy = jest.spyOn(StatsService, 'finalizeGameStats').mockResolvedValue();
+    // `lockGameRow` reads status and scores under FOR UPDATE; default to a live
+    // game so a FINISHED row from an earlier test never leaks in.
+    mockLockedGame({ status: 'IN_PROGRESS', homeScore: 0, awayScore: 0 });
   });
 
   afterEach(() => {
     finalizeSpy.mockRestore();
   });
+
+  /** The row `lockGameRow` returns: the game as it stands under the lock, after any concurrent writer committed. */
+  function mockLockedGame(row: { status: string; homeScore: number; awayScore: number }): void {
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
+  }
 
   /** Mocks every lookup needed for a head coach to create/delete an event on `game`. */
   function mockCoachAccess(game: ReturnType<typeof createGame>, playerId?: string): { coachId: string } {
@@ -63,6 +71,7 @@ describe('GameEventService', () => {
     // SHOT create/delete recompute the score inside a transaction (audit #6)
     (mockPrisma.gameEvent.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 0, awayScore: 0 });
+    mockLockedGame({ status: game.status, homeScore: game.homeScore, awayScore: game.awayScore });
     return { coachId: coach.id };
   }
 
@@ -121,6 +130,38 @@ describe('GameEventService', () => {
       const game = createGame({ status: 'IN_PROGRESS' });
       const { coachId } = mockCoachAccess(game);
       const event = createGameEvent({ gameId: game.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
+      (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
+
+      await GameEventService.deleteEvent(game.id, event.id, coachId);
+
+      expect(finalizeSpy).not.toHaveBeenCalled();
+    });
+
+    it('createEvent re-finalizes when the game turned FINISHED before the write took the lock (#724)', async () => {
+      const player = createPlayer();
+      const game = createGame({ status: 'IN_PROGRESS' });
+      const { coachId } = mockCoachAccess(game, player.id);
+      // A PATCH status=FINISHED committed between verifyGameAccess and the lock
+      mockLockedGame({ status: 'FINISHED', homeScore: 0, awayScore: 0 });
+      const event = createGameEvent({ gameId: game.id, playerId: player.id, eventType: 'SHOT' });
+      (mockPrisma.gameEvent.create as jest.Mock).mockResolvedValue({ ...event, player: null });
+
+      await GameEventService.createEvent(
+        game.id,
+        { playerId: player.id, eventType: 'SHOT', metadata: { made: true, points: 2 } },
+        coachId
+      );
+
+      expect(finalizeSpy).toHaveBeenCalledWith(game.id);
+    });
+
+    it('deleteEvent decides from the locked status, not the pre-read row (#724)', async () => {
+      const game = createGame({ status: 'FINISHED' });
+      const { coachId } = mockCoachAccess(game);
+      // Reopened between the access check and the lock
+      mockLockedGame({ status: 'IN_PROGRESS', homeScore: 0, awayScore: 0 });
+      const event = createGameEvent({ gameId: game.id, eventType: 'REBOUND' });
       (mockPrisma.gameEvent.findUnique as jest.Mock).mockResolvedValue(event);
       (mockPrisma.gameEvent.delete as jest.Mock).mockResolvedValue(event);
 
@@ -309,8 +350,10 @@ describe('GameEventService', () => {
       const team = createTeam({ seasonId: season.id });
       const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
       const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
-      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS' });
+      // Pre-read row says 10-4; a SHOT commits 12-4 before this write takes the lock (#665)
+      const game = createGame({ teamId: team.id, status: 'IN_PROGRESS', homeScore: 10, awayScore: 4 });
       const event = createGameEvent({ gameId: game.id, eventType: 'TIMEOUT' });
+      mockLockedGame({ status: 'IN_PROGRESS', homeScore: 12, awayScore: 4 });
 
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({
         ...game,
@@ -335,13 +378,16 @@ describe('GameEventService', () => {
       const createArgs = (mockPrisma.gameEvent.create as jest.Mock).mock.calls[0][0];
       expect(createArgs.data.playerId).toBeNull();
       expect(createArgs.data.timestamp).toBeInstanceOf(Date);
-      // Non-SHOT events don't touch the score, so no transaction/recompute
-      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      // Non-SHOT events take the row lock but don't recompute or write the score
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      const lockSql = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0].join('?');
+      expect(lockSql).toContain('FOR UPDATE');
       expect(mockPrisma.game.update).not.toHaveBeenCalled();
-      expect(result.score).toEqual({ homeScore: game.homeScore, awayScore: game.awayScore });
+      // The score read under the lock, never the verifyGameAccess row (10-4)
+      expect(result.score).toEqual({ homeScore: 12, awayScore: 4 });
       expect(mockEmitGameEvent).toHaveBeenCalledWith(game.id, {
         event: { ...event, player: null },
-        score: { homeScore: game.homeScore, awayScore: game.awayScore },
+        score: { homeScore: 12, awayScore: 4 },
       });
     });
 
@@ -722,15 +768,17 @@ describe('GameEventService', () => {
       });
     });
 
-    it('should delete a non-SHOT event without recomputing the score', async () => {
+    it('should delete a non-SHOT event and return the score read under the row lock (#665)', async () => {
       const coach = createCoach();
       const league = createLeague();
       const season = createSeason({ leagueId: league.id });
       const team = createTeam({ seasonId: season.id });
       const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
       const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      // Pre-read row says 12-9; a SHOT commits 14-9 before this delete takes the lock
       const game = createGame({ teamId: team.id, homeScore: 12, awayScore: 9 });
       const event = createGameEvent({ gameId: game.id, eventType: 'REBOUND' });
+      mockLockedGame({ status: 'IN_PROGRESS', homeScore: 14, awayScore: 9 });
 
       (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ ...game, team: { ...team, members: [] } });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
@@ -744,13 +792,15 @@ describe('GameEventService', () => {
 
       const result = await GameEventService.deleteEvent(game.id, event.id, coach.id);
 
-      expect(result).toEqual({ success: true, score: { homeScore: 12, awayScore: 9 } });
-      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ success: true, score: { homeScore: 14, awayScore: 9 } });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      const lockSql = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0].join('?');
+      expect(lockSql).toContain('FOR UPDATE');
       expect(mockPrisma.game.update).not.toHaveBeenCalled();
       expect(mockEmitGameEventRemoved).toHaveBeenCalledWith(game.id, {
         gameId: game.id,
         eventId: event.id,
-        score: { homeScore: 12, awayScore: 9 },
+        score: { homeScore: 14, awayScore: 9 },
       });
     });
 
@@ -864,6 +914,18 @@ describe('GameEventService', () => {
 
     it('returns 0 for an empty log', () => {
       expect(computeHomeScore([])).toBe(0);
+    });
+
+    it('ignores stored shots with an out-of-range value or a non-boolean made (#723)', () => {
+      expect(
+        computeHomeScore([
+          { eventType: 'SHOT', metadata: { made: true, points: 4 } },
+          { eventType: 'SHOT', metadata: { made: true, points: -5 } },
+          { eventType: 'SHOT', metadata: { made: true, points: 0 } },
+          { eventType: 'SHOT', metadata: { made: 'yes', points: 2 } },
+          { eventType: 'SHOT', metadata: { made: true, points: 3 } },
+        ])
+      ).toBe(3);
     });
   });
 });

@@ -116,6 +116,60 @@ describe('Game Events API', () => {
       expect(response.body.error).toContain('Invalid event type');
     });
 
+    it.each([
+      ['points out of range', { made: true, points: 4 }],
+      ['negative points', { made: true, points: -5 }],
+      ['missing points', { made: true }],
+      ['a non-boolean made', { made: 'yes', points: 2 }],
+    ])('should return 400 for a SHOT with %s (#723)', async (_label, metadata) => {
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/events`)
+        .send({ playerId: TEST_PLAYER_ID, eventType: 'SHOT', metadata });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toMatch(/SHOT metadata\.(points|made)/);
+      expect(mockGameEventService.createEvent).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a SHOT with no metadata (#723)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/events`)
+        .send({ playerId: TEST_PLAYER_ID, eventType: 'SHOT' });
+
+      expect(response.status).toBe(400);
+      expect(mockGameEventService.createEvent).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 for a REBOUND with an unknown type (#723)', async () => {
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/events`)
+        .send({ playerId: TEST_PLAYER_ID, eventType: 'REBOUND', metadata: { type: 'team' } });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('REBOUND metadata.type must be offensive or defensive');
+      expect(mockGameEventService.createEvent).not.toHaveBeenCalled();
+    });
+
+    it('should pass a valid REBOUND through to the service (#723)', async () => {
+      const rebound = { ...mockEvent, eventType: 'REBOUND', metadata: { type: 'offensive' } };
+      mockGameEventService.createEvent.mockResolvedValue({
+        event: rebound,
+        score: { homeScore: 12, awayScore: 4 },
+      } as unknown as Awaited<ReturnType<typeof mockGameEventService.createEvent>>);
+
+      const response = await request(app)
+        .post(`/api/v1/games/${TEST_GAME_ID}/events`)
+        .send({ playerId: TEST_PLAYER_ID, eventType: 'REBOUND', metadata: { type: 'offensive' } });
+
+      expect(response.status).toBe(201);
+      expect(response.body.score).toEqual({ homeScore: 12, awayScore: 4 });
+      expect(mockGameEventService.createEvent).toHaveBeenCalledWith(
+        TEST_GAME_ID,
+        expect.objectContaining({ eventType: 'REBOUND', metadata: { type: 'offensive' } }),
+        TEST_USER_ID
+      );
+    });
+
     it('should return 400 for invalid playerId format', async () => {
       const response = await request(app)
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
@@ -135,6 +189,7 @@ describe('Game Events API', () => {
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
         .send({
           eventType: 'SHOT',
+          metadata: { made: true, points: 2 },
         });
 
       expect(response.status).toBe(404);
@@ -150,6 +205,7 @@ describe('Game Events API', () => {
         .post(`/api/v1/games/${TEST_GAME_ID}/events`)
         .send({
           eventType: 'SHOT',
+          metadata: { made: true, points: 2 },
         });
 
       expect(response.status).toBe(403);

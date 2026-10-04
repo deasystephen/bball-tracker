@@ -10,7 +10,7 @@ import { createInvitationSchema } from '../../src/api/invitations/schemas';
 describe('Game Event Schema Security', () => {
   it('should reject deeply nested objects in metadata', () => {
     const result = createGameEventSchema.safeParse({
-      eventType: 'SHOT',
+      eventType: 'FOUL',
       metadata: {
         nested: { deeply: { nested: { object: true } } },
       },
@@ -22,7 +22,7 @@ describe('Game Event Schema Security', () => {
 
   it('should reject array values in metadata', () => {
     const result = createGameEventSchema.safeParse({
-      eventType: 'SHOT',
+      eventType: 'FOUL',
       metadata: {
         items: [1, 2, 3],
       },
@@ -31,8 +31,9 @@ describe('Game Event Schema Security', () => {
   });
 
   it('should accept flat primitive metadata', () => {
+    // SHOT metadata is an exact shape since #723; the loose record is for other types
     const result = createGameEventSchema.safeParse({
-      eventType: 'SHOT',
+      eventType: 'FOUL',
       metadata: {
         quarter: 1,
         shotType: 'three-pointer',

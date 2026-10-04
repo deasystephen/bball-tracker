@@ -6,7 +6,9 @@ import prisma from '../models';
 import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
-import { GameEventType, GameStatus } from '@prisma/client';
+import { GameEventType, GameStatus, Prisma } from '@prisma/client';
+import { lockGameRow } from '../utils/game-row-lock';
+import { shotMade, shotValue } from '../utils/shot-points';
 
 // Types for stats responses
 export interface PlayerGameStats {
@@ -124,11 +126,6 @@ export interface TeamSeasonStats {
   }>;
 }
 
-interface ShotMetadata {
-  made: boolean;
-  points: number;
-}
-
 interface ReboundMetadata {
   type: 'offensive' | 'defensive';
 }
@@ -147,14 +144,28 @@ export function perGame(total: number, games: number): number {
   return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
 }
 
+/**
+ * Clock for the `finalizeGameStats` transaction. It covers the wait for the
+ * game-row lock (queued behind in-flight event writes), two reads and four
+ * writes. Prisma's 5 s default is too tight on a slow RDS: a timeout (P2028)
+ * is swallowed by the callers and leaves a FINISHED game without a box score.
+ */
+export const FINALIZE_TRANSACTION_TIMEOUT_MS = 15_000;
+
 export class StatsService {
   /**
-   * Calculate player stats from game events for a specific game
+   * Calculate player stats from game events for a specific game.
+   *
+   * `db` is a transaction client when the caller needs the read inside its own
+   * transaction (`finalizeGameStats` reads under the game-row lock, #724).
    */
-  static async calculatePlayerStats(gameId: string): Promise<PlayerGameStats[]> {
+  static async calculatePlayerStats(
+    gameId: string,
+    db: Prisma.TransactionClient = prisma
+  ): Promise<PlayerGameStats[]> {
     // Fetch events and game with members in parallel
     const [events, game] = await Promise.all([
-      prisma.gameEvent.findMany({
+      db.gameEvent.findMany({
         where: { gameId },
         include: {
           player: {
@@ -165,7 +176,7 @@ export class StatsService {
           },
         },
       }),
-      prisma.game.findUnique({
+      db.game.findUnique({
         where: { id: gameId },
         include: {
           team: {
@@ -233,26 +244,28 @@ export class StatsService {
 
       switch (event.eventType) {
         case GameEventType.SHOT: {
-          const shotMeta = metadata as unknown as ShotMetadata;
-          const pointValue = shotMeta.points || 2;
+          // Same point rule as `computeHomeScore` (utils/shot-points.ts, #723):
+          // a shot with an out-of-range value counts nowhere.
+          const pointValue = shotValue(event.metadata);
+          const made = shotMade(event.metadata);
 
           if (pointValue === 3) {
             stats.threePointersAttempted++;
-            if (shotMeta.made) {
+            if (made) {
               stats.threePointersMade++;
               stats.points += 3;
             }
           } else if (pointValue === 1) {
             // Free throw
             stats.freeThrowsAttempted++;
-            if (shotMeta.made) {
+            if (made) {
               stats.freeThrowsMade++;
               stats.points += 1;
             }
-          } else {
+          } else if (pointValue === 2) {
             // Regular 2-pointer
             stats.fieldGoalsAttempted++;
-            if (shotMeta.made) {
+            if (made) {
               stats.fieldGoalsMade++;
               stats.points += 2;
             }
@@ -371,8 +384,8 @@ export class StatsService {
 
   /**
    * Finalize game stats when game status changes to FINISHED
-   * This persists calculated stats to PlayerStats and TeamStats tables.
-   * Uses a transaction to batch all upserts together.
+   * This persists calculated stats to PlayerStats and TeamStats tables, reading
+   * the events and writing the rows in one transaction under the game-row lock.
    *
    * Idempotent and safe to re-run: stale PlayerStats rows for players who no
    * longer have any events are deleted, so a reopen → edit → finish cycle (or
@@ -384,134 +397,93 @@ export class StatsService {
    */
   static async finalizeGameStats(gameId: string): Promise<void> {
     const startedAt = Date.now();
-    const game = await prisma.game.findUnique({
-      where: { id: gameId },
-      include: {
-        team: true,
-      },
-    });
 
-    if (!game) {
-      throw new NotFoundError('Game not found');
-    }
+    // One transaction that first locks the game row (the same lock every event
+    // write takes), then reads the event log and writes the box score, so two
+    // overlapping finalizations serialize and the last one to commit has read
+    // every committed event (#724).
+    const { teamId, players } = await prisma.$transaction(async (tx) => {
+      await lockGameRow(tx, gameId);
 
-    const playerStats = await this.calculatePlayerStats(gameId);
-
-    if (playerStats.length === 0) {
-      await prisma.$transaction([
-        prisma.playerStats.deleteMany({ where: { gameId } }),
-        prisma.teamStats.deleteMany({ where: { gameId } }),
-      ]);
-      logger.info('Stats finalized', {
-        gameId,
-        teamId: game.teamId,
-        players: 0,
-        duration: Date.now() - startedAt,
-      });
-      return;
-    }
-
-    const teamStats = this.calculateTeamTotals(game.teamId, game.team.name, playerStats);
-
-    // Batch all writes in a single transaction
-    await prisma.$transaction([
-      // Drop rows for players who no longer appear in the event set
-      prisma.playerStats.deleteMany({
-        where: {
-          gameId,
-          playerId: { notIn: playerStats.map((stats) => stats.playerId) },
+      const game = await tx.game.findUnique({
+        where: { id: gameId },
+        include: {
+          team: true,
         },
-      }),
-      // Upsert player stats
-      ...playerStats.map((stats) =>
-        prisma.playerStats.upsert({
-          where: {
-            playerId_gameId: {
-              playerId: stats.playerId,
-              gameId,
-            },
-          },
-          create: {
-            playerId: stats.playerId,
-            gameId,
-            points: stats.points,
-            rebounds: stats.rebounds,
-            assists: stats.assists,
-            steals: stats.steals,
-            blocks: stats.blocks,
-            turnovers: stats.turnovers,
-            fouls: stats.fouls,
-            fieldGoalsMade: stats.fieldGoalsMade,
-            fieldGoalsAttempted: stats.fieldGoalsAttempted,
-            threePointersMade: stats.threePointersMade,
-            threePointersAttempted: stats.threePointersAttempted,
-            freeThrowsMade: stats.freeThrowsMade,
-            freeThrowsAttempted: stats.freeThrowsAttempted,
-          },
-          update: {
-            points: stats.points,
-            rebounds: stats.rebounds,
-            assists: stats.assists,
-            steals: stats.steals,
-            blocks: stats.blocks,
-            turnovers: stats.turnovers,
-            fouls: stats.fouls,
-            fieldGoalsMade: stats.fieldGoalsMade,
-            fieldGoalsAttempted: stats.fieldGoalsAttempted,
-            threePointersMade: stats.threePointersMade,
-            threePointersAttempted: stats.threePointersAttempted,
-            freeThrowsMade: stats.freeThrowsMade,
-            freeThrowsAttempted: stats.freeThrowsAttempted,
-          },
-        })
-      ),
+      });
+
+      if (!game) {
+        throw new NotFoundError('Game not found');
+      }
+
+      const playerStats = await this.calculatePlayerStats(gameId, tx);
+
+      if (playerStats.length === 0) {
+        await tx.playerStats.deleteMany({ where: { gameId } });
+        await tx.teamStats.deleteMany({ where: { gameId } });
+        return { teamId: game.teamId, players: 0 };
+      }
+
+      const teamStats = this.calculateTeamTotals(game.teamId, game.team.name, playerStats);
+
+      // Replace the game's player rows in two statements rather than one
+      // upsert per player, to keep the time under the lock short. Same result:
+      // players with no remaining events drop out.
+      await tx.playerStats.deleteMany({ where: { gameId } });
+      await tx.playerStats.createMany({
+        data: playerStats.map((stats) => ({
+          playerId: stats.playerId,
+          gameId,
+          points: stats.points,
+          rebounds: stats.rebounds,
+          assists: stats.assists,
+          steals: stats.steals,
+          blocks: stats.blocks,
+          turnovers: stats.turnovers,
+          fouls: stats.fouls,
+          fieldGoalsMade: stats.fieldGoalsMade,
+          fieldGoalsAttempted: stats.fieldGoalsAttempted,
+          threePointersMade: stats.threePointersMade,
+          threePointersAttempted: stats.threePointersAttempted,
+          freeThrowsMade: stats.freeThrowsMade,
+          freeThrowsAttempted: stats.freeThrowsAttempted,
+        })),
+      });
+
       // Upsert team stats
-      prisma.teamStats.upsert({
+      const teamValues = {
+        points: teamStats.points,
+        rebounds: teamStats.rebounds,
+        assists: teamStats.assists,
+        turnovers: teamStats.turnovers,
+        fieldGoalsMade: teamStats.fieldGoalsMade,
+        fieldGoalsAttempted: teamStats.fieldGoalsAttempted,
+        threePointersMade: teamStats.threePointersMade,
+        threePointersAttempted: teamStats.threePointersAttempted,
+        freeThrowsMade: teamStats.freeThrowsMade,
+        freeThrowsAttempted: teamStats.freeThrowsAttempted,
+        fieldGoalPercentage: teamStats.fieldGoalPercentage,
+        threePointPercentage: teamStats.threePointPercentage,
+        freeThrowPercentage: teamStats.freeThrowPercentage,
+      };
+      await tx.teamStats.upsert({
         where: {
           teamId_gameId: {
             teamId: game.teamId,
             gameId,
           },
         },
-        create: {
-          teamId: game.teamId,
-          gameId,
-          points: teamStats.points,
-          rebounds: teamStats.rebounds,
-          assists: teamStats.assists,
-          turnovers: teamStats.turnovers,
-          fieldGoalsMade: teamStats.fieldGoalsMade,
-          fieldGoalsAttempted: teamStats.fieldGoalsAttempted,
-          threePointersMade: teamStats.threePointersMade,
-          threePointersAttempted: teamStats.threePointersAttempted,
-          freeThrowsMade: teamStats.freeThrowsMade,
-          freeThrowsAttempted: teamStats.freeThrowsAttempted,
-          fieldGoalPercentage: teamStats.fieldGoalPercentage,
-          threePointPercentage: teamStats.threePointPercentage,
-          freeThrowPercentage: teamStats.freeThrowPercentage,
-        },
-        update: {
-          points: teamStats.points,
-          rebounds: teamStats.rebounds,
-          assists: teamStats.assists,
-          turnovers: teamStats.turnovers,
-          fieldGoalsMade: teamStats.fieldGoalsMade,
-          fieldGoalsAttempted: teamStats.fieldGoalsAttempted,
-          threePointersMade: teamStats.threePointersMade,
-          threePointersAttempted: teamStats.threePointersAttempted,
-          freeThrowsMade: teamStats.freeThrowsMade,
-          freeThrowsAttempted: teamStats.freeThrowsAttempted,
-          fieldGoalPercentage: teamStats.fieldGoalPercentage,
-          threePointPercentage: teamStats.threePointPercentage,
-          freeThrowPercentage: teamStats.freeThrowPercentage,
-        },
-      }),
-    ]);
+        create: { teamId: game.teamId, gameId, ...teamValues },
+        update: teamValues,
+      });
+
+      return { teamId: game.teamId, players: playerStats.length };
+    }, { timeout: FINALIZE_TRANSACTION_TIMEOUT_MS });
 
     logger.info('Stats finalized', {
       gameId,
-      teamId: game.teamId,
-      players: playerStats.length,
+      teamId,
+      players,
       duration: Date.now() - startedAt,
     });
   }

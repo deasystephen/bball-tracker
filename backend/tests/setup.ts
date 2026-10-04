@@ -170,6 +170,7 @@ export const mockPrisma = {
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
+    createMany: jest.fn(),
     update: jest.fn(),
     upsert: jest.fn(),
     delete: jest.fn(),
