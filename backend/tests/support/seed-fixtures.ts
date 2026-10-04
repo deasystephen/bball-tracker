@@ -86,8 +86,11 @@ export interface SeededGame {
   opponent: string;
   date: Date;
   status: GameStatus;
-  /** 0 for a SCHEDULED game; a FINISHED game's score is re-derived from its events. */
-  homeScore: number;
+  /**
+   * No `homeScore`: the restore resets it to 0 and a FINISHED game's score is
+   * derived from its events (`seed-resets.ts#writeFinishedGameEvents`), never
+   * written from a fixture.
+   */
   awayScore: number;
   /** For the seed's log line. */
   label: string;
@@ -112,7 +115,6 @@ export function seededGames(now: Date, teams: { warriorsId: string; lakersId: st
       opponent: 'Lakers',
       date: tomorrow,
       status: GameStatus.SCHEDULED,
-      homeScore: 0,
       awayScore: 0,
       label: 'Warriors vs Lakers (Scheduled - tomorrow)',
     },
@@ -122,7 +124,6 @@ export function seededGames(now: Date, teams: { warriorsId: string; lakersId: st
       opponent: 'Celtics',
       date: nextWeek,
       status: GameStatus.SCHEDULED,
-      homeScore: 0,
       awayScore: 0,
       label: 'Warriors vs Celtics (Scheduled - next week)',
     },
@@ -132,7 +133,6 @@ export function seededGames(now: Date, teams: { warriorsId: string; lakersId: st
       opponent: 'Heat',
       date: lastWeek,
       status: GameStatus.FINISHED,
-      homeScore: heat.home,
       awayScore: heat.away,
       label: `Warriors vs Heat (Finished - ${heat.home}-${heat.away})`,
     },
@@ -142,7 +142,6 @@ export function seededGames(now: Date, teams: { warriorsId: string; lakersId: st
       opponent: 'Warriors',
       date: tomorrow,
       status: GameStatus.SCHEDULED,
-      homeScore: 0,
       awayScore: 0,
       label: 'Lakers vs Warriors (Scheduled - tomorrow)',
     },
@@ -152,7 +151,6 @@ export function seededGames(now: Date, teams: { warriorsId: string; lakersId: st
       opponent: 'Suns',
       date: lastWeek,
       status: GameStatus.FINISHED,
-      homeScore: suns.home,
       awayScore: suns.away,
       label: `Lakers vs Suns (Finished - ${suns.home}-${suns.away})`,
     },

@@ -27,7 +27,7 @@
  * when its name ends in `-` plus 8 hex characters.
  */
 
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 
 export const TEST_EMAIL_DOMAIN = 'example.test';
 
@@ -130,29 +130,44 @@ export async function findTestRows(db: Db, scope: TestRowScope): Promise<TestRow
   };
 }
 
+/** What `deleteUsersWhere` removed. */
+export interface DeletedUsers {
+  users: number;
+  invitations: number;
+}
+
+/**
+ * Hard-deletes the users `where` matches, after the invitations they SENT.
+ *
+ * `invitedById` is ON DELETE RESTRICT on both `TeamInvitation` and
+ * `GuardianInvitation` (the only RESTRICT foreign keys onto `User`; every other
+ * relation cascades or sets null), so those rows have to go first or the user
+ * delete fails with P2003 (#783). Opens no transaction of its own, so it also
+ * runs on a transaction client: a caller that needs the three deletes atomic
+ * runs it inside `$transaction`.
+ */
+export async function deleteUsersWhere(
+  db: Pick<PrismaClient, 'user' | 'teamInvitation' | 'guardianInvitation'>,
+  where: Prisma.UserWhereInput
+): Promise<DeletedUsers> {
+  const guardianInvitations = await db.guardianInvitation.deleteMany({ where: { invitedBy: where } });
+  const teamInvitations = await db.teamInvitation.deleteMany({ where: { invitedBy: where } });
+  const users = await db.user.deleteMany({ where });
+  return { users: users.count, invitations: guardianInvitations.count + teamInvitations.count };
+}
+
 /** Removes the rows a scope covers, in the order the foreign keys allow. */
 export async function removeTestRows(db: Db, scope: TestRowScope): Promise<RemovedTestRows> {
   assertNotProductionDatabase();
   const { userIds, leagueIds, teamIds, lineageIds } = await findTestRows(db, scope);
 
-  // `invitedById` has no cascade on either invitation table, so these go first.
+  // Invitations TO the run's users or on its teams; the ones its users SENT go
+  // with the users, in deleteUsersWhere.
   const guardianInvitations = await db.guardianInvitation.deleteMany({
-    where: {
-      OR: [
-        { invitedById: { in: userIds } },
-        { childId: { in: userIds } },
-        { teamId: { in: teamIds } },
-      ],
-    },
+    where: { OR: [{ childId: { in: userIds } }, { teamId: { in: teamIds } }] },
   });
   const teamInvitations = await db.teamInvitation.deleteMany({
-    where: {
-      OR: [
-        { invitedById: { in: userIds } },
-        { playerId: { in: userIds } },
-        { teamId: { in: teamIds } },
-      ],
-    },
+    where: { OR: [{ playerId: { in: userIds } }, { teamId: { in: teamIds } }] },
   });
 
   const games = await db.game.deleteMany({ where: { teamId: { in: teamIds } } });
@@ -162,13 +177,13 @@ export async function removeTestRows(db: Db, scope: TestRowScope): Promise<Remov
   await db.team.deleteMany({ where: { id: { in: teamIds } } });
   // A lineage survives its teams; remove the ones nothing refers to any more.
   await db.teamLineage.deleteMany({ where: { id: { in: lineageIds }, teams: { none: {} } } });
-  const users = await db.user.deleteMany({ where: { id: { in: userIds } } });
+  const users = await deleteUsersWhere(db, { id: { in: userIds } });
 
   return {
-    users: users.count,
+    users: users.users,
     leagues: leagues.count,
     teams: teamIds.length,
     games: games.count,
-    invitations: guardianInvitations.count + teamInvitations.count,
+    invitations: guardianInvitations.count + teamInvitations.count + users.invitations,
   };
 }

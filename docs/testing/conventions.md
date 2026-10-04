@@ -96,11 +96,15 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - **The seed's logic lives in `tests/support/`, not in `prisma/seed.ts`.** `prisma/*.ts` is outside
   `tsc` and ESLint and no test runs the seed, so anything in it that must agree with service code
   goes in `seed-fixtures.ts` (fixed ids, event logs, seeded games; pure) or `seed-resets.ts`
-  (database resets: tombstone sweep, seeded-game restore, finished-game events), and the seed calls
-  service functions (`createDefaultTeamRoles`, `computeHomeScore`) instead of copying them (#787).
-  `seed-fixtures.test.ts` pins the data and scans the seed's source for copies;
-  `tests/integration/seed-resets.db.test.ts` runs the resets on run-id rows. A reset that sweeps
-  globally takes a scope, so its test touches only its own rows.
+  (database resets: tombstone sweep, flow-created managed players, default roles, seeded-game
+  restore, finished-game events under `lockGameRow`), and those call service functions
+  (`createDefaultTeamRoles`, `computeHomeScore`) instead of copying them (#787). No fixture carries
+  a `homeScore`. `seed-fixtures.test.ts` pins the data and only checks that the seed imports the
+  resets; `tests/integration/seed-resets.db.test.ts` proves what the resets do, on run-id rows. A
+  reset that sweeps globally takes a scope, so its test touches only its own rows.
+- **Hard-deleting users goes through `test-leftovers.ts#deleteUsersWhere`**: it deletes the
+  invitations they sent first (both `invitedById` foreign keys are `RESTRICT`, #783).
+  `removeTestRows` and the seed's tombstone and managed-player resets use it.
 
 ## Migration backfill guard (#493)
 - `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The

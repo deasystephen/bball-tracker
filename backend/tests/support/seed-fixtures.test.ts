@@ -1,12 +1,13 @@
 /**
- * Pins the seed to service code (#787) and to its own fixture lists (#782, #788).
+ * Pins the seed's fixture data (#782, #787, #788).
  *
  * `prisma/seed.ts` is outside the `tsc` and ESLint scope and nothing runs it
- * in CI, so a copy of service logic inside it drifts silently. It used to
- * carry its own `createDefaultTeamRoles` and hand-written `homeScore`
- * literals. This suite checks that the seeded event logs still add up to the
- * documented scores under the production scoring rule, and reads the seed's
- * source to check it calls the service functions instead of copying them.
+ * in CI. This suite checks the pure data in `seed-fixtures.ts`: the seeded
+ * event logs add up to the documented scores under the production scoring
+ * rule, the seeded games are the five fixed ids, the managed-player ids are
+ * real UUIDs. It reads the seed's source only to check that it imports the
+ * shared resets; what those resets do is proven against Postgres in
+ * `tests/integration/seed-resets.db.test.ts`.
  */
 
 import fs from 'fs';
@@ -16,7 +17,6 @@ import { computeHomeScore } from '../../src/services/game-event-service';
 import {
   BRYCE_JAMES_ID,
   FINISHED_GAME_SCORES,
-  LAKERS_MANAGED_IDS,
   SEED_IDS,
   SEEDED_GAME_IDS,
   SEEDED_LAKERS_MANAGED_IDS,
@@ -79,19 +79,21 @@ describe('seededGames', () => {
     expect(games.map((game) => game.id).sort()).toEqual([...SEEDED_GAME_IDS].sort());
   });
 
-  it('scheduled games are in the future with no score; finished ones carry the documented scores', () => {
+  it('scheduled games are in the future with no score; finished ones carry the documented away scores', () => {
     for (const game of games) {
       if (game.status === GameStatus.SCHEDULED) {
         expect(game.date.getTime()).toBeGreaterThan(now.getTime());
-        expect([game.homeScore, game.awayScore]).toEqual([0, 0]);
+        expect(game.awayScore).toBe(0);
       } else {
         expect(game.status).toBe(GameStatus.FINISHED);
         expect(game.date.getTime()).toBeLessThan(now.getTime());
       }
     }
     const byId = new Map(games.map((game) => [game.id, game]));
-    expect(byId.get(SEED_IDS.WARRIORS_VS_HEAT_GAME)).toMatchObject({ homeScore: 112, awayScore: 105 });
-    expect(byId.get(SEED_IDS.LAKERS_VS_SUNS_GAME)).toMatchObject({ homeScore: 98, awayScore: 102 });
+    expect(byId.get(SEED_IDS.WARRIORS_VS_HEAT_GAME)).toMatchObject({ awayScore: 105 });
+    expect(byId.get(SEED_IDS.LAKERS_VS_SUNS_GAME)).toMatchObject({ awayScore: 102 });
+    // No fixture carries a home score: it is derived from the events.
+    expect(games.every((game) => !('homeScore' in game))).toBe(true);
   });
 });
 
@@ -102,32 +104,25 @@ describe('seeded Lakers managed players (#782)', () => {
     expect(SEEDED_LAKERS_MANAGED_IDS.every((id) => UUID.test(id))).toBe(true);
     expect(SEEDED_LAKERS_MANAGED_IDS).toContain(BRYCE_JAMES_ID);
   });
-
-  it('the seed creates them by these ids and excludes exactly this list from the reset', () => {
-    for (const key of Object.keys(LAKERS_MANAGED_IDS)) {
-      expect(SEED_SOURCE).toContain(`LAKERS_MANAGED_IDS.${key}`);
-    }
-    expect(SEED_SOURCE).toMatch(/id:\s*\{\s*notIn:\s*\[\.\.\.SEEDED_LAKERS_MANAGED_IDS\]\s*\}/);
-    expect(SEED_SOURCE).not.toMatch(/NOT:\s*\{\s*id:\s*\{\s*startsWith:\s*'managed-'/);
-  });
 });
 
-describe('prisma/seed.ts uses service code (#787)', () => {
-  it('creates default team roles with the service function, not a local copy', () => {
-    expect(SEED_SOURCE).toMatch(/import \{ createDefaultTeamRoles \} from '\.\.\/src\/utils\/permissions';/);
-    expect(SEED_SOURCE).not.toMatch(/function createDefaultTeamRoles\s*\(/);
-    expect(SEED_SOURCE).not.toMatch(/teamRole\.createMany/);
-  });
+/** Names the seed imports from a module, read from its import statements. */
+function importedFrom(source: string, module: string): string[] {
+  const escaped = module.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const match = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'${escaped}'`).exec(source);
+  return match ? match[1].split(',').map((name) => name.trim()).filter(Boolean) : [];
+}
 
-  it('never writes a hand-picked home score', () => {
-    expect(SEED_SOURCE).not.toMatch(/homeScore:\s*\d/);
-    expect(SEED_SOURCE).toMatch(/writeFinishedGameEvents\(prisma, SEED_IDS\.WARRIORS_VS_HEAT_GAME/);
-    expect(SEED_SOURCE).toMatch(/writeFinishedGameEvents\(prisma, SEED_IDS\.LAKERS_VS_SUNS_GAME/);
-  });
-
-  it('restores the seeded games and sweeps tombstones through the shared resets', () => {
-    expect(SEED_SOURCE).toMatch(/restoreSeededGames\(prisma, games\)/);
-    expect(SEED_SOURCE).toMatch(/removeTombstones\(prisma\)/);
-    expect(SEED_SOURCE).not.toMatch(/user\.deleteMany\(\{\s*where:\s*\{\s*deletedAt/);
+describe('prisma/seed.ts imports the shared resets (#782, #783, #787, #788)', () => {
+  it('imports every reset from tests/support/seed-resets', () => {
+    expect(importedFrom(SEED_SOURCE, '../tests/support/seed-resets')).toEqual(
+      expect.arrayContaining([
+        'ensureDefaultTeamRoles',
+        'removeFlowCreatedManagedPlayers',
+        'removeTombstones',
+        'restoreSeededGames',
+        'writeFinishedGameEvents',
+      ])
+    );
   });
 });

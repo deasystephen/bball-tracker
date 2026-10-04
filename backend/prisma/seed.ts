@@ -6,35 +6,27 @@
 import { PrismaClient, UserRole, GuardianRelationship, SubscriptionTier } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { createDefaultTeamRoles } from '../src/utils/permissions';
+import { StatsService } from '../src/services/stats-service';
 import { removeTestRows } from '../tests/support/test-leftovers';
 import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
 import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
   SEED_IDS,
-  SEEDED_LAKERS_MANAGED_IDS,
   lakersVsSunsEvents,
   seededGames,
   warriorsVsHeatEvents,
 } from '../tests/support/seed-fixtures';
-import { removeTombstones, restoreSeededGames, writeFinishedGameEvents } from '../tests/support/seed-resets';
+import {
+  ensureDefaultTeamRoles,
+  removeFlowCreatedManagedPlayers,
+  removeTombstones,
+  restoreSeededGames,
+  writeFinishedGameEvents,
+} from '../tests/support/seed-resets';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
-
-/**
- * The team's three default roles, created by the same function
- * `TeamService.createTeam` uses (#787), so the seeded Warriors and Lakers carry
- * exactly the flags a team created through the API gets. Only on a team that
- * has no roles yet: the service function has no `skipDuplicates`, and the
- * seeded TeamStaff rows point at the existing roles.
- */
-async function ensureDefaultTeamRoles(teamId: string): Promise<void> {
-  if ((await prisma.teamRole.count({ where: { teamId } })) === 0) {
-    await createDefaultTeamRoles(teamId, prisma);
-  }
-}
 
 async function main() {
   // Seed data includes live bearer secrets (invitation tokens honored by the
@@ -181,20 +173,14 @@ async function main() {
   // ...and the managed players roster flows add to his Lakers (E2E Test
   // Player from roster-management.yaml). Guarded to flow-created rows: the
   // SEEDED Lakers managed players are the fixed UUIDs in
-  // SEEDED_LAKERS_MANAGED_IDS (tests/support/seed-fixtures.ts) and are upserted
-  // below; never widen this to all of Frank's managed players (#782: a dead
+  // SEEDED_LAKERS_MANAGED_IDS (tests/support/seed-fixtures.ts), which
+  // removeFlowCreatedManagedPlayers keeps, and are upserted below; never
+  // widen this to all of Frank's managed players (#782: a dead
   // prefix guard hard-deleted all six fixtures on every reseed, cascading
   // their stats and RSVPs on games the seed does not rebuild).
-  const staleFrankManaged = await prisma.user.deleteMany({
-    where: {
-      managedById: coachFrank.id,
-      isManaged: true,
-      deletedAt: null,
-      id: { notIn: [...SEEDED_LAKERS_MANAGED_IDS] },
-    },
-  });
-  if (staleFrankManaged.count > 0) {
-    console.log(`    Removed ${staleFrankManaged.count} flow-created managed player(s) from a previous E2E run`);
+  const staleFrankManaged = await removeFlowCreatedManagedPlayers(prisma, coachFrank.id);
+  if (staleFrankManaged > 0) {
+    console.log(`    Removed ${staleFrankManaged} flow-created managed player(s) from a previous E2E run`);
   }
 
   const assistantMike = await prisma.user.upsert({
@@ -500,7 +486,9 @@ async function main() {
   console.log(`  Created team: ${warriors.name}`);
 
   // Create default roles for Warriors
-  await ensureDefaultTeamRoles(warriors.id);
+  // Same function TeamService.createTeam uses (#787); creates only the
+  // default roles the team lacks, so the staff rows below always find theirs.
+  await ensureDefaultTeamRoles(prisma, warriors.id);
   console.log(`    Created default roles for ${warriors.name}`);
 
   // Get the head coach and assistant coach roles
@@ -597,7 +585,7 @@ async function main() {
   console.log(`  Created team: ${lakers.name}`);
 
   // Create default roles for Lakers
-  await ensureDefaultTeamRoles(lakers.id);
+  await ensureDefaultTeamRoles(prisma, lakers.id);
   console.log(`    Created default roles for ${lakers.name}`);
 
   const lakersHeadCoachRole = await prisma.teamRole.findUnique({
@@ -875,8 +863,6 @@ async function main() {
   // =========================================================================
   console.log('\nCalculating stats for finished games...');
 
-  // Import the stats service dynamically to avoid circular dependency
-  const { StatsService } = await import('../src/services/stats-service');
 
   try {
     await StatsService.finalizeGameStats(SEED_IDS.WARRIORS_VS_HEAT_GAME);
