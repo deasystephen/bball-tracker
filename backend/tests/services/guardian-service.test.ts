@@ -3,6 +3,7 @@
  */
 
 import { GuardianService } from '../../src/services/guardian-service';
+import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
 import { createAdmin, createCoach, createPlayer, createTeam, createUser } from '../factories';
 import {
@@ -635,7 +636,7 @@ describe('GuardianService', () => {
 
     it('creates the Guardian link (primary when first) and promotes a bare PLAYER account to PARENT', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PLAYER' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PLAYER' });
       const tx = setTx();
 
       const result = await GuardianService.acceptInvitationByToken('tok');
@@ -658,7 +659,7 @@ describe('GuardianService', () => {
 
     it('is not primary when the child already has a guardian', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-2', role: 'PARENT' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-2', role: 'PARENT' });
       setTx({ guardianCount: 1 });
 
       const result = await GuardianService.acceptInvitationByToken('tok');
@@ -668,7 +669,7 @@ describe('GuardianService', () => {
 
     it('keeps a COACH account as COACH', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'coach-2', role: 'COACH' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'coach-2', role: 'COACH' });
       const tx = setTx();
 
       await GuardianService.acceptInvitationByToken('tok');
@@ -679,7 +680,7 @@ describe('GuardianService', () => {
 
     it('keeps a PLAYER who is rostered somewhere as PLAYER', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'player-2', role: 'PLAYER' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'player-2', role: 'PLAYER' });
       const tx = setTx({ memberships: 1 });
 
       await GuardianService.acceptInvitationByToken('tok');
@@ -689,7 +690,7 @@ describe('GuardianService', () => {
 
     it('keeps a PLAYER who is team staff as PLAYER', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'player-2', role: 'PLAYER' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'player-2', role: 'PLAYER' });
       const tx = setTx({ staffRows: 1 });
 
       await GuardianService.acceptInvitationByToken('tok');
@@ -699,7 +700,7 @@ describe('GuardianService', () => {
 
     it('reuses an existing Guardian link instead of creating a duplicate', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PARENT' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PARENT' });
       const existing = { id: 'g-old', parentId: 'parent-1', childId: CHILD_ID, relationship: 'OTHER', isPrimary: true };
       const tx = setTx({ existingLink: existing });
 
@@ -709,9 +710,30 @@ describe('GuardianService', () => {
       expect(result.guardian.id).toBe('g-old');
     });
 
+    it('resolves the adult with emailEquals (case-insensitive, escaped), never an exact-case lookup (#663)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow({ invitedEmail: 'pat_lee@test.com' }));
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'u1-mixed-case', role: 'COACH' });
+      const tx = setTx();
+
+      const result = await GuardianService.acceptInvitationByToken('tok');
+
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
+        where: { email: emailEquals('pat_lee@test.com'), deletedAt: null },
+        select: { id: true, role: true },
+      });
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ email: expect.anything() }) })
+      );
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(result.guardian.parentId).toBe('u1-mixed-case');
+      expect(tx.guardian.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ parentId: 'u1-mixed-case' }) })
+      );
+    });
+
     it('creates the PARENT account when none exists for the invited email', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'parent-new', role: 'PARENT' });
       setTx();
 
@@ -723,9 +745,49 @@ describe('GuardianService', () => {
       expect(result.guardian.parentId).toBe('parent-new');
     });
 
+    it('reuses the row that won a concurrent create (P2002) instead of failing (#663)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'parent-winner', role: 'PARENT' });
+      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`email`)',
+        { code: 'P2002', clientVersion: 'test' }
+      );
+      (mockPrisma.user.create as jest.Mock).mockRejectedValue(p2002);
+      setTx();
+
+      const result = await GuardianService.acceptInvitationByToken('tok');
+
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledTimes(2);
+      expect(result.guardian.parentId).toBe('parent-winner');
+    });
+
+    it('rethrows a create failure that is not P2002', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.create as jest.Mock).mockRejectedValue(new Error('db down'));
+      setTx();
+
+      await expect(GuardianService.acceptInvitationByToken('tok')).rejects.toThrow('db down');
+    });
+
+    it('rethrows P2002 when the winner row still cannot be found', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`email`)',
+        { code: 'P2002', clientVersion: 'test' }
+      );
+      (mockPrisma.user.create as jest.Mock).mockRejectedValue(p2002);
+      setTx();
+
+      await expect(GuardianService.acceptInvitationByToken('tok')).rejects.toBe(p2002);
+    });
+
     it('returns 400 (not 500) when a concurrent accept already moved it out of PENDING', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PARENT' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PARENT' });
       const tx = setTx({ updateCount: 0 });
 
       try {
@@ -774,9 +836,12 @@ describe('GuardianService', () => {
       }
     });
 
-    it('acceptInvitation accepts for the addressee (case-insensitive email match)', async () => {
+    it('acceptInvitation links the verified caller: a mixed-case stored address never creates a second account (#663)', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      // assertAddressee reads the caller by id; the stored address differs from
+      // invitedEmail only in case, which the exact-case lookup used to miss.
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-1', email: 'PARENT@test.com', role: 'PARENT' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PARENT' });
       const tx = {
         guardianInvitation: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -785,7 +850,7 @@ describe('GuardianService', () => {
         guardian: {
           findUnique: jest.fn().mockResolvedValue(null),
           count: jest.fn().mockResolvedValue(0),
-          create: jest.fn().mockResolvedValue({ id: 'g', parentId: 'parent-1', childId: CHILD_ID, relationship: 'MOTHER', isPrimary: true }),
+          create: jest.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'g', ...data })),
         },
         user: { update: jest.fn() },
       };
@@ -794,7 +859,33 @@ describe('GuardianService', () => {
       const result = await GuardianService.acceptInvitation('inv-1', 'parent-1');
 
       expect(result.guardian.id).toBe('g');
+      expect(result.guardian.parentId).toBe('parent-1');
+      expect(tx.guardian.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ parentId: 'parent-1' }) })
+      );
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      // The caller is resolved by id, never a second time by email.
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'parent-1', deletedAt: null },
+        select: { id: true, role: true },
+      });
       expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it('acceptInvitation throws NotFoundError when the verified caller was deleted in the meantime', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'parent-1', email: 'parent@test.com', role: 'PARENT' });
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+      try {
+        await GuardianService.acceptInvitation('inv-1', 'parent-1');
+        fail('expected to throw');
+      } catch (err) {
+        expectNotFoundError(err, 'User not found');
+      }
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('rejectInvitation marks the invitation REJECTED for the addressee', async () => {

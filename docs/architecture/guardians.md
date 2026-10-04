@@ -28,7 +28,14 @@ Removing the last guardian never deletes the child.
   `{ kind: 'guardian', invitation, guardian }` — acceptance creates the `Guardian` row inside one
   `$transaction` guarded by `updateMany … WHERE status = 'PENDING'` (loser of a race gets 400).
   Authenticated `POST /invitations/:id/accept|reject` try the id as a `GuardianInvitation` first and require
-  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too.
+  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too. **Which account
+  the link lands on (#663):** the authenticated path uses the verified caller's id as `parentId` and never
+  looks the adult up by email again; the by-token path resolves the adult exactly as invite time did,
+  `findFirst({ email: emailEquals(invitedEmail), deletedAt: null })`, and only when nothing matches
+  creates the PARENT account, with the same P2002 catch-and-reuse as `inviteGuardian`. Accept therefore
+  never creates a second account for an address that already has one in a different case (`User.email`
+  is byte-unique only; `POST /players` and `syncUser` store the address as given). Proven against
+  Postgres in `tests/integration/email-match.db.test.ts` (Guardian invitations).
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).

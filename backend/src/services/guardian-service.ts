@@ -9,7 +9,7 @@
  * returned on an authenticated response.
  */
 
-import { GuardianRelationship, Prisma } from '@prisma/client';
+import { GuardianRelationship, Prisma, UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
@@ -524,7 +524,8 @@ export class GuardianService {
 
   /**
    * Accept by token (unauthenticated; the token is the secret). The guardian
-   * is the account whose email the invitation was addressed to.
+   * is the account whose email the invitation was addressed to, resolved the
+   * same way invite time resolved it (`emailEquals`, #663).
    */
   static async acceptInvitationByToken(token: string): Promise<AcceptGuardianInvitationResult> {
     const invitation = await prisma.guardianInvitation.findUnique({ where: { token } });
@@ -538,14 +539,15 @@ export class GuardianService {
 
   /**
    * Authenticated accept by id: the caller must be the invited adult (their
-   * account email matches `invitedEmail`).
+   * account email matches `invitedEmail`). The caller IS the guardian: the
+   * verified id is used as `parentId`, never a second lookup by email (#663).
    */
   static async acceptInvitation(
     invitationId: string,
     userId: string
   ): Promise<AcceptGuardianInvitationResult> {
     const invitation = await this.requireInvitedUser(invitationId, userId);
-    return this.accept(invitation);
+    return this.accept(invitation, userId);
   }
 
   /**
@@ -614,8 +616,74 @@ export class GuardianService {
     }
   }
 
+  /**
+   * Shared accept. `verifiedParentId` is the caller of the authenticated path,
+   * already proven to be the addressee by `assertAddressee`; the by-token path
+   * has no caller and resolves the adult by address.
+   */
+  /**
+   * The account the invitation lands on (#663).
+   *
+   * Invite time matched an existing account with `emailEquals` and stored the
+   * lower-cased address; an exact-case `findUnique` here resolved a mixed-case
+   * stored row to nothing and created a second PARENT account for the same
+   * address (`User.email` is byte-unique only), so the real account never saw
+   * the child. So: the verified caller by id when there is one, otherwise the
+   * same `emailEquals` match as invite time, and only then a fallback create
+   * (a retry after a partial failure, or a later sign-up), with the same P2002
+   * catch-and-reuse as `inviteGuardian`. A tombstone has `email: null`, so
+   * `deletedAt IS NULL` is implied; it is spelled out anyway.
+   */
+  private static async resolveAcceptingParent(
+    invitedEmail: string,
+    verifiedParentId: string | undefined
+  ): Promise<{ id: string; role: UserRole }> {
+    const select = { id: true, role: true } as const;
+
+    if (verifiedParentId) {
+      const caller = await prisma.user.findFirst({
+        where: { id: verifiedParentId, deletedAt: null },
+        select,
+      });
+      if (!caller) {
+        throw new NotFoundError('User not found');
+      }
+      return caller;
+    }
+
+    const byEmail = (): Promise<{ id: string; role: UserRole } | null> =>
+      prisma.user.findFirst({ where: { email: emailEquals(invitedEmail), deletedAt: null }, select });
+
+    const existing = await byEmail();
+    if (existing) {
+      return existing;
+    }
+
+    try {
+      return await prisma.user.create({
+        data: {
+          name: invitedEmail.split('@')[0],
+          email: invitedEmail,
+          role: 'PARENT',
+          emailVerified: false,
+        },
+        select,
+      });
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+        throw err;
+      }
+      const winner = await byEmail();
+      if (!winner) {
+        throw err;
+      }
+      return winner;
+    }
+  }
+
   private static async accept(
-    invitation: Prisma.GuardianInvitationGetPayload<object>
+    invitation: Prisma.GuardianInvitationGetPayload<object>,
+    verifiedParentId?: string
   ): Promise<AcceptGuardianInvitationResult> {
     if (invitation.status === 'ACCEPTED') {
       throw new BadRequestError('This invitation has already been accepted');
@@ -631,23 +699,7 @@ export class GuardianService {
       throw new BadRequestError('This invitation has expired');
     }
 
-    // The adult's account was created (or matched) at invite time; a retry
-    // after a partial failure, or a later sign-up, may still need it created.
-    let parent = await prisma.user.findUnique({
-      where: { email: invitation.invitedEmail },
-      select: { id: true, role: true },
-    });
-    if (!parent) {
-      parent = await prisma.user.create({
-        data: {
-          name: invitation.invitedEmail.split('@')[0],
-          email: invitation.invitedEmail,
-          role: 'PARENT',
-          emailVerified: false,
-        },
-        select: { id: true, role: true },
-      });
-    }
+    const parent = await this.resolveAcceptingParent(invitation.invitedEmail, verifiedParentId);
     const parentId = parent.id;
 
     return prisma.$transaction(async (tx) => {
