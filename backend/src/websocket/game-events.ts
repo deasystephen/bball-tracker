@@ -29,7 +29,7 @@ import prisma from '../models';
 import { canAccessTeam } from '../utils/permissions';
 import { WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
-import { ServiceUnavailableError } from '../utils/errors';
+import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
   RATE_LIMITED_MESSAGE,
   checkHandshakeAllowed,
@@ -149,11 +149,23 @@ export async function authenticateSocket(
     next();
   } catch (error) {
     logger.error('Socket authentication failed', {
+      socketId: socket.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    // A JWKS/WorkOS outage is not a rejected token — tell the client so it
-    // can retry instead of logging out.
-    next(new Error(error instanceof ServiceUnavailableError ? 'Service unavailable' : 'Unauthorized'));
+    // A rejected token returns null from resolveSocketUser and never throws, so
+    // a throw is either an expected client error (a 4xx AppError, kept out of
+    // Sentry like the REST path does) or an outage/defect: JWKS unreachable,
+    // the database failing over. Middleware errors never reach the Express
+    // chain (sentryErrorHandler), so report the latter here, the way the REST
+    // path reports the same ServiceUnavailableError as a 503 (#672).
+    if (isExpectedClientError(error)) {
+      next(new Error('Unauthorized'));
+      return;
+    }
+    captureException(error, { flow: 'socket-auth', socketId: socket.id });
+    // An outage is not a rejected token — tell the client so it backs off and
+    // retries instead of refreshing its credentials and logging out.
+    next(new Error('Service unavailable'));
   }
 }
 

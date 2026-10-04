@@ -131,7 +131,9 @@ What exists today (as built; the runbook is `../runbooks/on-call.md`):
   forwards them to Datadog. Query `service:bball-tracker-api`; every line inside a request carries
   `requestId` and `userId`, domain events carry entity ids, and `LOG_LEVEL` (default `info`, in
   `infra/task-definition.json`) is the threshold. Detail: `backend-services.md#logging`.
-- **Errors**: Sentry, backend project (Express error handler, health check, socket auth) and mobile
+- **Errors**: Sentry. Backend project: the Express error handler, the health check, the socket
+  handshake (outages only, not rejected tokens), the auth routes, account deletion and the SES
+  event consumer, each explicit capture tagged `flow`. Mobile
   project (`ErrorBoundary`, auth and onboarding flows, and since #617 every network failure and 5xx
   from the API client, tagged `endpoint_pattern` / `status`, plus http, socket and log breadcrumbs).
   URLs are redacted on both sides before they leave the process.
