@@ -25,6 +25,7 @@ import {
   Card,
 } from '../../../components';
 import { useToast } from '../../../components/Toast';
+import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import { useTeam, canManageStaff } from '../../../hooks/useTeams';
 import {
   useTeamStaff,
@@ -76,6 +77,7 @@ export default function TeamStaffScreen() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | undefined>();
   const [roleType, setRoleType] = useState<StaffRoleType>('ASSISTANT_COACH');
+  const [roleMenuRow, setRoleMenuRow] = useState<TeamStaffRow | null>(null);
 
   const canManage = canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
 
@@ -109,23 +111,22 @@ export default function TeamStaffScreen() {
     }
   };
 
-  const handleChangeRole = (row: TeamStaffRow) => {
-    const options = STAFF_ROLE_TYPES.filter((type) => type !== row.role.type).map((type) => ({
-      text: t(ROLE_LABEL_KEY[type]),
-      onPress: async () => {
-        try {
-          await updateRole.mutateAsync({ teamId: id, userId: row.userId, roleType: type });
-          toast.showToast(t('teams.roleUpdated'), 'success');
-        } catch (err) {
-          toast.showToast(getApiErrorMessage(err, t('teams.roleUpdateFailed')), 'error');
-        }
-      },
-    }));
-    Alert.alert(t('teams.changeRoleTitle', { name: displayName(row.user) }), undefined, [
-      ...options,
-      { text: t('common.cancel'), style: 'cancel' },
-    ]);
+  const changeRole = async (row: TeamStaffRow, type: StaffRoleType) => {
+    try {
+      await updateRole.mutateAsync({ teamId: id, userId: row.userId, roleType: type });
+      toast.showToast(t('teams.roleUpdated'), 'success');
+    } catch (err) {
+      toast.showToast(getApiErrorMessage(err, t('teams.roleUpdateFailed')), 'error');
+    }
   };
+
+  // Per-row role chooser: an ActionMenu, never an Alert list (Android keeps
+  // only three Alert buttons). The sheet brings its own Close item.
+  const roleMenuItemsFor = (row: TeamStaffRow): ActionMenuItem[] =>
+    STAFF_ROLE_TYPES.filter((type) => type !== row.role.type).map((type) => ({
+      label: t(ROLE_LABEL_KEY[type]),
+      onPress: () => void changeRole(row, type),
+    }));
 
   const handleRemove = (row: TeamStaffRow, isSelf: boolean) => {
     Alert.alert(
@@ -313,7 +314,7 @@ export default function TeamStaffScreen() {
                   <View style={styles.rowActions}>
                     {canManage && (
                       <TouchableOpacity
-                        onPress={() => handleChangeRole(row)}
+                        onPress={() => setRoleMenuRow(row)}
                         style={styles.rowButton}
                         accessibilityRole="button"
                         accessibilityLabel={`${t('teams.changeRole')}: ${displayName(row.user)}`}
@@ -350,6 +351,13 @@ export default function TeamStaffScreen() {
           </ThemedText>
         )}
       </ScrollView>
+
+      <ActionMenu
+        visible={roleMenuRow !== null}
+        title={roleMenuRow ? t('teams.changeRoleTitle', { name: displayName(roleMenuRow.user) }) : ''}
+        items={roleMenuRow ? roleMenuItemsFor(roleMenuRow) : []}
+        onClose={() => setRoleMenuRow(null)}
+      />
     </ThemedView>
   );
 }

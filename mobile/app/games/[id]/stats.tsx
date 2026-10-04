@@ -174,7 +174,6 @@ export default function GameStatsScreen() {
             borderBottomColor: colors.border,
           },
         ]}
-        // @ts-ignore - web-specific attribute for print hiding
         data-hide-on-print="true"
       >
         <TouchableOpacity

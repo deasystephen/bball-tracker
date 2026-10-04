@@ -184,7 +184,7 @@ export default function AnnouncementThreadScreen() {
         </ThemedText>
         <View style={styles.announcementMeta}>
           <ThemedText variant="footnote" color="textTertiary">
-            {announcement.author.name}
+            {displayName(announcement.author)}
           </ThemedText>
           <ThemedText variant="footnote" color="textTertiary">
             {formatRelativeTime(announcement.createdAt, t)}

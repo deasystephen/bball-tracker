@@ -8,6 +8,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 import AnnouncementThreadScreen from '../../app/teams/[id]/announcements/[announcementId]';
 import { useAuthStore } from '../../store/auth-store';
+import { i18n } from '../../i18n';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
 import type { Announcement } from '../../hooks/useAnnouncements';
 import type { AnnouncementReply } from '../../hooks/useAnnouncementReplies';
@@ -137,6 +138,24 @@ describe('AnnouncementThreadScreen', () => {
     expect(getByText('See you there')).toBeTruthy();
     expect(getByText('Anthony Davis')).toBeTruthy();
     expect(getByText('Running late')).toBeTruthy();
+  });
+
+  it('names a deleted announcement author with the localized label, never the stored literal (#674)', async () => {
+    signIn('lebron');
+    mockAnnouncement = {
+      ...announcement,
+      author: { id: 'coach-1', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z' },
+    };
+    mockReplies = [];
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(<AnnouncementThreadScreen />);
+
+      expect(getByText('Usuario eliminado')).toBeTruthy();
+      expect(queryByText('Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('shows the empty state and a singular count when there are no replies', () => {

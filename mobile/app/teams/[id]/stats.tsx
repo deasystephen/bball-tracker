@@ -107,7 +107,6 @@ export default function TeamStatsScreen() {
             borderBottomColor: colors.border,
           },
         ]}
-        // @ts-ignore - web-specific attribute
         data-hide-on-print="true"
       >
         <TouchableOpacity

@@ -28,6 +28,7 @@ import { getGamePermissions } from '../../../utils/game-permissions';
 import { useToast } from '../../../components/Toast';
 import { spacing } from '../../../theme';
 import { formatShotDescription } from '../../../utils/shot-label';
+import { getGameResult } from '../../../utils/game-result';
 import type { ShotMetadata } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
 
@@ -362,7 +363,7 @@ export default function TrackGameScreen() {
             });
 
             // Confetti on win
-            if (homeScore > opponentScore) {
+            if (getGameResult(homeScore, opponentScore) === 'W') {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               setShowConfetti(true);
               setTimeout(() => {
