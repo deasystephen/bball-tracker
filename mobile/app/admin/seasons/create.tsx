@@ -103,7 +103,7 @@ export default function CreateSeasonScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + spacing.md, paddingHorizontal: padding }]}>
           <BackButton onPress={() => router.back()} style={styles.backButton} />
-          <ThemedText variant="h2">Create Season</ThemedText>
+          <ThemedText variant="h2" heading>Create Season</ThemedText>
         </View>
         <View style={styles.errorContainer}>
           <ThemedText variant="body" color="error">
@@ -136,7 +136,7 @@ export default function CreateSeasonScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">Create Season</ThemedText>
+          <ThemedText variant="h2" heading>Create Season</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             for {league.name}
           </ThemedText>

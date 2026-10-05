@@ -190,7 +190,7 @@ export default function TeamStaffScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">{t('teams.staff')}</ThemedText>
+          <ThemedText variant="h2" heading>{t('teams.staff')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {team.name}
           </ThemedText>
@@ -205,7 +205,7 @@ export default function TeamStaffScreen() {
           <Card variant="elevated" style={styles.formCard}>
             {showAddForm ? (
               <>
-                <ThemedText variant="h4" style={styles.formTitle}>
+                <ThemedText variant="h4" heading style={styles.formTitle}>
                   {t('teams.addStaff')}
                 </ThemedText>
                 <Input
@@ -281,7 +281,7 @@ export default function TeamStaffScreen() {
         )}
 
         <View style={styles.sectionHeader}>
-          <ThemedText variant="h3">{t('teams.staff')}</ThemedText>
+          <ThemedText variant="h3" heading>{t('teams.staff')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {t('teams.staffCount', { count: staff.length })}
           </ThemedText>

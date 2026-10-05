@@ -152,7 +152,7 @@ export default function CreateGameScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} icon="close" />
         <View style={styles.headerContent}>
-          <ThemedText variant="h3" numberOfLines={1}>
+          <ThemedText variant="h3" heading numberOfLines={1}>
             New Game
           </ThemedText>
         </View>

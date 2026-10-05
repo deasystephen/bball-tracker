@@ -96,7 +96,7 @@ export default function RoleSelectScreen() {
   return (
     <ThemedView variant="background" style={[styles.container, { paddingTop: insets.top + spacing.xl }]}>
       <View style={styles.header}>
-        <ThemedText variant="h1" style={styles.title}>
+        <ThemedText variant="h1" heading style={styles.title}>
           {t('roleOnboarding.title')}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>

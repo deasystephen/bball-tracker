@@ -136,7 +136,7 @@ export default function AnnouncementsScreen() {
         ]}
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
-        <ThemedText variant="h2" style={styles.headerTitle}>
+        <ThemedText variant="h2" heading style={styles.headerTitle}>
           Announcements
         </ThemedText>
         {canPost && (

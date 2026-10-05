@@ -145,7 +145,7 @@ export default function Login() {
       colors={[colors.primary, colors.primaryDark]}
       style={styles.container}
     >
-      <Text style={styles.title}>Hooplings</Text>
+      <Text style={styles.title} accessibilityRole="header">Hooplings</Text>
       <Text style={styles.subtitle}>Sign in to continue</Text>
 
       {isLoading ? (
@@ -196,7 +196,7 @@ export default function Login() {
       >
         <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Test User</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Select Test User</Text>
             <TouchableOpacity
               onPress={() => setShowDevLogin(false)}
               accessibilityRole="button"

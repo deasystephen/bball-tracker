@@ -106,7 +106,7 @@ export default function AuthCallbackScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
-          <ThemedText variant="h2" style={styles.title}>
+          <ThemedText variant="h2" heading style={styles.title}>
             Sign In Failed
           </ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>

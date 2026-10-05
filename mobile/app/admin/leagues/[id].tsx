@@ -187,7 +187,7 @@ export default function LeagueDetailScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>{league.name}</ThemedText>
+          <ThemedText variant="h2" heading numberOfLines={1}>{league.name}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {seasons.length} {seasons.length === 1 ? 'season' : 'seasons'}
           </ThemedText>
@@ -208,7 +208,7 @@ export default function LeagueDetailScreen() {
 
       {/* Seasons List */}
       <View style={[styles.sectionHeader, { paddingHorizontal: padding }]}>
-        <ThemedText variant="h3">Seasons</ThemedText>
+        <ThemedText variant="h3" heading>Seasons</ThemedText>
         <TouchableOpacity
           onPress={handleCreateSeason}
           style={[styles.addSeasonButton, { backgroundColor: colors.primary }]}

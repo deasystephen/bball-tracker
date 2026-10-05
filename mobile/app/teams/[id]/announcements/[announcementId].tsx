@@ -184,7 +184,7 @@ export default function AnnouncementThreadScreen() {
   const listHeader = (
     <View>
       <Card variant="elevated" style={styles.announcementCard}>
-        <ThemedText variant="h3">{announcement.title}</ThemedText>
+        <ThemedText variant="h3" heading>{announcement.title}</ThemedText>
         <ThemedText variant="body" style={styles.announcementBody}>
           {announcement.body}
         </ThemedText>
@@ -213,7 +213,7 @@ export default function AnnouncementThreadScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">{t('announcements.title')}</ThemedText>
+          <ThemedText variant="h2" heading>{t('announcements.title')}</ThemedText>
           {team && (
             <ThemedText variant="caption" color="textSecondary">
               {team.name}

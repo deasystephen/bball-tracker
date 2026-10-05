@@ -177,7 +177,7 @@ export default function GameStatsScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>
+          <ThemedText variant="h2" heading numberOfLines={1}>
             Box Score
           </ThemedText>
         </View>
@@ -199,7 +199,7 @@ export default function GameStatsScreen() {
                 {boxScore.team.name}
               </ThemedText>
               <ThemedText
-                variant="h1"
+                variant="h1" heading={false} /* score, a value */
                 style={[styles.finalScore, { color: resultText === 'W' ? colors.success : colors.text }]}
               >
                 {boxScore.game.homeScore}
@@ -221,7 +221,7 @@ export default function GameStatsScreen() {
                 {boxScore.game.opponent}
               </ThemedText>
               <ThemedText
-                variant="h1"
+                variant="h1" heading={false} /* score, a value */
                 style={[styles.finalScore, { color: resultText === 'L' ? colors.error : colors.text }]}
               >
                 {boxScore.game.awayScore}
@@ -235,7 +235,7 @@ export default function GameStatsScreen() {
 
         {/* Team Comparison Bars */}
         <View style={styles.section}>
-          <ThemedText variant="h3" style={styles.sectionTitle}>
+          <ThemedText variant="h3" heading style={styles.sectionTitle}>
             Team Comparison
           </ThemedText>
           <Card variant="default" style={styles.comparisonCard}>
@@ -290,21 +290,21 @@ export default function GameStatsScreen() {
 
         {/* Team Stats Summary */}
         <View style={styles.section}>
-          <ThemedText variant="h3" style={styles.sectionTitle}>
+          <ThemedText variant="h3" heading style={styles.sectionTitle}>
             Team Statistics
           </ThemedText>
           <Card variant="default" style={styles.teamStatsCard}>
             <View style={styles.teamStatsRow}>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.points}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.points}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Points</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.rebounds}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.rebounds}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Rebounds</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.assists}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.assists}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Assists</ThemedText>
               </View>
             </View>
@@ -334,7 +334,7 @@ export default function GameStatsScreen() {
 
         {/* Full Box Score Table */}
         <View style={styles.section}>
-          <ThemedText variant="h3" style={styles.sectionTitle}>
+          <ThemedText variant="h3" heading style={styles.sectionTitle}>
             Player Statistics
           </ThemedText>
           {boxScore.team.players.length > 0 ? (
@@ -355,7 +355,7 @@ export default function GameStatsScreen() {
         {/* Individual Player Cards (mobile-friendly view) */}
         {!isWeb && boxScore.team.players.length > 0 && (
           <View style={styles.section}>
-            <ThemedText variant="h3" style={styles.sectionTitle}>
+            <ThemedText variant="h3" heading style={styles.sectionTitle}>
               Individual Performance
             </ThemedText>
             {boxScore.team.players.map((player) => (

@@ -225,7 +225,7 @@ export default function Home() {
                   >
                     {liveGame.team?.name || 'Home'}
                   </ThemedText>
-                  <ThemedText variant="h1" style={styles.liveScore}>
+                  <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScore}>
                     {liveGame.homeScore}
                   </ThemedText>
                 </View>
@@ -240,7 +240,7 @@ export default function Home() {
                   >
                     {liveGame.opponent}
                   </ThemedText>
-                  <ThemedText variant="h1" style={styles.liveScore}>
+                  <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScore}>
                     {liveGame.awayScore}
                   </ThemedText>
                 </View>
@@ -303,7 +303,7 @@ export default function Home() {
         {teams && teams.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <ThemedText variant="h4">Your Teams</ThemedText>
+              <ThemedText variant="h4" heading>Your Teams</ThemedText>
               <TouchableOpacity onPress={() => router.push('/teams')} accessibilityRole="button">
                 <ThemedText variant="caption" color="primary">
                   See All
@@ -364,7 +364,7 @@ export default function Home() {
 
         {/* Recent Activity Feed */}
         <View style={styles.section}>
-          <ThemedText variant="h4" style={styles.sectionTitle}>
+          <ThemedText variant="h4" heading style={styles.sectionTitle}>
             Recent Activity
           </ThemedText>
 

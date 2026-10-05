@@ -193,7 +193,7 @@ export default function CreateTeamScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h2" heading style={styles.headerTitle}>
             {t('teams.create')}
           </ThemedText>
         </View>

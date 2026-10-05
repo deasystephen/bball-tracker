@@ -109,7 +109,7 @@ export default function DeleteAccountScreen() {
       >
         <BackButton onPress={goBack} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">{title}</ThemedText>
+          <ThemedText variant="h2" heading>{title}</ThemedText>
         </View>
       </View>
 

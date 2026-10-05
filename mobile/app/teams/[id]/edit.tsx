@@ -182,7 +182,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h2" heading style={styles.headerTitle}>
             Edit Team
           </ThemedText>
         </View>

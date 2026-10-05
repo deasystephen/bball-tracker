@@ -123,7 +123,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           onPress={() => undefined}
           accessible={false}
         >
-          <ThemedText variant="h4" style={styles.title}>
+          <ThemedText variant="h4" heading style={styles.title}>
             {title}
           </ThemedText>
           {items.map((item) => (

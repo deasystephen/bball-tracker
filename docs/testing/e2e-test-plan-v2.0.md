@@ -1131,14 +1131,28 @@ Cross-cuts E, I, J — but worth aggregating here.
 - **Expected (current):** An already-connected socket stays connected (handshake-only auth; #49 deferred). A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
 - **Notes:** ___________
 
-### P.10 — VoiceOver: every control is a button, single-choice rows say "selected" (#655)
+### P.10 — VoiceOver Headings rotor finds screen titles and sections (#775)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH
+- **Steps:** Turn on VoiceOver (or Accessibility Inspector on the simulator). Open Teams → a team → Roster, set the rotor to **Headings** and swipe down. Repeat on Team stats, a game's detail (scheduled with RSVP, then finished with a box score), the Stats tab and Home.
+- **Expected:** Roster lands on "Roster", then the add-player form title, "Current Players (n)" and "Invited (n)" when there are invitations, instead of "No headings". Team stats: the title, "Season Record", "Shooting Percentages", "Recent Games", "Roster Stats". Game detail: "RSVP", "Box Score". No score, record count or stat number is announced as a heading. Jest: `__tests__/a11y/heading-roles.test.ts` (source guard).
+- **Notes:** ___________
+
+### P.11 — Largest accessibility text size keeps the tracker, tab bar, box score and toasts readable (#776)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH
+- **Steps:** Settings → Accessibility → Display & Text Size → Larger Text: turn on Larger Accessibility Sizes and drag the slider to the maximum. Open the tracker on an in-progress game, switch between tabs, open a finished game's box score, and trigger a long error toast (for example record a shot in Airplane Mode). Then return to the default size and repeat.
+- **Expected:** At the largest size every `2PT`/`3PT`/`FT` and `MADE`/`MISS` label sits fully inside its button; the focused tab's label does not overlap its icon; box-score cells such as `12-18` and `100.0` show in full (no `…`) and the table still scrolls sideways; a long toast shows up to four lines and stays up long enough to read. At the default size the shot grid and the tab bar are the same height as before. Jest: `__tests__/a11y/text-sizing.test.tsx` (caps, clamps and the fit arithmetic; Jest does no layout).
+- **Notes:** ___________
+
+### P.12 — VoiceOver: every control is a button, single-choice rows say "selected" (#655)
 - [ ] Pass / Fail / Skipped
 - **Role:** coach (Home, Games, Stats, roster) and the seeded guardian Sonya Curry (RSVP)
 - **Steps:** With VoiceOver on: Home → swipe to "See All" and to a team pill. Games tab → swipe through All / Live / Upcoming / Completed, double-tap Upcoming, swipe again. Stats tab with two teams → swipe through the team chips. Team → Roster → the header's first control; Add Player → pick a directory player → the clear (x) control. As Sonya, open the Warriors game, answer Going, swipe through Going / Not Going / Maybe. Profile → avatar.
 - **Expected:** "See All, button"; the pill reads "<team>, <n> players, button". The active filter reads "Upcoming, selected, button" and the others have no "selected"; the shown team's chip reads "selected". The roster back arrow reads "Go back, button"; the clear control reads "Clear selected player, button". The RSVP answers read as radio buttons with "selected" on Going. The avatar reads "Change photo, button"; in Manage Players its menu is titled "Player Photo". Maestro: `.maestro/guardian-rsvp.yaml` asserts `selected: true` on Going (re-seed first). Jest: `__tests__/a11y/pressable-roles.test.ts`, `__tests__/app/tab-pill-selection.test.tsx`.
 - **Notes:** ___________
 
-### P.11 — Icon buttons, pills and chips are 44pt touch targets (#772)
+### P.13 — Icon buttons, pills and chips are 44pt touch targets (#772)
 - [ ] Pass / Fail / Skipped
 - **Steps:** On the iOS simulator, run Accessibility Inspector → Audit on: team detail as its head coach (edit / delete icons), Home with a pending invitation (bell), the roster header, Games and Stats tabs, game detail as a guardian of two players ("Respond for" chips, Going / Not Going / Maybe), and the tracker after one shot (UNDO). On a device, tap each of those controls near its edge.
 - **Expected:** No "hit area too small" row for any of them. Icons and header layout look as before (the icon buttons grew through `hitSlop`, not padding); the pills, chips, RSVP answers and UNDO are 44pt tall. The team hero's edit and delete each take only their own taps. Jest: `__tests__/a11y/touch-targets.test.ts` and the 44pt cases in the UndoBanner, RSVP and tab-pill tests.
@@ -1356,4 +1370,5 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-09-27: #445 — FREE team cap lifted. D.1 no longer expects a 402 on the 4th team; the Profile usage meter reads `<count> · Unlimited` for every tier. Paid tiers are reachable only through the ADMIN comp route (`PATCH /api/v1/admin/users/:userId/subscription`, exercised with `curl`; no app UI). Nothing marked passed.
 - 2026-09-29: #418 — the deprecated add-player endpoints are gone. `POST /teams/:id/managed-players` answers 404 and `POST /teams/:id/invitations` takes `{ playerId }` only; Q.4 and Q.8 now target the unified `POST /teams/:teamId/players`. No app-visible change (the app has used the unified endpoint since the 2026-08-28 OTA).
 - 2026-10-04: audit batch #669 #730 #774. B.2a (avatar photo menu is an ActionMenu, dismissable on Android), G.3a (double tap records one event) and G.3b (VoiceOver/TalkBack announcements on the tracker, toasts and Watch Live): device-only checks.
-- 2026-10-05: audit batch #655 #772 #773. P.10 (VoiceOver roles, labels and selected state), P.11 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.
+- 2026-10-05: audit batch #775 #776. P.10 (VoiceOver Headings rotor reaches screen titles and section headings) and P.11 (largest accessibility text size on the tracker, tab bar, box score and toasts): device-only checks.
+- 2026-10-05: audit batch #655 #772 #773. P.12 (VoiceOver roles, labels and selected state), P.13 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.

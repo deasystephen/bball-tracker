@@ -85,7 +85,7 @@ export default function NamePromptScreen() {
   return (
     <ThemedView variant="background" style={[styles.container, { paddingTop: insets.top + spacing.xl }]}>
       <View style={styles.header}>
-        <ThemedText variant="h1" style={styles.title}>
+        <ThemedText variant="h1" heading style={styles.title}>
           {fromProfile ? 'Edit your name' : 'What should we call you?'}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>

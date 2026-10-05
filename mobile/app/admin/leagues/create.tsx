@@ -101,7 +101,7 @@ export default function CreateLeagueScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">Create League</ThemedText>
+          <ThemedText variant="h2" heading>Create League</ThemedText>
         </View>
       </View>
 

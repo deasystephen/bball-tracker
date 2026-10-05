@@ -156,7 +156,7 @@ export default function AdminDashboard() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">League Management</ThemedText>
+          <ThemedText variant="h2" heading>League Management</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             Create and manage leagues and seasons
           </ThemedText>

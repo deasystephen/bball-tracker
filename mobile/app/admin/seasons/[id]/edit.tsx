@@ -161,7 +161,7 @@ function EditSeasonForm({ season }: { season: Season }) {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">{t('seasons.editTitle')}</ThemedText>
+          <ThemedText variant="h2" heading>{t('seasons.editTitle')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary" numberOfLines={1}>
             {season.name}
           </ThemedText>

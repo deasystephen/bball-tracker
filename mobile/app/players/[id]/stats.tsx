@@ -99,7 +99,7 @@ export default function PlayerStatsScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>
+          <ThemedText variant="h2" heading numberOfLines={1}>
             Player Stats
           </ThemedText>
         </View>
@@ -117,12 +117,12 @@ export default function PlayerStatsScreen() {
         <View style={[styles.playerHero, { backgroundColor: colors.primary }]}>
           <View style={styles.avatarRing}>
             <View style={styles.avatar}>
-              <ThemedText variant="h1" style={styles.avatarText}>
+              <ThemedText variant="h1" heading={false} /* avatar initial */ style={styles.avatarText}>
                 {displayName(player).charAt(0).toUpperCase()}
               </ThemedText>
             </View>
           </View>
-          <ThemedText variant="h2" style={styles.playerName}>
+          <ThemedText variant="h2" heading style={styles.playerName}>
             {displayName(player)}
           </ThemedText>
           <View style={styles.heroChips}>
@@ -144,7 +144,7 @@ export default function PlayerStatsScreen() {
         {/* Career Totals */}
         {careerTotals.gamesPlayed > 0 && (
           <View style={styles.section}>
-            <ThemedText variant="h3" style={styles.sectionTitle}>
+            <ThemedText variant="h3" heading style={styles.sectionTitle}>
               Career Averages
             </ThemedText>
             <SeasonAverages stats={careerTotals} />
@@ -223,7 +223,7 @@ export default function PlayerStatsScreen() {
         {/* Stats by Team */}
         {teams.length > 0 && (
           <View style={styles.section}>
-            <ThemedText variant="h3" style={styles.sectionTitle}>
+            <ThemedText variant="h3" heading style={styles.sectionTitle}>
               Stats by Team
             </ThemedText>
             {teams.map((teamData) => (

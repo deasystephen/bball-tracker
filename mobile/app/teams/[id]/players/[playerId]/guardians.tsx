@@ -165,7 +165,7 @@ export default function PlayerGuardiansScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">Parents &amp; guardians</ThemedText>
+          <ThemedText variant="h2" heading>Parents &amp; guardians</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {playerName} · {team.name}
           </ThemedText>
@@ -180,7 +180,7 @@ export default function PlayerGuardiansScreen() {
           <Card variant="elevated" style={styles.formCard}>
             {showForm ? (
               <>
-                <ThemedText variant="h4" style={styles.formTitle}>
+                <ThemedText variant="h4" heading style={styles.formTitle}>
                   Invite a parent
                 </ThemedText>
                 <Input
@@ -229,7 +229,7 @@ export default function PlayerGuardiansScreen() {
         )}
 
         <View style={styles.sectionHeader}>
-          <ThemedText variant="h3">Guardians</ThemedText>
+          <ThemedText variant="h3" heading>Guardians</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {guardians.length}
           </ThemedText>
@@ -281,7 +281,7 @@ export default function PlayerGuardiansScreen() {
         {pendingInvitations.length > 0 && (
           <>
             <View style={[styles.sectionHeader, styles.pendingHeader]}>
-              <ThemedText variant="h3">Pending invites</ThemedText>
+              <ThemedText variant="h3" heading>Pending invites</ThemedText>
               <ThemedText variant="caption" color="textSecondary">
                 {pendingInvitations.length}
               </ThemedText>

@@ -368,7 +368,7 @@ export default function GameDetailScreen() {
         {/* RSVP Section - only for scheduled/upcoming games */}
         {(isScheduled || isInProgress) && (
           <Card variant="default" style={styles.rsvpCard}>
-            <ThemedText variant="h3" style={styles.rsvpTitle}>RSVP</ThemedText>
+            <ThemedText variant="h3" heading style={styles.rsvpTitle}>RSVP</ThemedText>
 
             {/* Responding for: self + each child on this team (guardians) */}
             {childrenOnTeam.length > 0 && (
@@ -514,7 +514,7 @@ export default function GameDetailScreen() {
               {/* Box Score Section */}
               <View style={styles.boxScoreSection}>
                 <View style={styles.sectionHeader}>
-                  <ThemedText variant="h3">Box Score</ThemedText>
+                  <ThemedText variant="h3" heading>Box Score</ThemedText>
                   <TouchableOpacity
                     onPress={() => router.push(`/games/${id}/stats`)}
                     style={styles.viewAllButton}
