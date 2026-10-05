@@ -34,4 +34,4 @@ appId: com.bballtracker.mobile
 # accessible element (#774): its label joins both names and scores, so the
 # opponent and the score are asserted through that label, never as bare text.
 - assertVisible: "LIVE"
-- assertVisible: "Score: .* 0, Spectator Rival 0"
+- assertVisible: "Score: Lakers 0, Spectator Rival 0"

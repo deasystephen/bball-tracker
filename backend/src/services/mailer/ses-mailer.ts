@@ -1,16 +1,11 @@
 import { SESv2Client, SendEmailCommand, type SendEmailCommandOutput } from '@aws-sdk/client-sesv2';
 import { Mailer, MailSendParams, MailSendResult } from './index';
-import { createHash } from 'crypto';
 import { logger } from '../../utils/logger';
+import { hashRecipient } from '../../utils/hash-recipient';
 
-/**
- * Stable, non-reversible recipient identifier for logs: first 12 hex chars of
- * sha256(lowercased address). Lets ops correlate repeated sends to one
- * recipient without putting the address itself in CloudWatch (audit #48).
- */
-export function hashRecipient(address: string): string {
-  return createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 12);
-}
+// Re-exported so existing importers keep working; the implementation lives in
+// utils/hash-recipient.ts, which the seed imports without loading the SES SDK.
+export { hashRecipient };
 
 export interface SesMailerOptions {
   region: string;
