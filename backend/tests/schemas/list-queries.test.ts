@@ -1,6 +1,7 @@
 /**
  * Schema tests for the list-query schemas of GET /games, GET /games/:gameId/events,
- * GET /invitations and GET /leagues (#693).
+ * GET /invitations and GET /leagues (#693), plus the `includePersonal` flag
+ * shared with GET /seasons.
  *
  * The parsed `limit` and `offset` go straight to Prisma `take`/`skip`, so the
  * bounds here are the only cap on a page. Query-string values arrive as
@@ -11,6 +12,7 @@ import type { z } from 'zod';
 import { gameEventQuerySchema, gameQuerySchema } from '../../src/api/games/schemas';
 import { invitationQuerySchema } from '../../src/api/invitations/schemas';
 import { leagueQuerySchema } from '../../src/api/leagues/schemas';
+import { seasonQuerySchema } from '../../src/api/seasons/schemas';
 
 const VALID_UUID = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
 
@@ -114,23 +116,30 @@ describe('invitationQuerySchema filters', () => {
 describe('leagueQuerySchema filters', () => {
   // League ids are custom strings and the schema has no enum filter, so there
   // is no id or enum case here; `includePersonal` is the only typed filter.
-  it("reads includePersonal 'true' as true", () => {
-    expect(leagueQuerySchema.safeParse({ includePersonal: 'true' }).data?.includePersonal).toBe(true);
-  });
-
-  it("reads includePersonal 'false' as false", () => {
-    expect(leagueQuerySchema.safeParse({ includePersonal: 'false' }).data?.includePersonal).toBe(false);
-  });
-
-  it.each([['1'], ['yes'], ['TRUE'], ['']])("rejects includePersonal '%s'", (value) => {
-    expect(leagueQuerySchema.safeParse({ includePersonal: value }).success).toBe(false);
-  });
-
-  it('leaves includePersonal undefined when absent', () => {
-    expect(leagueQuerySchema.safeParse({}).data?.includePersonal).toBeUndefined();
-  });
-
   it('accepts a free-text search', () => {
     expect(leagueQuerySchema.safeParse({ search: 'Spring' }).data?.search).toBe('Spring');
+  });
+});
+
+// The ADMIN-only personal-league escape hatch (#442) on both list routes.
+// No client sends it, so only 'true' and 'false' parse; anything else is a 400.
+describe.each([
+  { name: 'leagueQuerySchema', schema: leagueQuerySchema },
+  { name: 'seasonQuerySchema', schema: seasonQuerySchema },
+])('$name includePersonal', ({ schema }) => {
+  it("reads 'true' as true", () => {
+    expect(schema.safeParse({ includePersonal: 'true' }).data?.includePersonal).toBe(true);
+  });
+
+  it("reads 'false' as false", () => {
+    expect(schema.safeParse({ includePersonal: 'false' }).data?.includePersonal).toBe(false);
+  });
+
+  it('leaves it undefined when absent', () => {
+    expect(schema.safeParse({}).data?.includePersonal).toBeUndefined();
+  });
+
+  it.each([['1'], ['yes'], ['TRUE'], ['']])("rejects '%s'", (value) => {
+    expect(schema.safeParse({ includePersonal: value }).success).toBe(false);
   });
 });

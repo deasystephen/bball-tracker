@@ -38,8 +38,9 @@ export const seasonQuerySchema = z.object({
   search: z.string().optional(),
   // ADMIN-only escape hatch: personal leagues (#442) are excluded from admin
   // listings by default so they do not accumulate one row per coach.
+  // Only 'true' or 'false': any other string is a 400, not a silent false.
   includePersonal: z
-    .string()
+    .enum(['true', 'false'])
     .transform((val) => val === 'true')
     .optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
