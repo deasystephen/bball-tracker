@@ -11,6 +11,22 @@ When adding new features or fixing bugs, always write tests that verify behavior
 - API tests catch validation issues, middleware problems, and response format errors that service-only tests miss
 - Test with realistic data formats (e.g., both UUID and custom string IDs if the database allows both)
 
+## Mocks in API tests (backend)
+- **A mocked service resolves the service's declared return type.** Type the value with the exported
+  type (`const page: TeamList = { teams: [item], total: 1, limit: 10, offset: 0 }`) and never cast the
+  whole value with `as unknown as Awaited<ReturnType<…>>`: that cast is what let four list suites mock
+  a `pagination` key no service returns and assert on it for eight months (#762). When a fixture is
+  looser than the Prisma payload, narrow the item, not the page. Assert the fields a client reads
+  (`total`, `limit`, `offset` at the top level for teams, games, leagues and seasons; nested
+  `pagination` only for players and invitations, whose services return it).
+- **The shared Prisma mock (`tests/setup.ts#mockPrisma`) defines every delegate method `src/` calls.**
+  `$transaction` hands its callback `mockPrisma`, so `tx.<model>.<method>` needs the method too.
+  `tests/utils/prisma-mock-coverage-guard.test.ts` derives the models from `Prisma.ModelName` and the
+  calls from `src/` (any receiver: `prisma`, `tx`, `db`) and fails naming each missing
+  `<model>.<method>`; add it to the model's block as `<method>: jest.fn()` (#766). A real-service API
+  test then needs no hand-built `tx`: `tests/api/invitation-transitions.test.ts` is the pattern, with a
+  `findUniqueOrThrow` that applies the service's `select` so a "no token" assertion tests the select.
+
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
 - Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields

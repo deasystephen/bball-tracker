@@ -4,7 +4,7 @@
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
-import { GameService } from '../../src/services/game-service';
+import { GameService, type GameList, type GameListItem } from '../../src/services/game-service';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
 
 // Test UUIDs
@@ -47,6 +47,8 @@ describe('Games API', () => {
       coach: { id: TEST_USER_ID, name: 'Test User' },
     },
   };
+  // The fixture is looser than the list include; narrow the item, never the page (#762).
+  const gameListItem = mockGame as unknown as GameListItem;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -136,24 +138,21 @@ describe('Games API', () => {
     });
 
     it('should list games successfully', async () => {
-      mockGameService.listGames.mockResolvedValue({
-        games: [mockGame],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
+      const page: GameList = { games: [gameListItem], total: 1, limit: 10, offset: 0 };
+      mockGameService.listGames.mockResolvedValue(page);
 
       const response = await request(app).get('/api/v1/games');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.games).toHaveLength(1);
-      expect(response.body.pagination).toBeDefined();
+      // Mobile reads these top-level fields to page (useGames, #762).
+      expect(response.body).toMatchObject({ success: true, total: 1, limit: 10, offset: 0 });
     });
 
     it('should filter games by teamId', async () => {
-      mockGameService.listGames.mockResolvedValue({
-        games: [mockGame],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
+      const page: GameList = { games: [gameListItem], total: 1, limit: 10, offset: 0 };
+      mockGameService.listGames.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/games')
@@ -167,10 +166,8 @@ describe('Games API', () => {
     });
 
     it('should filter games by status', async () => {
-      mockGameService.listGames.mockResolvedValue({
-        games: [mockGame],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
+      const page: GameList = { games: [gameListItem], total: 1, limit: 10, offset: 0 };
+      mockGameService.listGames.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/games')
@@ -184,17 +181,15 @@ describe('Games API', () => {
     });
 
     it('should support pagination', async () => {
-      mockGameService.listGames.mockResolvedValue({
-        games: [mockGame],
-        pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as unknown as Awaited<ReturnType<typeof mockGameService.listGames>>);
+      const page: GameList = { games: [gameListItem], total: 25, limit: 10, offset: 10 };
+      mockGameService.listGames.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/games')
         .query({ limit: 10, offset: 10 });
 
       expect(response.status).toBe(200);
-      expect(response.body.pagination.hasMore).toBe(true);
+      expect(response.body).toMatchObject({ total: 25, limit: 10, offset: 10 });
     });
   });
 

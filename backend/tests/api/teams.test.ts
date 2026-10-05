@@ -4,7 +4,7 @@
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
-import { TeamService } from '../../src/services/team-service';
+import { TeamService, type TeamList, type TeamListItem } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { NotFoundError, ForbiddenError, PaymentRequiredError, BadRequestError } from '../../src/utils/errors';
 import { invalidateUsage } from '../../src/services/usage-service';
@@ -82,6 +82,8 @@ describe('Teams API', () => {
     staff: [{ userId: TEST_USER_ID, user: { id: TEST_USER_ID, name: 'Test User', email: 'test@example.com' }, role: { name: 'Head Coach' } }],
     members: [],
   };
+  // The fixture is looser than the list include; narrow the item, never the page (#762).
+  const teamListItem = mockTeam as unknown as TeamListItem;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -315,24 +317,21 @@ describe('Teams API', () => {
 
   describe('GET /api/v1/teams', () => {
     it('should list teams successfully', async () => {
-      mockTeamService.listTeams.mockResolvedValue({
-        teams: [mockTeam],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
+      const page: TeamList = { teams: [teamListItem], total: 1, limit: 10, offset: 0 };
+      mockTeamService.listTeams.mockResolvedValue(page);
 
       const response = await request(app).get('/api/v1/teams');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.teams).toHaveLength(1);
-      expect(response.body.pagination).toBeDefined();
+      // Mobile reads these top-level fields to page (useTeams getNextPageParam, #762).
+      expect(response.body).toMatchObject({ success: true, total: 1, limit: 10, offset: 0 });
     });
 
     it('should filter teams by leagueId', async () => {
-      mockTeamService.listTeams.mockResolvedValue({
-        teams: [mockTeam],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
+      const page: TeamList = { teams: [teamListItem], total: 1, limit: 10, offset: 0 };
+      mockTeamService.listTeams.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/teams')
@@ -346,12 +345,8 @@ describe('Teams API', () => {
     });
 
     it('should filter teams by playerId and still pass the caller id for access scoping', async () => {
-      mockTeamService.listTeams.mockResolvedValue({
-        teams: [],
-        total: 0,
-        limit: 20,
-        offset: 0,
-      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
+      const page: TeamList = { teams: [], total: 0, limit: 20, offset: 0 };
+      mockTeamService.listTeams.mockResolvedValue(page);
 
       const otherPlayerId = 'b2c3d4e5-f6a7-4901-b345-67890abcdef0';
       const response = await request(app)
@@ -367,10 +362,8 @@ describe('Teams API', () => {
     });
 
     it('should filter teams by seasonId', async () => {
-      mockTeamService.listTeams.mockResolvedValue({
-        teams: [mockTeam],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockTeamService.listTeams>>);
+      const page: TeamList = { teams: [teamListItem], total: 1, limit: 10, offset: 0 };
+      mockTeamService.listTeams.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/teams')

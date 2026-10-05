@@ -15,7 +15,9 @@ import { config as loadEnv } from 'dotenv';
 // failure reads "The server does not support SSL connections".
 loadEnv();
 
-// Create mock Prisma client first (before mocking)
+// Create mock Prisma client first (before mocking). Every delegate method
+// that src/ calls must exist here; tests/utils/prisma-mock-coverage-guard.test.ts
+// fails naming any that is missing (#766).
 export const mockPrisma = {
   user: {
     findUnique: jest.fn(),
@@ -53,6 +55,7 @@ export const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    upsert: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
   },
@@ -148,6 +151,7 @@ export const mockPrisma = {
   },
   teamInvitation: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),

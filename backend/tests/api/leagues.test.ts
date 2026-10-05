@@ -4,7 +4,7 @@
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
-import { LeagueService } from '../../src/services/league-service';
+import { LeagueService, type LeagueList, type LeagueListItem } from '../../src/services/league-service';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../src/utils/errors';
 
 // Mock the authenticate middleware
@@ -35,6 +35,8 @@ describe('Leagues API', () => {
     admins: [],
     _count: { seasons: 0 },
   };
+  // The fixture is looser than the list include; narrow the item, never the page (#762).
+  const leagueListItem = mockLeague as unknown as LeagueListItem;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -225,23 +227,20 @@ describe('Leagues API', () => {
 
   describe('GET /api/v1/leagues', () => {
     it('should list leagues successfully', async () => {
-      mockLeagueService.listLeagues.mockResolvedValue({
-        leagues: [mockLeague],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
+      const page: LeagueList = { leagues: [leagueListItem], total: 1, limit: 10, offset: 0 };
+      mockLeagueService.listLeagues.mockResolvedValue(page);
 
       const response = await request(app).get('/api/v1/leagues');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.leagues).toHaveLength(1);
+      expect(response.body).toMatchObject({ success: true, total: 1, limit: 10, offset: 0 });
     });
 
     it('should filter leagues by search term', async () => {
-      mockLeagueService.listLeagues.mockResolvedValue({
-        leagues: [mockLeague],
-        pagination: { total: 1, limit: 10, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
+      const page: LeagueList = { leagues: [leagueListItem], total: 1, limit: 10, offset: 0 };
+      mockLeagueService.listLeagues.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/leagues')
@@ -257,17 +256,15 @@ describe('Leagues API', () => {
     });
 
     it('should support pagination', async () => {
-      mockLeagueService.listLeagues.mockResolvedValue({
-        leagues: [mockLeague],
-        pagination: { total: 25, limit: 10, offset: 10, hasMore: true },
-      } as unknown as Awaited<ReturnType<typeof mockLeagueService.listLeagues>>);
+      const page: LeagueList = { leagues: [leagueListItem], total: 25, limit: 10, offset: 10 };
+      mockLeagueService.listLeagues.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/leagues')
         .query({ limit: 10, offset: 10 });
 
       expect(response.status).toBe(200);
-      expect(response.body.pagination.hasMore).toBe(true);
+      expect(response.body).toMatchObject({ total: 25, limit: 10, offset: 10 });
     });
   });
 

@@ -4,7 +4,7 @@
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
-import { SeasonService } from '../../src/services/season-service';
+import { SeasonService, type SeasonList, type SeasonListItem } from '../../src/services/season-service';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../src/utils/errors';
 
 // Test IDs - mix of UUIDs and custom strings to test both formats
@@ -55,6 +55,9 @@ describe('Seasons API', () => {
       name: 'Downtown Youth Basketball League',
     },
   };
+  // The fixture is looser than the list include; narrow the item, never the page (#762).
+  const seasonListItem = mockSeason as unknown as SeasonListItem;
+  const customLeagueSeasonListItem = mockSeasonWithCustomLeagueId as unknown as SeasonListItem;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -225,24 +228,20 @@ describe('Seasons API', () => {
 
   describe('GET /api/v1/seasons', () => {
     it('should list seasons successfully', async () => {
-      mockSeasonService.listSeasons.mockResolvedValue({
-        seasons: [mockSeason],
-        pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
+      const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0 };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
 
       const response = await request(app).get('/api/v1/seasons');
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.seasons).toHaveLength(1);
-      expect(response.body.pagination).toBeDefined();
+      expect(response.body).toMatchObject({ success: true, total: 1, limit: 20, offset: 0 });
     });
 
     it('should filter by UUID league ID', async () => {
-      mockSeasonService.listSeasons.mockResolvedValue({
-        seasons: [mockSeason],
-        pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
+      const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0 };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -256,10 +255,8 @@ describe('Seasons API', () => {
     });
 
     it('should filter by custom string league ID', async () => {
-      mockSeasonService.listSeasons.mockResolvedValue({
-        seasons: [mockSeasonWithCustomLeagueId],
-        pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
+      const page: SeasonList = { seasons: [customLeagueSeasonListItem], total: 1, limit: 20, offset: 0 };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -273,10 +270,8 @@ describe('Seasons API', () => {
     });
 
     it('should filter by isActive', async () => {
-      mockSeasonService.listSeasons.mockResolvedValue({
-        seasons: [mockSeason],
-        pagination: { total: 1, limit: 20, offset: 0, hasMore: false },
-      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
+      const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0 };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/seasons')
@@ -290,16 +285,15 @@ describe('Seasons API', () => {
     });
 
     it('should handle pagination parameters', async () => {
-      mockSeasonService.listSeasons.mockResolvedValue({
-        seasons: [],
-        pagination: { total: 50, limit: 10, offset: 20, hasMore: true },
-      } as unknown as Awaited<ReturnType<typeof mockSeasonService.listSeasons>>);
+      const page: SeasonList = { seasons: [], total: 50, limit: 10, offset: 20 };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
 
       const response = await request(app)
         .get('/api/v1/seasons')
         .query({ limit: '10', offset: '20' });
 
       expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ total: 50, limit: 10, offset: 20 });
       expect(mockSeasonService.listSeasons).toHaveBeenCalledWith(
         expect.objectContaining({ limit: 10, offset: 20 }),
         { id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef', role: 'ADMIN' }

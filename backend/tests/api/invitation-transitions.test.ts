@@ -1,0 +1,218 @@
+/**
+ * Invitation status transitions through the real route → InvitationService →
+ * shared Prisma mock path (#766): accept, reject, cancel and the public
+ * by-token accept. Only authentication is stubbed.
+ *
+ * `teamInvitation.findUniqueOrThrow` applies the `select` the service passes to
+ * a full row that carries a `token`, the way Prisma does. The "no token in the
+ * body" assertions therefore exercise the service's `INVITATION_*_SELECT`
+ * constants and the routes' `omitToken`, not the fixture. The public by-token
+ * accept has no `omitToken` and relies on the select alone.
+ */
+
+import request from 'supertest';
+import { app } from '../../src/index';
+import { mockPrisma } from '../setup';
+
+const PLAYER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+const COACH_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
+const TEAM_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
+const INVITATION_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+const MEMBER_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
+const SECRET_TOKEN = 'secret-invitation-token-0123456789';
+
+let caller: { id: string; role: string } = { id: PLAYER_ID, role: 'PLAYER' };
+
+jest.mock('../../src/api/auth/middleware', () => ({
+  authenticate: jest.fn((req, _res, next) => {
+    req.user = {
+      id: caller.id,
+      email: null,
+      name: 'Caller',
+      role: caller.role,
+      subscriptionTier: 'FREE',
+      subscriptionExpiresAt: null,
+    };
+    next();
+  }),
+}));
+
+/** A full `TeamInvitation` row as Prisma stores it, secret included. */
+function invitationRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const now = new Date();
+  return {
+    id: INVITATION_ID,
+    teamId: TEAM_ID,
+    playerId: PLAYER_ID,
+    invitedById: COACH_ID,
+    status: 'PENDING',
+    token: SECRET_TOKEN,
+    jerseyNumber: 0,
+    position: 'PG',
+    message: null,
+    expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+    createdAt: now,
+    updatedAt: now,
+    acceptedAt: null,
+    rejectedAt: null,
+    team: { id: TEAM_ID, name: 'Lakers' },
+    ...overrides,
+  };
+}
+
+/** Prisma `select` semantics on a plain object: keep `true` keys, recurse into `{ select }`. */
+function applySelect(row: Record<string, unknown>, select: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, spec] of Object.entries(select)) {
+    if (spec === true) {
+      out[key] = row[key];
+    } else if (spec && typeof spec === 'object' && 'select' in spec) {
+      out[key] = applySelect(row[key] as Record<string, unknown>, (spec as { select: Record<string, unknown> }).select);
+    }
+  }
+  return out;
+}
+
+/** The row after the transition `updateMany` wrote `data`, read back with the service's select. */
+function readBackAfter(data: () => Record<string, unknown>): void {
+  mockPrisma.teamInvitation.findUniqueOrThrow.mockImplementation(
+    async ({ select }: { select: Record<string, unknown> }) => applySelect(invitationRow(data()), select)
+  );
+}
+
+function expectNoToken(body: unknown): void {
+  expect((body as { invitation: object }).invitation).not.toHaveProperty('token');
+  expect(JSON.stringify(body)).not.toContain(SECRET_TOKEN);
+}
+
+function expectGuardedTransition(status: string): void {
+  expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
+    where: { id: INVITATION_ID, status: 'PENDING' },
+    data: expect.objectContaining({ status }),
+  });
+  const [{ select }] = mockPrisma.teamInvitation.findUniqueOrThrow.mock.calls[0];
+  expect(select).not.toHaveProperty('token');
+}
+
+const expectedMemberWhere = { teamId_playerId: { teamId: TEAM_ID, playerId: PLAYER_ID } };
+
+describe('invitation transitions through the real InvitationService (#766)', () => {
+  beforeEach(() => {
+    caller = { id: PLAYER_ID, role: 'PLAYER' };
+    mockPrisma.teamInvitation.findUnique.mockResolvedValue(invitationRow());
+    mockPrisma.teamInvitation.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.teamInvitation.count.mockResolvedValue(0);
+    mockPrisma.guardianInvitation.findUnique.mockResolvedValue(null);
+    mockPrisma.guardian.findUnique.mockResolvedValue(null);
+    mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.teamMember.upsert.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      playerId: PLAYER_ID,
+      jerseyNumber: 0,
+      position: 'PG',
+      player: { id: PLAYER_ID, name: 'Player' },
+      team: { id: TEAM_ID, name: 'Lakers' },
+    });
+  });
+
+  it('POST /invitations/:id/accept flips PENDING → ACCEPTED and upserts the membership', async () => {
+    readBackAfter(() => ({ status: 'ACCEPTED', acceptedAt: new Date() }));
+
+    const res = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/accept`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      kind: 'team',
+      invitation: { id: INVITATION_ID, status: 'ACCEPTED' },
+      teamMember: { id: MEMBER_ID, teamId: TEAM_ID, playerId: PLAYER_ID },
+    });
+    expectNoToken(res.body);
+    expectGuardedTransition('ACCEPTED');
+    expect(mockPrisma.teamMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedMemberWhere, update: {} })
+    );
+  });
+
+  it('POST /invitations/:id/reject flips PENDING → REJECTED and strips an unclaimed email', async () => {
+    readBackAfter(() => ({ status: 'REJECTED', rejectedAt: new Date() }));
+
+    const res = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/reject`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      kind: 'team',
+      invitation: { id: INVITATION_ID, status: 'REJECTED', team: { id: TEAM_ID, name: 'Lakers' } },
+    });
+    expectNoToken(res.body);
+    expectGuardedTransition('REJECTED');
+    expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PLAYER_ID, workosUserId: null, deletedAt: null } })
+    );
+    expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /invitations/:id lets a roster manager cancel, without stripping the email', async () => {
+    caller = { id: COACH_ID, role: 'COACH' };
+    mockPrisma.user.findUnique.mockResolvedValue({ role: 'COACH' });
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM_ID, season: { league: { admins: [] } } });
+    mockPrisma.teamStaff.findMany.mockResolvedValue([
+      {
+        teamId: TEAM_ID,
+        userId: COACH_ID,
+        role: {
+          canManageTeam: true,
+          canManageRoster: true,
+          canTrackStats: true,
+          canViewStats: true,
+          canShareStats: true,
+        },
+      },
+    ]);
+    readBackAfter(() => ({ status: 'CANCELLED' }));
+
+    const res = await request(app).delete(`/api/v1/invitations/${INVITATION_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      invitation: { id: INVITATION_ID, status: 'CANCELLED' },
+    });
+    expectNoToken(res.body);
+    expectGuardedTransition('CANCELLED');
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('POST /invitations/by-token/:token/accept accepts with the token alone and never echoes it', async () => {
+    readBackAfter(() => ({ status: 'ACCEPTED', acceptedAt: new Date() }));
+
+    const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      kind: 'team',
+      invitation: { id: INVITATION_ID, status: 'ACCEPTED' },
+      teamMember: { teamId: TEAM_ID, playerId: PLAYER_ID },
+    });
+    expectNoToken(res.body);
+    expect(mockPrisma.teamInvitation.findUnique).toHaveBeenCalledWith({ where: { token: SECRET_TOKEN } });
+    expectGuardedTransition('ACCEPTED');
+    expect(mockPrisma.teamMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedMemberWhere, update: {} })
+    );
+  });
+
+  it('a transition that loses the PENDING race answers 400 and writes no membership', async () => {
+    mockPrisma.teamInvitation.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/accept`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Cannot accept invitation: it is no longer pending');
+    expect(mockPrisma.teamInvitation.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
+  });
+});
