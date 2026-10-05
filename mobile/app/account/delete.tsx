@@ -29,6 +29,7 @@ import { captureException } from '../../services/sentry';
 import { useTranslation } from '../../i18n';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
 
 /** The exact, case-sensitive confirmation word (trimmed). */
 export const DELETE_CONFIRMATION = 'DELETE';
@@ -106,7 +107,13 @@ export default function DeleteAccountScreen() {
           },
         ]}
       >
-        <TouchableOpacity onPress={goBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Go back">
+        <TouchableOpacity
+          onPress={goBack}
+          style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>

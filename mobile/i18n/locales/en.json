@@ -13,7 +13,8 @@
     "invalidEmail": "Enter a valid email address",
     "justNow": "Just now",
     "hoursAgo": "{{count}}h ago",
-    "yesterday": "Yesterday"
+    "yesterday": "Yesterday",
+    "changePhoto": "Change photo"
   },
   "navigation": {
     "home": "Home",
@@ -134,7 +135,9 @@
     "jerseyNumber": "Jersey Number",
     "position": "Position",
     "addToTeam": "Add to Team",
-    "removeFromTeam": "Remove from Team"
+    "removeFromTeam": "Remove from Team",
+    "playerPhoto": "Player Photo",
+    "clearSelectedPlayer": "Clear selected player"
   },
   "games": {
     "title": "Games",

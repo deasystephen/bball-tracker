@@ -179,6 +179,7 @@ export default function Profile() {
           <TouchableOpacity
             style={[styles.myStatsCard, { backgroundColor: colors.backgroundSecondary }]}
             onPress={() => router.push(`/players/${user.id}/stats`)}
+            accessibilityRole="button"
           >
             <View style={[styles.myStatsIcon, { backgroundColor: colors.primary + '20' }]}>
               <Ionicons name="stats-chart" size={20} color={colors.primary} />
@@ -347,6 +348,7 @@ export default function Profile() {
             <Card variant="default" style={styles.settingsCard}>
               <TouchableOpacity
                 style={styles.settingRow}
+                accessibilityRole="button"
                 accessibilityLabel={t('roleOnboarding.changeRole')}
                 onPress={() => router.push('/onboarding/role?from=profile')}
               >
@@ -375,7 +377,11 @@ export default function Profile() {
               Management
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
-              <TouchableOpacity style={styles.settingRow} onPress={() => router.push('/admin')}>
+              <TouchableOpacity
+                style={styles.settingRow}
+                onPress={() => router.push('/admin')}
+                accessibilityRole="button"
+              >
                 <View style={styles.settingLeft}>
                   <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
                     <Ionicons name="trophy" size={18} color={colors.primary} />

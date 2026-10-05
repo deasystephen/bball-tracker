@@ -45,6 +45,7 @@ import { getApiErrorMessage } from '../../../../services/api-client';
 import { displayName } from '../../../../utils/display-name';
 import { useGoBack } from '../../../../hooks/useGoBack';
 import { formatRelativeTime } from '../../../../utils/relative-time';
+import { HEADER_ICON_HIT_SLOP } from '../../../../utils/touch-target';
 
 export default function AnnouncementThreadScreen() {
   const router = useRouter();
@@ -208,6 +209,7 @@ export default function AnnouncementThreadScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

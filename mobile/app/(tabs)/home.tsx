@@ -34,6 +34,9 @@ import { getTeamColor } from '../../utils/team-colors';
 import { canCreateTeams } from '../../utils/team-permissions';
 import type { Game } from '../../types/game';
 import { displayName } from '../../utils/display-name';
+import { touchTargetHitSlop } from '../../utils/touch-target';
+
+const BELL_ICON_SIZE = 22;
 
 export default function Home() {
   const router = useRouter();
@@ -158,9 +161,11 @@ export default function Home() {
               <TouchableOpacity
                 onPress={() => router.push('/invitations')}
                 style={styles.bellButton}
+                hitSlop={touchTargetHitSlop(BELL_ICON_SIZE + 2 * spacing.xs)}
+                accessibilityRole="button"
                 accessibilityLabel={`${pendingInvitations.length} pending invitations`}
               >
-                <Ionicons name="notifications" size={22} color={colors.text} />
+                <Ionicons name="notifications" size={BELL_ICON_SIZE} color={colors.text} />
                 <View
                   style={[styles.bellBadge, { backgroundColor: colors.error }]}
                 >
@@ -188,6 +193,7 @@ export default function Home() {
             onPress={() => router.push(`/games/${liveGame.id}`)}
             activeOpacity={0.85}
             style={styles.liveCardWrapper}
+            accessibilityRole="button"
           >
             <View
               style={[
@@ -294,7 +300,7 @@ export default function Home() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <ThemedText variant="h4">Your Teams</ThemedText>
-              <TouchableOpacity onPress={() => router.push('/teams')}>
+              <TouchableOpacity onPress={() => router.push('/teams')} accessibilityRole="button">
                 <ThemedText variant="caption" color="primary">
                   See All
                 </ThemedText>
@@ -307,6 +313,7 @@ export default function Home() {
             >
               {teams.map((team) => {
                 const teamColor = getTeamColor(team.name);
+                const playerCount = team._count?.members ?? team.members?.length ?? 0;
                 return (
                   <TouchableOpacity
                     key={team.id}
@@ -315,6 +322,11 @@ export default function Home() {
                       { backgroundColor: colors.backgroundSecondary },
                     ]}
                     onPress={() => router.push(`/teams/${team.id}`)}
+                    accessibilityRole="button"
+                    // Without a label VoiceOver starts with the initial badge
+                    // ("W, Warriors, …"); not the bare name, which the Teams
+                    // tab card already uses and Maestro taps by full match.
+                    accessibilityLabel={`${team.name}, ${playerCount} players`}
                   >
                     <View
                       style={[
@@ -337,7 +349,7 @@ export default function Home() {
                       {team.name}
                     </ThemedText>
                     <ThemedText variant="footnote" color="textSecondary">
-                      {team._count?.members ?? team.members?.length ?? 0} players
+                      {playerCount} players
                     </ThemedText>
                   </TouchableOpacity>
                 );
@@ -376,6 +388,7 @@ export default function Home() {
               key={`inv-${invitation.id}`}
               onPress={() => router.push('/invitations')}
               style={styles.activityItem}
+              accessibilityRole="button"
             >
               <View
                 style={[
@@ -415,6 +428,7 @@ export default function Home() {
                 key={`game-${game.id}`}
                 onPress={() => router.push(`/games/${game.id}`)}
                 style={styles.activityItem}
+                accessibilityRole="button"
               >
                 <View
                   style={[
@@ -480,6 +494,7 @@ export default function Home() {
                       { backgroundColor: colors.primary },
                     ]}
                     onPress={() => router.push('/teams/create')}
+                    accessibilityRole="button"
                   >
                     <ThemedText
                       variant="captionBold"

@@ -13,7 +13,8 @@
     "invalidEmail": "Ingresa un correo electrónico válido",
     "justNow": "Ahora mismo",
     "hoursAgo": "hace {{count}} h",
-    "yesterday": "Ayer"
+    "yesterday": "Ayer",
+    "changePhoto": "Cambiar foto"
   },
   "navigation": {
     "home": "Inicio",
@@ -131,7 +132,9 @@
     "jerseyNumber": "Número de Camiseta",
     "position": "Posición",
     "addToTeam": "Agregar al Equipo",
-    "removeFromTeam": "Quitar del Equipo"
+    "removeFromTeam": "Quitar del Equipo",
+    "playerPhoto": "Foto del jugador",
+    "clearSelectedPlayer": "Quitar el jugador seleccionado"
   },
   "games": {
     "title": "Juegos",

@@ -29,6 +29,7 @@ import { spacing } from '../theme';
 import { getHorizontalPadding } from '../utils/responsive';
 import { SUPPORT_EMAIL } from '../config/env';
 import { useToast } from '../components/Toast';
+import { HEADER_ICON_HIT_SLOP } from '../utils/touch-target';
 
 export const APP_NAME = 'Hooplings';
 
@@ -152,6 +153,7 @@ export default function AboutScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

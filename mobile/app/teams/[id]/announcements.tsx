@@ -35,6 +35,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { formatRelativeTime } from '../../../utils/relative-time';
 import type { Announcement } from '../../../hooks/useAnnouncements';
 import { displayName } from '../../../utils/display-name';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function AnnouncementsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -136,6 +137,7 @@ export default function AnnouncementsScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -148,6 +150,8 @@ export default function AnnouncementsScreen() {
           <TouchableOpacity
             onPress={() => setShowCompose(!showCompose)}
             style={styles.composeButton}
+            hitSlop={HEADER_ICON_HIT_SLOP}
+            accessibilityRole="button"
             accessibilityLabel="New announcement"
           >
             <Ionicons name={showCompose ? 'close' : 'add'} size={24} color={colors.primary} />

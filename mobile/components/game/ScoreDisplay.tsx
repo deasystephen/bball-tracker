@@ -17,6 +17,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, typography } from '../../theme';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../hooks/useScoreAnnouncement';
+import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -100,6 +101,7 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
           <TouchableOpacity
             onPress={onBack}
             style={styles.backButton}
+            hitSlop={HEADER_ICON_HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >

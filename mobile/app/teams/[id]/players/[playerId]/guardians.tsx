@@ -44,6 +44,7 @@ import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 import { useGoBack } from '../../../../../hooks/useGoBack';
 import { displayName } from '../../../../../utils/display-name';
+import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../../../utils/touch-target';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -164,6 +165,7 @@ export default function PlayerGuardiansScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -329,5 +331,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   pendingHeader: { marginTop: spacing.lg },
-  rowButton: { padding: spacing.xs },
+  // Change-role and remove sit 4pt apart, so they grow to 44pt rather than
+  // take hitSlop (overlapping slop would hand one the other's taps).
+  rowButton: {
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

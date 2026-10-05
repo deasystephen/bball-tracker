@@ -34,6 +34,7 @@ import {
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { useGoBack } from '../../hooks/useGoBack';
+import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -155,6 +156,7 @@ export default function AdminDashboard() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

@@ -34,6 +34,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { getApiErrorMessage } from '../../../services/api-client';
 import { useTranslation } from '../../../i18n';
+import { HEADER_ICON_HIT_SLOP, touchTargetHitSlop } from '../../../utils/touch-target';
 
 /**
  * The league delete rule, as the API applies it (`league-service.deleteLeague`):
@@ -176,6 +177,7 @@ export default function LeagueDetailScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -191,6 +193,7 @@ export default function LeagueDetailScreen() {
           <TouchableOpacity
             onPress={handleDeleteLeague}
             style={styles.deleteButton}
+            hitSlop={touchTargetHitSlop(22 + 2 * spacing.sm)}
             accessibilityRole="button"
             accessibilityLabel={t('leagues.deleteLeague')}
             testID="league-delete-button"

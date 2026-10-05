@@ -30,6 +30,7 @@ import { useAuthUser } from '../../../store/auth-store';
 import { canCreateLeagues } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function CreateLeagueScreen() {
   const router = useRouter();
@@ -103,6 +104,7 @@ export default function CreateLeagueScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

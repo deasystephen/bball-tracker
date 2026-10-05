@@ -40,6 +40,7 @@ import { getApiErrorMessage } from '../../../../services/api-client';
 import { useTranslation } from '../../../../i18n';
 import { spacing } from '../../../../theme';
 import { getHorizontalPadding } from '../../../../utils/responsive';
+import { HEADER_ICON_HIT_SLOP } from '../../../../utils/touch-target';
 
 const NAME_MAX_LENGTH = 100;
 
@@ -163,6 +164,7 @@ function EditSeasonForm({ season }: { season: Season }) {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

@@ -713,6 +713,12 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** After the shot you hear the new score ("Score: <team> <n>, <opponent> <m>") and then "<player> - 2pt made. Undo available for 5 seconds", once, not every second. The UNDO button reads as "Saving" while the event is being saved, then "Undo, button". The error toast is spoken. On Watch Live the score reads as one element and each update is spoken once; opening the screen does not announce the score. On Android each change is heard once, not twice.
 - **Notes:** ___________
 
+### G.3c — Opponent score buttons are labelled 44pt buttons (#773)
+- [ ] Pass / Fail / Skipped
+- **Steps:** With VoiceOver on, open the tracker of an in-progress game and swipe to the controls under "Opponent Score". Then, with VoiceOver off, tap each of -1, +1, +2 and +3 near its top and bottom edge (Accessibility Inspector: check each frame).
+- **Expected:** VoiceOver reads "Subtract 1 from opponent score, button", "Add 1 to opponent score, button", "Add 2 …", "Add 3 …". Each control is at least 44pt tall and an edge tap changes the opponent score by the right amount. The visible -1 / +1 / +2 / +3 text and colours are unchanged.
+- **Notes:** ___________
+
 ### G.4 — Hot-streak milestone
 - [ ] Pass / Fail / Skipped
 - **Steps:** Have one player make 3 shots in a row. Then: undo the 3rd (flame should clear), re-record it, leave the tracker with "Leave" and re-open it via Continue Tracking, and make one more shot (flame should still be on — counters are seeded from the server's events on open, audit #75).
@@ -1111,6 +1117,19 @@ Cross-cuts E, I, J — but worth aggregating here.
 - **Expected (current):** An already-connected socket stays connected (handshake-only auth; #49 deferred). A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
 - **Notes:** ___________
 
+### P.10 — VoiceOver: every control is a button, single-choice rows say "selected" (#655)
+- [ ] Pass / Fail / Skipped
+- **Role:** coach (Home, Games, Stats, roster) and the seeded guardian Sonya Curry (RSVP)
+- **Steps:** With VoiceOver on: Home → swipe to "See All" and to a team pill. Games tab → swipe through All / Live / Upcoming / Completed, double-tap Upcoming, swipe again. Stats tab with two teams → swipe through the team chips. Team → Roster → the header's first control; Add Player → pick a directory player → the clear (x) control. As Sonya, open the Warriors game, answer Going, swipe through Going / Not Going / Maybe. Profile → avatar.
+- **Expected:** "See All, button"; the pill reads "<team>, <n> players, button". The active filter reads "Upcoming, selected, button" and the others have no "selected"; the shown team's chip reads "selected". The roster back arrow reads "Go back, button"; the clear control reads "Clear selected player, button". The RSVP answers read as radio buttons with "selected" on Going. The avatar reads "Change photo, button"; in Manage Players its menu is titled "Player Photo". Maestro: `.maestro/guardian-rsvp.yaml` asserts `selected: true` on Going (re-seed first). Jest: `__tests__/a11y/pressable-roles.test.ts`, `__tests__/app/tab-pill-selection.test.tsx`.
+- **Notes:** ___________
+
+### P.11 — Icon buttons, pills and chips are 44pt touch targets (#772)
+- [ ] Pass / Fail / Skipped
+- **Steps:** On the iOS simulator, run Accessibility Inspector → Audit on: team detail as its head coach (edit / delete icons), Home with a pending invitation (bell), the roster header, Games and Stats tabs, game detail as a guardian of two players ("Respond for" chips, Going / Not Going / Maybe), and the tracker after one shot (UNDO). On a device, tap each of those controls near its edge.
+- **Expected:** No "hit area too small" row for any of them. Icons and header layout look as before (the icon buttons grew through `hitSlop`, not padding); the pills, chips, RSVP answers and UNDO are 44pt tall. The team hero's edit and delete each take only their own taps. Jest: `__tests__/a11y/touch-targets.test.ts` and the 44pt cases in the UndoBanner, RSVP and tab-pill tests.
+- **Notes:** ___________
+
 ---
 
 ## Q. Role permission matrix (boundary checks)
@@ -1323,3 +1342,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-09-27: #445 — FREE team cap lifted. D.1 no longer expects a 402 on the 4th team; the Profile usage meter reads `<count> · Unlimited` for every tier. Paid tiers are reachable only through the ADMIN comp route (`PATCH /api/v1/admin/users/:userId/subscription`, exercised with `curl`; no app UI). Nothing marked passed.
 - 2026-09-29: #418 — the deprecated add-player endpoints are gone. `POST /teams/:id/managed-players` answers 404 and `POST /teams/:id/invitations` takes `{ playerId }` only; Q.4 and Q.8 now target the unified `POST /teams/:teamId/players`. No app-visible change (the app has used the unified endpoint since the 2026-08-28 OTA).
 - 2026-10-04: audit batch #669 #730 #774. B.2a (avatar photo menu is an ActionMenu, dismissable on Android), G.3a (double tap records one event) and G.3b (VoiceOver/TalkBack announcements on the tracker, toasts and Watch Live): device-only checks.
+- 2026-10-05: audit batch #655 #772 #773. P.10 (VoiceOver roles, labels and selected state), P.11 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.

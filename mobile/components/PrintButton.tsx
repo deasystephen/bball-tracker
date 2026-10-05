@@ -100,6 +100,8 @@ export const PrintButton: React.FC<PrintButtonProps> = ({
       style={[styles.button, { borderColor: colors.border }]}
       activeOpacity={0.7}
       data-print-show="true"
+      accessibilityRole="button"
+      accessibilityLabel={title}
     >
       <Ionicons name="print-outline" size={20} color={colors.primary} />
       {showLabel && (

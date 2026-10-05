@@ -32,6 +32,7 @@ import { useAuthUser } from '../../../store/auth-store';
 import { canManageLeague } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function CreateSeasonScreen() {
   const router = useRouter();
@@ -103,7 +104,13 @@ export default function CreateSeasonScreen() {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + spacing.md, paddingHorizontal: padding }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            hitSlop={HEADER_ICON_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <ThemedText variant="h2">Create Season</ThemedText>
@@ -140,6 +147,7 @@ export default function CreateSeasonScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

@@ -22,6 +22,7 @@ import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { getResultColor } from '../../utils/game-result';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 export default function Stats() {
   const router = useRouter();
@@ -127,6 +128,8 @@ export default function Stats() {
                           : colors.border,
                     },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedTeamId === team.id }}
                 >
                   <ThemedText
                     variant="caption"
@@ -234,6 +237,7 @@ export default function Stats() {
                   <ThemedText variant="h3">Team Leaders</ThemedText>
                   <TouchableOpacity
                     onPress={() => router.push(`/teams/${selectedTeamId}/stats`)}
+                    accessibilityRole="button"
                   >
                     <ThemedText variant="caption" color="primary">
                       View All
@@ -253,6 +257,7 @@ export default function Stats() {
                       onPress={() =>
                         router.push(`/players/${topRebounder.playerId}/stats`)
                       }
+                      accessibilityRole="button"
                     >
                       <View
                         style={[
@@ -293,6 +298,7 @@ export default function Stats() {
                       onPress={() =>
                         router.push(`/players/${topScorer.playerId}/stats`)
                       }
+                      accessibilityRole="button"
                     >
                       <View
                         style={[
@@ -333,6 +339,7 @@ export default function Stats() {
                       onPress={() =>
                         router.push(`/players/${topAssister.playerId}/stats`)
                       }
+                      accessibilityRole="button"
                     >
                       <View
                         style={[
@@ -391,6 +398,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
     borderWidth: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   recordCard: { marginBottom: spacing.md, alignItems: 'center' },
   recordRow: {

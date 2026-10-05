@@ -30,6 +30,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { areAllLeaguesPersonal } from '../../../utils/league-scope';
 import { Ionicons } from '@expo/vector-icons';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function EditTeamScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -183,6 +184,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -267,6 +269,8 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                           : 'No seasons'
                       }
                       onPress={() => handleLeagueSelect(league.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
                       rightElement={
                         isSelected ? (
                           <Ionicons
@@ -319,6 +323,8 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                             : 'No teams yet'
                         }
                         onPress={() => setSeasonId(season.id)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: isSelected }}
                         rightElement={
                           isSelected ? (
                             <Ionicons

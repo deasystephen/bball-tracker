@@ -35,6 +35,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
 
 export default function CreateGameScreen() {
   const router = useRouter();
@@ -152,6 +153,7 @@ export default function CreateGameScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -229,6 +231,8 @@ export default function CreateGameScreen() {
                       title={team.name}
                       subtitle={team.season?.league?.name ? `${team.season.league.name} - ${team.season.name}` : undefined}
                       onPress={() => setTeamId(team.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
                       rightElement={
                         isSelected ? (
                           <Ionicons

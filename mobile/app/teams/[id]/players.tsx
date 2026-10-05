@@ -77,11 +77,15 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, getResponsiveValue } from '../../../utils/responsive';
+import { touchTargetHitSlop } from '../../../utils/touch-target';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
 import { useGoBack } from '../../../hooks/useGoBack';
+
+/** The header back arrow and the clear-selection icon draw at 32pt (24 + padding); the slop makes them 44pt. */
+const SMALL_ICON_BUTTON_HIT_SLOP = touchTargetHitSlop(24 + 2 * spacing.xs);
 
 interface ChipPalette {
   success: string;
@@ -715,6 +719,9 @@ export default function ManagePlayersScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={SMALL_ICON_BUTTON_HIT_SLOP}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -805,6 +812,9 @@ export default function ManagePlayersScreen() {
                     <TouchableOpacity
                       onPress={() => setSelectedPlayer(null)}
                       style={styles.clearSelection}
+                      hitSlop={SMALL_ICON_BUTTON_HIT_SLOP}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('players.clearSelectedPlayer')}
                     >
                       <Ionicons name="close-circle" size={24} color={colors.textTertiary} />
                     </TouchableOpacity>
@@ -861,6 +871,7 @@ export default function ManagePlayersScreen() {
                   uri={avatarUri}
                   name={name}
                   onImageSelected={setAvatarUri}
+                  menuTitle={t('players.playerPhoto')}
                 />
               </View>
 
@@ -1037,6 +1048,7 @@ export default function ManagePlayersScreen() {
           <Pressable
             style={styles.editBackdrop}
             onPress={() => setEditingMember(null)}
+            accessibilityRole="button"
             accessibilityLabel="Close edit"
           />
           <View
@@ -1111,6 +1123,7 @@ export default function ManagePlayersScreen() {
               <Pressable
                 style={styles.editBackdrop}
                 onPress={() => setEmailEditMember(null)}
+                accessibilityRole="button"
                 accessibilityLabel="Close email edit"
               />
               <View

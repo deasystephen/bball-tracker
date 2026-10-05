@@ -27,6 +27,7 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getGameResult, getResultColor } from '../../../utils/game-result';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -179,6 +180,7 @@ export default function GameStatsScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

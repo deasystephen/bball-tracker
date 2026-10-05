@@ -44,6 +44,7 @@ import { useAuthUser } from '../../../store/auth-store';
 import { getApiErrorMessage } from '../../../services/api-client';
 import { displayName } from '../../../utils/display-name';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 
 const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   HEAD_COACH: 'teams.roleHeadCoach',
@@ -189,6 +190,7 @@ export default function TeamStaffScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -396,6 +398,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowActions: { flexDirection: 'row', gap: spacing.xs },
-  rowButton: { padding: spacing.xs },
+  // Change-role and remove sit 4pt apart, so they grow to 44pt rather than
+  // take hitSlop (overlapping slop would hand one the other's taps).
+  rowButton: {
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hint: { marginTop: spacing.md },
 });

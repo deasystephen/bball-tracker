@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { AccessibilityInfo, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 import { UndoBanner } from '../../../components/game/UndoBanner';
@@ -214,5 +214,12 @@ describe('UndoBanner', () => {
       render(<UndoBanner visible={false} message="x" onUndo={jest.fn()} />);
       expect(spy).not.toHaveBeenCalled();
     });
+  });
+
+  it('makes the UNDO button a 44pt touch target (#772)', () => {
+    const { getByRole } = render(<UndoBanner visible message="x" onUndo={jest.fn()} />);
+    expect(StyleSheet.flatten(getByRole('button', { name: 'Undo' }).props.style)).toEqual(
+      expect.objectContaining({ minHeight: 44 })
+    );
   });
 });

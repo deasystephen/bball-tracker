@@ -299,6 +299,39 @@ never inline a role check in a screen:
   which is how the defect shipped with a passing test. To assert it in a screen test, walk the
   `parent` chain of the button and expect no other accessible ancestor
   (`__tests__/app/profile-my-kids.test.tsx`).
+- **Every pressable says what it is (#655).** React Native gives a bare `TouchableOpacity` or
+  `Pressable` no button trait, so VoiceOver reads it as static text. Prefer the shared primitives,
+  which set the role (`Button`, `Card onPress`, `ListItem`, `SortPills`, `ActionMenu`); a hand-rolled
+  pressable sets `accessibilityRole` itself: `"button"`, `"radio"` for one answer out of several (the
+  RSVP answers, the "Respond for" chips, the league/season/team pickers in team edit and game
+  create), `"link"` for an external URL. An **icon-only** pressable also carries an
+  `accessibilityLabel` (VoiceOver otherwise reads the icon font's glyph); back arrows use the
+  literal `"Go back"`, which ten Maestro flows tap. A **single-choice** pill, chip or radio row marks
+  the active one with `accessibilityState={{ selected }}`, never by colour alone (Games filter pills,
+  Stats team chips, RSVP answers; `SortPills` is the reference), so VoiceOver reads "selected" and
+  Maestro can assert `selected: true` (`.maestro/guardian-rsvp.yaml`). A composite card (game card,
+  activity row, podium card) needs only the role: its children form the label. When you do add a
+  label to a pressable that a Maestro flow matches by its text, keep the text in the label
+  (`grep -rn '<text>' .maestro/` first). `__tests__/a11y/pressable-roles.test.ts` reads the source
+  of `app/` and `components/` and fails on a pressable with no `accessibilityRole`, or an icon-only
+  one with no `accessibilityLabel`, unless it opts out with `accessible={false}`; there is no
+  allow-list. Screen tests: `__tests__/app/tab-pill-selection.test.tsx`,
+  `__tests__/app/game-detail-rsvp-picker.test.tsx`. The tab bar keeps role `"button"` with
+  `selected` (switching to `"tab"` would gain nothing VoiceOver users need and risks the
+  "<Name> tab" labels the flows tap).
+- **Every control is a 44pt touch target (#772, #773).** The minimum lives in
+  `utils/touch-target.ts` (`MIN_TOUCH_TARGET`). Text controls (pills, chips, the RSVP answers, UNDO,
+  the opponent score buttons) take `minHeight: MIN_TOUCH_TARGET` with `justifyContent: 'center'`.
+  An icon button keeps its drawn size and gets `hitSlop={touchTargetHitSlop(<icon> + 2 * <padding>)}`
+  (`HEADER_ICON_HIT_SLOP` for the usual 24pt header icon with `padding: spacing.sm`), so neither the
+  glyph nor the header around it moves; two icon buttons side by side with little or
+  no gap (season edit/delete, game delete/share, the staff and guardian row actions) grow to 44pt
+  with `minWidth`/`minHeight` instead, because overlapping slop hands the later sibling the earlier
+  one's taps. `__tests__/a11y/touch-targets.test.ts` works out every icon-only pressable's size from
+  its icon `size`, its `StyleSheet` entry and its `hitSlop` (checking that the size passed to
+  `touchTargetHitSlop` is no larger than the real one) and fails under 44 x 44 or when it cannot
+  tell; text controls are covered by render tests that flatten the style (UndoBanner,
+  OpponentScoreButtons, the RSVP picker and the tab pills).
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
   Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the

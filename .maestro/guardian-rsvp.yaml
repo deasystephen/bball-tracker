@@ -42,3 +42,9 @@ appId: com.bballtracker.mobile
 - assertNotVisible: "Continue Tracking"
 - tapOn: "Going"
 - assertVisible: ".*going.*"
+
+# The answer just given carries the selected state, not only the fill colour
+# (#655): VoiceOver reads "selected" on it.
+- assertVisible:
+    text: "Going"
+    selected: true

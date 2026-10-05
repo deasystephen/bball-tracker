@@ -30,6 +30,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { displayName } from '../../../utils/display-name';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function PlayerStatsScreen() {
   const router = useRouter();
@@ -99,6 +100,7 @@ export default function PlayerStatsScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
@@ -237,6 +239,7 @@ export default function PlayerStatsScreen() {
                 <TouchableOpacity
                   style={styles.teamHeader}
                   onPress={() => router.push(`/teams/${teamData.teamId}/stats`)}
+                  accessibilityRole="button"
                 >
                   <View>
                     <ThemedText variant="bodyBold">{teamData.teamName}</ThemedText>

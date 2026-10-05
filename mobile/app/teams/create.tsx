@@ -38,6 +38,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { canCreateTeams } from '../../utils/team-permissions';
 import { areAllLeaguesPersonal } from '../../utils/league-scope';
 import { useAuthUser } from '../../store/auth-store';
+import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
 
 /**
  * Sentinel league id for "no league — put it in my own teams". Always offered
@@ -192,6 +193,7 @@ export default function CreateTeamScreen() {
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
+          hitSlop={HEADER_ICON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >

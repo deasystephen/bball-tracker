@@ -33,6 +33,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import type { GameStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../../hooks/useScoreAnnouncement';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
 
 export default function GameLiveScreen() {
   const router = useRouter();
@@ -105,6 +106,7 @@ export default function GameLiveScreen() {
           <TouchableOpacity
             onPress={() => router.back()}
             style={styles.backButton}
+            hitSlop={HEADER_ICON_HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
