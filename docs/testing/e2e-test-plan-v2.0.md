@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-25
 **Target build:** Mobile — latest TestFlight build on OTA runtime 1.5.0 (v1.5.0, Expo SDK 57; build #33 or newer, cut 2026-09-29 from `b408645` / #576, see `mobile/binary-manifest.json`), with the latest production OTA applied — #32 and older are 1.4.0-or-earlier binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
-**Checkboxes:** count with `grep -c '^- \[ \]' docs/testing/e2e-test-plan-v2.0.md`; none are pre-ticked. This line states no total on purpose, so a PR that adds a section does not need to touch it.
+**Checkboxes:** count all with `grep -c '^- \[[ x]\]' docs/testing/e2e-test-plan-v2.0.md` and the passed ones with `grep -c '^- \[x\]'`; a ticked box keeps the `Pass / Fail / Skipped` selector and records the date, who ran it, the device and the OTA or build on its Notes line. This line states no total on purpose, so a PR that adds a section does not need to touch it.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
 
@@ -939,7 +939,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Notes:** ___________
 
 ### K.3a — Outcomes without colour, and with VoiceOver (#778)
-- [x] Pass (2026-10-05, owner, device, after OTA f08483ab… at `78eebfb`)
+- [x] Pass / Fail / Skipped
 - **Steps:** As a coach whose team has finished games including a tie, turn on Settings → Accessibility →
   Display & Text Size → Color Filters → Grayscale. Open the Stats tab, then Team detail → View Team Stats.
   Turn Grayscale off, turn VoiceOver on, and focus the record card on the Stats tab and the Season Record on
@@ -950,7 +950,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   with no "7, W, -, 7, L" before it and no separate stop on the streak (check the same with TalkBack on
   Android if available). Team Stats reads its record as one sentence, "Season record: 7 wins, 7 losses,
   1 tie", not "7, -, 7". Jest: `__tests__/app/stats-result-cues.test.tsx`.
-- **Notes:** ___________
+- **Notes:** Pass on device, 2026-10-05, owner, VoiceOver + grayscale, after OTA f08483ab-0387-4b03-8148-5d949d7970fa at `78eebfb`.
 
 ### K.4 — Career stats across seasons
 - [ ] Pass / Fail / Skipped
@@ -1132,31 +1132,31 @@ Cross-cuts E, I, J — but worth aggregating here.
 - **Notes:** ___________
 
 ### P.10 — VoiceOver Headings rotor finds screen titles and sections (#775)
-- [x] Pass (2026-10-05, owner, device, after OTA f08483ab… at `78eebfb`)
+- [x] Pass / Fail / Skipped
 - **Role:** COACH
 - **Steps:** Turn on VoiceOver (or Accessibility Inspector on the simulator). Open Teams → a team → Roster, set the rotor to **Headings** and swipe down. Repeat on Team stats, a game's detail (scheduled with RSVP, then finished with a box score), the Stats tab and Home.
 - **Expected:** Roster lands on "Roster", then the add-player form title, "Current Players (n)" and "Invited (n)" when there are invitations, instead of "No headings". Team stats: the title, "Season Record", "Shooting Percentages", "Recent Games", "Roster Stats". Game detail: "RSVP", "Box Score". No score, record count or stat number is announced as a heading. Jest: `__tests__/a11y/heading-roles.test.ts` (source guard).
-- **Notes:** ___________
+- **Notes:** Pass on device, 2026-10-05, owner, VoiceOver Headings rotor, after OTA f08483ab-0387-4b03-8148-5d949d7970fa at `78eebfb`.
 
 ### P.11 — Largest accessibility text size keeps the tracker, tab bar, box score and toasts readable (#776)
-- [x] Pass (2026-10-05, owner, device, after OTA f08483ab… at `78eebfb`)
+- [x] Pass / Fail / Skipped
 - **Role:** COACH
 - **Steps:** Settings → Accessibility → Display & Text Size → Larger Text: turn on Larger Accessibility Sizes and drag the slider to the maximum. Open the tracker on an in-progress game, switch between tabs, open a finished game's box score, and trigger a long error toast (for example record a shot in Airplane Mode). Then return to the default size and repeat.
 - **Expected:** At the largest size every `2PT`/`3PT`/`FT` and `MADE`/`MISS` label sits fully inside its button; the focused tab's label does not overlap its icon; box-score cells such as `12-18` and `100.0` show in full (no `…`) and the table still scrolls sideways; a long toast shows up to four lines and stays up long enough to read. At the default size the shot grid and the tab bar are the same height as before. Jest: `__tests__/a11y/text-sizing.test.tsx` (caps, clamps and the fit arithmetic; Jest does no layout).
-- **Notes:** ___________
+- **Notes:** Pass on device, 2026-10-05, owner, largest accessibility text size, after OTA f08483ab-0387-4b03-8148-5d949d7970fa at `78eebfb`.
 
 ### P.12 — VoiceOver: every control is a button, single-choice rows say "selected" (#655)
-- [x] Pass (2026-10-05, owner, device, after OTA f08483ab… at `78eebfb`)
+- [x] Pass / Fail / Skipped
 - **Role:** coach (Home, Games, Stats, roster) and the seeded guardian Sonya Curry (RSVP)
 - **Steps:** With VoiceOver on: Home → swipe to "See All" and to a team pill. Games tab → swipe through All / Live / Upcoming / Completed, double-tap Upcoming, swipe again. Stats tab with two teams → swipe through the team chips. Team → Roster → the header's first control; Add Player → pick a directory player → the clear (x) control. As Sonya, open the Warriors game, answer Going, swipe through Going / Not Going / Maybe. Profile → avatar.
 - **Expected:** "See All, button"; the pill reads "<team>, <n> players, button". The active filter reads "Upcoming, selected, button" and the others have no "selected"; the shown team's chip reads "selected". The roster back arrow reads "Go back, button"; the clear control reads "Clear selected player, button". The RSVP answers read as radio buttons with "selected" on Going. The avatar reads "Change photo, button"; in Manage Players its menu is titled "Player Photo". Maestro: `.maestro/guardian-rsvp.yaml` asserts `selected: true` on Going (re-seed first). Jest: `__tests__/a11y/pressable-roles.test.ts`, `__tests__/app/tab-pill-selection.test.tsx`.
-- **Notes:** ___________
+- **Notes:** Pass on device, 2026-10-05, owner, VoiceOver roles/labels/selected, after OTA f08483ab-0387-4b03-8148-5d949d7970fa at `78eebfb`.
 
 ### P.13 — Icon buttons, pills and chips are 44pt touch targets (#772)
-- [x] Pass (2026-10-05, owner, device, after OTA f08483ab… at `78eebfb`)
+- [x] Pass / Fail / Skipped
 - **Steps:** On the iOS simulator, run Accessibility Inspector → Audit on: team detail as its head coach (edit / delete icons), Home with a pending invitation (bell), the roster header, Games and Stats tabs, game detail as a guardian of two players ("Respond for" chips, Going / Not Going / Maybe), and the tracker after one shot (UNDO). On a device, tap each of those controls near its edge.
 - **Expected:** No "hit area too small" row for any of them. Icons and header layout look as before (the icon buttons grew through `hitSlop`, not padding); the pills, chips, RSVP answers and UNDO are 44pt tall. The team hero's edit and delete each take only their own taps. Jest: `__tests__/a11y/touch-targets.test.ts` and the 44pt cases in the UndoBanner, RSVP and tab-pill tests.
-- **Notes:** ___________
+- **Notes:** Pass on device, 2026-10-05, owner, edge taps on each control, after OTA f08483ab-0387-4b03-8148-5d949d7970fa at `78eebfb`; the simulator Accessibility Inspector Audit half was not separately recorded.
 
 ---
 
@@ -1372,3 +1372,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-10-04: audit batch #669 #730 #774. B.2a (avatar photo menu is an ActionMenu, dismissable on Android), G.3a (double tap records one event) and G.3b (VoiceOver/TalkBack announcements on the tracker, toasts and Watch Live): device-only checks.
 - 2026-10-05: audit batch #775 #776. P.10 (VoiceOver Headings rotor reaches screen titles and section headings) and P.11 (largest accessibility text size on the tracker, tab bar, box score and toasts): device-only checks.
 - 2026-10-05: audit batch #655 #772 #773. P.12 (VoiceOver roles, labels and selected state), P.13 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.
+- 2026-10-05: first ticked boxes. K.3a and P.10–P.13 recorded as passed on a device by the owner after OTA f08483ab-0387-4b03-8148-5d949d7970fa (main at `78eebfb`); the record for each is on its Notes line, and the matching issues (#655 #772 #773 #775 #776 #778) carry the same note. G.3c (#773, opponent score buttons) is not yet recorded.
