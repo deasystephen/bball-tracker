@@ -16,41 +16,24 @@
  * wrapper) opts out with `accessible={false}`.
  */
 
-import fs from 'fs';
-import path from 'path';
 import ts from 'typescript';
 
-import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
-
-const SCANNED_DIRS = ['app', 'components'];
-
-const PRESSABLES = new Set([
-  'TouchableOpacity',
-  'TouchableHighlight',
-  'TouchableWithoutFeedback',
-  'Pressable',
-]);
-
-/** Icon components whose glyph is meaningless to a screen reader. */
-const ICONS = new Set(['Ionicons', 'MaterialIcons', 'MaterialCommunityIcons', 'FontAwesome', 'Feather']);
+import {
+  type JsxNode,
+  jsxAttributes,
+  lineOf,
+  literalAttribute,
+  parseTsx,
+  tagNameOf,
+  walkJsx,
+} from '../helpers/source-files';
+import { ICONS, TOUCHABLES, scannedSources } from '../helpers/pressables';
 
 export interface RoleFinding {
   file: string;
   line: number;
   name: string;
   problem: 'no accessibilityRole' | 'icon-only without accessibilityLabel';
-}
-
-function attributeNames(opening: ts.JsxOpeningLikeElement): Map<string, string> {
-  const result = new Map<string, string>();
-  for (const attribute of opening.attributes.properties) {
-    if (ts.isJsxAttribute(attribute)) {
-      result.set(attribute.name.getText(), attribute.initializer?.getText() ?? 'true');
-    } else if (ts.isJsxSpreadAttribute(attribute)) {
-      result.set('...', attribute.expression.getText());
-    }
-  }
-  return result;
 }
 
 /** The JSX children that render something (whitespace-only text and comments dropped). */
@@ -62,50 +45,42 @@ function meaningfulChildren(node: ts.JsxElement): ts.JsxChild[] {
   });
 }
 
-function isIconOnly(node: ts.JsxElement): boolean {
+function isIconOnly(node: JsxNode): boolean {
+  if (!ts.isJsxElement(node)) return false;
   const children = meaningfulChildren(node);
-  if (children.length !== 1) return false;
-  const only = children[0];
-  const opening = ts.isJsxElement(only) ? only.openingElement : ts.isJsxSelfClosingElement(only) ? only : null;
-  return opening !== null && ICONS.has(opening.tagName.getText());
+  const only = children.length === 1 ? children[0] : undefined;
+  return (
+    only !== undefined &&
+    (ts.isJsxElement(only) || ts.isJsxSelfClosingElement(only)) &&
+    ICONS.has(tagNameOf(only))
+  );
 }
 
 export function findUnlabelledPressables(fileName: string, text: string): RoleFinding[] {
-  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = parseTsx(fileName, text);
   const findings: RoleFinding[] = [];
 
-  const visit = (node: ts.Node): void => {
-    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
-      const opening = ts.isJsxElement(node) ? node.openingElement : node;
-      const name = opening.tagName.getText();
-      if (PRESSABLES.has(name)) {
-        const attributes = attributeNames(opening);
-        const line = source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
-        const optsOut = attributes.get('accessible') === '{false}';
-        if (!optsOut && !attributes.has('accessibilityRole')) {
-          findings.push({ file: fileName, line, name, problem: 'no accessibilityRole' });
-        }
-        if (!optsOut && ts.isJsxElement(node) && isIconOnly(node) && !attributes.has('accessibilityLabel')) {
-          findings.push({ file: fileName, line, name, problem: 'icon-only without accessibilityLabel' });
-        }
-      }
+  walkJsx(source, null, (node) => {
+    const name = tagNameOf(node);
+    if (!TOUCHABLES.has(name)) return null;
+    const attributes = jsxAttributes(node);
+    if (literalAttribute(attributes, 'accessible') === false) return null;
+    const line = lineOf(source, node);
+    if (!attributes.has('accessibilityRole')) {
+      findings.push({ file: fileName, line, name, problem: 'no accessibilityRole' });
     }
-    ts.forEachChild(node, visit);
-  };
+    if (isIconOnly(node) && !attributes.has('accessibilityLabel')) {
+      findings.push({ file: fileName, line, name, problem: 'icon-only without accessibilityLabel' });
+    }
+    return null;
+  });
 
-  visit(source);
   return findings;
 }
 
 describe('pressable roles and labels', () => {
   it('finds none missing in the app', () => {
-    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.tsx']));
-    // A guard that scans nothing passes for the wrong reason.
-    expect(files.length).toBeGreaterThan(50);
-
-    const findings = files.flatMap((file) =>
-      findUnlabelledPressables(path.relative(MOBILE_ROOT, file), fs.readFileSync(file, 'utf8'))
-    );
+    const findings = scannedSources().flatMap(({ file, text }) => findUnlabelledPressables(file, text));
 
     expect(findings.map((f) => `${f.file}:${f.line} ${f.name}: ${f.problem}`)).toEqual([]);
   });

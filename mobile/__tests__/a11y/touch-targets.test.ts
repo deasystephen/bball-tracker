@@ -4,7 +4,7 @@
  * An icon button is as big as its glyph plus padding. A 22pt icon with 4pt
  * padding is a 30pt target, which a coach operating the app one-handed
  * misses. This reads the source of `app/` and `components/` and checks every
- * pressable (`TouchableOpacity`, `TouchableHighlight`, `Pressable`) whose
+ * touchable (`helpers/pressables.ts#TOUCHABLES`, shared with the other pressable guards) whose
  * first child is an icon, or that holds an icon and no text: the icon-only
  * buttons, and hand-sized ones with a second child such as the Home bell and
  * its badge or the print button and its label. It works out the button's
@@ -42,13 +42,20 @@ import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
 
-import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+import {
+  MOBILE_ROOT,
+  type JsxNode,
+  jsxAttributeExpression,
+  jsxAttributes,
+  lineOf,
+  literalAttribute,
+  parseTsx,
+  tagNameOf,
+  walkJsx,
+} from '../helpers/source-files';
+import { ICONS, TOUCHABLES, scannedSources } from '../helpers/pressables';
 import { spacing } from '../../theme/spacing';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
-
-const SCANNED_DIRS = ['app', 'components'];
-const PRESSABLES = new Set(['TouchableOpacity', 'TouchableHighlight', 'Pressable']);
-const ICONS = new Set(['Ionicons', 'MaterialIcons', 'MaterialCommunityIcons', 'FontAwesome', 'Feather']);
 const TEXT = new Set(['Text', 'ThemedText', 'Animated.Text']);
 /** Elements that can sit beside an icon in a text-free button without setting its size. */
 const NEUTRAL = new Set(['View', 'Animated.View']);
@@ -62,19 +69,6 @@ export interface SizeFinding {
 
 type Style = Record<string, number | undefined>;
 type Sides = { top: number; bottom: number; left: number; right: number };
-
-function attribute(opening: ts.JsxOpeningLikeElement, name: string): ts.JsxAttribute | undefined {
-  return opening.attributes.properties.find(
-    (p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.getText() === name
-  );
-}
-
-function initializerExpression(attr: ts.JsxAttribute | undefined): ts.Expression | undefined {
-  const init = attr?.initializer;
-  if (!init) return undefined;
-  if (ts.isJsxExpression(init)) return init.expression;
-  return init;
-}
 
 /** The `const` named `name` that `from` sees: nearest enclosing block first, then the module. */
 function declaredConst(name: string, from: ts.Node): ts.Expression | undefined {
@@ -99,10 +93,7 @@ const modules = new Map<string, ts.SourceFile | null>();
 function moduleAt(base: string): ts.SourceFile | null {
   if (!modules.has(base)) {
     const file = ['.ts', '.tsx', '/index.ts', '/index.tsx'].map((ext) => base + ext).find((f) => fs.existsSync(f));
-    modules.set(
-      base,
-      file ? ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true) : null
-    );
+    modules.set(base, file ? parseTsx(file, fs.readFileSync(file, 'utf8')) : null);
   }
   return modules.get(base) ?? null;
 }
@@ -266,114 +257,102 @@ function hitSlopOf(expr: ts.Expression | undefined, width: number, height: numbe
   return { unreadable: true };
 }
 
-function openingOf(child: ts.JsxChild): ts.JsxOpeningLikeElement | undefined {
-  if (ts.isJsxSelfClosingElement(child)) return child;
-  if (ts.isJsxElement(child)) return child.openingElement;
-  return undefined;
+function isJsxNode(node: ts.Node): node is JsxNode {
+  return ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node);
 }
 
 /** The icon a pressable is sized around: its first child, or the only icon in a text-free body. */
-function sizingIcon(node: ts.JsxElement): ts.JsxOpeningLikeElement | undefined {
+function sizingIcon(node: JsxNode): JsxNode | undefined {
+  if (!ts.isJsxElement(node)) return undefined;
   const children = node.children.filter(
     (c) => !(ts.isJsxText(c) && c.text.trim() === '') && !(ts.isJsxExpression(c) && !c.expression)
   );
-  const first = children[0] && openingOf(children[0]);
-  if (first && ICONS.has(first.tagName.getText())) return first;
+  const first = children[0];
+  if (first && isJsxNode(first) && ICONS.has(tagNameOf(first))) return first;
 
   // Otherwise only a body of icons in plain views: text, or a component such
   // as an Avatar, sizes the button some other way.
-  let icon: ts.JsxOpeningLikeElement | undefined;
+  let icon: JsxNode | undefined;
   let sizedOtherwise = false;
-  const scan = (n: ts.Node): void => {
-    if (ts.isJsxText(n) && n.text.trim() !== '') sizedOtherwise = true;
-    const opening = ts.isJsxSelfClosingElement(n) ? n : ts.isJsxOpeningElement(n) ? n : undefined;
-    if (opening) {
-      const name = opening.tagName.getText();
-      if (ICONS.has(name)) icon = icon ?? opening;
+  node.children.forEach((child) => {
+    walkJsx(child, null, (inner) => {
+      const name = tagNameOf(inner);
+      if (ICONS.has(name)) icon = icon ?? inner;
       else if (TEXT.has(name) || !NEUTRAL.has(name)) sizedOtherwise = true;
-    }
-    ts.forEachChild(n, scan);
-  };
-  node.children.forEach(scan);
+      return null;
+    });
+    const scanText = (n: ts.Node): void => {
+      if (ts.isJsxText(n) && n.text.trim() !== '') sizedOtherwise = true;
+      ts.forEachChild(n, scanText);
+    };
+    scanText(child);
+  });
   return icon && !sizedOtherwise ? icon : undefined;
 }
 
 export function findSmallIconButtons(fileName: string, text: string): SizeFinding[] {
-  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = parseTsx(fileName, text);
   const findings: SizeFinding[] = [];
-  const lineOf = (node: ts.Node): number => source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
 
-  const visit = (node: ts.Node): void => {
-    if ((ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node))) {
-      const opening = ts.isJsxElement(node) ? node.openingElement : node;
-      if (PRESSABLES.has(opening.tagName.getText())) {
-        const { objects, opaque } = styleObjects(initializerExpression(attribute(opening, 'style')));
+  walkJsx(source, null, (node) => {
+    if (!TOUCHABLES.has(tagNameOf(node))) return null;
+    const { objects, opaque } = styleObjects(jsxAttributeExpression(node, 'style'));
 
-        for (const object of objects) {
-          for (const prop of object.properties) {
-            if (
-              ts.isPropertyAssignment(prop) &&
-              SIZE_KEYS.has(prop.name.getText()) &&
-              ts.isNumericLiteral(prop.initializer) &&
-              prop.initializer.text === String(MIN_TOUCH_TARGET)
-            ) {
-              findings.push({
-                file: fileName,
-                line: lineOf(prop),
-                problem: `literal ${MIN_TOUCH_TARGET} for ${prop.name.getText()}; use MIN_TOUCH_TARGET`,
-              });
-            }
-          }
-        }
-
-        const icon = ts.isJsxElement(node) ? sizingIcon(node) : undefined;
-        if (icon && attribute(opening, 'accessible')?.initializer?.getText() !== '{false}') {
-          const line = lineOf(node);
-          const iconSize = evaluate(initializerExpression(attribute(icon, 'size')));
-          if (iconSize === undefined || opaque) {
-            findings.push({ file: fileName, line, problem: 'icon button size unresolved' });
-          } else {
-            const s = resolveStyle(objects);
-            const pad = (side: number | undefined, axis: number | undefined): number => side ?? axis ?? s.padding ?? 0;
-            const drawnWidth = iconSize + pad(s.paddingLeft, s.paddingHorizontal) + pad(s.paddingRight, s.paddingHorizontal);
-            const drawnHeight = iconSize + pad(s.paddingTop, s.paddingVertical) + pad(s.paddingBottom, s.paddingVertical);
-            const width = Math.max(drawnWidth, s.width ?? 0, s.minWidth ?? 0);
-            const height = Math.max(drawnHeight, s.height ?? 0, s.minHeight ?? 0);
-            const slop = hitSlopOf(initializerExpression(attribute(opening, 'hitSlop')), width, height);
-            if ('unreadable' in slop) {
-              findings.push({ file: fileName, line, problem: 'hitSlop unresolved' });
-            } else if ('oversized' in slop) {
-              findings.push({
-                file: fileName,
-                line,
-                problem: `hitSlop argument ${slop.oversized} exceeds the button's ${Math.min(width, height)}pt size; pass the real size`,
-              });
-            } else {
-              const reachW = width + slop.sides.left + slop.sides.right;
-              const reachH = height + slop.sides.top + slop.sides.bottom;
-              if (reachW < MIN_TOUCH_TARGET || reachH < MIN_TOUCH_TARGET) {
-                findings.push({ file: fileName, line, problem: `icon button is ${reachW}x${reachH}` });
-              }
-            }
-          }
+    for (const object of objects) {
+      for (const prop of object.properties) {
+        if (
+          ts.isPropertyAssignment(prop) &&
+          SIZE_KEYS.has(prop.name.getText()) &&
+          ts.isNumericLiteral(prop.initializer) &&
+          prop.initializer.text === String(MIN_TOUCH_TARGET)
+        ) {
+          findings.push({
+            file: fileName,
+            line: lineOf(source, prop),
+            problem: `literal ${MIN_TOUCH_TARGET} for ${prop.name.getText()}; use MIN_TOUCH_TARGET`,
+          });
         }
       }
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
+
+    const icon = sizingIcon(node);
+    if (!icon || literalAttribute(jsxAttributes(node), 'accessible') === false) return null;
+    const line = lineOf(source, node);
+    const iconSize = evaluate(jsxAttributeExpression(icon, 'size'));
+    if (iconSize === undefined || opaque) {
+      findings.push({ file: fileName, line, problem: 'icon button size unresolved' });
+      return null;
+    }
+    const s = resolveStyle(objects);
+    const pad = (side: number | undefined, axis: number | undefined): number => side ?? axis ?? s.padding ?? 0;
+    const drawnWidth = iconSize + pad(s.paddingLeft, s.paddingHorizontal) + pad(s.paddingRight, s.paddingHorizontal);
+    const drawnHeight = iconSize + pad(s.paddingTop, s.paddingVertical) + pad(s.paddingBottom, s.paddingVertical);
+    const width = Math.max(drawnWidth, s.width ?? 0, s.minWidth ?? 0);
+    const height = Math.max(drawnHeight, s.height ?? 0, s.minHeight ?? 0);
+    const slop = hitSlopOf(jsxAttributeExpression(node, 'hitSlop'), width, height);
+    if ('unreadable' in slop) {
+      findings.push({ file: fileName, line, problem: 'hitSlop unresolved' });
+    } else if ('oversized' in slop) {
+      findings.push({
+        file: fileName,
+        line,
+        problem: `hitSlop argument ${slop.oversized} exceeds the button's ${Math.min(width, height)}pt size; pass the real size`,
+      });
+    } else {
+      const reachW = width + slop.sides.left + slop.sides.right;
+      const reachH = height + slop.sides.top + slop.sides.bottom;
+      if (reachW < MIN_TOUCH_TARGET || reachH < MIN_TOUCH_TARGET) {
+        findings.push({ file: fileName, line, problem: `icon button is ${reachW}x${reachH}` });
+      }
+    }
+    return null;
+  });
   return findings;
 }
 
 describe('icon button touch targets', () => {
   it('finds none under 44pt in the app', () => {
-    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.tsx']));
-    // A guard that scans nothing passes for the wrong reason.
-    expect(files.length).toBeGreaterThan(50);
-
-    const findings = files.flatMap((file) =>
-      findSmallIconButtons(path.relative(MOBILE_ROOT, file), fs.readFileSync(file, 'utf8'))
-    );
+    const findings = scannedSources().flatMap(({ file, text }) => findSmallIconButtons(file, text));
 
     expect(findings.map((f) => `${f.file}:${f.line} ${f.problem}`)).toEqual([]);
   });

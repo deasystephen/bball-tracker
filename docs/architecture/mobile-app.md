@@ -382,6 +382,10 @@ never inline a role check in a screen:
   `allowFontScaling` that is anything but a literal `true` anywhere in app code, and on any
   `defaultProps` use. The visual check at the largest text size is device-only (E2E plan P.11).
   The AST helpers these guards share live in `__tests__/helpers/source-files.ts`.
+  The three pressable guards (nested-pressables, pressable-roles, touch-targets) also share
+  `__tests__/helpers/pressables.ts`: the scanned directories, one `TOUCHABLES` set (React Native's four
+  touchables, `TouchableWithoutFeedback` included), `ICONS`, and `scannedSources()`, which holds the
+  only file-count sanity check and throws when a scan finds suspiciously few files.
 - **A game outcome is never shown by colour alone (#778, WCAG 1.4.1).** Every W / L / T carries its
   letter next to its colour, and every colour comes from `utils/game-result.ts#getResultColor`: the
   Games tab stripe, the season record (`components/stats/SeasonRecord`, a caption under each number,

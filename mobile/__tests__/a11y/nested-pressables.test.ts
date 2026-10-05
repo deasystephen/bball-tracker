@@ -18,21 +18,8 @@
  * To fix a finding, make the two pressables siblings inside a plain `View`.
  */
 
-import fs from 'fs';
-import path from 'path';
-
-import {
-  MOBILE_ROOT,
-  jsxAttributes,
-  lineOf,
-  literalAttribute,
-  parseTsx,
-  sourceFiles,
-  tagNameOf,
-  walkJsx,
-} from '../helpers/source-files';
-
-const SCANNED_DIRS = ['app', 'components'];
+import { jsxAttributes, lineOf, literalAttribute, parseTsx, tagNameOf, walkJsx } from '../helpers/source-files';
+import { TOUCHABLES, scannedSources } from '../helpers/pressables';
 
 /**
  * The selection rule (#694): a component that unconditionally renders a
@@ -41,10 +28,7 @@ const SCANNED_DIRS = ['app', 'components'];
  * `onBack` / `onEndGame`; it is counted here, the stricter side.
  */
 const ALWAYS_PRESSABLE = new Set([
-  'TouchableOpacity',
-  'TouchableHighlight',
-  'TouchableWithoutFeedback',
-  'Pressable',
+  ...TOUCHABLES,
   'Button',
   'BackButton',
   'AvatarPicker',
@@ -105,13 +89,7 @@ function findNestedPressables(fileName: string, text: string): Finding[] {
 
 describe('nested pressables', () => {
   it('finds none in the app', () => {
-    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.tsx']));
-    // A guard that scans nothing passes for the wrong reason.
-    expect(files.length).toBeGreaterThan(50);
-
-    const findings = files.flatMap((file) =>
-      findNestedPressables(path.relative(MOBILE_ROOT, file), fs.readFileSync(file, 'utf8'))
-    );
+    const findings = scannedSources().flatMap(({ file, text }) => findNestedPressables(file, text));
 
     expect(
       findings.map(
