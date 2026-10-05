@@ -7,6 +7,7 @@ import { PrismaClient, UserRole, GuardianRelationship, SubscriptionTier } from '
 import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { StatsService } from '../src/services/stats-service';
+import { hashRecipient } from '../src/services/mailer/ses-mailer';
 import { removeTestRows } from '../tests/support/test-leftovers';
 import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
 import {
@@ -728,6 +729,11 @@ async function main() {
       email: 'xander.expired@example.com',
       jersey: 22,
       status: 'PENDING' as const,
+      // Sent eight days ago and lapsed yesterday. A realistic createdAt matters:
+      // the resend cooldown (#715) refuses a resend within two minutes of the
+      // player's newest invitation row, and roster-email-bounced.yaml resends
+      // right after correcting the address.
+      createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
       expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
       // The invite never arrived: the address hard-bounced (#449). Drives the
       // "Email bounced" chip and .maestro/roster-email-bounced.yaml.
@@ -793,6 +799,11 @@ async function main() {
         token: randomBytes(32).toString('base64url'),
         status: fixture.status,
         expiresAt: fixture.expiresAt,
+        // The address this row's email went to, as the service records it
+        // (#715): without it the resend cooldown treats the row as sent to
+        // whatever address the player has now.
+        recipientHash: hashRecipient(fixture.email),
+        ...('createdAt' in fixture ? { createdAt: fixture.createdAt } : {}),
         ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
       },
     });

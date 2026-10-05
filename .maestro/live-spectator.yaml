@@ -30,7 +30,8 @@ appId: com.bballtracker.mobile
 - assertVisible: "Continue Tracking"
 - tapOn: "Watch Live"
 
-# Spectator screen renders: LIVE badge + opponent + initial score
+# Spectator screen renders: LIVE badge + the score header. The header is ONE
+# accessible element (#774): its label joins both names and scores, so the
+# opponent and the score are asserted through that label, never as bare text.
 - assertVisible: "LIVE"
-- assertVisible: "Spectator Rival"
-- assertVisible: "0"
+- assertVisible: "Score: .* 0, Spectator Rival 0"
