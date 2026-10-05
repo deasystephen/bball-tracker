@@ -15,6 +15,7 @@ import Animated, {
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 export type StatType = 'OREB' | 'DREB' | 'STL' | 'BLK' | 'AST';
 
@@ -183,7 +184,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     minWidth: 80,
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   buttonText: {
     fontWeight: '600',

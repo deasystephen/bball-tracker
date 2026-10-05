@@ -33,6 +33,8 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 const getStatusColor = (
   status: GameStatus,
@@ -239,14 +241,7 @@ export default function GameDetailScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
           {/* Scheduled or finished only — deleting mid-tracking is more likely a
               mis-tap than intent (end the game first). Finished-game deletion
@@ -427,6 +422,8 @@ export default function GameDetailScreen() {
                     onPress={() =>
                       submitRsvp.mutate({ gameId: id, status, playerId: respondingFor ?? undefined })
                     }
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: isSelected }}
                   >
                     <ThemedText
                       variant="captionBold"
@@ -521,6 +518,7 @@ export default function GameDetailScreen() {
                   <TouchableOpacity
                     onPress={() => router.push(`/games/${id}/stats`)}
                     style={styles.viewAllButton}
+                    accessibilityRole="button"
                   >
                     <ThemedText variant="caption" color="primary">
                       View Full Stats
@@ -572,14 +570,19 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerSpacer: {
     flex: 1,
   },
+  // Delete and share sit side by side with no gap, so they grow to 44pt
+  // rather than take hitSlop (overlapping slop would hand one the other's taps).
   iconButton: {
     padding: spacing.sm,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statusContainer: {
     alignItems: 'center',
@@ -673,6 +676,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: 999,
     borderWidth: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   rsvpButtons: {
     flexDirection: 'row',
@@ -684,6 +689,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: 8,
     borderWidth: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   rsvpSummary: {
     marginTop: spacing.md,

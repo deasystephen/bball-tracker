@@ -45,6 +45,12 @@ import { getApiErrorMessage } from '../../../../services/api-client';
 import { displayName } from '../../../../utils/display-name';
 import { useGoBack } from '../../../../hooks/useGoBack';
 import { formatRelativeTime } from '../../../../utils/relative-time';
+import { BackButton } from '../../../../components/BackButton';
+import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../../utils/touch-target';
+
+const REPLY_MENU_ICON_SIZE = 20;
+/** The reply menu draws at 28pt (20 + 4pt padding); the slop makes it a 44pt target. */
+const REPLY_MENU_HIT_SLOP = touchTargetHitSlop(REPLY_MENU_ICON_SIZE + 2 * spacing.xs);
 
 export default function AnnouncementThreadScreen() {
   const router = useRouter();
@@ -166,9 +172,9 @@ export default function AnnouncementThreadScreen() {
             style={styles.menuButton}
             accessibilityRole="button"
             accessibilityLabel={t('announcements.replyMenu')}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={REPLY_MENU_HIT_SLOP}
           >
-            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+            <Ionicons name="ellipsis-horizontal" size={REPLY_MENU_ICON_SIZE} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
       </View>
@@ -205,14 +211,7 @@ export default function AnnouncementThreadScreen() {
           { paddingTop: insets.top + spacing.md, paddingHorizontal: padding, borderBottomColor: colors.border },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading>{t('announcements.title')}</ThemedText>
           {team && (
@@ -315,7 +314,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },
@@ -353,8 +351,8 @@ const styles = StyleSheet.create({
   },
   composerInput: { flex: 1 },
   sendButton: {
-    width: 44,
-    height: 44,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',

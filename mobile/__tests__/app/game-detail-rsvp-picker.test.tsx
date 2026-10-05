@@ -7,6 +7,7 @@
  * state reads the child's row. Non-guardians never see the picker.
  */
 
+import { StyleSheet } from 'react-native';
 import { render, fireEvent } from '@testing-library/react-native';
 
 import GameDetailScreen from '../../app/games/[id]/index';
@@ -134,8 +135,23 @@ describe('GameDetailScreen RSVP picker (guardians)', () => {
       },
     ];
     signIn('dell', [stephLink]);
-    const { getByText } = render(<GameDetailScreen />);
-    const notGoing = getByText('Not Going');
-    expect(notGoing.props.style).toEqual(expect.arrayContaining([expect.objectContaining({ color: '#FFFFFF' })]));
+    const { getByRole } = render(<GameDetailScreen />);
+    // Through the accessibility state VoiceOver reads, not the fill colour (#655).
+    expect(getByRole('radio', { name: 'Not Going' }).props.accessibilityState).toEqual({ selected: true });
+    expect(getByRole('radio', { name: 'Going' }).props.accessibilityState).toEqual({ selected: false });
+    expect(getByRole('radio', { name: 'Maybe' }).props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('makes the "Respond for" chips and the RSVP answers 44pt touch targets (#772)', () => {
+    mockGame = {
+      ...baseGame,
+      team: { ...baseGame.team!, members: [...baseGame.team!.members!, member('dell', 'Dell Curry')] },
+    };
+    signIn('dell', [stephLink]);
+    const { getByRole } = render(<GameDetailScreen />);
+
+    for (const name of ['Respond for Me', 'Respond for Steph Curry', 'Going', 'Not Going', 'Maybe']) {
+      expect(StyleSheet.flatten(getByRole('radio', { name }).props.style).minHeight).toBe(44);
+    }
   });
 });

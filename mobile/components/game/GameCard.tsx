@@ -128,6 +128,7 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
           onPress={onPress}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
+          accessibilityRole="button"
         >
           <Animated.View style={[liveBorderStyle]}>
             <Card variant="elevated" style={styles.card}>

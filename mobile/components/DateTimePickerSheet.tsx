@@ -17,6 +17,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 export type DateTimePickerSheetMode = 'date' | 'time';
 
@@ -140,7 +141,7 @@ const styles = StyleSheet.create({
   },
   toolbarButton: {
     // 44pt minimum touch target
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
     minWidth: 72,
     justifyContent: 'center',
   },

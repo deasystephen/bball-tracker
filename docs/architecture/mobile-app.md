@@ -296,7 +296,7 @@ never inline a role check in a screen:
   fails on any nesting, unless the outer pressable opts out with `accessible={false}`
   (`ActionMenu`'s sheet wrapper). What counts as a pressable follows one rule (#694): a component
   that unconditionally renders a touchable is always a pressable (`ALWAYS_PRESSABLE`): the React
-  Native touchables, `Pressable`, `Button`, `AvatarPicker`, `PrintButton`, `SortPills`,
+  Native touchables, `Pressable`, `Button`, `BackButton`, `AvatarPicker`, `PrintButton`, `SortPills`,
   `RelationshipChips`, `SeasonDateFields`, `GameCard`, `OpponentScoreButtons`, `UndoBanner` and
   `ScoreDisplay` (its buttons depend on `onBack` / `onEndGame`, so it is counted on the stricter
   side). A component that renders one only when given `onPress` counts only with `onPress`
@@ -305,6 +305,47 @@ never inline a role check in a screen:
   which is how the defect shipped with a passing test. To assert it in a screen test, walk the
   `parent` chain of the button and expect no other accessible ancestor
   (`__tests__/app/profile-my-kids.test.tsx`).
+- **Every pressable says what it is (#655).** React Native gives a bare `TouchableOpacity` or
+  `Pressable` no button trait, so VoiceOver reads it as static text. Prefer the shared primitives,
+  which set the role (`Button`, `Card onPress`, `ListItem`, `SortPills`, `ActionMenu`); a hand-rolled
+  pressable sets `accessibilityRole` itself: `"button"`, `"radio"` for one answer out of several (the
+  RSVP answers, the "Respond for" chips, the league/season/team pickers in team edit and game
+  create), `"link"` for an external URL. An **icon-only** pressable also carries an
+  `accessibilityLabel` (VoiceOver otherwise reads the icon font's glyph). A screen's header back
+  control is `components/BackButton`: it carries the role, the literal label `"Go back"` (which ten
+  Maestro flows tap, and which the ErrorState way-back guard looks for), the 24pt icon (`close` on
+  game create) and `HEADER_ICON_HIT_SLOP`; the caller passes `onPress` (its own `router.back()` or
+  `useGoBack`) and a `style` with only the margins that place it. A **single-choice** pill, chip or radio row marks
+  the active one with `accessibilityState={{ selected }}`, never by colour alone (Games filter pills,
+  Stats team chips, RSVP answers; `SortPills` is the reference), so VoiceOver reads "selected" and
+  Maestro can assert `selected: true` (`.maestro/guardian-rsvp.yaml`). A composite card (game card,
+  activity row, podium card) needs only the role: its children form the label. When you do add a
+  label to a pressable that a Maestro flow matches by its text, keep the text in the label
+  (`grep -rn '<text>' .maestro/` first). `__tests__/a11y/pressable-roles.test.ts` reads the source
+  of `app/` and `components/` and fails on a pressable with no `accessibilityRole`, or an icon-only
+  one with no `accessibilityLabel`, unless it opts out with `accessible={false}`; there is no
+  allow-list. Screen tests: `__tests__/app/tab-pill-selection.test.tsx`,
+  `__tests__/app/game-detail-rsvp-picker.test.tsx`. The tab bar keeps role `"button"` with
+  `selected` (switching to `"tab"` would gain nothing VoiceOver users need and risks the
+  "<Name> tab" labels the flows tap).
+- **Every control is a 44pt touch target (#772, #773).** The minimum lives in
+  `utils/touch-target.ts` (`MIN_TOUCH_TARGET`); no style writes a literal `44` for a size. Text controls (pills, chips, the RSVP answers, UNDO,
+  the opponent score buttons) take `minHeight: MIN_TOUCH_TARGET` with `justifyContent: 'center'`.
+  An icon button keeps its drawn size and gets `hitSlop={touchTargetHitSlop(<icon> + 2 * <padding>)}`
+  (`HEADER_ICON_HIT_SLOP` for the usual 24pt header icon with `padding: spacing.sm`), so neither the
+  glyph nor the header around it moves; two icon buttons side by side with little or
+  no gap (season edit/delete, game delete/share, the staff and guardian row actions) grow to 44pt
+  with `minWidth`/`minHeight` instead, because overlapping slop hands the later sibling the earlier
+  one's taps. A wide text pill that is too short takes height-only slop,
+  `touchTargetHitSlop(MIN_TOUCH_TARGET, <height>)` ("Add Season" on league detail). Hoist every slop to
+  a module constant next to the icon-size constant it is computed from. `__tests__/a11y/touch-targets.test.ts`
+  checks every pressable whose first child is an icon, or whose body is only icons in plain views (so
+  the Home bell with its badge too): it works out the size from the icon `size`, the `StyleSheet`
+  entry and the `hitSlop`, resolving names the way the compiler does (enclosing block, module, then
+  named relative imports), checks that the size passed to `touchTargetHitSlop` is no larger than the
+  real one (and says so when it is), and fails under 44 x 44 or when it cannot tell. It also fails on a
+  literal `44` for `minHeight`/`minWidth`/`height`/`width` in any pressable style; text controls are covered by render tests that flatten the style (UndoBanner,
+  OpponentScoreButtons, the RSVP picker and the tab pills).
 - **Screen titles and section headings carry `accessibilityRole="header"` (#775).** Every navigator
   hides the native header, so each screen draws its own title; without the role VoiceOver's Headings
   rotor and TalkBack's heading navigation find nothing. Use `<ThemedText variant="h2" heading>` (an
@@ -341,6 +382,10 @@ never inline a role check in a screen:
   `allowFontScaling` that is anything but a literal `true` anywhere in app code, and on any
   `defaultProps` use. The visual check at the largest text size is device-only (E2E plan P.11).
   The AST helpers these guards share live in `__tests__/helpers/source-files.ts`.
+  The three pressable guards (nested-pressables, pressable-roles, touch-targets) also share
+  `__tests__/helpers/pressables.ts`: the scanned directories, one `TOUCHABLES` set (React Native's four
+  touchables, `TouchableWithoutFeedback` included), `ICONS`, and `scannedSources()`, which holds the
+  only file-count sanity check and throws when a scan finds suspiciously few files.
 - **A game outcome is never shown by colour alone (#778, WCAG 1.4.1).** Every W / L / T carries its
   letter next to its colour, and every colour comes from `utils/game-result.ts#getResultColor`: the
   Games tab stripe, the season record (`components/stats/SeasonRecord`, a caption under each number,

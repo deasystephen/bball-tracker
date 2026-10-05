@@ -18,6 +18,8 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   per-row menus (never an `Alert` menu), `SortPills` for pill rows, `useTabBarPadding()` for tab
   scroll padding, `ErrorState` with `onBack={useGoBack(parent)}` on pushed screens.
 - Never nest a pressable inside a pressable (source-scanning test). Toasts get no touch handlers.
+- Every pressable has `accessibilityRole` (icon-only: also a label; single-choice: `accessibilityState.selected`)
+  and a 44pt target from `utils/touch-target.ts`; `__tests__/a11y/pressable-roles` and `touch-targets` enforce it.
 - Auth store: `updateUser` for edits, `setUser` only at login; prefer selectors over a bare
   `useAuthStore()`. New unauthenticated endpoints go into `PUBLIC_PATHS` in `services/api-client.ts`.
 - Native modules behind `requireOptionalNativeModule`; upload parts are `expo-file-system` `File`s.

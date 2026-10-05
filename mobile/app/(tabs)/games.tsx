@@ -31,6 +31,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { canManageAnyTeam } from '../../utils/game-permissions';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import { getGameResult, getResultColor } from '../../utils/game-result';
 import type { Game, GameStatus } from '../../types/game';
 
@@ -103,6 +104,7 @@ export default function Games() {
           <TouchableOpacity
             onPress={() => handleGamePress(item)}
             activeOpacity={0.85}
+            accessibilityRole="button"
             style={[
               styles.liveGameCard,
               {
@@ -164,6 +166,7 @@ export default function Games() {
           <TouchableOpacity
             onPress={() => handleGamePress(item)}
             activeOpacity={0.7}
+            accessibilityRole="button"
           >
             <Card variant="elevated" style={styles.upcomingCard}>
               <View style={styles.upcomingRow}>
@@ -209,6 +212,7 @@ export default function Games() {
           <TouchableOpacity
             onPress={() => handleGamePress(item)}
             activeOpacity={0.7}
+            accessibilityRole="button"
           >
             <Card variant="elevated" style={styles.completedCard}>
               <View style={styles.completedRow}>
@@ -296,6 +300,8 @@ export default function Games() {
                     borderColor: isActive ? colors.primary : colors.border,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
               >
                 <ThemedText
                   variant="captionBold"
@@ -377,6 +383,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
     borderWidth: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   liveGameCard: {
     borderRadius: borderRadius.lg,

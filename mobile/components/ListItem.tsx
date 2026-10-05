@@ -16,6 +16,7 @@ import { spacing } from '../theme';
 import { shadows } from '../theme/shadows';
 import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
   title: string;
@@ -103,7 +104,7 @@ export const ListItem: React.FC<ListItemProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    minHeight: 44, // iOS touch target minimum
+    minHeight: MIN_TOUCH_TARGET, // iOS touch target minimum
   },
   content: {
     flexDirection: 'row',

@@ -34,6 +34,8 @@ import { getApiErrorMessage } from '../../../services/api-client';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 /** "Mar 1, 2024 - Jun 30, 2024", with a placeholder for a missing end. */
 export function formatSeasonRange(
@@ -122,14 +124,7 @@ export default function SeasonDetailScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={goBack}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={goBack} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading numberOfLines={1}>{season.name}</ThemedText>
           {season.league && (
@@ -247,8 +242,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: spacing.xs,
   },
+  // Edit and delete sit side by side with no gap, so they grow to 44pt
+  // rather than take hitSlop (overlapping slop would hand one the other's taps).
   iconButton: {
     padding: spacing.sm,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerContent: {
     flex: 1,

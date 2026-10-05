@@ -44,6 +44,8 @@ import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 import { useGoBack } from '../../../../../hooks/useGoBack';
 import { displayName } from '../../../../../utils/display-name';
+import { MIN_TOUCH_TARGET } from '../../../../../utils/touch-target';
+import { BackButton } from '../../../../../components/BackButton';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -161,14 +163,7 @@ export default function PlayerGuardiansScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading>Parents &amp; guardians</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -314,7 +309,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  backButton: { padding: spacing.sm, marginRight: spacing.sm },
+  backButton: { marginRight: spacing.sm },
   headerContent: { flex: 1 },
   scrollContent: { paddingTop: spacing.lg },
   formCard: { marginBottom: spacing.lg },
@@ -329,5 +324,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   pendingHeader: { marginTop: spacing.lg },
-  rowButton: { padding: spacing.xs },
+  // Change-role and remove sit 4pt apart, so they grow to 44pt rather than
+  // take hitSlop (overlapping slop would hand one the other's taps).
+  rowButton: {
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

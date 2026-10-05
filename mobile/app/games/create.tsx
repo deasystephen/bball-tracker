@@ -35,6 +35,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { BackButton } from '../../components/BackButton';
 
 export default function CreateGameScreen() {
   const router = useRouter();
@@ -149,14 +150,7 @@ export default function CreateGameScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="close" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} icon="close" />
         <View style={styles.headerContent}>
           <ThemedText variant="h3" heading numberOfLines={1}>
             New Game
@@ -229,6 +223,8 @@ export default function CreateGameScreen() {
                       title={team.name}
                       subtitle={team.season?.league?.name ? `${team.season.league.name} - ${team.season.name}` : undefined}
                       onPress={() => setTeamId(team.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
                       rightElement={
                         isSelected ? (
                           <Ionicons
@@ -366,7 +362,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerContent: {

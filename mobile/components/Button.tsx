@@ -20,6 +20,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 interface ButtonProps extends Omit<PressableProps, 'style'> {
   title: string;
@@ -124,7 +125,7 @@ export const Button: React.FC<ButtonProps> = ({
     borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
     paddingVertical: paddingValue,
     paddingHorizontal: paddingValue * 1.5,
     width: fullWidth ? '100%' : 'auto',

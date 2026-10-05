@@ -102,6 +102,21 @@ export function jsxAttributes(node: JsxNode): Map<string, JsxAttributeValue> {
   return result;
 }
 
+/**
+ * The expression a named attribute holds (`{styles.button}` gives
+ * `styles.button`, `"Go back"` gives the string literal), for a scanner that
+ * evaluates it itself; `undefined` when the attribute is absent or bare.
+ */
+export function jsxAttributeExpression(node: JsxNode, name: string): ts.Expression | undefined {
+  for (const attribute of openingOf(node).attributes.properties) {
+    if (!ts.isJsxAttribute(attribute) || attribute.name.getText() !== name) continue;
+    const initializer = attribute.initializer;
+    if (!initializer) return undefined;
+    return ts.isJsxExpression(initializer) ? initializer.expression : initializer;
+  }
+  return undefined;
+}
+
 /** A literal attribute value, or `undefined` when the attribute is absent, bare or an expression. */
 export function literalAttribute(
   attributes: Map<string, JsxAttributeValue>,

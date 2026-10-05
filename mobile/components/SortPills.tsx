@@ -10,6 +10,7 @@ import { View, TouchableOpacity, StyleSheet, StyleProp, ViewStyle } from 'react-
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 export interface SortPillOption<K extends string> {
   key: K;
@@ -78,7 +79,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     borderWidth: 1,
     // 44pt minimum touch target (was 36 in the pre-extraction copies).
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
 });

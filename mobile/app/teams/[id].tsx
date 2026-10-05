@@ -29,12 +29,18 @@ import { useTranslation } from '../../i18n';
 import { formatTeamBracket } from '../../utils/team-labels';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { touchTargetHitSlop } from '../../utils/touch-target';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 import { getTeamColor } from '../../utils/team-colors';
 import { RosterSortKey, sortRosterMembers } from '../../utils/roster-sort';
 import { useRosterSortPreference } from '../../hooks/useRosterSortPreference';
 import { useGoBack } from '../../hooks/useGoBack';
+import { BackButton } from '../../components/BackButton';
+
+const HERO_ICON_SIZE = 22;
+/** The edit and delete icons draw at 30pt (22 + padding); the slop makes them 44pt targets. */
+const HERO_ICON_HIT_SLOP = touchTargetHitSlop(HERO_ICON_SIZE + 2 * spacing.xs);
 
 const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
   { key: 'jersey', label: 'Jersey #' },
@@ -118,29 +124,26 @@ export default function TeamDetailsScreen() {
       {/* Team Hero Header */}
       <View style={[styles.heroHeader, { backgroundColor: teamColor, paddingTop: insets.top }]}>
         <View style={[styles.heroNav, { paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.heroBackButton}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} color="#FFFFFF" />
           {canManageTeam && (
             <View style={styles.heroActions}>
               <TouchableOpacity
                 onPress={() => router.push(`/teams/${id}/edit`)}
                 style={styles.heroIconButton}
+                hitSlop={HERO_ICON_HIT_SLOP}
+                accessibilityRole="button"
                 accessibilityLabel="Edit team"
               >
-                <Ionicons name="create-outline" size={22} color="#FFFFFF" />
+                <Ionicons name="create-outline" size={HERO_ICON_SIZE} color="#FFFFFF" />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleDelete}
                 style={styles.heroIconButton}
+                hitSlop={HERO_ICON_HIT_SLOP}
+                accessibilityRole="button"
                 accessibilityLabel="Delete team"
               >
-                <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
+                <Ionicons name="trash-outline" size={HERO_ICON_SIZE} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           )}
@@ -169,6 +172,7 @@ export default function TeamDetailsScreen() {
           <TouchableOpacity
             style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}
             onPress={() => router.push(`/teams/${id}/stats`)}
+            accessibilityRole="button"
           >
             <ThemedText variant="h3">{memberCount}</ThemedText>
             <ThemedText variant="footnote" color="textSecondary">Players</ThemedText>
@@ -301,6 +305,7 @@ export default function TeamDetailsScreen() {
                   key={member.id}
                   style={[styles.rosterCard, { backgroundColor: colors.backgroundSecondary }]}
                   onPress={() => router.push(`/players/${member.playerId}/stats`)}
+                  accessibilityRole="button"
                   accessibilityLabel={displayName(member.player)}
                 >
                   <View style={[styles.jerseyBadge, { backgroundColor: teamColor + '20' }]}>
@@ -355,7 +360,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: spacing.sm,
   },
-  heroBackButton: { padding: spacing.sm },
   heroActions: { flexDirection: 'row', gap: spacing.md },
   heroIconButton: { padding: spacing.xs },
   heroContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },

@@ -145,6 +145,7 @@ export default function TeamsScreen() {
         onPress={() => handleTeamPress(item.id)}
         activeOpacity={0.8}
         style={[styles.teamCard, { backgroundColor: colors.backgroundSecondary }]}
+        accessibilityRole="button"
         accessibilityLabel={item.name}
       >
         <View style={[styles.teamColorHeader, { backgroundColor: teamColor }]}>

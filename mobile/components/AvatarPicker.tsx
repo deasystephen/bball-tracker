@@ -14,6 +14,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
+import { useTranslation } from '../i18n';
 import { typography } from '../theme/typography';
 import { ActionMenu, type ActionMenuItem } from './ActionMenu';
 
@@ -90,6 +91,8 @@ export const Avatar: React.FC<AvatarProps> = ({
 
 interface AvatarPickerProps extends AvatarProps {
   onImageSelected: (uri: string | null) => void;
+  /** The photo menu's title; defaults to "Profile Photo" (your own photo). */
+  menuTitle?: string;
 }
 
 type PhotoSource = 'camera' | 'library';
@@ -107,8 +110,10 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   name = '',
   size = 'large',
   onImageSelected,
+  menuTitle,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const dimension = SIZES[size];
 
   const pickImage = async (source: PhotoSource) => {
@@ -160,6 +165,8 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
         onPress={() => setMenuVisible(true)}
         activeOpacity={0.7}
         testID="avatar-picker"
+        accessibilityRole="button"
+        accessibilityLabel={t('common.changePhoto')}
       >
         <Avatar uri={uri} name={name} size={size} />
         <View
@@ -177,7 +184,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
       {/* A sibling of the avatar button, never inside it (nested pressables). */}
       <ActionMenu
         visible={menuVisible}
-        title="Profile Photo"
+        title={menuTitle ?? t('common.profilePhoto')}
         items={menuItems}
         onClose={() => setMenuVisible(false)}
       />

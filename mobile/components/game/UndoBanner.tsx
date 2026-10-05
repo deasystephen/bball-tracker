@@ -15,6 +15,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { announce } from '../../utils/announce';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 interface UndoBannerProps {
   visible: boolean;
@@ -210,6 +211,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: 8,
     marginLeft: spacing.sm,
+    // The only way to correct a mis-tap, used one-handed mid-play (#772).
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
   },
   undoButtonPending: {
     opacity: 0.5,

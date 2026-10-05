@@ -24,6 +24,7 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
 import { useTranslation } from '../../i18n';
 import { captureException } from '../../services/sentry';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 export default function Profile() {
   const router = useRouter();
@@ -179,6 +180,7 @@ export default function Profile() {
           <TouchableOpacity
             style={[styles.myStatsCard, { backgroundColor: colors.backgroundSecondary }]}
             onPress={() => router.push(`/players/${user.id}/stats`)}
+            accessibilityRole="button"
           >
             <View style={[styles.myStatsIcon, { backgroundColor: colors.primary + '20' }]}>
               <Ionicons name="stats-chart" size={20} color={colors.primary} />
@@ -347,6 +349,7 @@ export default function Profile() {
             <Card variant="default" style={styles.settingsCard}>
               <TouchableOpacity
                 style={styles.settingRow}
+                accessibilityRole="button"
                 accessibilityLabel={t('roleOnboarding.changeRole')}
                 onPress={() => router.push('/onboarding/role?from=profile')}
               >
@@ -375,7 +378,11 @@ export default function Profile() {
               Management
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
-              <TouchableOpacity style={styles.settingRow} onPress={() => router.push('/admin')}>
+              <TouchableOpacity
+                style={styles.settingRow}
+                onPress={() => router.push('/admin')}
+                accessibilityRole="button"
+              >
                 <View style={styles.settingLeft}>
                   <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
                     <Ionicons name="trophy" size={18} color={colors.primary} />
@@ -607,11 +614,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     flex: 1,
     // 44pt minimum touch target
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   childRowMore: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

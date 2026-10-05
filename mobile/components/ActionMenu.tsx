@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 export interface ActionMenuItem {
   label: string;
@@ -177,7 +178,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingVertical: spacing.md,
     // 44pt minimum touch target
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
   closeItem: {

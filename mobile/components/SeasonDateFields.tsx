@@ -16,6 +16,7 @@ import { DateTimePickerSheet } from './DateTimePickerSheet';
 import { useTheme } from '../hooks/useTheme';
 import { useTranslation } from '../i18n';
 import { spacing, borderRadius } from '../theme';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 export interface SeasonDateFieldsProps {
   startDate: Date | null;
@@ -171,8 +172,8 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     // 44pt minimum touch target
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

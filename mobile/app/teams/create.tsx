@@ -38,6 +38,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { canCreateTeams } from '../../utils/team-permissions';
 import { areAllLeaguesPersonal } from '../../utils/league-scope';
 import { useAuthUser } from '../../store/auth-store';
+import { BackButton } from '../../components/BackButton';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 /**
  * Sentinel league id for "no league — put it in my own teams". Always offered
@@ -189,14 +191,7 @@ export default function CreateTeamScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading style={styles.headerTitle}>
             {t('teams.create')}
@@ -440,7 +435,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },
@@ -468,7 +462,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: borderRadius.sm,
     borderWidth: 1,
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   disclosureLabels: {
     flex: 1,

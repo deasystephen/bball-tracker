@@ -35,6 +35,8 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { formatRelativeTime } from '../../../utils/relative-time';
 import type { Announcement } from '../../../hooks/useAnnouncements';
 import { displayName } from '../../../utils/display-name';
+import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 export default function AnnouncementsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -133,14 +135,7 @@ export default function AnnouncementsScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <ThemedText variant="h2" heading style={styles.headerTitle}>
           Announcements
         </ThemedText>
@@ -148,6 +143,8 @@ export default function AnnouncementsScreen() {
           <TouchableOpacity
             onPress={() => setShowCompose(!showCompose)}
             style={styles.composeButton}
+            hitSlop={HEADER_ICON_HIT_SLOP}
+            accessibilityRole="button"
             accessibilityLabel="New announcement"
           >
             <Ionicons name={showCompose ? 'close' : 'add'} size={24} color={colors.primary} />
@@ -232,7 +229,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },

@@ -132,6 +132,7 @@ export default function Login() {
     <TouchableOpacity
       style={[styles.devUserItem, { backgroundColor: colors.backgroundTertiary }]}
       onPress={() => handleDevLogin(item.email)}
+      accessibilityRole="button"
     >
       <Text style={[styles.devUserName, { color: colors.text }]}>{item.name}</Text>
       <Text style={[styles.devUserEmail, { color: colors.textSecondary }]}>{item.email}</Text>

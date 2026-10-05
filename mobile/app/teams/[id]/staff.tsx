@@ -44,6 +44,8 @@ import { useAuthUser } from '../../../store/auth-store';
 import { getApiErrorMessage } from '../../../services/api-client';
 import { displayName } from '../../../utils/display-name';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   HEAD_COACH: 'teams.roleHeadCoach',
@@ -186,14 +188,7 @@ export default function TeamStaffScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading>{t('teams.staff')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -373,7 +368,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  backButton: { padding: spacing.sm, marginRight: spacing.sm },
+  backButton: { marginRight: spacing.sm },
   headerContent: { flex: 1 },
   scrollContent: { paddingTop: spacing.lg },
   formCard: { marginBottom: spacing.lg },
@@ -396,6 +391,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowActions: { flexDirection: 'row', gap: spacing.xs },
-  rowButton: { padding: spacing.xs },
+  // Change-role and remove sit 4pt apart, so they grow to 44pt rather than
+  // take hitSlop (overlapping slop would hand one the other's taps).
+  rowButton: {
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hint: { marginTop: spacing.md },
 });
