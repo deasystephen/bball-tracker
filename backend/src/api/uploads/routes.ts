@@ -3,7 +3,7 @@ import { authenticate } from '../auth/middleware';
 import { avatarUploadUrlSchema } from './schemas';
 import { generateAvatarUploadUrl } from '../../services/upload-service';
 import { BadRequestError } from '../../utils/errors';
-import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 
 const router = Router();
 
@@ -32,9 +32,9 @@ router.post('/avatar-url', async (req, res) => {
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
-      logger.error('Error generating avatar upload URL', { error: error instanceof Error ? error.message : String(error) });
       res.status(500).json({ error: 'Failed to generate upload URL' });
     }
+    logRouteError(res, 'Error generating avatar upload URL', error);
   }
 });
 

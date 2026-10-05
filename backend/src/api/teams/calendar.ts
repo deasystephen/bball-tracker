@@ -20,6 +20,7 @@ import {
   AppError,
 } from '../../utils/errors';
 import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 
 const router = Router({ mergeParams: true });
 
@@ -54,14 +55,12 @@ router.get(
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.status(200).send(icsText);
   } catch (error) {
-    logger.error('Error serving calendar feed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to generate calendar feed' });
     }
+    logRouteError(res, 'Error serving calendar feed', error);
   }
   }
 );
@@ -93,9 +92,6 @@ router.post(
         ...result,
       });
     } catch (error) {
-      logger.error('Error subscribing to calendar feed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
       if (
         error instanceof NotFoundError ||
         error instanceof ForbiddenError ||
@@ -105,6 +101,7 @@ router.post(
       } else {
         res.status(500).json({ error: 'Failed to subscribe to calendar feed' });
       }
+      logRouteError(res, 'Error subscribing to calendar feed', error);
     }
   }
 );
@@ -129,9 +126,6 @@ router.post(
         ...result,
       });
     } catch (error) {
-      logger.error('Error revoking calendar feed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
       if (
         error instanceof NotFoundError ||
         error instanceof ForbiddenError ||
@@ -141,6 +135,7 @@ router.post(
       } else {
         res.status(500).json({ error: 'Failed to revoke calendar feed' });
       }
+      logRouteError(res, 'Error revoking calendar feed', error);
     }
   }
 );

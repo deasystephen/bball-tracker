@@ -12,7 +12,7 @@ import {
   addLeagueAdminSchema,
 } from './schemas';
 import { AppError, BadRequestError } from '../../utils/errors';
-import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 import { validateUuidParams } from '../middleware/validate-params';
 
 const router = Router();
@@ -41,12 +41,12 @@ router.post('/', async (req, res) => {
       league,
     });
   } catch (error) {
-    logger.error('Error creating league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to create league' });
     }
+    logRouteError(res, 'Error creating league', error);
   }
 });
 
@@ -74,12 +74,12 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing leagues', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list leagues' });
     }
+    logRouteError(res, 'Error listing leagues', error);
   }
 });
 
@@ -96,12 +96,12 @@ router.get('/:id', async (req, res) => {
       league,
     });
   } catch (error) {
-    logger.error('Error getting league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to get league' });
     }
+    logRouteError(res, 'Error getting league', error);
   }
 });
 
@@ -130,12 +130,12 @@ router.patch('/:id', async (req, res) => {
       league,
     });
   } catch (error) {
-    logger.error('Error updating league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to update league' });
     }
+    logRouteError(res, 'Error updating league', error);
   }
 });
 
@@ -152,12 +152,12 @@ router.delete('/:id', async (req, res) => {
       message: 'League deleted successfully',
     });
   } catch (error) {
-    logger.error('Error deleting league', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to delete league' });
     }
+    logRouteError(res, 'Error deleting league', error);
   }
 });
 
@@ -187,12 +187,12 @@ router.post('/:id/admins', async (req, res) => {
       admin,
     });
   } catch (error) {
-    logger.error('Error adding league admin', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to add league admin' });
     }
+    logRouteError(res, 'Error adding league admin', error);
   }
 });
 
@@ -213,12 +213,12 @@ router.delete('/:id/admins/:userId', validateUuidParams('userId'), async (req, r
       message: 'League admin removed successfully',
     });
   } catch (error) {
-    logger.error('Error removing league admin', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof AppError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to remove league admin' });
     }
+    logRouteError(res, 'Error removing league admin', error);
   }
 });
 

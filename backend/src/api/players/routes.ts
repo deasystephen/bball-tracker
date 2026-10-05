@@ -16,6 +16,7 @@ import { AccountService } from '../../services/account-service';
 import { isGuardianOf } from '../../utils/permissions';
 import prisma from '../../models';
 import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 
 const router = Router();
 
@@ -47,7 +48,6 @@ router.post('/', async (req, res) => {
       player,
     });
   } catch (error) {
-    logger.error('Error creating player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -58,6 +58,7 @@ router.post('/', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to create player' });
     }
+    logRouteError(res, 'Error creating player', error);
   }
 });
 
@@ -87,12 +88,12 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing players', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list players' });
     }
+    logRouteError(res, 'Error listing players', error);
   }
 });
 
@@ -112,12 +113,12 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    logger.error('Error getting player', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof NotFoundError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to get player' });
     }
+    logRouteError(res, 'Error getting player', error);
   }
 });
 
@@ -146,7 +147,6 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    logger.error('Error updating player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -157,6 +157,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to update player' });
     }
+    logRouteError(res, 'Error updating player', error);
   }
 });
 
@@ -173,7 +174,6 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Player deleted successfully',
     });
   } catch (error) {
-    logger.error('Error deleting player', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -183,6 +183,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to delete player' });
     }
+    logRouteError(res, 'Error deleting player', error);
   }
 });
 

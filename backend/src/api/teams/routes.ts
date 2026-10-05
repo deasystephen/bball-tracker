@@ -18,7 +18,6 @@ import {
   updateStaffRoleSchema,
 } from './schemas';
 import {
-  AppError,
   BadRequestError,
   NotFoundError,
   ForbiddenError,
@@ -36,6 +35,7 @@ import { requireEntitlement, requireTeamCreateLimit } from '../middleware/entitl
 import { exportRateLimit, inviteRateLimit } from '../middleware/rate-limit';
 import { Feature } from '../../services/entitlements';
 import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
@@ -77,7 +77,6 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
       team,
     });
   } catch (error) {
-    logger.error('Error creating team', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof PaymentRequiredError) {
       res.status(error.statusCode).json(error.body());
     } else if (
@@ -89,6 +88,7 @@ router.post('/', requireTeamCreateLimit(), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to create team' });
     }
+    logRouteError(res, 'Error creating team', error);
   }
 });
 
@@ -113,12 +113,12 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing teams', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof BadRequestError) {
       res.status(error.statusCode).json({ error: error.message });
     } else {
       res.status(500).json({ error: 'Failed to list teams' });
     }
+    logRouteError(res, 'Error listing teams', error);
   }
 });
 
@@ -135,7 +135,6 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       team,
     });
   } catch (error) {
-    logger.error('Error getting team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -145,6 +144,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to get team' });
     }
+    logRouteError(res, 'Error getting team', error);
   }
 });
 
@@ -173,7 +173,6 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       team,
     });
   } catch (error) {
-    logger.error('Error updating team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -183,6 +182,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to update team' });
     }
+    logRouteError(res, 'Error updating team', error);
   }
 });
 
@@ -202,7 +202,6 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Team deleted successfully',
     });
   } catch (error) {
-    logger.error('Error deleting team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -212,6 +211,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to delete team' });
     }
+    logRouteError(res, 'Error deleting team', error);
   }
 });
 
@@ -248,10 +248,6 @@ router.post('/:teamId/players', inviteRateLimit, validateUuidParams('teamId'), a
       invitation: result.invitation && omitToken(result.invitation),
     });
   } catch (error) {
-    // Expected outcomes (4xx, including the 429 resend cooldown the service
-    // already logged at info) are warnings; only the unexpected is an error.
-    const log = error instanceof AppError ? logger.warn : logger.error;
-    log('Error adding roster player', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof DetailedError) {
       // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
       res.status(error.statusCode).json(error.body());
@@ -264,6 +260,9 @@ router.post('/:teamId/players', inviteRateLimit, validateUuidParams('teamId'), a
     } else {
       res.status(500).json({ error: 'Failed to add player' });
     }
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    logRouteError(res, 'Error adding roster player', error);
   }
 });
 
@@ -296,10 +295,6 @@ router.post('/:teamId/invitations', inviteRateLimit, validateUuidParams('teamId'
       emailSent,
     });
   } catch (error) {
-    // Expected outcomes (4xx, including the 429 resend cooldown the service
-    // already logged at info) are warnings; only the unexpected is an error.
-    const log = error instanceof AppError ? logger.warn : logger.error;
-    log('Error creating invitation', { error: error instanceof Error ? error.message : String(error) });
     if (error instanceof DetailedError) {
       // 429 resend_cooldown (#715): `{ error, code, retryAfterSeconds }`
       res.status(error.statusCode).json(error.body());
@@ -312,6 +307,9 @@ router.post('/:teamId/invitations', inviteRateLimit, validateUuidParams('teamId'
     } else {
       res.status(500).json({ error: 'Failed to create invitation' });
     }
+    // Expected outcomes (4xx, including the 429 resend cooldown the service
+    // already logged at info) are warnings; only the unexpected is an error.
+    logRouteError(res, 'Error creating invitation', error);
   }
 });
 
@@ -344,7 +342,6 @@ router.post(
       // should warn the coach — unification spec, SES incident 2026-08-28)
       res.status(201).json({ success: true, invitation: omitToken(invitation), emailSent });
     } catch (error) {
-      logger.error('Error inviting guardian', { error: error instanceof Error ? error.message : String(error) });
       if (
         error instanceof BadRequestError ||
         error instanceof NotFoundError ||
@@ -354,6 +351,7 @@ router.post(
       } else {
         res.status(500).json({ error: 'Failed to invite guardian' });
       }
+      logRouteError(res, 'Error inviting guardian', error);
     }
   }
 );
@@ -380,12 +378,12 @@ router.get(
         pendingInvitations: result.pendingInvitations.map(omitToken),
       });
     } catch (error) {
-      logger.error('Error listing guardians', { error: error instanceof Error ? error.message : String(error) });
       if (error instanceof NotFoundError || error instanceof ForbiddenError) {
         res.status(error.statusCode).json({ error: error.message });
       } else {
         res.status(500).json({ error: 'Failed to list guardians' });
       }
+      logRouteError(res, 'Error listing guardians', error);
     }
   }
 );
@@ -408,12 +406,12 @@ router.delete(
 
       res.json({ success: true, message: 'Guardian removed successfully' });
     } catch (error) {
-      logger.error('Error removing guardian', { error: error instanceof Error ? error.message : String(error) });
       if (error instanceof NotFoundError || error instanceof ForbiddenError) {
         res.status(error.statusCode).json({ error: error.message });
       } else {
         res.status(500).json({ error: 'Failed to remove guardian' });
       }
+      logRouteError(res, 'Error removing guardian', error);
     }
   }
 );
@@ -435,7 +433,6 @@ router.delete('/:id/players/:playerId', validateUuidParams('id', 'playerId'), as
       message: 'Player removed from team successfully',
     });
   } catch (error) {
-    logger.error('Error removing player from team', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -445,6 +442,7 @@ router.delete('/:id/players/:playerId', validateUuidParams('id', 'playerId'), as
     } else {
       res.status(500).json({ error: 'Failed to remove player from team' });
     }
+    logRouteError(res, 'Error removing player from team', error);
   }
 });
 
@@ -474,7 +472,6 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
       teamMember,
     });
   } catch (error) {
-    logger.error('Error updating team member', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -484,6 +481,7 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
     } else {
       res.status(500).json({ error: 'Failed to update team member' });
     }
+    logRouteError(res, 'Error updating team member', error);
   }
 });
 
@@ -505,7 +503,6 @@ router.get('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => {
       staff,
     });
   } catch (error) {
-    logger.error('Error listing team staff', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -515,6 +512,7 @@ router.get('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to list team staff' });
     }
+    logRouteError(res, 'Error listing team staff', error);
   }
 });
 
@@ -531,7 +529,6 @@ router.get('/:teamId/roles', validateUuidParams('teamId'), async (req, res) => {
       roles,
     });
   } catch (error) {
-    logger.error('Error listing team roles', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -541,6 +538,7 @@ router.get('/:teamId/roles', validateUuidParams('teamId'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to list team roles' });
     }
+    logRouteError(res, 'Error listing team roles', error);
   }
 });
 
@@ -572,7 +570,6 @@ router.post('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => 
       staff,
     });
   } catch (error) {
-    logger.error('Error adding team staff', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -582,6 +579,7 @@ router.post('/:teamId/staff', validateUuidParams('teamId'), async (req, res) => 
     } else {
       res.status(500).json({ error: 'Failed to add team staff' });
     }
+    logRouteError(res, 'Error adding team staff', error);
   }
 });
 
@@ -611,7 +609,6 @@ router.patch('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), a
       staff,
     });
   } catch (error) {
-    logger.error('Error updating team staff role', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -621,6 +618,7 @@ router.patch('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), a
     } else {
       res.status(500).json({ error: 'Failed to update team staff role' });
     }
+    logRouteError(res, 'Error updating team staff role', error);
   }
 });
 
@@ -643,7 +641,6 @@ router.delete('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), 
       message: 'Staff member removed successfully',
     });
   } catch (error) {
-    logger.error('Error removing team staff', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -653,6 +650,7 @@ router.delete('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), 
     } else {
       res.status(500).json({ error: 'Failed to remove team staff' });
     }
+    logRouteError(res, 'Error removing team staff', error);
   }
 });
 
@@ -684,7 +682,6 @@ router.post('/:teamId/announcements', validateUuidParams('teamId'), async (req, 
       announcement,
     });
   } catch (error) {
-    logger.error('Error creating announcement', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -694,6 +691,7 @@ router.post('/:teamId/announcements', validateUuidParams('teamId'), async (req, 
     } else {
       res.status(500).json({ error: 'Failed to create announcement' });
     }
+    logRouteError(res, 'Error creating announcement', error);
   }
 });
 
@@ -721,7 +719,6 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
       ...result,
     });
   } catch (error) {
-    logger.error('Error listing announcements', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -731,6 +728,7 @@ router.get('/:teamId/announcements', validateUuidParams('teamId'), async (req, r
     } else {
       res.status(500).json({ error: 'Failed to list announcements' });
     }
+    logRouteError(res, 'Error listing announcements', error);
   }
 });
 
@@ -769,7 +767,13 @@ router.get(
     });
     exportFile.stream.pipe(res);
   } catch (error) {
-    logger.error('Error exporting team season CSV', { error: error instanceof Error ? error.message : String(error) });
+    if (res.headersSent) {
+      // The stream already started the response: answering again would throw
+      // ERR_HTTP_HEADERS_SENT and lose this line, so log, end it and stop.
+      logRouteError(res, 'Error exporting team season CSV', error);
+      res.end();
+      return;
+    }
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError ||
@@ -779,6 +783,7 @@ router.get(
     } else {
       res.status(500).json({ error: 'Failed to export team season CSV' });
     }
+    logRouteError(res, 'Error exporting team season CSV', error);
   }
   }
 );

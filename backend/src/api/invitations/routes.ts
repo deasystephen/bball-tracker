@@ -15,7 +15,7 @@ import {
   ForbiddenError,
 } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
-import { logger } from '../../utils/logger';
+import { logRouteError } from '../../utils/log-route-error';
 import { omitToken } from './serializers';
 
 const router = Router();
@@ -56,7 +56,6 @@ router.get('/', async (req, res) => {
       guardianInvitations: guardianInvitations.map(omitToken),
     });
   } catch (error) {
-    logger.error('Error listing invitations', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -66,6 +65,7 @@ router.get('/', async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to list invitations' });
     }
+    logRouteError(res, 'Error listing invitations', error);
   }
 });
 
@@ -85,7 +85,6 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       invitation: omitToken(invitation),
     });
   } catch (error) {
-    logger.error('Error getting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof NotFoundError ||
       error instanceof ForbiddenError
@@ -94,6 +93,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to get invitation' });
     }
+    logRouteError(res, 'Error getting invitation', error);
   }
 });
 
@@ -131,7 +131,6 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation accepted. You have been added to the team.',
     });
   } catch (error) {
-    logger.error('Error accepting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -141,6 +140,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to accept invitation' });
     }
+    logRouteError(res, 'Error accepting invitation', error);
   }
 });
 
@@ -173,7 +173,6 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation rejected.',
     });
   } catch (error) {
-    logger.error('Error rejecting invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -183,6 +182,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to reject invitation' });
     }
+    logRouteError(res, 'Error rejecting invitation', error);
   }
 });
 
@@ -203,7 +203,6 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Invitation cancelled.',
     });
   } catch (error) {
-    logger.error('Error cancelling invitation', { error: error instanceof Error ? error.message : String(error) });
     if (
       error instanceof BadRequestError ||
       error instanceof NotFoundError ||
@@ -213,6 +212,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to cancel invitation' });
     }
+    logRouteError(res, 'Error cancelling invitation', error);
   }
 });
 
