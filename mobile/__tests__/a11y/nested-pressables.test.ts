@@ -27,9 +27,10 @@ import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
 const SCANNED_DIRS = ['app', 'components'];
 
 /**
- * Components that always render a pressable: the React Native primitives,
- * `Button`, and the app's leaf components whose root is a `TouchableOpacity`
- * (#694).
+ * The selection rule (#694): a component that unconditionally renders a
+ * touchable goes here; one that renders it only when given `onPress` goes in
+ * PRESSABLE_WITH_ON_PRESS. `ScoreDisplay` renders its buttons only when given
+ * `onBack` / `onEndGame`; it is counted here, the stricter side.
  */
 const ALWAYS_PRESSABLE = new Set([
   'TouchableOpacity',
@@ -41,9 +42,14 @@ const ALWAYS_PRESSABLE = new Set([
   'PrintButton',
   'SortPills',
   'RelationshipChips',
+  'SeasonDateFields',
+  'GameCard',
+  'OpponentScoreButtons',
+  'UndoBanner',
+  'ScoreDisplay',
 ]);
-/** Wrappers that render a `TouchableOpacity` only when given `onPress`: `ListItem` and `Card`. */
-const PRESSABLE_WITH_ON_PRESS = new Set(['ListItem', 'Card']);
+/** Components that render a touchable only when given `onPress`. */
+const PRESSABLE_WITH_ON_PRESS = new Set(['ListItem', 'Card', 'PlayerStatsCard']);
 
 interface Finding {
   file: string;

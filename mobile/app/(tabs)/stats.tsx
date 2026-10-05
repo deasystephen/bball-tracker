@@ -14,14 +14,14 @@ import {
   EmptyState,
   LoadingSpinner,
 } from '../../components';
-import { SeasonAverages } from '../../components/stats';
+import { SeasonAverages, SeasonRecord } from '../../components/stats';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../hooks/useStats';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { describeResults, getResultColor } from '../../utils/game-result';
+import { describeRecord, describeResults, getResultColor } from '../../utils/game-result';
 import { useTranslation } from '../../i18n';
 
 export default function Stats() {
@@ -154,65 +154,30 @@ export default function Stats() {
                 variant="elevated"
                 style={styles.recordCard}
                 onPress={() => router.push(`/teams/${selectedTeamId}/stats`)}
+                accessibilityLabel={[
+                  selectedTeam?.name,
+                  describeRecord(t, seasonStats.wins, seasonStats.losses, seasonStats.ties),
+                  describeResults(t, streak),
+                ]
+                  .filter(Boolean)
+                  .join('. ')}
+                testID="stats-record-card"
               >
                 <ThemedText variant="caption" color="textSecondary">
                   {selectedTeam?.name}
                 </ThemedText>
-                <View style={styles.recordRow}>
-                  <View style={styles.recordNum}>
-                    <ThemedText
-                      variant="h1"
-                      style={{ color: colors.success, fontSize: 48, lineHeight: 54 }}
-                    >
-                      {seasonStats.wins}
-                    </ThemedText>
-                    <ThemedText variant="caption" color="textSecondary">
-                      W
-                    </ThemedText>
-                  </View>
-                  <ThemedText variant="h2" color="textTertiary">
-                    -
-                  </ThemedText>
-                  <View style={styles.recordNum}>
-                    <ThemedText
-                      variant="h1"
-                      style={{ color: colors.error, fontSize: 48, lineHeight: 54 }}
-                    >
-                      {seasonStats.losses}
-                    </ThemedText>
-                    <ThemedText variant="caption" color="textSecondary">
-                      L
-                    </ThemedText>
-                  </View>
-                  {seasonStats.ties > 0 && (
-                    <>
-                      <ThemedText variant="h2" color="textTertiary">
-                        -
-                      </ThemedText>
-                      <View style={styles.recordNum}>
-                        <ThemedText
-                          variant="h1"
-                          style={{ color: colors.textSecondary, fontSize: 48, lineHeight: 54 }}
-                        >
-                          {seasonStats.ties}
-                        </ThemedText>
-                        <ThemedText variant="caption" color="textSecondary">
-                          T
-                        </ThemedText>
-                      </View>
-                    </>
-                  )}
-                </View>
+                <SeasonRecord
+                  wins={seasonStats.wins}
+                  losses={seasonStats.losses}
+                  ties={seasonStats.ties}
+                  numberStyle={styles.recordNumber}
+                  style={styles.recordRow}
+                  labelled={false}
+                />
 
-                {/* Streak indicator dots */}
-                {/* The letter and the row's label carry the outcome; colour only repeats it (#778). */}
+                {/* The letter and the card's label carry the outcome; colour only repeats it (#778). */}
                 {streak.length > 0 && (
-                  <View
-                    style={styles.streakRow}
-                    accessible
-                    accessibilityLabel={describeResults(t, streak)}
-                    testID="stats-streak"
-                  >
+                  <View style={styles.streakRow} testID="stats-streak">
                     {streak.map((result, idx) => {
                       const resultColor = getResultColor(result, colors);
                       return (
@@ -405,13 +370,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   recordCard: { marginBottom: spacing.md, alignItems: 'center' },
-  recordRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    marginVertical: spacing.sm,
-  },
-  recordNum: { alignItems: 'center' },
+  recordRow: { gap: spacing.lg, marginVertical: spacing.sm },
+  recordNumber: { fontSize: 48, lineHeight: 54 },
   streakRow: {
     flexDirection: 'row',
     gap: spacing.xs,

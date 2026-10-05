@@ -3,7 +3,9 @@
  *
  * Team Stats showed the season record as two coloured digits, and the Stats
  * tab's streak was a row of empty coloured dots that VoiceOver skipped. Each
- * now carries the result letter, and one spoken label per element.
+ * now carries the result letter. Team Stats reads its record as one sentence;
+ * on the Stats tab the pressable card carries the one label for record and
+ * streak, so nothing inside it is a second focusable element.
  */
 
 import React from 'react';
@@ -93,18 +95,28 @@ describe('Team Stats season record', () => {
   });
 });
 
-describe('Stats tab streak', () => {
-  it('is one accessible element that reads the last eight results in order', () => {
+describe('Stats tab record card', () => {
+  it('carries one label that reads the record and then the last eight results in order', () => {
     const view = render(<Stats />);
-    const streak = view.getByTestId('stats-streak');
+    const card = view.getByTestId('stats-record-card');
 
-    expect(streak.props.accessible).toBe(true);
-    expect(streak.props.accessibilityLabel).toBe(
-      'Last 8 games, most recent first: win, tie, loss, win, win, loss, loss, win'
+    expect(card.props.accessibilityLabel).toBe(
+      'Wildcats. Season record: 7 wins, 7 losses, 1 tie. ' +
+        'Last 8 games, most recent first: win, tie, loss, win, win, loss, loss, win'
     );
   });
 
-  it('prints the letter in every dot, so the results survive grayscale', () => {
+  it('adds no second accessible element inside the pressable card', () => {
+    const view = render(<Stats />);
+    const card = view.getByTestId('stats-record-card');
+    const nested = card
+      .findAll((node) => node !== card && node.props.accessible === true)
+      .map((node) => String(node.props.accessibilityLabel ?? node.type));
+
+    expect(nested).toEqual([]);
+  });
+
+  it('prints the letter in every streak dot, so the results survive grayscale', () => {
     const view = render(<Stats />);
     const letters = within(view.getByTestId('stats-streak'))
       .getAllByText(/^[WLT]$/)
@@ -117,6 +129,18 @@ describe('Stats tab streak', () => {
     mockSeasonStats = { ...mockSeasonStats, gamesPlayed: 1, wins: 0, losses: 0, ties: 1, recentGames: [game('g1', 'T')] };
     const view = render(<Stats />);
 
-    expect(view.getByTestId('stats-streak').props.accessibilityLabel).toBe('Last game: tie');
+    expect(view.getByTestId('stats-record-card').props.accessibilityLabel).toBe(
+      'Wildcats. Season record: 0 wins, 0 losses, 1 tie. Last game: tie'
+    );
+  });
+
+  it('leaves the streak out of the label when there are no recent games', () => {
+    mockSeasonStats = { ...mockSeasonStats, recentGames: [] };
+    const view = render(<Stats />);
+
+    expect(view.queryByTestId('stats-streak')).toBeNull();
+    expect(view.getByTestId('stats-record-card').props.accessibilityLabel).toBe(
+      'Wildcats. Season record: 7 wins, 7 losses, 1 tie'
+    );
   });
 });

@@ -939,10 +939,11 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   Turn Grayscale off, turn VoiceOver on, and focus the record card on the Stats tab and the Season Record on
   Team Stats.
 - **Expected:** In grayscale every record number has its **W** / **L** / **T** caption and every streak dot
-  shows its letter. VoiceOver reads the Stats tab card with "Last 8 games, most recent first: win, tie, …" in
-  the order of the dots (the card stays one element that opens Team Stats), and reads the Team Stats record
-  as one sentence, "Season record: 7 wins, 7 losses, 1 tie", not "7, -, 7". Jest:
-  `__tests__/app/stats-result-cues.test.tsx`.
+  shows its letter. VoiceOver reads the Stats tab card as one element that opens Team Stats: "<team>. Season
+  record: 7 wins, 7 losses, 1 tie. Last 8 games, most recent first: win, tie, …", in the order of the dots,
+  with no "7, W, -, 7, L" before it and no separate stop on the streak (check the same with TalkBack on
+  Android if available). Team Stats reads its record as one sentence, "Season record: 7 wins, 7 losses,
+  1 tie", not "7, -, 7". Jest: `__tests__/app/stats-result-cues.test.tsx`.
 - **Notes:** ___________
 
 ### K.4 — Career stats across seasons
