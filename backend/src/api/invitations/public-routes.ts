@@ -16,6 +16,7 @@ import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { BadRequestError, NotFoundError } from '../../utils/errors';
 import { logRouteError } from '../../utils/log-route-error';
+import { omitToken } from './serializers';
 import {
   invitationLookupIpRateLimit,
   invitationTokenRateLimit,
@@ -105,7 +106,7 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
         const accepted = await InvitationService.acceptInvitationByToken(token as string);
         return {
           kind: 'team' as const,
-          invitation: accepted.invitation,
+          invitation: omitToken(accepted.invitation),
           teamMember: accepted.teamMember,
           message: 'Invitation accepted. You have been added to the team.',
         };
@@ -114,7 +115,7 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
         const accepted = await GuardianService.acceptInvitationByToken(token as string);
         return {
           kind: 'guardian' as const,
-          invitation: accepted.invitation,
+          invitation: omitToken(accepted.invitation),
           guardian: accepted.guardian,
           message: 'Invitation accepted. You are now a guardian of this player.',
         };

@@ -25,6 +25,7 @@ import { WorkOSService } from '../../src/services/workos-service';
 import { ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
 import { mockPrisma } from '../setup';
+import { devToken } from '../support/auth-fixtures';
 import {
   createGame,
   createTeam,
@@ -221,10 +222,7 @@ describe('websocket/game-events', () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = 'development';
       try {
-        const expired = Buffer.from(
-          JSON.stringify({ userId: 'u1', exp: Date.now() - 1000 })
-        ).toString('base64');
-        expect(await resolveSocketUser(`dev_${expired}`)).toBeNull();
+        expect(await resolveSocketUser(devToken({ userId: 'u1', exp: Date.now() - 1000 }))).toBeNull();
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
@@ -235,9 +233,6 @@ describe('websocket/game-events', () => {
       process.env.NODE_ENV = 'development';
       try {
         const user = createCoach();
-        const valid = Buffer.from(
-          JSON.stringify({ userId: user.id, exp: Date.now() + 60_000 })
-        ).toString('base64');
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
           id: user.id,
           email: user.email,
@@ -245,7 +240,7 @@ describe('websocket/game-events', () => {
           role: user.role,
         });
 
-        const resolved = await resolveSocketUser(`Bearer dev_${valid}`);
+        const resolved = await resolveSocketUser(`Bearer ${devToken({ userId: user.id })}`);
         expect(resolved).toEqual({
           id: user.id,
           email: user.email,

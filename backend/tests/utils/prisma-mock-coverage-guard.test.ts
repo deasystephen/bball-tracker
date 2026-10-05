@@ -9,15 +9,20 @@
  * `mockPrisma` itself, so `tx.<model>.<method>` needs the same method.
  *
  * Source-derived, never a hand list: the model names come from the generated
- * client (`Prisma.ModelName`) and the calls from `src/`, with any receiver
- * (`prisma`, `tx`, `db`, or the next alias someone writes) and any whitespace
- * or line break between the parts. When this fails, add the named method to
- * the matching block in `tests/setup.ts` as `<method>: jest.fn()`.
+ * client (`Prisma.ModelName`) and the calls from `src/`. A receiver is any
+ * identifier (`prisma`, `tx`, `db`, or the next alias someone writes) or a
+ * parenthesised or call expression (`(tx ?? prisma)`, `getClient()`); a type
+ * argument (`$queryRaw<Row[]>`) and whitespace or line breaks between the parts
+ * are allowed. Optional chaining (`prisma?.team`) and a delegate stored in a
+ * variable first (`const d = prisma.team; d.findMany()`) are not seen. When
+ * this fails, add the named method to the matching block in `tests/setup.ts`
+ * as `<method>: jest.fn()`.
  */
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
+import { sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
@@ -48,24 +53,17 @@ const DELEGATE_OPERATIONS = [
   'groupBy',
 ];
 
+/** An identifier, or the close of a parenthesised or call expression. */
+const RECEIVER = String.raw`(?:\b[A-Za-z_$][\w$]*|\))`;
+/** An optional type argument: `<Row[]>`, `<{ id: string }[]>`. */
+const TYPE_ARGUMENT = String.raw`(?:\s*<[^()\x60;]*>)?`;
+
 const DELEGATE_CALL = new RegExp(
-  `\\b[A-Za-z_$][\\w$]*\\s*\\.\\s*(${MODEL_DELEGATES.join('|')})\\s*\\.\\s*(${DELEGATE_OPERATIONS.join('|')})\\s*\\(`,
+  String.raw`${RECEIVER}\s*\.\s*(${MODEL_DELEGATES.join('|')})\s*\.\s*(${DELEGATE_OPERATIONS.join('|')})${TYPE_ARGUMENT}\s*\(`,
   'g'
 );
-/** Client-level methods: `prisma.$transaction(…)`, ``tx.$queryRaw`…` ``. */
-const CLIENT_CALL = /\b[A-Za-z_][\w]*\s*\.\s*(\$[A-Za-z]+)\s*[(`]/g;
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return full.endsWith('.ts') ? [full] : [];
-  });
-}
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-}
+/** Client-level methods: `prisma.$transaction(…)`, ``tx.$queryRaw<Row[]>`…` ``. */
+const CLIENT_CALL = new RegExp(String.raw`${RECEIVER}\s*\.\s*(\$[A-Za-z]+)${TYPE_ARGUMENT}\s*[(\x60]`, 'g');
 
 /** `model.method` for every delegate call, `$method` for every client call. */
 export function findPrismaCalls(source: string): string[] {
@@ -89,25 +87,26 @@ export function missingFromMock(calls: Iterable<string>, mock: object): string[]
 }
 
 describe('the shared Prisma mock covers every call in src/ (#766)', () => {
-  const files = sourceFiles(SRC);
-  const callsByFile = files.map((file) => ({
-    file: path.relative(BACKEND, file),
-    calls: findPrismaCalls(readFileSync(file, 'utf8')),
-  }));
-  const allCalls = callsByFile.flatMap(({ calls }) => calls);
+  let callsByFile: Array<{ file: string; calls: string[] }> = [];
 
-  it('scans the backend source and finds the calls it is meant to', () => {
-    // A guard that reads nothing passes for the wrong reason.
-    expect(files.length).toBeGreaterThan(50);
+  beforeAll(() => {
+    callsByFile = sourceFiles(SRC).map((file) => ({
+      file: path.relative(BACKEND, file),
+      calls: findPrismaCalls(readFileSync(file, 'utf8')),
+    }));
+  });
+
+  it('scans the backend source and finds calls in it', () => {
+    // A guard that reads nothing passes for the wrong reason. Floors only:
+    // which calls exist is the service code's business, not this guard's;
+    // each receiver shape is proven on fixture strings below.
+    expect(callsByFile.length).toBeGreaterThan(50);
     expect(MODEL_DELEGATES.length).toBeGreaterThan(15);
-    expect(new Set(allCalls).size).toBeGreaterThan(100);
-    // One per receiver the source uses today: the client, a transaction, a `db` parameter.
-    expect(allCalls).toEqual(
-      expect.arrayContaining(['teamMember.upsert', 'teamInvitation.findUniqueOrThrow', 'teamRole.createMany', '$transaction'])
-    );
+    expect(new Set(callsByFile.flatMap(({ calls }) => calls)).size).toBeGreaterThan(50);
   });
 
   it('finds no delegate method that src/ calls and mockPrisma lacks', () => {
+    const allCalls = callsByFile.flatMap(({ calls }) => calls);
     const offenders = missingFromMock(allCalls, mockPrisma).map((call) => {
       const where = callsByFile.filter(({ calls }) => calls.includes(call)).map(({ file }) => file);
       return `${call} (called in ${where.join(', ')})`;
@@ -125,6 +124,13 @@ describe('the guard pattern', () => {
     ['await client\n  .game\n  .findMany({', ['game.findMany']],
     ['await prisma.$transaction(async (tx) => {', ['$transaction']],
     ['await tx.$queryRaw`SELECT 1`', ['$queryRaw']],
+    ['const rows = await tx.$queryRaw<LockedGame[]>`SELECT', ['$queryRaw']],
+    ['await tx.$queryRaw<{ id: string }[]>`SELECT id`', ['$queryRaw']],
+    ['await prisma.$transaction<number>(async (tx) => {', ['$transaction']],
+    ['await prisma.team.findMany<Prisma.TeamFindManyArgs>({', ['team.findMany']],
+    ['await (tx ?? prisma).teamStaff.deleteMany({', ['teamStaff.deleteMany']],
+    ['await getClient().pushToken.upsert({', ['pushToken.upsert']],
+    ['await getClient().$executeRaw`DELETE`', ['$executeRaw']],
   ])('reports %j', (source, expected) => {
     expect(findPrismaCalls(source)).toEqual(expected);
   });

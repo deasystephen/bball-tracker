@@ -30,6 +30,7 @@ import {
   resetSocketRateLimits,
 } from '../../src/websocket/rate-limit';
 import { mockPrisma } from '../setup';
+import { devToken } from '../support/auth-fixtures';
 import {
   createCoach,
   createTeam,
@@ -67,10 +68,7 @@ describe('websocket integration (socket.io-client)', () => {
   });
 
   function buildDevToken(userId: string): string {
-    const payload = Buffer.from(
-      JSON.stringify({ userId, exp: Date.now() + 60_000 })
-    ).toString('base64');
-    return `dev_${payload}`;
+    return devToken({ userId });
   }
 
   function connect(token: string | undefined): ClientSocket {

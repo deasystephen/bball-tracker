@@ -17,8 +17,9 @@
  * - a `logRouteError(` must come after the last response write, so it reads
  *   the status that was sent, unless it sits in an `if (res.headersSent)` guard.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import path from 'path';
+import { sourceFiles } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const API = path.join(BACKEND, 'src/api');
@@ -56,14 +57,6 @@ const APP_ERROR_CLASS =
 const POSITIVE_INSTANCEOF = new RegExp(`(?<!!\\(\\s*)\\b\\w+\\s+instanceof\\s+${APP_ERROR_CLASS}\\b`);
 const STATUS_4XX = /statusCode\s*<\s*500|statusCode\s*>=\s*400/;
 const RESPONSE_WRITE = /\bres\s*\.\s*(?:status|json|send|sendStatus|end|redirect)\s*\(/g;
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return full.endsWith('.ts') ? [full] : [];
-  });
-}
 
 /** Blanks comments and string/template contents (keeping offsets) so braces in them are not counted. */
 function maskNonCode(source: string): string {
@@ -243,7 +236,10 @@ export function misorderedRouteLogs(block: Block): number {
 }
 
 describe('route catches log 4xx outcomes at warn (#656)', () => {
-  const files = sourceFiles(API);
+  let files: string[] = [];
+  beforeAll(() => {
+    files = sourceFiles(API);
+  });
   const rel = (file: string): string => path.relative(API, file);
 
   it.each(ROUTERS)('scans %s', (router) => {

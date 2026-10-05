@@ -15,26 +15,15 @@
  * hard-deletes an account nothing references any more (#529), all under the
  * FOR UPDATE lock it takes on the row. No other file hard-deletes a User.
  */
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
+import { sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
 const ALLOWLIST = new Set([path.join(SRC, 'services/account-service.ts')]);
 
 const USER_WRITE = /\buser\.(update|updateMany|delete|deleteMany|upsert)\(/g;
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return full.endsWith('.ts') ? [full] : [];
-  });
-}
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/.*$/gm, '');
-}
 
 /** The text from `source[open]` (an opening bracket) to its matching close, inclusive. */
 function balanced(source: string, open: number): string {
@@ -75,7 +64,10 @@ export function findUnguardedUserWrites(source: string): string[] {
 }
 
 describe('every User write is guarded by deletedAt (#643)', () => {
-  const files = sourceFiles(SRC);
+  let files: string[] = [];
+  beforeAll(() => {
+    files = sourceFiles(SRC);
+  });
 
   it('scans the backend source', () => {
     // A guard that reads nothing passes for the wrong reason.

@@ -3,11 +3,12 @@
  * shared Prisma mock path (#766): accept, reject, cancel and the public
  * by-token accept. Only authentication is stubbed.
  *
- * `teamInvitation.findUniqueOrThrow` applies the `select` the service passes to
- * a full row that carries a `token`, the way Prisma does. The "no token in the
- * body" assertions therefore exercise the service's `INVITATION_*_SELECT`
- * constants and the routes' `omitToken`, not the fixture. The public by-token
- * accept has no `omitToken` and relies on the select alone.
+ * The token is kept out of every response twice: the service reads the row
+ * back through an `INVITATION_*_SELECT` without `token`, and each route wraps
+ * the invitation in `omitToken`. `teamInvitation.findUniqueOrThrow` applies
+ * the `select` the service passes to a full row that carries a `token`, the
+ * way Prisma does, so the main cases prove the select; the last block makes
+ * the read-back leak the token and proves `omitToken` on its own.
  */
 
 import request from 'supertest';
@@ -21,18 +22,12 @@ const INVITATION_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
 const MEMBER_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
 const SECRET_TOKEN = 'secret-invitation-token-0123456789';
 
-let caller: { id: string; role: string } = { id: PLAYER_ID, role: 'PLAYER' };
+let mockCaller: { id: string; role: string } = { id: PLAYER_ID, role: 'PLAYER' };
 
 jest.mock('../../src/api/auth/middleware', () => ({
   authenticate: jest.fn((req, _res, next) => {
-    req.user = {
-      id: caller.id,
-      email: null,
-      name: 'Caller',
-      role: caller.role,
-      subscriptionTier: 'FREE',
-      subscriptionExpiresAt: null,
-    };
+    const { authUser } = jest.requireActual('../support/auth-fixtures');
+    req.user = authUser({ id: mockCaller.id, role: mockCaller.role, email: null });
     next();
   }),
 }));
@@ -90,15 +85,22 @@ function expectGuardedTransition(status: string): void {
     where: { id: INVITATION_ID, status: 'PENDING' },
     data: expect.objectContaining({ status }),
   });
-  const [{ select }] = mockPrisma.teamInvitation.findUniqueOrThrow.mock.calls[0];
-  expect(select).not.toHaveProperty('token');
+  expect(mockPrisma.teamInvitation.findUniqueOrThrow).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: { id: INVITATION_ID },
+      select: expect.not.objectContaining({ token: expect.anything() }),
+    })
+  );
 }
 
 const expectedMemberWhere = { teamId_playerId: { teamId: TEAM_ID, playerId: PLAYER_ID } };
 
 describe('invitation transitions through the real InvitationService (#766)', () => {
   beforeEach(() => {
-    caller = { id: PLAYER_ID, role: 'PLAYER' };
+    mockCaller = { id: PLAYER_ID, role: 'PLAYER' };
+    // clearAllMocks keeps implementations: reset the read-back so a test that
+    // installs none cannot read the previous test's row.
+    mockPrisma.teamInvitation.findUniqueOrThrow.mockReset();
     mockPrisma.teamInvitation.findUnique.mockResolvedValue(invitationRow());
     mockPrisma.teamInvitation.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.teamInvitation.count.mockResolvedValue(0);
@@ -155,7 +157,7 @@ describe('invitation transitions through the real InvitationService (#766)', () 
   });
 
   it('DELETE /invitations/:id lets a roster manager cancel, without stripping the email', async () => {
-    caller = { id: COACH_ID, role: 'COACH' };
+    mockCaller = { id: COACH_ID, role: 'COACH' };
     mockPrisma.user.findUnique.mockResolvedValue({ role: 'COACH' });
     mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM_ID, season: { league: { admins: [] } } });
     mockPrisma.teamStaff.findMany.mockResolvedValue([
@@ -185,7 +187,7 @@ describe('invitation transitions through the real InvitationService (#766)', () 
     expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
-  it('POST /invitations/by-token/:token/accept accepts with the token alone and never echoes it', async () => {
+  it('POST /invitations/by-token/:token/accept accepts with the token alone', async () => {
     readBackAfter(() => ({ status: 'ACCEPTED', acceptedAt: new Date() }));
 
     const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
@@ -214,5 +216,27 @@ describe('invitation transitions through the real InvitationService (#766)', () 
     expect(res.body.error).toBe('Cannot accept invitation: it is no longer pending');
     expect(mockPrisma.teamInvitation.findUniqueOrThrow).not.toHaveBeenCalled();
     expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
+  });
+
+  describe('omitToken strips a token the read-back leaks (defence in depth)', () => {
+    beforeEach(() => {
+      // Ignore the select: the row comes back with its token, as an
+      // `include`-based query would return it.
+      mockPrisma.teamInvitation.findUniqueOrThrow.mockResolvedValue(invitationRow({ status: 'ACCEPTED' }));
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'ADMIN' });
+    });
+
+    it.each([
+      ['POST', `/api/v1/invitations/${INVITATION_ID}/accept`, PLAYER_ID],
+      ['POST', `/api/v1/invitations/${INVITATION_ID}/reject`, PLAYER_ID],
+      ['DELETE', `/api/v1/invitations/${INVITATION_ID}`, COACH_ID],
+      ['POST', `/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`, PLAYER_ID],
+    ])('%s %s', async (method, url, callerId) => {
+      mockCaller = { id: callerId, role: callerId === COACH_ID ? 'ADMIN' : 'PLAYER' };
+      const res = method === 'DELETE' ? await request(app).delete(url) : await request(app).post(url);
+
+      expect(res.status).toBe(200);
+      expectNoToken(res.body);
+    });
   });
 });

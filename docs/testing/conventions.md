@@ -22,10 +22,16 @@ When adding new features or fixing bugs, always write tests that verify behavior
 - **The shared Prisma mock (`tests/setup.ts#mockPrisma`) defines every delegate method `src/` calls.**
   `$transaction` hands its callback `mockPrisma`, so `tx.<model>.<method>` needs the method too.
   `tests/utils/prisma-mock-coverage-guard.test.ts` derives the models from `Prisma.ModelName` and the
-  calls from `src/` (any receiver: `prisma`, `tx`, `db`) and fails naming each missing
-  `<model>.<method>`; add it to the model's block as `<method>: jest.fn()` (#766). A real-service API
-  test then needs no hand-built `tx`: `tests/api/invitation-transitions.test.ts` is the pattern, with a
-  `findUniqueOrThrow` that applies the service's `select` so a "no token" assertion tests the select.
+  calls from `src/` (an identifier receiver such as `prisma`, `tx` or `db`, or a parenthesised or call
+  expression; type arguments allowed) and fails naming each missing `<model>.<method>`; add it to the
+  model's block as `<method>: jest.fn()` (#766). A real-service API test then needs no hand-built `tx`:
+  `tests/api/invitation-transitions.test.ts` is the pattern. Reset any delegate whose implementation a
+  test installs in `beforeEach` (`clearAllMocks` keeps implementations).
+- **Shared test helpers live in `tests/support/`:** `auth-fixtures.ts` (`authUser(overrides)`, the
+  six fields `authenticate` attaches; `devToken({ userId, exp? })`), `log-lines.ts`
+  (`parseLogLines(spy)` for `console.log`/`console.error` spies; a non-JSON line fails) and
+  `source-scan.ts` (`sourceFiles`, `stripComments`) for the backend source-scanning guards, which
+  walk the tree in `beforeAll`, never at collection time.
 
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas

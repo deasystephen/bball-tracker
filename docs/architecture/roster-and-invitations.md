@@ -132,9 +132,12 @@ eng-review amendments recorded there).
   invitations back through explicit `select` constants (`INVITATION_SCALAR_SELECT` / `INVITATION_SELECT` /
   `INVITATION_TEAM_SELECT`) that omit `token`, and `api/invitations/serializers.ts#omitToken` strips it again
   at the route layer as defense in depth. Only `getInvitationByToken` / `acceptInvitationByToken` (the
-  public routes, where the caller already holds the token) touch it. Tests in `tests/api/invitations.test.ts`,
+  public routes, where the caller already holds the token) touch it. The public by-token accept wraps both
+  kinds (team and guardian) in `omitToken` too (#766). Tests in `tests/api/invitations.test.ts`,
   `tests/api/teams.test.ts` and `tests/services/invitation-service.test.ts` assert `token` is absent from
-  create/list/get/accept/reject/cancel. Do not add `include`-based invitation queries.
+  create/list/get/accept/reject/cancel; `tests/api/invitation-transitions.test.ts` drives accept, reject,
+  cancel and by-token accept through the real service and proves the select and `omitToken` separately.
+  Do not add `include`-based invitation queries.
 - **`GET /invitations?playerId=<other user>`** (role matrix B2.4): allowed for system ADMINs (unscoped);
   for guardians of the player (`isGuardianOf`, unscoped; see `guardians.md`);
   with `teamId`, for callers with `canManageRoster` on that team; without `teamId`, for callers with

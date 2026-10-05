@@ -17,6 +17,8 @@ import { TeamService } from '../../src/services/team-service';
 import { WorkOSService, type VerifiedToken } from '../../src/services/workos-service';
 import { logger } from '../../src/utils/logger';
 import { mockPrisma } from '../setup';
+import { authUser, devToken } from '../support/auth-fixtures';
+import { parseLogLines, type LogLine } from '../support/log-lines';
 
 jest.mock('../../src/services/team-service');
 const mockTeamService = TeamService as jest.Mocked<typeof TeamService>;
@@ -26,31 +28,10 @@ const TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const DOMAIN_EVENT = 'Domain event from a service';
 const verified: VerifiedToken = { id: 'workos_123', expiresAt: Date.now() + 60_000 };
 
-const dbUser = {
-  id: USER_ID,
-  email: 'coach@example.com',
-  name: 'Coach',
-  role: 'COACH',
-  subscriptionTier: 'FREE',
-  subscriptionExpiresAt: null,
-};
-
-type LogLine = { message: string; requestId?: string; userId?: string; teamId?: string };
-
-function loggedLines(spy: jest.SpyInstance): LogLine[] {
-  return spy.mock.calls
-    .map(([raw]) => {
-      try {
-        return JSON.parse(String(raw)) as LogLine;
-      } catch {
-        return null;
-      }
-    })
-    .filter((line): line is LogLine => line !== null);
-}
+const dbUser = authUser({ id: USER_ID });
 
 function domainEventLines(spy: jest.SpyInstance): LogLine[] {
-  return loggedLines(spy).filter((line) => line.message === DOMAIN_EVENT);
+  return parseLogLines(spy).filter((line) => line.message === DOMAIN_EVENT);
 }
 
 describe('domain-event log context', () => {
@@ -89,7 +70,7 @@ describe('domain-event log context', () => {
   it('carries userId and requestId after a dev token resolves', async () => {
     process.env.NODE_ENV = 'development';
     const verifySpy = jest.spyOn(WorkOSService, 'verifyToken');
-    const token = `dev_${Buffer.from(JSON.stringify({ userId: USER_ID, exp: Date.now() + 60_000 })).toString('base64')}`;
+    const token = devToken({ userId: USER_ID });
 
     const res = await request(app)
       .get('/api/v1/teams')
@@ -110,7 +91,7 @@ describe('domain-event log context', () => {
     const refused = await request(app).get('/api/v1/teams').set('X-Request-Id', 'req-anon');
     expect(refused.status).toBe(401);
 
-    const lines = loggedLines(consoleSpy).filter((line) => line.requestId === 'req-anon');
+    const lines = parseLogLines(consoleSpy).filter((line) => line.requestId === 'req-anon');
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
       expect(line).not.toHaveProperty('userId');

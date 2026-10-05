@@ -9,6 +9,7 @@ import request from 'supertest';
 import { requestContext } from '../../src/api/middleware/request-context';
 import { logger } from '../../src/utils/logger';
 import { getLogContext, setLogContextUser } from '../../src/utils/log-context';
+import { parseLogLines } from '../support/log-lines';
 
 describe('requestContext middleware', () => {
   let infoSpy: jest.SpyInstance;
@@ -60,7 +61,7 @@ describe('requestContext middleware', () => {
 
     await request(app).get('/log').set('x-request-id', 'req-42');
 
-    const line = logSpy.mock.calls.map(([l]) => JSON.parse(l as string)).find((e) => e.message === 'Domain event');
+    const line = parseLogLines(logSpy).find((e) => e.message === 'Domain event');
     expect(line).toEqual(expect.objectContaining({ requestId: 'req-42', teamId: 't1' }));
   });
 });
