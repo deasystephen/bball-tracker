@@ -138,17 +138,17 @@ export default function TeamStatsScreen() {
             <View style={styles.recordHeader}>
               <ThemedText variant="h3" heading>Season Record</ThemedText>
               <View style={styles.record}>
-                <ThemedText variant="h1" color="success">
+                <ThemedText variant="h1" heading={false} /* record count, a value */ color="success">
                   {seasonStats.wins}
                 </ThemedText>
-                <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
-                <ThemedText variant="h1" color="error">
+                <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary"> - </ThemedText>
+                <ThemedText variant="h1" heading={false} /* record count, a value */ color="error">
                   {seasonStats.losses}
                 </ThemedText>
                 {seasonStats.ties > 0 && (
                   <>
-                    <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
-                    <ThemedText variant="h1" color="textSecondary">
+                    <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary"> - </ThemedText>
+                    <ThemedText variant="h1" heading={false} /* record count, a value */ color="textSecondary">
                       {seasonStats.ties}
                     </ThemedText>
                   </>
@@ -174,19 +174,19 @@ export default function TeamStatsScreen() {
             </ThemedText>
             <View style={styles.shootingRow}>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.fieldGoalPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">FG%</ThemedText>
               </View>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.threePointPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">3P%</ThemedText>
               </View>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.freeThrowPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">FT%</ThemedText>

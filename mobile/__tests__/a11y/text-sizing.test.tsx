@@ -13,7 +13,6 @@
  * largest text size is the final check (docs/testing/e2e-test-plan-v2.0.md).
  */
 
-import fs from 'fs';
 import path from 'path';
 import React from 'react';
 import { Dimensions, StyleSheet, Text } from 'react-native';
@@ -27,7 +26,19 @@ import { TOAST_MAX_LINES, ToastProvider, toastDuration, useToast } from '../../c
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { MAX_FONT_SCALE } from '../../theme/typography';
 import type { PlayerGameStats, TeamGameStats } from '../../types/stats';
-import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+import {
+  MOBILE_ROOT,
+  jsxAttributeValue,
+  jsxAttributes,
+  lineOf,
+  literalAttribute,
+  parseTsx,
+  readSource,
+  sourceFiles,
+  tagNameOf,
+  walkJsx,
+} from '../helpers/source-files';
+import type { JsxAttributeValue, JsxNode } from '../helpers/source-files';
 
 jest.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -48,6 +59,9 @@ jest.mock('../../hooks/useTheme', () => ({
 /** The largest iOS accessibility text size multiplier. */
 const LARGEST_IOS_SCALE = 3.571;
 
+/** Directories of app code (everything but tests, scripts and assets). */
+const APP_CODE_DIRS = ['app', 'components', 'config', 'hooks', 'i18n', 'services', 'store', 'theme', 'utils'];
+
 /** The components #776 names. A fixed `height:` in them needs a reason here. */
 const FIXED_HEIGHT_ALLOWLIST: Record<string, { match: string; reason: string }[]> = {
   'components/game/ShotButtons.tsx': [],
@@ -65,12 +79,124 @@ const FIXED_HEIGHT_ALLOWLIST: Record<string, { match: string; reason: string }[]
   ],
 };
 
-function read(relative: string): string {
-  return fs.readFileSync(path.join(MOBILE_ROOT, relative), 'utf8');
-}
-
 const flat = (style: StyleProp<ViewStyle & TextStyle>): ViewStyle & TextStyle =>
   StyleSheet.flatten(style) ?? {};
+
+const isTrueLiteral = (value: JsxAttributeValue): boolean =>
+  value.kind === 'true' || (value.kind === 'literal' && value.value === true);
+
+/**
+ * Every place in `text` that can turn font scaling off: an `allowFontScaling`
+ * prop, style key or property assignment whose value is not a literal `true`
+ * (a variable, a spread object, `false`), and any `defaultProps` use (the
+ * old `Text.defaultProps.allowFontScaling = false` switch). Read from the AST,
+ * so comments that mention the prop do not count.
+ */
+function fontScalingOffenders(fileName: string, text: string): string[] {
+  const source = parseTsx(fileName, text);
+  const findings: string[] = [];
+  const report = (node: ts.Node) => findings.push(`${fileName}:${lineOf(source, node)} ${node.getText()}`);
+  const isTrue = (expression: ts.Expression | undefined) => expression?.kind === ts.SyntaxKind.TrueKeyword;
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxAttribute(node) && node.name.getText() === 'allowFontScaling') {
+      if (!isTrueLiteral(jsxAttributeValue(node))) report(node);
+    } else if (ts.isPropertyAssignment(node) && node.name.getText() === 'allowFontScaling') {
+      if (!isTrue(node.initializer)) report(node);
+    } else if (ts.isShorthandPropertyAssignment(node) && node.name.getText() === 'allowFontScaling') {
+      report(node);
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const target = node.left.getText();
+      if (/\ballowFontScaling$/.test(target) && !isTrue(node.right)) report(node);
+    } else if (ts.isIdentifier(node) && node.text === 'defaultProps') {
+      report(node.parent);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return findings;
+}
+
+/** The properties of one entry of the file's `StyleSheet.create({...})`, by key. */
+function styleSheetEntry(source: ts.SourceFile, key: string): Map<string, ts.Expression> {
+  const result = new Map<string, ts.Expression>();
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText() === 'StyleSheet.create' &&
+      node.arguments[0] &&
+      ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      for (const entry of node.arguments[0].properties) {
+        if (
+          ts.isPropertyAssignment(entry) &&
+          entry.name.getText() === key &&
+          ts.isObjectLiteralExpression(entry.initializer)
+        ) {
+          for (const property of entry.initializer.properties) {
+            if (ts.isPropertyAssignment(property)) result.set(property.name.getText(), property.initializer);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return result;
+}
+
+const numberOf = (expression: ts.Expression | undefined): number =>
+  expression && ts.isNumericLiteral(expression) ? Number(expression.text) : NaN;
+
+/** The nearest ancestor of `node` that is a JSX element named `tag`. */
+function enclosingElement(node: ts.Node, tag: string): JsxNode | undefined {
+  for (let current = node.parent; current; current = current.parent) {
+    if ((ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current)) && tagNameOf(current) === tag) {
+      return current;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The identifiers a label's render guard requires to be false: for
+ * `{isFocused && !isTrackTab && (<Label />)}` that is `isTrackTab`.
+ */
+function negatedGuards(label: ts.Node, stop: ts.Node): Set<string> {
+  const names = new Set<string>();
+  for (let current = label.parent; current && current !== stop; current = current.parent) {
+    if (ts.isJsxExpression(current) && current.expression) {
+      const collect = (node: ts.Node): void => {
+        if (
+          ts.isPrefixUnaryExpression(node) &&
+          node.operator === ts.SyntaxKind.ExclamationToken &&
+          ts.isIdentifier(node.operand)
+        ) {
+          names.add(node.operand.text);
+        }
+        if (!ts.isJsxElement(node) && !ts.isJsxSelfClosingElement(node)) ts.forEachChild(node, collect);
+      };
+      collect(current.expression);
+      break;
+    }
+  }
+  return names;
+}
+
+/** Whether `node` sits in the `whenTrue` branch of a `cond ? a : b` on one of `names`, below `stop`. */
+function onlyWhen(node: ts.Node, names: Set<string>, stop: ts.Node): boolean {
+  for (let child = node, current = node.parent; current && current !== stop; child = current, current = current.parent) {
+    if (
+      ts.isConditionalExpression(current) &&
+      ts.isIdentifier(current.condition) &&
+      names.has(current.condition.text) &&
+      current.whenTrue === child
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 const stats = {
   points: 24,
@@ -103,17 +229,46 @@ const team = { ...stats, teamId: 't1', teamName: 'Hawks' } as TeamGameStats;
 
 describe('text sizing at accessibility text sizes', () => {
   it('never turns font scaling off', () => {
-    const files = ['app', 'components'].flatMap((dir) =>
-      sourceFiles(path.join(MOBILE_ROOT, dir), ['.ts', '.tsx'])
-    );
-    const offenders = files.filter((file) => /allowFontScaling\s*=\s*\{\s*false\s*\}/.test(fs.readFileSync(file, 'utf8')));
+    const files = APP_CODE_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.ts', '.tsx']));
+    // A guard that scans nothing passes for the wrong reason.
+    expect(files.length).toBeGreaterThan(100);
+    const offenders = files.flatMap((file) => {
+      const relative = path.relative(MOBILE_ROOT, file);
+      return fontScalingOffenders(relative, readSource(relative));
+    });
     expect(offenders).toEqual([]);
+  });
+
+  it('catches every way of turning font scaling off', () => {
+    const offenders = fontScalingOffenders(
+      'sample.tsx',
+      `
+      // A comment that mentions allowFontScaling={false} is not code.
+      const a = <Text allowFontScaling={false}>A</Text>;
+      const b = <Text allowFontScaling={scales}>B</Text>;
+      const c = <Text {...{ allowFontScaling: false }}>C</Text>;
+      const d = { allowFontScaling };
+      Text.defaultProps = Text.defaultProps || {};
+      settings.allowFontScaling = false;
+      const ok = <Text allowFontScaling>OK</Text>;
+      const ok2 = <Text allowFontScaling={true} style={{ allowFontScaling: true }}>OK</Text>;
+      `
+    );
+    expect(offenders.map((finding) => finding.split(' ')[0])).toEqual([
+      'sample.tsx:3',
+      'sample.tsx:4',
+      'sample.tsx:5',
+      'sample.tsx:6',
+      'sample.tsx:7',
+      'sample.tsx:7',
+      'sample.tsx:8',
+    ]);
   });
 
   describe('fixed heights in the components #776 names', () => {
     it.each(Object.keys(FIXED_HEIGHT_ALLOWLIST))('%s has no unlisted fixed height', (file) => {
       const allowed = FIXED_HEIGHT_ALLOWLIST[file];
-      const findings = read(file)
+      const findings = readSource(file)
         .split('\n')
         .map((line, index) => ({ line: line.trim(), number: index + 1 }))
         .filter(({ line }) => /(^|[^A-Za-z])height\s*:/.test(line))
@@ -124,7 +279,7 @@ describe('text sizing at accessibility text sizes', () => {
 
     it('has no stale allowlist entry', () => {
       const stale = Object.entries(FIXED_HEIGHT_ALLOWLIST).flatMap(([file, entries]) => {
-        const lines = read(file)
+        const lines = readSource(file)
           .split('\n')
           .map((line) => line.trim());
         return entries.filter((entry) => !lines.includes(entry.match)).map((entry) => `${file} ${entry.match}`);
@@ -156,32 +311,41 @@ describe('text sizing at accessibility text sizes', () => {
   });
 
   describe('tab bar label', () => {
-    const source = read('app/(tabs)/_layout.tsx');
-
-    it('caps the focused label and bounds its line height inside TAB_BAR_HEIGHT', () => {
-      const file = ts.createSourceFile('layout.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-      const labels: Map<string, string>[] = [];
-      const visit = (node: ts.Node): void => {
-        if (ts.isJsxOpeningElement(node) && node.tagName.getText() === 'Animated.Text') {
-          const attributes = new Map<string, string>();
-          for (const a of node.attributes.properties) {
-            if (ts.isJsxAttribute(a)) attributes.set(a.name.getText(), a.initializer?.getText() ?? 'true');
-          }
-          labels.push(attributes);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(file);
-
+    it('caps the focused label and fits it with its own icon inside TAB_BAR_HEIGHT', () => {
+      const source = parseTsx('app/(tabs)/_layout.tsx', readSource('app/(tabs)/_layout.tsx'));
+      const labels: JsxNode[] = [];
+      walkJsx(source, null, (node) => {
+        if (tagNameOf(node) === 'Animated.Text') labels.push(node);
+        return null;
+      });
       expect(labels).toHaveLength(1);
-      expect(labels[0].get('maxFontSizeMultiplier')).toBe('{MAX_FONT_SCALE.fixedControl}');
+      const [label] = labels;
+      expect(jsxAttributes(label).get('maxFontSizeMultiplier')).toEqual({
+        kind: 'expression',
+        text: 'MAX_FONT_SCALE.fixedControl',
+      });
 
-      const tabLabel = /tabLabel:\s*\{([^}]*)\}/.exec(source)?.[1] ?? '';
-      const lineHeight = Number(/lineHeight:\s*(\d+)/.exec(tabLabel)?.[1]);
-      const marginTop = Number(/marginTop:\s*(\d+)/.exec(tabLabel)?.[1]);
-      const ICON_SIZE = 24;
-      expect(source).toContain(`size={${ICON_SIZE}}`);
-      expect(ICON_SIZE + marginTop + lineHeight * MAX_FONT_SCALE.fixedControl).toBeLessThanOrEqual(
+      // The icon drawn with this label: an Ionicons in the same tab item that is
+      // not confined to a branch the label's guard rules out (the Track button).
+      const tabItem = enclosingElement(label, 'TouchableOpacity');
+      expect(tabItem).toBeDefined();
+      const guards = negatedGuards(label, tabItem as ts.Node);
+      expect(guards.size).toBeGreaterThan(0);
+      const icons: JsxNode[] = [];
+      walkJsx(tabItem as ts.Node, null, (node) => {
+        if (tagNameOf(node) === 'Ionicons' && !onlyWhen(node, guards, tabItem as ts.Node)) icons.push(node);
+        return null;
+      });
+      expect(icons).toHaveLength(1);
+      const iconSize = literalAttribute(jsxAttributes(icons[0]), 'size');
+      expect(typeof iconSize).toBe('number');
+
+      const tabLabel = styleSheetEntry(source, 'tabLabel');
+      const lineHeight = numberOf(tabLabel.get('lineHeight'));
+      const marginTop = numberOf(tabLabel.get('marginTop'));
+      expect(lineHeight).toBeGreaterThan(0);
+      expect(marginTop).toBeGreaterThanOrEqual(0);
+      expect((iconSize as number) + marginTop + lineHeight * MAX_FONT_SCALE.fixedControl).toBeLessThanOrEqual(
         TAB_BAR_HEIGHT
       );
     });
@@ -271,7 +435,9 @@ describe('text sizing at accessibility text sizes', () => {
 
     it('keeps short messages at the requested duration and caps long ones', () => {
       expect(toastDuration('Saved')).toBe(3000);
+      expect(toastDuration('Copied', 1200)).toBe(1200);
       expect(toastDuration('Saved', 5000)).toBe(5000);
+      expect(toastDuration('x'.repeat(100), 1200)).toBe(1200 + 40 * 40);
       expect(toastDuration('x'.repeat(160))).toBe(7000);
       expect(toastDuration('x'.repeat(1000))).toBe(8000);
       expect(toastDuration('x'.repeat(1000), 10000)).toBe(10000);

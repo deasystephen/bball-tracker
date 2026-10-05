@@ -207,7 +207,7 @@ export default function GameStatsScreen() {
                 {boxScore.team.name}
               </ThemedText>
               <ThemedText
-                variant="h1"
+                variant="h1" heading={false} /* score, a value */
                 style={[styles.finalScore, { color: resultText === 'W' ? colors.success : colors.text }]}
               >
                 {boxScore.game.homeScore}
@@ -229,7 +229,7 @@ export default function GameStatsScreen() {
                 {boxScore.game.opponent}
               </ThemedText>
               <ThemedText
-                variant="h1"
+                variant="h1" heading={false} /* score, a value */
                 style={[styles.finalScore, { color: resultText === 'L' ? colors.error : colors.text }]}
               >
                 {boxScore.game.awayScore}
@@ -304,15 +304,15 @@ export default function GameStatsScreen() {
           <Card variant="default" style={styles.teamStatsCard}>
             <View style={styles.teamStatsRow}>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.points}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.points}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Points</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.rebounds}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.rebounds}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Rebounds</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
-                <ThemedText variant="h2">{boxScore.team.stats.assists}</ThemedText>
+                <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.assists}</ThemedText>
                 <ThemedText variant="caption" color="textSecondary">Assists</ThemedText>
               </View>
             </View>

@@ -130,7 +130,7 @@ export default function Games() {
                 >
                   {item.team?.name || 'Home'}
                 </ThemedText>
-                <ThemedText variant="h1" style={styles.liveScoreNum}>
+                <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScoreNum}>
                   {item.homeScore}
                 </ThemedText>
               </View>
@@ -145,7 +145,7 @@ export default function Games() {
                 >
                   {item.opponent}
                 </ThemedText>
-                <ThemedText variant="h1" style={styles.liveScoreNum}>
+                <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScoreNum}>
                   {item.awayScore}
                 </ThemedText>
               </View>

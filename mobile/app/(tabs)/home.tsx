@@ -149,7 +149,7 @@ export default function Home() {
             <ThemedText variant="caption" color="textSecondary">
               {getGreeting()}
             </ThemedText>
-            <ThemedText variant="h3" heading>
+            <ThemedText variant="h3">
               {user?.name?.split(' ')[0] || 'Coach'}
             </ThemedText>
           </View>
@@ -215,7 +215,7 @@ export default function Home() {
                   >
                     {liveGame.team?.name || 'Home'}
                   </ThemedText>
-                  <ThemedText variant="h1" style={styles.liveScore}>
+                  <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScore}>
                     {liveGame.homeScore}
                   </ThemedText>
                 </View>
@@ -230,7 +230,7 @@ export default function Home() {
                   >
                     {liveGame.opponent}
                   </ThemedText>
-                  <ThemedText variant="h1" style={styles.liveScore}>
+                  <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScore}>
                     {liveGame.awayScore}
                   </ThemedText>
                 </View>

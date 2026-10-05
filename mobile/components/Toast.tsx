@@ -73,12 +73,14 @@ const MAX_AUTO_DURATION = 8000;
 
 /**
  * How long a toast stays up. A long message (a server error sentence, the 402
- * upgrade copy) gets reading time on top of the default, capped at
- * `MAX_AUTO_DURATION`; it never shortens a duration the caller asked for (#776).
+ * upgrade copy) gets reading time on top of the requested duration, capped at
+ * `MAX_AUTO_DURATION`. A short message keeps exactly the requested duration,
+ * shorter than the default included, and a requested duration above the cap is
+ * never shortened (#776).
  */
 export function toastDuration(message: string, requested: number = DEFAULT_DURATION): number {
   const extra = Math.max(0, message.length - SHORT_MESSAGE_LENGTH) * READING_MS_PER_CHAR;
-  return Math.max(requested, Math.min(MAX_AUTO_DURATION, DEFAULT_DURATION + extra));
+  return Math.max(requested, Math.min(MAX_AUTO_DURATION, requested + extra));
 }
 
 /** Lines a toast message may take before it ellipsizes (#776). */

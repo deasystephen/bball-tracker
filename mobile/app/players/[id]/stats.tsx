@@ -123,7 +123,7 @@ export default function PlayerStatsScreen() {
         <View style={[styles.playerHero, { backgroundColor: colors.primary }]}>
           <View style={styles.avatarRing}>
             <View style={styles.avatar}>
-              <ThemedText variant="h1" style={styles.avatarText}>
+              <ThemedText variant="h1" heading={false} /* avatar initial */ style={styles.avatarText}>
                 {displayName(player).charAt(0).toUpperCase()}
               </ThemedText>
             </View>

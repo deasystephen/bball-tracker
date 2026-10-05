@@ -148,7 +148,7 @@ export default function TeamsScreen() {
         accessibilityLabel={item.name}
       >
         <View style={[styles.teamColorHeader, { backgroundColor: teamColor }]}>
-          <ThemedText variant="h1" style={styles.teamInitial}>
+          <ThemedText variant="h1" heading={false} /* avatar initial */ style={styles.teamInitial}>
             {item.name.charAt(0).toUpperCase()}
           </ThemedText>
         </View>

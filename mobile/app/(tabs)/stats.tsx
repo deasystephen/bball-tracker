@@ -160,7 +160,7 @@ export default function Stats() {
                 <View style={styles.recordRow}>
                   <View style={styles.recordNum}>
                     <ThemedText
-                      variant="h1"
+                      variant="h1" heading={false} /* record count, a value */
                       style={{ color: colors.success, fontSize: 48, lineHeight: 54 }}
                     >
                       {seasonStats.wins}
@@ -169,12 +169,12 @@ export default function Stats() {
                       W
                     </ThemedText>
                   </View>
-                  <ThemedText variant="h2" color="textTertiary">
+                  <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary">
                     -
                   </ThemedText>
                   <View style={styles.recordNum}>
                     <ThemedText
-                      variant="h1"
+                      variant="h1" heading={false} /* record count, a value */
                       style={{ color: colors.error, fontSize: 48, lineHeight: 54 }}
                     >
                       {seasonStats.losses}
@@ -185,12 +185,12 @@ export default function Stats() {
                   </View>
                   {seasonStats.ties > 0 && (
                     <>
-                      <ThemedText variant="h2" color="textTertiary">
+                      <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary">
                         -
                       </ThemedText>
                       <View style={styles.recordNum}>
                         <ThemedText
-                          variant="h1"
+                          variant="h1" heading={false} /* record count, a value */
                           style={{ color: colors.textSecondary, fontSize: 48, lineHeight: 54 }}
                         >
                           {seasonStats.ties}
@@ -313,7 +313,7 @@ export default function Stats() {
                       >
                         {topScorer.playerName.split(' ')[0]}
                       </ThemedText>
-                      <ThemedText variant="h2">
+                      <ThemedText variant="h2" heading={false} /* stat value */>
                         {topScorer.pointsPerGame.toFixed(1)}
                       </ThemedText>
                       <ThemedText variant="footnote" color="textSecondary">
