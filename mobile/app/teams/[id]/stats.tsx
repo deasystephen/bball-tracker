@@ -21,7 +21,7 @@ import {
   ErrorState,
   SortPills,
 } from '../../../components';
-import { SeasonAverages, PlayerStatsCard } from '../../../components/stats';
+import { SeasonAverages, PlayerStatsCard, SeasonRecord } from '../../../components/stats';
 import { PrintButton } from '../../../components/PrintButton';
 import { useTeamSeasonStats, useTeamRosterStats } from '../../../hooks/useStats';
 import { useTeam } from '../../../hooks/useTeams';
@@ -137,23 +137,13 @@ export default function TeamStatsScreen() {
           <Card variant="elevated" style={styles.recordCard}>
             <View style={styles.recordHeader}>
               <ThemedText variant="h3" heading>Season Record</ThemedText>
-              <View style={styles.record}>
-                <ThemedText variant="h1" heading={false} /* record count, a value */ color="success">
-                  {seasonStats.wins}
-                </ThemedText>
-                <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary"> - </ThemedText>
-                <ThemedText variant="h1" heading={false} /* record count, a value */ color="error">
-                  {seasonStats.losses}
-                </ThemedText>
-                {seasonStats.ties > 0 && (
-                  <>
-                    <ThemedText variant="h2" heading={false} /* record separator */ color="textTertiary"> - </ThemedText>
-                    <ThemedText variant="h1" heading={false} /* record count, a value */ color="textSecondary">
-                      {seasonStats.ties}
-                    </ThemedText>
-                  </>
-                )}
-              </View>
+              <SeasonRecord
+                wins={seasonStats.wins}
+                losses={seasonStats.losses}
+                ties={seasonStats.ties}
+                style={styles.record}
+                testID="team-stats-record"
+              />
             </View>
             <ThemedText variant="caption" color="textSecondary" style={styles.gamesPlayed}>
               {seasonStats.gamesPlayed} games played
@@ -289,8 +279,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   record: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginTop: spacing.sm,
   },
   gamesPlayed: {

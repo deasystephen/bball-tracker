@@ -294,8 +294,14 @@ never inline a role check in a screen:
   `childRowMore` in `app/(tabs)/profile.tsx`; the date rows in `admin/seasons/create`).
   `__tests__/a11y/nested-pressables.test.ts` reads the source of `app/` and `components/` and
   fails on any nesting, unless the outer pressable opts out with `accessible={false}`
-  (`ActionMenu`'s sheet wrapper). A `ListItem` counts as a pressable only when it is given
-  `onPress`. Screen tests cannot stand in for the guard: `getByLabelText` finds a nested button,
+  (`ActionMenu`'s sheet wrapper). What counts as a pressable follows one rule (#694): a component
+  that unconditionally renders a touchable is always a pressable (`ALWAYS_PRESSABLE`): the React
+  Native touchables, `Pressable`, `Button`, `AvatarPicker`, `PrintButton`, `SortPills`,
+  `RelationshipChips`, `SeasonDateFields`, `GameCard`, `OpponentScoreButtons`, `UndoBanner` and
+  `ScoreDisplay` (its buttons depend on `onBack` / `onEndGame`, so it is counted on the stricter
+  side). A component that renders one only when given `onPress` counts only with `onPress`
+  (`PRESSABLE_WITH_ON_PRESS`): `ListItem`, `Card` and `PlayerStatsCard`. A new component that
+  renders a touchable must be added to the matching set by hand. Screen tests cannot stand in for the guard: `getByLabelText` finds a nested button,
   which is how the defect shipped with a passing test. To assert it in a screen test, walk the
   `parent` chain of the button and expect no other accessible ancestor
   (`__tests__/app/profile-my-kids.test.tsx`).
@@ -335,6 +341,20 @@ never inline a role check in a screen:
   `allowFontScaling` that is anything but a literal `true` anywhere in app code, and on any
   `defaultProps` use. The visual check at the largest text size is device-only (E2E plan P.11).
   The AST helpers these guards share live in `__tests__/helpers/source-files.ts`.
+- **A game outcome is never shown by colour alone (#778, WCAG 1.4.1).** Every W / L / T carries its
+  letter next to its colour, and every colour comes from `utils/game-result.ts#getResultColor`: the
+  Games tab stripe, the season record (`components/stats/SeasonRecord`, a caption under each number,
+  shared by the Stats tab and Team Stats), and the Stats tab streak (an 18pt dot with the letter
+  inside, tinted and outlined in the result colour). The spoken text comes from `describeRecord`
+  ("Season record: 7 wins, 7 losses, 1 tie") and `describeResults` ("Last 8 games, most recent
+  first: win, tie, …") in the same file, with their words in the `stats` namespace of both locale
+  files; `getRecordParts` there is the one place that decides ties appear only when there are any.
+  On Team Stats, `SeasonRecord` is one accessible element with its own label. On the Stats tab the
+  record and streak sit inside the pressable card, so the **card** carries the single label (team
+  name, record, streak) and `SeasonRecord` is rendered with `labelled={false}`: a labelled element
+  inside a pressable is a dead focusable on TalkBack. Tests: `__tests__/app/stats-result-cues.test.tsx`
+  (including that nothing inside the card is accessible), `__tests__/utils/game-result.test.ts`
+  (English and Spanish strings).
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
   Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the

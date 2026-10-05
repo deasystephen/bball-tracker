@@ -67,6 +67,7 @@ const VALUE_COMPONENTS = [
   'components/game/GameCard.tsx',
   'components/game/ScoreDisplay.tsx',
   'components/stats/PlayerStatsCard.tsx',
+  'components/stats/SeasonRecord.tsx',
 ];
 
 /**
