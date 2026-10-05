@@ -225,5 +225,21 @@
     "replyNotificationsOn": "Push and email when someone replies to your announcements",
     "replyNotificationsOff": "Off",
     "replyNotificationsFailed": "Could not save that setting"
+  },
+  "stats": {
+    "result": {
+      "W": "win",
+      "L": "loss",
+      "T": "tie"
+    },
+    "wins_one": "{{count}} win",
+    "wins_other": "{{count}} wins",
+    "losses_one": "{{count}} loss",
+    "losses_other": "{{count}} losses",
+    "ties_one": "{{count}} tie",
+    "ties_other": "{{count}} ties",
+    "seasonRecordLabel": "Season record: {{record}}",
+    "streakLabel_one": "Last game: {{results}}",
+    "streakLabel_other": "Last {{count}} games, most recent first: {{results}}"
   }
 }

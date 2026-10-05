@@ -206,5 +206,21 @@
     "replyNotificationsOn": "Aviso y correo cuando alguien responde a tus anuncios",
     "replyNotificationsOff": "Desactivadas",
     "replyNotificationsFailed": "No se pudo guardar ese ajuste"
+  },
+  "stats": {
+    "result": {
+      "W": "victoria",
+      "L": "derrota",
+      "T": "empate"
+    },
+    "wins_one": "{{count}} victoria",
+    "wins_other": "{{count}} victorias",
+    "losses_one": "{{count}} derrota",
+    "losses_other": "{{count}} derrotas",
+    "ties_one": "{{count}} empate",
+    "ties_other": "{{count}} empates",
+    "seasonRecordLabel": "Récord de la temporada: {{record}}",
+    "streakLabel_one": "Último partido: {{results}}",
+    "streakLabel_other": "Últimos {{count}} partidos, del más reciente al más antiguo: {{results}}"
   }
 }
