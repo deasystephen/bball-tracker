@@ -75,7 +75,7 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
       }),
       () => GuardianService.getInvitationByToken(token as string)
     );
-    res.json({ success: true, invitation });
+    res.json({ success: true, invitation: omitToken(invitation) });
   } catch (error) {
     if (error instanceof NotFoundError) {
       res.status(404).json({ error: 'Invitation not found' });

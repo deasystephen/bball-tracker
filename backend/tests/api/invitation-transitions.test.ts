@@ -8,11 +8,16 @@
  * the invitation in `omitToken`. `teamInvitation.findUniqueOrThrow` applies
  * the `select` the service passes to a full row that carries a `token`, the
  * way Prisma does, so the main cases prove the select; the last block makes
- * the read-back leak the token and proves `omitToken` on its own.
+ * the read-back leak the token and proves `omitToken` on its own. The public
+ * lookup (`GET /invitations/by-token/:token`) builds its payload field by
+ * field, so its leak is staged one layer up, in the service's return value.
  */
 
 import request from 'supertest';
 import { app } from '../../src/index';
+import { InvitationService, type PublicInvitation } from '../../src/services/invitation-service';
+import { GuardianService, type PublicGuardianInvitation } from '../../src/services/guardian-service';
+import { NotFoundError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 
 const PLAYER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
@@ -236,6 +241,56 @@ describe('invitation transitions through the real InvitationService (#766)', () 
       const res = method === 'DELETE' ? await request(app).delete(url) : await request(app).post(url);
 
       expect(res.status).toBe(200);
+      expectNoToken(res.body);
+    });
+  });
+
+  describe('GET /invitations/by-token/:token strips a token the lookup leaks (defence in depth)', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('team invitation', async () => {
+      const leaked: PublicInvitation & { token: string } = {
+        id: INVITATION_ID,
+        status: 'PENDING',
+        teamName: 'Lakers',
+        inviterName: 'Coach',
+        inviterDeletedAt: null,
+        position: 'PG',
+        jerseyNumber: 0,
+        message: null,
+        expiresAt: new Date().toISOString(),
+        token: SECRET_TOKEN,
+      };
+      jest.spyOn(InvitationService, 'getInvitationByToken').mockResolvedValue(leaked);
+
+      const res = await request(app).get(`/api/v1/invitations/by-token/${SECRET_TOKEN}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation).toMatchObject({ kind: 'team', id: INVITATION_ID });
+      expectNoToken(res.body);
+    });
+
+    it('guardian invitation', async () => {
+      const leaked: PublicGuardianInvitation & { token: string } = {
+        kind: 'guardian',
+        id: INVITATION_ID,
+        status: 'PENDING',
+        childName: 'Player',
+        teamName: 'Lakers',
+        inviterName: 'Coach',
+        relationship: 'GUARDIAN',
+        expiresAt: new Date().toISOString(),
+        token: SECRET_TOKEN,
+      };
+      jest.spyOn(InvitationService, 'getInvitationByToken').mockRejectedValue(new NotFoundError('Invitation not found'));
+      jest.spyOn(GuardianService, 'getInvitationByToken').mockResolvedValue(leaked);
+
+      const res = await request(app).get(`/api/v1/invitations/by-token/${SECRET_TOKEN}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation).toMatchObject({ kind: 'guardian', id: INVITATION_ID });
       expectNoToken(res.body);
     });
   });
