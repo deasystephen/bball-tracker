@@ -6,3 +6,4 @@ export * from './BoxScoreTable';
 export * from './PlayerStatsCard';
 export * from './SeasonAverages';
 export * from './StatRow';
+export * from './SeasonRecord';
