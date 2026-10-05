@@ -73,7 +73,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   blocked; his only row is the staff role, so his deletion **erases** the row) is the self-delete
   Maestro fixture; `BRYCE_JAMES_ID` (managed Lakers player, Gloria James as guardian; rostered,
   so his deletion tombstones) is the guardian child-delete fixture; the seed sweeps tombstones
-  first and re-creates Mike by email.
+  first and re-creates Mike by email. The sweep (`tests/support/seed-resets.ts#removeTombstones`, through
+  `test-leftovers.ts#deleteUsersWhere`) deletes the invitations a tombstone sent before the
+  tombstone, in one transaction: both
+  `invitedById` foreign keys are `ON DELETE RESTRICT` and deletion keeps sent invitations (#783).
 - Tests: `tests/services/account-service.test.ts`, `tests/api/account-delete.test.ts`,
   `tests/integration/account-deletion.db.test.ts` (real Postgres: rollback, concurrency, guarded
   writes, export contract), `lastHeadCoachTeams` in `tests/utils/permissions.test.ts`.

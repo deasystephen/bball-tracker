@@ -576,13 +576,19 @@ export async function lastHeadCoachTeams(
 }
 
 /**
- * Create default team roles when a new team is created
+ * Create default team roles when a new team is created.
+ *
+ * `skipDuplicates` (off by default; `TeamService.createTeam` never needs it)
+ * lets the seed top up a team that already holds some of the three roles
+ * (unique on `teamId` + `name`) without failing on the ones it has (#787).
  */
 export async function createDefaultTeamRoles(
   teamId: string,
-  db: Prisma.TransactionClient = prisma
+  db: Prisma.TransactionClient = prisma,
+  options: { skipDuplicates?: boolean } = {}
 ): Promise<void> {
   await db.teamRole.createMany({
+    ...(options.skipDuplicates ? { skipDuplicates: true } : {}),
     data: [
       {
         teamId,

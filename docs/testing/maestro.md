@@ -50,7 +50,17 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   reads `.maestro/` and fails when a flow creates a game whose opponent is not listed) and the
   rows real-database tests leave behind (next section, "Real-database suites").
   `live-spectator.yaml`'s "Spectator Rival" was missing from the first list until #584; its
-  games stay in progress, and the Games tab had filled with them.
+  games stay in progress, and the Games tab had filled with them. The seed's own fixed fixtures
+  live in `backend/tests/support/seed-fixtures.ts`: the six seeded Lakers managed players
+  (`SEEDED_LAKERS_MANAGED_IDS`, the only managed players of Frank's the reset keeps; a dead id-prefix
+  guard used to hard-delete all six on every reseed, #782) and the five seeded games.
+- **The seed restores fixtures, not only creates them.** Every reseed puts the five seeded games
+  back to their seeded date, status and scores and deletes every RSVP on them (#788:
+  `guardian-rsvp.yaml` leaves Steph "Going" on Warriors vs Lakers, and it and
+  `player-no-tracking.yaml` assert that game is "Scheduled"); events and stats on the scheduled ones
+  go too. It derives the default team roles and the finished games' `homeScore` from service code
+  (`createDefaultTeamRoles`, `computeHomeScore`), so a change to those defaults reaches the fixture by
+  itself; `backend/tests/support/seed-fixtures.test.ts` pins the seeded events to 112 and 98 (#787).
 - **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
   role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
   must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts
@@ -102,8 +112,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   placeholder: give it a `testID` and use `tapOn: id:`.
 - Run with: `maestro test .maestro/` or `maestro test .maestro/<flow>.yaml`. **Run the suite
   sequentially, with a fresh `npx prisma db seed` before every flow** — the seed is the reset
-  between flows (it restores mutated fixture names and roles, deletes flow-created teams, games
-  and players, and removes what interrupted test runs left behind), so never run two flows
+  between flows (it restores mutated fixture names, roles and seeded games, deletes flow-created
+  teams, games, players and RSVPs, removes account-deletion tombstones together with the
+  invitations they sent (#783: the inviter foreign keys are `RESTRICT`, so a tombstone that had
+  invited anyone used to abort the whole seed with P2003), and removes what interrupted test runs
+  left behind), so never run two flows
   back-to-back without it. **Last full run: 25 of 25, every flow on its first attempt, on
   2026-10-03, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 Debug build at
   commit `1efc177`, backend `npm run dev` + Metro, about 19 minutes of flow time; the longest flow

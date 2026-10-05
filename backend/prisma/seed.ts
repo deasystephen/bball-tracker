@@ -3,76 +3,30 @@
  * Run with: npm run db:seed
  */
 
-import { PrismaClient, UserRole, TeamRoleType, GuardianRelationship, GameEventType, SubscriptionTier } from '@prisma/client';
+import { PrismaClient, UserRole, GuardianRelationship, SubscriptionTier } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { StatsService } from '../src/services/stats-service';
 import { removeTestRows } from '../tests/support/test-leftovers';
 import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
+import {
+  BRYCE_JAMES_ID,
+  LAKERS_MANAGED_IDS,
+  SEED_IDS,
+  lakersVsSunsEvents,
+  seededGames,
+  warriorsVsHeatEvents,
+} from '../tests/support/seed-fixtures';
+import {
+  ensureDefaultTeamRoles,
+  removeFlowCreatedManagedPlayers,
+  removeTombstones,
+  restoreSeededGames,
+  writeFinishedGameEvents,
+} from '../tests/support/seed-resets';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
-/** #444 guardian child-deletion fixture (fixed UUID; see the Bryce James block). */
-export const BRYCE_JAMES_ID = '40000000-0000-4000-a000-000000000109';
 const prisma = new PrismaClient({ adapter });
-
-// Deterministic UUIDs for seed data (reproducible across runs)
-const SEED_IDS = {
-  LEAGUE: '10000000-0000-4000-a000-000000000001',
-  WARRIORS_TEAM: '20000000-0000-4000-a000-000000000001',
-  LAKERS_TEAM: '20000000-0000-4000-a000-000000000002',
-  // Persistent identities (#462). Fixed ids so re-runs are idempotent; an
-  // existing dev DB keeps the lineage the migration backfilled plus this one.
-  WARRIORS_LINEAGE: '21000000-0000-4000-a000-000000000001',
-  LAKERS_LINEAGE: '21000000-0000-4000-a000-000000000002',
-  WARRIORS_VS_LAKERS_GAME: '30000000-0000-4000-a000-000000000001',
-  WARRIORS_VS_CELTICS_GAME: '30000000-0000-4000-a000-000000000002',
-  WARRIORS_VS_HEAT_GAME: '30000000-0000-4000-a000-000000000003',
-  LAKERS_VS_WARRIORS_GAME: '30000000-0000-4000-a000-000000000004',
-  LAKERS_VS_SUNS_GAME: '30000000-0000-4000-a000-000000000005',
-};
-
-// Helper to create default team roles
-async function createDefaultTeamRoles(teamId: string) {
-  const roles = await prisma.teamRole.createMany({
-    skipDuplicates: true,
-    data: [
-      {
-        teamId,
-        type: TeamRoleType.HEAD_COACH,
-        name: 'Head Coach',
-        description: 'Primary team coach with full administrative access',
-        canManageTeam: true,
-        canManageRoster: true,
-        canTrackStats: true,
-        canViewStats: true,
-        canShareStats: true,
-      },
-      {
-        teamId,
-        type: TeamRoleType.ASSISTANT_COACH,
-        name: 'Assistant Coach',
-        description: 'Assistant coach with team management access',
-        canManageTeam: true,
-        canManageRoster: true,
-        canTrackStats: true,
-        canViewStats: true,
-        canShareStats: true,
-      },
-      {
-        teamId,
-        type: TeamRoleType.TEAM_MANAGER,
-        name: 'Team Manager',
-        description: 'Team volunteer who helps with game day operations',
-        canManageTeam: false,
-        canManageRoster: false,
-        canTrackStats: true,
-        canViewStats: true,
-        canShareStats: true,
-      },
-    ],
-  });
-
-  return roles;
-}
 
 async function main() {
   // Seed data includes live bearer secrets (invitation tokens honored by the
@@ -97,11 +51,17 @@ async function main() {
   // Account-deletion tombstones (#444) left by .maestro/account-delete.yaml and
   // .maestro/guardian-child-delete.yaml. The fixtures are recreated below by
   // email / fixed id, so the old rows would otherwise pile up as "Deleted user"
-  // in the dev-login list. Cascading hard delete — fine while no deleted
-  // fixture carries game events.
-  const staleTombstones = await prisma.user.deleteMany({ where: { deletedAt: { not: null } } });
-  if (staleTombstones.count > 0) {
-    console.log(`  Removed ${staleTombstones.count} account-deletion tombstone(s) from a previous E2E run`);
+  // in the dev-login list. The hazard in a hard delete is not game events
+  // (GameEvent.playerId is SET NULL) but the invitations a tombstone SENT:
+  // `invitedById` is ON DELETE RESTRICT on both invitation tables and account
+  // deletion keeps those rows, so removeTombstones deletes them first, in one
+  // transaction (#783). Runs first, so no upsert below can meet a tombstone.
+  const staleTombstones = await removeTombstones(prisma);
+  if (staleTombstones.users > 0) {
+    console.log(
+      `  Removed ${staleTombstones.users} account-deletion tombstone(s) and ` +
+        `${staleTombstones.invitations} invitation(s) they sent from a previous E2E run`
+    );
   }
 
   // Rows that tests/integration/*.db.test.ts left behind when a run was
@@ -212,17 +172,15 @@ async function main() {
 
   // ...and the managed players roster flows add to his Lakers (E2E Test
   // Player from roster-management.yaml). Guarded to flow-created rows: the
-  // SEEDED Lakers managed players all carry ids starting 'managed-' and are
-  // recreated below — never widen this to all of Frank's managed players.
-  const staleFrankManaged = await prisma.user.deleteMany({
-    where: {
-      managedById: coachFrank.id,
-      isManaged: true,
-      NOT: { id: { startsWith: 'managed-' } },
-    },
-  });
-  if (staleFrankManaged.count > 0) {
-    console.log(`    Removed ${staleFrankManaged.count} flow-created managed player(s) from a previous E2E run`);
+  // SEEDED Lakers managed players are the fixed UUIDs in
+  // SEEDED_LAKERS_MANAGED_IDS (tests/support/seed-fixtures.ts), which
+  // removeFlowCreatedManagedPlayers keeps, and are upserted below; never
+  // widen this to all of Frank's managed players (#782: a dead
+  // prefix guard hard-deleted all six fixtures on every reseed, cascading
+  // their stats and RSVPs on games the seed does not rebuild).
+  const staleFrankManaged = await removeFlowCreatedManagedPlayers(prisma, coachFrank.id);
+  if (staleFrankManaged > 0) {
+    console.log(`    Removed ${staleFrankManaged} flow-created managed player(s) from a previous E2E run`);
   }
 
   const assistantMike = await prisma.user.upsert({
@@ -528,7 +486,9 @@ async function main() {
   console.log(`  Created team: ${warriors.name}`);
 
   // Create default roles for Warriors
-  await createDefaultTeamRoles(warriors.id);
+  // Same function TeamService.createTeam uses (#787); creates only the
+  // default roles the team lacks, so the staff rows below always find theirs.
+  await ensureDefaultTeamRoles(prisma, warriors.id);
   console.log(`    Created default roles for ${warriors.name}`);
 
   // Get the head coach and assistant coach roles
@@ -625,7 +585,7 @@ async function main() {
   console.log(`  Created team: ${lakers.name}`);
 
   // Create default roles for Lakers
-  await createDefaultTeamRoles(lakers.id);
+  await ensureDefaultTeamRoles(prisma, lakers.id);
   console.log(`    Created default roles for ${lakers.name}`);
 
   const lakersHeadCoachRole = await prisma.teamRole.findUnique({
@@ -717,9 +677,9 @@ async function main() {
   // Lakers managed players (managed by Coach Frank Vogel). Bryce James is the
   // #444 guardian child-deletion fixture (created above with Gloria as guardian).
   const managedLakersPlayers = [
-    { id: '40000000-0000-4000-a000-000000000107', name: 'Marcus Johnson', jersey: 7, position: 'SG' },
-    { id: '40000000-0000-4000-a000-000000000114', name: 'Ethan Williams', jersey: 14, position: 'PF' },
-    { id: BRYCE_JAMES_ID, name: 'Bryce James', jersey: 9, position: 'SG' },
+    { id: LAKERS_MANAGED_IDS.MARCUS_JOHNSON, name: 'Marcus Johnson', jersey: 7, position: 'SG' },
+    { id: LAKERS_MANAGED_IDS.ETHAN_WILLIAMS, name: 'Ethan Williams', jersey: 14, position: 'PF' },
+    { id: LAKERS_MANAGED_IDS.BRYCE_JAMES, name: 'Bryce James', jersey: 9, position: 'SG' },
   ];
 
   for (const mp of managedLakersPlayers) {
@@ -755,7 +715,7 @@ async function main() {
   // (Marcus/Ethan above cover "Not invited"; claimed players cover "Active".)
   const inviteStateFixtures = [
     {
-      id: '40000000-0000-4000-a000-000000000221',
+      id: LAKERS_MANAGED_IDS.IRIS_INVITED,
       name: 'Iris Invited',
       email: 'iris.invited@example.com',
       jersey: 21,
@@ -763,7 +723,7 @@ async function main() {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
     {
-      id: '40000000-0000-4000-a000-000000000222',
+      id: LAKERS_MANAGED_IDS.XANDER_EXPIRED,
       name: 'Xander Expired',
       email: 'xander.expired@example.com',
       jersey: 22,
@@ -774,7 +734,7 @@ async function main() {
       bounced: true,
     },
     {
-      id: '40000000-0000-4000-a000-000000000224',
+      id: LAKERS_MANAGED_IDS.WENDY_WEBACCEPT,
       name: 'Wendy WebAccept',
       email: 'wendy.webaccept@example.com',
       jersey: 24,
@@ -844,612 +804,65 @@ async function main() {
   // =========================================================================
   console.log('\nCreating games...');
 
-  const now = new Date();
-  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  // Warriors games
-  await prisma.game.upsert({
-    where: { id: SEED_IDS.WARRIORS_VS_LAKERS_GAME },
-    update: {},
-    create: {
-      id: SEED_IDS.WARRIORS_VS_LAKERS_GAME,
-      teamId: warriors.id,
-      opponent: 'Lakers',
-      date: tomorrow,
-      status: 'SCHEDULED',
-    },
-  });
-  console.log(`  Created game: Warriors vs Lakers (Scheduled - tomorrow)`);
-
-  await prisma.game.upsert({
-    where: { id: SEED_IDS.WARRIORS_VS_CELTICS_GAME },
-    update: {},
-    create: {
-      id: SEED_IDS.WARRIORS_VS_CELTICS_GAME,
-      teamId: warriors.id,
-      opponent: 'Celtics',
-      date: nextWeek,
-      status: 'SCHEDULED',
-    },
-  });
-  console.log(`  Created game: Warriors vs Celtics (Scheduled - next week)`);
-
-  await prisma.game.upsert({
-    where: { id: SEED_IDS.WARRIORS_VS_HEAT_GAME },
-    update: {},
-    create: {
-      id: SEED_IDS.WARRIORS_VS_HEAT_GAME,
-      teamId: warriors.id,
-      opponent: 'Heat',
-      date: lastWeek,
-      status: 'FINISHED',
-      homeScore: 112,
-      awayScore: 105,
-    },
-  });
-  console.log(`  Created game: Warriors vs Heat (Finished - 112-105)`);
-
-  // Lakers games
-  await prisma.game.upsert({
-    where: { id: SEED_IDS.LAKERS_VS_WARRIORS_GAME },
-    update: {},
-    create: {
-      id: SEED_IDS.LAKERS_VS_WARRIORS_GAME,
-      teamId: lakers.id,
-      opponent: 'Warriors',
-      date: tomorrow,
-      status: 'SCHEDULED',
-    },
-  });
-  console.log(`  Created game: Lakers vs Warriors (Scheduled - tomorrow)`);
-
-  await prisma.game.upsert({
-    where: { id: SEED_IDS.LAKERS_VS_SUNS_GAME },
-    update: {},
-    create: {
-      id: SEED_IDS.LAKERS_VS_SUNS_GAME,
-      teamId: lakers.id,
-      opponent: 'Suns',
-      date: lastWeek,
-      status: 'FINISHED',
-      homeScore: 98,
-      awayScore: 102,
-    },
-  });
-  console.log(`  Created game: Lakers vs Suns (Finished - 98-102)`);
+  // Restored on every seed, not only created (#788): date, status and scores
+  // go back to the seeded values and every RSVP on these games is deleted.
+  // guardian-rsvp.yaml taps "Going" as Steph on Warriors vs Lakers and,
+  // with player-no-tracking.yaml, asserts that game is "Scheduled"; a
+  // leftover RSVP or a game started by hand used to survive every reseed.
+  const games = seededGames(new Date(), { warriorsId: warriors.id, lakersId: lakers.id });
+  const restoredGames = await restoreSeededGames(prisma, games);
+  for (const game of games) {
+    console.log(`  Created game: ${game.label}`);
+  }
+  if (restoredGames.rsvps + restoredGames.events > 0) {
+    console.log(
+      `    Removed ${restoredGames.rsvps} RSVP(s) and ${restoredGames.events} event(s) from the seeded games`
+    );
+  }
 
   // =========================================================================
   // GAME EVENTS (for finished games)
   // =========================================================================
   console.log('\nCreating game events for finished games...');
 
-  // Helper to create events
-  const createShotEvent = (gameId: string, playerId: string, made: boolean, points: number, timestamp: Date) => ({
-    gameId,
-    playerId,
-    eventType: GameEventType.SHOT,
-    timestamp,
-    metadata: { made, points },
-  });
+  // The event logs live in tests/support/seed-fixtures.ts; homeScore is
+  // derived from them with GameEventService.computeHomeScore on every run
+  // (#787), never written by hand. seed-fixtures.test.ts pins the totals.
+  const lastWeek = games.find((game) => game.id === SEED_IDS.WARRIORS_VS_HEAT_GAME)!.date;
 
-  const createReboundEvent = (gameId: string, playerId: string, type: 'offensive' | 'defensive', timestamp: Date) => ({
-    gameId,
-    playerId,
-    eventType: GameEventType.REBOUND,
-    timestamp,
-    metadata: { type },
-  });
+  const warriorsEvents = warriorsVsHeatEvents(
+    SEED_IDS.WARRIORS_VS_HEAT_GAME,
+    {
+      steph: players['steph.curry@example.com'].id,
+      klay: players['klay.thompson@example.com'].id,
+      draymond: players['draymond.green@example.com'].id,
+      wiggins: players['andrew.wiggins@example.com'].id,
+      poole: players['jordan.poole@example.com'].id,
+    },
+    lastWeek
+  );
+  const warriorsScore = await writeFinishedGameEvents(prisma, SEED_IDS.WARRIORS_VS_HEAT_GAME, warriorsEvents);
+  console.log(`  Created ${warriorsEvents.length} events for Warriors vs Heat game (home score ${warriorsScore})`);
 
-  const createSimpleEvent = (gameId: string, playerId: string, eventType: GameEventType, timestamp: Date) => ({
-    gameId,
-    playerId,
-    eventType,
-    timestamp,
-    metadata: {},
-  });
-
-  // Clear existing events for these games first
-  await prisma.gameEvent.deleteMany({
-    where: { gameId: { in: [SEED_IDS.WARRIORS_VS_HEAT_GAME, SEED_IDS.LAKERS_VS_SUNS_GAME] } },
-  });
-
-  // -------------------------------------------------------------------------
-  // Warriors vs Heat (112-105) - Warriors stat lines
-  // -------------------------------------------------------------------------
-  // Steph Curry: 32 pts (10-18 FG, 6-12 3PT, 6-6 FT), 5 reb, 8 ast, 2 stl, 0 blk, 3 TO, 2 fouls
-  // Klay Thompson: 25 pts (9-17 FG, 5-10 3PT, 2-2 FT), 4 reb, 2 ast, 1 stl, 0 blk, 1 TO, 3 fouls
-  // Draymond Green: 12 pts (5-9 FG, 1-3 3PT, 1-2 FT), 10 reb, 7 ast, 2 stl, 2 blk, 4 TO, 4 fouls
-  // Andrew Wiggins: 22 pts (8-14 FG, 2-5 3PT, 4-5 FT), 6 reb, 2 ast, 1 stl, 1 blk, 2 TO, 2 fouls
-  // Jordan Poole: 21 pts (7-15 FG, 3-8 3PT, 4-4 FT), 3 reb, 4 ast, 0 stl, 0 blk, 2 TO, 3 fouls
-  // Total: 112 pts
-
-  const warriorsGameId = SEED_IDS.WARRIORS_VS_HEAT_GAME;
-  const stephId = players['steph.curry@example.com'].id;
-  const klayId = players['klay.thompson@example.com'].id;
-  const draymondId = players['draymond.green@example.com'].id;
-  const wigginsId = players['andrew.wiggins@example.com'].id;
-  const pooleId = players['jordan.poole@example.com'].id;
-
-  const warriorsEvents: Array<{
-    gameId: string;
-    playerId: string;
-    eventType: GameEventType;
-    timestamp: Date;
-    metadata: object;
-  }> = [];
-  let eventTime = new Date(lastWeek);
-
-  // Steph Curry events
-  // 2-pointers: 4 made, 2 missed (4*2=8 pts from 2s)
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, stephId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, stephId, false, 2, eventTime));
-  }
-  // 3-pointers: 6 made, 6 missed (6*3=18 pts from 3s)
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, stephId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, stephId, false, 3, eventTime));
-  }
-  // Free throws: 6 made (6 pts)
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, stephId, true, 1, eventTime));
-  }
-  // Rebounds: 3 def, 2 off
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, stephId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, stephId, 'offensive', eventTime));
-  }
-  // Assists: 8
-  for (let i = 0; i < 8; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, stephId, GameEventType.ASSIST, eventTime));
-  }
-  // Steals: 2
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, stephId, GameEventType.STEAL, eventTime));
-  }
-  // Turnovers: 3
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, stephId, GameEventType.TURNOVER, eventTime));
-  }
-  // Fouls: 2
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, stephId, GameEventType.FOUL, eventTime));
-  }
-
-  // Klay Thompson events - 25 pts (4 2PT made, 3 missed, 5 3PT made, 5 missed, 2 FT made)
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, klayId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, klayId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, klayId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, klayId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, klayId, true, 1, eventTime));
-  }
-  // 4 rebounds, 2 assists, 1 steal, 1 TO, 3 fouls
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, klayId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, klayId, GameEventType.ASSIST, eventTime));
-  }
-  warriorsEvents.push(createSimpleEvent(warriorsGameId, klayId, GameEventType.STEAL, new Date(eventTime.getTime() + 60000)));
-  warriorsEvents.push(createSimpleEvent(warriorsGameId, klayId, GameEventType.TURNOVER, new Date(eventTime.getTime() + 120000)));
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, klayId, GameEventType.FOUL, eventTime));
-  }
-
-  // Draymond Green events - 12 pts (4 2PT made, 2 missed, 1 3PT made, 2 missed, 1 FT made, 1 missed)
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, false, 2, eventTime));
-  }
-  warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, true, 3, new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, false, 3, eventTime));
-  }
-  warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, true, 1, new Date(eventTime.getTime() + 60000)));
-  warriorsEvents.push(createShotEvent(warriorsGameId, draymondId, false, 1, new Date(eventTime.getTime() + 120000)));
-  // 10 rebounds (7 def, 3 off), 7 assists, 2 steals, 2 blocks, 4 TO, 4 fouls
-  for (let i = 0; i < 7; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, draymondId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, draymondId, 'offensive', eventTime));
-  }
-  for (let i = 0; i < 7; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, draymondId, GameEventType.ASSIST, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, draymondId, GameEventType.STEAL, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, draymondId, GameEventType.BLOCK, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, draymondId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, draymondId, GameEventType.FOUL, eventTime));
-  }
-
-  // Andrew Wiggins events - 22 pts (6 2PT made, 3 missed, 2 3PT made, 3 missed, 4 FT made, 1 missed)
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, true, 1, eventTime));
-  }
-  warriorsEvents.push(createShotEvent(warriorsGameId, wigginsId, false, 1, new Date(eventTime.getTime() + 60000)));
-  // 6 rebounds, 2 assists, 1 steal, 1 block, 2 TO, 2 fouls
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, wigginsId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, wigginsId, 'offensive', eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, wigginsId, GameEventType.ASSIST, eventTime));
-  }
-  warriorsEvents.push(createSimpleEvent(warriorsGameId, wigginsId, GameEventType.STEAL, new Date(eventTime.getTime() + 60000)));
-  warriorsEvents.push(createSimpleEvent(warriorsGameId, wigginsId, GameEventType.BLOCK, new Date(eventTime.getTime() + 120000)));
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, wigginsId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, wigginsId, GameEventType.FOUL, eventTime));
-  }
-
-  // Jordan Poole events - 21 pts (4 2PT made, 4 missed, 3 3PT made, 5 missed, 4 FT made)
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, pooleId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, pooleId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, pooleId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, pooleId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createShotEvent(warriorsGameId, pooleId, true, 1, eventTime));
-  }
-  // 3 rebounds, 4 assists, 0 steals, 0 blocks, 2 TO, 3 fouls
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createReboundEvent(warriorsGameId, pooleId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, pooleId, GameEventType.ASSIST, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, pooleId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    warriorsEvents.push(createSimpleEvent(warriorsGameId, pooleId, GameEventType.FOUL, eventTime));
-  }
-
-  // Insert all Warriors events
-  await prisma.gameEvent.createMany({ data: warriorsEvents });
-  console.log(`  Created ${warriorsEvents.length} events for Warriors vs Heat game`);
-
-  // -------------------------------------------------------------------------
-  // Lakers vs Suns (98-102) - Lakers stat lines
-  // -------------------------------------------------------------------------
-  // LeBron James: 28 pts (10-19 FG, 2-6 3PT, 6-8 FT), 8 reb, 9 ast, 1 stl, 1 blk, 4 TO, 2 fouls
-  // Anthony Davis: 24 pts (9-16 FG, 0-1 3PT, 6-7 FT), 12 reb, 3 ast, 1 stl, 3 blk, 2 TO, 4 fouls
-  // Russell Westbrook: 18 pts (7-15 FG, 1-4 3PT, 3-5 FT), 6 reb, 7 ast, 2 stl, 0 blk, 5 TO, 3 fouls
-  // Austin Reaves: 15 pts (5-10 FG, 3-6 3PT, 2-2 FT), 3 reb, 4 ast, 1 stl, 0 blk, 1 TO, 2 fouls
-  // D'Angelo Russell: 13 pts (4-12 FG, 3-7 3PT, 2-2 FT), 2 reb, 5 ast, 0 stl, 0 blk, 2 TO, 1 foul
-  // Total: 98 pts
-
-  const lakersGameId = SEED_IDS.LAKERS_VS_SUNS_GAME;
-  const lebronId = players['lebron.james@example.com'].id;
-  const adId = players['anthony.davis@example.com'].id;
-  const russId = players['russell.westbrook@example.com'].id;
-  const reavesId = players['austin.reaves@example.com'].id;
-  const dloId = players['dangelo.russell@example.com'].id;
-
-  const lakersEvents: Array<{
-    gameId: string;
-    playerId: string;
-    eventType: GameEventType;
-    timestamp: Date;
-    metadata: object;
-  }> = [];
-  eventTime = new Date(lastWeek);
-
-  // LeBron James events - 28 pts (8 2PT made, 5 missed, 2 3PT made, 4 missed, 6 FT made, 2 missed)
-  for (let i = 0; i < 8; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, true, 1, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, lebronId, false, 1, eventTime));
-  }
-  // 8 rebounds (6 def, 2 off), 9 assists, 1 steal, 1 block, 4 TO, 2 fouls
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, lebronId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, lebronId, 'offensive', eventTime));
-  }
-  for (let i = 0; i < 9; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, lebronId, GameEventType.ASSIST, eventTime));
-  }
-  lakersEvents.push(createSimpleEvent(lakersGameId, lebronId, GameEventType.STEAL, new Date(eventTime.getTime() + 60000)));
-  lakersEvents.push(createSimpleEvent(lakersGameId, lebronId, GameEventType.BLOCK, new Date(eventTime.getTime() + 120000)));
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, lebronId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, lebronId, GameEventType.FOUL, eventTime));
-  }
-
-  // Anthony Davis events - 24 pts (9 2PT made, 6 missed, 0 3PT made, 1 missed, 6 FT made, 1 missed)
-  for (let i = 0; i < 9; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, adId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, adId, false, 2, eventTime));
-  }
-  lakersEvents.push(createShotEvent(lakersGameId, adId, false, 3, new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, adId, true, 1, eventTime));
-  }
-  lakersEvents.push(createShotEvent(lakersGameId, adId, false, 1, new Date(eventTime.getTime() + 60000)));
-  // 12 rebounds (8 def, 4 off), 3 assists, 1 steal, 3 blocks, 2 TO, 4 fouls
-  for (let i = 0; i < 8; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, adId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, adId, 'offensive', eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, adId, GameEventType.ASSIST, eventTime));
-  }
-  lakersEvents.push(createSimpleEvent(lakersGameId, adId, GameEventType.STEAL, new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, adId, GameEventType.BLOCK, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, adId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, adId, GameEventType.FOUL, eventTime));
-  }
-
-  // Russell Westbrook events - 18 pts (6 2PT made, 7 missed, 1 3PT made, 3 missed, 3 FT made, 2 missed)
-  for (let i = 0; i < 6; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, russId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 7; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, russId, false, 2, eventTime));
-  }
-  lakersEvents.push(createShotEvent(lakersGameId, russId, true, 3, new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, russId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, russId, true, 1, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, russId, false, 1, eventTime));
-  }
-  // 6 rebounds, 7 assists, 2 steals, 0 blocks, 5 TO, 3 fouls
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, russId, 'defensive', eventTime));
-  }
-  lakersEvents.push(createReboundEvent(lakersGameId, russId, 'offensive', new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 7; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, russId, GameEventType.ASSIST, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, russId, GameEventType.STEAL, eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, russId, GameEventType.TURNOVER, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, russId, GameEventType.FOUL, eventTime));
-  }
-
-  // Austin Reaves events - 15 pts (2 2PT made, 2 missed, 3 3PT made, 3 missed, 2 FT made)
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, reavesId, true, 2, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, reavesId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, reavesId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, reavesId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, reavesId, true, 1, eventTime));
-  }
-  // 3 rebounds, 4 assists, 1 steal, 0 blocks, 1 TO, 2 fouls
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, reavesId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, reavesId, GameEventType.ASSIST, eventTime));
-  }
-  lakersEvents.push(createSimpleEvent(lakersGameId, reavesId, GameEventType.STEAL, new Date(eventTime.getTime() + 60000)));
-  lakersEvents.push(createSimpleEvent(lakersGameId, reavesId, GameEventType.TURNOVER, new Date(eventTime.getTime() + 120000)));
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, reavesId, GameEventType.FOUL, eventTime));
-  }
-
-  // D'Angelo Russell events - 13 pts (1 2PT made, 3 missed, 3 3PT made, 4 missed, 2 FT made)
-  lakersEvents.push(createShotEvent(lakersGameId, dloId, true, 2, new Date(eventTime.getTime() + 60000)));
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, dloId, false, 2, eventTime));
-  }
-  for (let i = 0; i < 3; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, dloId, true, 3, eventTime));
-  }
-  for (let i = 0; i < 4; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, dloId, false, 3, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createShotEvent(lakersGameId, dloId, true, 1, eventTime));
-  }
-  // 2 rebounds, 5 assists, 0 steals, 0 blocks, 2 TO, 1 foul
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createReboundEvent(lakersGameId, dloId, 'defensive', eventTime));
-  }
-  for (let i = 0; i < 5; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, dloId, GameEventType.ASSIST, eventTime));
-  }
-  for (let i = 0; i < 2; i++) {
-    eventTime = new Date(eventTime.getTime() + 60000);
-    lakersEvents.push(createSimpleEvent(lakersGameId, dloId, GameEventType.TURNOVER, eventTime));
-  }
-  lakersEvents.push(createSimpleEvent(lakersGameId, dloId, GameEventType.FOUL, new Date(eventTime.getTime() + 60000)));
-
-  // Insert all Lakers events
-  await prisma.gameEvent.createMany({ data: lakersEvents });
-  console.log(`  Created ${lakersEvents.length} events for Lakers vs Suns game`);
+  const lakersEvents = lakersVsSunsEvents(
+    SEED_IDS.LAKERS_VS_SUNS_GAME,
+    {
+      lebron: players['lebron.james@example.com'].id,
+      ad: players['anthony.davis@example.com'].id,
+      russ: players['russell.westbrook@example.com'].id,
+      reaves: players['austin.reaves@example.com'].id,
+      dlo: players['dangelo.russell@example.com'].id,
+    },
+    lastWeek
+  );
+  const lakersScore = await writeFinishedGameEvents(prisma, SEED_IDS.LAKERS_VS_SUNS_GAME, lakersEvents);
+  console.log(`  Created ${lakersEvents.length} events for Lakers vs Suns game (home score ${lakersScore})`);
 
   // =========================================================================
   // CALCULATE AND STORE STATS FOR FINISHED GAMES
   // =========================================================================
   console.log('\nCalculating stats for finished games...');
 
-  // Import the stats service dynamically to avoid circular dependency
-  const { StatsService } = await import('../src/services/stats-service');
 
   try {
     await StatsService.finalizeGameStats(SEED_IDS.WARRIORS_VS_HEAT_GAME);
