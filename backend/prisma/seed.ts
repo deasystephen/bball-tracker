@@ -13,6 +13,8 @@ import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
   SEED_IDS,
+  invitationFixtureRow,
+  inviteStateFixtures,
   lakersVsSunsEvents,
   seededGames,
   warriorsVsHeatEvents,
@@ -713,39 +715,16 @@ async function main() {
   // rostered managed player per chip state so Maestro/manual QA can assert
   // Invited / Invite expired / Active-via-web-accept deterministically.
   // (Marcus/Ethan above cover "Not invited"; claimed players cover "Active".)
-  const inviteStateFixtures = [
-    {
-      id: LAKERS_MANAGED_IDS.IRIS_INVITED,
-      name: 'Iris Invited',
-      email: 'iris.invited@example.com',
-      jersey: 21,
-      status: 'PENDING' as const,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-    {
-      id: LAKERS_MANAGED_IDS.XANDER_EXPIRED,
-      name: 'Xander Expired',
-      email: 'xander.expired@example.com',
-      jersey: 22,
-      status: 'PENDING' as const,
-      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      // The invite never arrived: the address hard-bounced (#449). Drives the
-      // "Email bounced" chip and .maestro/roster-email-bounced.yaml.
-      bounced: true,
-    },
-    {
-      id: LAKERS_MANAGED_IDS.WENDY_WEBACCEPT,
-      name: 'Wendy WebAccept',
-      email: 'wendy.webaccept@example.com',
-      jersey: 24,
-      status: 'ACCEPTED' as const,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    },
-  ];
+  // Typed and dated in tests/support/seed-fixtures.ts, where the fixture test
+  // pins the ages the resend cooldown (#715) depends on.
+  const inviteFixtures = inviteStateFixtures(new Date(), {
+    iris: LAKERS_MANAGED_IDS.IRIS_INVITED,
+    xander: LAKERS_MANAGED_IDS.XANDER_EXPIRED,
+    wendy: LAKERS_MANAGED_IDS.WENDY_WEBACCEPT,
+  });
 
-  for (const fixture of inviteStateFixtures) {
-    const deliveryState =
-      'bounced' in fixture && fixture.bounced
+  for (const fixture of inviteFixtures) {
+    const deliveryState = fixture.bounced
         ? { emailSuppressedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), emailSuppressedReason: 'BOUNCE' as const }
         : { emailSuppressedAt: null, emailSuppressedReason: null };
 
@@ -791,9 +770,7 @@ async function main() {
         playerId: fixturePlayer.id,
         invitedById: coachFrank.id,
         token: randomBytes(32).toString('base64url'),
-        status: fixture.status,
-        expiresAt: fixture.expiresAt,
-        ...(fixture.status === 'ACCEPTED' ? { acceptedAt: new Date() } : {}),
+        ...invitationFixtureRow(fixture),
       },
     });
     console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);

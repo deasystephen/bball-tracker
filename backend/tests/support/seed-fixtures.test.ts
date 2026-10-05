@@ -14,12 +14,16 @@ import fs from 'fs';
 import path from 'path';
 import { GameStatus } from '@prisma/client';
 import { computeHomeScore } from '../../src/services/game-event-service';
+import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/invitation-service';
+import { hashRecipient } from '../../src/utils/hash-recipient';
 import {
   BRYCE_JAMES_ID,
   FINISHED_GAME_SCORES,
   SEED_IDS,
   SEEDED_GAME_IDS,
   SEEDED_LAKERS_MANAGED_IDS,
+  invitationFixtureRow,
+  inviteStateFixtures,
   lakersVsSunsEvents,
   seededGames,
   warriorsVsHeatEvents,
@@ -124,5 +128,33 @@ describe('prisma/seed.ts imports the shared resets (#782, #783, #787, #788)', ()
         'writeFinishedGameEvents',
       ])
     );
+  });
+});
+
+describe('invite-state fixtures (#715 cooldown)', () => {
+  const now = new Date('2026-10-05T00:00:00Z');
+  const fixtures = inviteStateFixtures(now, { iris: 'iris', xander: 'xander', wendy: 'wendy' });
+
+  it('dates every row older than the resend cooldown', () => {
+    for (const f of fixtures) {
+      expect(now.getTime() - f.createdAt.getTime()).toBeGreaterThan(INVITATION_RESEND_COOLDOWN_MS);
+    }
+  });
+
+  it('keeps the chip states consistent with the dates', () => {
+    const byName = Object.fromEntries(fixtures.map((f) => [f.name, f]));
+    expect(byName['Iris Invited'].expiresAt.getTime()).toBeGreaterThan(now.getTime());
+    expect(byName['Xander Expired'].expiresAt.getTime()).toBeLessThan(now.getTime());
+    expect(byName['Xander Expired'].bounced).toBe(true);
+    expect(byName['Wendy WebAccept'].acceptedAt!.getTime()).toBeGreaterThan(byName['Wendy WebAccept'].createdAt.getTime());
+  });
+
+  it('writes recipientHash the way the service does', () => {
+    for (const f of fixtures) {
+      const row = invitationFixtureRow(f);
+      expect(row.recipientHash).toBe(hashRecipient(f.email));
+      expect(row.createdAt).toBe(f.createdAt);
+      expect('acceptedAt' in row).toBe(f.status === 'ACCEPTED');
+    }
   });
 });

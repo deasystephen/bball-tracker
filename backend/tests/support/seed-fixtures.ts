@@ -16,7 +16,8 @@
  * (`seed-resets.ts` does).
  */
 
-import { GameEventType, GameStatus } from '@prisma/client';
+import { GameEventType, GameStatus, InvitationStatus } from '@prisma/client';
+import { hashRecipient } from '../../src/utils/hash-recipient';
 
 /** Deterministic UUIDs for seed data (reproducible across runs). */
 export const SEED_IDS = {
@@ -659,4 +660,87 @@ export function lakersVsSunsEvents(
   lakersEvents.push(createSimpleEvent(lakersGameId, dloId, GameEventType.FOUL, new Date(eventTime.getTime() + 60000)));
 
   return lakersEvents;
+}
+
+// ---------------------------------------------------------------------------
+// Invite-state fixtures (#584 chips, #715 cooldown)
+// ---------------------------------------------------------------------------
+
+/** A coach-managed Lakers player whose invitation row drives one roster chip. */
+export interface InviteStateFixture {
+  id: string;
+  name: string;
+  email: string;
+  jersey: number;
+  status: InvitationStatus;
+  /** When the invitation email went out; the newest row's age gates a resend. */
+  createdAt: Date;
+  expiresAt: Date;
+  acceptedAt?: Date;
+  /** The address hard-bounced (#449): drives the "Email bounced" chip. */
+  bounced?: boolean;
+}
+
+/**
+ * The three invite-state fixtures. Every row has a realistic `createdAt`: the
+ * resend cooldown (#715) refuses a resend within `INVITATION_RESEND_COOLDOWN_MS`
+ * of the player's newest invitation row, and roster-email-bounced.yaml resends
+ * Xander's invitation right after correcting the address, so a row created at
+ * seed time would be refused with 429.
+ */
+export function inviteStateFixtures(now: Date, ids: { iris: string; xander: string; wendy: string }): InviteStateFixture[] {
+  const t = now.getTime();
+  return [
+    {
+      id: ids.iris,
+      name: 'Iris Invited',
+      email: 'iris.invited@example.com',
+      jersey: 21,
+      status: InvitationStatus.PENDING,
+      createdAt: new Date(t - 1 * DAY_MS),
+      expiresAt: new Date(t + 6 * DAY_MS),
+    },
+    {
+      id: ids.xander,
+      name: 'Xander Expired',
+      email: 'xander.expired@example.com',
+      jersey: 22,
+      status: InvitationStatus.PENDING,
+      // Sent eight days ago, lapsed yesterday; the email never arrived.
+      createdAt: new Date(t - 8 * DAY_MS),
+      expiresAt: new Date(t - 1 * DAY_MS),
+      bounced: true,
+    },
+    {
+      id: ids.wendy,
+      name: 'Wendy WebAccept',
+      email: 'wendy.webaccept@example.com',
+      jersey: 24,
+      status: InvitationStatus.ACCEPTED,
+      createdAt: new Date(t - 5 * DAY_MS),
+      expiresAt: new Date(t + 2 * DAY_MS),
+      acceptedAt: new Date(t - 4 * DAY_MS),
+    },
+  ];
+}
+
+/**
+ * The `TeamInvitation` columns the seed writes for a fixture, shaped as the
+ * service writes them: `recipientHash` is `hashRecipient(email)` (#715), so the
+ * cooldown can tell a corrected address from a repeat send.
+ */
+export function invitationFixtureRow(fixture: InviteStateFixture): {
+  status: InvitationStatus;
+  createdAt: Date;
+  expiresAt: Date;
+  recipientHash: string;
+  acceptedAt?: Date;
+} {
+  return {
+    status: fixture.status,
+    createdAt: fixture.createdAt,
+    expiresAt: fixture.expiresAt,
+    recipientHash: hashRecipient(fixture.email),
+    ...(fixture.acceptedAt ? { acceptedAt: fixture.acceptedAt } : {}),
+  };
 }

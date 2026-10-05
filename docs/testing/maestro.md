@@ -117,16 +117,23 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   invitations they sent (#783: the inviter foreign keys are `RESTRICT`, so a tombstone that had
   invited anyone used to abort the whole seed with P2003), and removes what interrupted test runs
   left behind), so never run two flows
-  back-to-back without it. **Last full run: 25 of 25, every flow on its first attempt, on
-  2026-10-03, on Maestro 2.11.0** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 Debug build at
-  commit `1efc177`, backend `npm run dev` + Metro, about 19 minutes of flow time; the longest flow
-  is `game-tracking.yaml` at under two minutes). The flows added since the first green run on
+  back-to-back without it. **Last full run: 2026-10-04 (evening, local time) on Maestro 2.11.0, 23 of 25 on the first attempt
+  and 25 of 25 after two fixes in the same session** (iPhone 17 simulator on iOS 26.5, Expo SDK 57 Debug build
+  at commit `7061306`, backend `npm run dev` + Metro, 26 minutes including the seed before each
+  flow; the longest flow is `game-tracking.yaml` at 101 s). The two first-attempt failures were
+  both consequences of changes merged earlier that day, not app crashes: `roster-email-bounced.yaml`
+  hit the resend cooldown (#715) because the seeded expired invitation was created seconds earlier
+  with no `recipientHash` (every invite-state fixture now carries a dated `createdAt` and its `recipientHash`,
+  pinned by `tests/support/seed-fixtures.test.ts`), and
+  `live-spectator.yaml` asserted the opponent name as bare text after the score header became one
+  accessible element (#774); it now matches the joined `Score: …` label. Before that: 25 of 25 on
+  2026-10-03 at commit `1efc177`, about 19 minutes of flow time. The flows added since the first green run on
   2026-09-29 (22 of 22) were `error-way-back.yaml` (same day), `admin-season-manage.yaml` (#614,
   2026-09-30, dev-login as the seeded ADMIN, create → edit → delete a season, then the league
   delete refused for teams) and `announcement-reply.yaml` (#34, 2026-10-03, post an announcement
   as Frank, reply in the thread, delete the reply; the seed removes the "Reply Fixture"
   announcement). Maestro 2.1.0 had hung mid-flow under Xcode 27 on 2026-09-27 and 28; no hang
-  has been seen on 2.11.0, in four full runs. Still run each flow under a time limit with one
+  has been seen on 2.11.0 in any full run since. Still run each flow under a time limit with one
   retry: a hung driver otherwise stalls the whole suite. **After a
   Maestro upgrade, run the full suite before trusting it**: 2.1 → 2.11 changed what
   `hideKeyboard` does and broke two flows. Nightly CI for the suite was
