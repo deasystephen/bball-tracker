@@ -24,16 +24,23 @@ describe('devLoginSchema', () => {
     expect(devLoginSchema.safeParse({ email: `${local(255)}@example.test` }).success).toBe(false);
   });
 
+  it('names the length cap in its message', () => {
+    const result = devLoginSchema.safeParse({ email: `${'a'.repeat(242)}@example.test` });
+    expect(result.error?.issues.map((i) => i.message)).toEqual(['Email is too long']);
+  });
+
   it.each([
-    ['a missing email', {}],
-    ['an empty email', { email: '' }],
-    ['a whitespace-only email', { email: '   ' }],
-    ['a number', { email: 1 }],
-    ['an object (a Prisma filter)', { email: { contains: 'a' } }],
-    ['an array', { email: ['frank.vogel@example.com'] }],
-    ['null', { email: null }],
-  ])('rejects %s', (_label, body) => {
-    expect(devLoginSchema.safeParse(body).success).toBe(false);
+    ['a missing email', {}, 'Email is required'],
+    ['an empty email', { email: '' }, 'Email is required'],
+    ['a whitespace-only email', { email: '   ' }, 'Email is required'],
+    ['a number', { email: 1 }, 'Email must be a string'],
+    ['an object (a Prisma filter)', { email: { contains: 'a' } }, 'Email must be a string'],
+    ['an array', { email: ['frank.vogel@example.com'] }, 'Email must be a string'],
+    ['null', { email: null }, 'Email must be a string'],
+  ])('rejects %s with one message', (_label, body, message) => {
+    const result = devLoginSchema.safeParse(body);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.message)).toEqual([message]);
   });
 
   it('rejects a missing body', () => {

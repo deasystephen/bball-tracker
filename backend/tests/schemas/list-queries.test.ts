@@ -118,9 +118,12 @@ describe('leagueQuerySchema filters', () => {
     expect(leagueQuerySchema.safeParse({ includePersonal: 'true' }).data?.includePersonal).toBe(true);
   });
 
-  it("reads includePersonal 'false' or any other string as false", () => {
+  it("reads includePersonal 'false' as false", () => {
     expect(leagueQuerySchema.safeParse({ includePersonal: 'false' }).data?.includePersonal).toBe(false);
-    expect(leagueQuerySchema.safeParse({ includePersonal: '1' }).data?.includePersonal).toBe(false);
+  });
+
+  it.each([['1'], ['yes'], ['TRUE'], ['']])("rejects includePersonal '%s'", (value) => {
+    expect(leagueQuerySchema.safeParse({ includePersonal: value }).success).toBe(false);
   });
 
   it('leaves includePersonal undefined when absent', () => {
