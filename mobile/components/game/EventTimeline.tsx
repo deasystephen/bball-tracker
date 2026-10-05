@@ -157,7 +157,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <ThemedText variant="h4">Recent Plays</ThemedText>
+        <ThemedText variant="h4" heading>Recent Plays</ThemedText>
         <ThemedText variant="caption" color="textTertiary">
           {events.length} total
         </ThemedText>

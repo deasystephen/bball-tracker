@@ -4,11 +4,11 @@
  */
 
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, useWindowDimensions } from 'react-native';
 import { ThemedText } from '../ThemedText';
 import { ThemedView } from '../ThemedView';
 import { useTheme } from '../../hooks/useTheme';
-import { spacing } from '../../theme';
+import { MAX_FONT_SCALE, spacing } from '../../theme';
 import { isTablet, isWeb } from '../../utils/responsive';
 import type { PlayerGameStats, TeamGameStats } from '../../types/stats';
 
@@ -21,6 +21,7 @@ interface BoxScoreTableProps {
 interface ColumnDef {
   key: string;
   label: string;
+  /** Width at the default text size; it grows with the text up to the cap (#776). */
   width: number;
   getValue: (stats: PlayerGameStats | TeamGameStats) => string | number;
   align?: 'left' | 'center' | 'right';
@@ -53,42 +54,42 @@ const extendedColumns: ColumnDef[] = [
   {
     key: 'fg',
     label: 'FG',
-    width: 55,
+    width: 60,
     getValue: (s) => `${s.fieldGoalsMade}-${s.fieldGoalsAttempted}`,
     align: 'center',
   },
   {
     key: 'fgp',
     label: 'FG%',
-    width: 50,
+    width: 60,
     getValue: (s) => s.fieldGoalPercentage.toFixed(1),
     align: 'center',
   },
   {
     key: '3p',
     label: '3P',
-    width: 50,
+    width: 60,
     getValue: (s) => `${s.threePointersMade}-${s.threePointersAttempted}`,
     align: 'center',
   },
   {
     key: '3pp',
     label: '3P%',
-    width: 50,
+    width: 60,
     getValue: (s) => s.threePointPercentage.toFixed(1),
     align: 'center',
   },
   {
     key: 'ft',
     label: 'FT',
-    width: 50,
+    width: 60,
     getValue: (s) => `${s.freeThrowsMade}-${s.freeThrowsAttempted}`,
     align: 'center',
   },
   {
     key: 'ftp',
     label: 'FT%',
-    width: 50,
+    width: 60,
     getValue: (s) => s.freeThrowPercentage.toFixed(1),
     align: 'center',
   },
@@ -100,7 +101,11 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
   showExtendedStats = true,
 }) => {
   const { colors } = useTheme();
+  const { fontScale } = useWindowDimensions();
   const useFullWidth = isTablet || isWeb;
+  // Every row is its own flex row, so a column keeps one width across rows by
+  // scaling with the text (capped like the text) rather than growing per cell.
+  const widthScale = Math.max(1, Math.min(fontScale, MAX_FONT_SCALE.denseTable));
 
   const columns = showExtendedStats
     ? [...baseColumns, ...extendedColumns]
@@ -119,19 +124,16 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
     return (
       <View
         key={column.key}
-        style={[
-          styles.cell,
-          {
-            width: column.width,
-            minWidth: column.width,
-          },
-        ]}
+        style={[styles.cell, { width: column.width * widthScale }]}
       >
+        {/* Data cells never clamp (a value wraps rather than show "12…"); the
+            short column labels keep one line (#776). */}
         <ThemedText
           variant={variant}
           color={color}
           style={{ textAlign }}
-          numberOfLines={1}
+          numberOfLines={isHeader ? 1 : undefined}
+          maxFontSizeMultiplier={MAX_FONT_SCALE.denseTable}
         >
           {content}
         </ThemedText>
@@ -215,6 +217,7 @@ const styles = StyleSheet.create({
   cell: {
     paddingHorizontal: spacing.xs,
     justifyContent: 'center',
+    flexShrink: 0,
   },
   divider: {
     height: 1,

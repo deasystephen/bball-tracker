@@ -110,7 +110,7 @@ export default function DeleteAccountScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">{title}</ThemedText>
+          <ThemedText variant="h2" heading>{title}</ThemedText>
         </View>
       </View>
 

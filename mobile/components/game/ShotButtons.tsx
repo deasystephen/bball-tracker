@@ -17,14 +17,20 @@ import Animated, {
 } from 'react-native-reanimated';
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
-import { spacing } from '../../theme';
+import { MAX_FONT_SCALE, spacing } from '../../theme';
 
 interface ShotButtonsProps {
   onShot: (points: 1 | 2 | 3, made: boolean) => void;
   disabled?: boolean;
 }
 
-const BUTTON_HEIGHT = 60;
+/**
+ * The grid's height at the default text size. Both labels cap their scaling at
+ * `MAX_FONT_SCALE.fixedControl` so the grid keeps this height at accessibility
+ * text sizes (40pt of text at 1x, 52pt at the cap); `minHeight` is the safety
+ * net if the content ever outgrows it (#776).
+ */
+export const BUTTON_HEIGHT = 60;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -75,7 +81,7 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
         {
           backgroundColor: disabled ? 'rgba(128,128,128,0.3)' : color,
           width,
-          height: BUTTON_HEIGHT,
+          minHeight: BUTTON_HEIGHT,
         },
       ]}
       onPress={handlePress}
@@ -86,10 +92,18 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
     >
-      <ThemedText variant="body" style={styles.pointsText}>
+      <ThemedText
+        variant="body"
+        style={styles.pointsText}
+        maxFontSizeMultiplier={MAX_FONT_SCALE.fixedControl}
+      >
         {pointsText}
       </ThemedText>
-      <ThemedText variant="caption" style={styles.madeText}>
+      <ThemedText
+        variant="caption"
+        style={styles.madeText}
+        maxFontSizeMultiplier={MAX_FONT_SCALE.fixedControl}
+      >
         {label}
       </ThemedText>
     </AnimatedPressable>

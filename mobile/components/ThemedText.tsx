@@ -13,6 +13,14 @@ type ThemeColorKey = 'text' | 'textSecondary' | 'textTertiary' | 'primary' | 'er
 interface ThemedTextProps extends TextProps {
   variant?: TypographyVariant;
   color?: ThemeColorKey;
+  /**
+   * Exposes the text as a heading (`accessibilityRole="header"`) so VoiceOver's
+   * Headings rotor and TalkBack's heading navigation can jump to it. Opt-in, never
+   * a variant default: the heading variants also render numbers (scores, record
+   * counts, stat values), which must not be announced as headings. An explicit
+   * `accessibilityRole` wins over this flag. Guard: `__tests__/a11y/heading-roles.test.ts`.
+   */
+  heading?: boolean;
 }
 
 const colorMap: Record<ThemeColorKey, keyof Colors> = {
@@ -28,6 +36,8 @@ export const ThemedText: React.FC<ThemedTextProps> = ({
   style,
   variant = 'body',
   color = 'text',
+  heading = false,
+  accessibilityRole,
   ...props
 }) => {
   const { colors } = useTheme();
@@ -40,6 +50,7 @@ export const ThemedText: React.FC<ThemedTextProps> = ({
         { color: textColor },
         style,
       ]}
+      accessibilityRole={accessibilityRole ?? (heading ? 'header' : undefined)}
       {...props}
     />
   );

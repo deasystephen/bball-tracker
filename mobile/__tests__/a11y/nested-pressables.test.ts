@@ -20,9 +20,17 @@
 
 import fs from 'fs';
 import path from 'path';
-import ts from 'typescript';
 
-import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+import {
+  MOBILE_ROOT,
+  jsxAttributes,
+  lineOf,
+  literalAttribute,
+  parseTsx,
+  sourceFiles,
+  tagNameOf,
+  walkJsx,
+} from '../helpers/source-files';
 
 const SCANNED_DIRS = ['app', 'components'];
 
@@ -65,52 +73,32 @@ interface Outer {
   optsOut: boolean;
 }
 
-function attributesOf(node: ts.JsxElement | ts.JsxSelfClosingElement): Map<string, string> {
-  const opening = ts.isJsxElement(node) ? node.openingElement : node;
-  const result = new Map<string, string>();
-  for (const attribute of opening.attributes.properties) {
-    if (ts.isJsxAttribute(attribute)) {
-      result.set(attribute.name.getText(), attribute.initializer?.getText() ?? 'true');
-    }
-  }
-  return result;
-}
-
-export function findNestedPressables(fileName: string, text: string): Finding[] {
-  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const lineOf = (node: ts.Node): number =>
-    source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+function findNestedPressables(fileName: string, text: string): Finding[] {
+  const source = parseTsx(fileName, text);
   const findings: Finding[] = [];
 
-  const visit = (node: ts.Node, outer: Outer | null): void => {
-    let next = outer;
-    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
-      const opening = ts.isJsxElement(node) ? node.openingElement : node;
-      const name = opening.tagName.getText();
-      const attributes = attributesOf(node);
-      const pressable =
-        ALWAYS_PRESSABLE.has(name) || (PRESSABLE_WITH_ON_PRESS.has(name) && attributes.has('onPress'));
-      if (pressable) {
-        if (outer && !outer.optsOut) {
-          findings.push({
-            file: fileName,
-            line: lineOf(node),
-            inner: name,
-            outer: outer.name,
-            outerLine: outer.line,
-          });
-        }
-        next = {
-          name,
-          line: lineOf(node),
-          optsOut: attributes.get('accessible') === '{false}',
-        };
-      }
+  walkJsx<Outer | null>(source, null, (node, outer) => {
+    const name = tagNameOf(node);
+    const attributes = jsxAttributes(node);
+    const pressable =
+      ALWAYS_PRESSABLE.has(name) || (PRESSABLE_WITH_ON_PRESS.has(name) && attributes.has('onPress'));
+    if (!pressable) return outer;
+    if (outer && !outer.optsOut) {
+      findings.push({
+        file: fileName,
+        line: lineOf(source, node),
+        inner: name,
+        outer: outer.name,
+        outerLine: outer.line,
+      });
     }
-    ts.forEachChild(node, (child) => visit(child, next));
-  };
+    return {
+      name,
+      line: lineOf(source, node),
+      optsOut: literalAttribute(attributes, 'accessible') === false,
+    };
+  });
 
-  visit(source, null);
   return findings;
 }
 

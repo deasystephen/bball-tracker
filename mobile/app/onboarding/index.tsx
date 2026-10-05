@@ -111,7 +111,7 @@ export default function OnboardingScreen() {
               <View style={styles.iconContainer}>
                 <Ionicons name={screen.icon} size={96} color="#FFFFFF" />
               </View>
-              <Text style={styles.title}>{screen.title}</Text>
+              <Text style={styles.title} accessibilityRole="header">{screen.title}</Text>
               <Text style={styles.description}>{screen.description}</Text>
             </View>
           ))}

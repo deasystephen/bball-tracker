@@ -118,7 +118,7 @@ export default function TeamStatsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>
+          <ThemedText variant="h2" heading numberOfLines={1}>
             {team?.name || 'Team'} Stats
           </ThemedText>
         </View>
@@ -136,7 +136,7 @@ export default function TeamStatsScreen() {
         {seasonStats && (
           <Card variant="elevated" style={styles.recordCard}>
             <View style={styles.recordHeader}>
-              <ThemedText variant="h3">Season Record</ThemedText>
+              <ThemedText variant="h3" heading>Season Record</ThemedText>
               <SeasonRecord
                 wins={seasonStats.wins}
                 losses={seasonStats.losses}
@@ -159,24 +159,24 @@ export default function TeamStatsScreen() {
         {/* Shooting Percentages */}
         {seasonStats && (
           <Card variant="default" style={styles.shootingCard}>
-            <ThemedText variant="h3" style={styles.sectionTitle}>
+            <ThemedText variant="h3" heading style={styles.sectionTitle}>
               Shooting Percentages
             </ThemedText>
             <View style={styles.shootingRow}>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.fieldGoalPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">FG%</ThemedText>
               </View>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.threePointPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">3P%</ThemedText>
               </View>
               <View style={styles.shootingItem}>
-                <ThemedText variant="h2">
+                <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.freeThrowPercentage.toFixed(1)}%
                 </ThemedText>
                 <ThemedText variant="caption" color="textSecondary">FT%</ThemedText>
@@ -188,7 +188,7 @@ export default function TeamStatsScreen() {
         {/* Recent Games */}
         {seasonStats && seasonStats.recentGames.length > 0 && (
           <View style={styles.section}>
-            <ThemedText variant="h3" style={styles.sectionTitle}>
+            <ThemedText variant="h3" heading style={styles.sectionTitle}>
               Recent Games
             </ThemedText>
             <Card variant="default">
@@ -221,7 +221,7 @@ export default function TeamStatsScreen() {
         {sortedRoster.length > 0 && (
           <View style={styles.section}>
             <View style={styles.rosterHeader}>
-              <ThemedText variant="h3">Roster Stats</ThemedText>
+              <ThemedText variant="h3" heading>Roster Stats</ThemedText>
               <SortPills options={sortOptions} selected={sortBy} onSelect={setSortBy} />
             </View>
 

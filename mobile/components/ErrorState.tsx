@@ -50,7 +50,7 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
       <View style={[styles.iconContainer, { backgroundColor: colors.liveBackground, ...shadows.sm }]}>
         <Ionicons name="alert-circle-outline" size={iconSize} color={colors.error} />
       </View>
-      <ThemedText variant="h3" color="error" style={styles.title}>
+      <ThemedText variant="h3" heading color="error" style={styles.title}>
         {title}
       </ThemedText>
       <ThemedText variant="body" color="textSecondary" style={styles.message}>

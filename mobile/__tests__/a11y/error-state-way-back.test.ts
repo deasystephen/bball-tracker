@@ -18,11 +18,19 @@
  * control labelled "Go back" of its own.
  */
 
-import fs from 'fs';
 import path from 'path';
-import ts from 'typescript';
 
-import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
+import {
+  MOBILE_ROOT,
+  jsxAttributes,
+  lineOf,
+  literalAttribute,
+  parseTsx,
+  readSource,
+  sourceFiles,
+  tagNameOf,
+  walkJsx,
+} from '../helpers/source-files';
 
 const APP_DIR = path.join(MOBILE_ROOT, 'app');
 const TABS_DIR = path.join(APP_DIR, '(tabs)');
@@ -45,35 +53,21 @@ interface Scan {
   hasOwnBackControl: boolean;
 }
 
-export function scanErrorStates(fileName: string, text: string): Scan {
-  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function scanErrorStates(fileName: string, text: string): Scan {
+  const source = parseTsx(fileName, text);
   const withoutBack: Finding[] = [];
   let hasOwnBackControl = false;
 
-  const visit = (node: ts.Node): void => {
-    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      const name = node.tagName.getText();
-      const attributes = new Map<string, string>();
-      for (const attribute of node.attributes.properties) {
-        if (ts.isJsxAttribute(attribute)) {
-          attributes.set(attribute.name.getText(), attribute.initializer?.getText() ?? 'true');
-        }
-      }
-      if (name === 'ErrorState') {
-        if (!attributes.has('onBack')) {
-          withoutBack.push({
-            file: fileName,
-            line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          });
-        }
-      } else if (/^["']Go back["']$/.test(attributes.get('accessibilityLabel') ?? '')) {
-        hasOwnBackControl = true;
-      }
+  walkJsx(source, null, (node) => {
+    const attributes = jsxAttributes(node);
+    if (tagNameOf(node) === 'ErrorState') {
+      if (!attributes.has('onBack')) withoutBack.push({ file: fileName, line: lineOf(source, node) });
+    } else if (literalAttribute(attributes, 'accessibilityLabel') === 'Go back') {
+      hasOwnBackControl = true;
     }
-    ts.forEachChild(node, visit);
-  };
+    return null;
+  });
 
-  visit(source);
   return { withoutBack, hasOwnBackControl };
 }
 
@@ -83,7 +77,7 @@ function pushedScreenFiles(): string[] {
 }
 
 function scanFile(relative: string): Scan {
-  return scanErrorStates(relative, fs.readFileSync(path.join(MOBILE_ROOT, relative), 'utf8'));
+  return scanErrorStates(relative, readSource(relative));
 }
 
 describe('full-screen errors on pushed screens', () => {
@@ -102,7 +96,7 @@ describe('full-screen errors on pushed screens', () => {
   });
 
   it('scans the screens known to render ErrorState', () => {
-    const rendering = files.filter((file) => fs.readFileSync(path.join(MOBILE_ROOT, file), 'utf8').includes('<ErrorState'));
+    const rendering = files.filter((file) => readSource(file).includes('<ErrorState'));
 
     // 16 screens pass `onBack`, one keeps its header (#595, #614, #34); the
     // enumerated set is `SCREENS` in __tests__/app/error-state-way-back.test.tsx.

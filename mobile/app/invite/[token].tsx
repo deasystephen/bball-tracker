@@ -124,7 +124,7 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
-          <ThemedText variant="h2" style={styles.title}>Invitation Not Found</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>Invitation Not Found</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
             This invitation link is invalid or has been removed.
           </ThemedText>
@@ -139,7 +139,7 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="checkmark-circle-outline" size={64} color={colors.success} />
-          <ThemedText variant="h2" style={styles.title}>Already Accepted</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>Already Accepted</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
             You&apos;ve already accepted the invitation{guardian ? ' for' : ' to'} {subject}.
           </ThemedText>
@@ -158,7 +158,7 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
-          <ThemedText variant="h2" style={styles.title}>Invitation Declined</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>Invitation Declined</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
             This invitation{guardian ? ' for' : ' to'} {subject} was declined.
           </ThemedText>
@@ -173,7 +173,7 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="ban-outline" size={64} color={colors.textTertiary} />
-          <ThemedText variant="h2" style={styles.title}>Invitation Cancelled</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>Invitation Cancelled</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
             This invitation{guardian ? ' for' : ' to'} {subject} has been cancelled.
           </ThemedText>
@@ -188,7 +188,7 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="time-outline" size={64} color={colors.warning} />
-          <ThemedText variant="h2" style={styles.title}>Invitation Expired</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>Invitation Expired</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
             This invitation{guardian ? ' for' : ' to'} {subject} expired on{' '}
             {formatExpiry(invitation.expiresAt)}.
@@ -206,7 +206,7 @@ export default function InviteDeepLinkScreen() {
     <ThemedView variant="background" style={styles.container}>
       <View style={styles.content}>
         <Ionicons name={guardian ? 'people-outline' : 'mail-open-outline'} size={64} color={colors.primary} />
-        <ThemedText variant="h1" style={styles.title}>
+        <ThemedText variant="h1" heading style={styles.title}>
           {guardian ? 'Parent Invitation' : 'Team Invitation'}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>

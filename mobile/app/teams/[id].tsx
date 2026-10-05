@@ -146,7 +146,7 @@ export default function TeamDetailsScreen() {
           )}
         </View>
         <View style={styles.heroContent}>
-          <ThemedText variant="h1" style={styles.heroTeamName}>
+          <ThemedText variant="h1" heading style={styles.heroTeamName}>
             {team.name}
           </ThemedText>
           {headCoaches.length > 0 && (
@@ -270,7 +270,7 @@ export default function TeamDetailsScreen() {
         {/* Roster - 2 column grid */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <ThemedText variant="h3">{t('teams.players')}</ThemedText>
+            <ThemedText variant="h3" heading>{t('teams.players')}</ThemedText>
             <ThemedText variant="caption" color="textSecondary">
               {memberCount} {memberCount === 1 ? 'player' : 'players'}
             </ThemedText>

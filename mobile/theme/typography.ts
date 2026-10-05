@@ -101,3 +101,17 @@ export const typography = {
 } as const;
 
 export type TypographyVariant = keyof typeof typography;
+
+/**
+ * Dynamic Type caps (#776). Text scales with the OS text size everywhere; never
+ * set `allowFontScaling={false}`. A cap (`maxFontSizeMultiplier`) goes only on
+ * text inside a control whose size is fixed on purpose, so the layout around it
+ * holds. Everything else lets the text grow (`minHeight`, no one-line clamp on
+ * user data). Detail: docs/architecture/mobile-app.md, Accessibility.
+ */
+export const MAX_FONT_SCALE = {
+  /** Tracker shot buttons and tab bar labels: fixed-height controls. */
+  fixedControl: 1.3,
+  /** Box score cells: a 14-column table that must stay usable when scrolled. */
+  denseTable: 1.5,
+} as const;

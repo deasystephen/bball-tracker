@@ -158,7 +158,7 @@ export default function AboutScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">About</ThemedText>
+          <ThemedText variant="h2" heading>About</ThemedText>
         </View>
       </View>
 
@@ -166,7 +166,7 @@ export default function AboutScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingHorizontal: padding }]}
         showsVerticalScrollIndicator={false}
       >
-        <ThemedText variant="h4" style={styles.sectionTitle}>
+        <ThemedText variant="h4" heading style={styles.sectionTitle}>
           {APP_NAME}
         </ThemedText>
         <Card variant="default" style={styles.card}>
@@ -198,7 +198,7 @@ export default function AboutScreen() {
           style={styles.shareButton}
         />
 
-        <ThemedText variant="h4" style={[styles.sectionTitle, styles.helpTitle]}>
+        <ThemedText variant="h4" heading style={[styles.sectionTitle, styles.helpTitle]}>
           Help
         </ThemedText>
         <Card variant="default" style={styles.card}>

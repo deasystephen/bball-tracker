@@ -198,7 +198,7 @@ export default function CreateTeamScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h2" heading style={styles.headerTitle}>
             {t('teams.create')}
           </ThemedText>
         </View>
