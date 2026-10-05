@@ -196,6 +196,13 @@ describe('Games API', () => {
       expect(response.status).toBe(200);
       expect(response.body.pagination.hasMore).toBe(true);
     });
+
+    it('should return 400 for a limit above 100 without calling the service (#693)', async () => {
+      const response = await request(app).get('/api/v1/games').query({ limit: 1000 });
+
+      expect(response.status).toBe(400);
+      expect(mockGameService.listGames).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /api/v1/games/:id', () => {

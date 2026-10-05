@@ -13,6 +13,8 @@ import {
   callbackQuerySchema,
   registerPushTokenSchema,
   removePushTokenSchema,
+  devLoginSchema,
+  refreshSchema,
 } from './schemas';
 import { GuardianService } from '../../services/guardian-service';
 import prisma from '../../models';
@@ -28,7 +30,6 @@ import { getUsage } from '../../services/usage-service';
 import { assertOwnUploadUrl, deletePreviousAvatar } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
-import { z } from 'zod';
 
 const router = Router();
 
@@ -151,11 +152,11 @@ if (process.env.NODE_ENV === 'development') {
    */
   router.post('/dev-login', async (req, res) => {
     try {
-      const { email } = req.body;
-
-      if (!email) {
+      const parsed = devLoginSchema.safeParse(req.body);
+      if (!parsed.success) {
         return res.status(400).json({ error: 'Email is required' });
       }
+      const { email } = parsed.data;
 
       // Find user by email
       const user = await prisma.user.findUnique({
@@ -370,10 +371,6 @@ router.get('/callback', async (req, res) => {
     }
     logRouteError(res, 'Error in auth callback', error);
   }
-});
-
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
 });
 
 /**

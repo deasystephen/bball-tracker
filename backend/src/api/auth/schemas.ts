@@ -94,3 +94,17 @@ export const registerPushTokenSchema = z.object({
 export const removePushTokenSchema = z.object({
   token: pushTokenValueSchema,
 });
+
+/**
+ * POST /auth/dev-login (development only). A string only: an object `email`
+ * would reach `prisma.user.findUnique` as a filter and surface as a 500 (#692).
+ * Deliberately not `.email()`: any seeded address must keep signing in.
+ */
+export const devLoginSchema = z.object({
+  email: z.string().trim().min(1).max(254),
+});
+
+/** POST /auth/refresh */
+export const refreshSchema = z.object({
+  refreshToken: z.string().min(1),
+});
