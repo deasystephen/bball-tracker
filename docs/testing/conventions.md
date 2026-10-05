@@ -10,6 +10,8 @@ When adding new features or fixing bugs, always write tests that verify behavior
 - **Always add API integration tests** (in `tests/api/`) that test the full request/response cycle through Express routes
 - API tests catch validation issues, middleware problems, and response format errors that service-only tests miss
 - Test with realistic data formats (e.g., both UUID and custom string IDs if the database allows both)
+- Development-only routes are mounted only when `NODE_ENV=development` while the router module evaluates, so set the env first and restore it afterwards. Two patterns exist. The full app is loaded with a plain dynamic import of `src/index` into the shared registry (`tests/api/auth-dev-login.test.ts`, main `describe`). The router alone, or a "not mounted" case under another `NODE_ENV`, is loaded with `jest.isolateModulesAsync` and mounted on a bare `express()` app (`tests/api/dev-users.test.ts`; the "outside development" `describe` of `auth-dev-login.test.ts`). A "not mounted" case sends a body the mounted route would answer 400 and asserts Express's own `Cannot POST` 404: the isolated registry holds its own Prisma mock, so a lookup-based 404 proves nothing.
+- A list route gets at least one API case asserting 400 for a rejected query value and that the service mock was not called; the full pagination and filter matrix lives in `tests/schemas/` (`list-queries.test.ts`).
 
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas

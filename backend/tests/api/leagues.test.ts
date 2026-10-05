@@ -269,6 +269,13 @@ describe('Leagues API', () => {
       expect(response.status).toBe(200);
       expect(response.body.pagination.hasMore).toBe(true);
     });
+
+    it('should return 400 for a non-numeric limit without calling the service (#693)', async () => {
+      const response = await request(app).get('/api/v1/leagues').query({ limit: 'abc' });
+
+      expect(response.status).toBe(400);
+      expect(mockLeagueService.listLeagues).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /api/v1/leagues/:id', () => {

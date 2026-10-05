@@ -290,6 +290,15 @@ describe('Game Events API', () => {
       expect(response.body.total).toBe(100);
     });
 
+    it('should return 400 for a negative offset without calling the service (#693)', async () => {
+      const response = await request(app)
+        .get(`/api/v1/games/${TEST_GAME_ID}/events`)
+        .query({ offset: -1 });
+
+      expect(response.status).toBe(400);
+      expect(mockGameEventService.listEvents).not.toHaveBeenCalled();
+    });
+
     it('should return 404 when game not found', async () => {
       mockGameEventService.listEvents.mockRejectedValue(new NotFoundError('Game not found'));
 

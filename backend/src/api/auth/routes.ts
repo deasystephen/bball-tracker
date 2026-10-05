@@ -13,6 +13,8 @@ import {
   callbackQuerySchema,
   registerPushTokenSchema,
   removePushTokenSchema,
+  devLoginSchema,
+  refreshSchema,
 } from './schemas';
 import { GuardianService } from '../../services/guardian-service';
 import prisma from '../../models';
@@ -28,7 +30,7 @@ import { getUsage } from '../../services/usage-service';
 import { assertOwnUploadUrl, deletePreviousAvatar } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
-import { z } from 'zod';
+import { emailEquals } from '../../utils/email-match';
 
 const router = Router();
 
@@ -144,6 +146,9 @@ if (process.env.NODE_ENV === 'development') {
     });
   });
 
+  /** The seeded logins change with the seed, so the hint names the list route, not addresses. */
+  const DEV_LOGIN_NOT_FOUND_HINT = 'List the available test users with GET /api/v1/auth/dev-users';
+
   /**
    * POST /api/v1/auth/dev-login
    * Development-only endpoint to bypass WorkOS and login directly by email
@@ -151,22 +156,23 @@ if (process.env.NODE_ENV === 'development') {
    */
   router.post('/dev-login', async (req, res) => {
     try {
-      const { email } = req.body;
-
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' });
+      const parsed = devLoginSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: parsed.error.issues.map((issue) => issue.message).join(', '),
+        });
       }
 
-      // Find user by email
-      const user = await prisma.user.findUnique({
-        where: { email, deletedAt: null },
+      // Live rows only (#444); any case, through the one email filter (#572).
+      const user = await prisma.user.findFirst({
+        where: { email: emailEquals(parsed.data.email), deletedAt: null },
         select: SESSION_USER_SELECT,
       });
 
       if (!user) {
         return res.status(404).json({
           error: 'User not found',
-          hint: 'Available test users: coach.smith@example.com, coach.johnson@example.com'
+          hint: DEV_LOGIN_NOT_FOUND_HINT,
         });
       }
 
@@ -183,8 +189,9 @@ if (process.env.NODE_ENV === 'development') {
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
-      logger.error('Dev login error', { error: error instanceof Error ? error.message : String(error) });
-      return res.status(500).json({ error: 'Dev login failed' });
+      res.status(500).json({ error: 'Dev login failed' });
+      logRouteError(res, 'Dev login error', error);
+      return;
     }
   });
 
@@ -370,10 +377,6 @@ router.get('/callback', async (req, res) => {
     }
     logRouteError(res, 'Error in auth callback', error);
   }
-});
-
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
 });
 
 /**

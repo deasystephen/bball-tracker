@@ -224,6 +224,13 @@ describe('Seasons API', () => {
   });
 
   describe('GET /api/v1/seasons', () => {
+    it('should return 400 for an includePersonal other than true or false without calling the service', async () => {
+      const response = await request(app).get('/api/v1/seasons').query({ includePersonal: '1' });
+
+      expect(response.status).toBe(400);
+      expect(mockSeasonService.listSeasons).not.toHaveBeenCalled();
+    });
+
     it('should list seasons successfully', async () => {
       mockSeasonService.listSeasons.mockResolvedValue({
         seasons: [mockSeason],

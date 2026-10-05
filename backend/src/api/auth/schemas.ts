@@ -94,3 +94,22 @@ export const registerPushTokenSchema = z.object({
 export const removePushTokenSchema = z.object({
   token: pushTokenValueSchema,
 });
+
+/**
+ * POST /auth/dev-login (development only). A string only: an object `email`
+ * would reach the user lookup as a filter and surface as a 500 (#692).
+ * Deliberately not `.email()`: any seeded address must keep signing in.
+ * Messages follow `pushTokenValueSchema`: one per failure, returned as-is.
+ */
+export const devLoginSchema = z.object({
+  email: z
+    .string({ error: (issue) => (issue.input === undefined ? 'Email is required' : 'Email must be a string') })
+    .trim()
+    .min(1, 'Email is required')
+    .max(254, 'Email is too long'),
+});
+
+/** POST /auth/refresh */
+export const refreshSchema = z.object({
+  refreshToken: z.string().min(1),
+});
