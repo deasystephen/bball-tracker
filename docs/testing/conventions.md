@@ -13,6 +13,28 @@ When adding new features or fixing bugs, always write tests that verify behavior
 - Development-only routes are mounted only when `NODE_ENV=development` while the router module evaluates, so set the env first and restore it afterwards. Two patterns exist. The full app is loaded with a plain dynamic import of `src/index` into the shared registry (`tests/api/auth-dev-login.test.ts`, main `describe`). The router alone, or a "not mounted" case under another `NODE_ENV`, is loaded with `jest.isolateModulesAsync` and mounted on a bare `express()` app (`tests/api/dev-users.test.ts`; the "outside development" `describe` of `auth-dev-login.test.ts`). A "not mounted" case sends a body the mounted route would answer 400 and asserts Express's own `Cannot POST` 404: the isolated registry holds its own Prisma mock, so a lookup-based 404 proves nothing.
 - A list route gets at least one API case asserting 400 for a rejected query value and that the service mock was not called; the full pagination and filter matrix lives in `tests/schemas/` (`list-queries.test.ts`).
 
+## Mocks in API tests (backend)
+- **A mocked service resolves the service's declared return type.** Type the value with the exported
+  type (`const page: TeamList = { teams: [item], total: 1, limit: 10, offset: 0 }`) and never cast the
+  whole value with `as unknown as Awaited<ReturnType<…>>`: that cast is what let four list suites mock
+  a `pagination` key no service returns and assert on it for eight months (#762). When a fixture is
+  looser than the Prisma payload, narrow the item, not the page. Assert the fields a client reads
+  (`total`, `limit`, `offset` at the top level for teams, games, leagues and seasons; nested
+  `pagination` only for players and invitations, whose services return it).
+- **The shared Prisma mock (`tests/setup.ts#mockPrisma`) defines every delegate method `src/` calls.**
+  `$transaction` hands its callback `mockPrisma`, so `tx.<model>.<method>` needs the method too.
+  `tests/utils/prisma-mock-coverage-guard.test.ts` derives the models from `Prisma.ModelName` and the
+  calls from `src/` (an identifier receiver such as `prisma`, `tx` or `db`, or a parenthesised or call
+  expression; type arguments allowed) and fails naming each missing `<model>.<method>`; add it to the
+  model's block as `<method>: jest.fn()` (#766). A real-service API test then needs no hand-built `tx`:
+  `tests/api/invitation-transitions.test.ts` is the pattern. Reset any delegate whose implementation a
+  test installs in `beforeEach` (`clearAllMocks` keeps implementations).
+- **Shared test helpers live in `tests/support/`:** `auth-fixtures.ts` (`authUser(overrides)`, the
+  six fields `authenticate` attaches; `devToken({ userId, exp? })`), `log-lines.ts`
+  (`parseLogLines(spy)` for `console.log`/`console.error` spies; a non-JSON line fails) and
+  `source-scan.ts` (`sourceFiles`, `stripComments`) for the backend source-scanning guards, which
+  walk the tree in `beforeAll`, never at collection time.
+
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
 - Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields

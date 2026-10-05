@@ -12,8 +12,9 @@
  *
  * `contains` + `mode: 'insensitive'` is allowed: search is meant to be loose.
  */
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
+import { sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
@@ -28,24 +29,15 @@ const OPERATOR_CLI = path.join(SCRIPTS, 'data-subject-request.ts');
 const RAW_INSENSITIVE_EQUALS =
   /\{(?=[^{}]*\bequals\b)(?=[^{}]*\bmode\s*:\s*['"]insensitive['"])[^{}]*\}/g;
 
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) return sourceFiles(full);
-    return full.endsWith('.ts') ? [full] : [];
-  });
-}
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-}
-
 export function findRawInsensitiveEquals(source: string): string[] {
   return stripComments(source).match(RAW_INSENSITIVE_EQUALS) ?? [];
 }
 
 describe('case-insensitive equality goes through emailEquals (#572)', () => {
-  const files = [...sourceFiles(SRC), ...sourceFiles(SCRIPTS)];
+  let files: string[] = [];
+  beforeAll(() => {
+    files = [...sourceFiles(SRC), ...sourceFiles(SCRIPTS)];
+  });
 
   it('scans the backend source and the operator scripts', () => {
     // A guard that reads nothing passes for the wrong reason.

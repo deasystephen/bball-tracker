@@ -6,6 +6,7 @@
 
 import { logger, currentLogLevel, isLevelEnabled, DEFAULT_LOG_LEVEL } from '../../src/utils/logger';
 import { runWithLogContext, setLogContextUser, getLogContext } from '../../src/utils/log-context';
+import { parseLogLines } from '../support/log-lines';
 
 describe('utils/logger', () => {
   const originalLevel = process.env.LOG_LEVEL;
@@ -24,10 +25,6 @@ describe('utils/logger', () => {
     else process.env.LOG_LEVEL = originalLevel;
   });
 
-  function entries(spy: jest.SpyInstance): Array<Record<string, unknown>> {
-    return spy.mock.calls.map(([line]) => JSON.parse(line as string) as Record<string, unknown>);
-  }
-
   describe('LOG_LEVEL', () => {
     it('defaults to info: debug is dropped, info / warn / error are written', () => {
       delete process.env.LOG_LEVEL;
@@ -38,8 +35,8 @@ describe('utils/logger', () => {
       logger.warn('w');
       logger.error('e');
 
-      expect(entries(out).map((e) => e.level)).toEqual(['info', 'warn']);
-      expect(entries(err).map((e) => e.level)).toEqual(['error']);
+      expect(parseLogLines(out).map((e) => e.level)).toEqual(['info', 'warn']);
+      expect(parseLogLines(err).map((e) => e.level)).toEqual(['error']);
     });
 
     it('LOG_LEVEL=debug enables debug regardless of NODE_ENV', () => {
@@ -48,7 +45,7 @@ describe('utils/logger', () => {
 
       logger.debug('d', { gameId: 'g1' });
 
-      expect(entries(out)).toEqual([
+      expect(parseLogLines(out)).toEqual([
         expect.objectContaining({ level: 'debug', message: 'd', gameId: 'g1', service: 'bball-tracker-api' }),
       ]);
     });
@@ -60,8 +57,8 @@ describe('utils/logger', () => {
       logger.warn('w');
       logger.error('e');
 
-      expect(entries(out).map((e) => e.level)).toEqual(['warn']);
-      expect(entries(err).map((e) => e.level)).toEqual(['error']);
+      expect(parseLogLines(out).map((e) => e.level)).toEqual(['warn']);
+      expect(parseLogLines(err).map((e) => e.level)).toEqual(['error']);
     });
 
     it('LOG_LEVEL=error keeps only errors', () => {
@@ -71,7 +68,7 @@ describe('utils/logger', () => {
       logger.error('e');
 
       expect(out).not.toHaveBeenCalled();
-      expect(entries(err).map((e) => e.level)).toEqual(['error']);
+      expect(parseLogLines(err).map((e) => e.level)).toEqual(['error']);
     });
 
     it('is case-insensitive and falls back to info on an unknown value', () => {
@@ -91,7 +88,7 @@ describe('utils/logger', () => {
       process.env.LOG_LEVEL = 'info';
       logger.info('kept');
 
-      expect(entries(out).map((e) => e.message)).toEqual(['kept']);
+      expect(parseLogLines(out).map((e) => e.message)).toEqual(['kept']);
     });
   });
 
@@ -99,8 +96,8 @@ describe('utils/logger', () => {
     it('has no context outside a request', () => {
       expect(getLogContext()).toBeUndefined();
       logger.info('bare');
-      expect(entries(out)[0]).not.toHaveProperty('requestId');
-      expect(entries(out)[0]).not.toHaveProperty('userId');
+      expect(parseLogLines(out)[0]).not.toHaveProperty('requestId');
+      expect(parseLogLines(out)[0]).not.toHaveProperty('userId');
     });
 
     it('merges the ambient requestId and userId into every entry, explicit context winning', async () => {
@@ -112,7 +109,7 @@ describe('utils/logger', () => {
         logger.info('explicit wins', { userId: 'other', requestId: 'req-explicit' });
       });
 
-      const lines = entries(out);
+      const lines = parseLogLines(out);
       expect(lines[0]).toEqual(expect.objectContaining({ message: 'before auth', requestId: 'req-1' }));
       expect(lines[0]).not.toHaveProperty('userId');
       expect(lines[1]).toEqual(
@@ -137,7 +134,7 @@ describe('utils/logger', () => {
         }),
       ]);
 
-      const byMessage = Object.fromEntries(entries(out).map((e) => [e.message as string, e]));
+      const byMessage = Object.fromEntries(parseLogLines(out).map((e) => [e.message as string, e]));
       expect(byMessage.a).toEqual(expect.objectContaining({ requestId: 'a', userId: 'user-a' }));
       expect(byMessage.b).toEqual(expect.objectContaining({ requestId: 'b', userId: 'user-b' }));
     });
