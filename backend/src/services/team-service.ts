@@ -260,13 +260,15 @@ export interface TeamList {
  * Resolve (creating if needed) the caller's personal league and its
  * current-year season, for a team create that supplied no `seasonId` (#442).
  *
- * WHY THERE IS NO P2002 RETRY. This runs inside `createTeam`'s transaction,
- * AFTER the `SELECT ... FOR UPDATE` on the caller's own User row. That lock is
- * what makes it safe: `League.personalOwnerId` is unique per user and the
- * season lives only inside that user's own league, so the only writer that can
- * ever contend for either constraint is the same `userId`, and it is
- * serialized. Do NOT remove the lock on the belief that a retry covers this --
- * there is no retry. (A system ADMIN creating a same-named season in someone's
+ * WHY THERE IS NO P2002 RETRY. Prisma compiles all three upserts below to a
+ * native `INSERT ... ON CONFLICT DO UPDATE`, so two concurrent provisionings
+ * for one user converge on one league and one season without any retry
+ * (`tests/integration/team-create.db.test.ts`, #765). This also runs inside
+ * `createTeam`'s transaction, AFTER the `SELECT ... FOR UPDATE` on the
+ * caller's own User row: that lock serializes the tier-cap re-check and this
+ * provisioning per caller, and keeps it safe if an upsert ever loses the
+ * native path (a nested write does that). Never add a P2002 retry, and do not
+ * remove the lock. (A system ADMIN creating a same-named season in someone's
  * personal league via `POST /seasons` is the one theoretical contender; it is
  * not defended against.)
  *
