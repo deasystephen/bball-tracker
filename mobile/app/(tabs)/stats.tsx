@@ -21,11 +21,13 @@ import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { getResultColor } from '../../utils/game-result';
+import { describeResults, getResultColor } from '../../utils/game-result';
+import { useTranslation } from '../../i18n';
 
 export default function Stats() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
@@ -81,8 +83,7 @@ export default function Stats() {
   }
 
   // Win/loss streak from recent games
-  const recentResults =
-    seasonStats?.recentGames?.slice(0, 10).map((g) => g.result) || [];
+  const streak = seasonStats?.recentGames?.slice(0, 8).map((g) => g.result) || [];
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -204,19 +205,30 @@ export default function Stats() {
                 </View>
 
                 {/* Streak indicator dots */}
-                {recentResults.length > 0 && (
-                  <View style={styles.streakRow}>
-                    {recentResults.slice(0, 8).map((result, idx) => (
-                      <View
-                        key={idx}
-                        style={[
-                          styles.streakDot,
-                          {
-                            backgroundColor: getResultColor(result, colors),
-                          },
-                        ]}
-                      />
-                    ))}
+                {/* The letter and the row's label carry the outcome; colour only repeats it (#778). */}
+                {streak.length > 0 && (
+                  <View
+                    style={styles.streakRow}
+                    accessible
+                    accessibilityLabel={describeResults(t, streak)}
+                    testID="stats-streak"
+                  >
+                    {streak.map((result, idx) => {
+                      const resultColor = getResultColor(result, colors);
+                      return (
+                        <View
+                          key={idx}
+                          style={[
+                            styles.streakDot,
+                            { backgroundColor: resultColor + '20', borderColor: resultColor },
+                          ]}
+                        >
+                          <ThemedText variant="footnoteBold">
+                            {result}
+                          </ThemedText>
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </Card>
@@ -405,7 +417,14 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     marginTop: spacing.sm,
   },
-  streakDot: { width: 8, height: 8, borderRadius: 4 },
+  streakDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   section: { marginTop: spacing.lg },
   sectionHeader: {
     flexDirection: 'row',

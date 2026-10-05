@@ -28,7 +28,8 @@ import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
-import { getResultColor } from '../../../utils/game-result';
+import { describeRecord, getResultColor, type GameResult } from '../../../utils/game-result';
+import { useTranslation } from '../../../i18n';
 import { useGoBack } from '../../../hooks/useGoBack';
 
 type SortKey = 'ppg' | 'rpg' | 'apg' | 'efficiency';
@@ -38,6 +39,7 @@ export default function TeamStatsScreen() {
   const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -86,6 +88,15 @@ export default function TeamStatsScreen() {
       />
     );
   }
+
+  // Every number carries its letter, not only its colour (#778). Ties appear once there are any.
+  const recordParts: { result: GameResult; count: number }[] = seasonStats
+    ? [
+        { result: 'W', count: seasonStats.wins },
+        { result: 'L', count: seasonStats.losses },
+        ...(seasonStats.ties > 0 ? [{ result: 'T' as const, count: seasonStats.ties }] : []),
+      ]
+    : [];
 
   const sortOptions: { key: SortKey; label: string }[] = [
     { key: 'ppg', label: 'PPG' },
@@ -137,22 +148,35 @@ export default function TeamStatsScreen() {
           <Card variant="elevated" style={styles.recordCard}>
             <View style={styles.recordHeader}>
               <ThemedText variant="h3">Season Record</ThemedText>
-              <View style={styles.record}>
-                <ThemedText variant="h1" color="success">
-                  {seasonStats.wins}
-                </ThemedText>
-                <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
-                <ThemedText variant="h1" color="error">
-                  {seasonStats.losses}
-                </ThemedText>
-                {seasonStats.ties > 0 && (
-                  <>
-                    <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
-                    <ThemedText variant="h1" color="textSecondary">
-                      {seasonStats.ties}
-                    </ThemedText>
-                  </>
+              <View
+                style={styles.record}
+                accessible
+                accessibilityLabel={describeRecord(
+                  t,
+                  seasonStats.wins,
+                  seasonStats.losses,
+                  seasonStats.ties
                 )}
+                testID="team-stats-record"
+              >
+                {recordParts.map(({ result, count }, index) => (
+                  <React.Fragment key={result}>
+                    {index > 0 && (
+                      <ThemedText variant="h2" color="textTertiary"> - </ThemedText>
+                    )}
+                    <View style={styles.recordNum}>
+                      <ThemedText
+                        variant="h1"
+                        style={{ color: getResultColor(result, colors) }}
+                      >
+                        {count}
+                      </ThemedText>
+                      <ThemedText variant="caption" color="textSecondary">
+                        {result}
+                      </ThemedText>
+                    </View>
+                  </React.Fragment>
+                ))}
               </View>
             </View>
             <ThemedText variant="caption" color="textSecondary" style={styles.gamesPlayed}>
@@ -292,6 +316,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: spacing.sm,
+  },
+  recordNum: {
+    alignItems: 'center',
   },
   gamesPlayed: {
     marginTop: spacing.sm,

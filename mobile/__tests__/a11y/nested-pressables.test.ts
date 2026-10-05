@@ -26,15 +26,24 @@ import { MOBILE_ROOT, sourceFiles } from '../helpers/source-files';
 
 const SCANNED_DIRS = ['app', 'components'];
 
-/** Components that render a pressable. `ListItem` does only when given `onPress`. */
+/**
+ * Components that always render a pressable: the React Native primitives,
+ * `Button`, and the app's leaf components whose root is a `TouchableOpacity`
+ * (#694).
+ */
 const ALWAYS_PRESSABLE = new Set([
   'TouchableOpacity',
   'TouchableHighlight',
   'TouchableWithoutFeedback',
   'Pressable',
   'Button',
+  'AvatarPicker',
+  'PrintButton',
+  'SortPills',
+  'RelationshipChips',
 ]);
-const PRESSABLE_WITH_ON_PRESS = new Set(['ListItem']);
+/** Wrappers that render a `TouchableOpacity` only when given `onPress`: `ListItem` and `Card`. */
+const PRESSABLE_WITH_ON_PRESS = new Set(['ListItem', 'Card']);
 
 interface Finding {
   file: string;
@@ -200,6 +209,33 @@ describe('nested pressables', () => {
 
       expect(plain).toEqual([]);
       expect(pressable.map((f) => `${f.inner} in ${f.outer}`)).toEqual(['TouchableOpacity in ListItem']);
+    });
+
+    it('treats Card as a pressable only when it is given onPress', () => {
+      const pressable = findNestedPressables(
+        'sample.tsx',
+        `const A = () => <Card onPress={open}><Button title="Clear" onPress={clear} /></Card>;`
+      );
+      const plain = findNestedPressables(
+        'sample.tsx',
+        `const B = () => <Card><Button title="Clear" onPress={clear} /></Card>;`
+      );
+
+      expect(pressable.map((f) => `${f.inner} in ${f.outer}`)).toEqual(['Button in Card']);
+      expect(plain).toEqual([]);
+    });
+
+    it('counts the leaf components that always render a pressable', () => {
+      const findings = findNestedPressables(
+        'sample.tsx',
+        `const A = () => (
+          <TouchableOpacity onPress={open}>
+            <PrintButton title="Print" />
+          </TouchableOpacity>
+        );`
+      );
+
+      expect(findings.map((f) => `${f.inner} in ${f.outer}`)).toEqual(['PrintButton in TouchableOpacity']);
     });
   });
 });
