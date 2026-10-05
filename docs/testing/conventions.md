@@ -116,6 +116,9 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - The script and the workflow live under `.github/`, outside the path filter that makes a merge
   deploy. The Postgres image is read from `docker-compose.yml`, so the major stays pinned in
   the places `tests/infra/postgres-version.test.ts` already checks.
+- The Node major has the same kind of parity test: `tests/infra/node-version.test.ts` ties the
+  root `.nvmrc` (read by every `actions/setup-node` step), `backend/package.json` `engines.node`
+  and `docker/Dockerfile` together (#714).
 
 ## Manual API smoke scripts (`backend/scripts/`)
 - `backend/scripts/test-players-api.sh [BASE_URL] [ACCESS_TOKEN]` exercises `/api/v1/players` against a

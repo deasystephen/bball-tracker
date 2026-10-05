@@ -67,7 +67,7 @@ npm test                    # Jest (includes the OTA drift guard)
 ### Web (`/web`)
 ```bash
 npm install && npm run dev   # http://localhost:3000
-npm run lint && npm run build
+npm run lint && npm run type-check && npm run build   # lint is ESLint --max-warnings 0; CI runs all three
 ```
 
 ### Mobile builds and OTA (EAS)

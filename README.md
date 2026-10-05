@@ -58,7 +58,7 @@ A basketball tracking app for youth leagues, featuring real-time game tracking, 
 
 ### Prerequisites
 
-- Node.js 22+ (Prisma 7 requires it; production Docker image is Node 22)
+- Node.js 22 (the root `.nvmrc`; matches the production Docker image, and CI runs the same major. Prisma 7 itself accepts 20.19+/22.12+)
 - Docker and Docker Compose
 - iOS Simulator (Xcode) for mobile development
 
