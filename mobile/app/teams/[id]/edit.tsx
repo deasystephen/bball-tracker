@@ -189,7 +189,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h2" heading style={styles.headerTitle}>
             Edit Team
           </ThemedText>
         </View>

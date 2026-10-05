@@ -719,7 +719,7 @@ export default function ManagePlayersScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" style={styles.headerTitle}>
+          <ThemedText variant="h2" heading style={styles.headerTitle}>
             {t('teams.roster')}
           </ThemedText>
         </View>
@@ -735,7 +735,7 @@ export default function ManagePlayersScreen() {
 
         {/* Add Player card */}
         <Card variant="elevated" style={styles.formCard}>
-          <ThemedText variant="h4" style={styles.formTitle}>
+          <ThemedText variant="h4" heading style={styles.formTitle}>
             {showAddForm ? 'Add Player' : 'Invite Player'}
           </ThemedText>
 
@@ -948,7 +948,7 @@ export default function ManagePlayersScreen() {
 
         {/* Current Players */}
         <View style={styles.section}>
-          <ThemedText variant="h4" style={styles.sectionTitle}>
+          <ThemedText variant="h4" heading style={styles.sectionTitle}>
             Current Players ({members.length})
           </ThemedText>
 
@@ -970,7 +970,7 @@ export default function ManagePlayersScreen() {
             can't see a live invite tends to re-invite and hit a 400. */}
         {teamInvitationsError != null && (
           <View style={styles.section}>
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               Invited
             </ThemedText>
             <Card variant="default" style={styles.playersCard}>
@@ -993,7 +993,7 @@ export default function ManagePlayersScreen() {
         )}
         {pendingNonMemberInvites.length > 0 && (
           <View style={styles.section}>
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               Invited ({pendingNonMemberInvites.length})
             </ThemedText>
             <ThemedText variant="caption" color="textTertiary" style={styles.sectionHint}>
@@ -1048,7 +1048,7 @@ export default function ManagePlayersScreen() {
               },
             ]}
           >
-            <ThemedText variant="h4" style={styles.editTitle}>
+            <ThemedText variant="h4" heading style={styles.editTitle}>
               {editingMember ? `Edit ${displayName(editingMember.player)}` : ''}
             </ThemedText>
             <Input
@@ -1122,7 +1122,7 @@ export default function ManagePlayersScreen() {
                   },
                 ]}
               >
-                <ThemedText variant="h4" style={styles.editTitle}>
+                <ThemedText variant="h4" heading style={styles.editTitle}>
                   {emailEditMember ? `Email for ${displayName(emailEditMember.player)}` : ''}
                 </ThemedText>
                 {issue && (

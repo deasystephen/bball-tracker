@@ -64,6 +64,25 @@ const TOAST_ICON: Record<ToastType, keyof typeof Ionicons.glyphMap> = {
 };
 
 const DEFAULT_DURATION = 3000;
+/** Messages up to this many characters keep the requested duration. */
+const SHORT_MESSAGE_LENGTH = 60;
+/** Extra reading time per character beyond `SHORT_MESSAGE_LENGTH`. */
+const READING_MS_PER_CHAR = 40;
+/** A long message never extends a toast past this. */
+const MAX_AUTO_DURATION = 8000;
+
+/**
+ * How long a toast stays up. A long message (a server error sentence, the 402
+ * upgrade copy) gets reading time on top of the default, capped at
+ * `MAX_AUTO_DURATION`; it never shortens a duration the caller asked for (#776).
+ */
+export function toastDuration(message: string, requested: number = DEFAULT_DURATION): number {
+  const extra = Math.max(0, message.length - SHORT_MESSAGE_LENGTH) * READING_MS_PER_CHAR;
+  return Math.max(requested, Math.min(MAX_AUTO_DURATION, DEFAULT_DURATION + extra));
+}
+
+/** Lines a toast message may take before it ellipsizes (#776). */
+export const TOAST_MAX_LINES = 4;
 
 function ToastItem({
   toast,
@@ -156,7 +175,7 @@ function ToastItem({
           styles.message,
           { color: colors.text },
         ]}
-        numberOfLines={2}
+        numberOfLines={TOAST_MAX_LINES}
       >
         {toast.message}
       </Text>
@@ -174,7 +193,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const showToast = useCallback(
     (message: string, type: ToastType = 'success', duration: number = DEFAULT_DURATION) => {
       const id = Date.now().toString() + Math.random().toString(36).slice(2);
-      setToasts((prev) => [...prev, { id, message, type, duration }].slice(-MAX_VISIBLE_TOASTS));
+      setToasts((prev) =>
+        [...prev, { id, message, type, duration: toastDuration(message, duration) }].slice(
+          -MAX_VISIBLE_TOASTS
+        )
+      );
     },
     []
   );

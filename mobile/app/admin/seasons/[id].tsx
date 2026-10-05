@@ -131,7 +131,7 @@ export default function SeasonDetailScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" numberOfLines={1}>{season.name}</ThemedText>
+          <ThemedText variant="h2" heading numberOfLines={1}>{season.name}</ThemedText>
           {season.league && (
             <ThemedText variant="caption" color="textSecondary" numberOfLines={1}>
               {season.league.name}
@@ -197,7 +197,7 @@ export default function SeasonDetailScreen() {
           )}
         </Card>
 
-        <ThemedText variant="h3" style={styles.sectionTitle}>
+        <ThemedText variant="h3" heading style={styles.sectionTitle}>
           {t('seasons.teams')}
         </ThemedText>
         {teams.length === 0 ? (

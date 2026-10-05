@@ -149,7 +149,7 @@ export default function Home() {
             <ThemedText variant="caption" color="textSecondary">
               {getGreeting()}
             </ThemedText>
-            <ThemedText variant="h3">
+            <ThemedText variant="h3" heading>
               {user?.name?.split(' ')[0] || 'Coach'}
             </ThemedText>
           </View>
@@ -293,7 +293,7 @@ export default function Home() {
         {teams && teams.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <ThemedText variant="h4">Your Teams</ThemedText>
+              <ThemedText variant="h4" heading>Your Teams</ThemedText>
               <TouchableOpacity onPress={() => router.push('/teams')}>
                 <ThemedText variant="caption" color="primary">
                   See All
@@ -348,7 +348,7 @@ export default function Home() {
 
         {/* Recent Activity Feed */}
         <View style={styles.section}>
-          <ThemedText variant="h4" style={styles.sectionTitle}>
+          <ThemedText variant="h4" heading style={styles.sectionTitle}>
             Recent Activity
           </ThemedText>
 

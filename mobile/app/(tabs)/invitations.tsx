@@ -436,7 +436,7 @@ export default function InvitationsScreen() {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingHorizontal: padding }]}>
-          <ThemedText variant="h1">Invitations</ThemedText>
+          <ThemedText variant="h1" heading>Invitations</ThemedText>
         </View>
         {renderDebugCard()}
         <EmptyState
@@ -451,7 +451,7 @@ export default function InvitationsScreen() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <View style={[styles.header, { paddingHorizontal: padding }]}>
-        <ThemedText variant="h1">Invitations</ThemedText>
+        <ThemedText variant="h1" heading>Invitations</ThemedText>
         <ThemedText variant="caption" color="textSecondary">
           {invitations.length + guardianInvitations.length}{' '}
           {invitations.length + guardianInvitations.length === 1 ? 'invitation' : 'invitations'}

@@ -299,6 +299,36 @@ never inline a role check in a screen:
   which is how the defect shipped with a passing test. To assert it in a screen test, walk the
   `parent` chain of the button and expect no other accessible ancestor
   (`__tests__/app/profile-my-kids.test.tsx`).
+- **Screen titles and section headings carry `accessibilityRole="header"` (#775).** Every navigator
+  hides the native header, so each screen draws its own title; without the role VoiceOver's Headings
+  rotor and TalkBack's heading navigation find nothing. Use `<ThemedText variant="h2" heading>` (an
+  explicit `accessibilityRole` wins over the flag) or `accessibilityRole="header"` on a bare `Text`
+  (login, onboarding slides). The role is opt-in, never a variant default: the heading variants also
+  render numbers (scores, record counts, stat values, avatar initials), which are never headings. A
+  heading inside a container that is itself accessible (a pressable card, a label-carrying `View`) is
+  hidden from VoiceOver anyway; mark headings that sit outside such containers. The role changes no
+  visible text, so Maestro's text selectors are unaffected. Shared titles are marked once in their
+  component: `EmptyState`, `ErrorState`, `ActionMenu`, `DateTimePickerSheet`, `SeasonAverages`,
+  `EventTimeline`. `__tests__/a11y/heading-roles.test.ts` reads the source and fails on an h1/h2
+  under `app/` without the role (unless it is on `VALUE_ALLOWLIST`, each entry with a reason), on a
+  screen with no heading at all (unless on `SCREENS_WITHOUT_TITLE`: navigators, the launch redirect,
+  the tracker and Watch Live, whose header is the score), on a value that is marked, and on stale
+  allowlist entries.
+- **Dynamic Type: text scales everywhere; caps only inside fixed-size controls (#776).** Never set
+  `allowFontScaling={false}`. Where a control's size is fixed on purpose, its text caps its scaling
+  with `maxFontSizeMultiplier` from `theme/typography.ts#MAX_FONT_SCALE`: `fixedControl` (1.3) on the
+  tracker's `ShotButtons` labels (the two-row grid keeps its 60pt height so the stat buttons stay in
+  reach on 667pt devices; the button uses `minHeight`) and on the focused tab label (the bar keeps
+  `TAB_BAR_HEIGHT`, which `useTabBarPadding` depends on; the label has a bounded `lineHeight`);
+  `denseTable` (1.5) on `BoxScoreTable` cells, whose columns widen with the text up to the same cap
+  so every row keeps one width, and whose data cells never clamp to one line (only the short column
+  labels do). Everywhere else let the container grow: `minHeight` over `height` around text, and no
+  `numberOfLines` on user data unless the design truncates on purpose. Toasts clamp at
+  `TOAST_MAX_LINES` (4) and `toastDuration` adds 40ms per character beyond 60 (up to 8s) so a long
+  error stays up long enough to read. `__tests__/a11y/text-sizing.test.tsx` checks the caps, the
+  clamps, the fit arithmetic at the caps (Jest does no layout), and fails on an unlisted fixed
+  `height:` in those four files or any `allowFontScaling={false}`. The visual check at the largest
+  text size is device-only (E2E plan P.11).
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.
   Toasts are **non-interactive** (`pointerEvents="none"`, auto-dismiss only — no swipe/tap to dismiss): the

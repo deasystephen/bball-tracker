@@ -158,7 +158,7 @@ export default function CreateGameScreen() {
           <Ionicons name="close" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h3" numberOfLines={1}>
+          <ThemedText variant="h3" heading numberOfLines={1}>
             New Game
           </ThemedText>
         </View>

@@ -141,7 +141,7 @@ export default function AnnouncementsScreen() {
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <ThemedText variant="h2" style={styles.headerTitle}>
+        <ThemedText variant="h2" heading style={styles.headerTitle}>
           Announcements
         </ThemedText>
         {canPost && (

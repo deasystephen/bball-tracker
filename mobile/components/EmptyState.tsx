@@ -43,7 +43,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       ) : (
         <Ionicons name={icon} size={iconSize} color={colors.textTertiary} />
       )}
-      <ThemedText variant="h3" color="textSecondary" style={styles.title}>
+      <ThemedText variant="h3" heading color="textSecondary" style={styles.title}>
         {title}
       </ThemedText>
       {message && (

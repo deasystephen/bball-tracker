@@ -271,7 +271,7 @@ export default function Games() {
           { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
         ]}
       >
-        <ThemedText variant="h1">Games</ThemedText>
+        <ThemedText variant="h1" heading>Games</ThemedText>
       </View>
 
       {/* Filter Tabs */}

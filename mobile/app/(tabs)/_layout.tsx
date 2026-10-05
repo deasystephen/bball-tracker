@@ -12,7 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '../../hooks/useTheme';
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
-import { borderRadius } from '../../theme';
+import { borderRadius, MAX_FONT_SCALE } from '../../theme';
 // expo-router carries its own fork of the tab navigator since SDK 56; the
 // `@react-navigation/bottom-tabs` package is no longer installed.
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
@@ -187,6 +187,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                 {isFocused && !isTrackTab && (
                   <Animated.Text
                     style={[styles.tabLabel, { color: colors.primary }]}
+                    maxFontSizeMultiplier={MAX_FONT_SCALE.fixedControl}
                   >
                     {tab.label}
                   </Animated.Text>
@@ -261,8 +262,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // The bar keeps TAB_BAR_HEIGHT (useTabBarPadding depends on it), so the
+  // label's scaling is capped and its line height bounded: 24pt icon + 2 +
+  // 12 x 1.3 stays inside the 60pt item at every text size (#776).
   tabLabel: {
     fontSize: 10,
+    lineHeight: 12,
     fontWeight: '600',
     marginTop: 2,
   },

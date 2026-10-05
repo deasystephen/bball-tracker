@@ -106,7 +106,7 @@ export default function CreateSeasonScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <ThemedText variant="h2">Create Season</ThemedText>
+          <ThemedText variant="h2" heading>Create Season</ThemedText>
         </View>
         <View style={styles.errorContainer}>
           <ThemedText variant="body" color="error">
@@ -146,7 +146,7 @@ export default function CreateSeasonScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">Create Season</ThemedText>
+          <ThemedText variant="h2" heading>Create Season</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             for {league.name}
           </ThemedText>

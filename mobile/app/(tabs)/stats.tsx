@@ -69,7 +69,7 @@ export default function Stats() {
             { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
           ]}
         >
-          <ThemedText variant="h1">Statistics</ThemedText>
+          <ThemedText variant="h1" heading>Statistics</ThemedText>
         </View>
         <EmptyState
           icon="stats-chart-outline"
@@ -92,7 +92,7 @@ export default function Stats() {
           { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
         ]}
       >
-        <ThemedText variant="h1">Statistics</ThemedText>
+        <ThemedText variant="h1" heading>Statistics</ThemedText>
       </View>
 
       <ScrollView
@@ -231,7 +231,7 @@ export default function Stats() {
             {rosterStats && rosterStats.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <ThemedText variant="h3">Team Leaders</ThemedText>
+                  <ThemedText variant="h3" heading>Team Leaders</ThemedText>
                   <TouchableOpacity
                     onPress={() => router.push(`/teams/${selectedTeamId}/stats`)}
                   >

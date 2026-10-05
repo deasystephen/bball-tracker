@@ -161,7 +161,7 @@ export default function AdminDashboard() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">League Management</ThemedText>
+          <ThemedText variant="h2" heading>League Management</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             Create and manage leagues and seasons
           </ThemedText>

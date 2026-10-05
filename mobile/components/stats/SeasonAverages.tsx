@@ -66,7 +66,7 @@ export const SeasonAverages: React.FC<SeasonAveragesProps> = ({
 
   return (
     <Card variant="elevated" style={styles.container}>
-      <ThemedText variant="h3" style={styles.title}>
+      <ThemedText variant="h3" heading style={styles.title}>
         Season Averages
       </ThemedText>
       <View style={styles.statsContainer}>

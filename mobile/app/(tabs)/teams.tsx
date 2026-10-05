@@ -91,7 +91,7 @@ export default function TeamsScreen() {
             { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
           ]}
         >
-          <ThemedText variant="h1">{t('teams.title')}</ThemedText>
+          <ThemedText variant="h1" heading>{t('teams.title')}</ThemedText>
         </View>
         {canCreate ? (
           <EmptyState
@@ -178,7 +178,7 @@ export default function TeamsScreen() {
           { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
         ]}
       >
-        <ThemedText variant="h1">{t('teams.title')}</ThemedText>
+        <ThemedText variant="h1" heading>{t('teams.title')}</ThemedText>
       </View>
 
       <FlatList

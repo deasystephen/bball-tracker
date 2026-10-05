@@ -109,7 +109,7 @@ export default function CreateLeagueScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <ThemedText variant="h2">Create League</ThemedText>
+          <ThemedText variant="h2" heading>Create League</ThemedText>
         </View>
       </View>
 

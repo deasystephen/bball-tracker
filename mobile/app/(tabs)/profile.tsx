@@ -155,7 +155,7 @@ export default function Profile() {
               </ThemedText>
             )}
           </View>
-          <ThemedText variant="h2" style={styles.userName}>
+          <ThemedText variant="h2" heading style={styles.userName}>
             {user?.name || 'User'}
           </ThemedText>
           <View style={styles.roleChip}>
@@ -198,7 +198,7 @@ export default function Profile() {
             this too (guardian links are independent of the global role). */}
         {isGuardian(user) && (
           <View style={styles.section} testID="my-kids-section">
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               My kids
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
@@ -245,7 +245,7 @@ export default function Profile() {
 
         {/* Account Info */}
         <View style={styles.section}>
-          <ThemedText variant="h4" style={styles.sectionTitle}>
+          <ThemedText variant="h4" heading style={styles.sectionTitle}>
             Account
           </ThemedText>
           <Card variant="default" style={styles.infoCard}>
@@ -318,7 +318,7 @@ export default function Profile() {
         {/* Plan Usage Meter */}
         {usage && (
           <View style={styles.section}>
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               {t('usage.title')}
             </ThemedText>
             <Card variant="default" style={styles.infoCard}>
@@ -341,7 +341,7 @@ export default function Profile() {
             PARENT is derived from guardian links, never self-selected. */}
         {(user?.role === 'PLAYER' || user?.role === 'COACH') && !isGuardian(user) && (
           <View style={styles.section}>
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               {t('roleOnboarding.sectionTitle')}
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
@@ -371,7 +371,7 @@ export default function Profile() {
             from GET /auth/me); the admin screens guard themselves too. */}
         {canAccessAdmin(user) && (
           <View style={styles.section}>
-            <ThemedText variant="h4" style={styles.sectionTitle}>
+            <ThemedText variant="h4" heading style={styles.sectionTitle}>
               Management
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
@@ -395,7 +395,7 @@ export default function Profile() {
 
         {/* Settings */}
         <View style={styles.section}>
-          <ThemedText variant="h4" style={styles.sectionTitle}>
+          <ThemedText variant="h4" heading style={styles.sectionTitle}>
             Settings
           </ThemedText>
           <Card variant="default" style={styles.settingsCard}>
