@@ -35,6 +35,7 @@ import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 /** "Mar 1, 2024 - Jun 30, 2024", with a placeholder for a missing end. */
 export function formatSeasonRange(
@@ -123,14 +124,7 @@ export default function SeasonDetailScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={goBack}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={goBack} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" numberOfLines={1}>{season.name}</ThemedText>
           {season.league && (

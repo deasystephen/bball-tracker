@@ -91,7 +91,7 @@ export const Avatar: React.FC<AvatarProps> = ({
 
 interface AvatarPickerProps extends AvatarProps {
   onImageSelected: (uri: string | null) => void;
-  /** The photo menu's title: "Profile Photo" for your own, the caller's wording otherwise. */
+  /** The photo menu's title; defaults to "Profile Photo" (your own photo). */
   menuTitle?: string;
 }
 
@@ -110,7 +110,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   name = '',
   size = 'large',
   onImageSelected,
-  menuTitle = 'Profile Photo',
+  menuTitle,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -184,7 +184,7 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
       {/* A sibling of the avatar button, never inside it (nested pressables). */}
       <ActionMenu
         visible={menuVisible}
-        title={menuTitle}
+        title={menuTitle ?? t('common.profilePhoto')}
         items={menuItems}
         onClose={() => setMenuVisible(false)}
       />

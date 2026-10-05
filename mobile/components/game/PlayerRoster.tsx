@@ -16,6 +16,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { displayName } from '../../utils/display-name';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 interface Player {
   id: string;
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     gap: spacing.xs,
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   avatar: {
     width: 24,

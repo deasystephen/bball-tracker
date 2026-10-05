@@ -29,13 +29,14 @@ import { useTranslation } from '../../i18n';
 import { formatTeamBracket } from '../../utils/team-labels';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { HEADER_ICON_HIT_SLOP, touchTargetHitSlop } from '../../utils/touch-target';
+import { touchTargetHitSlop } from '../../utils/touch-target';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
 import { getTeamColor } from '../../utils/team-colors';
 import { RosterSortKey, sortRosterMembers } from '../../utils/roster-sort';
 import { useRosterSortPreference } from '../../hooks/useRosterSortPreference';
 import { useGoBack } from '../../hooks/useGoBack';
+import { BackButton } from '../../components/BackButton';
 
 const HERO_ICON_SIZE = 22;
 /** The edit and delete icons draw at 30pt (22 + padding); the slop makes them 44pt targets. */
@@ -123,15 +124,7 @@ export default function TeamDetailsScreen() {
       {/* Team Hero Header */}
       <View style={[styles.heroHeader, { backgroundColor: teamColor, paddingTop: insets.top }]}>
         <View style={[styles.heroNav, { paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.heroBackButton}
-            hitSlop={HEADER_ICON_HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} color="#FFFFFF" />
           {canManageTeam && (
             <View style={styles.heroActions}>
               <TouchableOpacity
@@ -367,7 +360,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: spacing.sm,
   },
-  heroBackButton: { padding: spacing.sm },
   heroActions: { flexDirection: 'row', gap: spacing.md },
   heroIconButton: { padding: spacing.xs },
   heroContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },

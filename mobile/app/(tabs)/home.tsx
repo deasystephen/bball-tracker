@@ -34,12 +34,16 @@ import { getTeamColor } from '../../utils/team-colors';
 import { canCreateTeams } from '../../utils/team-permissions';
 import type { Game } from '../../types/game';
 import { displayName } from '../../utils/display-name';
-import { touchTargetHitSlop } from '../../utils/touch-target';
+import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../utils/touch-target';
+import { useTranslation } from '../../i18n';
 
 const BELL_ICON_SIZE = 22;
+/** The bell draws at 30pt (22 + 4pt padding); the slop makes it a 44pt target. */
+const BELL_HIT_SLOP = touchTargetHitSlop(BELL_ICON_SIZE + 2 * spacing.xs);
 
 export default function Home() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const padding = getHorizontalPadding();
@@ -161,7 +165,7 @@ export default function Home() {
               <TouchableOpacity
                 onPress={() => router.push('/invitations')}
                 style={styles.bellButton}
-                hitSlop={touchTargetHitSlop(BELL_ICON_SIZE + 2 * spacing.xs)}
+                hitSlop={BELL_HIT_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`${pendingInvitations.length} pending invitations`}
               >
@@ -326,7 +330,7 @@ export default function Home() {
                     // Without a label VoiceOver starts with the initial badge
                     // ("W, Warriors, …"); not the bare name, which the Teams
                     // tab card already uses and Maestro taps by full match.
-                    accessibilityLabel={`${team.name}, ${playerCount} players`}
+                    accessibilityLabel={`${team.name}, ${t('teams.playerCount', { count: playerCount })}`}
                   >
                     <View
                       style={[
@@ -349,7 +353,7 @@ export default function Home() {
                       {team.name}
                     </ThemedText>
                     <ThemedText variant="footnote" color="textSecondary">
-                      {playerCount} players
+                      {t('teams.playerCount', { count: playerCount })}
                     </ThemedText>
                   </TouchableOpacity>
                 );
@@ -539,8 +543,8 @@ const styles = StyleSheet.create({
   bellBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
   // 44pt touch target around the 32pt avatar.
   avatarButton: {
-    width: 44,
-    height: 44,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

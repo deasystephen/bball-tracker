@@ -60,6 +60,15 @@ describe('AvatarPicker photo menu', () => {
     expect(screen.getByLabelText('Close')).toBeTruthy();
   });
 
+  it('is a "Change photo" button, and takes the caller\'s menu title (Manage Players)', () => {
+    render(<AvatarPicker uri={PHOTO} name="Jamie Lee" menuTitle="Player Photo" onImageSelected={jest.fn()} />);
+
+    fireEvent.press(screen.getByRole('button', { name: 'Change photo' }));
+
+    expect(screen.getByText('Player Photo')).toBeTruthy();
+    expect(screen.queryByText('Profile Photo')).toBeNull();
+  });
+
   it('leaves out Remove Photo when there is no photo', () => {
     render(<AvatarPicker uri={null} name="Jamie Lee" onImageSelected={jest.fn()} />);
     openMenu();

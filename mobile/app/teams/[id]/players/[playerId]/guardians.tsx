@@ -44,7 +44,8 @@ import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 import { useGoBack } from '../../../../../hooks/useGoBack';
 import { displayName } from '../../../../../utils/display-name';
-import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../../../utils/touch-target';
+import { MIN_TOUCH_TARGET } from '../../../../../utils/touch-target';
+import { BackButton } from '../../../../../components/BackButton';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -162,15 +163,7 @@ export default function PlayerGuardiansScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2">Parents &amp; guardians</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -316,7 +309,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  backButton: { padding: spacing.sm, marginRight: spacing.sm },
+  backButton: { marginRight: spacing.sm },
   headerContent: { flex: 1 },
   scrollContent: { paddingTop: spacing.lg },
   formCard: { marginBottom: spacing.lg },

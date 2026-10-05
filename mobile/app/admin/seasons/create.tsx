@@ -10,11 +10,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  TouchableOpacity,
-} from 'react-native';
+  } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import {
   ThemedView,
   ThemedText,
@@ -32,7 +30,7 @@ import { useAuthUser } from '../../../store/auth-store';
 import { canManageLeague } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
-import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 export default function CreateSeasonScreen() {
   const router = useRouter();
@@ -104,15 +102,7 @@ export default function CreateSeasonScreen() {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + spacing.md, paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            hitSlop={HEADER_ICON_HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} style={styles.backButton} />
           <ThemedText variant="h2">Create Season</ThemedText>
         </View>
         <View style={styles.errorContainer}>
@@ -144,15 +134,7 @@ export default function CreateSeasonScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2">Create Season</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -222,7 +204,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },

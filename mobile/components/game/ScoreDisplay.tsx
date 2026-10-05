@@ -5,7 +5,6 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -17,7 +16,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing, typography } from '../../theme';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../hooks/useScoreAnnouncement';
-import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
+import { BackButton } from '../BackButton';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -98,15 +97,7 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
     >
       <View style={styles.topRow}>
         {onBack && (
-          <TouchableOpacity
-            onPress={onBack}
-            style={styles.backButton}
-            hitSlop={HEADER_ICON_HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={onBack} style={styles.backButton} color="#FFFFFF" />
         )}
         <View style={styles.titleContainer}>
           <View style={[styles.liveBadge, { backgroundColor: colors.success }]}>
@@ -198,7 +189,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   titleContainer: {

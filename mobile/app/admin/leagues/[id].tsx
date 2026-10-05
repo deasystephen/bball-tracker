@@ -34,7 +34,18 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { getApiErrorMessage } from '../../../services/api-client';
 import { useTranslation } from '../../../i18n';
-import { HEADER_ICON_HIT_SLOP, touchTargetHitSlop } from '../../../utils/touch-target';
+import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
+
+const DELETE_ICON_SIZE = 22;
+const ADD_ICON_SIZE = 20;
+/**
+ * "Add Season" is a 28pt-tall pill (20pt icon + 4pt padding) and already wider
+ * than 44pt: the slop adds height only, so the pill keeps its look.
+ */
+const ADD_SEASON_HIT_SLOP = touchTargetHitSlop(MIN_TOUCH_TARGET, ADD_ICON_SIZE + 2 * spacing.xs);
+/** The delete icon draws at 38pt (22 + 8pt padding); the slop makes it a 44pt target. */
+const DELETE_HIT_SLOP = touchTargetHitSlop(DELETE_ICON_SIZE + 2 * spacing.sm);
 
 /**
  * The league delete rule, as the API applies it (`league-service.deleteLeague`):
@@ -174,15 +185,7 @@ export default function LeagueDetailScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" numberOfLines={1}>{league.name}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -193,12 +196,12 @@ export default function LeagueDetailScreen() {
           <TouchableOpacity
             onPress={handleDeleteLeague}
             style={styles.deleteButton}
-            hitSlop={touchTargetHitSlop(22 + 2 * spacing.sm)}
+            hitSlop={DELETE_HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel={t('leagues.deleteLeague')}
             testID="league-delete-button"
           >
-            <Ionicons name="trash-outline" size={22} color={colors.error} />
+            <Ionicons name="trash-outline" size={DELETE_ICON_SIZE} color={colors.error} />
           </TouchableOpacity>
         )}
       </View>
@@ -209,11 +212,12 @@ export default function LeagueDetailScreen() {
         <TouchableOpacity
           onPress={handleCreateSeason}
           style={[styles.addSeasonButton, { backgroundColor: colors.primary }]}
+          hitSlop={ADD_SEASON_HIT_SLOP}
           accessibilityRole="button"
           accessibilityLabel="Add Season"
           testID="league-add-season-button"
         >
-          <Ionicons name="add" size={20} color={colors.textInverse} />
+          <Ionicons name="add" size={ADD_ICON_SIZE} color={colors.textInverse} />
           <ThemedText variant="captionBold" style={{ color: colors.textInverse }}>
             Add Season
           </ThemedText>
@@ -271,7 +275,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerContent: {

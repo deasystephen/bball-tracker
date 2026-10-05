@@ -7,11 +7,9 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+  } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import {
   ThemedView,
   ThemedText,
@@ -27,7 +25,7 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getGameResult, getResultColor } from '../../../utils/game-result';
 import { useGoBack } from '../../../hooks/useGoBack';
-import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -177,15 +175,7 @@ export default function GameStatsScreen() {
         ]}
         data-hide-on-print="true"
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" numberOfLines={1}>
             Box Score
@@ -392,7 +382,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },

@@ -10,11 +10,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  TouchableOpacity,
-} from 'react-native';
+  } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import {
   ThemedView,
   ThemedText,
@@ -30,7 +28,7 @@ import { useAuthUser } from '../../../store/auth-store';
 import { canCreateLeagues } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
-import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 export default function CreateLeagueScreen() {
   const router = useRouter();
@@ -101,15 +99,7 @@ export default function CreateLeagueScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2">Create League</ThemedText>
         </View>
@@ -174,7 +164,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginRight: spacing.sm,
     marginLeft: -spacing.xs,
   },

@@ -77,15 +77,17 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding, getResponsiveValue } from '../../../utils/responsive';
-import { touchTargetHitSlop } from '../../../utils/touch-target';
+import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../utils/touch-target';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { BackButton } from '../../../components/BackButton';
 
-/** The header back arrow and the clear-selection icon draw at 32pt (24 + padding); the slop makes them 44pt. */
-const SMALL_ICON_BUTTON_HIT_SLOP = touchTargetHitSlop(24 + 2 * spacing.xs);
+const CLEAR_SELECTION_ICON_SIZE = 24;
+/** The clear-selection icon draws at 32pt (24 + 4pt padding); the slop makes it 44pt. */
+const CLEAR_SELECTION_HIT_SLOP = touchTargetHitSlop(CLEAR_SELECTION_ICON_SIZE + 2 * spacing.xs);
 
 interface ChipPalette {
   success: string;
@@ -716,15 +718,7 @@ export default function ManagePlayersScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={SMALL_ICON_BUTTON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" style={styles.headerTitle}>
             {t('teams.roster')}
@@ -812,11 +806,11 @@ export default function ManagePlayersScreen() {
                     <TouchableOpacity
                       onPress={() => setSelectedPlayer(null)}
                       style={styles.clearSelection}
-                      hitSlop={SMALL_ICON_BUTTON_HIT_SLOP}
+                      hitSlop={CLEAR_SELECTION_HIT_SLOP}
                       accessibilityRole="button"
                       accessibilityLabel={t('players.clearSelectedPlayer')}
                     >
-                      <Ionicons name="close-circle" size={24} color={colors.textTertiary} />
+                      <Ionicons name="close-circle" size={CLEAR_SELECTION_ICON_SIZE} color={colors.textTertiary} />
                     </TouchableOpacity>
                   </View>
                 </Card>
@@ -1186,9 +1180,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  // BackButton draws at 40pt (this header's arrow was 32pt with 8pt after it):
+  // pulled left 4pt with no right margin, the arrow and the title stay put.
   backButton: {
-    padding: spacing.xs,
-    marginRight: spacing.sm,
+    marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,
@@ -1221,8 +1216,8 @@ const styles = StyleSheet.create({
   },
   rowButton: {
     // 44pt minimum touch target (WCAG/HIG)
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

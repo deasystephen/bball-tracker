@@ -11,8 +11,7 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+  } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,7 +32,7 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import type { GameStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../../hooks/useScoreAnnouncement';
-import { HEADER_ICON_HIT_SLOP } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 export default function GameLiveScreen() {
   const router = useRouter();
@@ -103,15 +102,7 @@ export default function GameLiveScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            hitSlop={HEADER_ICON_HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
         </View>
 
@@ -230,7 +221,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerSpacer: {

@@ -14,7 +14,8 @@
     "justNow": "Just now",
     "hoursAgo": "{{count}}h ago",
     "yesterday": "Yesterday",
-    "changePhoto": "Change photo"
+    "changePhoto": "Change photo",
+    "profilePhoto": "Profile Photo"
   },
   "navigation": {
     "home": "Home",
@@ -127,7 +128,9 @@
     "genderBoys": "Boys",
     "genderGirls": "Girls",
     "genderCoed": "Coed",
-    "bracket": "Age group & gender"
+    "bracket": "Age group & gender",
+    "playerCount_one": "{{count}} player",
+    "playerCount_other": "{{count}} players"
   },
   "players": {
     "title": "Players",

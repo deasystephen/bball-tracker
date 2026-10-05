@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 interface PrintButtonProps {
   title?: string;
@@ -122,6 +123,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     gap: spacing.xs,
+    // Web-only, where hitSlop does not apply: the button itself is 44pt tall.
+    minHeight: MIN_TOUCH_TARGET,
   },
   label: {
     marginLeft: spacing.xs,

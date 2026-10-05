@@ -15,7 +15,8 @@
  *
  * Allowed: a screen that renders `ErrorState` under its own header, which
  * stays on screen. It goes on `KEEPS_HEADER` with the reason, and must have a
- * control labelled "Go back" of its own.
+ * control labelled "Go back" of its own: a `<BackButton>` (which carries that
+ * label) or a pressable with `accessibilityLabel="Go back"`.
  */
 
 import fs from 'fs';
@@ -66,7 +67,7 @@ export function scanErrorStates(fileName: string, text: string): Scan {
             line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
           });
         }
-      } else if (/^["']Go back["']$/.test(attributes.get('accessibilityLabel') ?? '')) {
+      } else if (name === 'BackButton' || /^["']Go back["']$/.test(attributes.get('accessibilityLabel') ?? '')) {
         hasOwnBackControl = true;
       }
     }
@@ -191,6 +192,15 @@ describe('full-screen errors on pushed screens', () => {
 
       expect(header.hasOwnBackControl).toBe(true);
       expect(none.hasOwnBackControl).toBe(false);
+    });
+
+    it('counts the shared BackButton as a back control of the screen', () => {
+      const scan = scanErrorStates(
+        'sample.tsx',
+        `const Screen = () => <View><BackButton onPress={back} />{error ? <ErrorState message="Failed" /> : null}</View>;`
+      );
+
+      expect(scan.hasOwnBackControl).toBe(true);
     });
   });
 });

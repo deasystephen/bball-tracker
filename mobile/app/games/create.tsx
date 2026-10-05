@@ -35,7 +35,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
+import { BackButton } from '../../components/BackButton';
 
 export default function CreateGameScreen() {
   const router = useRouter();
@@ -150,15 +150,7 @@ export default function CreateGameScreen() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="close" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} icon="close" />
         <View style={styles.headerContent}>
           <ThemedText variant="h3" numberOfLines={1}>
             New Game
@@ -370,7 +362,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerContent: {

@@ -12,6 +12,7 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import { GUARDIAN_RELATIONSHIPS, relationshipLabel } from '../utils/guardian';
 import type { GuardianRelationship } from '../../shared/types';
+import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 
 export interface RelationshipChipsProps {
   value: GuardianRelationship;
@@ -66,7 +67,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     // 44pt minimum touch target (WCAG/HIG)
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
 });

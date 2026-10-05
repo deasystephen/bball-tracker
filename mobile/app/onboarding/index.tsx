@@ -51,6 +51,12 @@ const SCREENS: OnboardingSlide[] = [
 ];
 
 const ONBOARDED_KEY = 'hasOnboarded';
+/**
+ * Skip is text in the top corner of every slide on first launch. It already
+ * draws 36pt tall (caption + 8pt padding); this slop deliberately gives it
+ * about 60pt, more than the 44pt touchTargetHitSlop would.
+ */
+const SKIP_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -90,7 +96,7 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={styles.skipButton}
             onPress={handleSkip}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            hitSlop={SKIP_HIT_SLOP}
             accessibilityRole="button"
           >
             <Text style={styles.skipText}>Skip</Text>

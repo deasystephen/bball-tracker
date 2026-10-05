@@ -24,6 +24,7 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
 import { useTranslation } from '../../i18n';
 import { captureException } from '../../services/sentry';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 export default function Profile() {
   const router = useRouter();
@@ -613,11 +614,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     flex: 1,
     // 44pt minimum touch target
-    minHeight: 44,
+    minHeight: MIN_TOUCH_TARGET,
   },
   childRowMore: {
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: MIN_TOUCH_TARGET,
+    minHeight: MIN_TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -305,8 +305,11 @@ never inline a role check in a screen:
   pressable sets `accessibilityRole` itself: `"button"`, `"radio"` for one answer out of several (the
   RSVP answers, the "Respond for" chips, the league/season/team pickers in team edit and game
   create), `"link"` for an external URL. An **icon-only** pressable also carries an
-  `accessibilityLabel` (VoiceOver otherwise reads the icon font's glyph); back arrows use the
-  literal `"Go back"`, which ten Maestro flows tap. A **single-choice** pill, chip or radio row marks
+  `accessibilityLabel` (VoiceOver otherwise reads the icon font's glyph). A screen's header back
+  control is `components/BackButton`: it carries the role, the literal label `"Go back"` (which ten
+  Maestro flows tap, and which the ErrorState way-back guard looks for), the 24pt icon (`close` on
+  game create) and `HEADER_ICON_HIT_SLOP`; the caller passes `onPress` (its own `router.back()` or
+  `useGoBack`) and a `style` with only the margins that place it. A **single-choice** pill, chip or radio row marks
   the active one with `accessibilityState={{ selected }}`, never by colour alone (Games filter pills,
   Stats team chips, RSVP answers; `SortPills` is the reference), so VoiceOver reads "selected" and
   Maestro can assert `selected: true` (`.maestro/guardian-rsvp.yaml`). A composite card (game card,
@@ -320,17 +323,22 @@ never inline a role check in a screen:
   `selected` (switching to `"tab"` would gain nothing VoiceOver users need and risks the
   "<Name> tab" labels the flows tap).
 - **Every control is a 44pt touch target (#772, #773).** The minimum lives in
-  `utils/touch-target.ts` (`MIN_TOUCH_TARGET`). Text controls (pills, chips, the RSVP answers, UNDO,
+  `utils/touch-target.ts` (`MIN_TOUCH_TARGET`); no style writes a literal `44` for a size. Text controls (pills, chips, the RSVP answers, UNDO,
   the opponent score buttons) take `minHeight: MIN_TOUCH_TARGET` with `justifyContent: 'center'`.
   An icon button keeps its drawn size and gets `hitSlop={touchTargetHitSlop(<icon> + 2 * <padding>)}`
   (`HEADER_ICON_HIT_SLOP` for the usual 24pt header icon with `padding: spacing.sm`), so neither the
   glyph nor the header around it moves; two icon buttons side by side with little or
   no gap (season edit/delete, game delete/share, the staff and guardian row actions) grow to 44pt
   with `minWidth`/`minHeight` instead, because overlapping slop hands the later sibling the earlier
-  one's taps. `__tests__/a11y/touch-targets.test.ts` works out every icon-only pressable's size from
-  its icon `size`, its `StyleSheet` entry and its `hitSlop` (checking that the size passed to
-  `touchTargetHitSlop` is no larger than the real one) and fails under 44 x 44 or when it cannot
-  tell; text controls are covered by render tests that flatten the style (UndoBanner,
+  one's taps. A wide text pill that is too short takes height-only slop,
+  `touchTargetHitSlop(MIN_TOUCH_TARGET, <height>)` ("Add Season" on league detail). Hoist every slop to
+  a module constant next to the icon-size constant it is computed from. `__tests__/a11y/touch-targets.test.ts`
+  checks every pressable whose first child is an icon, or whose body is only icons in plain views (so
+  the Home bell with its badge too): it works out the size from the icon `size`, the `StyleSheet`
+  entry and the `hitSlop`, resolving names the way the compiler does (enclosing block, module, then
+  named relative imports), checks that the size passed to `touchTargetHitSlop` is no larger than the
+  real one (and says so when it is), and fails under 44 x 44 or when it cannot tell. It also fails on a
+  literal `44` for `minHeight`/`minWidth`/`height`/`width` in any pressable style; text controls are covered by render tests that flatten the style (UndoBanner,
   OpponentScoreButtons, the RSVP picker and the tab pills).
 - `components/Toast.tsx` renders toasts as a flowing column under the safe-area inset (newest at the bottom,
   at most `MAX_VISIBLE_TOASTS = 3`, oldest dropped) so concurrent toasts stack instead of overlapping.

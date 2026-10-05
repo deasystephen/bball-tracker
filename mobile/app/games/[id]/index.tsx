@@ -33,7 +33,8 @@ import { getHorizontalPadding } from '../../../utils/responsive';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
-import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { BackButton } from '../../../components/BackButton';
 
 const getStatusColor = (
   status: GameStatus,
@@ -240,15 +241,7 @@ export default function GameDetailScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            hitSlop={HEADER_ICON_HIT_SLOP}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
+          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
           {/* Scheduled or finished only — deleting mid-tracking is more likely a
               mis-tap than intent (end the game first). Finished-game deletion
@@ -577,7 +570,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerSpacer: {

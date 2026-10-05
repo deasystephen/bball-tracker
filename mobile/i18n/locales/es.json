@@ -14,7 +14,8 @@
     "justNow": "Ahora mismo",
     "hoursAgo": "hace {{count}} h",
     "yesterday": "Ayer",
-    "changePhoto": "Cambiar foto"
+    "changePhoto": "Cambiar foto",
+    "profilePhoto": "Foto de perfil"
   },
   "navigation": {
     "home": "Inicio",
@@ -124,7 +125,9 @@
     "genderBoys": "Niños",
     "genderGirls": "Niñas",
     "genderCoed": "Mixto",
-    "bracket": "Categoría y género"
+    "bracket": "Categoría y género",
+    "playerCount_one": "{{count}} jugador",
+    "playerCount_other": "{{count}} jugadores"
   },
   "players": {
     "title": "Jugadores",

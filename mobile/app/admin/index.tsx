@@ -34,7 +34,8 @@ import {
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { useGoBack } from '../../hooks/useGoBack';
-import { HEADER_ICON_HIT_SLOP } from '../../utils/touch-target';
+import { BackButton } from '../../components/BackButton';
+import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -153,15 +154,7 @@ export default function AdminDashboard() {
           },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          hitSlop={HEADER_ICON_HIT_SLOP}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2">League Management</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
@@ -225,15 +218,14 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   backButton: {
-    padding: spacing.sm,
     marginLeft: -spacing.xs,
   },
   headerContent: {
     flex: 1,
   },
   addButton: {
-    width: 44,
-    height: 44,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
