@@ -45,6 +45,7 @@ import {
   canWriteLeague,
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
+import { createOrConflict } from '../utils/prisma-errors';
 
 /**
  * User shape for roster and staff rows. Exported so game-service's game
@@ -809,16 +810,22 @@ export class TeamService {
       throw new BadRequestError('Player is already on this team');
     }
 
-    // Add player to team
-    const teamMember = await prisma.teamMember.create({
-      data: {
-        teamId,
-        playerId: data.playerId,
-        jerseyNumber: data.jerseyNumber,
-        position: data.position,
-      },
-      include: TEAM_MEMBER_INCLUDE,
-    });
+    // Add player to team; a lost race on @@unique([teamId, playerId]) answers
+    // the pre-check's 400 (#727).
+    const teamMember = await createOrConflict(
+      () =>
+        prisma.teamMember.create({
+          data: {
+            teamId,
+            playerId: data.playerId,
+            jerseyNumber: data.jerseyNumber,
+            position: data.position,
+          },
+          include: TEAM_MEMBER_INCLUDE,
+        }),
+      'Player is already on this team',
+      'TeamMember_teamId_playerId_key'
+    );
 
     logger.info('Roster player added', { teamId, playerId: data.playerId, userId, via: 'existing-user' });
 
@@ -1059,15 +1066,23 @@ export class TeamService {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // Add staff member
-    const teamStaff = await prisma.teamStaff.create({
-      data: {
-        teamId,
-        userId: user.id,
-        roleId: role.id,
-      },
-      include: TEAM_STAFF_INCLUDE,
-    });
+    // Add staff member; a lost race on @@unique([teamId, userId, roleId])
+    // answers the pre-check's 400 (#727). That index includes the role, so only
+    // a same-role duplicate is caught; two concurrent adds with different roles
+    // still leave two rows (one role per user is #463).
+    const teamStaff = await createOrConflict(
+      () =>
+        prisma.teamStaff.create({
+          data: {
+            teamId,
+            userId: user.id,
+            roleId: role.id,
+          },
+          include: TEAM_STAFF_INCLUDE,
+        }),
+      'User is already a staff member of this team',
+      'TeamStaff_teamId_userId_roleId_key'
+    );
 
     // Best-effort push notification; never fails the request.
     try {
@@ -1221,20 +1236,26 @@ export class TeamService {
       throw new BadRequestError('A role with this name already exists');
     }
 
-    // Create the role
-    const role = await prisma.teamRole.create({
-      data: {
-        teamId,
-        type: 'CUSTOM',
-        name: data.name,
-        description: data.description,
-        canManageTeam: data.canManageTeam ?? false,
-        canManageRoster: data.canManageRoster ?? false,
-        canTrackStats: data.canTrackStats ?? false,
-        canViewStats: data.canViewStats ?? true,
-        canShareStats: data.canShareStats ?? false,
-      },
-    });
+    // Create the role; a lost race on @@unique([teamId, name]) answers the
+    // pre-check's 400 (#727).
+    const role = await createOrConflict(
+      () =>
+        prisma.teamRole.create({
+          data: {
+            teamId,
+            type: 'CUSTOM',
+            name: data.name,
+            description: data.description,
+            canManageTeam: data.canManageTeam ?? false,
+            canManageRoster: data.canManageRoster ?? false,
+            canTrackStats: data.canTrackStats ?? false,
+            canViewStats: data.canViewStats ?? true,
+            canShareStats: data.canShareStats ?? false,
+          },
+        }),
+      'A role with this name already exists',
+      'TeamRole_teamId_name_key'
+    );
 
     return role;
   }

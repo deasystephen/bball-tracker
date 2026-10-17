@@ -21,6 +21,8 @@ import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors';
+import { lockUsers } from '../utils/user-row-lock';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -287,7 +289,7 @@ export class GuardianService {
         // Two concurrent invites for the same new guardian email: the loser
         // reuses the winner's row instead of surfacing a 500 (red-team RT8 —
         // same catch-and-reuse as invitation-service).
-        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+        if (!isUniqueViolation(err)) {
           throw err;
         }
         parent = await prisma.user.findFirst({
@@ -332,19 +334,26 @@ export class GuardianService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + GUARDIAN_INVITE_EXPIRES_DAYS);
 
-    const invitation = await prisma.guardianInvitation.create({
-      data: {
-        token,
-        childId: playerId,
-        teamId,
-        invitedEmail: email,
-        relationship: data.relationship,
-        invitedById: userId,
-        expiresAt,
-        status: 'PENDING',
-      },
-      select: GUARDIAN_INVITATION_SELECT,
-    });
+    // The dedupe above and this insert are not one transaction: a request that
+    // loses the race on the partial PENDING index answers the dedupe's 400 (#727).
+    const invitation = await createOrConflict(
+      () =>
+        prisma.guardianInvitation.create({
+          data: {
+            token,
+            childId: playerId,
+            teamId,
+            invitedEmail: email,
+            relationship: data.relationship,
+            invitedById: userId,
+            expiresAt,
+            status: 'PENDING',
+          },
+          select: GUARDIAN_INVITATION_SELECT,
+        }),
+      'A pending guardian invitation already exists for this email',
+      'GuardianInvitation_pending_childId_invitedEmail_key'
+    );
 
     const acceptUrl = `${publicAppUrl()}/invite/${token}`;
     // Awaited so callers can surface a failed send to the coach (unification
@@ -447,20 +456,25 @@ export class GuardianService {
       }
     }
 
-    const link = await prisma.guardian.findUnique({
-      where: { parentId_childId: { parentId: guardianUserId, childId: playerId } },
-    });
+    const link = await prisma.$transaction(async (tx) => {
+      // Lock the child first (#664, `lockUsers`), the same lock accept and
+      // account deletion take, then read the link under it: `isPrimary` read
+      // before the lock can be stale (a concurrent removal may have promoted
+      // this link), and a concurrent accept must not insert a non-primary link
+      // while this removal finds nobody to promote.
+      await lockUsers(tx, [playerId]);
+      const current = await tx.guardian.findUnique({
+        where: { parentId_childId: { parentId: guardianUserId, childId: playerId } },
+      });
+      if (!current) {
+        throw new NotFoundError('Guardian link not found');
+      }
 
-    if (!link) {
-      throw new NotFoundError('Guardian link not found');
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.guardian.delete({ where: { id: link.id } });
-
-      if (link.isPrimary) {
+      await tx.guardian.delete({ where: { id: current.id } });
+      if (current.isPrimary) {
         await GuardianService.promoteNextPrimary(tx, playerId);
       }
+      return current;
     });
 
     logger.info('Guardian unlinked', {
@@ -563,11 +577,24 @@ export class GuardianService {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);
     }
 
-    const rejected = await prisma.guardianInvitation.update({
-      where: { id: invitation.id },
-      data: { status: 'REJECTED' },
-      select: GUARDIAN_INVITATION_SELECT,
-    });
+    // Guarded like accept (#726): the status check above read the row unlocked,
+    // so a concurrent accept may have flipped it since. One conditional UPDATE
+    // (a non-unique filter on `update`): a row no longer PENDING matches
+    // nothing (P2025) and the loser gets a 400 instead of overwriting ACCEPTED
+    // with REJECTED under a live Guardian link.
+    let rejected: GuardianInvitationSummary;
+    try {
+      rejected = await prisma.guardianInvitation.update({
+        where: { id: invitation.id, status: 'PENDING' },
+        data: { status: 'REJECTED' },
+        select: GUARDIAN_INVITATION_SELECT,
+      });
+    } catch (err) {
+      if (isRecordNotFound(err)) {
+        throw new BadRequestError('Cannot reject invitation: it is no longer pending');
+      }
+      throw err;
+    }
 
     logger.info('Guardian invitation declined', {
       invitationId: invitation.id,
@@ -670,7 +697,7 @@ export class GuardianService {
         select,
       });
     } catch (err) {
-      if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+      if (!isUniqueViolation(err)) {
         throw err;
       }
       const winner = await byEmail();
@@ -703,17 +730,23 @@ export class GuardianService {
     const parentId = parent.id;
 
     return prisma.$transaction(async (tx) => {
-      // The parent was resolved outside this transaction, unlocked. Lock the
-      // row (`deletedAt IS NULL`): a deletion that committed in between leaves
-      // no row and a 404, and one that has not started waits on this lock, so
-      // no Guardian link or role write ever lands on a tombstone (#643).
-      // FOR NO KEY UPDATE, not FOR SHARE: this transaction may UPDATE the row
-      // (the PARENT promotion), and two accepts by the same parent that both
-      // held a share lock would deadlock on that upgrade. This lock serialises
-      // them, and still conflicts with deleteAccount's FOR UPDATE.
-      const live = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "User" WHERE "id" = ${parentId} AND "deletedAt" IS NULL FOR NO KEY UPDATE`;
-      if (live.length === 0) {
+      // Lock the child and the parent in ONE sorted statement (`lockUsers`).
+      //  - Child (#664): primacy below is a count-then-insert, and under READ
+      //    COMMITTED two accepts for one child (two parents, two invitations)
+      //    both counted 0 and both inserted isPrimary. removeGuardian and
+      //    account deletion lock the child too, so a removal cannot promote
+      //    nobody while this insert lands as non-primary.
+      //  - Parent (#643): resolved outside this transaction, unlocked. A
+      //    deletion that committed in between leaves no row or a tombstone
+      //    (404), one that has not started waits here, so no Guardian link or
+      //    role write lands on a tombstone. A write lock, not FOR SHARE: this
+      //    transaction may UPDATE the row (the PARENT promotion), and two
+      //    accepts by one parent holding share locks deadlocked on the upgrade.
+      // One statement in id order is a global order: two adults each
+      // accepting to guard the other wait instead of deadlocking.
+      const locked = await lockUsers(tx, [invitation.childId, parentId]);
+      const lockedParent = locked.find((row) => row.id === parentId);
+      if (!lockedParent || lockedParent.deletedAt !== null) {
         throw new NotFoundError('Account not found');
       }
 

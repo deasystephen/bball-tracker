@@ -17,7 +17,8 @@
  *
  *   $transaction
  *   ┌─────────────────────────────────────────────────────────────┐
- *   │ 1  SELECT … FROM "User" WHERE id=$1 FOR UPDATE               │
+ *   │ 1  SELECT … FROM "User" WHERE id=$1 OR id IN (my children)   │
+ *   │    ORDER BY id FOR UPDATE (one statement, global lock order) │
  *   │    already deleted ────────────────────────────────► 404     │
  *   │    mode guardian and (claimed or not managed) ─────► 403     │
  *   │ 2  mode self|operator: lastHeadCoachTeams(active seasons)    │
@@ -164,10 +165,21 @@ export class AccountService {
 
     const committed = await prisma.$transaction(async (tx) => {
       // 1. Lock the row. Concurrent deletes, self-writes and sign-ins serialize here.
+      // The same statement locks every child this user guards (#664): the
+      // purge below removes their links and promotes the next primary, which
+      // must not interleave with an accept or removeGuardian for that child
+      // (both lock the child through `utils/user-row-lock.ts#lockUsers`). One
+      // statement in id order keeps the lock order global, so none of them can
+      // deadlock against this one. The children share FOR UPDATE because one
+      // statement has one strength; it is held only for this transaction.
       const locked = await tx.$queryRaw<LockedUserRow[]>`
         SELECT "id", "email", "workosUserId", "isManaged", "profilePictureUrl", "deletedAt"
-        FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
-      const row = locked[0];
+        FROM "User"
+        WHERE "id" = ${userId}
+           OR "id" IN (SELECT "childId" FROM "Guardian" WHERE "parentId" = ${userId})
+        ORDER BY "id"
+        FOR UPDATE`;
+      const row = locked.find((candidate) => candidate.id === userId);
       if (!row || row.deletedAt !== null) {
         throw new NotFoundError('Account not found');
       }
