@@ -136,6 +136,14 @@ locals {
   # figure is below RAM / 9531392 (about 112 for 1 GiB). These are conservative
   # round-downs; check the live value with `SHOW max_connections;`. An unlisted
   # class falls back to the smallest figure, which errs toward alarming early.
+  #
+  # The app's own connection budget (#751): each API task's pg pool holds at
+  # most 10 connections (DB_POOL_MAX in backend/src/models/pool-config.ts). A
+  # rolling deploy briefly runs two tasks (deployment_maximum_percent = 200)
+  # plus `prisma migrate deploy` from docker/entrypoint.sh, so the app peaks at
+  # 2 x 10 + 1 = 21, well under the 60 threshold below for db.t3.micro.
+  # Exhaustion of one task's pool is invisible to this alarm; it shows as
+  # `"db":"timeout"` on /health instead.
   rds_max_connections_estimate = {
     "db.t3.micro"   = 80
     "db.t4g.micro"  = 80
