@@ -176,8 +176,24 @@ headed **`## Backend / Web — majors (human-owned)`** listing every package
 from "Backend / web majors (report only)" as `<pkg> current → latest`, grouped
 by side, with a one-line unblock note where one is known (the inline list's
 jest and prisma-generator entries keep their notes). Do not attribute these
-sides to Dependabot, which ignores majors on both. Include
-"Last refreshed: YYYY-MM-DD". Skip when `DRY_RUN=true`.
+sides to Dependabot, which ignores majors on both.
+
+It MUST also contain a section headed **`## Infra — Terraform provider and
+Docker images (human-owned)`** (report only; never edit anything under
+`infra/`, `docker/` or `docker-compose.yml`):
+  - `hashicorp/aws <locked> → <latest>`: `<locked>` is the `version` in
+    `infra/.terraform.lock.hcl`; `<latest>` is
+    `curl -s https://registry.terraform.io/v1/providers/hashicorp/aws | jq -r .version`
+    (write "registry unreachable" if the call fails). When the majors differ,
+    note that Dependabot ignores `hashicorp/aws` majors and the migration is
+    tracked in #866 (or the issue the ignore comment in `.github/dependabot.yml`
+    now names).
+  - every open Dependabot PR labelled `infra`
+    (`gh pr list --author app/dependabot --label infra --state open`) as
+    `#<n> <title>`: these wait for a human `terraform plan` or image review.
+  - "nothing deferred" when both lists are empty.
+
+Include "Last refreshed: YYYY-MM-DD". Skip when `DRY_RUN=true`.
 
 ## Step 5 — Expo SDK divergence (informational)
 
