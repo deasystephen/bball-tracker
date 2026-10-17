@@ -12,6 +12,7 @@ import {
   ThemedText,
   Card,
   EmptyState,
+  ErrorState,
   LoadingSpinner,
 } from '../../components';
 import { SeasonAverages, SeasonRecord } from '../../components/stats';
@@ -33,18 +34,39 @@ export default function Stats() {
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
 
-  const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
+  const {
+    data: teams,
+    isLoading: teamsLoading,
+    error: teamsError,
+    refetch: refetchTeams,
+  } = useTeams({ limit: TEAMS_MAX_LIMIT });
   // Only the user's explicit choice lives in state; default to the first team during render
   const [chosenTeamId, setChosenTeamId] = useState<string | null>(null);
   const selectedTeamId = chosenTeamId ?? teams?.[0]?.id ?? null;
   const setSelectedTeamId = setChosenTeamId;
 
-  const { data: seasonStats, isLoading: statsLoading } = useTeamSeasonStats(
-    selectedTeamId || ''
-  );
-  const { data: rosterStats, isLoading: rosterLoading } = useTeamRosterStats(
-    selectedTeamId || ''
-  );
+  const {
+    data: seasonStats,
+    isLoading: statsLoading,
+    error: statsError,
+    refetch: refetchStats,
+  } = useTeamSeasonStats(selectedTeamId || '');
+  const {
+    data: rosterStats,
+    isLoading: rosterLoading,
+    error: rosterError,
+    refetch: refetchRoster,
+  } = useTeamRosterStats(selectedTeamId || '');
+
+  // A failed request is not an empty result (#728). A failed background refetch keeps the
+  // cached data, so the error replaces the content only when there is nothing to show.
+  const statsFailed = Boolean(statsError && !seasonStats);
+  const rosterFailed = Boolean(rosterError && !rosterStats);
+  const teamStatsError = statsFailed ? statsError : rosterFailed ? rosterError : null;
+  const retryTeamStats = () => {
+    if (statsFailed) refetchStats();
+    if (rosterFailed) refetchRoster();
+  };
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId);
   const isLoading = teamsLoading || statsLoading || rosterLoading;
@@ -61,6 +83,25 @@ export default function Stats() {
 
   if (teamsLoading) {
     return <LoadingSpinner message="Loading..." fullScreen />;
+  }
+
+  if (teamsError && !teams) {
+    return (
+      <ThemedView variant="background" style={styles.container}>
+        <View
+          style={[
+            styles.header,
+            { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
+          ]}
+        >
+          <ThemedText variant="h1" heading>Statistics</ThemedText>
+        </View>
+        <ErrorState
+          message={teamsError instanceof Error ? teamsError.message : 'Failed to load teams'}
+          onRetry={refetchTeams}
+        />
+      </ThemedView>
+    );
   }
 
   if (!teams || teams.length === 0) {
@@ -147,7 +188,14 @@ export default function Stats() {
           </View>
         )}
 
-        {isLoading ? (
+        {teamStatsError ? (
+          <ErrorState
+            message={
+              teamStatsError instanceof Error ? teamStatsError.message : 'Failed to load stats'
+            }
+            onRetry={retryTeamStats}
+          />
+        ) : isLoading ? (
           <LoadingSpinner message="Loading stats..." />
         ) : (
           <>

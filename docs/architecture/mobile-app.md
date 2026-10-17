@@ -279,6 +279,10 @@ never inline a role check in a screen:
   authority, not a count here). When there is nothing to
   retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
   Try Again button that left the screen). Tab screens have the tab bar and need nothing.
+  A failed load is never shown as an empty result: the Stats tab renders `ErrorState` with
+  Try Again for a failed teams or team-stats query, keeps the team chips above a per-team
+  failure, and keeps a failed background refetch's cached data on screen (#728;
+  `__tests__/app/stats-tab-states.test.tsx`).
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that
