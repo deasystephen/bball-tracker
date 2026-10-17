@@ -53,8 +53,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   email: 'test@example.com',
   name: 'Test User',
   role: UserRole.COACH,
-  createdAt: new Date('2024-01-01'),
-  updatedAt: new Date('2024-01-01'),
+  createdAt: '2024-01-01T00:00:00.000Z',
   ...overrides,
 });
 

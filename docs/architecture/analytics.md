@@ -89,7 +89,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_role_updated` | a staff member's role changes | `team_id`, `role_type` | `hooks/useTeamStaff.ts` |
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
 | `invitation_sent` | an invitation is created or re-sent | `team_id`, `invitation_id`, `resend`, `email_sent` (null when the player has no email) | `hooks/useInvitations.ts` |
-| `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts`, `hooks/useInvitationByToken.ts` |
+| `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
 | `invitation_declined` | the invitee rejects | `invitation_id` | `hooks/useInvitations.ts` |
 | `invitation_cancelled` | a coach cancels a pending invitation | `team_id`, `invitation_id` | `hooks/useInvitations.ts` |
 | `guardian_invited` | a parent is invited for a roster player | `team_id`, `relationship` | `hooks/useGuardians.ts` |
@@ -140,7 +140,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `role`, `role_type` | enum | global role (`COACH`, …); staff role type (`HEAD_COACH`, `ASSISTANT_COACH`, `TEAM_MANAGER`) |
 | `league_scope` | enum | `personal` (caller's auto-provisioned league) or `league` (an explicit season) |
 | `kind` | enum | invitation model: `team` or `guardian` |
-| `source` | enum | where an invitation was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`) |
+| `source` | enum | where an invitation was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`). The invite screen accepts through `useAcceptInvitation` by id, which reports `in_app` today; nothing emits `link` since the uncalled by-token accept hook was removed (#822) |
 | `by` | enum | how a staff member was identified: `user_id` (picker) or `email` |
 | `relationship` | enum | `MOTHER`, `FATHER`, `GUARDIAN`, `OTHER` |
 | `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted`; HTTP status on `error_shown` |

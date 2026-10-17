@@ -1,18 +1,14 @@
 /**
- * Runtime tests for useInvitationByToken hooks (public invite accept flow).
+ * Runtime tests for useInvitationByToken (public invite lookup).
  */
 
-import { renderHook, waitFor, act } from '@testing-library/react-native';
+import { renderHook, waitFor } from '@testing-library/react-native';
 
-import {
-  useInvitationByToken,
-  useAcceptInvitationByToken,
-} from '../../hooks/useInvitationByToken';
+import { useInvitationByToken } from '../../hooks/useInvitationByToken';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
 
 const mockedGet = apiClient.get as jest.Mock;
-const mockedPost = apiClient.post as jest.Mock;
 
 const pendingInvitation = {
   id: 'inv-1',
@@ -82,59 +78,5 @@ describe('useInvitationByToken runtime', () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.status).toBe('EXPIRED');
-  });
-});
-
-describe('useAcceptInvitationByToken runtime', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('posts to the by-token accept endpoint', async () => {
-    mockedPost.mockResolvedValueOnce({
-      data: { success: true, message: 'Welcome to Lakers' },
-    });
-    const { wrapper } = createQueryWrapper();
-    const { result } = renderHook(() => useAcceptInvitationByToken(), {
-      wrapper,
-    });
-
-    await act(async () => {
-      await result.current.mutateAsync('tok-abc');
-    });
-
-    expect(mockedPost).toHaveBeenCalledWith('/invitations/by-token/tok-abc/accept');
-  });
-
-  it('invalidates both the by-token and the invitations list caches on success', async () => {
-    mockedPost.mockResolvedValueOnce({
-      data: { success: true, message: 'Welcome' },
-    });
-    const { wrapper, client } = createQueryWrapper();
-    const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
-    const { result } = renderHook(() => useAcceptInvitationByToken(), {
-      wrapper,
-    });
-
-    await act(async () => {
-      await result.current.mutateAsync('tok-abc');
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['invitationByToken', 'tok-abc'],
-    });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['invitations'] });
-  });
-
-  it('propagates accept failures to the caller', async () => {
-    mockedPost.mockRejectedValueOnce(new Error('expired token'));
-    const { wrapper } = createQueryWrapper();
-    const { result } = renderHook(() => useAcceptInvitationByToken(), {
-      wrapper,
-    });
-
-    await expect(
-      act(async () => {
-        await result.current.mutateAsync('bad-token');
-      })
-    ).rejects.toThrow('expired token');
   });
 });

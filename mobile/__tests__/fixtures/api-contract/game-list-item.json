@@ -1,0 +1,23 @@
+{
+  "id": "30000000-0000-4000-a000-000000000002",
+  "teamId": "20000000-0000-4000-a000-000000000001",
+  "opponent": "Celtics",
+  "date": "2026-10-12T16:26:06.161Z",
+  "status": "SCHEDULED",
+  "homeScore": 0,
+  "awayScore": 0,
+  "createdAt": "2026-10-04T03:01:22.539Z",
+  "updatedAt": "2026-10-05T16:26:06.162Z",
+  "team": {
+    "id": "20000000-0000-4000-a000-000000000001",
+    "name": "Warriors",
+    "season": {
+      "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+      "name": "Spring 2024",
+      "league": {
+        "id": "10000000-0000-4000-a000-000000000001",
+        "name": "Downtown Youth Basketball League"
+      }
+    }
+  }
+}

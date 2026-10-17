@@ -58,9 +58,26 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 ## Mobile source-scanning guards
 - Guard tests that read mobile source walk it through `mobile/__tests__/helpers/source-files.ts`
   (`MOBILE_ROOT`, `sourceFiles(dir, extensions)`, `scanLines(fileName, text, pattern)`); a new guard uses
-  it rather than copying a walker. Users today: `__tests__/a11y/{nested-pressables,error-state-way-back}`
-  and `__tests__/utils/{game-result-guard,display-name-guard}`. Each guard asserts it scanned a
-  plausible number of files and carries a self-test table of lines it must report and accept.
+  it rather than copying a walker. Users today: `__tests__/a11y/{nested-pressables,error-state-way-back}`,
+  `__tests__/utils/{game-result-guard,display-name-guard}` and `__tests__/types/shared-types-usage`.
+  Each guard asserts it scanned a plausible number of files and carries a self-test table of lines it
+  must report and accept.
+- `__tests__/types/shared-types-usage.test.ts` (#771) fails CI on an export of `shared/types/index.ts`
+  that no mobile app file imports (tests excluded). Only `mobile/` imports that file; delete a dead
+  export rather than keeping it "for later".
+
+## Mobile API contract fixtures (#767)
+- The mobile response types are hand-written; the backend's named `*_SELECT`/`*_INCLUDE` constants are
+  the contract. `mobile/__tests__/types/api-contract.test.ts` assigns JSON payloads recorded from a
+  local backend (`mobile/__tests__/fixtures/api-contract/`: auth session user, `GET /teams` item and
+  detail, `GET /games` item and detail, `GET /invitations` item, `GET /players/:id`) to the client
+  types, so `npm run type-check` fails on a client field the API never sends or one typed non-null
+  where the API sends `null`.
+- Fixtures, not a type import from `backend/src/services`: CI's mobile type-check job installs only
+  `mobile/` dependencies and cannot resolve `@prisma/client`. When a backend constant behind one of
+  these endpoints changes, re-record the fixture in the same PR (run the backend locally, `POST
+  /auth/dev-login` as a seeded user, call the endpoint, trim lists to one or two items) and keep the
+  hand-made null/absent variants the test header lists.
 
 ## Mobile copy & i18n
 - **Screen tests render the real i18n instance.** Never stub `useTranslation` to return the key

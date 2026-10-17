@@ -63,7 +63,7 @@ const teamInviteForChild: TeamInvitation = {
   expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
   createdAt: '',
   updatedAt: '',
-  team: { id: 't2', name: 'Select Team', season: { id: 's', name: '2026', isActive: true, league: { id: 'l', name: 'AAU' } } },
+  team: { id: 't2', name: 'Select Team', season: { id: 's', name: '2026', league: { id: 'l', name: 'AAU' } } },
   player: { id: 'steph', name: 'Steph Curry', email: '' },
   invitedBy: { id: 'coach-2', name: 'Coach Two', email: '' },
 };

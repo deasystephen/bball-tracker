@@ -39,8 +39,7 @@ const baseUser = {
   email: 'a@b.c',
   name: 'Old Name',
   role: UserRole.PLAYER,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 describe('useSessionRefresh', () => {

@@ -21,8 +21,8 @@ import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 interface Player {
   id: string;
   playerId: string;
-  jerseyNumber?: number;
-  position?: string;
+  jerseyNumber?: number | null;
+  position?: string | null;
   player: {
     deletedAt?: string | null;
     id: string;

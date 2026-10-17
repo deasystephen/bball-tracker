@@ -1,0 +1,55 @@
+{
+  "id": "20000000-0000-4000-a000-000000000001",
+  "name": "Warriors",
+  "seasonId": "642eec66-0082-4581-96b5-f0a9c0214afe",
+  "lineageId": "21000000-0000-4000-a000-000000000001",
+  "chatLink": "https://chat.whatsapp.com/warriors-team-chat",
+  "ageGroup": "U14",
+  "gender": "BOYS",
+  "createdAt": "2026-10-04T03:01:22.476Z",
+  "updatedAt": "2026-10-05T16:26:06.104Z",
+  "season": {
+    "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+    "name": "Spring 2024",
+    "league": {
+      "id": "10000000-0000-4000-a000-000000000001",
+      "name": "Downtown Youth Basketball League"
+    }
+  },
+  "staff": [
+    {
+      "id": "1d8244a0-669f-42f7-bf46-b2645444aee4",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "userId": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+      "roleId": "a5f09552-92b7-4748-b69a-12c97b161fc5",
+      "createdAt": "2026-10-04T03:01:22.483Z",
+      "updatedAt": "2026-10-04T03:01:22.483Z",
+      "user": {
+        "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+        "name": "Steve Kerr",
+        "email": "steve.kerr@example.com",
+        "isManaged": false,
+        "deletedAt": null
+      },
+      "role": {
+        "id": "a5f09552-92b7-4748-b69a-12c97b161fc5",
+        "teamId": "20000000-0000-4000-a000-000000000001",
+        "type": "HEAD_COACH",
+        "name": "Head Coach",
+        "description": "Primary team coach with full administrative access",
+        "canManageTeam": true,
+        "canManageRoster": true,
+        "canTrackStats": true,
+        "canViewStats": true,
+        "canShareStats": true,
+        "createdAt": "2026-10-04T03:01:22.479Z",
+        "updatedAt": "2026-10-04T03:01:22.479Z"
+      }
+    }
+  ],
+  "_count": {
+    "members": 8,
+    "staff": 3,
+    "games": 3
+  }
+}

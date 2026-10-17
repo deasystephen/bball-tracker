@@ -32,7 +32,6 @@ export interface TeamInvitation {
     season: {
       id: string;
       name: string;
-      isActive: boolean;
       league: {
         id: string;
         name: string;
@@ -42,14 +41,15 @@ export interface TeamInvitation {
   player: {
     id: string;
     name: string;
-    email?: string | null;
+    /** `User.email` is nullable (managed players, tombstones). */
+    email: string | null;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
   };
   invitedBy: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
   };
