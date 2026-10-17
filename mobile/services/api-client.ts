@@ -7,8 +7,9 @@ import { trackEvent, AnalyticsEvents } from './analytics';
 
 /**
  * API client configuration. The base URL is decided in one place,
- * `config/env.ts#getApiUrl()` (extra.apiUrl from app.config.js, else the dev
- * server under __DEV__, else the production API).
+ * `config/env.ts#getApiUrl()` (extra.apiUrl from app.config.js unless it is a
+ * loopback host in a release bundle, else the dev server under __DEV__, else
+ * the production API).
  */
 const getBaseURL = (): string => getApiUrl();
 
