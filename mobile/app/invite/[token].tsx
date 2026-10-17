@@ -20,6 +20,7 @@ import { setPendingReturnPath } from '../../utils/return-path';
 import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import { AxiosError } from 'axios';
+import { formatCalendarDate } from '../../utils/format-date';
 
 export default function InviteDeepLinkScreen() {
   const { token } = useLocalSearchParams<{ token: string }>();
@@ -60,11 +61,7 @@ export default function InviteDeepLinkScreen() {
     : '';
 
   function formatExpiry(expiresAt: string) {
-    return new Date(expiresAt).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    return formatCalendarDate(expiresAt);
   }
 
   async function handleAccept() {

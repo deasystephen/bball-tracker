@@ -60,6 +60,17 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/relative-time.ts#formatRelativeTime`, never an inline helper. Tests:
   `__tests__/app/announcement-thread.test.tsx`, `__tests__/hooks/useAnnouncementReplies.runtime.test.tsx`,
   `__tests__/app/profile-reply-notifications.test.tsx`; Maestro `.maestro/announcement-reply.yaml`.
+- **Dates and times** (#769): every date or time string goes through `utils/format-date.ts`
+  (`formatShortDate`, `formatLongDate`, `formatCalendarDate`, `formatSeasonDate`, `formatMonthDay`,
+  `formatMonthShort`, `formatNumericDate`, `formatDateTime`, `formatClockTime`; add a shape there
+  when none fits). The locale is the device's full tag (`es-ES`, `en-GB`) from expo-localization's
+  `getLocales()[0]?.languageTag`, the same call `i18n/config.ts` makes for the app language, read on
+  every call (an Android language change can keep the JS runtime alive) and `undefined` (runtime
+  default) when the device reports none; i18next's bare `en` would give an `en-GB` device a 12-hour
+  clock. `__tests__/utils/date-locale-guard.test.ts` parses mobile source and fails CI on any
+  `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` or `Intl.DateTimeFormat` call outside
+  the helper. `jest.setup.js` pins the tag to `en-US`; `__tests__/utils/format-date.test.ts` proves
+  `en-US`, `en-GB` and `es-ES` render differently.
 - Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
   `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
 - `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`

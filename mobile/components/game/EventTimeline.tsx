@@ -13,20 +13,12 @@ import { spacing } from '../../theme';
 import { formatShotDescription } from '../../utils/shot-label';
 import type { GameEvent, ShotMetadata, ReboundMetadata } from '../../types/game';
 import { displayName } from '../../utils/display-name';
+import { formatClockTime } from '../../utils/format-date';
 
 interface EventTimelineProps {
   events: GameEvent[];
   maxEvents?: number;
 }
-
-const formatTime = (timestamp: string): string => {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-};
 
 const getEventDescription = (event: GameEvent): string => {
   switch (event.eventType) {
@@ -143,7 +135,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
               {displayName(item.player) || 'Unknown Player'}
             </ThemedText>
             <ThemedText variant="caption" color="textTertiary">
-              {formatTime(item.timestamp || item.createdAt)}
+              {formatClockTime(item.timestamp || item.createdAt, { seconds: true })}
             </ThemedText>
           </View>
           <ThemedText variant="caption" color="textSecondary">
