@@ -27,8 +27,10 @@ Removing the last guardian never deletes the child.
   to … failed to send.") instead of "Invitation sent" when it is `false`, like the roster flows (#770). The
   screen has no resend yet (#420), so the toast does not point at one.
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
-  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `teamName`, `inviterName`,
-  `relationship`, `status`, `expiresAt`) and `POST /invitations/by-token/:token/accept` returns
+  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `childDeletedAt`, `teamName`,
+  `inviterName`, `inviterDeletedAt`, `relationship`, `status`, `expiresAt`; the two `…DeletedAt` fields are
+  ISO strings or `null`, the tombstone signals for the names, #813, and the `guardianInvitations` items on
+  `GET /invitations` have the same shape) and `POST /invitations/by-token/:token/accept` returns
   `{ kind: 'guardian', invitation, guardian }` — acceptance creates the `Guardian` row inside one
   `$transaction` guarded by `updateMany … WHERE status = 'PENDING'` (loser of a race gets 400).
   Authenticated `POST /invitations/:id/accept|reject` try the id as a `GuardianInvitation` first and require
@@ -48,7 +50,7 @@ Removing the last guardian never deletes the child.
   on the upgrade; now they serialise; the `PARENT` promotion is `updateMany({ where: { id,
   deletedAt: null } })` and zero rows aborts the transaction, so no `Guardian` row ever points at a
   tombstone.
-- **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
+- **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, deletedAt, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).
 - **What a guardian can do.** `utils/permissions.ts`: `isGuardianOf(userId, childId)`,
@@ -63,7 +65,8 @@ Removing the last guardian never deletes the child.
   default scope includes the caller's children, and `listInvitations?playerId=` accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
   /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on
   the coach-only team-member route). `GET /auth/me`, `/auth/callback` and `/auth/dev-login` add
-  `user.guardianOf: { childId, childName, relationship, isPrimary, isManaged, teams: { id, name }[] }[]`.
+  `user.guardianOf: { childId, childName, childDeletedAt, relationship, isPrimary, isManaged, teams: { id, name }[] }[]`
+  (`childDeletedAt` is the ISO tombstone signal for `childName`, #813).
   `isManaged` is true only for a managed child with no login (`isManaged && workosUserId === null`), the
   only record a guardian may delete (`DELETE /players/:id/account`, see `account-deletion.md`); `teams`
   lists the child's current team memberships and drives the Profile "Manage guardians" deep link

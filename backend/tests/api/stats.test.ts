@@ -68,6 +68,7 @@ describe('Stats API', () => {
         {
           playerId: TEST_PLAYER_ID,
           playerName: 'John Doe',
+          playerDeletedAt: null,
           jerseyNumber: 23,
           position: 'Guard',
           points: 25,
@@ -96,6 +97,7 @@ describe('Stats API', () => {
   const mockPlayerGameStats = {
     playerId: TEST_PLAYER_ID,
     playerName: 'John Doe',
+    playerDeletedAt: null,
     jerseyNumber: 23,
     position: 'Guard',
     points: 25,

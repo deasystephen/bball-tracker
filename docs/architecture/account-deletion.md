@@ -61,7 +61,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   one of them: rosters and staff on `GET /teams/:id` and `GET /games/:id`, `player` and
   `invitedBy` on `GET /invitations` and `GET /invitations/:id`, staff and members on
   `GET /seasons/:id` and `GET /leagues/:id`, league admins, `user` on `GET /games/:gameId/rsvps`,
-  `author` on announcements and replies, and the box-score and season-stats player (flattened as
+  `author` on announcements and replies, guardian rows on the guardians list (flattened as `deletedAt`
+  next to `name`), the guardian links in the data-subject export, and the box-score and season-stats player (flattened as
   `playerDeletedAt` next to `playerName`; `GET /stats/players/:id` returns the `player` object). So
   clients derive a "Deleted" chip and a localized label. The email variant goes only where the
   email rule in `authorization.md` allows it (staff for every team member; roster `player.email`
@@ -69,12 +70,14 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   which removes only the email and its delivery state, and RSVP `user.email` by `toRsvpView`).
   Game event players use `game-event-service.ts#EVENT_PLAYER_SELECT`, an alias of
   `USER_SUMMARY_SELECT`, on the REST payloads, the `game-event` socket broadcast and the socket
-  join snapshot. `tests/utils/user-select-guard.test.ts` fails on any inline `select` with
-  `name: true` on a `user`, `player`, `author` or `invitedBy` key in `backend/src/` that neither
-  selects `deletedAt: true` nor spreads a `USER_SUMMARY` constant.
+  join snapshot. `tests/utils/user-select-guard.test.ts` fails on any `select` with `name: true`
+  on a `User` relation key in `backend/src/` (the keys are read from `prisma/schema.prisma`: every field
+  typed `User`, `User?` or `User[]`) that neither selects `deletedAt: true` nor spreads a `USER_SUMMARY`
+  constant; a `select: SOME_CONSTANT` declared in the same file is checked through its body.
   The public `GET /invitations/by-token/:token` carries `inviterDeletedAt` next to `inviterName`
   for team invitations (#642) and guardian invitations, and so do the `guardianInvitations` items
-  on `GET /invitations` (#813). Pickers (`listPlayers`, `getPlayerById`, staff lookup, `dev-users`, `dev-login`)
+  on `GET /invitations` (#813). Guardian invitations and `guardianOf` also carry `childDeletedAt` next
+  to `childName`. Pickers (`listPlayers`, `getPlayerById`, staff lookup, `dev-users`, `dev-login`)
   filter tombstones out. `guardianOf[].isManaged` tells the app which
   child records a guardian may delete.
 - Retention statement for #25 is in the runbook ("Retention"): tombstone keeps id/role/dates; stats

@@ -224,7 +224,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
                 status: args.create.status,
                 createdAt: new Date('2026-10-01T00:00:00Z'),
                 updatedAt: new Date('2026-10-01T00:00:00Z'),
-                user: { ...user, profilePictureUrl: null, deletedAt: null },
+                user: { ...user, profilePictureUrl: null, isManaged: false, deletedAt: null },
               },
               args.include
             )
@@ -245,7 +245,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.rsvp.userId).toBe(CHILD.id);
-      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name, deletedAt: null });
+      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name, isManaged: false, deletedAt: null });
     });
 
     it('a guardian who is also the head coach keeps the child\'s email (roster manager)', async () => {
@@ -259,7 +259,13 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
         .send({ status: 'YES', playerId: CHILD.id });
 
       expect(response.status).toBe(200);
-      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name, email: CHILD.email, deletedAt: null });
+      expect(response.body.rsvp.user).toEqual({
+        id: CHILD.id,
+        name: CHILD.name,
+        email: CHILD.email,
+        isManaged: false,
+        deletedAt: null,
+      });
     });
 
     it('a self RSVP still returns the caller\'s own email', async () => {
@@ -270,7 +276,13 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       const response = await request(app).post(`/api/v1/games/${GAME_ID}/rsvp`).send({ status: 'NO' });
 
       expect(response.status).toBe(200);
-      expect(response.body.rsvp.user).toEqual({ id: PLAYER.id, name: PLAYER.name, email: PLAYER.email, deletedAt: null });
+      expect(response.body.rsvp.user).toEqual({
+        id: PLAYER.id,
+        name: PLAYER.name,
+        email: PLAYER.email,
+        isManaged: false,
+        deletedAt: null,
+      });
     });
   });
 
@@ -497,6 +509,103 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
         name: 'Deleted user',
         isManaged: false,
         deletedAt: DELETED_AT.toISOString(),
+      });
+    });
+
+    it('GET /teams/:teamId/members/:playerId/guardians gives the guardian row its deletedAt', async () => {
+      callerId = PARENT.id;
+      givenTeamStanding({ coach: [COACH.id], member: [CHILD.id], guardianOf: { [PARENT.id]: CHILD.id } });
+      givenStaffRows([COACH.id]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          include(
+            {
+              id: 'g-1',
+              parentId: PARENT.id,
+              childId: CHILD.id,
+              relationship: 'MOTHER',
+              isPrimary: true,
+              createdAt: new Date('2026-09-01T00:00:00Z'),
+              parent: { ...PARENT, isManaged: false, deletedAt: null },
+            },
+            args.include as Spec
+          ),
+        ])
+      );
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      const response = await request(app).get(`/api/v1/teams/${TEAM_ID}/members/${CHILD.id}/guardians`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.guardians[0]).toMatchObject({ userId: PARENT.id, name: PARENT.name, deletedAt: null });
+      // A guardian (not a roster manager) never sees guardian emails.
+      expect(response.body.guardians[0]).not.toHaveProperty('email');
+    });
+
+    it('GET /invitations/by-token/:token gives a guardian invitation childDeletedAt and inviterDeletedAt', async () => {
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve(
+          project(
+            {
+              id: 'gi-1',
+              status: 'PENDING',
+              relationship: 'MOTHER',
+              expiresAt: new Date('2026-12-01T00:00:00Z'),
+              child: { ...deletedTeammate },
+              team: { name: 'Hoops' },
+              invitedBy: { ...COACH, isManaged: false, deletedAt: DELETED_AT },
+            },
+            args.select as Spec
+          )
+        )
+      );
+
+      const response = await request(app).get('/api/v1/invitations/by-token/guardian-token-813');
+
+      expect(response.status).toBe(200);
+      expect(response.body.invitation).toMatchObject({
+        kind: 'guardian',
+        childName: 'Deleted user',
+        childDeletedAt: DELETED_AT.toISOString(),
+        inviterName: COACH.name,
+        inviterDeletedAt: DELETED_AT.toISOString(),
+      });
+      expect(JSON.stringify(response.body)).not.toContain(COACH.email);
+    });
+
+    it('GET /invitations gives guardianInvitations items childDeletedAt and inviterDeletedAt', async () => {
+      callerId = PARENT.id;
+      givenTeamStanding({});
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          project(
+            {
+              id: 'gi-1',
+              status: 'PENDING',
+              relationship: 'MOTHER',
+              expiresAt: new Date('2026-12-01T00:00:00Z'),
+              child: { ...deletedTeammate },
+              team: { name: 'Hoops' },
+              invitedBy: { ...COACH, isManaged: false, deletedAt: null },
+            },
+            args.select as Spec
+          ),
+        ])
+      );
+
+      const response = await request(app).get('/api/v1/invitations');
+
+      expect(response.status).toBe(200);
+      expect(response.body.guardianInvitations).toHaveLength(1);
+      expect(response.body.guardianInvitations[0]).toMatchObject({
+        childName: 'Deleted user',
+        childDeletedAt: DELETED_AT.toISOString(),
+        inviterName: COACH.name,
+        inviterDeletedAt: null,
       });
     });
   });

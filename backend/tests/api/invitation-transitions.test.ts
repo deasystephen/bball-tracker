@@ -278,6 +278,7 @@ describe('invitation transitions through the real InvitationService (#766)', () 
         id: INVITATION_ID,
         status: 'PENDING',
         childName: 'Player',
+        childDeletedAt: null,
         teamName: 'Lakers',
         inviterName: 'Coach',
         inviterDeletedAt: null,

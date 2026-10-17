@@ -16,7 +16,7 @@ export interface PlayerGameStats {
   playerId: string;
   playerName: string;
   /** Tombstone signal for `playerName` (#813): label from this, never the name. */
-  playerDeletedAt?: Date | null;
+  playerDeletedAt: Date | null;
   jerseyNumber?: number;
   position?: string;
   points: number;

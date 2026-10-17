@@ -640,7 +640,7 @@ describe('Auth API', () => {
       mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...mockUser, role: 'PARENT' });
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([
-        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One', isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 'team-1', name: 'Warriors' } }] } },
+        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One', deletedAt: new Date('2026-09-02T00:00:00.000Z'), isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 'team-1', name: 'Warriors' } }] } },
       ]);
 
       const response = await request(app)
@@ -649,7 +649,16 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.user.guardianOf).toEqual([
-        { childId: 'child-1', childName: 'Kid One', relationship: 'MOTHER', isPrimary: true, isManaged: true, teams: [{ id: 'team-1', name: 'Warriors' }] },
+        {
+          childId: 'child-1',
+          childName: 'Kid One',
+          // Tombstone signal for the child's name (#813).
+          childDeletedAt: '2026-09-02T00:00:00.000Z',
+          relationship: 'MOTHER',
+          isPrimary: true,
+          isManaged: true,
+          teams: [{ id: 'team-1', name: 'Warriors' }],
+        },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'user-1' } })

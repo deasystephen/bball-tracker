@@ -34,3 +34,4 @@ export const USER_SUMMARY_WITH_EMAIL_SELECT = {
 } satisfies Prisma.UserSelect;
 
 export type UserSummary = Prisma.UserGetPayload<{ select: typeof USER_SUMMARY_SELECT }>;
+export type UserSummaryWithEmail = Prisma.UserGetPayload<{ select: typeof USER_SUMMARY_WITH_EMAIL_SELECT }>;
