@@ -90,10 +90,14 @@ Step 2a and the Step 3 gate):
   major and point it at another.
 - **Don't add inert entries.** If every consumer of the old line already resolves to a patched
   version with no override, there is nothing to add. #779 removed eleven such entries.
-- **Retire dead entries.** The scan also removes an override whose target has left the tree: for
-  every override key on every side it runs `npm ls <pkg> --all`, and an `(empty)` result makes the
-  removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides"). #777
-  retired the backend's `hono`, `@hono/node-server` and `fast-xml-builder` entries this way.
+- **Retire dead entries.** The scan also removes an override whose target has left the tree, and
+  makes the removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides").
+  It probes the lockfile, never the installed tree, because `npm ci` on the Linux runner skips
+  `os`/`cpu`-gated optional packages (sharp's `@img/*`) and would make a live override look dead:
+  `npm ls <pkg> --all --package-lock-only` for a bare key, `npm ls "<pkg>@<range>" --all
+  --package-lock-only` for a version-keyed one, and, for a nested `"<parent>": { … }` entry,
+  whether the target still appears under `<parent>` in that tree. #777 retired the backend's
+  `hono`, `@hono/node-server` and `fast-xml-builder` entries.
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but

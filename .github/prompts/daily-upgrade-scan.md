@@ -110,18 +110,30 @@ under ⏸ only):
 
 ### Retire dead overrides (all sides)
 
-For every key in `backend/`, `web/` and `mobile/` `package.json#overrides`
-(top-level keys, and each nested key inside a parent block), run from that
-side's directory after `npm ci`:
+For every entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
+probe the LOCKFILE from that side's directory (`--package-lock-only`, never the
+installed tree: `npm ci` on this Linux runner skips `os`/`cpu`-gated optional
+packages such as sharp's `@img/*`, which would then look absent):
 
-  npm ls <pkg> --all          # for "<pkg>@^<major>" keys, ls the bare <pkg>
+  - bare root key `"<pkg>"`:
+      npm ls <pkg> --all --package-lock-only
+    dead when it prints `(empty)`.
+  - version-keyed key `"<pkg>@<range>"` (root or nested):
+      npm ls "<pkg>@<range>" --all --package-lock-only
+    dead when it prints `(empty)` (copies of `<pkg>` in other majors do not
+    keep it alive).
+  - nested key `"<parent>": { "<key>": … }`: run `npm ls <parent> --all
+    --package-lock-only` and look at the subtree under each `<parent>` copy.
+    Dead when `<parent>` is absent, or when no `<pkg>` (matching `<range>`
+    for a version-keyed `<key>`) appears anywhere beneath it. A copy of
+    `<pkg>` elsewhere in the tree does not keep a nested entry alive. When a
+    whole parent block is dead, remove the block.
 
-When it prints `(empty)` the target has left the tree and the entry is dead:
-it would silently pin any future consumer of that package. Remove the entry
-→ AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
-branch, Step 3). Remove nothing whose `npm ls` shows any copy, even one that
-already satisfies the floor; that is a human call. Name each removed key in the
-PR body and on the 🟢 line of the daily log ("override retired: <pkg>").
+A dead entry would silently pin any future consumer of that package. Removing
+it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
+branch, Step 3). Remove nothing a probe above still finds, even a copy that
+already satisfies the floor; that is a human call. Name each removed entry in
+the PR body and on the 🟢 line of the daily log ("override retired: <entry>").
 
 ### Mobile patch bumps
 

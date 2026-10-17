@@ -1,19 +1,19 @@
 /**
  * Shared helpers for the source-scanning guard tests under `tests/utils/`
  * (`email-match-guard`, `user-write-guard`, `route-catch-log-guard`,
- * `prisma-mock-coverage-guard`) and `tests/guards/unused-dependencies`.
- * Call them from a `beforeAll`, never at collection time, so
- * `--testPathPattern` runs that skip a guard do not walk the tree.
+ * `prisma-mock-coverage-guard`, `unused-dependencies-guard`). Call them from
+ * a `beforeAll`, never at collection time, so `--testPathPattern` runs that
+ * skip a guard do not walk the tree.
  */
 import { readdirSync } from 'fs';
 import path from 'path';
 
-/** Every `.ts` file under `dir`, recursively. */
-export function sourceFiles(dir: string): string[] {
+/** Every file under `dir` with one of `extensions` (default `.ts`), recursively. */
+export function sourceFiles(dir: string, extensions: readonly string[] = ['.ts']): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(full);
-    return entry.isFile() && entry.name.endsWith('.ts') ? [full] : [];
+    if (entry.isDirectory()) return sourceFiles(full, extensions);
+    return entry.isFile() && extensions.some((ext) => entry.name.endsWith(ext)) ? [full] : [];
   });
 }
 
