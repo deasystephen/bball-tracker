@@ -21,9 +21,11 @@ const getApiUrl = () => {
   if (IS_PRODUCTION) return process.env.API_URL || PRODUCTION_API_URL;
   if (IS_PREVIEW) return process.env.API_URL || PRODUCTION_API_URL;
   // A local Release build (APP_ENV unset) ignores the loopback default at
-  // runtime and calls production (#721); API_URL=http://<lan-ip>:3000 points
-  // it at a development backend on purpose.
-  return process.env.API_URL || 'http://127.0.0.1:3000';
+  // runtime and calls production (#721); LOCAL_API_URL=http://<lan-ip>:3000
+  // points it at a development backend on purpose. Deliberately not API_URL:
+  // an API_URL exported in a shell must never reach an OTA published with
+  // APP_ENV unset, where the loopback default is what the runtime guard catches.
+  return process.env.LOCAL_API_URL || 'http://127.0.0.1:3000';
 };
 
 const getAmplitudeApiKey = () => {

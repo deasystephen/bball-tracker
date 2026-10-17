@@ -117,7 +117,7 @@ describe('config/env getApiUrl()', () => {
       'https://api.example.test/127.0.0.1',
       'https://api.example.test/?next=http://localhost',
       // A LAN host stays allowed in release on purpose: it is how a local
-      // Release build is pointed at a development backend (API_URL).
+      // Release build is pointed at a development backend (LOCAL_API_URL).
       'http://192.168.1.20:3000',
       'http://devbox.local:3000',
     ])(

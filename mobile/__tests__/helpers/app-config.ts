@@ -50,6 +50,7 @@ interface ConfigPlugins {
 export const PUBLISH_ENV_KEYS = [
   'APP_ENV',
   'API_URL',
+  'LOCAL_API_URL',
   'SENTRY_DSN',
   'SENTRY_ENVIRONMENT',
   'SENTRY_RELEASE',

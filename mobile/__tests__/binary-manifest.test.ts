@@ -560,6 +560,7 @@ function writeManifest(manifest: BinaryManifest): void {
       {
         APP_ENV: 'preview',
         API_URL: 'https://override.example.test',
+        LOCAL_API_URL: 'http://192.168.1.20:3000',
         SENTRY_DSN: 'https://key@o0.ingest.example.test/1',
         SENTRY_ENVIRONMENT: 'preview',
         SENTRY_RELEASE: 'release-x',

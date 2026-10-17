@@ -10,7 +10,7 @@ import { log } from '../services/log';
  * Resolution order:
  *   1. `extra.apiUrl` from app.config.js — set at build/OTA publish time from
  *      APP_ENV (production/preview → the production API, otherwise the local
- *      dev server, or API_URL when set); `__tests__/app-config.test.ts` pins
+ *      dev server, or LOCAL_API_URL when set); `__tests__/app-config.test.ts` pins
  *      that mapping. A release bundle (`!__DEV__`) ignores a loopback value
  *      (`isLoopbackUrl`) and uses the production API instead (#721): an OTA
  *      published with APP_ENV unset ships the dev host (see
@@ -18,7 +18,8 @@ import { log } from '../services/log';
  *      release bundle has a reason to call the phone's own loopback. A LAN
  *      host (192.168.x.y, a .local name, …) stays allowed in release on
  *      purpose: it is how a local Release build is pointed at a development
- *      backend (`API_URL=http://<lan-ip>:3000`), never by accident.
+ *      backend (`LOCAL_API_URL=http://<lan-ip>:3000`), never by accident:
+ *      a shell's `API_URL` does not reach the dev branch of app.config.js.
  *   2. Otherwise the dev server when `__DEV__`, else the production API.
  *
  * The device cannot report a mis-published manifest by itself (it also has no

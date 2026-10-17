@@ -89,10 +89,17 @@ describe('app.config.js', () => {
 
   // #721: a release bundle ignores a loopback apiUrl and calls production, so
   // a local Release build needs a way to reach a development backend.
-  it('APP_ENV unset + API_URL → that host (a local Release build pointed at a LAN backend)', async () => {
-    const cfg = await loadConfig({ API_URL: 'http://192.168.1.20:3000' });
+  it('APP_ENV unset + LOCAL_API_URL → that host (a local Release build pointed at a LAN backend)', async () => {
+    const cfg = await loadConfig({ LOCAL_API_URL: 'http://192.168.1.20:3000' });
     expect(cfg.expo.extra.apiUrl).toBe('http://192.168.1.20:3000');
     expect(cfg.expo.extra.appEnv).toBe('development');
+  });
+
+  it('APP_ENV unset + API_URL → still the loopback default the runtime guard catches', async () => {
+    // An API_URL exported in a shell must not reach an OTA published without
+    // the production environment: a LAN host would pass the runtime guard.
+    const cfg = await loadConfig({ API_URL: 'http://192.168.1.20:3000' });
+    expect(cfg.expo.extra.apiUrl).toBe('http://127.0.0.1:3000');
   });
 
   it('API_URL overrides the host in production and preview', async () => {
