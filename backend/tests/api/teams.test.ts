@@ -588,6 +588,9 @@ describe('Teams API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Team deleted successfully');
+      // Usage-cache invalidation lives in the service (#658): the route only
+      // has to reach it with the caller.
+      expect(mockTeamService.deleteTeam).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
     });
 
     it('should return 404 for non-existent team', async () => {

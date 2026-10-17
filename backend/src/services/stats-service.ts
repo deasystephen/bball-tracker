@@ -144,6 +144,66 @@ export function perGame(total: number, games: number): number {
   return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
 }
 
+/** The summed counting stats every season / career aggregation derives its averages from. */
+type AveragedTotals = Pick<
+  PlayerGameStats,
+  | 'points'
+  | 'rebounds'
+  | 'assists'
+  | 'steals'
+  | 'blocks'
+  | 'turnovers'
+  | 'fieldGoalsMade'
+  | 'fieldGoalsAttempted'
+  | 'threePointersMade'
+  | 'threePointersAttempted'
+  | 'freeThrowsMade'
+  | 'freeThrowsAttempted'
+>;
+
+type DerivedPlayerAverages = Pick<
+  AggregatedPlayerStats,
+  | 'fieldGoalPercentage'
+  | 'threePointPercentage'
+  | 'freeThrowPercentage'
+  | 'pointsPerGame'
+  | 'reboundsPerGame'
+  | 'assistsPerGame'
+  | 'stealsPerGame'
+  | 'blocksPerGame'
+  | 'turnoversPerGame'
+  | 'efficiency'
+>;
+
+/**
+ * Percentages, per-game averages and efficiency for one player's summed
+ * totals over `gamesPlayed` games. The one place the season, roster, overall
+ * and career aggregations derive them, all through `shootingPercentage` and
+ * `perGame` (#682).
+ *
+ * EFF = (PTS + REB + AST + STL + BLK - missed FG - missed FT - TO) / games.
+ */
+function derivePlayerAverages(totals: AveragedTotals, gamesPlayed: number): DerivedPlayerAverages {
+  const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
+  const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
+  return {
+    fieldGoalPercentage: shootingPercentage(totals.fieldGoalsMade, totals.fieldGoalsAttempted),
+    threePointPercentage: shootingPercentage(totals.threePointersMade, totals.threePointersAttempted),
+    freeThrowPercentage: shootingPercentage(totals.freeThrowsMade, totals.freeThrowsAttempted),
+    pointsPerGame: perGame(totals.points, gamesPlayed),
+    reboundsPerGame: perGame(totals.rebounds, gamesPlayed),
+    assistsPerGame: perGame(totals.assists, gamesPlayed),
+    stealsPerGame: perGame(totals.steals, gamesPlayed),
+    blocksPerGame: perGame(totals.blocks, gamesPlayed),
+    turnoversPerGame: perGame(totals.turnovers, gamesPlayed),
+    efficiency: perGame(
+      totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
+        missedFG - missedFT - totals.turnovers,
+      gamesPlayed
+    ),
+  };
+}
+
 /**
  * Clock for the `finalizeGameStats` transaction. It covers the wait for the
  * game-row lock (queued behind in-flight event writes), two reads and four
@@ -309,15 +369,9 @@ export class StatsService {
       stats.fieldGoalsAttempted = totalFGAttempted;
       stats.fieldGoalsMade = totalFGMade;
 
-      stats.fieldGoalPercentage = totalFGAttempted > 0
-        ? Math.round((totalFGMade / totalFGAttempted) * 1000) / 10
-        : 0;
-      stats.threePointPercentage = stats.threePointersAttempted > 0
-        ? Math.round((stats.threePointersMade / stats.threePointersAttempted) * 1000) / 10
-        : 0;
-      stats.freeThrowPercentage = stats.freeThrowsAttempted > 0
-        ? Math.round((stats.freeThrowsMade / stats.freeThrowsAttempted) * 1000) / 10
-        : 0;
+      stats.fieldGoalPercentage = shootingPercentage(totalFGMade, totalFGAttempted);
+      stats.threePointPercentage = shootingPercentage(stats.threePointersMade, stats.threePointersAttempted);
+      stats.freeThrowPercentage = shootingPercentage(stats.freeThrowsMade, stats.freeThrowsAttempted);
     }
 
     return Array.from(playerStatsMap.values()).sort((a, b) => b.points - a.points);
@@ -369,15 +423,9 @@ export class StatsService {
     }
 
     // Calculate percentages
-    totals.fieldGoalPercentage = totals.fieldGoalsAttempted > 0
-      ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10
-      : 0;
-    totals.threePointPercentage = totals.threePointersAttempted > 0
-      ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10
-      : 0;
-    totals.freeThrowPercentage = totals.freeThrowsAttempted > 0
-      ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10
-      : 0;
+    totals.fieldGoalPercentage = shootingPercentage(totals.fieldGoalsMade, totals.fieldGoalsAttempted);
+    totals.threePointPercentage = shootingPercentage(totals.threePointersMade, totals.threePointersAttempted);
+    totals.freeThrowPercentage = shootingPercentage(totals.freeThrowsMade, totals.freeThrowsAttempted);
 
     return totals;
   }
@@ -655,36 +703,6 @@ export class StatsService {
       totals.freeThrowsAttempted += stat.freeThrowsAttempted;
     }
 
-    // Calculate percentages
-    const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
-      ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10
-      : 0;
-    const threePointPercentage = totals.threePointersAttempted > 0
-      ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10
-      : 0;
-    const freeThrowPercentage = totals.freeThrowsAttempted > 0
-      ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10
-      : 0;
-
-    // Calculate per-game averages
-    const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
-    const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
-    const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
-    const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
-    const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
-    const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
-
-    // Calculate efficiency
-    // EFF = (PTS + REB + AST + STL + BLK - Missed FG - Missed FT - TO) / Games
-    const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
-    const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
-    const efficiency = gamesPlayed > 0
-      ? Math.round(
-          ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
-            missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
-        ) / 10
-      : 0;
-
     return {
       playerId: player.id,
       playerName: player.name,
@@ -693,17 +711,8 @@ export class StatsService {
       ...totals,
       offensiveRebounds: 0, // Not tracked in PlayerStats table
       defensiveRebounds: 0,
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
       gamesPlayed,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
+      ...derivePlayerAverages(totals, gamesPlayed),
     };
   }
 
@@ -895,29 +904,6 @@ export class StatsService {
         totals.freeThrowsAttempted += stat.freeThrowsAttempted;
       }
 
-      const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
-        ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10 : 0;
-      const threePointPercentage = totals.threePointersAttempted > 0
-        ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10 : 0;
-      const freeThrowPercentage = totals.freeThrowsAttempted > 0
-        ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10 : 0;
-
-      const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
-      const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
-      const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
-      const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
-      const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
-      const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
-
-      const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
-      const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
-      const efficiency = gamesPlayed > 0
-        ? Math.round(
-            ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
-              missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
-          ) / 10
-        : 0;
-
       return {
         playerId: member.playerId,
         playerName: member.player.name,
@@ -926,17 +912,8 @@ export class StatsService {
         ...totals,
         offensiveRebounds: 0,
         defensiveRebounds: 0,
-        fieldGoalPercentage,
-        threePointPercentage,
-        freeThrowPercentage,
         gamesPlayed,
-        pointsPerGame: ppg,
-        reboundsPerGame: rpg,
-        assistsPerGame: apg,
-        stealsPerGame: spg,
-        blocksPerGame: bpg,
-        turnoversPerGame: tpg,
-        efficiency,
+        ...derivePlayerAverages(totals, gamesPlayed),
       };
     });
 
@@ -1073,29 +1050,6 @@ export class StatsService {
         totals.freeThrowsAttempted += stat.freeThrowsAttempted;
       }
 
-      const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
-        ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10 : 0;
-      const threePointPercentage = totals.threePointersAttempted > 0
-        ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10 : 0;
-      const freeThrowPercentage = totals.freeThrowsAttempted > 0
-        ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10 : 0;
-
-      const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
-      const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
-      const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
-      const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
-      const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
-      const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
-
-      const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
-      const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
-      const efficiency = gamesPlayed > 0
-        ? Math.round(
-            ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
-              missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
-          ) / 10
-        : 0;
-
       teamStatsResult.push({
         teamId: membership.teamId,
         teamName: membership.team.name,
@@ -1108,17 +1062,8 @@ export class StatsService {
           ...totals,
           offensiveRebounds: 0,
           defensiveRebounds: 0,
-          fieldGoalPercentage,
-          threePointPercentage,
-          freeThrowPercentage,
           gamesPlayed,
-          pointsPerGame: ppg,
-          reboundsPerGame: rpg,
-          assistsPerGame: apg,
-          stealsPerGame: spg,
-          blocksPerGame: bpg,
-          turnoversPerGame: tpg,
-          efficiency,
+          ...derivePlayerAverages(totals, gamesPlayed),
         },
       });
     }
@@ -1209,50 +1154,12 @@ export class StatsService {
 
     const gamesPlayed = totals.gamesPlayed;
 
-    // Calculate percentages
-    const fieldGoalPercentage = totals.fieldGoalsAttempted > 0
-      ? Math.round((totals.fieldGoalsMade / totals.fieldGoalsAttempted) * 1000) / 10
-      : 0;
-    const threePointPercentage = totals.threePointersAttempted > 0
-      ? Math.round((totals.threePointersMade / totals.threePointersAttempted) * 1000) / 10
-      : 0;
-    const freeThrowPercentage = totals.freeThrowsAttempted > 0
-      ? Math.round((totals.freeThrowsMade / totals.freeThrowsAttempted) * 1000) / 10
-      : 0;
-
-    // Calculate per-game averages
-    const ppg = gamesPlayed > 0 ? Math.round((totals.points / gamesPlayed) * 10) / 10 : 0;
-    const rpg = gamesPlayed > 0 ? Math.round((totals.rebounds / gamesPlayed) * 10) / 10 : 0;
-    const apg = gamesPlayed > 0 ? Math.round((totals.assists / gamesPlayed) * 10) / 10 : 0;
-    const spg = gamesPlayed > 0 ? Math.round((totals.steals / gamesPlayed) * 10) / 10 : 0;
-    const bpg = gamesPlayed > 0 ? Math.round((totals.blocks / gamesPlayed) * 10) / 10 : 0;
-    const tpg = gamesPlayed > 0 ? Math.round((totals.turnovers / gamesPlayed) * 10) / 10 : 0;
-
-    // Calculate efficiency
-    const missedFG = totals.fieldGoalsAttempted - totals.fieldGoalsMade;
-    const missedFT = totals.freeThrowsAttempted - totals.freeThrowsMade;
-    const efficiency = gamesPlayed > 0
-      ? Math.round(
-          ((totals.points + totals.rebounds + totals.assists + totals.steals + totals.blocks -
-            missedFG - missedFT - totals.turnovers) / gamesPlayed) * 10
-        ) / 10
-      : 0;
-
     return {
       playerId: player.id,
       playerName: player.name,
       ...totals,
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
       gamesPlayed,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
+      ...derivePlayerAverages(totals, gamesPlayed),
     };
   }
 }

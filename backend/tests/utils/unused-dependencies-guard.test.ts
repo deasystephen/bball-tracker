@@ -19,11 +19,10 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { join } from 'node:path';
-import { sourceFiles, stripComments } from '../support/source-scan';
+import { SCRIPT_EXTENSIONS, sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND_ROOT = join(__dirname, '..', '..');
 const SCANNED_DIRS = ['src', 'prisma', 'scripts'];
-const SOURCE_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs'];
 
 /** Dependencies used without an import the scan can see (CLI only, computed specifier, ...). */
 const DEPENDENCY_ALLOWLIST: Record<string, string> = {};
@@ -43,7 +42,7 @@ function readPackageJson(): PackageJson {
 /** Root-level config files (`prisma.config.ts`, `eslint.config.mjs`, `jest.config.js`, ...). */
 function rootSourceFiles(): string[] {
   return readdirSync(BACKEND_ROOT, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext)))
+    .filter((entry) => entry.isFile() && SCRIPT_EXTENSIONS.some((ext) => entry.name.endsWith(ext)))
     .map((entry) => join(BACKEND_ROOT, entry.name));
 }
 
@@ -101,7 +100,7 @@ describe('backend dependency hygiene (#781)', () => {
   beforeAll(() => {
     files = [
       ...rootSourceFiles(),
-      ...SCANNED_DIRS.flatMap((dir) => sourceFiles(join(BACKEND_ROOT, dir), SOURCE_EXTENSIONS)),
+      ...SCANNED_DIRS.flatMap((dir) => sourceFiles(join(BACKEND_ROOT, dir), SCRIPT_EXTENSIONS)),
     ];
     sources = files.map((file) => stripComments(readFileSync(file, 'utf8')));
   });

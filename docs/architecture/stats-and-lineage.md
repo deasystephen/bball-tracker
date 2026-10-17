@@ -51,8 +51,13 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   never a mean of per-game percentages (a 1/1 game then a 1/9 game reads 20.0%, not 55.6%). Games with zero
   attempts contribute nothing to the denominator. The migration
   `20260822120000_team_stats_shooting_counts` backfilled existing rows from their `PlayerStats`.
-- Use the exported `shootingPercentage(made, attempted)` helper (1 decimal, `0` when nothing attempted)
-  rather than inlining the rounding.
+- Use the exported `shootingPercentage(made, attempted)` (1 decimal, `0` when nothing attempted) and
+  `perGame(total, games)` (1 decimal, `0` when no games) helpers rather than inlining the rounding. Every
+  aggregation in `stats-service.ts` calls them: the box score and team totals directly, the team season
+  stats directly, and the player season, roster, overall and career aggregations through the private
+  `derivePlayerAverages(totals, gamesPlayed)` (percentages, six per-game averages and efficiency, which is
+  `perGame` of the EFF sum). `tests/utils/stats-rounding-guard.test.ts` fails on any `Math.round(` in the
+  file outside the two helpers (#682).
 - **Ties.** Equal scores are a `'T'`, never a loss: the season record is `{ wins, losses, ties }`
   (`gamesPlayed = wins + losses + ties`) and `recentGames[].result` is `'W' | 'L' | 'T'` (`gameResult()` in
   `stats-service.ts`). Mobile derives outcomes only through `mobile/utils/game-result.ts`
