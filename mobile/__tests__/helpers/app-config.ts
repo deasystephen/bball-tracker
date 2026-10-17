@@ -12,9 +12,13 @@
  * AndroidManifest.xml, gradle.properties, resources. `ios/` and `android/` are
  * gitignored outputs of a local `expo run:*` / `expo prebuild`, so evaluating
  * in place made the result depend on the machine. `introspectAppConfig`
- * therefore runs against a temporary project root that links every entry of
- * mobile/ except the machine-local ones (MACHINE_LOCAL_ENTRIES).
+ * therefore runs against a temporary project root that links only the
+ * top-level entries of mobile/ that git tracks, plus GITIGNORED_INPUTS
+ * (`introspectionEntries`). That is exactly what CI's clean checkout has, by
+ * construction: the next gitignored directory a plugin happens to read is
+ * excluded without anyone listing it.
  */
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -57,40 +61,71 @@ interface ConfigPlugins {
 }
 
 /**
- * Gitignored, machine-local entries of mobile/ that introspection must never
- * see: the native projects a local build generates, and Expo's caches and
- * export output.
+ * Gitignored entries that introspection still needs, each with its reason.
+ * Nothing else that git ignores is linked. (`.env` is not here: no config
+ * plugin in app.config.js reads it, and the hash was taken without one.)
  */
-export const MACHINE_LOCAL_ENTRIES = ['ios', 'android', '.expo', '.expo-shared', 'dist', 'web-build'] as const;
+export const GITIGNORED_INPUTS: Readonly<Record<string, string>> = {
+  node_modules: 'Config plugins are resolved from it, exactly as prebuild resolves them.',
+};
+
+/**
+ * The top-level entries of `sourceRoot` that introspection may see: the first
+ * path component of every file git tracks in mobile/ (read from the index, so
+ * a scratch copy of mobile/ is judged the same way and no symlink confuses
+ * it), plus GITIGNORED_INPUTS, each kept only when it exists in `sourceRoot`.
+ * An untracked top-level entry is not linked until it is committed or added;
+ * the files the config names are still hashed from `sourceRoot` directly.
+ */
+export function introspectionEntries(sourceRoot: string = MOBILE_ROOT): string[] {
+  const result = spawnSync('git', ['ls-files', '-z'], { cwd: MOBILE_ROOT, encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed in ${MOBILE_ROOT}: ${result.stderr || result.error?.message}`);
+  }
+  const tracked = new Set(
+    result.stdout
+      .split('\0')
+      .filter(Boolean)
+      .map((file) => file.split('/')[0])
+  );
+  const wanted = [...tracked, ...Object.keys(GITIGNORED_INPUTS)];
+  return [...new Set(wanted)].filter((entry) => fs.existsSync(path.join(sourceRoot, entry))).sort();
+}
+
+/** Symlinks each of `entries` from `sourceRoot` into `dest`. */
+export function linkEntries(sourceRoot: string, dest: string, entries: readonly string[]): void {
+  for (const entry of entries) fs.symlinkSync(path.join(sourceRoot, entry), path.join(dest, entry));
+}
 
 const introspectionRoots = new Map<string, string>();
 
-// Each test file that imports this helper gets its own module instance, so
-// this hook removes that file's roots. (Jest sandboxes `process`, so an exit
-// handler would never run.) The roots hold only symlinks: removing them never
-// touches mobile/.
-afterAll(() => {
+/** Removes every introspection root this module instance created. */
+export function removeIntrospectionRoots(): void {
   for (const dir of introspectionRoots.values()) fs.rmSync(dir, { recursive: true, force: true });
   introspectionRoots.clear();
-});
+}
+
+// Each test file that imports this helper gets its own module instance, so
+// this hook removes that file's roots (Jest sandboxes `process`, so an exit
+// handler would never run). Guarded so the module can still be loaded where
+// Jest's globals are absent (setupFiles, a ts-node script). The roots hold
+// only symlinks: removing them never touches mobile/.
+if (typeof afterAll === 'function') afterAll(removeIntrospectionRoots);
 
 /**
- * A temporary project root that links every entry of `sourceRoot` (default
- * mobile/) except MACHINE_LOCAL_ENTRIES, created once per source root and
- * removed after the importing test file. Links, not copies: node_modules resolves
- * plugins exactly as it does in place, and assets are read from the source.
+ * A temporary project root that links `introspectionEntries(sourceRoot)`,
+ * created once per source root and removed after the importing test file.
+ * Links, not copies: node_modules resolves plugins exactly as it does in
+ * place, and assets are read from the source.
  */
 export function introspectionRoot(sourceRoot: string = MOBILE_ROOT): string {
   const existing = introspectionRoots.get(sourceRoot);
   if (existing) return existing;
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'app-config-introspect-'));
-  const skipped: readonly string[] = MACHINE_LOCAL_ENTRIES;
-  for (const entry of fs.readdirSync(sourceRoot)) {
-    if (skipped.includes(entry)) continue;
-    fs.symlinkSync(path.join(sourceRoot, entry), path.join(root, entry));
-  }
+  // Registered before linking, so a failure part-way still gets cleaned up.
   introspectionRoots.set(sourceRoot, root);
+  linkEntries(sourceRoot, root, introspectionEntries(sourceRoot));
   return root;
 }
 
@@ -164,9 +199,11 @@ export async function loadAppConfig<T = { expo: ExpoAppConfig }>(
 export async function introspectAppConfig(
   expo: ExpoAppConfig,
   pluginNames?: readonly string[],
-  sourceRoot: string = MOBILE_ROOT
+  sourceRoot: string = MOBILE_ROOT,
+  /** false evaluates in `sourceRoot` itself; only the guard's negative control does that. */
+  isolate: boolean = true
 ): Promise<IntrospectedConfig> {
-  const projectRoot = introspectionRoot(sourceRoot);
+  const projectRoot = isolate ? introspectionRoot(sourceRoot) : sourceRoot;
   const { withPlugins, compileModsAsync } = jest.requireActual<ConfigPlugins>('expo/config-plugins');
   // Introspection mutates what it is given: work on deep copies.
   const base = JSON.parse(JSON.stringify(expo)) as Record<string, unknown>;

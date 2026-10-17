@@ -67,9 +67,11 @@ import path from 'path';
 
 import {
   APP_CONFIG_PATH,
-  MACHINE_LOCAL_ENTRIES,
   MOBILE_ROOT,
   introspectAppConfig,
+  introspectionEntries,
+  introspectionRoot,
+  linkEntries,
   loadAppConfig,
   publishEnvSnapshot,
   withEnv,
@@ -222,10 +224,14 @@ async function loadExpoConfig(file: string): Promise<ExpoAppConfig> {
 }
 
 /** The structure the hash is taken over; see the file header. */
-async function nativeConfigInput(expo: ExpoAppConfig, sourceRoot: string): Promise<Record<string, unknown>> {
+async function nativeConfigInput(
+  expo: ExpoAppConfig,
+  sourceRoot: string,
+  isolate: boolean
+): Promise<Record<string, unknown>> {
   let introspected: IntrospectedConfig;
   try {
-    introspected = await introspectAppConfig(expo, undefined, sourceRoot);
+    introspected = await introspectAppConfig(expo, undefined, sourceRoot, isolate);
   } catch (error) {
     // Typically a plugin that is not installed. Prebuild would fail the same
     // way, and a new plugin is a native change either way.
@@ -257,15 +263,21 @@ const hashMemo = new Map<string, Promise<string>>();
 /**
  * sha256 of the native configuration of an app.config.js (default: the
  * working tree's), with its plugins introspected and its files read from
- * `sourceRoot` (default mobile/). Memoised per file, source root and
- * publish-env snapshot: introspection is the slow part of this suite.
+ * `sourceRoot` (default mobile/). `isolate: false` skips the introspection
+ * root; only the negative control in the native-project test uses it.
+ * Memoised per file, source root, isolation and publish-env snapshot:
+ * introspection is the slow part of this suite.
  */
-function nativeConfigHash(file: string = APP_CONFIG_PATH, sourceRoot: string = MOBILE_ROOT): Promise<string> {
-  const key = `${file}\0${sourceRoot}\0${stableStringify(publishEnvSnapshot())}`;
+function nativeConfigHash(
+  file: string = APP_CONFIG_PATH,
+  sourceRoot: string = MOBILE_ROOT,
+  isolate: boolean = true
+): Promise<string> {
+  const key = `${file}\0${sourceRoot}\0${isolate}\0${stableStringify(publishEnvSnapshot())}`;
   let hash = hashMemo.get(key);
   if (!hash) {
     hash = loadExpoConfig(file).then(async (expo) =>
-      sha256(stableStringify(await nativeConfigInput(expo, sourceRoot)))
+      sha256(stableStringify(await nativeConfigInput(expo, sourceRoot, isolate)))
     );
     hashMemo.set(key, hash);
   }
@@ -591,10 +603,9 @@ function writeManifest(manifest: BinaryManifest): void {
     // directories in mobile/ itself: a developer's real project lives there.
     const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'binary-manifest-native-'));
     try {
-      const skipped: readonly string[] = MACHINE_LOCAL_ENTRIES;
-      for (const entry of fs.readdirSync(MOBILE_ROOT)) {
-        if (!skipped.includes(entry)) fs.symlinkSync(path.join(MOBILE_ROOT, entry), path.join(fakeRoot, entry));
-      }
+      // The copy starts from what introspection may see in mobile/, so this
+      // machine's own native project (if any) never takes part.
+      linkEntries(MOBILE_ROOT, fakeRoot, introspectionEntries(MOBILE_ROOT));
       const write = (file: string, content: string): void => {
         fs.mkdirSync(path.dirname(path.join(fakeRoot, file)), { recursive: true });
         fs.writeFileSync(path.join(fakeRoot, file), content);
@@ -605,19 +616,43 @@ function writeManifest(manifest: BinaryManifest): void {
       write('ios/Fake/Info.plist', plist('<key>LocalOnlyKey</key><string>from a local build</string>'));
       write('ios/Fake/Fake.entitlements', plist('<key>com.apple.developer.local-only</key><true/>'));
       write('ios/Fake/Supporting/Expo.plist', plist('<key>EXUpdatesLocalOnly</key><true/>'));
-      write('ios/Fake.xcodeproj/project.pbxproj', '// !$*UTF8*$!\n{}\n');
       write('ios/Podfile.properties.json', JSON.stringify({ 'local.only': 'true' }));
       write(
         'android/app/src/main/AndroidManifest.xml',
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android">' +
-          '<uses-permission android:name="android.permission.LOCAL_ONLY"/><application/></manifest>\n'
+          '<uses-permission android:name="android.permission.LOCAL_ONLY"/>' +
+          '<application android:name=".MainApplication"><activity android:name=".MainActivity"/></application></manifest>\n'
       );
       write('android/gradle.properties', 'local.only=true\n');
       write('android/app/src/main/res/values/strings.xml', '<resources><string name="local_only">x</string></resources>\n');
 
+      // Negative control: evaluated in place, the fake project DOES change the
+      // hash. Without this, the assertion below would pass vacuously if
+      // introspection stopped reading native projects for any other reason.
+      expect(await nativeConfigHash(APP_CONFIG_PATH, fakeRoot, false)).not.toBe(currentHash);
       expect(await nativeConfigHash(APP_CONFIG_PATH, fakeRoot)).toBe(currentHash);
     } finally {
       fs.rmSync(fakeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('links only entries git does not ignore (plus node_modules) into the introspection root', () => {
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'binary-manifest-ignored-'));
+    try {
+      linkEntries(MOBILE_ROOT, copy, introspectionEntries(MOBILE_ROOT));
+      // Gitignored by mobile/.gitignore, and in no hand-written list.
+      for (const dir of ['ios', 'android', 'dist', 'web-build', '.expo-shared']) {
+        fs.mkdirSync(path.join(copy, dir));
+      }
+      fs.writeFileSync(path.join(copy, '.env'), 'LOCAL_ONLY=1\n');
+
+      const linked = fs.readdirSync(introspectionRoot(copy));
+      for (const entry of ['ios', 'android', 'dist', 'web-build', '.expo-shared', '.env']) {
+        expect(linked).not.toContain(entry);
+      }
+      expect(linked).toEqual(expect.arrayContaining(['app.config.js', 'assets', 'package.json', 'node_modules']));
+    } finally {
+      fs.rmSync(copy, { recursive: true, force: true });
     }
   });
 
