@@ -2,41 +2,11 @@
 
 import { useState } from 'react';
 import { displayName } from '../../../lib/display-name';
-import { APP_STORE_URL, PLAY_STORE_URL, openInApp as openInAppWith } from '../../../lib/open-in-app';
+import { acceptInvitationByTokenUrl } from '../../../lib/api-urls';
+import { formatExpiry } from '../../../lib/format-date';
+import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
+import { APP_STORE_URL, PLAY_STORE_URL, openInApp } from '../../../lib/open-in-app';
 
-/**
- * `GET /invitations/by-token/:token` is polymorphic: a team invitation
- * (`kind: 'team'`, or no `kind` on older API builds) or a guardian invitation
- * (`kind: 'guardian'` — PARENT role, docs/plans/parent-role-spec.md).
- */
-export interface TeamInvitationDetails {
-  kind?: 'team';
-  id: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
-  teamName: string;
-  inviterName: string;
-  /** Sender's tombstone signal (#642); label from this, never from `inviterName`. */
-  inviterDeletedAt: string | null;
-  position: string | null;
-  jerseyNumber: number | null;
-  message: string | null;
-  expiresAt: string;
-}
-
-export interface GuardianInvitationDetails {
-  kind: 'guardian';
-  id: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
-  childName: string;
-  teamName: string | null;
-  inviterName: string;
-  /** Not on the guardian payload yet; optional so a future API build can add it. */
-  inviterDeletedAt?: string | null;
-  relationship: 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
-  expiresAt: string;
-}
-
-export type InvitationDetails = TeamInvitationDetails | GuardianInvitationDetails;
 
 interface Props {
   invitation: InvitationDetails;
@@ -47,11 +17,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 function isExpired(expiresAt: string): boolean {
   return new Date(expiresAt) < new Date();
-}
-
-function formatExpiry(expiresAt: string): string {
-  const date = new Date(expiresAt);
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 const RELATIONSHIP_LABEL: Record<GuardianInvitationDetails['relationship'], string> = {
@@ -80,15 +45,11 @@ export function InviteClient({ invitation, token }: Props) {
   );
   const preposition = guardian ? 'for' : 'to';
 
-  function openInApp() {
-    openInAppWith(token);
-  }
-
   async function acceptWithoutApp() {
     setAcceptState('loading');
     setErrorMessage('');
     try {
-      const res = await fetch(`${API_URL}/api/v1/invitations/by-token/${token}/accept`, {
+      const res = await fetch(acceptInvitationByTokenUrl(API_URL, token), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -138,7 +99,7 @@ export function InviteClient({ invitation, token }: Props) {
           <h1>Already Accepted</h1>
           <p>This invitation {preposition} {subject} has already been accepted.</p>
           <div className="actions">
-            <button className="btn btn-primary" onClick={openInApp}>Open in App</button>
+            <button className="btn btn-primary" onClick={() => openInApp(token)}>Open in App</button>
           </div>
         </div>
       </main>
@@ -253,7 +214,7 @@ export function InviteClient({ invitation, token }: Props) {
 
         {isPending && (
           <div className="actions">
-            <button className="btn btn-primary" onClick={openInApp}>
+            <button className="btn btn-primary" onClick={() => openInApp(token)}>
               Open in App
             </button>
 

@@ -10,6 +10,8 @@ export const STORE_FALLBACK_DELAY_MS = 1500;
 /** The browser surface `openInApp` touches, injectable so tests need no DOM. */
 export interface OpenInAppEnv {
   userAgent: string;
+  /** `navigator.maxTouchPoints`: tells iPadOS 13+ (desktop "Macintosh" UA) from a Mac. */
+  maxTouchPoints: number;
   document: Pick<Document, 'addEventListener' | 'removeEventListener'>;
   navigate: (url: string) => void;
 }
@@ -17,6 +19,7 @@ export interface OpenInAppEnv {
 function browserEnv(): OpenInAppEnv {
   return {
     userAgent: navigator.userAgent,
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
     document,
     navigate: (url) => {
       window.location.href = url;
@@ -34,7 +37,9 @@ export function inviteDeepLink(token: string): string {
  */
 export function openInApp(token: string, env: OpenInAppEnv = browserEnv()): void {
   const isAndroid = /android/i.test(env.userAgent);
-  const isIos = /iphone|ipad|ipod/i.test(env.userAgent);
+  // iPadOS 13+ Safari sends a Macintosh desktop UA; only touch support tells it apart.
+  const isIos =
+    /iphone|ipad|ipod/i.test(env.userAgent) || (/macintosh/i.test(env.userAgent) && env.maxTouchPoints > 1);
   const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
 
   let appOpened = false;

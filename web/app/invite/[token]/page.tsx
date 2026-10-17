@@ -32,7 +32,8 @@ export default async function InvitePage({
           <div className="logo">⏳</div>
           <h1>Invitation Temporarily Unavailable</h1>
           {result.status === 429 ? (
-            <p>Too many requests for this link. Please wait a few minutes and try again.</p>
+            // Either limiter (per token or per IP) can answer 429, so no per-link claim.
+            <p>There have been too many requests. Please wait a few minutes and try again.</p>
           ) : (
             <p>We couldn&apos;t load this invitation right now. Please try again in a few minutes.</p>
           )}

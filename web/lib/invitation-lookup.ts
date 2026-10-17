@@ -1,4 +1,5 @@
-import type { InvitationDetails } from '../app/invite/[token]/invite-client';
+import { invitationByTokenUrl } from './api-urls';
+import type { InvitationDetails } from './invitation-types';
 
 /**
  * Outcome of the server-side `GET /invitations/by-token/:token` lookup (#720).
@@ -11,9 +12,12 @@ export type LookupResult =
   | { kind: 'notFound' }
   | { kind: 'unavailable'; status?: number };
 
-function unavailable(status?: number): LookupResult {
-  // Status only: never the URL or the token (the token is a bearer secret).
-  console.warn('Invitation lookup unavailable', { status: status ?? 'network' });
+/** Why the lookup failed: the fetch threw, the API answered non-2xx, or a 2xx body was unusable. */
+export type UnavailableReason = 'network' | 'status' | 'body';
+
+function unavailable(reason: UnavailableReason, status?: number): LookupResult {
+  // Reason and status only: never the URL or the token (the token is a bearer secret).
+  console.warn('Invitation lookup unavailable', { reason, status: status ?? null });
   return { kind: 'unavailable', status };
 }
 
@@ -21,20 +25,20 @@ export async function getInvitation(token: string): Promise<LookupResult> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3000';
   let res: Response;
   try {
-    res = await fetch(`${apiUrl}/api/v1/invitations/by-token/${encodeURIComponent(token)}`, {
+    res = await fetch(invitationByTokenUrl(apiUrl, token), {
       cache: 'no-store',
     });
   } catch {
-    return unavailable();
+    return unavailable('network');
   }
 
   if (res.status === 400 || res.status === 404) return { kind: 'notFound' };
-  if (!res.ok) return unavailable(res.status);
+  if (!res.ok) return unavailable('status', res.status);
 
   try {
     const data = (await res.json()) as { invitation?: InvitationDetails };
-    return data.invitation ? { kind: 'ok', invitation: data.invitation } : unavailable(res.status);
+    return data.invitation ? { kind: 'ok', invitation: data.invitation } : unavailable('body', res.status);
   } catch {
-    return unavailable(res.status);
+    return unavailable('body', res.status);
   }
 }

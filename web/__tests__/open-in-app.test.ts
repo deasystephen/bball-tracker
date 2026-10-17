@@ -10,7 +10,11 @@ import {
 
 const IOS_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
-const IPAD_UA = 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+/** iPadOS 12 and earlier, and some in-app browsers, still say "iPad". */
+const LEGACY_IPAD_UA = 'Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+/** iPadOS 13+ Safari requests the desktop site with a Macintosh UA; only touch support differs. */
+const MAC_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 const ANDROID_UA =
   'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 const DESKTOP_UA =
@@ -18,10 +22,15 @@ const DESKTOP_UA =
 
 const TOKEN = 'abcDEF123_-xyz';
 
-function makeEnv(userAgent: string) {
+function makeEnv(userAgent: string, maxTouchPoints = 0) {
   const doc = new EventTarget();
   const navigate = vi.fn<(url: string) => void>();
-  const env: OpenInAppEnv = { userAgent, document: doc as unknown as OpenInAppEnv['document'], navigate };
+  const env: OpenInAppEnv = {
+    userAgent,
+    maxTouchPoints,
+    document: doc as unknown as OpenInAppEnv['document'],
+    navigate,
+  };
   const hide = () => doc.dispatchEvent(new Event('visibilitychange'));
   return { env, navigate, hide };
 }
@@ -46,10 +55,11 @@ describe('openInApp (#510)', () => {
   });
 
   it.each([
-    ['iPhone', IOS_UA],
-    ['iPad', IPAD_UA],
-  ])('falls back to the App Store on %s when the page never hid', (_label, ua) => {
-    const { env, navigate } = makeEnv(ua);
+    ['iPhone', IOS_UA, 5],
+    ['legacy iPad UA', LEGACY_IPAD_UA, 5],
+    ['iPadOS 13+ (Macintosh UA with touch)', MAC_UA, 5],
+  ])('falls back to the App Store on %s when the page never hid', (_label, ua, touchPoints) => {
+    const { env, navigate } = makeEnv(ua, touchPoints);
     openInApp(TOKEN, env);
     vi.advanceTimersByTime(STORE_FALLBACK_DELAY_MS - 1);
     expect(navigate).toHaveBeenCalledTimes(1);
@@ -78,6 +88,13 @@ describe('openInApp (#510)', () => {
     const { env, navigate, hide } = makeEnv(ANDROID_UA);
     openInApp(TOKEN, env);
     hide();
+    vi.runAllTimers();
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a Macintosh UA without touch as a desktop Mac', () => {
+    const { env, navigate } = makeEnv(MAC_UA, 0);
+    openInApp(TOKEN, env);
     vi.runAllTimers();
     expect(navigate).toHaveBeenCalledTimes(1);
   });

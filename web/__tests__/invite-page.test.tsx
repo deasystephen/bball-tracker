@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InvitePage from '../app/invite/[token]/page';
-import type { GuardianInvitationDetails, TeamInvitationDetails } from '../app/invite/[token]/invite-client';
+import type { GuardianInvitationDetails, TeamInvitationDetails } from '../lib/invitation-types';
 import { getInvitation } from '../lib/invitation-lookup';
 import { STRINGS } from '../lib/strings';
 
@@ -57,6 +57,8 @@ describe('invite page lookup states (#720)', () => {
     const html = await renderPage();
     expect(html).toContain('Invitation Temporarily Unavailable');
     expect(html).toContain('Please wait a few minutes and try again');
+    // Either limiter (per token or per IP) can trip, so the copy makes no per-link claim.
+    expect(html).not.toContain('this link');
     expect(html).not.toContain('Invitation Not Found');
     expect(html).not.toContain('resend');
   });
@@ -66,7 +68,7 @@ describe('invite page lookup states (#720)', () => {
     const html = await renderPage();
     expect(html).toContain('Invitation Temporarily Unavailable');
     expect(html).toContain('try again in a few minutes');
-    expect(html).not.toContain('Too many requests');
+    expect(html).not.toContain('too many requests');
     expect(html).not.toContain('resend');
   });
 
@@ -96,10 +98,30 @@ describe('invite page lookup states (#720)', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, {})));
     await renderPage();
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('Invitation lookup unavailable', { reason: 'status', status: 503 });
     const logged = JSON.stringify(warn.mock.calls);
-    expect(logged).toContain('503');
     expect(logged).not.toContain(TOKEN);
     expect(logged).not.toContain('api.example.test');
+  });
+
+  it.each([
+    ['network', () => vi.fn().mockRejectedValue(new TypeError('fetch failed')), null],
+    ['body', () => vi.fn().mockResolvedValue(new Response('<html>gateway</html>', { status: 200 })), 200],
+    ['body', () => vi.fn().mockResolvedValue(jsonResponse(200, { success: true })), 200],
+    ['status', () => vi.fn().mockResolvedValue(jsonResponse(500, {})), 500],
+  ] as const)('logs reason %s for an unavailable lookup', async (reason, makeFetch, status) => {
+    vi.stubGlobal('fetch', makeFetch());
+    await getInvitation(TOKEN);
+    expect(warn).toHaveBeenCalledWith('Invitation lookup unavailable', { reason, status });
+  });
+
+  it('requests the by-token URL with the token encoded', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, {}));
+    vi.stubGlobal('fetch', fetchMock);
+    await getInvitation('a/b');
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/api/v1/invitations/by-token/a%2Fb', {
+      cache: 'no-store',
+    });
   });
 
   it('maps statuses to the discriminated LookupResult', async () => {
