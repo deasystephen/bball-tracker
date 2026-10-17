@@ -1,20 +1,7 @@
-import { InviteClient, type InvitationDetails } from './invite-client';
+import { InviteClient } from './invite-client';
+import { getInvitation } from '../../../lib/invitation-lookup';
 
 export const dynamic = 'force-dynamic';
-
-async function getInvitation(token: string): Promise<InvitationDetails | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:3000';
-  try {
-    const res = await fetch(`${apiUrl}/api/v1/invitations/by-token/${token}`, {
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as { success: boolean; invitation: InvitationDetails };
-    return data.invitation ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export default async function InvitePage({
   params,
@@ -22,9 +9,9 @@ export default async function InvitePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const invitation = await getInvitation(token);
+  const result = await getInvitation(token);
 
-  if (!invitation) {
+  if (result.kind === 'notFound') {
     return (
       <main className="container">
         <div className="card">
@@ -37,5 +24,24 @@ export default async function InvitePage({
     );
   }
 
-  return <InviteClient invitation={invitation} token={token} />;
+  if (result.kind === 'unavailable') {
+    // No resend advice here: the link may still be valid, and a resend expires it.
+    return (
+      <main className="container">
+        <div className="card">
+          <div className="logo">⏳</div>
+          <h1>Invitation Temporarily Unavailable</h1>
+          {result.status === 429 ? (
+            // Either limiter (per token or per IP) can answer 429, so no per-link claim.
+            <p>There have been too many requests. Please wait a few minutes and try again.</p>
+          ) : (
+            <p>We couldn&apos;t load this invitation right now. Please try again in a few minutes.</p>
+          )}
+          <p className="footer">Your invitation link may still be valid.</p>
+        </div>
+      </main>
+    );
+  }
+
+  return <InviteClient invitation={result.invitation} token={token} />;
 }

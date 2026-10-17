@@ -145,9 +145,9 @@ never rename one without updating the required checks.
 exist because Dependabot auto-merges `/web` patch and minor bumps once the required checks pass.
 **Pending:** they gate that auto-merge only after the owner adds `Lint and Type Check (web)` and
 `Test Web` to the required status checks of `main` (#690); until then a red web job does not stop a
-`/web` merge. `Test Web` only builds (`next.config.ts` skips lint and type errors during the build,
-because the web leg of `lint-and-typecheck` runs both); it is a separate job so the web test
-runner (#510) has a job to extend.
+`/web` merge. `Test Web` runs the Vitest suite (`npm test`, #510) and then the production build
+(`next.config.ts` skips lint and type errors during the build, because the web leg of
+`lint-and-typecheck` runs both).
 
 **Node.** Every `actions/setup-node` step, in every workflow, reads `node-version-file: .nvmrc` and
 sets no `node-version` (setup-node would prefer it over the file).

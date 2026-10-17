@@ -177,8 +177,9 @@ eng-review amendments recorded there).
   (30 / 15 min, keyed by **token** via `invitationTokenKey`) because `hooplings.com/invite/<token>` is
   rendered server-side and every lookup arrives from the web server's single egress IP. For the same
   reason the lookup is **exempt from the global IP-keyed `apiRateLimit`** (`skipGlobalApiLimit`, #718):
-  otherwise the web server's 101st `/api/v1` call in a minute would turn every invite page into
-  "Invitation Not Found". It keeps a looser per-IP ceiling of its own, `invitationLookupIpRateLimit`
+  otherwise the web server's 101st `/api/v1` call in a minute would turn every invite page into the
+  "Invitation Temporarily Unavailable" card (the web page shows that card, with no resend advice, for any
+  429, 5xx or failed lookup, and "Invitation Not Found" only for a 400 or 404; #720). It keeps a looser per-IP ceiling of its own, `invitationLookupIpRateLimit`
   (`INVITATION_LOOKUP_IP_MAX_PER_15_MIN` = 600 / 15 min), because the token key alone would let a
   loop of random tokens reach the database unbounded. The accept `POST` stays on the IP-keyed
   `writeRateLimit` and `apiRateLimit` (the browser calls it directly).

@@ -49,12 +49,15 @@ const MAESTRO_DIR = resolve(MOBILE_ROOT, '../.maestro');
 /** A flow that must exist; proves the walker found the real directory, not just config.yaml. */
 const MAESTRO_ANCHOR_FLOW = 'onboarding-role.yaml';
 /**
- * The Next.js invite page is the one file that emits a custom-scheme link to real
- * browsers (`hooplings://invite/<token>`), and `web/` has no test runner of its own
- * (#510), so the source scan covers it from here. `test-mobile` runs on every push.
+ * The Next.js invite page is the one surface that emits a custom-scheme link to real
+ * browsers (`hooplings://invite/<token>`, built in `web/lib/open-in-app.ts`). The
+ * brand list lives here, so the source scan covers `web/app` and `web/lib` from this
+ * suite; `web/`'s own Vitest suite (#510) asserts the link is built correctly.
  */
 const WEB_APP_DIR = resolve(MOBILE_ROOT, '../web/app');
 const WEB_ANCHOR_FILE = 'invite/[token]/invite-client.tsx';
+const WEB_LIB_DIR = resolve(MOBILE_ROOT, '../web/lib');
+const WEB_LIB_ANCHOR_FILE = 'open-in-app.ts';
 
 const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|json)$/;
 /**
@@ -125,8 +128,8 @@ function maestroFlows(dir: string): string[] {
   return walkFiles(dir, new Set()).filter((file) => /\.ya?ml$/.test(file));
 }
 
-function webSourceFiles(): string[] {
-  return walkFiles(WEB_APP_DIR, SOURCE_SKIP_DIRS).filter((file) => SOURCE_EXTENSIONS.test(file));
+function webSourceFiles(dir: string): string[] {
+  return walkFiles(dir, SOURCE_SKIP_DIRS).filter((file) => SOURCE_EXTENSIONS.test(file));
 }
 
 function mobileSourceFiles(): string[] {
@@ -163,9 +166,15 @@ describe('brand guard (#474)', () => {
   });
 
   it('web app source contains no retired brand name or old-scheme link', () => {
-    const files = webSourceFiles();
+    const files = webSourceFiles(WEB_APP_DIR);
     expect(files).toContain(WEB_ANCHOR_FILE);
     expect(lineOffenders(WEB_APP_DIR, files, 'web/app')).toEqual([]);
+  });
+
+  it('web lib source contains no retired brand name or old-scheme link', () => {
+    const files = webSourceFiles(WEB_LIB_DIR);
+    expect(files).toContain(WEB_LIB_ANCHOR_FILE);
+    expect(lineOffenders(WEB_LIB_DIR, files, 'web/lib')).toEqual([]);
   });
 
   it('allows an allowlisted domain as a hostname but nothing that merely contains it', () => {
