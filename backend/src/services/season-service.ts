@@ -153,7 +153,8 @@ export class SeasonService {
           },
           include: SEASON_INCLUDE,
         }),
-      'A season with this name already exists in this league'
+      'A season with this name already exists in this league',
+      'Season_leagueId_name_key'
     );
 
     return season;

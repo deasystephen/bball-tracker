@@ -2,10 +2,9 @@
  * Unit tests for LeagueService
  */
 
-import { Prisma } from '@prisma/client';
 import { LeagueService } from '../../src/services/league-service';
 import { mockPrisma } from '../setup';
-import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer } from '../factories';
+import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer, uniqueViolation } from '../factories';
 import { expectNotFoundError, expectBadRequestError, expectForbiddenError } from '../helpers';
 
 describe('LeagueService', () => {
@@ -685,12 +684,7 @@ describe('LeagueService', () => {
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.season.create as jest.Mock).mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: 'test',
-        })
-      );
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(uniqueViolation('Season_leagueId_name_key'));
 
       const error = await LeagueService.createSeason(league.id, { name: 'Summer' }, sysAdmin.id).catch((e) => e);
 

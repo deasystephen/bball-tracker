@@ -5,7 +5,6 @@
  * date-range validation, and delete guards.
  */
 
-import { Prisma } from '@prisma/client';
 import { SeasonService } from '../../src/services/season-service';
 import { mockPrisma } from '../setup';
 import {
@@ -14,6 +13,7 @@ import {
   createLeague,
   createPlayer,
   createSeason,
+  uniqueViolation,
 } from '../factories';
 import { expectBadRequestError, expectForbiddenError, expectNotFoundError } from '../helpers';
 
@@ -110,12 +110,7 @@ describe('SeasonService', () => {
       (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(league);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.season.create as jest.Mock).mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: 'test',
-        })
-      );
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(uniqueViolation('Season_leagueId_name_key'));
 
       const error = await SeasonService.createSeason({ leagueId: league.id, name: 'Fall' }, admin.id).catch((e) => e);
 

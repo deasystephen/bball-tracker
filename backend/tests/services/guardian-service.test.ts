@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import { GuardianService } from '../../src/services/guardian-service';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
-import { createAdmin, createCoach, createPlayer, createTeam, createUser } from '../factories';
+import { createAdmin, createCoach, createPlayer, createTeam, createUser, uniqueViolation } from '../factories';
 import {
   expectBadRequestError,
   expectForbiddenError,
@@ -21,12 +21,21 @@ const mockedMailerSend = (
   jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }
 ).mailer.send;
 
-/** A unique-constraint violation as Prisma throws it (#727). */
-function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-    code: 'P2002',
-    clientVersion: 'test',
-  });
+/** The ids a `lockUsers` call (`… IN (${Prisma.join(ids)}) …`) asked for, in call order. */
+function lockedIds(call: unknown[]): string[] {
+  // A `Prisma.join` fragment carries its parameters in `values`.
+  return call.slice(1).flatMap((value) =>
+    typeof value === 'object' && value !== null && Array.isArray((value as { values?: unknown }).values)
+      ? ((value as { values: string[] }).values)
+      : [value as string]
+  );
+}
+
+/** `$queryRaw` stand-in for `lockUsers`: every requested row exists, live unless listed in `tombstoned`. */
+function echoLockedRows(tombstoned: string[] = []): jest.Mock {
+  return jest.fn().mockImplementation(async (...call: unknown[]) =>
+    lockedIds(call).map((id) => ({ id, deletedAt: tombstoned.includes(id) ? new Date() : null }))
+  );
 }
 
 const TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -353,12 +362,22 @@ describe('GuardianService', () => {
 
     it('answers the dedupe 400 when a concurrent invite wins the partial PENDING index (P2002, #727)', async () => {
       setHappyPath();
-      (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(uniqueViolation());
+      (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(
+        uniqueViolation('GuardianInvitation_pending_childId_invitedEmail_key')
+      );
 
       const error = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id).catch((e) => e);
 
       expectBadRequestError(error, 'A pending guardian invitation already exists for this email');
       expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('propagates a P2002 on another unique (token collision), which the dedupe message does not describe', async () => {
+      setHappyPath();
+      const tokenClash = uniqueViolation('GuardianInvitation_token_key');
+      (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(tokenClash);
+
+      await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id)).rejects.toBe(tokenClash);
     });
 
     it('propagates an invitation create failure that is not P2002', async () => {
@@ -493,6 +512,17 @@ describe('GuardianService', () => {
 
       expect(mockPrisma.guardian.delete).toHaveBeenCalledWith({ where: { id: 'g-1' } });
       expect(mockPrisma.guardian.update).toHaveBeenCalledWith({ where: { id: 'g-2' }, data: { isPrimary: true } });
+      // The child row is locked (#664) before the link is read, so isPrimary
+      // is read under the same lock accept and account deletion take.
+      const lockCall = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find((call) =>
+        (call[0] as TemplateStringsArray).join('?').includes('FOR NO KEY UPDATE')
+      );
+      expect(lockCall).toBeDefined();
+      expect(lockedIds(lockCall as unknown[])).toEqual([CHILD_ID]);
+      const lockOrder = (mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[
+        (mockPrisma.$queryRaw as jest.Mock).mock.calls.indexOf(lockCall as unknown[])
+      ];
+      expect(lockOrder).toBeLessThan((mockPrisma.guardian.findUnique as jest.Mock).mock.invocationCallOrder[0]);
       // No permission lookup needed for self-removal
       expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
     });
@@ -593,6 +623,7 @@ describe('GuardianService', () => {
       memberships: number;
       staffRows: number;
       parentLive: boolean;
+      parentTombstoned: boolean;
       promotedCount: number;
     }> = {}): Tx {
       const tx: Tx = {
@@ -608,9 +639,12 @@ describe('GuardianService', () => {
         teamMember: { count: jest.fn().mockResolvedValue(overrides.memberships ?? 0) },
         teamStaff: { count: jest.fn().mockResolvedValue(overrides.staffRows ?? 0) },
         user: { updateMany: jest.fn().mockResolvedValue({ count: overrides.promotedCount ?? 1 }) },
-        // The child lock (#664) ignores its result; the parent probe (#643)
-        // reads it: empty = tombstoned meanwhile.
-        $queryRaw: jest.fn().mockResolvedValue(overrides.parentLive === false ? [] : [{ id: 'parent' }]),
+        // lockUsers on child + parent (#664, #643): no parent row = erased
+        // meanwhile, a deletedAt = tombstoned meanwhile.
+        $queryRaw:
+          overrides.parentLive === false
+            ? jest.fn().mockResolvedValue([])
+            : echoLockedRows(overrides.parentTombstoned ? ['parent-1', 'coach-2'] : []),
       };
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: (t: Tx) => unknown) => cb(tx));
       return tx;
@@ -692,22 +726,18 @@ describe('GuardianService', () => {
         where: { id: 'parent-1', deletedAt: null },
         data: { role: 'PARENT' },
       });
-      expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
-      // First the per-child lock (#664): concurrent accepts for one child
-      // serialise, so only the first counts 0 guardians and becomes primary.
-      const childSql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
-      expect(childSql).toContain('FROM "User" WHERE "id" = ? FOR UPDATE');
-      expect(tx.$queryRaw.mock.calls[0][1]).toBe(CHILD_ID);
+      // One lock statement for child AND parent (#664, #643), before the
+      // invitation write: sorted by id so two accepts can never deadlock, and
+      // a write lock (not FOR SHARE) that leaves FK inserts on the child free.
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+      expect(sql).toContain('"id" IN (?)');
+      expect(sql).toContain('ORDER BY "id"');
+      expect(sql).toContain('FOR NO KEY UPDATE');
+      expect(lockedIds(tx.$queryRaw.mock.calls[0])).toEqual([CHILD_ID, 'parent-1']);
       expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         tx.guardianInvitation.updateMany.mock.invocationCallOrder[0]
       );
-      // Then the parent: a write lock, not FOR SHARE, so two accepts by one
-      // parent serialise instead of deadlocking on the share-to-update upgrade
-      // (#643 review).
-      const sql = (tx.$queryRaw.mock.calls[1][0] as TemplateStringsArray).join('?');
-      expect(sql).toContain('FOR NO KEY UPDATE');
-      expect(sql).toContain('"deletedAt" IS NULL');
-      expect(tx.$queryRaw.mock.calls[1][1]).toBe('parent-1');
     });
 
     it('404s and creates no Guardian link when the parent was deleted after it was resolved (#643)', async () => {
@@ -724,6 +754,18 @@ describe('GuardianService', () => {
       expect(tx.guardianInvitation.updateMany).not.toHaveBeenCalled();
       expect(tx.guardian.create).not.toHaveBeenCalled();
       expect(tx.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('404s and creates no Guardian link when the parent is a tombstone under the lock (#643)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PLAYER' });
+      const tx = setTx({ parentTombstoned: true });
+
+      const error = await GuardianService.acceptInvitationByToken('tok').catch((e) => e);
+
+      expectNotFoundError(error, 'Account not found');
+      expect(tx.guardianInvitation.updateMany).not.toHaveBeenCalled();
+      expect(tx.guardian.create).not.toHaveBeenCalled();
     });
 
     it('aborts the transaction when the guarded role write updates zero rows (#643)', async () => {
@@ -832,10 +874,7 @@ describe('GuardianService', () => {
       (mockPrisma.user.findFirst as jest.Mock)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ id: 'parent-winner', role: 'PARENT' });
-      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
-        'Unique constraint failed on the fields: (`email`)',
-        { code: 'P2002', clientVersion: 'test' }
-      );
+      const p2002 = uniqueViolation('User_email_key');
       (mockPrisma.user.create as jest.Mock).mockRejectedValue(p2002);
       setTx();
 
@@ -857,10 +896,7 @@ describe('GuardianService', () => {
     it('rethrows P2002 when the winner row still cannot be found', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
-      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
-        'Unique constraint failed on the fields: (`email`)',
-        { code: 'P2002', clientVersion: 'test' }
-      );
+      const p2002 = uniqueViolation('User_email_key');
       (mockPrisma.user.create as jest.Mock).mockRejectedValue(p2002);
       setTx();
 
@@ -935,7 +971,7 @@ describe('GuardianService', () => {
           create: jest.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'g', ...data })),
         },
         user: { updateMany: jest.fn() },
-        $queryRaw: jest.fn().mockResolvedValue([{ id: 'parent-1' }]),
+        $queryRaw: echoLockedRows(),
       };
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
@@ -974,35 +1010,47 @@ describe('GuardianService', () => {
     it('rejectInvitation marks the invitation REJECTED for the addressee', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
-      (mockPrisma.guardianInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
-      (mockPrisma.guardianInvitation.findUniqueOrThrow as jest.Mock).mockResolvedValue(
-        invitationRow({ status: 'REJECTED' })
-      );
+      (mockPrisma.guardianInvitation.update as jest.Mock).mockResolvedValue(invitationRow({ status: 'REJECTED' }));
 
       const result = await GuardianService.rejectInvitation('inv-1', 'parent-1');
 
       expect(result.status).toBe('REJECTED');
-      // Guarded like accept (#726): only a row still PENDING is flipped.
-      expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenCalledWith({
+      // Guarded like accept (#726): one conditional UPDATE, only a row still
+      // PENDING matches, and the token never comes back.
+      expect(mockPrisma.guardianInvitation.update).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.guardianInvitation.update).toHaveBeenCalledWith({
         where: { id: 'inv-1', status: 'PENDING' },
         data: { status: 'REJECTED' },
+        select: expect.not.objectContaining({ token: true }),
       });
-      expect(mockPrisma.guardianInvitation.update).not.toHaveBeenCalled();
-      expect(result).not.toHaveProperty('token');
+      expect(mockPrisma.guardianInvitation.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejectInvitation answers 400 when a concurrent accept flipped the row after the read (#726)', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
-      (mockPrisma.guardianInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      // The conditional UPDATE matches nothing once the row left PENDING.
+      (mockPrisma.guardianInvitation.update as jest.Mock).mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        })
+      );
 
       const error = await GuardianService.rejectInvitation('inv-1', 'parent-1').catch((e) => e);
 
       expectBadRequestError(error, 'Cannot reject invitation: it is no longer pending');
-      expect(mockPrisma.guardianInvitation.update).not.toHaveBeenCalled();
-      expect(mockPrisma.guardianInvitation.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(mockPrisma.guardian.create).not.toHaveBeenCalled();
       expect(mockPrisma.guardian.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('rejectInvitation propagates an update failure that is not P2025', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
+      const boom = new Error('connection reset');
+      (mockPrisma.guardianInvitation.update as jest.Mock).mockRejectedValue(boom);
+
+      await expect(GuardianService.rejectInvitation('inv-1', 'parent-1')).rejects.toBe(boom);
     });
 
     it('rejectInvitation refuses a non-PENDING invitation', async () => {

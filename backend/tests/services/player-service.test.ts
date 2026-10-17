@@ -23,6 +23,7 @@ import {
   createLeague,
   createGameEvent,
   createUser,
+  uniqueViolation,
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 
@@ -185,7 +186,7 @@ describe('PlayerService', () => {
     it('maps a unique-constraint race to ConflictError (409)', async () => {
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.user.create as jest.Mock).mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' })
+        uniqueViolation('User_email_key')
       );
 
       await expect(
@@ -1006,7 +1007,7 @@ describe('PlayerService', () => {
         .mockResolvedValueOnce(adminUser);
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValueOnce(null);
       (mockPrisma.user.update as jest.Mock).mockRejectedValueOnce(
-        new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' })
+        uniqueViolation('User_email_key')
       );
 
       await expect(

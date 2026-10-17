@@ -465,7 +465,8 @@ export class InvitationService {
   ): Promise<InvitationWithRelations> {
     return createOrConflict(
       () => prisma.teamInvitation.create({ data, select: INVITATION_SELECT }),
-      'A pending invitation already exists for this player'
+      'A pending invitation already exists for this player',
+      'TeamInvitation_pending_teamId_playerId_key'
     );
   }
 

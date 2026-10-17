@@ -4,7 +4,6 @@
 
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
-import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -18,6 +17,7 @@ import {
   createTeamRole,
   createTeamStaff,
   createUser,
+  uniqueViolation,
 } from '../factories';
 import {
   expectNotFoundError,
@@ -1348,10 +1348,7 @@ describe('TeamService', () => {
       it('answers the already-on-team 400 when a concurrent add wins the unique index (P2002)', async () => {
         const { teamId, playerId, coachId } = setAddPlayerPath();
         (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: 'test',
-        })
+          uniqueViolation('TeamMember_teamId_playerId_key')
         );
 
         const error = await TeamService.addPlayer(teamId, { playerId }, coachId).catch((e) => e);
@@ -1879,10 +1876,7 @@ describe('TeamService', () => {
       it('answers the already-staff 400 when a concurrent add wins the unique index (P2002)', async () => {
         const { teamId, targetId, adminId } = setAddStaffPath();
         (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: 'test',
-        })
+          uniqueViolation('TeamStaff_teamId_userId_roleId_key')
         );
 
         const error = await TeamService
@@ -2192,12 +2186,7 @@ describe('TeamService', () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
       (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: 'test',
-        })
-      );
+      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(uniqueViolation('TeamRole_teamId_name_key'));
 
       const error = await TeamService.createCustomRole(team.id, { name: 'Scorekeeper' }, admin.id).catch((e) => e);
 
@@ -2409,13 +2398,7 @@ describe('TeamService', () => {
         (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });
         (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue(null);
-        (mockPrisma.team.update as jest.Mock).mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-            code: 'P2002',
-            clientVersion: 'test',
-            meta: { target: ['lineageId', 'seasonId'] },
-          })
-        );
+        (mockPrisma.team.update as jest.Mock).mockRejectedValue(uniqueViolation('Team_lineageId_seasonId_key'));
 
         const error = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id).catch((e) => e);
 
