@@ -148,6 +148,10 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Unit tests (Vitest)
+        working-directory: web
+        run: npm test
+
       - name: Production build
         working-directory: web
         env:

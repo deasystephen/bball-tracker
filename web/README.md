@@ -46,7 +46,7 @@ Two API-host variables, both defaulting to `http://localhost:3000`:
 - `API_URL` — read server-side by `app/invite/[token]/page.tsx` for the invitation lookup (`GET /invitations/by-token/:token`).
 - `NEXT_PUBLIC_API_URL` — inlined into the browser bundle **at build time** for the Accept button in `invite-client.tsx` (`POST …/accept`). Set it before `npm run build`; a runtime env change does not reach the client.
 
-If `API_URL` is wrong the page swallows the fetch failure and renders "Invitation Not Found" for every token, so check it first when debugging. Running against a local backend also needs the web dev origin in the backend's `CORS_ORIGIN` (see `backend/env.example`).
+The page tells a dead link from a failed lookup (`lib/invitation-lookup.ts`, #720): a 400 or 404 renders "Invitation Not Found" with the ask-the-coach-to-resend footer; a 429, a 5xx, an unreadable body or a failed fetch renders "Invitation Temporarily Unavailable" (with wait copy for a 429) and **no** resend advice, because a resend supersedes the token and kills a link that was still valid. The server logs `Invitation lookup unavailable` with the status only, never the URL or the token. If `API_URL` is wrong every token renders the unavailable card, so check it first when debugging. Running against a local backend also needs the web dev origin in the backend's `CORS_ORIGIN` (see `backend/env.example`).
 
 In production both point at `https://api.hooplings.com`, and:
 - The backend's `CORS_ORIGIN` must list this site's origin(s) (`https://hooplings.com`, `https://www.hooplings.com`) or the Accept button fails its CORS preflight (#447) — see `infra/task-definition.json`.
@@ -54,7 +54,13 @@ In production both point at `https://api.hooplings.com`, and:
 
 ## Tests
 
-No test framework configured yet. CI runs lint and type-check in the `lint-and-typecheck` matrix and the production build in the `test-web` job (`.github/workflows/ci.yml`, #690). The web test runner is #510 (Vitest + `@testing-library/react`, to be added as a step of `test-web`); bootstrap it before adding more interactive flows.
+```bash
+npm test   # Vitest (vitest.config.mts), node environment, files in __tests__/
+```
+
+Vitest (#510) runs in the node environment: `lib/open-in-app.ts` takes its browser surface (user agent, `document`, navigation) as an argument, and pages are rendered with `react-dom/server`, so no DOM library is installed. `__tests__/open-in-app.test.ts` pins the `hooplings://invite/<token>` deep link and the store fallback (App Store on iOS, Play Store on Android, only when the page never hid; desktop never redirects); `__tests__/invite-page.test.tsx` covers the lookup states and the tombstoned-inviter label. CI runs lint and type-check in the `lint-and-typecheck` matrix, and `npm test` then the production build in the `Test Web` job (`.github/workflows/ci.yml`). `mobile/__tests__/i18n/brand-guard.test.ts` also scans `web/app` and `web/lib` for retired brand names.
+
+The inviter on the accept page goes through `lib/display-name.ts#displayName`, which mirrors the mobile helper: when `inviterDeletedAt` is set it shows the "Deleted user" label from `lib/strings.ts`, never the stored name (#814). The guardian by-token payload does not carry `inviterDeletedAt` yet, so the field is optional there.
 
 ## Related
 
@@ -62,4 +68,3 @@ No test framework configured yet. CI runs lint and type-check in the `lint-and-t
 - Backend mailer + template: `backend/src/services/mailer/templates/invitation.ts`
 - Mobile counterpart screen: `mobile/app/invite/[token].tsx`
 - Issue tracking the Android fingerprint: #139
-- Issue tracking the web test runner: #510

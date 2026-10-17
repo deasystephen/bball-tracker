@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { displayName } from '../../../lib/display-name';
+import { APP_STORE_URL, PLAY_STORE_URL, openInApp as openInAppWith } from '../../../lib/open-in-app';
 
 /**
  * `GET /invitations/by-token/:token` is polymorphic: a team invitation
@@ -13,6 +15,8 @@ export interface TeamInvitationDetails {
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   teamName: string;
   inviterName: string;
+  /** Sender's tombstone signal (#642); label from this, never from `inviterName`. */
+  inviterDeletedAt: string | null;
   position: string | null;
   jerseyNumber: number | null;
   message: string | null;
@@ -26,6 +30,8 @@ export interface GuardianInvitationDetails {
   childName: string;
   teamName: string | null;
   inviterName: string;
+  /** Not on the guardian payload yet; optional so a future API build can add it. */
+  inviterDeletedAt?: string | null;
   relationship: 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
   expiresAt: string;
 }
@@ -37,10 +43,6 @@ interface Props {
   token: string;
 }
 
-// App Store Connect app id (mobile/eas.json submit.production.ios.ascAppId). Apple
-// resolves the id-only form; it shows "not available" until the app is released.
-const APP_STORE_URL = 'https://apps.apple.com/app/id6758903514';
-const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.bballtracker.mobile';
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 function isExpired(expiresAt: string): boolean {
@@ -79,24 +81,7 @@ export function InviteClient({ invitation, token }: Props) {
   const preposition = guardian ? 'for' : 'to';
 
   function openInApp() {
-    const deepLink = `hooplings://invite/${token}`;
-    const ua = navigator.userAgent;
-    const isAndroid = /android/i.test(ua);
-    const isIos = /iphone|ipad|ipod/i.test(ua);
-    const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
-
-    let appOpened = false;
-    const onHide = () => { appOpened = true; };
-    document.addEventListener('visibilitychange', onHide);
-
-    window.location.href = deepLink;
-
-    setTimeout(() => {
-      document.removeEventListener('visibilitychange', onHide);
-      if (!appOpened && (isAndroid || isIos)) {
-        window.location.href = storeUrl;
-      }
-    }, 1500);
+    openInAppWith(token);
   }
 
   async function acceptWithoutApp() {
@@ -240,7 +225,9 @@ export function InviteClient({ invitation, token }: Props) {
           )}
           <div className="invite-meta-row">
             <span className="meta-label">From</span>
-            <span className="meta-value">{invitation.inviterName}</span>
+            <span className="meta-value">
+              {displayName({ name: invitation.inviterName, deletedAt: invitation.inviterDeletedAt })}
+            </span>
           </div>
           {teamInvite?.position && (
             <div className="invite-meta-row">

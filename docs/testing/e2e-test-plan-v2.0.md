@@ -1291,10 +1291,8 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 ### S.9 — ✓ Mobile ESLint
 - Resolved in #132 (ESLint + eslint-config-expo wired up in `mobile/eslint.config.mjs`, CI lints mobile) and #346 (all warnings burned down; `--max-warnings 0` enforced in both packages). Nothing to verify manually.
 
-### S.10 — ⚠ Web/ test framework absent
-- [ ] Verified-broken / Notes
-- **Issue:** Audit finding — no Vitest/Jest in web/. Coverage gates don't see web/.
-- **Expected fail mode:** Doesn't affect user testing.
+### S.10 — ✓ Web/ test framework
+- Resolved in #510 (Vitest in `web/`, `npm test` runs in CI's `Test Web` job; covers the invite deep link, store fallback, lookup error states and tombstoned inviter). Nothing to verify manually.
 
 ---
 
