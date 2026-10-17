@@ -57,14 +57,22 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null; // Push notifications only work on physical devices
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+  const existing = await Notifications.getPermissionsAsync();
+  let finalStatus = existing.status;
 
-  if (existingStatus !== 'granted') {
+  if (existing.status !== 'granted') {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
-    // Only when the prompt was shown; an already-granted device is not an answer.
-    trackEvent(AnalyticsEvents.PUSH_PERMISSION_ANSWERED, { granted: status === 'granted' });
+    // Only when the prompt was certainly shown. `undetermined` is a first
+    // ask. A stored `denied` usually resolves instantly with no alert (iOS
+    // after "Don't Allow", Android after the second refusal, or Android with
+    // notifications switched off in system settings, which still reports
+    // `canAskAgain: true`), so a repeat `denied` is indistinguishable from
+    // "no prompt" and is not tracked; a change to `granted` can only come
+    // from Android's second ask, so that one is.
+    if (existing.status === 'undetermined' || status === 'granted') {
+      trackEvent(AnalyticsEvents.PUSH_PERMISSION_ANSWERED, { granted: status === 'granted' });
+    }
   }
 
   if (finalStatus !== 'granted') {
