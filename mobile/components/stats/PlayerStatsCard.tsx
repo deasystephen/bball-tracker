@@ -10,6 +10,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import type { PlayerGameStats, AggregatedPlayerStats } from '../../types/stats';
+import { playerDisplayName } from '../../utils/display-name';
 
 interface PlayerStatsCardProps {
   stats: PlayerGameStats | AggregatedPlayerStats;
@@ -43,7 +44,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
           )}
           <View>
             <ThemedText variant="bodyBold" numberOfLines={1}>
-              {stats.playerName}
+              {playerDisplayName(stats)}
             </ThemedText>
             {stats.position && (
               <ThemedText variant="caption" color="textSecondary">

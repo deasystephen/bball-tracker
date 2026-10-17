@@ -12,7 +12,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
 import { relationshipLabel } from '../../utils/guardian';
-import { displayName } from '../../utils/display-name';
+import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
 import { apiClient } from '../../services/api-client';
 import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
@@ -29,7 +29,7 @@ export default function InviteDeepLinkScreen() {
   const { isAuthenticated, updateUser } = useAuthStore();
 
   const { data: invitation, isLoading, error } = useInvitationByToken(token);
-  const acceptById = useAcceptInvitation();
+  const acceptById = useAcceptInvitation({ source: 'link' });
 
   /**
    * Logged-out users must sign in first: accepting needs an identity, and the
@@ -52,12 +52,10 @@ export default function InviteDeepLinkScreen() {
   const guardian = isGuardianInvitation(invitation) ? invitation : null;
   const teamInvite = invitation && !isGuardianInvitation(invitation) ? invitation : null;
   const subject = guardian
-    ? `${guardian.childName}${guardian.teamName ? ` (${guardian.teamName})` : ''}`
+    ? `${childDisplayName(guardian)}${guardian.teamName ? ` (${guardian.teamName})` : ''}`
     : invitation?.teamName ?? '';
-  // Only the team payload carries the inviter's tombstone state today.
-  const inviter = invitation
-    ? displayName({ name: invitation.inviterName, deletedAt: teamInvite?.inviterDeletedAt })
-    : '';
+  // Both payloads carry the inviter's tombstone state (guardian since #813).
+  const inviter = invitation ? inviterDisplayName(invitation) : '';
 
   function formatExpiry(expiresAt: string) {
     return new Date(expiresAt).toLocaleDateString(undefined, {
@@ -88,7 +86,7 @@ export default function InviteDeepLinkScreen() {
           } catch {
             // useSessionRefresh catches up on the next foreground.
           }
-          toast.showToast(`You are now ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}`, 'success');
+          toast.showToast(`You are now ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}`, 'success');
           router.replace('/(tabs)/profile');
           return;
         }
@@ -106,7 +104,7 @@ export default function InviteDeepLinkScreen() {
     Alert.alert(
       'Accept Invitation',
       guardian
-        ? `Become ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}?`
+        ? `Become ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}?`
         : `Join ${invitation.teamName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -211,14 +209,14 @@ export default function InviteDeepLinkScreen() {
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
           {guardian
-            ? `You've been invited to be ${guardian.childName}'s ${relationshipLabel(guardian.relationship).toLowerCase()}.`
+            ? `You've been invited to be ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}.`
             : "You've been invited to join a team!"}
         </ThemedText>
 
         <Card variant="elevated" style={styles.detailCard}>
           {guardian ? (
             <>
-              <DetailRow label="Child" value={guardian.childName} />
+              <DetailRow label="Child" value={childDisplayName(guardian)} />
               <DetailRow label="Relationship" value={relationshipLabel(guardian.relationship)} />
               {guardian.teamName != null && <DetailRow label="Team" value={guardian.teamName} />}
             </>
@@ -254,7 +252,7 @@ export default function InviteDeepLinkScreen() {
               title={
                 isAuthenticated
                   ? guardian
-                    ? `Accept for ${guardian.childName}`
+                    ? `Accept for ${childDisplayName(guardian)}`
                     : 'Accept Invitation'
                   : 'Log In to Accept'
               }

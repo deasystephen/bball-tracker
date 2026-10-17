@@ -140,7 +140,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `role`, `role_type` | enum | global role (`COACH`, …); staff role type (`HEAD_COACH`, `ASSISTANT_COACH`, `TEAM_MANAGER`) |
 | `league_scope` | enum | `personal` (caller's auto-provisioned league) or `league` (an explicit season) |
 | `kind` | enum | invitation model: `team` or `guardian` |
-| `source` | enum | where an invitation was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`). The invite screen accepts through `useAcceptInvitation` by id, which reports `in_app` today; nothing emits `link` since the uncalled by-token accept hook was removed (#822) |
+| `source` | enum | where an invitation was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`, which passes `useAcceptInvitation({ source: 'link' })`) |
 | `by` | enum | how a staff member was identified: `user_id` (picker) or `email` |
 | `relationship` | enum | `MOTHER`, `FATHER`, `GUARDIAN`, `OTHER` |
 | `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted`; HTTP status on `error_shown` |

@@ -56,6 +56,11 @@ export type GuardianRelationship = 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
 export interface GuardianOfEntry {
   childId: string;
   childName: string;
+  /**
+   * Set when the child's account was deleted (#813); render via
+   * `childDisplayName`. Optional: older API builds omit it.
+   */
+  childDeletedAt?: string | null;
   relationship: GuardianRelationship;
   isPrimary: boolean;
   /**

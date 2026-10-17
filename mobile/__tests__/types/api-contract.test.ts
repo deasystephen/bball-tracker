@@ -5,9 +5,15 @@
  * `*_SELECT` / `*_INCLUDE` constants are the contract. Each fixture under
  * `__tests__/fixtures/api-contract/` was recorded from a local backend
  * (`POST /auth/dev-login` against the seed, 2026-10-17) and trimmed to one or
- * two list items. Assigning a fixture to its client type below is checked by
- * `npm run type-check` (`tsc --noEmit`), so a client field the API never
- * sends, or one typed non-null where the API sends `null`, fails CI:
+ * two list items. They predate PR #875 (#813: `inviterDeletedAt`,
+ * `playerDeletedAt` and friends); re-record them once it is deployed. Assigning a fixture to its client type below is checked by
+ * `npm run type-check` (`tsc --noEmit`). It fails CI on a REQUIRED client
+ * field the API never sends and on a field typed non-null (or required) where
+ * the API sends `null` (or omits the key). It does not catch an OPTIONAL
+ * client field the API never sends: assigning a non-literal value performs no
+ * excess-property check, and fixtures legitimately omit optional keys that
+ * other endpoints send (a list item has no `members`). The explicit
+ * assertions below pin the optional fields this test was written for:
  *
  * | Fixture | Endpoint | Backend shape |
  * | --- | --- | --- |
@@ -41,7 +47,7 @@ import type { User } from '../../../shared/types';
 import type { Team } from '../../hooks/useTeams';
 import type { TeamInvitation } from '../../hooks/useInvitations';
 import type { Player } from '../../hooks/usePlayers';
-import type { Game } from '../../types/game';
+import type { Game, GameRosterMember } from '../../types/game';
 
 import sessionUsers from '../fixtures/api-contract/auth-session-user.json';
 import teamListItem from '../fixtures/api-contract/team-list-item.json';
@@ -60,7 +66,7 @@ type Wire<T> = T extends string
       ? { [K in keyof T]: Wire<T[K]> }
       : T;
 
-type GameMember = NonNullable<NonNullable<Game['team']>['members']>[number];
+type GameMember = GameRosterMember;
 
 /** Compile-time assertion; the call is a runtime no-op. */
 function assertType<T extends true>(): T | undefined {
@@ -115,6 +121,8 @@ describe('client types match the recorded backend payloads', () => {
 
   it('GET /invitations items: user emails nullable, no season.isActive', () => {
     assertType<AcceptsNull<TeamInvitation['player']['email']>>();
+    // `GET /invitations/:id` omits it for a caller who is neither manager nor invitee.
+    assertType<IsOptional<TeamInvitation['player'], 'email'>>();
     assertType<AcceptsNull<TeamInvitation['invitedBy']['email']>>();
     assertType<Not<HasKey<TeamInvitation['team']['season'], 'isActive'>>>();
     expect(invitations.some((i) => i.player.email === null && i.invitedBy.email === null)).toBe(true);

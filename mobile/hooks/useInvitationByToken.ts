@@ -28,8 +28,12 @@ export interface GuardianInvitationByToken {
   id: string;
   status: InvitationByTokenStatus;
   childName: string;
+  /** Child's tombstone state (#813); render via `childDisplayName`. Older API builds omit it. */
+  childDeletedAt?: string | null;
   teamName: string | null;
   inviterName: string;
+  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. Older API builds omit it. */
+  inviterDeletedAt?: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }

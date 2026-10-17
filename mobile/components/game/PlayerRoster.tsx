@@ -17,18 +17,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { displayName } from '../../utils/display-name';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import type { GameRosterMember } from '../../types/game';
 
-interface Player {
-  id: string;
-  playerId: string;
-  jerseyNumber?: number | null;
-  position?: string | null;
-  player: {
-    deletedAt?: string | null;
-    id: string;
-    name: string;
-  };
-}
+type Player = GameRosterMember;
 
 interface PlayerRosterProps {
   players: Player[];

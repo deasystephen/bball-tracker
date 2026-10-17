@@ -127,8 +127,14 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   which would read as Active). A deleted roster row's menu offers only Remove player. The mobile
   types for invitation `player`/`invitedBy`, announcement `author` and `GameEvent.player` declare
   `deletedAt?`; until the API sends it on a payload, `displayName` falls back to the stored name. The
-  `/invite/<token>` accept screen renders the inviter as `displayName({ name: inviterName, deletedAt:
-  inviterDeletedAt })` (team by-token payload only; the guardian payload has no `inviterDeletedAt`).
+  flattened payloads carry a name string beside its timestamp (#813): `inviterName`/`inviterDeletedAt`
+  (team and guardian by-token payloads, `guardianInvitations`), `childName`/`childDeletedAt`
+  (guardian payloads, `guardianOf`) and `playerName`/`playerDeletedAt` (stats rows). Render them with
+  `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file; the timestamp is
+  optional on the client so an app that out-runs the deploy falls back to the stored name. Readers: the
+  invite screen, the Invitations tab guardian card, Profile My Kids and account deletion,
+  `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a tombstone shows the whole label,
+  never its first word).
   `__tests__/utils/display-name-guard.test.ts` reads `app/` and `components/` and fails on a raw
   `.name` read off any `…player`/`…Player`, `<x>.user` (staff rows), `invitedBy` or `author`; a bare
   `user.name` passes only in a file that binds `user` from the auth store (#674). Tests:

@@ -24,6 +24,16 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { describeRecord, describeResults, getResultColor } from '../../utils/game-result';
 import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { isDeletedUser, playerDisplayName } from '../../utils/display-name';
+
+/**
+ * Podium label: a live player's first name, or the whole localized
+ * deleted-user label for a tombstone (#813), never a split of it.
+ */
+function podiumName(stats: { playerName: string; playerDeletedAt?: string | null }): string {
+  const name = playerDisplayName(stats);
+  return isDeletedUser({ name: stats.playerName, deletedAt: stats.playerDeletedAt }) ? name : name.split(' ')[0];
+}
 
 export default function Stats() {
   const router = useRouter();
@@ -253,7 +263,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topRebounder.playerName.split(' ')[0]}
+                        {podiumName(topRebounder)}
                       </ThemedText>
                       <ThemedText variant="h3">
                         {topRebounder.reboundsPerGame.toFixed(1)}
@@ -294,7 +304,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topScorer.playerName.split(' ')[0]}
+                        {podiumName(topScorer)}
                       </ThemedText>
                       <ThemedText variant="h2" heading={false} /* stat value */>
                         {topScorer.pointsPerGame.toFixed(1)}
@@ -335,7 +345,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topAssister.playerName.split(' ')[0]}
+                        {podiumName(topAssister)}
                       </ThemedText>
                       <ThemedText variant="h3">
                         {topAssister.assistsPerGame.toFixed(1)}

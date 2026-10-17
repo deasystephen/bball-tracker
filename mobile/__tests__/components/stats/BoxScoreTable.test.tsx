@@ -10,6 +10,7 @@ import { render } from '@testing-library/react-native';
 
 import { BoxScoreTable } from '../../../components/stats/BoxScoreTable';
 import type { PlayerGameStats, TeamGameStats } from '../../../types/stats';
+import { i18n } from '../../../i18n';
 
 jest.mock('../../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -120,5 +121,20 @@ describe('BoxScoreTable', () => {
     );
     expect(getByText('#23 John Doe')).toBeTruthy();
     expect(getByText('Jane Smith')).toBeTruthy();
+  });
+  it('names a deleted player with the localized label from playerDeletedAt (#813)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(
+        <BoxScoreTable
+          players={[{ ...player, playerName: 'Deleted user', playerDeletedAt: '2026-09-01T00:00:00.000Z' }]}
+          teamStats={teamStats}
+        />
+      );
+      expect(getByText('#23 Usuario eliminado')).toBeTruthy();
+      expect(queryByText(/Deleted user/)).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

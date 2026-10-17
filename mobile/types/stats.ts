@@ -7,6 +7,8 @@ import type { GameResult } from '../utils/game-result';
 export interface PlayerGameStats {
   playerId: string;
   playerName: string;
+  /** Tombstone state for `playerName` (#813); render via `playerDisplayName`. Older API builds omit it. */
+  playerDeletedAt?: string | null;
   jerseyNumber?: number;
   position?: string;
   points: number;

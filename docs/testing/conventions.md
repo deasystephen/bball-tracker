@@ -71,8 +71,10 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   the contract. `mobile/__tests__/types/api-contract.test.ts` assigns JSON payloads recorded from a
   local backend (`mobile/__tests__/fixtures/api-contract/`: auth session user, `GET /teams` item and
   detail, `GET /games` item and detail, `GET /invitations` item, `GET /players/:id`) to the client
-  types, so `npm run type-check` fails on a client field the API never sends or one typed non-null
-  where the API sends `null`.
+  types, so `npm run type-check` fails on a required client field the API never sends, and on a field
+  typed non-null or required where the API sends `null` or omits the key. An optional client field the
+  API never sends is not caught (a non-literal assignment has no excess-property check); the test pins
+  the optional fields it was written for with explicit type assertions.
 - Fixtures, not a type import from `backend/src/services`: CI's mobile type-check job installs only
   `mobile/` dependencies and cannot resolve `@prisma/client`. When a backend constant behind one of
   these endpoints changes, re-record the fixture in the same PR (run the backend locally, `POST

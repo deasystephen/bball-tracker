@@ -518,7 +518,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** invited user (signed in)
 - **Prereq:** E.4 successful OR navigate to `hooplings://invite/<token>` directly
 - **Steps:** On the invite screen, tap "Accept Invitation" → confirm alert.
-- **Expected:** Toast confirmation. Navigates to the Invitations tab. The invitation moves from PENDING to ACCEPTED (`POST /invitations/by-token/:token/accept` when opened from the link while signed out, or the authenticated `POST /invitations/:id/accept`). User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
+- **Expected:** Toast confirmation. Navigates to the Invitations tab. The invitation moves from PENDING to ACCEPTED through the authenticated `POST /invitations/:id/accept` (the app never calls the public by-token accept; that route serves the web invite page). Amplitude records `invitation_accepted` with `source: link`. User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
 - **Notes:** ___________
 
 ### E.6 — Reject invitation

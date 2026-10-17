@@ -8,6 +8,7 @@
 import { render, fireEvent } from '@testing-library/react-native';
 
 import Profile from '../../app/(tabs)/profile';
+import { i18n } from '../../i18n';
 import { useAuthStore } from '../../store/auth-store';
 import type { GuardianOfEntry } from '../../../shared/types';
 
@@ -123,5 +124,19 @@ describe('Profile "My kids"', () => {
     const { queryByText, getByText } = render(<Profile />);
     expect(queryByText('My kids')).toBeNull();
     expect(getByText('Change account type')).toBeTruthy();
+  });
+  it('names a deleted child with the localized label from childDeletedAt (#813)', async () => {
+    signIn('PARENT', [
+      { childId: 'gone', childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z', relationship: 'MOTHER', isPrimary: true },
+    ]);
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, getByLabelText, queryByText } = render(<Profile />);
+      expect(getByText('Usuario eliminado')).toBeTruthy();
+      expect(getByLabelText(/^Usuario eliminado, /)).toBeTruthy();
+      expect(queryByText('Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

@@ -62,6 +62,9 @@ export interface Game {
   };
 }
 
+/** One roster row of `GET /games/:id` (the tracker's player chips). */
+export type GameRosterMember = NonNullable<NonNullable<Game['team']>['members']>[number];
+
 export interface ShotMetadata {
   made: boolean;
   /** 1 = free throw, 2 = field goal, 3 = three-pointer. */
