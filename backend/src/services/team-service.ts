@@ -44,21 +44,7 @@ import {
   canWriteLeague,
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
-
-/**
- * User shape for roster and staff rows. Exported so game-service's game
- * detail serves the same fields (`isManaged`, `deletedAt`) as the team detail.
- */
-export const USER_SUMMARY_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  // Lets clients label roster-only (managed) players (audit #64)
-  isManaged: true,
-  // Deleted accounts stay on rosters as tombstones (#444, D10/D14); clients
-  // derive a "Deleted" chip and a localized label from this, never from name.
-  deletedAt: true,
-} satisfies Prisma.UserSelect;
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -66,7 +52,7 @@ const TEAM_SUMMARY_SELECT = {
 } satisfies Prisma.TeamSelect;
 
 const TEAM_STAFF_INCLUDE = {
-  user: { select: USER_SUMMARY_SELECT },
+  user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   role: true,
 } satisfies Prisma.TeamStaffInclude;
 
@@ -92,7 +78,7 @@ const TEAM_INCLUDE = {
   staff: { include: TEAM_STAFF_INCLUDE },
   members: {
     include: {
-      player: { select: USER_SUMMARY_SELECT },
+      player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
     },
     orderBy: ROSTER_MEMBERS_ORDER_BY,
   },
@@ -101,11 +87,11 @@ const TEAM_INCLUDE = {
 /**
  * Roster rows on `GET /teams/:id` also carry the player's email delivery state
  * (#449) so a coach can be told "this address bounced". Deliberately NOT part
- * of USER_SUMMARY_SELECT: that select also feeds staff rows, which every team
+ * of USER_SUMMARY_WITH_EMAIL_SELECT: that select also feeds staff rows, which every team
  * member reads. Stripped with the email for callers without `canManageRoster`.
  */
 const ROSTER_PLAYER_SELECT = {
-  ...USER_SUMMARY_SELECT,
+  ...USER_SUMMARY_WITH_EMAIL_SELECT,
   emailSuppressedAt: true,
   emailSuppressedReason: true,
 } satisfies Prisma.UserSelect;
@@ -188,7 +174,7 @@ const teamListInclude = (userId: string): typeof TEAM_LIST_INCLUDE => ({
 });
 
 const TEAM_MEMBER_INCLUDE = {
-  player: { select: USER_SUMMARY_SELECT },
+  player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   team: { select: TEAM_SUMMARY_SELECT },
 } satisfies Prisma.TeamMemberInclude;
 

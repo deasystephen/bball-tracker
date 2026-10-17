@@ -23,6 +23,7 @@ const mockGuardianInvitationDetails = {
   childName: 'Kid Smith',
   teamName: 'Lakers',
   inviterName: 'Coach Smith',
+  inviterDeletedAt: null,
   relationship: 'MOTHER' as const,
   expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
 };

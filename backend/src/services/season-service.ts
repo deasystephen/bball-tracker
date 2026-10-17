@@ -12,6 +12,7 @@ import {
   getReadableLeagueIds,
   canReadLeague,
 } from '../utils/permissions';
+import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const LEAGUE_SUMMARY_SELECT = {
   id: true,
@@ -39,24 +40,14 @@ const SEASON_DETAIL_INCLUDE = {
     include: {
       staff: {
         include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          // Staff emails go to every reader of the team (authorization.md).
+          user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
           role: true,
         },
       },
       members: {
         include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
+          player: { select: USER_SUMMARY_SELECT },
         },
       },
       _count: {

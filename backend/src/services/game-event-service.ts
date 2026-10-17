@@ -12,6 +12,7 @@ import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { lockGameRow, LockedGame } from '../utils/game-row-lock';
 import { shotPoints } from '../utils/shot-points';
+import { USER_SUMMARY_SELECT } from '../utils/user-select';
 
 const GAME_ACCESS_INCLUDE = {
   team: {
@@ -27,14 +28,10 @@ const GAME_ACCESS_INCLUDE = {
 
 /**
  * Player shape on every game event (REST list/detail, game detail timeline,
- * socket broadcast). `deletedAt` is the tombstone signal for the timeline
- * label (#642); never email here.
+ * socket broadcast, CSV export): the shared user summary, so `deletedAt` is
+ * the tombstone signal for the timeline label (#642, #813); never email here.
  */
-export const EVENT_PLAYER_SELECT = {
-  id: true,
-  name: true,
-  deletedAt: true,
-} satisfies Prisma.UserSelect;
+export const EVENT_PLAYER_SELECT = USER_SUMMARY_SELECT;
 
 export type EventPlayer = Prisma.UserGetPayload<{ select: typeof EVENT_PLAYER_SELECT }>;
 

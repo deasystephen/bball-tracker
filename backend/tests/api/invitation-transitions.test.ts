@@ -280,6 +280,7 @@ describe('invitation transitions through the real InvitationService (#766)', () 
         childName: 'Player',
         teamName: 'Lakers',
         inviterName: 'Coach',
+        inviterDeletedAt: null,
         relationship: 'GUARDIAN',
         expiresAt: new Date().toISOString(),
         token: SECRET_TOKEN,

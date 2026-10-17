@@ -49,8 +49,8 @@ mailer.send ──(ConfigurationSetName)──► SES ──► SNS ──► SQ
   do the same, or a corrected address is reported as bounced.
 - **Who sees it:** `GET /teams/:id` roster rows carry both fields for callers with
   `canManageRoster` and are stripped with the email for everyone else. They are selected through
-  `ROSTER_PLAYER_SELECT`, **not** `USER_SUMMARY_SELECT` — that one also feeds staff rows, which
-  every team member reads.
+  `ROSTER_PLAYER_SELECT`, **not** `utils/user-select.ts#USER_SUMMARY_WITH_EMAIL_SELECT` — that one
+  also feeds staff rows, which every team member reads.
 - **`services/mailer/ses-event-consumer.ts`** long-polls the queue (20s, batches of 10). Handled
   and ignored messages are deleted; a handler failure **or a malformed body** is left alone, so it
   is redelivered and ends in the dead-letter queue intact. Receive failures back off 5s → 60s and

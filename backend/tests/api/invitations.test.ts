@@ -105,6 +105,7 @@ describe('Invitations API', () => {
           childName: 'Kid Smith',
           teamName: 'Lakers',
           inviterName: 'Coach Smith',
+          inviterDeletedAt: '2026-09-01T00:00:00.000Z',
           relationship: 'MOTHER',
           expiresAt: new Date(Date.now() + 86400000).toISOString(),
         },
@@ -119,6 +120,8 @@ describe('Invitations API', () => {
         kind: 'guardian',
         childName: 'Kid Smith',
         relationship: 'MOTHER',
+        // Tombstone signal for a deleted inviter (#813).
+        inviterDeletedAt: '2026-09-01T00:00:00.000Z',
       });
       expect(response.body.guardianInvitations[0]).not.toHaveProperty('token');
     });

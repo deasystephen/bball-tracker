@@ -15,6 +15,7 @@ import { NotFoundError, ForbiddenError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { canAccessTeam } from '../utils/permissions';
 import { StatsService } from './stats-service';
+import { USER_SUMMARY_SELECT } from '../utils/user-select';
 
 type GameWithTeam = Game & { team: Team };
 
@@ -149,7 +150,7 @@ export class StatsExportService {
           const page = await prisma.gameEvent.findMany({
             where: { gameId },
             orderBy: [{ timestamp: 'asc' }, { id: 'asc' }],
-            include: { player: { select: { id: true, name: true } } },
+            include: { player: { select: USER_SUMMARY_SELECT } },
             take: EVENT_PAGE_SIZE,
             ...(cursor ? { cursor, skip: 1 } : {}),
           });

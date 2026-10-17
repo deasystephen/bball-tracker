@@ -126,7 +126,7 @@ describe('GuardianService', () => {
           expiresAt,
           child: { name: 'Kid Smith' },
           team: { name: 'Lakers' },
-          invitedBy: { name: 'Coach' },
+          invitedBy: { name: 'Coach', deletedAt: new Date('2026-09-01T00:00:00.000Z') },
           token: 'must-not-leak',
         },
       ]);
@@ -141,10 +141,17 @@ describe('GuardianService', () => {
           childName: 'Kid Smith',
           teamName: 'Lakers',
           inviterName: 'Coach',
+          // Deleted inviter: the client labels from this, never the name (#813).
+          inviterDeletedAt: '2026-09-01T00:00:00.000Z',
           relationship: 'MOTHER',
           expiresAt: expiresAt.toISOString(),
         },
       ]);
+      expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ invitedBy: { select: { name: true, deletedAt: true } } }),
+        })
+      );
       expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -515,7 +522,7 @@ describe('GuardianService', () => {
         expiresAt,
         child: { name: 'Kid Smith' },
         team: { name: 'Lakers' },
-        invitedBy: { name: 'Coach' },
+        invitedBy: { name: 'Coach', deletedAt: null },
       });
 
       const result = await GuardianService.getInvitationByToken('tok');
@@ -527,10 +534,32 @@ describe('GuardianService', () => {
         childName: 'Kid Smith',
         teamName: 'Lakers',
         inviterName: 'Coach',
+        inviterDeletedAt: null,
         relationship: 'FATHER',
         expiresAt: expiresAt.toISOString(),
       });
       expect(result).not.toHaveProperty('invitedEmail');
+      // Public payload: the inviter's name and tombstone signal, never email.
+      expect(mockPrisma.guardianInvitation.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ invitedBy: { select: { name: true, deletedAt: true } } }),
+        })
+      );
+    });
+
+    it('carries the deleted inviter tombstone (#813)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue({
+        id: 'inv-1',
+        status: 'PENDING',
+        relationship: 'FATHER',
+        expiresAt: new Date(),
+        child: { name: 'Kid Smith' },
+        team: { name: 'Lakers' },
+        invitedBy: { name: 'Deleted user', deletedAt: new Date('2026-09-01T00:00:00.000Z') },
+      });
+
+      const result = await GuardianService.getInvitationByToken('tok');
+      expect(result.inviterDeletedAt).toBe('2026-09-01T00:00:00.000Z');
     });
 
     it('returns teamName null when the team was deleted', async () => {
@@ -541,7 +570,7 @@ describe('GuardianService', () => {
         expiresAt: new Date(),
         child: { name: 'Kid Smith' },
         team: null,
-        invitedBy: { name: 'Coach' },
+        invitedBy: { name: 'Coach', deletedAt: null },
       });
 
       const result = await GuardianService.getInvitationByToken('tok');

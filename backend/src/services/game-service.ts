@@ -7,7 +7,8 @@ import prisma from '../models';
 import { CreateGameInput, UpdateGameInput, GameQueryParams } from '../api/games/schemas';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { hasTeamPermission, canAccessTeam, isSystemAdmin, readableTeamsWhere } from '../utils/permissions';
-import { omitRosterManagerFields, ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from './team-service';
+import { omitRosterManagerFields, ROSTER_MEMBERS_ORDER_BY } from './team-service';
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { StatsService } from './stats-service';
 import { logger } from '../utils/logger';
 import { emitGameStatusChange, emitGameScoreChange } from '../websocket/emit';
@@ -24,7 +25,7 @@ const GAME_INCLUDE = {
       },
       staff: {
         include: {
-          user: { select: USER_SUMMARY_SELECT },
+          user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
           role: true,
         },
       },
@@ -40,7 +41,7 @@ const GAME_DETAIL_INCLUDE = {
         include: {
           // Same user shape as the team detail (isManaged, deletedAt for
           // tombstones, #642); email is stripped below for non-managers.
-          player: { select: USER_SUMMARY_SELECT },
+          player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
         },
         // Same roster order as team-service TEAM_INCLUDE.members.
         orderBy: ROSTER_MEMBERS_ORDER_BY,

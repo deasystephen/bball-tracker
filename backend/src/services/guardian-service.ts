@@ -21,6 +21,7 @@ import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -93,6 +94,11 @@ export interface PublicGuardianInvitation {
   childName: string;
   teamName: string | null;
   inviterName: string;
+  /**
+   * Tombstone signal for the sender (#813), as on the team invitation's
+   * public view: clients label from this, never the name.
+   */
+  inviterDeletedAt: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }
@@ -195,7 +201,8 @@ export class GuardianService {
         expiresAt: true,
         child: { select: { name: true } },
         team: { select: { name: true } },
-        invitedBy: { select: { name: true } },
+        // Public payload: name and the tombstone signal only, never email.
+        invitedBy: { select: { name: true, deletedAt: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -207,6 +214,7 @@ export class GuardianService {
       childName: invitation.child.name,
       teamName: invitation.team?.name ?? null,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       relationship: invitation.relationship,
       expiresAt: invitation.expiresAt.toISOString(),
     }));
@@ -221,7 +229,7 @@ export class GuardianService {
   ): Promise<{ id: string; name: string; email: string | null }> {
     const member = await prisma.teamMember.findUnique({
       where: { teamId_playerId: { teamId, playerId } },
-      select: { player: { select: { id: true, name: true, email: true } } },
+      select: { player: { select: USER_SUMMARY_WITH_EMAIL_SELECT } },
     });
 
     if (!member) {
@@ -502,7 +510,8 @@ export class GuardianService {
         expiresAt: true,
         child: { select: { name: true } },
         team: { select: { name: true } },
-        invitedBy: { select: { name: true } },
+        // Public payload: name and the tombstone signal only, never email.
+        invitedBy: { select: { name: true, deletedAt: true } },
       },
     });
 
@@ -517,6 +526,7 @@ export class GuardianService {
       childName: invitation.child.name,
       teamName: invitation.team?.name ?? null,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       relationship: invitation.relationship,
       expiresAt: invitation.expiresAt.toISOString(),
     };

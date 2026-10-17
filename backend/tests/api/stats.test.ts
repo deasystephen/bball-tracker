@@ -158,7 +158,7 @@ describe('Stats API', () => {
   };
 
   const mockPlayerOverallStats = {
-    player: { id: TEST_PLAYER_ID, name: 'John Doe' },
+    player: { id: TEST_PLAYER_ID, name: 'John Doe', isManaged: false, deletedAt: null },
     teams: [
       {
         teamId: TEST_TEAM_ID,

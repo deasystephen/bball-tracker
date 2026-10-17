@@ -577,7 +577,7 @@ describe('GameEventService', () => {
       // Event players carry the tombstone signal for the timeline, never email (#642).
       expect(mockPrisma.gameEvent.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          include: { player: { select: { id: true, name: true, deletedAt: true } } },
+          include: { player: { select: { id: true, name: true, isManaged: true, deletedAt: true } } },
         })
       );
     });

@@ -3,7 +3,8 @@
  */
 
 import { GameService } from '../../src/services/game-service';
-import { ROSTER_MEMBERS_ORDER_BY, USER_SUMMARY_SELECT } from '../../src/services/team-service';
+import { ROSTER_MEMBERS_ORDER_BY } from '../../src/services/team-service';
+import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { EVENT_PLAYER_SELECT } from '../../src/services/game-event-service';
 import { emitGameScoreChange, emitGameStatusChange } from '../../src/websocket/emit';
 import { mockPrisma } from '../setup';
@@ -264,11 +265,12 @@ describe('GameService', () => {
       // Prisma is mocked, so the include is the only guard that the tombstone
       // signal reaches the tracker roster and the event timeline.
       const { include } = (mockPrisma.game.findUnique as jest.Mock).mock.calls[0][0];
-      expect(USER_SUMMARY_SELECT).toMatchObject({ deletedAt: true, isManaged: true });
-      expect(include.team.include.members.include.player).toEqual({ select: USER_SUMMARY_SELECT });
-      expect(include.team.include.staff.include.user).toEqual({ select: USER_SUMMARY_SELECT });
+      expect(USER_SUMMARY_WITH_EMAIL_SELECT).toMatchObject({ deletedAt: true, isManaged: true });
+      expect(include.team.include.members.include.player).toEqual({ select: USER_SUMMARY_WITH_EMAIL_SELECT });
+      expect(include.team.include.staff.include.user).toEqual({ select: USER_SUMMARY_WITH_EMAIL_SELECT });
       expect(include.events.include.player).toEqual({ select: EVENT_PLAYER_SELECT });
-      expect(EVENT_PLAYER_SELECT).toEqual({ id: true, name: true, deletedAt: true });
+      expect(EVENT_PLAYER_SELECT).toBe(USER_SUMMARY_SELECT);
+      expect(EVENT_PLAYER_SELECT).not.toHaveProperty('email');
     });
 
     it('should return game for team member without other members\' emails (role matrix B2.5)', async () => {

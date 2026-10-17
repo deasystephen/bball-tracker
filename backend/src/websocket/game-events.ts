@@ -29,6 +29,7 @@ import prisma from '../models';
 import { canAccessTeam } from '../utils/permissions';
 import { WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
+import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
   RATE_LIMITED_MESSAGE,
@@ -194,7 +195,7 @@ export interface GameSnapshot {
     homeScore: number;
     awayScore: number;
   };
-  events: Array<GameEvent & { player?: { id: string; name: string } | null }>;
+  events: Array<GameEvent & { player?: UserSummary | null }>;
 }
 
 export async function buildGameSnapshot(gameId: string): Promise<GameSnapshot | null> {
@@ -203,7 +204,8 @@ export async function buildGameSnapshot(gameId: string): Promise<GameSnapshot | 
     include: {
       events: {
         include: {
-          player: { select: { id: true, name: true } },
+          // Same player shape as every REST event payload (#813).
+          player: { select: USER_SUMMARY_SELECT },
         },
         orderBy: { timestamp: 'desc' },
         take: SNAPSHOT_EVENT_LIMIT,

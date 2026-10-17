@@ -9,11 +9,14 @@ import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { GameEventType, GameStatus, Prisma } from '@prisma/client';
 import { lockGameRow } from '../utils/game-row-lock';
 import { shotMade, shotValue } from '../utils/shot-points';
+import { USER_SUMMARY_SELECT, UserSummary } from '../utils/user-select';
 
 // Types for stats responses
 export interface PlayerGameStats {
   playerId: string;
   playerName: string;
+  /** Tombstone signal for `playerName` (#813): label from this, never the name. */
+  playerDeletedAt?: Date | null;
   jerseyNumber?: number;
   position?: string;
   points: number;
@@ -168,12 +171,7 @@ export class StatsService {
       db.gameEvent.findMany({
         where: { gameId },
         include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
+          player: { select: USER_SUMMARY_SELECT },
         },
       }),
       db.game.findUnique({
@@ -216,6 +214,7 @@ export class StatsService {
         playerStatsMap.set(event.playerId, {
           playerId: event.playerId,
           playerName: event.player.name,
+          playerDeletedAt: event.player.deletedAt,
           jerseyNumber: memberInfo?.jerseyNumber ?? undefined,
           position: memberInfo?.position ?? undefined,
           points: 0,
@@ -606,7 +605,7 @@ export class StatsService {
     // Get player info
     const player = await prisma.user.findUnique({
       where: { id: playerId },
-      select: { id: true, name: true },
+      select: USER_SUMMARY_SELECT,
     });
 
     if (!player) {
@@ -688,6 +687,7 @@ export class StatsService {
     return {
       playerId: player.id,
       playerName: player.name,
+      playerDeletedAt: player.deletedAt,
       jerseyNumber: teamMember?.jerseyNumber ?? undefined,
       position: teamMember?.position ?? undefined,
       ...totals,
@@ -835,9 +835,7 @@ export class StatsService {
       prisma.teamMember.findMany({
         where: { teamId },
         include: {
-          player: {
-            select: { id: true, name: true },
-          },
+          player: { select: USER_SUMMARY_SELECT },
         },
       }),
       prisma.game.findMany({
@@ -921,6 +919,7 @@ export class StatsService {
       return {
         playerId: member.playerId,
         playerName: member.player.name,
+        playerDeletedAt: member.player.deletedAt,
         jerseyNumber: member.jerseyNumber ?? undefined,
         position: member.position ?? undefined,
         ...totals,
@@ -952,7 +951,7 @@ export class StatsService {
     playerId: string,
     userId: string
   ): Promise<{
-    player: { id: string; name: string };
+    player: UserSummary;
     teams: Array<{
       teamId: string;
       teamName: string;
@@ -965,7 +964,7 @@ export class StatsService {
     const [player, memberships] = await Promise.all([
       prisma.user.findUnique({
         where: { id: playerId },
-        select: { id: true, name: true },
+        select: USER_SUMMARY_SELECT,
       }),
       prisma.teamMember.findMany({
         where: { playerId },
@@ -1103,6 +1102,7 @@ export class StatsService {
         stats: {
           playerId: player.id,
           playerName: player.name,
+          playerDeletedAt: player.deletedAt,
           jerseyNumber: membership.jerseyNumber ?? undefined,
           position: membership.position ?? undefined,
           ...totals,
@@ -1168,7 +1168,7 @@ export class StatsService {
    * Aggregate multiple season stats into career totals
    */
   private static aggregatePlayerStats(
-    player: { id: string; name: string },
+    player: UserSummary,
     statsList: AggregatedPlayerStats[]
   ): AggregatedPlayerStats {
     const totals = {
@@ -1241,6 +1241,7 @@ export class StatsService {
     return {
       playerId: player.id,
       playerName: player.name,
+      playerDeletedAt: player.deletedAt,
       ...totals,
       fieldGoalPercentage,
       threePointPercentage,
