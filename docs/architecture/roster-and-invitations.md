@@ -107,8 +107,12 @@ eng-review amendments recorded there).
   invitation, a staff role or a guardian link could land on a stranger. `emailEquals` escapes
   `\`, `_` and `%`. It covers `User.email` (Add Player, guardian
   find-or-create, add staff by email, SES events) and `GuardianInvitation.invitedEmail`
-  (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on the
-  raw filter anywhere else in `src/`; `contains` + `insensitive` (search) stays allowed.
+  (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on any
+  innermost object literal in `backend/src/` or `backend/scripts/` (`.ts`, `.js`, `.mjs`) outside the
+  helper that pairs `equals` with an explicit `mode`, whatever its value: the `'insensitive'` literal,
+  `Prisma.QueryMode.insensitive`, a constant or the shorthand (#696). Outside `emailEquals` there is no
+  reason to pair the two. `contains` + `insensitive` (search) stays allowed. A filter assembled across
+  statements, and `startsWith` / `endsWith` + `insensitive`, are not checked.
   **Proven only against real Postgres** (`tests/integration/email-match.db.test.ts`): each flow
   plants a look-alike account and must not touch it. When adding such a test, put the `_` on the
   side that is the **query** — the look-alike on the wrong side passes with the bug present

@@ -145,20 +145,21 @@ export function perGame(total: number, games: number): number {
 }
 
 /** The summed counting stats every season / career aggregation derives its averages from. */
-interface AveragedTotals {
-  points: number;
-  rebounds: number;
-  assists: number;
-  steals: number;
-  blocks: number;
-  turnovers: number;
-  fieldGoalsMade: number;
-  fieldGoalsAttempted: number;
-  threePointersMade: number;
-  threePointersAttempted: number;
-  freeThrowsMade: number;
-  freeThrowsAttempted: number;
-}
+type AveragedTotals = Pick<
+  PlayerGameStats,
+  | 'points'
+  | 'rebounds'
+  | 'assists'
+  | 'steals'
+  | 'blocks'
+  | 'turnovers'
+  | 'fieldGoalsMade'
+  | 'fieldGoalsAttempted'
+  | 'threePointersMade'
+  | 'threePointersAttempted'
+  | 'freeThrowsMade'
+  | 'freeThrowsAttempted'
+>;
 
 type DerivedPlayerAverages = Pick<
   AggregatedPlayerStats,
@@ -702,19 +703,6 @@ export class StatsService {
       totals.freeThrowsAttempted += stat.freeThrowsAttempted;
     }
 
-    const {
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
-    } = derivePlayerAverages(totals, gamesPlayed);
-
     return {
       playerId: player.id,
       playerName: player.name,
@@ -723,17 +711,8 @@ export class StatsService {
       ...totals,
       offensiveRebounds: 0, // Not tracked in PlayerStats table
       defensiveRebounds: 0,
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
       gamesPlayed,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
+      ...derivePlayerAverages(totals, gamesPlayed),
     };
   }
 
@@ -925,19 +904,6 @@ export class StatsService {
         totals.freeThrowsAttempted += stat.freeThrowsAttempted;
       }
 
-      const {
-        fieldGoalPercentage,
-        threePointPercentage,
-        freeThrowPercentage,
-        pointsPerGame: ppg,
-        reboundsPerGame: rpg,
-        assistsPerGame: apg,
-        stealsPerGame: spg,
-        blocksPerGame: bpg,
-        turnoversPerGame: tpg,
-        efficiency,
-      } = derivePlayerAverages(totals, gamesPlayed);
-
       return {
         playerId: member.playerId,
         playerName: member.player.name,
@@ -946,17 +912,8 @@ export class StatsService {
         ...totals,
         offensiveRebounds: 0,
         defensiveRebounds: 0,
-        fieldGoalPercentage,
-        threePointPercentage,
-        freeThrowPercentage,
         gamesPlayed,
-        pointsPerGame: ppg,
-        reboundsPerGame: rpg,
-        assistsPerGame: apg,
-        stealsPerGame: spg,
-        blocksPerGame: bpg,
-        turnoversPerGame: tpg,
-        efficiency,
+        ...derivePlayerAverages(totals, gamesPlayed),
       };
     });
 
@@ -1093,19 +1050,6 @@ export class StatsService {
         totals.freeThrowsAttempted += stat.freeThrowsAttempted;
       }
 
-      const {
-        fieldGoalPercentage,
-        threePointPercentage,
-        freeThrowPercentage,
-        pointsPerGame: ppg,
-        reboundsPerGame: rpg,
-        assistsPerGame: apg,
-        stealsPerGame: spg,
-        blocksPerGame: bpg,
-        turnoversPerGame: tpg,
-        efficiency,
-      } = derivePlayerAverages(totals, gamesPlayed);
-
       teamStatsResult.push({
         teamId: membership.teamId,
         teamName: membership.team.name,
@@ -1118,17 +1062,8 @@ export class StatsService {
           ...totals,
           offensiveRebounds: 0,
           defensiveRebounds: 0,
-          fieldGoalPercentage,
-          threePointPercentage,
-          freeThrowPercentage,
           gamesPlayed,
-          pointsPerGame: ppg,
-          reboundsPerGame: rpg,
-          assistsPerGame: apg,
-          stealsPerGame: spg,
-          blocksPerGame: bpg,
-          turnoversPerGame: tpg,
-          efficiency,
+          ...derivePlayerAverages(totals, gamesPlayed),
         },
       });
     }
@@ -1219,34 +1154,12 @@ export class StatsService {
 
     const gamesPlayed = totals.gamesPlayed;
 
-    const {
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
-    } = derivePlayerAverages(totals, gamesPlayed);
-
     return {
       playerId: player.id,
       playerName: player.name,
       ...totals,
-      fieldGoalPercentage,
-      threePointPercentage,
-      freeThrowPercentage,
       gamesPlayed,
-      pointsPerGame: ppg,
-      reboundsPerGame: rpg,
-      assistsPerGame: apg,
-      stealsPerGame: spg,
-      blocksPerGame: bpg,
-      turnoversPerGame: tpg,
-      efficiency,
+      ...derivePlayerAverages(totals, gamesPlayed),
     };
   }
 }

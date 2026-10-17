@@ -83,10 +83,12 @@ export const apiRateLimit = rateLimit({
  * the only route it is mounted on: 30 requests per minute per IP. The browser
  * calls that route directly, unauthenticated, so the key is the IP.
  *
- * It is NOT a general POST/PATCH/DELETE limiter (#823). Every other write
- * route has only the global `apiRateLimit` (100/min per IP), plus
- * `inviteRateLimit` on the three routes that can send invitation email.
- * Mounting it more widely is a behaviour change and needs its own issue.
+ * It is NOT a general POST/PATCH/DELETE limiter (#823). The auth routes have
+ * their own (`authRateLimit` on login, callback and dev-login,
+ * `refreshRateLimit` on `POST /auth/refresh`), the three routes that can send
+ * invitation email add `inviteRateLimit`, and every other authenticated write
+ * route has only the global `apiRateLimit` (100/min per IP). Mounting this
+ * one more widely is a behaviour change and needs its own issue.
  */
 export const writeRateLimit = rateLimit({
   windowMs: 60 * 1000,

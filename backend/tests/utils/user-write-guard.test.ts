@@ -7,8 +7,9 @@
  * re-populate an erased account. The rule lives in CLAUDE.md and
  * `docs/architecture/account-deletion.md`; this suite turns it from remembered
  * into enforced: any `user.update(`, `user.updateMany(`, `user.delete(`,
- * `user.deleteMany(` or `user.upsert(` in `src/` or `scripts/` whose `where`
- * is not an object literal naming `deletedAt` fails. `scripts/` holds the
+ * `user.deleteMany(` or `user.upsert(` in `src/` or `scripts/` (TypeScript and
+ * the `.js` / `.mjs` scripts) whose `where` is not an object literal naming
+ * `deletedAt` fails. `scripts/` holds the
  * operator tooling that runs against production (#824), so it is held to the
  * same rule as the API.
  *
@@ -26,12 +27,13 @@
  */
 import { readFileSync } from 'fs';
 import path from 'path';
-import { sourceFiles, stripComments } from '../support/source-scan';
+import { SCRIPT_EXTENSIONS, sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
 const SCRIPTS = path.join(BACKEND, 'scripts');
 const OPERATOR_CLI = path.join(SCRIPTS, 'data-subject-request.ts');
+const MJS_SCRIPT = path.join(SCRIPTS, 'pg-upgrade-checks.mjs');
 
 /** File → why it may write a `User` row without `deletedAt` in the `where`. */
 const ALLOWLIST = new Map<string, string>([
@@ -84,7 +86,7 @@ export function findUnguardedUserWrites(source: string): string[] {
 describe('every User write is guarded by deletedAt (#643)', () => {
   let files: string[] = [];
   beforeAll(() => {
-    files = [...sourceFiles(SRC), ...sourceFiles(SCRIPTS)];
+    files = [...sourceFiles(SRC), ...sourceFiles(SCRIPTS, SCRIPT_EXTENSIONS)];
   });
 
   it('scans the backend source and the operator scripts', () => {
@@ -92,6 +94,7 @@ describe('every User write is guarded by deletedAt (#643)', () => {
     expect(files.length).toBeGreaterThan(50);
     expect(files).toContain(path.join(SRC, 'services/player-service.ts'));
     expect(files).toContain(OPERATOR_CLI);
+    expect(files).toContain(MJS_SCRIPT);
   });
 
   it('every allowlist entry exists and carries a reason', () => {

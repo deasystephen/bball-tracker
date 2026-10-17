@@ -7,19 +7,27 @@
  * call bypasses all of it, and `utils/redact.ts` / `hashRecipient()` too.
  * ESLint `no-console` (with one override for `src/utils/logger.ts`) is the
  * first line; this suite is the second, and keeps the exception explicit.
+ *
+ * It fails on ANY reference to the `console` identifier once comments and
+ * string / template literals are stripped: `console.log(…)`,
+ * `console['error'](…)`, `const { log } = console`, `globalThis.console`.
+ * ESLint misses the destructuring form; this does not. The one gap: code
+ * inside a template literal's `${…}` is stripped with the template (ESLint
+ * still sees a `console.x` call there).
  */
 import { readFileSync } from 'fs';
 import path from 'path';
-import { sourceFiles, stripComments } from '../support/source-scan';
+import { sourceFiles, stripComments, stripStrings } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
 const LOGGER = path.join(SRC, 'utils/logger.ts');
 
-const CONSOLE_CALL = /\bconsole\s*\.\s*\w+/g;
+/** Any reference to the global `console`, however it is reached. */
+const CONSOLE_REFERENCE = /\bconsole\b/g;
 
 export function findConsoleCalls(source: string): string[] {
-  return stripComments(source).match(CONSOLE_CALL) ?? [];
+  return stripStrings(stripComments(source)).match(CONSOLE_REFERENCE) ?? [];
 }
 
 describe('no console.* in src/ outside the logger (#684)', () => {
@@ -48,6 +56,10 @@ describe('the guard pattern', () => {
     ["console.log('payload', body);", 1],
     ['console.warn("w"); console.error("e");', 2],
     ['console\n  .info(x);', 1],
+    ["console['error'](err);", 1],
+    ['const { log } = console;', 1],
+    ['globalThis.console.log(x);', 1],
+    ['const c = console; c.log(x);', 1],
   ])('flags %j', (source, count) => {
     expect(findConsoleCalls(source)).toHaveLength(count);
   });
@@ -57,6 +69,10 @@ describe('the guard pattern', () => {
     ["// console.log('debug');"],
     ["/* console.log('debug'); */"],
     ['const myconsole = { log: () => undefined }; myconsole.log();'],
+    ["logger.info('see console.log output');"],
+    ['logger.info("console.error is not used");'],
+    ['logger.info(`console.log ${id}`);'],
+    ["// don't use console.log\nlogger.info('x');"],
   ])('allows %j', (source) => {
     expect(findConsoleCalls(source)).toEqual([]);
   });

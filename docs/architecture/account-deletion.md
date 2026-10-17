@@ -49,7 +49,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   committed must not re-identify the tombstone. Keep that invariant on any new write path:
   `tests/utils/user-write-guard.test.ts` fails on any `user.update(`, `user.updateMany(`,
   `user.delete(`, `user.deleteMany(` or `user.upsert(` in `backend/src/` or `backend/scripts/`
-  whose `where` is not an object literal naming `deletedAt`. Only `account-service.ts` is
+  (`.ts`, `.js`, `.mjs`) whose `where` is not an object literal naming `deletedAt`. Only `account-service.ts` is
   allowlisted: it writes the tombstone, scrubs `managedById`, and hard-deletes an account nothing
   references, under its own `FOR UPDATE` lock. No script is allowlisted: the operator CLI deletes
   through `AccountService.deleteAccount` and the lookup only reads; a script that ever needs a raw

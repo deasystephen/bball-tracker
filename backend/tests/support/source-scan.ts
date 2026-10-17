@@ -1,20 +1,22 @@
 /**
  * Shared helpers for the source-scanning guard tests under `tests/utils/`
  * (`email-match-guard`, `user-write-guard`, `route-catch-log-guard`,
- * `no-console-guard`, `stats-rounding-guard`,
- * `prisma-mock-coverage-guard`). Call them from a `beforeAll`, never at
+ * `no-console-guard`, `stats-rounding-guard`, `prisma-mock-coverage-guard`). Call them from a `beforeAll`, never at
  * collection time, so `--testPathPattern` runs that skip a guard do not walk
  * the tree.
  */
 import { readdirSync } from 'fs';
 import path from 'path';
 
-/** Every `.ts` file under `dir`, recursively. */
-export function sourceFiles(dir: string): string[] {
+/** TypeScript plus the plain-JavaScript operator scripts (`scripts/*.mjs`). */
+export const SCRIPT_EXTENSIONS = ['.ts', '.js', '.mjs'];
+
+/** Every file under `dir` with one of `extensions` (default `.ts`), recursively. */
+export function sourceFiles(dir: string, extensions: string[] = ['.ts']): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(full);
-    return entry.isFile() && entry.name.endsWith('.ts') ? [full] : [];
+    if (entry.isDirectory()) return sourceFiles(full, extensions);
+    return entry.isFile() && extensions.some((ext) => entry.name.endsWith(ext)) ? [full] : [];
   });
 }
 
@@ -28,4 +30,17 @@ export function stripComments(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/\s\/\/.*$/gm, '');
+}
+
+/**
+ * Replaces every string and template literal with an empty one of the same
+ * quote, so a guard does not match text inside a string. Run it after
+ * `stripComments` (an apostrophe in a comment would otherwise open a string).
+ * A template's `${…}` expressions go with it.
+ */
+export function stripStrings(source: string): string {
+  return source
+    .replace(/`(?:\\[\s\S]|[^`\\])*`/g, '``')
+    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\\n])*"/g, '""');
 }
