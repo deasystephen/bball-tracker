@@ -213,6 +213,42 @@ export const PRE_INIT_BUFFER_LIMIT = 50;
 let preInitBuffer: BufferedEvent[] = [];
 
 /**
+ * Identity set before init has resolved, held like the events. A login can
+ * complete before `amplitude.init` does (a cold start from the sign-in
+ * redirect), and Amplitude persists whatever identity it has, so a dropped
+ * `setUserId` would leave the install anonymous until the next sign-in.
+ * Applied at init before the buffered events are sent, so the flushed
+ * `user_logged_in` carries the user id; cleared by `resetUser`; dropped with
+ * the event buffer when there is no key or init fails.
+ */
+let pendingUserId: string | null = null;
+let pendingUserProperties: Partial<AnalyticsUserProperties> = {};
+
+function mergePendingUserProperties(properties: Partial<AnalyticsUserProperties>): void {
+  const defined = Object.fromEntries(
+    Object.entries(properties).filter(([, value]) => value !== undefined),
+  ) as Partial<AnalyticsUserProperties>;
+  pendingUserProperties = { ...pendingUserProperties, ...defined };
+}
+
+function clearPendingIdentity(): void {
+  pendingUserId = null;
+  pendingUserProperties = {};
+}
+
+function applyPendingIdentity(): void {
+  const userId = pendingUserId;
+  const properties = pendingUserProperties;
+  clearPendingIdentity();
+  try {
+    if (userId) amplitude.setUserId(userId);
+    applyUserProperties(properties);
+  } catch (error) {
+    log.warn('[Analytics] Failed to apply pending identity', { error });
+  }
+}
+
+/**
  * Initialize Amplitude analytics.
  * No-ops gracefully if the API key is not configured.
  */
@@ -222,6 +258,7 @@ export async function initAnalytics(): Promise<void> {
     log.debug('[Analytics] No Amplitude API key configured, skipping initialization');
     initPending = false;
     preInitBuffer = [];
+    clearPendingIdentity();
     return;
   }
 
@@ -230,12 +267,14 @@ export async function initAnalytics(): Promise<void> {
       trackingOptions: AMPLITUDE_TRACKING_OPTIONS,
     }).promise;
     initialized = true;
+    applyPendingIdentity();
     const buffered = preInitBuffer;
     preInitBuffer = [];
     for (const { event, properties } of buffered) send(event, properties);
   } catch (error) {
     log.warn('[Analytics] Failed to initialize Amplitude', { error });
     preInitBuffer = [];
+    clearPendingIdentity();
   } finally {
     initPending = false;
   }
@@ -281,9 +320,15 @@ function send(event: AnalyticsEvent, properties: Record<string, AnalyticsValue> 
 
 /**
  * Identify the current user for analytics, optionally with user properties.
+ * Before init has resolved, the identity is held and applied at init.
  */
 export function identifyUser(userId: string, properties?: Partial<AnalyticsUserProperties>): void {
-  if (!initialized) return;
+  if (!initialized) {
+    if (!initPending) return;
+    pendingUserId = userId;
+    if (properties) mergePendingUserProperties(properties);
+    return;
+  }
 
   try {
     amplitude.setUserId(userId);
@@ -302,7 +347,10 @@ export function identifyUser(userId: string, properties?: Partial<AnalyticsUserP
  * are skipped so a partial refresh never clears a property.
  */
 export function setUserProperties(properties: Partial<AnalyticsUserProperties>): void {
-  if (!initialized) return;
+  if (!initialized) {
+    if (initPending) mergePendingUserProperties(properties);
+    return;
+  }
 
   try {
     applyUserProperties(properties);
@@ -328,10 +376,14 @@ export function appVersion(): string {
 }
 
 /**
- * Reset user identity on logout.
+ * Reset user identity on logout. Before init, clears the held identity so a
+ * logout in the init window does not resurrect it.
  */
 export function resetUser(): void {
-  if (!initialized) return;
+  if (!initialized) {
+    clearPendingIdentity();
+    return;
+  }
 
   try {
     amplitude.reset();

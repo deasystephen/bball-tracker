@@ -5,6 +5,9 @@
  *   - bails when no auth token
  *   - bails when not running on a physical device
  *   - bails when permissions are denied
+ *   - tracks push_permission_answered only when the OS could show the
+ *     prompt (#645): not when already granted or already denied with no ask
+ *     left
  *   - registers the push token with the backend on success
  *   - swallows backend errors silently
  *   - subscribes to tap responses and routes by data payload
@@ -20,6 +23,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { apiClient } from '../../services/api-client';
+import { trackEvent } from '../../services/analytics';
 import { useAuthStore } from '../../store/auth-store';
 import {
   useNotificationSetup,
@@ -27,6 +31,12 @@ import {
   getRegisteredPushToken,
 } from '../../hooks/useNotifications';
 
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+}));
+
+const mockedTrack = trackEvent as jest.Mock;
 const mockedPost = apiClient.post as jest.Mock;
 const mockedDelete = apiClient.delete as jest.Mock;
 
@@ -231,7 +241,7 @@ describe('useNotificationSetup runtime', () => {
 
   it('does not request a token when permissions are denied', async () => {
     setAuthenticated('jwt-token');
-    mockedGetPermissions.mockResolvedValueOnce({ status: 'denied' });
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'denied', canAskAgain: false });
     mockedRequestPermissions.mockResolvedValueOnce({ status: 'denied' });
 
     renderHook(() => useNotificationSetup());
@@ -239,8 +249,39 @@ describe('useNotificationSetup runtime', () => {
     await waitFor(() => {
       expect(mockedRequestPermissions).toHaveBeenCalledTimes(1);
     });
+    // Let the registration promise settle past the request.
+    await act(async () => {});
     expect(mockedGetToken).not.toHaveBeenCalled();
     expect(mockedPost).not.toHaveBeenCalled();
+    // #645: an already-denied device resolves with no prompt; not an answer.
+    expect(mockedTrack).not.toHaveBeenCalled();
+  });
+
+  it('tracks push_permission_answered { granted: false } when the prompt is shown and declined', async () => {
+    setAuthenticated('jwt-token');
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'undetermined', canAskAgain: true });
+    mockedRequestPermissions.mockResolvedValueOnce({ status: 'denied' });
+
+    renderHook(() => useNotificationSetup());
+
+    await waitFor(() => {
+      expect(mockedTrack).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedTrack).toHaveBeenCalledWith('push_permission_answered', { granted: false });
+    expect(mockedGetToken).not.toHaveBeenCalled();
+  });
+
+  it('tracks the answer on Android after a first refusal, while the OS can still ask', async () => {
+    setAuthenticated('jwt-token');
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
+    mockedRequestPermissions.mockResolvedValueOnce({ status: 'denied' });
+
+    renderHook(() => useNotificationSetup());
+
+    await waitFor(() => {
+      expect(mockedTrack).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedTrack).toHaveBeenCalledWith('push_permission_answered', { granted: false });
   });
 
   it('skips the request prompt when permissions are already granted', async () => {
@@ -255,6 +296,7 @@ describe('useNotificationSetup runtime', () => {
       expect(mockedPost).toHaveBeenCalledTimes(1);
     });
     expect(mockedRequestPermissions).not.toHaveBeenCalled();
+    expect(mockedTrack).not.toHaveBeenCalled();
     expect(mockedGetToken).toHaveBeenCalledWith({ projectId: 'test-project-id' });
     expect(mockedPost).toHaveBeenCalledWith('/auth/push-token', {
       token: 'ExponentPushToken[abc]',
@@ -264,7 +306,7 @@ describe('useNotificationSetup runtime', () => {
 
   it('registers the token after prompting when status starts as undetermined', async () => {
     setAuthenticated('jwt-token');
-    mockedGetPermissions.mockResolvedValueOnce({ status: 'undetermined' });
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'undetermined', canAskAgain: true });
     mockedRequestPermissions.mockResolvedValueOnce({ status: 'granted' });
     mockedGetToken.mockResolvedValueOnce({ data: 'ExponentPushToken[xyz]' });
     mockedPost.mockResolvedValueOnce({ data: { success: true } });
@@ -277,6 +319,8 @@ describe('useNotificationSetup runtime', () => {
         platform: 'ios',
       });
     });
+    expect(mockedTrack).toHaveBeenCalledTimes(1);
+    expect(mockedTrack).toHaveBeenCalledWith('push_permission_answered', { granted: true });
   });
 
   it('reports the android platform when running on android', async () => {

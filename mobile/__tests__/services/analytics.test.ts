@@ -4,8 +4,10 @@
  * Verifies:
  *   - initAnalytics is a no-op (does NOT call amplitude.init) when no API key
  *     is configured, and returns without throwing.
- *   - trackEvent / identifyUser / setUserProperties / resetUser are no-ops
- *     before init (guarded by the `initialized` flag).
+ *   - Before init, events are buffered and identity (user id + merged user
+ *     properties) is held, then applied at init before the buffered events
+ *     are sent (#647); both are dropped with no SDK call when there is no
+ *     key or init fails, and resetUser clears the held identity.
  *   - After a successful init, they delegate to amplitude with the right
  *     args, and the typed props map (#616) is what reaches `track`.
  *   - Errors thrown by amplitude are swallowed (function still returns).
@@ -220,6 +222,140 @@ describe('analytics service', () => {
     });
   });
 
+  describe('identity before init (#647)', () => {
+    /** The SDK mock remembers the user id it was given, like the real client. */
+    function rememberUserId(): void {
+      let userId: string | undefined;
+      mockAmplitude.setUserId.mockImplementation((id: string) => {
+        userId = id;
+      });
+      mockAmplitude.getUserId.mockImplementation(() => userId);
+      mockAmplitude.getDeviceId.mockReturnValue('d1');
+    }
+
+    function withKey(promise: Promise<void> = Promise.resolve()): AnalyticsModule {
+      mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+      mockAmplitude.init.mockReturnValueOnce({ promise });
+      return load();
+    }
+
+    afterEach(() => {
+      mockAmplitude.setUserId.mockReset();
+      mockAmplitude.getUserId.mockReset();
+    });
+
+    it('identifyUser before init is applied at init, before any buffered event is sent', async () => {
+      rememberUserId();
+      const set = jest.fn();
+      mockAmplitude.Identify.mockImplementationOnce(() => ({ set }));
+      const { initAnalytics, identifyUser, trackEvent, AnalyticsEvents } = withKey();
+
+      identifyUser('user-1', { role: 'COACH', is_parent: false });
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
+      expect(mockAmplitude.identify).not.toHaveBeenCalled();
+
+      await initAnalytics();
+      expect(mockAmplitude.setUserId).toHaveBeenCalledTimes(1);
+      expect(mockAmplitude.setUserId).toHaveBeenCalledWith('user-1');
+      expect(mockAmplitude.identify).toHaveBeenCalledTimes(1);
+      expect(set).toHaveBeenCalledWith('role', 'COACH');
+      expect(set).toHaveBeenCalledWith('is_parent', false);
+
+      const trackOrder = mockAmplitude.track.mock.invocationCallOrder[0];
+      expect(mockAmplitude.setUserId.mock.invocationCallOrder[0]).toBeLessThan(trackOrder);
+      expect(mockAmplitude.identify.mock.invocationCallOrder[0]).toBeLessThan(trackOrder);
+    });
+
+    it('flushes the buffered user_logged_in with the pending user id', async () => {
+      rememberUserId();
+      const { initAnalytics, identifyUser, trackEvent, AnalyticsEvents } = withKey();
+
+      identifyUser('user-1');
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      await initAnalytics();
+
+      expect(mockAmplitude.track).toHaveBeenCalledWith('user_logged_in', undefined, {
+        user_id: 'user-1',
+        device_id: 'd1',
+      });
+    });
+
+    it('merges setUserProperties partials (later keys win, undefined skipped) and applies them once', async () => {
+      const set = jest.fn();
+      mockAmplitude.Identify.mockImplementationOnce(() => ({ set }));
+      const { initAnalytics, identifyUser, setUserProperties } = withKey();
+
+      identifyUser('user-1', { role: 'PLAYER', tier: 'FREE' });
+      setUserProperties({ tier: 'PREMIUM', team_count: 3 });
+      setUserProperties({ team_count: undefined, role: undefined });
+      await initAnalytics();
+
+      expect(mockAmplitude.identify).toHaveBeenCalledTimes(1);
+      expect(set.mock.calls).toEqual(
+        expect.arrayContaining([
+          ['role', 'PLAYER'],
+          ['tier', 'PREMIUM'],
+          ['team_count', 3],
+        ]),
+      );
+      expect(set).toHaveBeenCalledTimes(3);
+    });
+
+    it('setUserProperties alone before init applies the properties without a user id', async () => {
+      const { initAnalytics, setUserProperties } = withKey();
+      setUserProperties({ tier: 'FREE' });
+      expect(mockAmplitude.identify).not.toHaveBeenCalled();
+
+      await initAnalytics();
+      expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
+      expect(mockAmplitude.identify).toHaveBeenCalledTimes(1);
+    });
+
+    it('resetUser before init clears the pending identity; nothing is applied at init', async () => {
+      const { initAnalytics, identifyUser, setUserProperties, resetUser } = withKey();
+
+      identifyUser('user-1', { role: 'COACH' });
+      setUserProperties({ tier: 'FREE' });
+      resetUser();
+      await initAnalytics();
+
+      expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
+      expect(mockAmplitude.identify).not.toHaveBeenCalled();
+      expect(mockAmplitude.reset).not.toHaveBeenCalled();
+    });
+
+    it('is dropped with no SDK call when there is no API key', async () => {
+      const { initAnalytics, identifyUser, setUserProperties, resetUser } = load();
+      identifyUser('user-1', { role: 'COACH' });
+      setUserProperties({ tier: 'FREE' });
+      await initAnalytics();
+      // After the decision nothing is held either.
+      identifyUser('user-2', { role: 'PLAYER' });
+      setUserProperties({ tier: 'PREMIUM' });
+      resetUser();
+
+      expect(mockAmplitude.init).not.toHaveBeenCalled();
+      expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
+      expect(mockAmplitude.identify).not.toHaveBeenCalled();
+      expect(mockAmplitude.reset).not.toHaveBeenCalled();
+    });
+
+    it('is dropped with no SDK call when amplitude.init rejects', async () => {
+      const { initAnalytics, identifyUser, setUserProperties } = withKey(
+        Promise.reject(new Error('boom')),
+      );
+      identifyUser('user-1', { role: 'COACH' });
+      setUserProperties({ tier: 'FREE' });
+      await initAnalytics();
+      identifyUser('user-2');
+      setUserProperties({ tier: 'PREMIUM' });
+
+      expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
+      expect(mockAmplitude.identify).not.toHaveBeenCalled();
+    });
+  });
+
   // Tracking options (#559). These values are what the App Privacy labels and
   // the data-subject runbook declare, so a change here is a change to what the
   // app tells Apple and its users. Update docs/release/app-store-submission.md
@@ -318,12 +454,6 @@ describe('analytics service', () => {
     it('setUserProperties with nothing to set sends no identify call', async () => {
       const { setUserProperties } = await loadInitialized();
       setUserProperties({ tier: undefined });
-      expect(mockAmplitude.identify).not.toHaveBeenCalled();
-    });
-
-    it('setUserProperties is a no-op before init', () => {
-      const { setUserProperties } = load();
-      setUserProperties({ tier: 'FREE' });
       expect(mockAmplitude.identify).not.toHaveBeenCalled();
     });
 
