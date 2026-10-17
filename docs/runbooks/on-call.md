@@ -60,8 +60,14 @@ Expect several emails for one incident. A crashed task trips `ecs-no-running-tas
 
 `api-uptime`, `ecs-no-running-task`, `alb-unhealthy-host`
 
-1. **Confirm from outside.** A 503 with `"db":"down"` means the task is running and the database
-   is not reachable — go to [Database](#database). No response at all means the task or the ALB.
+1. **Confirm from outside.** A 503 means the task is running and its database ping failed; `db`
+   says how, and both go to [Database](#database). No response at all means the task or the ALB.
+   - `"db":"down"`: the database answered with an error — connection refused, authentication,
+     TLS. Look at the instance state and the security group.
+   - `"db":"timeout"`: the ping hit the pool's 3.5 s `connectionTimeoutMillis`. Either all 10
+     clients of the task's pool are busy (saturation: check `rds-cpu-high` and the
+     `alb-response-time-p99` alarm, and Performance Insights' top SQL), or RDS is not answering
+     TCP at all (a security-group or route change, a failover in progress).
    ```bash
    curl -sS -m 10 -w '\n%{http_code}\n' https://api.hooplings.com/health
    ```
@@ -140,10 +146,14 @@ as a remedy: Socket.io runs on an in-memory adapter and is single-replica only (
    aws rds describe-db-instances --db-instance-identifier bball-tracker-production-postgres \
      --query 'DBInstances[0].{status:DBInstanceStatus,allocatedGiB:AllocatedStorage,maxGiB:MaxAllocatedStorage,class:DBInstanceClass,pending:PendingModifiedValues}'
    ```
-2. **Connections: count the tasks.** One task holds a small pool (the two-week peak before these
-   alarms existed was 9). Dozens of connections means more tasks than intended are running, or
-   an operator session or script was left open. Confirm `runningCount` with the
-   `describe-services` command above.
+2. **Connections: count the tasks.** One task holds at most 10 connections (`DB_POOL_MAX` in
+   `backend/src/models/pool-config.ts`; the two-week peak before these alarms existed was 9). A
+   rolling deploy briefly runs two tasks plus `prisma migrate deploy`, so the app's ceiling is
+   2 x 10 + 1 = 21. Anything well above that means more tasks than intended are running, or an
+   operator session or script was left open. Confirm `runningCount` with the `describe-services`
+   command above. Pool exhaustion inside one task never shows here: it shows as
+   `"db":"timeout"` on `/health` and as 503s with `Retry-After` (or 500s from routes that answer
+   their own errors) on API requests.
 3. **CPU: open Performance Insights** for the instance and look at top SQL. `db.t3.micro` is
    burstable — sustained CPU also drains the credit balance (`CPUCreditBalance`), after which the
    instance is throttled and everything slows at once.

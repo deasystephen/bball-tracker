@@ -92,6 +92,18 @@ describe('the paths that count as a deploy', () => {
     expect(fromScript).toEqual(fromFilter);
     expect(entries).toContain("':(exclude,glob)**/*.md'");
   });
+
+  it('exclude the same files in the path filter and in the script', () => {
+    const block = CI_WORKFLOW.match(/^ {12}backend:\n((?: {14}- '[^']+'\n)+)/m);
+    expect(block).not.toBeNull();
+    const fromFilter = [...(block?.[1] ?? '').matchAll(/- '!([^']+)'/g)].map((m) => m[1]).sort();
+
+    const declared = SCRIPT_SOURCE.match(/^DEPLOY_PATHS=\((.*)\)$/m);
+    const fromScript = [...(declared?.[1] ?? '').matchAll(/':\(exclude(?:,glob)?\)([^']+)'/g)].map((m) => m[1]).sort();
+
+    expect(fromFilter).toEqual(['**/*.md', 'infra/.terraform.lock.hcl']);
+    expect(fromScript).toEqual(fromFilter);
+  });
 });
 
 describe('deploy-contents.sh', () => {
@@ -139,6 +151,7 @@ describe('deploy-contents.sh', () => {
     commit('readme', 'backend/README.md', 'docs: markdown under backend');
     commit('infra', 'infra/task-definition.json', 'fix(infra): a new variable');
     commit('feature', 'backend/src/b.ts', 'feat: the change a person merged');
+    commit('lock', 'infra/.terraform.lock.hcl', 'chore(deps): bump hashicorp/aws in /infra');
   });
 
   afterAll(() => {
@@ -181,6 +194,12 @@ describe('deploy-contents.sh', () => {
 
   it('names a deploy of the running commit as a restart', () => {
     expect(run(commits.feature, commits.feature)).toContain('changes no code');
+  });
+
+  it('leaves out a Terraform provider lock bump: it is not in the image (#786)', () => {
+    const out = run(commits.feature, commits.lock);
+    expect(out).not.toContain('### ');
+    expect(out).toContain('None of the 1 commits in between changes what is deployed');
   });
 
   it('says when nothing in between changes the image', () => {

@@ -14,6 +14,7 @@ import {
   StaffRoleType,
 } from '../api/teams/schemas';
 import { NotificationService } from './notification-service';
+import { invalidateUsage } from './usage-service';
 import { logger } from '../utils/logger';
 import {
   NotFoundError,
@@ -675,7 +676,8 @@ export class TeamService {
       });
       // Season rollover (#461) is not built; moving a team-season row is the
       // only lineage-level change today and the one worth a line.
-      if (data.seasonId !== undefined && data.seasonId !== team.seasonId) {
+      const seasonMoved = data.seasonId !== undefined && data.seasonId !== team.seasonId;
+      if (seasonMoved) {
         logger.info('Team moved to season', {
           teamId,
           lineageId: team.lineageId,
@@ -683,6 +685,12 @@ export class TeamService {
           toSeasonId: data.seasonId,
           userId,
         });
+      }
+      // A season move changes the `seasons` usage metric of every staff member
+      // (#658); any other edit changes no metered count. `invalidateUsage`
+      // dedupes a user holding two roles. Best-effort, never throws.
+      if (seasonMoved) {
+        await invalidateUsage(...updated.staff.map((s) => s.userId));
       }
       return updated;
     } catch (err) {
@@ -719,7 +727,14 @@ export class TeamService {
     // its lineage if this was the last team-season on it. Season/League
     // cascades bypass this path and leave harmless orphan lineages; this is
     // the only cleanup (#462).
-    const lineageDeleted = await prisma.$transaction(async (tx) => {
+    // The staff rows go with the team, so every staff member's usage counts
+    // change (#658): read them inside the transaction, before the cascade.
+    const { lineageDeleted, staffRows } = await prisma.$transaction(async (tx) => {
+      const staffRows = await tx.teamStaff.findMany({
+        where: { teamId },
+        select: { userId: true },
+      });
+
       await tx.team.delete({
         where: { id: teamId },
       });
@@ -727,10 +742,13 @@ export class TeamService {
       const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
       if (remaining === 0) {
         await tx.teamLineage.delete({ where: { id: team.lineageId } });
-        return true;
       }
-      return false;
+      return { lineageDeleted: remaining === 0, staffRows };
     });
+
+    // After commit: every staff member's counts changed, and the caller's may
+    // have (#658). `invalidateUsage` dedupes; best-effort, never throws.
+    await invalidateUsage(userId, ...staffRows.map((s) => s.userId));
 
     logger.info('Team deleted', {
       teamId,

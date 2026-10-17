@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { PoolConfig } from 'pg';
+import { DB_POOL_OPTIONS } from './pool-config';
 
 const connectionString = process.env.DATABASE_URL!;
 
@@ -40,9 +41,11 @@ function getSslConfig(): PoolConfig['ssl'] {
 
 const ssl = getSslConfig();
 
+// Explicit pool bounds (#751): see ./pool-config.ts for why each exists.
 const adapter = new PrismaPg({
   connectionString,
   ...(ssl ? { ssl } : {}),
+  ...DB_POOL_OPTIONS,
 });
 
 const prisma = new PrismaClient({

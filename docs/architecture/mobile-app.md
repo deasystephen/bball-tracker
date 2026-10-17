@@ -279,6 +279,13 @@ never inline a role check in a screen:
   authority, not a count here). When there is nothing to
   retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
   Try Again button that left the screen). Tab screens have the tab bar and need nothing.
+  A failed load is never shown as an empty result: the Stats tab renders `ErrorState` with
+  Try Again for a failed teams or team-stats query and keeps the team chips above a per-team
+  failure (#728; `__tests__/app/stats-tab-states.test.tsx`). `utils/query-state.ts#showQueryError`
+  decides when the error wins: only when the query has no data, so a failed background refetch
+  keeps its cached data on screen. TanStack keeps `error` set while a retry is in flight, so the
+  tab shows the spinner while the failed query `isFetching`. The message comes from
+  `getApiErrorMessage` (which sends `error_shown`), memoised on the error so it fires once per failure.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that

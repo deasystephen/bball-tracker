@@ -89,6 +89,9 @@
     "createNew": "Crear Nuevo Equipo",
     "details": "Detalles del Equipo",
     "managePlayers": "Administrar Jugadores",
+    "playerEmptyMessage": "Tu entrenador te añadirá a un equipo. ¿Entrenas uno tú? Cambia tu tipo de cuenta en Perfil.",
+    "playerEmptyAction": "Cambiar tipo de cuenta",
+    "createNotAllowed": "Solo los entrenadores pueden crear equipos. Puedes cambiar tu tipo de cuenta en Perfil.",
     "editNotAllowed": "Solo los administradores del equipo pueden editarlo.",
     "rosterNotAllowed": "Solo los administradores del equipo pueden cambiar la plantilla.",
     "staff": "Cuerpo técnico",
@@ -155,6 +158,22 @@
     "teams": "Equipos",
     "seasons": "Temporadas",
     "upgradeForUnlimited": "Mejora para uso ilimitado"
+  },
+  "roleOnboarding": {
+    "title": "¿Cómo usarás Hooplings?",
+    "subtitle": "Los entrenadores crean equipos y registran partidos. Los jugadores se unen a equipos y siguen sus estadísticas. Puedes cambiarlo más tarde en Perfil.",
+    "coachTitle": "Entreno un equipo",
+    "coachBody": "Crea equipos, invita jugadores, dirige partidos y registra estadísticas.",
+    "playerTitle": "Juego en un equipo",
+    "playerBody": "Acepta invitaciones, sigue los partidos y consulta tus números.",
+    "continue": "Continuar",
+    "hint": "Los administradores y tutores gestionan las cuentas en otro lugar.",
+    "errorTitle": "No se pudo guardar",
+    "errorBody": "No pudimos actualizar tu tipo de cuenta. Comprueba tu conexión e inténtalo de nuevo.",
+    "sectionTitle": "Cuenta",
+    "changeRole": "Cambiar tipo de cuenta",
+    "currentCoach": "Tu cuenta es de entrenador",
+    "currentPlayer": "Tu cuenta es de jugador"
   },
   "account": {
     "deletedUser": "Usuario eliminado",
