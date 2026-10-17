@@ -138,7 +138,9 @@ describe('Guardians API', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns 400 for a duplicate pending invitation', async () => {
+    it('returns 400 for a duplicate pending invitation, from the dedupe or a lost P2002 race (#727)', async () => {
+      // The service answers this BadRequestError both from its pre-check and
+      // when a concurrent invite wins the partial PENDING index; never a 500.
       mockGuardianService.inviteGuardian.mockRejectedValue(
         new BadRequestError('A pending guardian invitation already exists for this email')
       );
@@ -146,7 +148,7 @@ describe('Guardians API', () => {
       const res = await request(app).post(base).send({ email: 'parent@example.com', relationship: 'FATHER' });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('already exists');
+      expect(res.body.error).toBe('A pending guardian invitation already exists for this email');
     });
 
     it('returns 500 on unexpected errors', async () => {

@@ -22,6 +22,9 @@ Removing the last guardian never deletes the child.
   again by `omitToken`. Uniqueness is the hand-written partial index
   `GuardianInvitation_pending_childId_invitedEmail_key … WHERE status = 'PENDING'` (migration
   `20260823120000_guardian_invitation`); a stale PENDING row is flipped to EXPIRED on re-invite.
+  The dedupe check and the insert are not one transaction, so a lost race on the partial index (a
+  double-tapped Invite) maps P2002 → 400 `A pending guardian invitation already exists for this email`
+  (`utils/prisma-errors.ts#createOrConflict`), never 500 (#727).
   The response carries the per-send `emailSent`; `hooks/useGuardians.ts#useInviteGuardian` resolves with
   `{ invitation, emailSent }` and the Guardians screen shows an error toast ("Invitation created, but the email
   to … failed to send.") instead of "Invitation sent" when it is `false`, like the roster flows (#770). The
@@ -31,8 +34,19 @@ Removing the last guardian never deletes the child.
   `relationship`, `status`, `expiresAt`) and `POST /invitations/by-token/:token/accept` returns
   `{ kind: 'guardian', invitation, guardian }` — acceptance creates the `Guardian` row inside one
   `$transaction` guarded by `updateMany … WHERE status = 'PENDING'` (loser of a race gets 400).
+  **Per-child lock (#664):** the transaction first takes `SELECT … FROM "User" WHERE "id" = <childId>
+  FOR UPDATE`, before the invitation write, so concurrent accepts for one child (two parents, two
+  invitations) serialise: primacy is a count-then-insert, and under READ COMMITTED two unlocked accepts
+  both counted 0 and both inserted `isPrimary`. There is no partial unique index on primacy; the lock is
+  the enforcement. The child lock comes before the parent lock below; account deletion locks only the
+  deleted user's row, so the two cannot deadlock against it. Proven in
+  `tests/integration/guardian-accept.db.test.ts`.
   Authenticated `POST /invitations/:id/accept|reject` try the id as a `GuardianInvitation` first and require
-  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too. **Which account
+  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too. Reject is guarded
+  by the same `updateMany … WHERE status = 'PENDING'` as accept (#726): a reject that loses to a
+  concurrent accept answers 400 `Cannot reject invitation: it is no longer pending` instead of overwriting
+  `ACCEPTED` under a live `Guardian` link (the unlocked status read still answers the more specific
+  `Cannot reject invitation with status: X` in the common case). **Which account
   the link lands on (#663):** the authenticated path uses the verified caller's id as `parentId` and never
   looks the adult up by email again; the by-token path resolves the adult exactly as invite time did,
   `findFirst({ email: emailEquals(invitedEmail), deletedAt: null })`, and only when nothing matches

@@ -21,6 +21,7 @@ import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -287,7 +288,7 @@ export class GuardianService {
         // Two concurrent invites for the same new guardian email: the loser
         // reuses the winner's row instead of surfacing a 500 (red-team RT8 —
         // same catch-and-reuse as invitation-service).
-        if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+        if (!isUniqueViolation(err)) {
           throw err;
         }
         parent = await prisma.user.findFirst({
@@ -332,19 +333,25 @@ export class GuardianService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + GUARDIAN_INVITE_EXPIRES_DAYS);
 
-    const invitation = await prisma.guardianInvitation.create({
-      data: {
-        token,
-        childId: playerId,
-        teamId,
-        invitedEmail: email,
-        relationship: data.relationship,
-        invitedById: userId,
-        expiresAt,
-        status: 'PENDING',
-      },
-      select: GUARDIAN_INVITATION_SELECT,
-    });
+    // The dedupe above and this insert are not one transaction: a request that
+    // loses the race on the partial PENDING index answers the dedupe's 400 (#727).
+    const invitation = await createOrConflict(
+      () =>
+        prisma.guardianInvitation.create({
+          data: {
+            token,
+            childId: playerId,
+            teamId,
+            invitedEmail: email,
+            relationship: data.relationship,
+            invitedById: userId,
+            expiresAt,
+            status: 'PENDING',
+          },
+          select: GUARDIAN_INVITATION_SELECT,
+        }),
+      'A pending guardian invitation already exists for this email'
+    );
 
     const acceptUrl = `${publicAppUrl()}/invite/${token}`;
     // Awaited so callers can surface a failed send to the coach (unification
@@ -563,9 +570,18 @@ export class GuardianService {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);
     }
 
-    const rejected = await prisma.guardianInvitation.update({
-      where: { id: invitation.id },
+    // Guarded like accept (#726): the status check above read the row unlocked,
+    // so a concurrent accept may have flipped it since. The loser gets a 400
+    // instead of overwriting ACCEPTED with REJECTED under a live Guardian link.
+    const { count } = await prisma.guardianInvitation.updateMany({
+      where: { id: invitation.id, status: 'PENDING' },
       data: { status: 'REJECTED' },
+    });
+    if (count === 0) {
+      throw new BadRequestError('Cannot reject invitation: it is no longer pending');
+    }
+    const rejected = await prisma.guardianInvitation.findUniqueOrThrow({
+      where: { id: invitation.id },
       select: GUARDIAN_INVITATION_SELECT,
     });
 
@@ -670,7 +686,7 @@ export class GuardianService {
         select,
       });
     } catch (err) {
-      if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+      if (!isUniqueViolation(err)) {
         throw err;
       }
       const winner = await byEmail();
@@ -703,6 +719,13 @@ export class GuardianService {
     const parentId = parent.id;
 
     return prisma.$transaction(async (tx) => {
+      // One accept per child at a time (#664): primacy below is decided by
+      // count-then-insert, and under READ COMMITTED two accepts for one child
+      // (two parents, two invitations) would both count 0 and both insert
+      // isPrimary. Taken before the parent lock; account deletion locks only
+      // the deleted user's row, so the two locks cannot deadlock against it.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${invitation.childId} FOR UPDATE`;
+
       // The parent was resolved outside this transaction, unlocked. Lock the
       // row (`deletedAt IS NULL`): a deletion that committed in between leaves
       // no row and a 404, and one that has not started waits on this lock, so

@@ -5,6 +5,7 @@
  * date-range validation, and delete guards.
  */
 
+import { Prisma } from '@prisma/client';
 import { SeasonService } from '../../src/services/season-service';
 import { mockPrisma } from '../setup';
 import {
@@ -100,6 +101,38 @@ describe('SeasonService', () => {
         );
       }
       expect(mockPrisma.season.create).not.toHaveBeenCalled();
+    });
+
+    it('answers the duplicate-name 400 when a concurrent create wins the unique index (P2002, #727)', async () => {
+      const admin = createAdmin();
+      const league = createLeague();
+
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(league);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      );
+
+      const error = await SeasonService.createSeason({ leagueId: league.id, name: 'Fall' }, admin.id).catch((e) => e);
+
+      expectBadRequestError(error, 'A season with this name already exists in this league');
+    });
+
+    it('propagates a season create failure that is not P2002', async () => {
+      const admin = createAdmin();
+      const league = createLeague();
+      const boom = new Error('connection reset');
+
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(league);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(boom);
+
+      await expect(SeasonService.createSeason({ leagueId: league.id, name: 'Fall' }, admin.id)).rejects.toBe(boom);
     });
 
     it('rejects inverted start/end dates', async () => {

@@ -1331,6 +1331,42 @@ describe('TeamService', () => {
         expectBadRequestError(error, 'Player is already on this team');
       }
     });
+
+    describe('when the roster insert itself fails (#727)', () => {
+      function setAddPlayerPath(): { teamId: string; playerId: string; coachId: string } {
+        const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+        const player = createPlayer();
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(coach)
+          .mockResolvedValueOnce(player);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+        return { teamId: team.id, playerId: player.id, coachId: coach.id };
+      }
+
+      it('answers the already-on-team 400 when a concurrent add wins the unique index (P2002)', async () => {
+        const { teamId, playerId, coachId } = setAddPlayerPath();
+        (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+        );
+
+        const error = await TeamService.addPlayer(teamId, { playerId }, coachId).catch((e) => e);
+
+        expectBadRequestError(error, 'Player is already on this team');
+      });
+
+      it('propagates a failure that is not P2002', async () => {
+        const { teamId, playerId, coachId } = setAddPlayerPath();
+        const boom = new Error('connection reset');
+        (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(boom);
+
+        await expect(TeamService.addPlayer(teamId, { playerId }, coachId)).rejects.toBe(boom);
+      });
+    });
   });
 
   describe('removePlayer', () => {
@@ -1821,6 +1857,51 @@ describe('TeamService', () => {
       expectBadRequestError(error, 'User is already a staff member of this team');
       expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
     });
+
+    describe('when the staff insert itself fails (#727)', () => {
+      function setAddStaffPath(): { teamId: string; targetId: string; adminId: string } {
+        const { team } = createFullTeam();
+        const admin = createAdmin();
+        const targetUser = createCoach();
+        const role = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        mockAdminRequester(admin);
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation(({ where }) => {
+          if (where.id === admin.id) return Promise.resolve(admin);
+          if (where.id === targetUser.id) return Promise.resolve({ id: targetUser.id, name: targetUser.name });
+          return Promise.resolve(null);
+        });
+        (mockPrisma.teamRole.findFirst as jest.Mock).mockResolvedValue(role);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+        return { teamId: team.id, targetId: targetUser.id, adminId: admin.id };
+      }
+
+      it('answers the already-staff 400 when a concurrent add wins the unique index (P2002)', async () => {
+        const { teamId, targetId, adminId } = setAddStaffPath();
+        (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+        );
+
+        const error = await TeamService
+          .addStaffMember(teamId, { userId: targetId, roleType: 'HEAD_COACH' }, adminId)
+          .catch((e) => e);
+
+        expectBadRequestError(error, 'User is already a staff member of this team');
+      });
+
+      it('propagates a failure that is not P2002', async () => {
+        const { teamId, targetId, adminId } = setAddStaffPath();
+        const boom = new Error('connection reset');
+        (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(boom);
+
+        await expect(
+          TeamService.addStaffMember(teamId, { userId: targetId, roleType: 'HEAD_COACH' }, adminId)
+        ).rejects.toBe(boom);
+      });
+    });
   });
 
   describe('changeStaffRole', () => {
@@ -2102,6 +2183,38 @@ describe('TeamService', () => {
 
       expectBadRequestError(error, 'A role with this name already exists');
       expect(mockPrisma.teamRole.create).not.toHaveBeenCalled();
+    });
+
+    it('answers the duplicate-name 400 when a concurrent create wins the unique index (P2002, #727)', async () => {
+      const { team } = createFullTeam();
+      const admin = createAdmin();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      );
+
+      const error = await TeamService.createCustomRole(team.id, { name: 'Scorekeeper' }, admin.id).catch((e) => e);
+
+      expectBadRequestError(error, 'A role with this name already exists');
+    });
+
+    it('propagates a role create failure that is not P2002', async () => {
+      const { team } = createFullTeam();
+      const admin = createAdmin();
+      const boom = new Error('connection reset');
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(boom);
+
+      await expect(TeamService.createCustomRole(team.id, { name: 'Scorekeeper' }, admin.id)).rejects.toBe(boom);
     });
   });
 
