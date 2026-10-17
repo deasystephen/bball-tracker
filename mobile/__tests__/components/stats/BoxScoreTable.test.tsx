@@ -90,6 +90,14 @@ describe('BoxScoreTable', () => {
     expect(getByText('#0 John Doe')).toBeTruthy();
   });
 
+  it('drops the jersey prefix, never "#null", when the API sends null', () => {
+    const { getByText, queryByText } = render(
+      <BoxScoreTable players={[{ ...player, jerseyNumber: null }]} teamStats={teamStats} />
+    );
+    expect(getByText('John Doe')).toBeTruthy();
+    expect(queryByText(/#null/)).toBeNull();
+  });
+
   it('renders a player without a jersey number', () => {
     const { getByText } = render(
       <BoxScoreTable players={[playerNoJersey]} teamStats={teamStats} />

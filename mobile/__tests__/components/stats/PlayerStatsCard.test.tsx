@@ -5,7 +5,7 @@
  *   - per-game stats render (PTS/REB/AST + detailed shooting splits)
  *   - aggregated stats render per-game averages + efficiency when showAverages
  *   - compact mode hides detailed rows
- *   - jersey number / position conditional rendering
+ *   - jersey number / position conditional rendering (jersey 0 shows; null and absent hide)
  *   - onPress wraps content in a touchable and fires the handler
  */
 
@@ -86,6 +86,17 @@ describe('PlayerStatsCard', () => {
     const { queryByText } = render(<PlayerStatsCard stats={gameStats} compact />);
     expect(queryByText('STL')).toBeNull();
     expect(queryByText('FG (52.9%)')).toBeNull();
+  });
+
+  it('shows jersey #0 (0 is a valid jersey)', () => {
+    const { getByText } = render(<PlayerStatsCard stats={{ ...gameStats, jerseyNumber: 0 }} />);
+    expect(getByText('#0')).toBeTruthy();
+  });
+
+  it('renders no jersey, never "#null", when the API sends null', () => {
+    const { queryByText } = render(<PlayerStatsCard stats={{ ...gameStats, jerseyNumber: null }} />);
+    expect(queryByText(/#null/)).toBeNull();
+    expect(queryByText(/^#/)).toBeNull();
   });
 
   it('omits jersey number and position when not provided', () => {

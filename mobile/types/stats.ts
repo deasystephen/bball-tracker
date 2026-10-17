@@ -9,7 +9,12 @@ export interface PlayerGameStats {
   playerName: string;
   /** Tombstone state for `playerName` (#813); render via `playerDisplayName`. Older API builds omit it. */
   playerDeletedAt?: string | null;
-  jerseyNumber?: number;
+  /**
+   * `0` is a valid jersey: test `!= null`, never truthiness or `!== undefined`.
+   * The stats service omits the key for a player without a number today;
+   * `null` is typed so a backend that sends it cannot render "#null".
+   */
+  jerseyNumber?: number | null;
   position?: string;
   points: number;
   rebounds: number;

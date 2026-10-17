@@ -37,7 +37,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
       {/* Player Header */}
       <View style={styles.header}>
         <View style={styles.playerInfo}>
-          {stats.jerseyNumber !== undefined && (
+          {stats.jerseyNumber != null && (
             <ThemedText variant="h3" color="primary" style={styles.jerseyNumber}>
               #{stats.jerseyNumber}
             </ThemedText>
