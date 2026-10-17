@@ -7,6 +7,9 @@
  *
  * Rule (CLAUDE.md, emails in payloads): roster `player.email` only for callers
  * with `canManageRoster`; staff emails for every team member.
+ *
+ * The same harness proves the tombstone signal (`deletedAt`, #813) reaches the
+ * user objects on the season, RSVP and announcement payloads.
  */
 
 import request from 'supertest';
@@ -45,7 +48,7 @@ function project(row: Row, select: Spec): Row {
   const out: Row = {};
   for (const [key, value] of Object.entries(select)) {
     if (value === true) out[key] = row[key];
-    else if (value && typeof value === 'object') out[key] = shape(row[key] as Row, value as Spec);
+    else if (value && typeof value === 'object') out[key] = shape(row[key] as Row | Row[], value as Spec);
   }
   return out;
 }
@@ -54,12 +57,14 @@ function project(row: Row, select: Spec): Row {
 function include(row: Row, spec: Spec): Row {
   const out: Row = { ...row };
   for (const [key, value] of Object.entries(spec)) {
-    if (value && typeof value === 'object') out[key] = shape(row[key] as Row, value as Spec);
+    if (value && typeof value === 'object') out[key] = shape(row[key] as Row | Row[], value as Spec);
   }
   return out;
 }
 
-function shape(row: Row, args: Spec): Row {
+function shape(row: Row | Row[], args: Spec): Row | Row[] {
+  // A to-many relation (season.teams, team.staff) is projected row by row.
+  if (Array.isArray(row)) return row.map((item) => shape(item, args) as Row);
   if (args.select) return project(row, args.select as Spec);
   if (args.include) return include(row, args.include as Spec);
   return row;
@@ -219,7 +224,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
                 status: args.create.status,
                 createdAt: new Date('2026-10-01T00:00:00Z'),
                 updatedAt: new Date('2026-10-01T00:00:00Z'),
-                user: { ...user, profilePictureUrl: null, deletedAt: null },
+                user: { ...user, profilePictureUrl: null, isManaged: false, deletedAt: null },
               },
               args.include
             )
@@ -240,7 +245,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.rsvp.userId).toBe(CHILD.id);
-      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name });
+      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name, isManaged: false, deletedAt: null });
     });
 
     it('a guardian who is also the head coach keeps the child\'s email (roster manager)', async () => {
@@ -254,7 +259,13 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
         .send({ status: 'YES', playerId: CHILD.id });
 
       expect(response.status).toBe(200);
-      expect(response.body.rsvp.user).toEqual({ id: CHILD.id, name: CHILD.name, email: CHILD.email });
+      expect(response.body.rsvp.user).toEqual({
+        id: CHILD.id,
+        name: CHILD.name,
+        email: CHILD.email,
+        isManaged: false,
+        deletedAt: null,
+      });
     });
 
     it('a self RSVP still returns the caller\'s own email', async () => {
@@ -265,7 +276,13 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       const response = await request(app).post(`/api/v1/games/${GAME_ID}/rsvp`).send({ status: 'NO' });
 
       expect(response.status).toBe(200);
-      expect(response.body.rsvp.user).toEqual({ id: PLAYER.id, name: PLAYER.name, email: PLAYER.email });
+      expect(response.body.rsvp.user).toEqual({
+        id: PLAYER.id,
+        name: PLAYER.name,
+        email: PLAYER.email,
+        isManaged: false,
+        deletedAt: null,
+      });
     });
   });
 
@@ -364,6 +381,232 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.staff[0].user.email).toBe(COACH.email);
+    });
+  });
+
+  /**
+   * #813: every user object on these payloads carries the tombstone signal,
+   * through the route and the real service's select (one shared
+   * `USER_SUMMARY_SELECT`), so mobile's `displayName` can label a deleted
+   * account instead of showing the stored English literal.
+   */
+  describe('user objects carry deletedAt (#813)', () => {
+    const DELETED_AT = new Date('2026-09-01T00:00:00Z');
+    const deletedTeammate = { ...TEAMMATE, name: 'Deleted user', isManaged: false, deletedAt: DELETED_AT, profilePictureUrl: null };
+
+    it('GET /seasons/:id gives a league admin staff and roster users with deletedAt', async () => {
+      callerId = COACH.id;
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...COACH, role: 'ADMIN' });
+      const season: Row = {
+        id: 'season-1',
+        leagueId: 'league-1',
+        name: 'Fall 2026',
+        startDate: new Date('2026-09-01T00:00:00Z'),
+        endDate: new Date('2026-12-01T00:00:00Z'),
+        isActive: true,
+        league: { id: 'league-1', name: 'City League' },
+        _count: { teams: 1 },
+        teams: [
+          {
+            id: TEAM_ID,
+            name: 'Hoops',
+            staff: [
+              {
+                id: 'staff-1',
+                user: { ...COACH, isManaged: false, deletedAt: null, profilePictureUrl: null },
+                role: { id: 'role-1', type: 'HEAD_COACH', name: 'Head Coach', ...ALL_FLAGS },
+              },
+            ],
+            members: [{ id: 'member-1', player: deletedTeammate }],
+            _count: { members: 1, games: 0 },
+          },
+        ],
+      };
+      (mockPrisma.season.findUnique as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve(include(season, args.include as Spec))
+      );
+
+      const response = await request(app).get('/api/v1/seasons/season-1');
+
+      expect(response.status).toBe(200);
+      const [team] = response.body.season.teams;
+      // Staff emails go to every reader; roster members carry no email here.
+      expect(team.staff[0].user).toEqual({
+        id: COACH.id,
+        name: COACH.name,
+        email: COACH.email,
+        isManaged: false,
+        deletedAt: null,
+      });
+      expect(team.members[0].player).toEqual({
+        id: TEAMMATE.id,
+        name: 'Deleted user',
+        isManaged: false,
+        deletedAt: DELETED_AT.toISOString(),
+      });
+    });
+
+    it('GET /games/:gameId/rsvps gives a teammate the deleted user\'s deletedAt and no email', async () => {
+      givenTeamStanding({ coach: [COACH.id], member: [PLAYER.id] });
+      givenStaffRows([COACH.id]);
+      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ id: GAME_ID, teamId: TEAM_ID });
+      (mockPrisma.gameRsvp.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          include(
+            {
+              id: 'rsvp-1',
+              gameId: GAME_ID,
+              userId: TEAMMATE.id,
+              status: 'YES',
+              createdAt: new Date('2026-10-01T00:00:00Z'),
+              updatedAt: new Date('2026-10-01T00:00:00Z'),
+              user: deletedTeammate,
+            },
+            args.include as Spec
+          ),
+        ])
+      );
+      (mockPrisma.gameRsvp.groupBy as jest.Mock).mockResolvedValue([{ status: 'YES', _count: { status: 1 } }]);
+
+      const response = await request(app).get(`/api/v1/games/${GAME_ID}/rsvps`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.rsvps[0].user).toEqual({
+        id: TEAMMATE.id,
+        name: 'Deleted user',
+        isManaged: false,
+        deletedAt: DELETED_AT.toISOString(),
+      });
+    });
+
+    it('GET /teams/:teamId/announcements gives the deleted author\'s deletedAt', async () => {
+      givenTeamStanding({ coach: [COACH.id], member: [PLAYER.id] });
+      givenStaffRows([COACH.id]);
+      (mockPrisma.announcement.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          include(
+            {
+              id: ANNOUNCEMENT_ID,
+              teamId: TEAM_ID,
+              authorId: TEAMMATE.id,
+              title: 'Old news',
+              body: 'From a deleted account.',
+              createdAt: new Date('2026-10-01T00:00:00Z'),
+              author: deletedTeammate,
+              _count: { replies: 0 },
+            },
+            args.include as Spec
+          ),
+        ])
+      );
+      (mockPrisma.announcement.count as jest.Mock).mockResolvedValue(1);
+
+      const response = await request(app).get(`/api/v1/teams/${TEAM_ID}/announcements`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.announcements[0].author).toEqual({
+        id: TEAMMATE.id,
+        name: 'Deleted user',
+        isManaged: false,
+        deletedAt: DELETED_AT.toISOString(),
+      });
+    });
+
+    it('GET /teams/:teamId/members/:playerId/guardians gives the guardian row its deletedAt', async () => {
+      callerId = PARENT.id;
+      givenTeamStanding({ coach: [COACH.id], member: [CHILD.id], guardianOf: { [PARENT.id]: CHILD.id } });
+      givenStaffRows([COACH.id]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          include(
+            {
+              id: 'g-1',
+              parentId: PARENT.id,
+              childId: CHILD.id,
+              relationship: 'MOTHER',
+              isPrimary: true,
+              createdAt: new Date('2026-09-01T00:00:00Z'),
+              parent: { ...PARENT, isManaged: false, deletedAt: null },
+            },
+            args.include as Spec
+          ),
+        ])
+      );
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([]);
+
+      const response = await request(app).get(`/api/v1/teams/${TEAM_ID}/members/${CHILD.id}/guardians`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.guardians[0]).toMatchObject({ userId: PARENT.id, name: PARENT.name, deletedAt: null });
+      // A guardian (not a roster manager) never sees guardian emails.
+      expect(response.body.guardians[0]).not.toHaveProperty('email');
+    });
+
+    it('GET /invitations/by-token/:token gives a guardian invitation childDeletedAt and inviterDeletedAt', async () => {
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve(
+          project(
+            {
+              id: 'gi-1',
+              status: 'PENDING',
+              relationship: 'MOTHER',
+              expiresAt: new Date('2026-12-01T00:00:00Z'),
+              child: { ...deletedTeammate },
+              team: { name: 'Hoops' },
+              invitedBy: { ...COACH, isManaged: false, deletedAt: DELETED_AT },
+            },
+            args.select as Spec
+          )
+        )
+      );
+
+      const response = await request(app).get('/api/v1/invitations/by-token/guardian-token-813');
+
+      expect(response.status).toBe(200);
+      expect(response.body.invitation).toMatchObject({
+        kind: 'guardian',
+        childName: 'Deleted user',
+        childDeletedAt: DELETED_AT.toISOString(),
+        inviterName: COACH.name,
+        inviterDeletedAt: DELETED_AT.toISOString(),
+      });
+      expect(JSON.stringify(response.body)).not.toContain(COACH.email);
+    });
+
+    it('GET /invitations gives guardianInvitations items childDeletedAt and inviterDeletedAt', async () => {
+      callerId = PARENT.id;
+      givenTeamStanding({});
+      (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockImplementation((args: Spec) =>
+        Promise.resolve([
+          project(
+            {
+              id: 'gi-1',
+              status: 'PENDING',
+              relationship: 'MOTHER',
+              expiresAt: new Date('2026-12-01T00:00:00Z'),
+              child: { ...deletedTeammate },
+              team: { name: 'Hoops' },
+              invitedBy: { ...COACH, isManaged: false, deletedAt: null },
+            },
+            args.select as Spec
+          ),
+        ])
+      );
+
+      const response = await request(app).get('/api/v1/invitations');
+
+      expect(response.status).toBe(200);
+      expect(response.body.guardianInvitations).toHaveLength(1);
+      expect(response.body.guardianInvitations[0]).toMatchObject({
+        childName: 'Deleted user',
+        childDeletedAt: DELETED_AT.toISOString(),
+        inviterName: COACH.name,
+        inviterDeletedAt: null,
+      });
     });
   });
 });

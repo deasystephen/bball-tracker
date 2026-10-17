@@ -21,6 +21,7 @@ import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { USER_SUMMARY_WITH_EMAIL_SELECT, type UserSummaryWithEmail } from '../utils/user-select';
 import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
 
@@ -46,7 +47,8 @@ const GUARDIAN_INVITATION_SELECT = {
 } satisfies Prisma.GuardianInvitationSelect;
 
 const GUARDIAN_INCLUDE = {
-  parent: { select: { id: true, name: true, email: true } },
+  // `email` is dropped by `toSummary` for callers without canManageRoster.
+  parent: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.GuardianInclude;
 
 export type GuardianInvitationSummary = Prisma.GuardianInvitationGetPayload<{
@@ -59,6 +61,8 @@ export interface GuardianSummary {
   id: string;
   userId: string;
   name: string;
+  /** Tombstone signal for `name` (#813): label from this, never the name. */
+  deletedAt: Date | null;
   /** Present only when the caller has `canManageRoster` on the team. */
   email?: string | null;
   relationship: GuardianRelationship;
@@ -74,6 +78,8 @@ export interface GuardianList {
 export interface GuardianOfEntry {
   childId: string;
   childName: string;
+  /** Tombstone signal for `childName` (#813), ISO like `inviterDeletedAt`. */
+  childDeletedAt: string | null;
   relationship: GuardianRelationship;
   isPrimary: boolean;
   /** True only for a managed child with no login: the one record a guardian may delete. */
@@ -93,8 +99,15 @@ export interface PublicGuardianInvitation {
   id: string;
   status: GuardianInvitationSummary['status'];
   childName: string;
+  /** Tombstone signal for `childName` (#813): clients label from this. */
+  childDeletedAt: string | null;
   teamName: string | null;
   inviterName: string;
+  /**
+   * Tombstone signal for the sender (#813), as on the team invitation's
+   * public view: clients label from this, never the name.
+   */
+  inviterDeletedAt: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }
@@ -116,6 +129,7 @@ function toSummary(g: GuardianWithParent, includeEmail: boolean): GuardianSummar
     id: g.id,
     userId: g.parentId,
     name: g.parent.name,
+    deletedAt: g.parent.deletedAt,
     ...(includeEmail && { email: g.parent.email }),
     relationship: g.relationship,
     isPrimary: g.isPrimary,
@@ -142,6 +156,7 @@ export class GuardianService {
         child: {
           select: {
             name: true,
+            deletedAt: true,
             isManaged: true,
             workosUserId: true,
             teamMembers: { select: { team: { select: { id: true, name: true } } } },
@@ -154,6 +169,7 @@ export class GuardianService {
     return links.map((link) => ({
       childId: link.childId,
       childName: link.child.name,
+      childDeletedAt: link.child.deletedAt?.toISOString() ?? null,
       relationship: link.relationship,
       isPrimary: link.isPrimary,
       // A managed, unclaimed child is the only record a guardian may delete
@@ -195,9 +211,10 @@ export class GuardianService {
         status: true,
         relationship: true,
         expiresAt: true,
-        child: { select: { name: true } },
+        child: { select: { name: true, deletedAt: true } },
         team: { select: { name: true } },
-        invitedBy: { select: { name: true } },
+        // Public payload: name and the tombstone signal only, never email.
+        invitedBy: { select: { name: true, deletedAt: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -207,8 +224,10 @@ export class GuardianService {
       id: invitation.id,
       status: invitation.status,
       childName: invitation.child.name,
+      childDeletedAt: invitation.child.deletedAt?.toISOString() ?? null,
       teamName: invitation.team?.name ?? null,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       relationship: invitation.relationship,
       expiresAt: invitation.expiresAt.toISOString(),
     }));
@@ -220,10 +239,10 @@ export class GuardianService {
   private static async requireMember(
     teamId: string,
     playerId: string
-  ): Promise<{ id: string; name: string; email: string | null }> {
+  ): Promise<UserSummaryWithEmail> {
     const member = await prisma.teamMember.findUnique({
       where: { teamId_playerId: { teamId, playerId } },
-      select: { player: { select: { id: true, name: true, email: true } } },
+      select: { player: { select: USER_SUMMARY_WITH_EMAIL_SELECT } },
     });
 
     if (!member) {
@@ -514,9 +533,10 @@ export class GuardianService {
         status: true,
         relationship: true,
         expiresAt: true,
-        child: { select: { name: true } },
+        child: { select: { name: true, deletedAt: true } },
         team: { select: { name: true } },
-        invitedBy: { select: { name: true } },
+        // Public payload: name and the tombstone signal only, never email.
+        invitedBy: { select: { name: true, deletedAt: true } },
       },
     });
 
@@ -529,8 +549,10 @@ export class GuardianService {
       id: invitation.id,
       status: invitation.status,
       childName: invitation.child.name,
+      childDeletedAt: invitation.child.deletedAt?.toISOString() ?? null,
       teamName: invitation.team?.name ?? null,
       inviterName: invitation.invitedBy.name,
+      inviterDeletedAt: invitation.invitedBy.deletedAt?.toISOString() ?? null,
       relationship: invitation.relationship,
       expiresAt: invitation.expiresAt.toISOString(),
     };

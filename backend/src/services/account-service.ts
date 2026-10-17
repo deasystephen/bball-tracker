@@ -57,6 +57,7 @@ import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/erro
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
+import { USER_SUMMARY_SELECT } from '../utils/user-select';
 import { deletePreviousAvatar } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
@@ -388,8 +389,8 @@ export class AccountService {
       prisma.teamMember.findMany({ where: { playerId: userId }, include: TEAM_REF_INCLUDE }),
       prisma.teamStaff.findMany({ where: { userId }, include: STAFF_EXPORT_INCLUDE }),
       prisma.leagueAdmin.findMany({ where: { userId }, include: { league: { select: { id: true, name: true } } } }),
-      prisma.guardian.findMany({ where: { parentId: userId }, include: { child: { select: { id: true, name: true } } } }),
-      prisma.guardian.findMany({ where: { childId: userId }, include: { parent: { select: { id: true, name: true } } } }),
+      prisma.guardian.findMany({ where: { parentId: userId }, include: GUARDIAN_CHILD_EXPORT_INCLUDE }),
+      prisma.guardian.findMany({ where: { childId: userId }, include: GUARDIAN_PARENT_EXPORT_INCLUDE }),
       prisma.teamInvitation.findMany({ where: { playerId: userId }, select: RECEIVED_INVITATION_SELECT }),
       prisma.teamInvitation.findMany({ where: { invitedById: userId }, select: SENT_INVITATION_SELECT }),
       prisma.guardianInvitation.findMany({
@@ -503,6 +504,10 @@ const SENT_GUARDIAN_INVITATION_SELECT = {
   createdAt: true,
 } satisfies Prisma.GuardianInvitationSelect;
 
+/** The other side of a guardian link, in the shared user shape (#813). */
+const GUARDIAN_CHILD_EXPORT_INCLUDE = { child: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
+const GUARDIAN_PARENT_EXPORT_INCLUDE = { parent: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
+
 /** Everything `exportUserData` returns; the runbook lists these keys as the export contract. */
 export interface UserDataExport {
   exportedAt: Date;
@@ -511,8 +516,8 @@ export interface UserDataExport {
   teamMembers: Prisma.TeamMemberGetPayload<{ include: typeof TEAM_REF_INCLUDE }>[];
   teamStaff: Prisma.TeamStaffGetPayload<{ include: typeof STAFF_EXPORT_INCLUDE }>[];
   leagueAdmins: Prisma.LeagueAdminGetPayload<{ include: { league: { select: { id: true; name: true } } } }>[];
-  guardiansAsParent: Prisma.GuardianGetPayload<{ include: { child: { select: { id: true; name: true } } } }>[];
-  guardiansAsChild: Prisma.GuardianGetPayload<{ include: { parent: { select: { id: true; name: true } } } }>[];
+  guardiansAsParent: Prisma.GuardianGetPayload<{ include: typeof GUARDIAN_CHILD_EXPORT_INCLUDE }>[];
+  guardiansAsChild: Prisma.GuardianGetPayload<{ include: typeof GUARDIAN_PARENT_EXPORT_INCLUDE }>[];
   receivedInvitations: Prisma.TeamInvitationGetPayload<{ select: typeof RECEIVED_INVITATION_SELECT }>[];
   sentInvitations: Prisma.TeamInvitationGetPayload<{ select: typeof SENT_INVITATION_SELECT }>[];
   guardianInvitations: Prisma.GuardianInvitationGetPayload<{ select: typeof GUARDIAN_INVITATION_EXPORT_SELECT }>[];

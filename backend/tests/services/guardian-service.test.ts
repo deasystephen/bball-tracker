@@ -2,6 +2,7 @@
  * Unit tests for GuardianService (PARENT role — docs/plans/parent-role-spec.md)
  */
 
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
 import { GuardianService } from '../../src/services/guardian-service';
 import { emailEquals } from '../../src/utils/email-match';
@@ -93,21 +94,21 @@ describe('GuardianService', () => {
           childId: 'c1',
           relationship: 'FATHER',
           isPrimary: true,
-          child: { name: 'Kid One', isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 't1', name: 'Warriors' } }] },
+          child: { name: 'Kid One', deletedAt: null, isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 't1', name: 'Warriors' } }] },
         },
         {
           childId: 'c2',
           relationship: 'OTHER',
           isPrimary: false,
           // Claimed account: managed flag already cleared by syncUser, and it has a login
-          child: { name: 'Kid Two', isManaged: false, workosUserId: 'workos_kid', teamMembers: [] },
+          child: { name: 'Kid Two', deletedAt: new Date('2026-09-02T00:00:00.000Z'), isManaged: false, workosUserId: 'workos_kid', teamMembers: [] },
         },
         {
           childId: 'c3',
           relationship: 'MOTHER',
           isPrimary: false,
           // Managed flag still set but the child has a login: not deletable by a guardian
-          child: { name: 'Kid Three', isManaged: true, workosUserId: 'workos_kid3', teamMembers: [] },
+          child: { name: 'Kid Three', deletedAt: null, isManaged: true, workosUserId: 'workos_kid3', teamMembers: [] },
         },
       ]);
 
@@ -115,9 +116,9 @@ describe('GuardianService', () => {
 
       // isManaged marks the only kind of child record a guardian may delete (#444 D5)
       expect(result).toEqual([
-        { childId: 'c1', childName: 'Kid One', relationship: 'FATHER', isPrimary: true, isManaged: true, teams: [{ id: 't1', name: 'Warriors' }] },
-        { childId: 'c2', childName: 'Kid Two', relationship: 'OTHER', isPrimary: false, isManaged: false, teams: [] },
-        { childId: 'c3', childName: 'Kid Three', relationship: 'MOTHER', isPrimary: false, isManaged: false, teams: [] },
+        { childId: 'c1', childName: 'Kid One', childDeletedAt: null, relationship: 'FATHER', isPrimary: true, isManaged: true, teams: [{ id: 't1', name: 'Warriors' }] },
+        { childId: 'c2', childName: 'Kid Two', childDeletedAt: '2026-09-02T00:00:00.000Z', relationship: 'OTHER', isPrimary: false, isManaged: false, teams: [] },
+        { childId: 'c3', childName: 'Kid Three', childDeletedAt: null, relationship: 'MOTHER', isPrimary: false, isManaged: false, teams: [] },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'parent-1' } })
@@ -142,9 +143,9 @@ describe('GuardianService', () => {
           status: 'PENDING',
           relationship: 'MOTHER',
           expiresAt,
-          child: { name: 'Kid Smith' },
+          child: { name: 'Kid Smith', deletedAt: new Date('2026-09-02T00:00:00.000Z') },
           team: { name: 'Lakers' },
-          invitedBy: { name: 'Coach' },
+          invitedBy: { name: 'Coach', deletedAt: new Date('2026-09-01T00:00:00.000Z') },
           token: 'must-not-leak',
         },
       ]);
@@ -157,12 +158,23 @@ describe('GuardianService', () => {
           id: 'gi-1',
           status: 'PENDING',
           childName: 'Kid Smith',
+          childDeletedAt: '2026-09-02T00:00:00.000Z',
           teamName: 'Lakers',
           inviterName: 'Coach',
+          // Deleted inviter: the client labels from this, never the name (#813).
+          inviterDeletedAt: '2026-09-01T00:00:00.000Z',
           relationship: 'MOTHER',
           expiresAt: expiresAt.toISOString(),
         },
       ]);
+      expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            child: { select: { name: true, deletedAt: true } },
+            invitedBy: { select: { name: true, deletedAt: true } },
+          }),
+        })
+      );
       expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -398,7 +410,7 @@ describe('GuardianService', () => {
         relationship: 'MOTHER',
         isPrimary: true,
         createdAt: new Date(),
-        parent: { id: 'parent-1', name: 'Mom', email: 'mom@test.com' },
+        parent: { id: 'parent-1', name: 'Mom', email: 'mom@test.com', isManaged: false, deletedAt: null },
       },
     ];
 
@@ -424,8 +436,12 @@ describe('GuardianService', () => {
       const result = await GuardianService.listGuardians(TEAM_ID, CHILD_ID, 'coach-1');
 
       expect(result.guardians).toEqual([
-        expect.objectContaining({ userId: 'parent-1', name: 'Mom', email: 'mom@test.com', isPrimary: true }),
+        expect.objectContaining({ userId: 'parent-1', name: 'Mom', deletedAt: null, email: 'mom@test.com', isPrimary: true }),
       ]);
+      // The guardian's own row in the shared user shape (#813).
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ include: { parent: { select: USER_SUMMARY_WITH_EMAIL_SELECT } } })
+      );
       expect(result.pendingInvitations).toHaveLength(1);
       expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -446,6 +462,7 @@ describe('GuardianService', () => {
 
       expect(result.guardians[0]).not.toHaveProperty('email');
       expect(result.guardians[0].name).toBe('Mom');
+      expect(result.guardians[0].deletedAt).toBeNull();
     });
 
     it('throws ForbiddenError for a caller who is neither manager nor guardian', async () => {
@@ -570,9 +587,9 @@ describe('GuardianService', () => {
         status: 'PENDING',
         relationship: 'FATHER',
         expiresAt,
-        child: { name: 'Kid Smith' },
+        child: { name: 'Kid Smith', deletedAt: null },
         team: { name: 'Lakers' },
-        invitedBy: { name: 'Coach' },
+        invitedBy: { name: 'Coach', deletedAt: null },
       });
 
       const result = await GuardianService.getInvitationByToken('tok');
@@ -582,12 +599,39 @@ describe('GuardianService', () => {
         id: 'inv-1',
         status: 'PENDING',
         childName: 'Kid Smith',
+        childDeletedAt: null,
         teamName: 'Lakers',
         inviterName: 'Coach',
+        inviterDeletedAt: null,
         relationship: 'FATHER',
         expiresAt: expiresAt.toISOString(),
       });
       expect(result).not.toHaveProperty('invitedEmail');
+      // Public payload: the inviter's name and tombstone signal, never email.
+      expect(mockPrisma.guardianInvitation.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            child: { select: { name: true, deletedAt: true } },
+            invitedBy: { select: { name: true, deletedAt: true } },
+          }),
+        })
+      );
+    });
+
+    it('carries the deleted inviter tombstone (#813)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue({
+        id: 'inv-1',
+        status: 'PENDING',
+        relationship: 'FATHER',
+        expiresAt: new Date(),
+        child: { name: 'Kid Smith', deletedAt: null },
+        team: { name: 'Lakers' },
+        invitedBy: { name: 'Deleted user', deletedAt: new Date('2026-09-01T00:00:00.000Z') },
+      });
+
+      const result = await GuardianService.getInvitationByToken('tok');
+      expect(result.inviterDeletedAt).toBe('2026-09-01T00:00:00.000Z');
+      expect(result.childDeletedAt).toBeNull();
     });
 
     it('returns teamName null when the team was deleted', async () => {
@@ -596,9 +640,9 @@ describe('GuardianService', () => {
         status: 'PENDING',
         relationship: 'FATHER',
         expiresAt: new Date(),
-        child: { name: 'Kid Smith' },
+        child: { name: 'Kid Smith', deletedAt: null },
         team: null,
-        invitedBy: { name: 'Coach' },
+        invitedBy: { name: 'Coach', deletedAt: null },
       });
 
       const result = await GuardianService.getInvitationByToken('tok');

@@ -11,6 +11,7 @@ import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
 import { mailer } from './mailer';
 import { announcementTemplate } from './mailer/templates';
+import { USER_SUMMARY_SELECT } from '../utils/user-select';
 
 /**
  * No `email`: every team reader (players, guardians) receives this payload, and
@@ -20,13 +21,7 @@ import { announcementTemplate } from './mailer/templates';
  * nameless author looks the address up separately (`emailAnnouncement`).
  */
 export const ANNOUNCEMENT_INCLUDE = {
-  author: {
-    select: {
-      id: true,
-      name: true,
-      deletedAt: true,
-    },
-  },
+  author: { select: USER_SUMMARY_SELECT },
   // Reply count for the list's "N replies" footnote (#34); the thread itself
   // is GET /announcements/:id/replies.
   _count: { select: { replies: true } },

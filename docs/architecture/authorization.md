@@ -198,8 +198,8 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 - Announcements are created and listed under `/teams/:teamId/announcements` (`canManageTeam` to
   post, `canAccessTeam` to read). `GET /announcements/:id` returns one announcement with its author
   and `_count.replies`; same gate as the list (404 unknown, 403 without access to its team).
-  Announcement payloads carry the author's `id`, `name` and `deletedAt` and never an email
-  (`ANNOUNCEMENT_INCLUDE`, #654); the announcement email looks the author's address up separately,
+  Announcement payloads carry the author's `id`, `name`, `isManaged` and `deletedAt` and never an
+  email (`ANNOUNCEMENT_INCLUDE` on `USER_SUMMARY_SELECT`, #654, #813); the announcement email looks the author's address up separately,
   and only when the author has no name.
 - Replies (`AnnouncementReply`, one level deep, never reply-to-reply) live under
   `/announcements/:id/replies`. **Anyone who can read the team may reply** (`canAccessTeam`: staff,
@@ -209,8 +209,8 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
   anyone with **`canManageTeam`** on the team (head and assistant coach; a team manager cannot); a
   reply under a different announcement is a 404, not a hint. Services: `announcement-service.ts`
   (`getAnnouncement`) and `announcement-reply-service.ts`.
-- Reply payloads carry the author's `id`, `name`, `profilePictureUrl` and `deletedAt` and never an
-  email (reply authors are players and guardians, whose addresses only roster managers see).
+- Reply payloads carry the author's `id`, `name`, `isManaged`, `profilePictureUrl` and `deletedAt`
+  and never an email (reply authors are players and guardians, whose addresses only roster managers see).
 - A new reply notifies the announcement's author by push and email in the background
   (`AnnouncementReplyService.notifyAuthor`) unless the author replied to their own post, has
   `User.notifyOnReplies` false (`PATCH /auth/me { notifyOnReplies }`, Profile → Reply notifications),
@@ -227,4 +227,4 @@ team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 - **Everyone else**: only themselves, their guardian children, and players rostered on any team the caller may read, which is the shared `utils/permissions.ts#teamAccessWhere` clause (staff, member, league admin, guardian of a member; #685), never a local copy. `role` / `isManaged` filters are ignored (always `PLAYER`, non-managed); `search` matches name only; `email` is omitted from list results and is `null` on detail unless it's the caller's own record. Players outside those teams are a **404**, not a 403, so ids can't be enumerated. A guardian reads and lists their children regardless of roster state or `isManaged` (#821): the predicate also admits `id IN getGuardianChildIds(caller)`, and in `GET /players` that branch sits outside the non-admin `isManaged: false` exclusion, so a team-less or coach-created child is visible, matching `PATCH /players/:id`, which already accepts the guardian link. Proven per branch against real Postgres in `tests/integration/player-directory.db.test.ts`.
 - **Deleted accounts** are a 404 on detail, never listed, and `PATCH` / `DELETE /players/:id` treat a tombstone as not found for an ADMIN too; both writes carry `where: { id, deletedAt: null }` in one statement, so a deletion committing after the read is a 404 (P2025) (#643, see `account-deletion.md`).
 - **Email** on `POST /players` and `PATCH /players/:id` is trimmed and lower-cased by the schema, and the duplicate probe is `emailEquals` (case-insensitive, 400 on a match; a P2002 race is 409). A change that differs only in case from the stored address is not a change: no write, delivery state kept (#651).
-- Team rosters (`GET /teams/:id`) remain the place coaches see their managed players; `USER_SUMMARY_SELECT` now includes `isManaged` so clients can label roster-only players (audit #64).
+- Team rosters (`GET /teams/:id`) remain the place coaches see their managed players; the shared user summary (`utils/user-select.ts`, #813) includes `isManaged` so clients can label roster-only players (audit #64).

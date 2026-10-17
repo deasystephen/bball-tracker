@@ -8,6 +8,7 @@ import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { createOrConflict } from '../utils/prisma-errors';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
+import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -19,13 +20,7 @@ import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } fro
 const LEAGUE_OMIT = { personalOwnerId: true } satisfies Prisma.LeagueOmit;
 
 const LEAGUE_ADMIN_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  },
+  user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.LeagueAdminInclude;
 
 const LEAGUE_INCLUDE = {
@@ -51,24 +46,13 @@ const LEAGUE_DETAIL_INCLUDE = {
         include: {
           staff: {
             include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
-                },
-              },
+              user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
               role: true,
             },
           },
           members: {
             include: {
-              player: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
+              player: { select: USER_SUMMARY_SELECT },
             },
           },
         },

@@ -169,6 +169,7 @@ describe('Guardians API', () => {
             id: 'g-1',
             userId: TEST_GUARDIAN_USER_ID,
             name: 'Mom',
+            deletedAt: null,
             email: 'mom@example.com',
             relationship: 'MOTHER',
             isPrimary: true,

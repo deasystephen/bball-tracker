@@ -103,8 +103,10 @@ describe('Invitations API', () => {
           id: 'b2c3d4e5-f6a7-4901-a345-67890abcdef1',
           status: 'PENDING',
           childName: 'Kid Smith',
+          childDeletedAt: '2026-09-02T00:00:00.000Z',
           teamName: 'Lakers',
           inviterName: 'Coach Smith',
+          inviterDeletedAt: '2026-09-01T00:00:00.000Z',
           relationship: 'MOTHER',
           expiresAt: new Date(Date.now() + 86400000).toISOString(),
         },
@@ -118,7 +120,10 @@ describe('Invitations API', () => {
       expect(response.body.guardianInvitations[0]).toMatchObject({
         kind: 'guardian',
         childName: 'Kid Smith',
+        childDeletedAt: '2026-09-02T00:00:00.000Z',
         relationship: 'MOTHER',
+        // Tombstone signal for a deleted inviter (#813).
+        inviterDeletedAt: '2026-09-01T00:00:00.000Z',
       });
       expect(response.body.guardianInvitations[0]).not.toHaveProperty('token');
     });

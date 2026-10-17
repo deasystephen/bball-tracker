@@ -10,22 +10,19 @@ import { mailer } from './mailer';
 import { rsvpConfirmationTemplate } from './mailer/templates';
 import { logger } from '../utils/logger';
 import { formatEmailDateTime } from '../utils/format-date';
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const RSVP_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  },
+  // `email` is stripped by `toRsvpView` for callers without canManageRoster.
+  user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.GameRsvpInclude;
 
 export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCLUDE }>;
 /**
  * `GET /games/:id/rsvps` row and `POST /games/:id/rsvp` response. `user.email`
  * is present only for callers with `canManageRoster` on the game's team (plus
- * the caller's own row); everyone else gets `{ id, name }` (role matrix B2.5).
+ * the caller's own row); everyone else gets the user summary without `email`
+ * (`id, name, isManaged, deletedAt`; role matrix B2.5).
  */
 export type RsvpView = Omit<RsvpWithUser, 'user'> & {
   user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
@@ -38,7 +35,10 @@ export type RsvpView = Omit<RsvpWithUser, 'user'> & {
 export function toRsvpView(row: RsvpWithUser, callerId: string, canManageRoster: boolean): RsvpView {
   if (canManageRoster || row.user.id === callerId) return row;
   const { user, ...rest } = row;
-  return { ...rest, user: { id: user.id, name: user.name } };
+  // Every other field of the shared user summary (deletedAt, #813) stays.
+  const publicUser: RsvpView['user'] = { ...user };
+  delete publicUser.email;
+  return { ...rest, user: publicUser };
 }
 
 export interface RsvpSummary {
