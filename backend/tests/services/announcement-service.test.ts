@@ -15,6 +15,7 @@ import {
   expectForbiddenError,
   expectNotFoundError,
 } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/services/notification-service', () => ({
   NotificationService: {
@@ -180,6 +181,7 @@ describe('AnnouncementService', () => {
         updatedAt: new Date(),
       };
       (mockPrisma.announcement.create as jest.Mock).mockResolvedValue(announcement);
+      const infoSpy = spyOnInfo();
 
       const result = await AnnouncementService.createAnnouncement(
         team.id,
@@ -188,6 +190,10 @@ describe('AnnouncementService', () => {
       );
 
       expect(result).toEqual(announcement);
+      // One domain event, ids only: never the title or body (#686).
+      const event = domainEvent(infoSpy, 'Announcement created');
+      expect(event).toEqual({ announcementId: 'a1', teamId: team.id, userId: admin.id });
+      expect(JSON.stringify(event)).not.toContain('Game moved');
       expect(mockPrisma.announcement.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {

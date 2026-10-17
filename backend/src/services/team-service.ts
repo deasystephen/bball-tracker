@@ -653,6 +653,13 @@ export class TeamService {
       updateData.gender = data.gender;
     }
 
+    // Columns whose value actually changes, for the domain event: never the
+    // values, and not a key the payload merely repeats (#686).
+    const loaded: Record<string, unknown> = team;
+    const fields = Object.entries(updateData)
+      .filter(([key, value]) => value !== loaded[key])
+      .map(([key]) => key);
+
     // Update the team
     try {
       const updated = await prisma.team.update({
@@ -669,8 +676,11 @@ export class TeamService {
           lineageId: team.lineageId,
           fromSeasonId: team.seasonId,
           toSeasonId: data.seasonId,
+          fields,
           userId,
         });
+      } else {
+        logger.info('Team updated', { teamId, fields, userId });
       }
       // A season move changes the `seasons` usage metric of every staff member
       // (#658); any other edit changes no metered count. `invalidateUsage`
@@ -938,6 +948,8 @@ export class TeamService {
       include: TEAM_MEMBER_INCLUDE,
     });
 
+    logger.info('Roster member updated', { teamId, playerId, userId });
+
     return updatedMember;
   }
 
@@ -1070,6 +1082,13 @@ export class TeamService {
       'TeamStaff_teamId_userId_roleId_key'
     );
 
+    logger.info('Staff added', {
+      teamId,
+      staffUserId: user.id,
+      roleType: role.type,
+      userId: requestingUserId,
+    });
+
     // Best-effort push notification; never fails the request.
     try {
       await NotificationService.sendToUsers([user.id], {
@@ -1126,11 +1145,21 @@ export class TeamService {
       await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
     }
 
-    return prisma.teamStaff.update({
+    const updated = await prisma.teamStaff.update({
       where: { id: current.id },
       data: { roleId: role.id },
       include: TEAM_STAFF_INCLUDE,
     });
+
+    logger.info('Staff role changed', {
+      teamId,
+      staffUserId,
+      fromRoleType: current.role.type,
+      roleType: role.type,
+      userId: requestingUserId,
+    });
+
+    return updated;
   }
 
   /**
@@ -1172,6 +1201,14 @@ export class TeamService {
 
     await prisma.teamStaff.deleteMany({
       where: { teamId, userId: staffUserId },
+    });
+
+    logger.info('Staff removed', {
+      teamId,
+      staffUserId,
+      roleId: existing.roleId,
+      self: isSelf,
+      userId: requestingUserId,
     });
 
     return { success: true };
@@ -1242,6 +1279,8 @@ export class TeamService {
       'A role with this name already exists',
       'TeamRole_teamId_name_key'
     );
+
+    logger.info('Custom role created', { teamId, roleId: role.id, userId: requestingUserId });
 
     return role;
   }

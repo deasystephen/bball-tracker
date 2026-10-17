@@ -20,6 +20,7 @@ import {
   createUser,
 } from '../factories';
 import { expectNotFoundError, expectForbiddenError } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/websocket/emit', () => ({
   emitGameEvent: jest.fn(),
@@ -222,6 +223,7 @@ describe('GameEventService', () => {
         { eventType: 'SHOT', metadata: { made: true, points: 2 } },
       ]);
       (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 2, awayScore: 0 });
+      const infoSpy = spyOnInfo();
 
       const result = await GameEventService.createEvent(
         game.id,
@@ -232,6 +234,13 @@ describe('GameEventService', () => {
       expect(result.event).toHaveProperty('id', event.id);
       expect(result.event).toHaveProperty('eventType', 'SHOT');
       expect(result.score).toEqual({ homeScore: 2, awayScore: 0 });
+      // One domain event, ids and the event type only: never the metadata (#686).
+      expect(domainEvent(infoSpy, 'Game event created')).toEqual({
+        gameId: game.id,
+        eventId: event.id,
+        eventType: 'SHOT',
+        userId: coach.id,
+      });
     });
 
     it('should recompute and persist homeScore from SHOT events inside a transaction (audit #6, #8)', async () => {
@@ -751,10 +760,18 @@ describe('GameEventService', () => {
         { eventType: 'SHOT', metadata: { made: true, points: 3 } },
       ]);
       (mockPrisma.game.update as jest.Mock).mockResolvedValue({ homeScore: 3, awayScore: 5 });
+      const infoSpy = spyOnInfo();
 
       const result = await GameEventService.deleteEvent(game.id, event.id, coach.id);
 
       expect(result).toEqual({ success: true, score: { homeScore: 3, awayScore: 5 } });
+      // One domain event, ids and the event type only (#686).
+      expect(domainEvent(infoSpy, 'Game event deleted')).toEqual({
+        gameId: game.id,
+        eventId: event.id,
+        eventType: 'SHOT',
+        userId: coach.id,
+      });
       // SHOT removal recomputes the score in a transaction and broadcasts it (audit #8)
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mockPrisma.gameEvent.delete).toHaveBeenCalledWith({ where: { id: event.id } });

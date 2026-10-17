@@ -35,6 +35,7 @@ import {
   uniqueViolation,
 } from '../factories';
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 import { assertOwnUploadUrl, deletePreviousAvatar } from '../../src/services/upload-service';
 
@@ -1198,6 +1199,21 @@ describe('PlayerService', () => {
         expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(url, null);
         expect(mockS3Send).not.toHaveBeenCalled();
       });
+    });
+
+    it('logs one `Player deleted` domain event with ids only (#686)', async () => {
+      const player = createPlayer();
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
+      const infoSpy = spyOnInfo();
+
+      await PlayerService.deletePlayer(player.id, 'admin-id');
+
+      const event = domainEvent(infoSpy, 'Player deleted');
+      expect(event).toEqual({ playerId: player.id, userId: 'admin-id' });
+      expect(JSON.stringify(event)).not.toContain(String(player.email));
     });
 
     it('treats a tombstone as not found, even for an admin (#643)', async () => {

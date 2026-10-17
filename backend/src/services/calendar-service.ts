@@ -10,6 +10,7 @@ import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors'
 import { canAccessTeam } from '../utils/permissions';
 import { Feature, getEffectiveTier, hasFeature } from './entitlements';
 import { apiBaseUrl, publicAppUrl } from '../utils/urls';
+import { logger } from '../utils/logger';
 
 // Assume games run ~2 hours. Game model has only a start `date`.
 const DEFAULT_GAME_DURATION_HOURS = 2;
@@ -98,6 +99,8 @@ export class CalendarService {
           },
         });
 
+    logger.info('Calendar feed subscribed', { teamId, created: !existing, userId });
+
     const base = apiBaseUrl();
     const path = `/api/v1/teams/${teamId}/calendar.ics?token=${encodeURIComponent(
       tokenRow.token
@@ -127,6 +130,8 @@ export class CalendarService {
       where: { userId, teamId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+
+    logger.info('Calendar feed revoked', { teamId, revoked: result.count, userId });
 
     return { revoked: result.count };
   }

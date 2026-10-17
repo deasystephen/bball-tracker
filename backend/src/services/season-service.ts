@@ -13,6 +13,7 @@ import {
   getReadableLeagueIds,
   canReadLeague,
 } from '../utils/permissions';
+import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const LEAGUE_SUMMARY_SELECT = {
@@ -147,6 +148,8 @@ export class SeasonService {
       'A season with this name already exists in this league',
       'Season_leagueId_name_key'
     );
+
+    logger.info('Season created', { seasonId: season.id, leagueId: data.leagueId, userId });
 
     return season;
   }
@@ -342,6 +345,8 @@ export class SeasonService {
       include: SEASON_INCLUDE,
     });
 
+    logger.info('Season updated', { seasonId, leagueId: season.leagueId, userId });
+
     return updatedSeason;
   }
 
@@ -378,6 +383,8 @@ export class SeasonService {
     await prisma.season.delete({
       where: { id: seasonId },
     });
+
+    logger.info('Season deleted', { seasonId, leagueId: season.leagueId, userId });
 
     return { success: true };
   }

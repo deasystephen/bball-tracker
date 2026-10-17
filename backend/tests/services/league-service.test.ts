@@ -6,6 +6,7 @@ import { LeagueService } from '../../src/services/league-service';
 import { mockPrisma } from '../setup';
 import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer, uniqueViolation } from '../factories';
 import { expectNotFoundError, expectBadRequestError, expectForbiddenError } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 describe('LeagueService', () => {
   describe('createLeague', () => {
@@ -392,6 +393,19 @@ describe('LeagueService', () => {
           where: { id: league.id },
         })
       );
+    });
+
+    it('logs one `League deleted` domain event with ids only (#686)', async () => {
+      const admin = createAdmin();
+      const league = createLeague({ name: 'Secret League Name' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue({ ...league, seasons: [] });
+      (mockPrisma.league.delete as jest.Mock).mockResolvedValue(league);
+      const infoSpy = spyOnInfo();
+
+      await LeagueService.deleteLeague(league.id, admin.id);
+
+      expect(domainEvent(infoSpy, 'League deleted')).toEqual({ leagueId: league.id, userId: admin.id });
     });
 
     it('should throw ForbiddenError if user is not system admin', async () => {

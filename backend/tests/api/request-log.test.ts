@@ -8,7 +8,7 @@
 import request from 'supertest';
 import { app } from '../../src/index';
 import { TeamService } from '../../src/services/team-service';
-import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 
@@ -42,12 +42,8 @@ describe('request log', () => {
   let infoSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    infoSpy = spyOnInfo();
     mockTeamService.listTeams.mockResolvedValue({ teams: [], total: 0, limit: 20, offset: 0 } as never);
-  });
-
-  afterEach(() => {
-    infoSpy.mockRestore();
   });
 
   it('carries userId once the request authenticated', async () => {
