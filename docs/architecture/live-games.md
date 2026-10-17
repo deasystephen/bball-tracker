@@ -61,7 +61,9 @@ current score so a client can drop events and still converge.
   JWKS/WorkOS outage, a database failover) is `connect_error: Service unavailable`, so the client
   backs off and retries rather than refreshing credentials, and is reported to Sentry with
   `captureException(error, { flow: 'socket-auth', socketId })`, because middleware rejections
-  never reach the Express chain and `sentryErrorHandler` (#672).
+  never reach the Express chain and `sentryErrorHandler` (#672). A deleted account (tombstone,
+  `deletedAt` set) is refused like REST refuses it: both lookups in `resolveSocketUser` filter on
+  `deletedAt: null`, so a still-valid dev token for a deleted user cannot join a game room (#667).
 - Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
   handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
   max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).

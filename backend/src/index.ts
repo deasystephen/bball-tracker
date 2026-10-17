@@ -18,6 +18,8 @@ import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
+import { createShutdown } from './utils/shutdown';
+import { closeRedis } from './utils/redis';
 
 const app = express();
 const httpServer = createServer(app);
@@ -77,19 +79,25 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
+import { isPoolTimeoutError } from './models/pool-config';
 
+// `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
+// fired (pool saturated, or RDS not answering TCP), 'down' for anything else
+// (refused, auth, TLS). Both are 503; the runbook decodes the difference.
 app.get('/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: 'ok', db: 'ok', commit: deployedCommit(), timestamp: new Date().toISOString() });
   } catch (err) {
+    const db = isPoolTimeoutError(err) ? 'timeout' : 'down';
     logger.error('Health check DB ping failed', {
+      db,
       error: err instanceof Error ? err.message : String(err),
     });
-    captureException(err, { flow: 'health-check' });
+    captureException(err, { flow: 'health-check', db });
     res
       .status(503)
-      .json({ status: 'degraded', db: 'down', commit: deployedCommit(), timestamp: new Date().toISOString() });
+      .json({ status: 'degraded', db, commit: deployedCommit(), timestamp: new Date().toISOString() });
   }
 });
 
@@ -170,7 +178,20 @@ if (require.main === module) {
 
   // SES bounce/complaint events (#449). Null — and a no-op — until
   // SES_EVENTS_QUEUE_URL is configured.
-  createSesEventConsumer()?.start();
+  const consumer = createSesEventConsumer();
+  consumer?.start();
+
+  // Graceful stop on ECS's SIGTERM (and Ctrl-C locally): utils/shutdown.ts (#747).
+  const shutdown = createShutdown({
+    io,
+    consumer,
+    disconnectPrisma: () => prisma.$disconnect(),
+    closeRedis,
+    exit: (code) => process.exit(code),
+  });
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => void shutdown(signal));
+  }
 }
 
 export { app, io, httpServer };
