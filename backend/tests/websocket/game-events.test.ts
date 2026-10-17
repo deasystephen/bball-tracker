@@ -253,6 +253,60 @@ describe('websocket/game-events', () => {
     });
   });
 
+  // #667: tombstoned accounts are refused at the handshake, as REST refuses them.
+  describe('resolveSocketUser and deleted accounts', () => {
+    const verifyToken = (): jest.SpyInstance => jest.spyOn(WorkOSService, 'verifyToken');
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('filters the dev-token lookup on deletedAt: null', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      try {
+        const user = createCoach();
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        });
+        await resolveSocketUser(devToken({ userId: user.id }));
+        expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: user.id, deletedAt: null } })
+        );
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it('filters the WorkOS lookup on deletedAt: null', async () => {
+      verifyToken().mockResolvedValue({ id: 'user_x' } as never);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await resolveSocketUser('Bearer some.jwt.token');
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { workosUserId: 'user_x', deletedAt: null } })
+      );
+    });
+
+    it('refuses a tombstoned user (the filtered lookup finds no row)', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      try {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        expect(await resolveSocketUser(devToken({ userId: 'deleted-user' }))).toBeNull();
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+
+      verifyToken().mockResolvedValue({ id: 'user_deleted' } as never);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      expect(await resolveSocketUser('Bearer some.jwt.token')).toBeNull();
+    });
+  });
+
   describe('authenticateSocket', () => {
     const mockCaptureException = captureException as jest.Mock;
 

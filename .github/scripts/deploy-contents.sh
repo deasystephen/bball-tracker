@@ -24,7 +24,7 @@ set -uo pipefail
 
 # The paths that make up the deployed image and its task definition. Keep in
 # step with the `backend` filter of the detect-changes job in ci.yml.
-DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md')
+DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md' ':(exclude)infra/.terraform.lock.hcl')
 
 DEPLOYED="${1:-}"
 NEW="${2:-}"
@@ -99,7 +99,7 @@ if [ "$all" -eq 0 ]; then
 fi
 
 if [ "$total" -eq 0 ]; then
-  echo "None of the $all commits in between changes what is deployed (\`backend/\`, \`infra/\`, \`docker/\`, \`ci.yml\`; Markdown left out). The image is rebuilt from the same sources."
+  echo "None of the $all commits in between changes what is deployed (\`backend/\`, \`infra/\`, \`docker/\`, \`ci.yml\`; Markdown and the Terraform lock left out). The image is rebuilt from the same sources."
   exit 0
 fi
 

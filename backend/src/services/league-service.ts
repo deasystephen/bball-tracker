@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
+import { createOrConflict } from '../utils/prisma-errors';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
@@ -517,17 +518,23 @@ export class LeagueService {
       throw new BadRequestError('A season with this name already exists in this league');
     }
 
-    // Create season
-    const season = await prisma.season.create({
-      data: {
-        leagueId,
-        name: data.name,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        isActive: true,
-      },
-      include: SEASON_INCLUDE,
-    });
+    // Create season; a lost race on @@unique([leagueId, name]) answers the
+    // pre-check's 400 (#727).
+    const season = await createOrConflict(
+      () =>
+        prisma.season.create({
+          data: {
+            leagueId,
+            name: data.name,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isActive: true,
+          },
+          include: SEASON_INCLUDE,
+        }),
+      'A season with this name already exists in this league',
+      'Season_leagueId_name_key'
+    );
 
     return season;
   }

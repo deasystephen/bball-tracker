@@ -4,6 +4,8 @@
  * thread agree; strings come from `common.*` in the locale files.
  */
 
+import { formatMonthDay } from './format-date';
+
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -16,5 +18,5 @@ export function formatRelativeTime(iso: string, t: Translate, now: Date = new Da
   if (diffHours < 1) return t('common.justNow');
   if (diffHours < 24) return t('common.hoursAgo', { count: diffHours });
   if (diffHours < 48) return t('common.yesterday');
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return formatMonthDay(date);
 }

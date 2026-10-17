@@ -2,9 +2,16 @@
  * Unit tests for TeamService
  */
 
+// Only the usage-cache side effect is observed (#658); the rest of the module
+// stays real.
+jest.mock('../../src/services/usage-service', () => ({
+  ...jest.requireActual('../../src/services/usage-service'),
+  invalidateUsage: jest.fn().mockResolvedValue(undefined),
+}));
+
+import { invalidateUsage } from '../../src/services/usage-service';
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
-import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -18,6 +25,7 @@ import {
   createTeamRole,
   createTeamStaff,
   createUser,
+  uniqueViolation,
 } from '../factories';
 import {
   expectNotFoundError,
@@ -971,6 +979,8 @@ describe('TeamService', () => {
       const result = await TeamService.updateTeam(team.id, { name: newName }, coach.id);
 
       expect(result).toHaveProperty('name', newName);
+      // A rename changes no metered count (#658).
+      expect(invalidateUsage).not.toHaveBeenCalled();
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
@@ -1070,17 +1080,30 @@ describe('TeamService', () => {
         leagueId: otherLeague.id,
         userId: coach.id,
       });
+      const assistantId = 'staff-assistant';
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         seasonId: otherSeason.id,
         season: { ...season, league },
-        staff: [],
+        // The coach holds two roles on the team.
+        staff: [
+          { ...coachStaff, userId: coach.id },
+          { ...coachStaff, id: 'staff-row-2', userId: coach.id },
+          { ...coachStaff, id: 'staff-row-3', userId: assistantId },
+        ],
         members: [],
       });
 
       const result = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id);
 
       expect(result.seasonId).toBe(otherSeason.id);
+      // A season move changes every staff member's `seasons` metric (#658):
+      // one invalidation covering each staff row's user, after the write.
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId);
+      expect((invalidateUsage as jest.Mock).mock.invocationCallOrder[0]).toBeGreaterThan(
+        (mockPrisma.team.update as jest.Mock).mock.invocationCallOrder[0]
+      );
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ seasonId: otherSeason.id }) })
       );
@@ -1145,6 +1168,8 @@ describe('TeamService', () => {
 
       expect(mockPrisma.season.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.leagueAdmin.findUnique).not.toHaveBeenCalled();
+      // Re-sending the current season is not a move: no usage change (#658).
+      expect(invalidateUsage).not.toHaveBeenCalled();
     });
   });
 
@@ -1193,10 +1218,54 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
 
       await expect(TeamService.deleteTeam(team.id, admin.id)).resolves.toEqual({ success: true });
       expect(mockPrisma.teamStaff.findFirst).not.toHaveBeenCalled();
+      // A non-staff admin is still invalidated (harmless).
+      expect(invalidateUsage).toHaveBeenCalledWith(admin.id);
+    });
+
+    it('invalidates every staff member plus the caller, from rows read before the cascade (#658)', async () => {
+      const { team, coach, coachStaff } = createFullTeam();
+      const assistantId = 'staff-assistant';
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      // The coach holds two roles on the team (head + assistant).
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { userId: coach.id },
+        { userId: assistantId },
+        { userId: coach.id },
+      ]);
+      (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
+
+      await expect(TeamService.deleteTeam(team.id, coach.id)).resolves.toEqual({ success: true });
+
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
+        where: { teamId: team.id },
+        select: { userId: true },
+      });
+      const order = (m: unknown): number => (m as jest.Mock).mock.invocationCallOrder[0];
+      expect(order(mockPrisma.teamStaff.findMany)).toBeLessThan(order(mockPrisma.team.delete));
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId, coach.id);
+      expect(order(invalidateUsage)).toBeGreaterThan(order(mockPrisma.$transaction));
+    });
+
+    it('invalidates nobody when the delete is refused', async () => {
+      const { team } = createFullTeam();
+      const assistant = createCoach();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(assistant);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(TeamService.deleteTeam(team.id, assistant.id)).rejects.toBeDefined();
+      expect(invalidateUsage).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
@@ -1330,6 +1399,39 @@ describe('TeamService', () => {
       } catch (error) {
         expectBadRequestError(error, 'Player is already on this team');
       }
+    });
+
+    describe('when the roster insert itself fails (#727)', () => {
+      function setAddPlayerPath(): { teamId: string; playerId: string; coachId: string } {
+        const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+        const player = createPlayer();
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(coach)
+          .mockResolvedValueOnce(player);
+        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+        return { teamId: team.id, playerId: player.id, coachId: coach.id };
+      }
+
+      it('answers the already-on-team 400 when a concurrent add wins the unique index (P2002)', async () => {
+        const { teamId, playerId, coachId } = setAddPlayerPath();
+        (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(
+          uniqueViolation('TeamMember_teamId_playerId_key')
+        );
+
+        const error = await TeamService.addPlayer(teamId, { playerId }, coachId).catch((e) => e);
+
+        expectBadRequestError(error, 'Player is already on this team');
+      });
+
+      it('propagates a failure that is not P2002', async () => {
+        const { teamId, playerId, coachId } = setAddPlayerPath();
+        const boom = new Error('connection reset');
+        (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(boom);
+
+        await expect(TeamService.addPlayer(teamId, { playerId }, coachId)).rejects.toBe(boom);
+      });
     });
   });
 
@@ -1821,6 +1923,48 @@ describe('TeamService', () => {
       expectBadRequestError(error, 'User is already a staff member of this team');
       expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
     });
+
+    describe('when the staff insert itself fails (#727)', () => {
+      function setAddStaffPath(): { teamId: string; targetId: string; adminId: string } {
+        const { team } = createFullTeam();
+        const admin = createAdmin();
+        const targetUser = createCoach();
+        const role = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        mockAdminRequester(admin);
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation(({ where }) => {
+          if (where.id === admin.id) return Promise.resolve(admin);
+          if (where.id === targetUser.id) return Promise.resolve({ id: targetUser.id, name: targetUser.name });
+          return Promise.resolve(null);
+        });
+        (mockPrisma.teamRole.findFirst as jest.Mock).mockResolvedValue(role);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+        return { teamId: team.id, targetId: targetUser.id, adminId: admin.id };
+      }
+
+      it('answers the already-staff 400 when a concurrent add wins the unique index (P2002)', async () => {
+        const { teamId, targetId, adminId } = setAddStaffPath();
+        (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(
+          uniqueViolation('TeamStaff_teamId_userId_roleId_key')
+        );
+
+        const error = await TeamService
+          .addStaffMember(teamId, { userId: targetId, roleType: 'HEAD_COACH' }, adminId)
+          .catch((e) => e);
+
+        expectBadRequestError(error, 'User is already a staff member of this team');
+      });
+
+      it('propagates a failure that is not P2002', async () => {
+        const { teamId, targetId, adminId } = setAddStaffPath();
+        const boom = new Error('connection reset');
+        (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(boom);
+
+        await expect(
+          TeamService.addStaffMember(teamId, { userId: targetId, roleType: 'HEAD_COACH' }, adminId)
+        ).rejects.toBe(boom);
+      });
+    });
   });
 
   describe('changeStaffRole', () => {
@@ -2103,6 +2247,33 @@ describe('TeamService', () => {
       expectBadRequestError(error, 'A role with this name already exists');
       expect(mockPrisma.teamRole.create).not.toHaveBeenCalled();
     });
+
+    it('answers the duplicate-name 400 when a concurrent create wins the unique index (P2002, #727)', async () => {
+      const { team } = createFullTeam();
+      const admin = createAdmin();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(uniqueViolation('TeamRole_teamId_name_key'));
+
+      const error = await TeamService.createCustomRole(team.id, { name: 'Scorekeeper' }, admin.id).catch((e) => e);
+
+      expectBadRequestError(error, 'A role with this name already exists');
+    });
+
+    it('propagates a role create failure that is not P2002', async () => {
+      const { team } = createFullTeam();
+      const admin = createAdmin();
+      const boom = new Error('connection reset');
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamRole.create as jest.Mock).mockRejectedValue(boom);
+
+      await expect(TeamService.createCustomRole(team.id, { name: 'Scorekeeper' }, admin.id)).rejects.toBe(boom);
+    });
   });
 
   describe('getTeamRoles', () => {
@@ -2296,13 +2467,7 @@ describe('TeamService', () => {
         (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });
         (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue(null);
-        (mockPrisma.team.update as jest.Mock).mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-            code: 'P2002',
-            clientVersion: 'test',
-            meta: { target: ['lineageId', 'seasonId'] },
-          })
-        );
+        (mockPrisma.team.update as jest.Mock).mockRejectedValue(uniqueViolation('Team_lineageId_seasonId_key'));
 
         const error = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id).catch((e) => e);
 

@@ -6,7 +6,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
 - **Anonymize in place; erase outright only when nothing references the row.**
   `AccountService.deleteAccount(userId, { actorId, mode })` (`services/account-service.ts`) runs
-  ONE `$transaction`: `SELECT … FOR UPDATE` on the user row → last-head-coach check → purge rows
+  ONE `$transaction`: `SELECT … FOR UPDATE` on the user row and every child it guards, in one
+  id-ordered statement (#664, the guardian primacy lock; `docs/architecture/guardians.md`) → last-head-coach check → purge rows
   that only serve the person → scrub personal data elsewhere → **count what still points at the
   row** → tombstone it (`workosUserId`/`email`/`profilePictureUrl` null, `name =
   DELETED_USER_NAME`, `deletedAt = now()`), or `delete` it when the count is zero (#529). The
@@ -41,17 +42,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   too; one `update` with `where: { id, deletedAt: null }`, P2025 is 404), `DELETE /players/:id`
   (tombstone 404 and a `delete` with the same guarded `where`; before, it hard-deleted the tombstone
   and the `onDelete: Cascade` relations such as `AnnouncementReply.author` silently took the retained
-  rows with it), guardian accept (`FOR NO KEY UPDATE` probe on the parent, a write lock because the
+  rows with it), guardian accept (`FOR NO KEY UPDATE` on the parent, taken with the child in one sorted
+  statement by `utils/user-row-lock.ts#lockUsers`, a write lock because the
   same transaction may promote the row to `PARENT`; a share lock deadlocked two concurrent accepts by
   one parent) and Add Player case 2 (the reuse `updateMany` and photo fill carry `deletedAt: null`;
   zero rows on a tombstone is 404, on a claimed row the case-3 re-branch) plus
   `stripUnclaimedEmail`. A request that authenticated a moment before the deletion
   committed must not re-identify the tombstone. Keep that invariant on any new write path:
   `tests/utils/user-write-guard.test.ts` fails on any `user.update(`, `user.updateMany(`,
-  `user.delete(`, `user.deleteMany(` or `user.upsert(` in `src/` whose `where` is not an object
-  literal naming `deletedAt`. Only `account-service.ts` is allowlisted: it writes the tombstone,
-  scrubs `managedById`, and hard-deletes an account nothing references, under its own `FOR UPDATE`
-  lock. Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
+  `user.delete(`, `user.deleteMany(` or `user.upsert(` in `backend/src/` or `backend/scripts/`
+  (`.ts`, `.js`, `.mjs`) whose `where` is not an object literal naming `deletedAt`. Only `account-service.ts` is
+  allowlisted: it writes the tombstone, scrubs `managedById`, and hard-deletes an account nothing
+  references, under its own `FOR UPDATE` lock. No script is allowlisted: the operator CLI deletes
+  through `AccountService.deleteAccount` and the lookup only reads; a script that ever needs a raw
+  hard delete gets its own allowlist entry with a one-line reason. Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.

@@ -395,6 +395,22 @@ describe('Invitations API', () => {
       expect(mockInvitationService.rejectInvitation).not.toHaveBeenCalled();
     });
 
+    it('answers 400 when a guardian invitation was accepted concurrently (lost reject race, #726)', async () => {
+      const guardianInvitationId = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+      mockGuardianService.findInvitationForUser.mockResolvedValue({
+        id: guardianInvitationId,
+      } as unknown as Awaited<ReturnType<typeof mockGuardianService.findInvitationForUser>>);
+      mockGuardianService.rejectInvitation.mockRejectedValue(
+        new BadRequestError('Cannot reject invitation: it is no longer pending')
+      );
+
+      const response = await request(app).post(`/api/v1/invitations/${guardianInvitationId}/reject`);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('Cannot reject invitation: it is no longer pending');
+      expect(mockInvitationService.rejectInvitation).not.toHaveBeenCalled();
+    });
+
     it('should reject an invitation successfully', async () => {
       const rejectedInvitation = { ...mockInvitation, status: 'REJECTED' };
       mockInvitationService.rejectInvitation.mockResolvedValue(rejectedInvitation as unknown as Awaited<ReturnType<typeof mockInvitationService.rejectInvitation>>);

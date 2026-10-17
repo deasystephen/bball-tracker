@@ -75,7 +75,7 @@ export function gameRoom(gameId: string): string {
  * Resolve a bearer-style token to a local user. Mirrors the logic in
  * `src/api/auth/middleware.ts` but returns a plain value instead of mutating
  * an Express request. Returns `null` when the token is invalid/expired or the
- * user does not exist.
+ * user does not exist or is a tombstone (`deletedAt` set).
  */
 export async function resolveSocketUser(
   rawToken: string | undefined
@@ -98,8 +98,10 @@ export async function resolveSocketUser(
         return null;
       }
 
+      // Dev tokens resolve by id, so a deleted account (#444) must be refused
+      // explicitly, as the REST middleware does (#667).
       const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+        where: { id: decoded.userId, deletedAt: null },
         select: { id: true, email: true, name: true, role: true },
       });
       return user ?? null;
@@ -113,8 +115,9 @@ export async function resolveSocketUser(
     return null;
   }
 
+  // Deletion nulls workosUserId, but `deletedAt` is the tombstone signal (#667).
   const user = await prisma.user.findUnique({
-    where: { workosUserId: workosUser.id },
+    where: { workosUserId: workosUser.id, deletedAt: null },
     select: { id: true, email: true, name: true, role: true },
   });
   return user ?? null;

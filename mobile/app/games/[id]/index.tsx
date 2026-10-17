@@ -30,6 +30,7 @@ import { useAuthStore } from '../../../store/auth-store';
 import { guardianChildrenOnTeam, isRosteredOn } from '../../../utils/guardian';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
+import { formatClockTime, formatLongDate } from '../../../utils/format-date';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
@@ -67,24 +68,6 @@ const getStatusLabel = (status: GameStatus): string => {
     default:
       return status;
   }
-};
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
-};
-
-const formatTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 };
 
 export default function GameDetailScreen() {
@@ -325,7 +308,7 @@ export default function GameDetailScreen() {
               <ThemedText variant="caption" color="textSecondary">
                 Date
               </ThemedText>
-              <ThemedText variant="body">{formatDate(game.date)}</ThemedText>
+              <ThemedText variant="body">{formatLongDate(game.date)}</ThemedText>
             </View>
           </View>
 
@@ -337,7 +320,7 @@ export default function GameDetailScreen() {
               <ThemedText variant="caption" color="textSecondary">
                 Time
               </ThemedText>
-              <ThemedText variant="body">{formatTime(game.date)}</ThemedText>
+              <ThemedText variant="body">{formatClockTime(game.date)}</ThemedText>
             </View>
           </View>
 

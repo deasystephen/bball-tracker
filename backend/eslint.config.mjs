@@ -40,7 +40,17 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
-      'no-console': ['error', { allow: ['warn', 'error', 'log'] }],
+      // Code logs through `utils/logger.ts` (one JSON object per line, gated by
+      // LOG_LEVEL, with requestId/userId); a bare console call bypasses all of it.
+      'no-console': 'error',
+    },
+  },
+
+  // The one place console is reached directly (docs/architecture/backend-services.md#logging).
+  {
+    files: ['src/utils/logger.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 

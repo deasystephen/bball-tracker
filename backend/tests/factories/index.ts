@@ -3,7 +3,7 @@
  * Provides consistent, typed test data for all entities
  */
 
-import { UserRole, GameStatus, InvitationStatus, GameEventType, TeamRoleType } from '@prisma/client';
+import { Prisma, UserRole, GameStatus, InvitationStatus, GameEventType, TeamRoleType } from '@prisma/client';
 
 // Counter for generating unique IDs
 let idCounter = 0;
@@ -670,4 +670,27 @@ export function createTeamStats(options: CreateTeamStatsOptions = {}): TeamStats
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/**
+ * A unique-constraint violation (P2002) as Prisma 7 with the pg driver adapter
+ * throws it: no `meta.target`, the index name at
+ * `meta.driverAdapterError.cause.constraint.index` (verified against Postgres,
+ * 2026-10-17). Pass the index name a service's `createOrConflict` targets;
+ * omit it for a violation that names no constraint.
+ */
+export function uniqueViolation(target?: string): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'test',
+    meta:
+      target === undefined
+        ? undefined
+        : {
+            driverAdapterError: {
+              name: 'DriverAdapterError',
+              cause: { kind: 'UniqueConstraintViolation', constraint: { index: target } },
+            },
+          },
+  });
 }
