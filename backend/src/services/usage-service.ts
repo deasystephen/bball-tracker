@@ -144,11 +144,13 @@ export async function getUsage(userId: string): Promise<Usage> {
 }
 
 /**
- * Invalidate a user's cached usage counts. Call after any write that changes a
- * metered count (e.g. team create/delete) so the next read recomputes.
+ * Invalidate the cached usage counts of every given user, in one Redis call.
+ * Call after any write that changes a metered count (team create/delete, staff
+ * add/remove, season move) with every user whose counts changed, not only the
+ * caller (#658). Best-effort: a failed delete converges within the TTL.
  */
-export async function invalidateUsage(userId: string): Promise<void> {
-  await cacheDelete(usageCacheKey(userId));
+export async function invalidateUsage(...userIds: string[]): Promise<void> {
+  await cacheDelete(...new Set(userIds.map(usageCacheKey)));
 }
 
 /**

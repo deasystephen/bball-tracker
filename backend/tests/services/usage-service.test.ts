@@ -230,6 +230,13 @@ describe('usage-service', () => {
 
       expect(mockCacheDelete).toHaveBeenCalledWith(`usage:counts:${USER_ID}`);
     });
+
+    it('deletes every given user key in one call, each once (#658)', async () => {
+      await invalidateUsage('user-a', 'user-b', 'user-a');
+
+      expect(mockCacheDelete).toHaveBeenCalledTimes(1);
+      expect(mockCacheDelete).toHaveBeenCalledWith('usage:counts:user-a', 'usage:counts:user-b');
+    });
   });
 
   describe('canCreateTeam', () => {

@@ -9,6 +9,7 @@ import {
   redactQueryObject,
   redactQueryString,
   redactUrl,
+  redactUrlsInText,
 } from '../../src/utils/redact';
 
 describe('isSensitiveQueryKey', () => {
@@ -98,5 +99,14 @@ describe('redactUrl', () => {
       'https://api.example.test/api/v1/games?page=1'
     );
     expect(redactUrl('')).toBe('');
+  });
+});
+
+describe('redactUrlsInText', () => {
+  it('redacts URLs inside free text and leaves the rest alone', () => {
+    expect(
+      redactUrlsInText('GET https://api.hooplings.com/api/v1/invitations/by-token/abcdefghijk?x=1&token=s3cret failed')
+    ).toBe('GET https://api.hooplings.com/api/v1/invitations/by-token/[redacted]?x=1&token=[redacted] failed');
+    expect(redactUrlsInText('plain message, no url')).toBe('plain message, no url');
   });
 });

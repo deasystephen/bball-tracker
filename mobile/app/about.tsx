@@ -31,6 +31,7 @@ import { SUPPORT_EMAIL } from '../config/env';
 import { useToast } from '../components/Toast';
 import { BackButton } from '../components/BackButton';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { formatDateTime } from '../utils/format-date';
 
 export const APP_NAME = 'Hooplings';
 
@@ -133,7 +134,7 @@ export default function AboutScreen() {
       label: 'Update',
       value: info.isEmbedded
         ? 'Embedded build (no OTA applied)'
-        : `${info.updateId}\nPublished ${info.updatePublishedAt?.toLocaleString() ?? 'unknown'}`,
+        : `${info.updateId}\nPublished ${info.updatePublishedAt ? formatDateTime(info.updatePublishedAt) : 'unknown'}`,
     },
     { icon: 'git-branch', label: 'Channel', value: info.channel ?? 'none (development)' },
   ];

@@ -2,6 +2,14 @@
  * Unit tests for TeamService
  */
 
+// Only the usage-cache side effect is observed (#658); the rest of the module
+// stays real.
+jest.mock('../../src/services/usage-service', () => ({
+  ...jest.requireActual('../../src/services/usage-service'),
+  invalidateUsage: jest.fn().mockResolvedValue(undefined),
+}));
+
+import { invalidateUsage } from '../../src/services/usage-service';
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
 import { Prisma } from '@prisma/client';
@@ -971,6 +979,8 @@ describe('TeamService', () => {
       const result = await TeamService.updateTeam(team.id, { name: newName }, coach.id);
 
       expect(result).toHaveProperty('name', newName);
+      // A rename changes no metered count (#658).
+      expect(invalidateUsage).not.toHaveBeenCalled();
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
@@ -1070,17 +1080,30 @@ describe('TeamService', () => {
         leagueId: otherLeague.id,
         userId: coach.id,
       });
+      const assistantId = 'staff-assistant';
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         seasonId: otherSeason.id,
         season: { ...season, league },
-        staff: [],
+        // The coach holds two roles on the team.
+        staff: [
+          { ...coachStaff, userId: coach.id },
+          { ...coachStaff, id: 'staff-row-2', userId: coach.id },
+          { ...coachStaff, id: 'staff-row-3', userId: assistantId },
+        ],
         members: [],
       });
 
       const result = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id);
 
       expect(result.seasonId).toBe(otherSeason.id);
+      // A season move changes every staff member's `seasons` metric (#658):
+      // one invalidation covering each staff row's user, after the write.
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId);
+      expect((invalidateUsage as jest.Mock).mock.invocationCallOrder[0]).toBeGreaterThan(
+        (mockPrisma.team.update as jest.Mock).mock.invocationCallOrder[0]
+      );
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ seasonId: otherSeason.id }) })
       );
@@ -1145,6 +1168,8 @@ describe('TeamService', () => {
 
       expect(mockPrisma.season.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.leagueAdmin.findUnique).not.toHaveBeenCalled();
+      // Re-sending the current season is not a move: no usage change (#658).
+      expect(invalidateUsage).not.toHaveBeenCalled();
     });
   });
 
@@ -1193,10 +1218,54 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
 
       await expect(TeamService.deleteTeam(team.id, admin.id)).resolves.toEqual({ success: true });
       expect(mockPrisma.teamStaff.findFirst).not.toHaveBeenCalled();
+      // A non-staff admin is still invalidated (harmless).
+      expect(invalidateUsage).toHaveBeenCalledWith(admin.id);
+    });
+
+    it('invalidates every staff member plus the caller, from rows read before the cascade (#658)', async () => {
+      const { team, coach, coachStaff } = createFullTeam();
+      const assistantId = 'staff-assistant';
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      // The coach holds two roles on the team (head + assistant).
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { userId: coach.id },
+        { userId: assistantId },
+        { userId: coach.id },
+      ]);
+      (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
+
+      await expect(TeamService.deleteTeam(team.id, coach.id)).resolves.toEqual({ success: true });
+
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
+        where: { teamId: team.id },
+        select: { userId: true },
+      });
+      const order = (m: unknown): number => (m as jest.Mock).mock.invocationCallOrder[0];
+      expect(order(mockPrisma.teamStaff.findMany)).toBeLessThan(order(mockPrisma.team.delete));
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId, coach.id);
+      expect(order(invalidateUsage)).toBeGreaterThan(order(mockPrisma.$transaction));
+    });
+
+    it('invalidates nobody when the delete is refused', async () => {
+      const { team } = createFullTeam();
+      const assistant = createCoach();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(assistant);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(TeamService.deleteTeam(team.id, assistant.id)).rejects.toBeDefined();
+      expect(invalidateUsage).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundError if team does not exist', async () => {

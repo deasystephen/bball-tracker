@@ -158,3 +158,75 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+
+  # ----------------------------------------------------------------------
+  # Terraform providers (infra/) — human-reviewed, never auto-merged (#786)
+  # ----------------------------------------------------------------------
+  # Bumps move infra/.terraform.lock.hcl (committed for this reason). CI runs
+  # fmt/init/validate (so a bumped lock is installable and validated) but never
+  # plan or apply, so the reviewer runs `terraform init` and `terraform plan`
+  # from infra/ with production credentials and merges only on "No changes."
+  # A lock-only merge does not deploy (the ci.yml deploy filter excludes it);
+  # if the merge carries anything else under infra/, check for IN_PROGRESS games
+  # first (docs/automation/daily-upgrade-scan.md, "Division of labour").
+  - package-ecosystem: "terraform"
+    directory: "/infra"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 2
+    labels:
+      - "infra"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    ignore:
+      # The 5.x → 6.x provider migration has breaking changes and needs a
+      # human plan against live state: https://github.com/deasystephen/bball-tracker/issues/866
+      - dependency-name: "hashicorp/aws"
+        update-types: ["version-update:semver-major"]
+
+  # ----------------------------------------------------------------------
+  # Docker base images — human-reviewed, never auto-merged (#786)
+  # ----------------------------------------------------------------------
+  # docker/Dockerfile uses the floating `node:22-alpine`, so new 22.x digests
+  # already reach production on every deploy; this surfaces the major line
+  # (22 → 24). Moving it also moves .nvmrc and engines.node
+  # (backend/tests/infra/node-version.test.ts).
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 2
+    labels:
+      - "infra"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # docker-compose.yml (local dev Postgres + Redis). Dependabot reads compose
+  # files only through the separate `docker-compose` ecosystem; `docker` scans
+  # Dockerfiles. The Postgres major is pinned in three places
+  # (backend/tests/infra/postgres-version.test.ts), so a postgres major PR here
+  # goes red until rds.tf and ci.yml move with it.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 2
+    labels:
+      - "infra"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"

@@ -36,6 +36,7 @@ import { getApiErrorMessage } from '../../../services/api-client';
 import { useTranslation } from '../../../i18n';
 import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
+import { formatNumericDate } from '../../../utils/format-date';
 
 const DELETE_ICON_SIZE = 22;
 const ADD_ICON_SIZE = 20;
@@ -120,7 +121,7 @@ export default function LeagueDetailScreen() {
   const renderSeason = ({ item }: { item: Season }) => {
     const teamCount = item._count?.teams || item.teams?.length || 0;
     const dateRange = item.startDate || item.endDate
-      ? `${item.startDate ? new Date(item.startDate).toLocaleDateString() : 'No start'} - ${item.endDate ? new Date(item.endDate).toLocaleDateString() : 'No end'}`
+      ? `${item.startDate ? formatNumericDate(item.startDate) : 'No start'} - ${item.endDate ? formatNumericDate(item.endDate) : 'No end'}`
       : null;
 
     return (

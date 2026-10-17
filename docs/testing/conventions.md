@@ -97,6 +97,15 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   leftover link to it fails CI, and the stripping logic is covered by a synthetic entry in the
   self-test. Scope is mobile only — `backend/tests/services/mailer.test.ts` runs the same retired
   patterns over every rendered email template.
+- **Every key in `en.json` exists in `es.json` with the same placeholders (#732).** A device set to
+  Spanish renders `es.json` and silently falls back to English for a missing key, which is how 17
+  keys (`roleOnboarding.*`, `teams.playerEmptyMessage`, `teams.playerEmptyAction`,
+  `teams.createNotAllowed`) shipped English-only on Spanish devices. `__tests__/i18n/locale-parity.test.ts`
+  flattens every file in `i18n/locales/` to dot-joined leaf keys and fails CI on a key missing from or
+  extra in a locale, a leaf that is not a string, or a shared key whose sorted `{{placeholder}}`
+  names differ from `en.json` (i18next format syntax counts by name: `{{count, number}}` is
+  `count`), naming each offender. Add a new key to both files in the same change; a new locale file is
+  picked up automatically.
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)
 - They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,

@@ -1,5 +1,12 @@
+// Spy on Sentry capture while keeping the rest of the util real.
+jest.mock('../src/utils/sentry', () => ({
+  ...jest.requireActual('../src/utils/sentry'),
+  captureException: jest.fn(),
+}));
+
 import request from 'supertest';
 import { app, httpServer } from '../src/index';
+import { captureException } from '../src/utils/sentry';
 import { mockPrisma } from './setup';
 
 describe('Health Check', () => {
@@ -23,6 +30,23 @@ describe('Health Check', () => {
     expect(response.status).toBe(503);
     expect(response.body.status).toBe('degraded');
     expect(response.body.db).toBe('down');
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), { flow: 'health-check', db: 'down' });
+  });
+
+  // #751: pg's connectionTimeoutMillis fired; the pool is saturated or RDS is
+  // not answering TCP. Still 503, but the body names the cause.
+  it.each([
+    'timeout exceeded when trying to connect',
+    'Connection terminated due to connection timeout',
+  ])('returns 503 with db "timeout" when the ping fails with "%s"', async (message) => {
+    (mockPrisma.$queryRaw as jest.Mock).mockRejectedValueOnce(new Error(message));
+
+    const response = await request(app).get('/health');
+    expect(response.status).toBe(503);
+    expect(response.body.status).toBe('degraded');
+    expect(response.body.db).toBe('timeout');
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), { flow: 'health-check', db: 'timeout' });
   });
 
   // #570: "what is in production" is one request, with no AWS access.
