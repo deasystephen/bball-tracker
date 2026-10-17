@@ -50,7 +50,9 @@ jest.mock('expo-linking', () => ({
 
 // Mock expo-localization
 jest.mock('expo-localization', () => ({
-  getLocales: () => [{ languageCode: 'en', countryCode: 'US' }],
+  // `languageTag` pins utils/format-date.ts, so date strings do not depend on
+  // the developer machine's ICU default.
+  getLocales: () => [{ languageTag: 'en-US', languageCode: 'en', countryCode: 'US' }],
   locale: 'en-US',
   timezone: 'America/New_York',
 }));
@@ -228,11 +230,15 @@ global.mockSecureStore = (() => {
     __reset: () => store.clear(),
   };
 })();
+// utils/format-date.ts probes ExpoLocalization the same way; it gets the
+// expo-localization mock above, so the two never disagree.
 jest.mock('expo', () => ({
   ...jest.requireActual('expo'),
-  requireOptionalNativeModule: jest.fn((name) =>
-    name === 'ExpoSecureStore' ? global.mockSecureStore : null
-  ),
+  requireOptionalNativeModule: jest.fn((name) => {
+    if (name === 'ExpoSecureStore') return global.mockSecureStore;
+    if (name === 'ExpoLocalization') return jest.requireMock('expo-localization');
+    return null;
+  }),
 }));
 
 // Mock expo-splash-screen

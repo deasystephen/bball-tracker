@@ -35,6 +35,7 @@ import { useAuthUser } from '../../store/auth-store';
 import { spacing } from '../../theme';
 import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
+import { formatClockTime, formatLongDate } from '../../utils/format-date';
 import { BackButton } from '../../components/BackButton';
 
 export default function CreateGameScreen() {
@@ -114,22 +115,6 @@ export default function CreateGameScreen() {
     // would otherwise sit on top of the sheet.
     Keyboard.dismiss();
     setPicker(mode);
-  };
-
-  const formatDate = (d: Date): string => {
-    return d.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const formatTime = (d: Date): string => {
-    return d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
   };
 
   if (teamsLoading || !allowed) {
@@ -289,7 +274,7 @@ export default function CreateGameScreen() {
               ]}
               onPress={() => openPicker('date')}
               accessibilityRole="button"
-              accessibilityLabel={`Game date: ${formatDate(date)}`}
+              accessibilityLabel={`Game date: ${formatLongDate(date)}`}
               testID="game-date-button"
             >
               <Ionicons
@@ -297,7 +282,7 @@ export default function CreateGameScreen() {
                 size={20}
                 color={colors.primary}
               />
-              <ThemedText variant="body">{formatDate(date)}</ThemedText>
+              <ThemedText variant="body">{formatLongDate(date)}</ThemedText>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -310,11 +295,11 @@ export default function CreateGameScreen() {
               ]}
               onPress={() => openPicker('time')}
               accessibilityRole="button"
-              accessibilityLabel={`Game time: ${formatTime(date)}`}
+              accessibilityLabel={`Game time: ${formatClockTime(date)}`}
               testID="game-time-button"
             >
               <Ionicons name="time" size={20} color={colors.primary} />
-              <ThemedText variant="body">{formatTime(date)}</ThemedText>
+              <ThemedText variant="body">{formatClockTime(date)}</ThemedText>
             </TouchableOpacity>
           </Card>
 

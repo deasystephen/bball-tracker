@@ -60,6 +60,14 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/relative-time.ts#formatRelativeTime`, never an inline helper. Tests:
   `__tests__/app/announcement-thread.test.tsx`, `__tests__/hooks/useAnnouncementReplies.runtime.test.tsx`,
   `__tests__/app/profile-reply-notifications.test.tsx`; Maestro `.maestro/announcement-reply.yaml`.
+- **Dates and times** (#769): game dates, game times, event times and season dates go through
+  `utils/format-date.ts` (`formatShortDate`, `formatLongDate`, `formatSeasonDate`, `formatClockTime`).
+  The locale is the device's full tag (`es-ES`, `en-GB`), read once from the `ExpoLocalization`
+  native module through `requireOptionalNativeModule` and `undefined` (runtime default) when it is
+  missing; i18next's bare `en` would give an `en-GB` device a 12-hour clock. Never pass a literal
+  locale to `toLocale*String` or `Intl.DateTimeFormat`: `__tests__/utils/date-locale-guard.test.ts`
+  fails CI on it. `jest.setup.js` pins the tag to `en-US`; `__tests__/utils/format-date.test.ts`
+  proves `en-US`, `en-GB` and `es-ES` render differently.
 - Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
   `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
 - `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`
