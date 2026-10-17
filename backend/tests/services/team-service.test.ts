@@ -968,9 +968,11 @@ describe('TeamService', () => {
         members: [],
       });
 
-      const result = await TeamService.updateTeam(team.id, { name: newName }, coach.id);
+      const { team: result, affectedUserIds } = await TeamService.updateTeam(team.id, { name: newName }, coach.id);
 
       expect(result).toHaveProperty('name', newName);
+      // A rename changes no metered count (#658).
+      expect(affectedUserIds).toEqual([]);
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
@@ -1070,17 +1072,29 @@ describe('TeamService', () => {
         leagueId: otherLeague.id,
         userId: coach.id,
       });
+      const assistantId = 'staff-assistant';
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         seasonId: otherSeason.id,
         season: { ...season, league },
-        staff: [],
+        // The coach holds two roles on the team: counted once (#658).
+        staff: [
+          { ...coachStaff, userId: coach.id },
+          { ...coachStaff, id: 'staff-row-2', userId: coach.id },
+          { ...coachStaff, id: 'staff-row-3', userId: assistantId },
+        ],
         members: [],
       });
 
-      const result = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id);
+      const { team: result, affectedUserIds } = await TeamService.updateTeam(
+        team.id,
+        { seasonId: otherSeason.id },
+        coach.id
+      );
 
       expect(result.seasonId).toBe(otherSeason.id);
+      // A season move changes every staff member's `seasons` metric (#658).
+      expect(affectedUserIds).toEqual([coach.id, assistantId]);
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ seasonId: otherSeason.id }) })
       );
@@ -1119,7 +1133,7 @@ describe('TeamService', () => {
         ...team, name: 'Renamed', season: { ...season, league }, staff: [], members: [],
       });
 
-      const result = await TeamService.updateTeam(team.id, { name: 'Renamed' }, assistant.id);
+      const { team: result } = await TeamService.updateTeam(team.id, { name: 'Renamed' }, assistant.id);
 
       expect(result.name).toBe('Renamed');
       expect(mockPrisma.teamStaff.findFirst).not.toHaveBeenCalled();
@@ -1141,10 +1155,12 @@ describe('TeamService', () => {
         members: [],
       });
 
-      await TeamService.updateTeam(team.id, { seasonId: team.seasonId }, coach.id);
+      const { affectedUserIds } = await TeamService.updateTeam(team.id, { seasonId: team.seasonId }, coach.id);
 
       expect(mockPrisma.season.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.leagueAdmin.findUnique).not.toHaveBeenCalled();
+      // Re-sending the current season is not a move: no usage change (#658).
+      expect(affectedUserIds).toEqual([]);
     });
   });
 
@@ -1156,11 +1172,12 @@ describe('TeamService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ userId: coach.id }]);
       (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
 
       const result = await TeamService.deleteTeam(team.id, coach.id);
 
-      expect(result).toEqual({ success: true });
+      expect(result).toEqual({ success: true, affectedUserIds: [coach.id] });
       expect(mockPrisma.team.delete).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: team.id },
@@ -1193,10 +1210,42 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
 
-      await expect(TeamService.deleteTeam(team.id, admin.id)).resolves.toEqual({ success: true });
+      await expect(TeamService.deleteTeam(team.id, admin.id)).resolves.toEqual({
+        success: true,
+        affectedUserIds: [],
+      });
       expect(mockPrisma.teamStaff.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('returns the distinct staff user ids, read before the cascade delete (#658)', async () => {
+      const { team, coach, coachStaff } = createFullTeam();
+      const assistantId = 'staff-assistant';
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      // The coach holds two roles on the team (head + assistant): counted once.
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { userId: coach.id },
+        { userId: assistantId },
+        { userId: coach.id },
+      ]);
+      (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
+
+      const result = await TeamService.deleteTeam(team.id, coach.id);
+
+      expect(result.affectedUserIds).toEqual([coach.id, assistantId]);
+      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
+        where: { teamId: team.id },
+        select: { userId: true },
+      });
+      const staffReadOrder = (mockPrisma.teamStaff.findMany as jest.Mock).mock.invocationCallOrder[0];
+      const deleteOrder = (mockPrisma.team.delete as jest.Mock).mock.invocationCallOrder[0];
+      expect(staffReadOrder).toBeLessThan(deleteOrder);
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
@@ -2334,7 +2383,9 @@ describe('TeamService', () => {
         const { team, coach } = mockHeadCoachDelete();
         (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
 
-        await expect(TeamService.deleteTeam(team.id, coach.id)).resolves.toEqual({ success: true });
+        await expect(TeamService.deleteTeam(team.id, coach.id)).resolves.toEqual(
+          expect.objectContaining({ success: true })
+        );
 
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         expect(mockPrisma.team.delete).toHaveBeenCalledWith({ where: { id: team.id } });

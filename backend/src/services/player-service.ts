@@ -16,7 +16,12 @@ import {
   ConflictError,
 } from '../utils/errors';
 import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
-import { getPlayerTeamAccess, isGuardianOf, readableTeamsWhere } from '../utils/permissions';
+import {
+  getGuardianChildIds,
+  getPlayerTeamAccess,
+  isGuardianOf,
+  teamAccessWhere,
+} from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail } from '../utils/email-match';
 
@@ -96,13 +101,19 @@ export interface PlayerCaller {
 }
 
 /**
- * Prisma filter for "users rostered on at least one team `userId` may read".
- * The team clause is the shared `teamAccessWhere` (staff OR member OR league
- * admin OR guardian of a member), never a local copy: a two-branch copy here
- * left league admins and guardians with a 404 on the directory (#685).
+ * Prisma filter for the player directory: "users rostered on at least one team
+ * `userId` may read, or `userId`'s guardian children". The team clause is the
+ * shared `teamAccessWhere` (staff OR member OR league admin OR guardian of a
+ * member), never a local copy: a two-branch copy here left league admins and
+ * guardians with a 404 on the directory (#685). The child branch admits a
+ * guardian's child regardless of roster state, matching `updatePlayer` (#821).
  */
 async function sharesTeamWith(userId: string): Promise<Prisma.UserWhereInput> {
-  return { teamMembers: { some: { team: await readableTeamsWhere(userId) } } };
+  const childIds = await getGuardianChildIds(userId);
+  const sharesTeam: Prisma.UserWhereInput = {
+    teamMembers: { some: { team: teamAccessWhere(userId, childIds) } },
+  };
+  return childIds.length > 0 ? { OR: [sharesTeam, { id: { in: childIds } }] } : sharesTeam;
 }
 
 export interface PlayerList {
@@ -511,6 +522,11 @@ export class PlayerService {
     } catch (error) {
       throw PlayerService.mapWriteError(error);
     }
+
+    // Best-effort, after the delete and outside any transaction (#725): the row
+    // is gone, so its avatar object is unreferenced. No-op for WorkOS photo
+    // URLs and null; S3 failures are logged, never thrown.
+    await deletePreviousAvatar(player.profilePictureUrl, null);
 
     return { success: true };
   }

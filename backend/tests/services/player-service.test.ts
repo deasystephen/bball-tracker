@@ -7,6 +7,14 @@ jest.mock('../../src/services/upload-service', () => ({
   assertOwnUploadUrl: jest.fn(),
 }));
 
+// Only reached by the deletePlayer cases that run the real
+// `deletePreviousAvatar` (#725): the S3 client it would call.
+const mockS3Send = jest.fn();
+jest.mock('@aws-sdk/client-s3', () => ({
+  S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
+  DeleteObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ input })),
+}));
+
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
@@ -296,8 +304,16 @@ describe('PlayerService', () => {
       expect(result.id).toBe(child.id);
       expect(result.email).toBeNull();
       const where = (mockPrisma.user.findFirst as jest.Mock).mock.calls[0][0].where;
-      expect(where.teamMembers.some.team).toEqual(teamAccessWhere(parent.id, [child.id]));
-      expect(where.teamMembers.some.team.OR).toContainEqual({
+      // Team branch (the shared clause, guardian-of-a-member included) OR the
+      // child directly, so a team-less child is readable too (#821).
+      expect(where).toEqual({
+        id: child.id,
+        OR: [
+          { teamMembers: { some: { team: teamAccessWhere(parent.id, [child.id]) } } },
+          { id: { in: [child.id] } },
+        ],
+      });
+      expect(where.OR[0].teamMembers.some.team.OR).toContainEqual({
         members: { some: { playerId: { in: [child.id] } } },
       });
     });
@@ -440,7 +456,12 @@ describe('PlayerService', () => {
         {
           OR: [
             { id: parent.id },
-            { teamMembers: { some: { team: teamAccessWhere(parent.id, ['child-1']) } } },
+            {
+              OR: [
+                { teamMembers: { some: { team: teamAccessWhere(parent.id, ['child-1']) } } },
+                { id: { in: ['child-1'] } },
+              ],
+            },
           ],
         },
       ]);
@@ -1089,6 +1110,68 @@ describe('PlayerService', () => {
       expect(result).toEqual({ success: true });
       // Guarded like every User write (#643).
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: player.id, deletedAt: null } });
+    });
+
+    describe('avatar cleanup (#725)', () => {
+      const bucket = process.env.S3_AVATARS_BUCKET || 'bball-tracker-avatars-dev';
+      const bucketUrl = `https://${bucket}.s3.amazonaws.com/avatars/coach-1/0b9f6f1e-2c4e-4c51-9d0a-1f3c5e7a9b2d.jpg`;
+      const realUploadService = jest.requireActual<typeof import('../../src/services/upload-service')>(
+        '../../src/services/upload-service'
+      );
+
+      function mockDeletablePlayer(profilePictureUrl: string | null): ReturnType<typeof createPlayer> {
+        const player = { ...createPlayer(), profilePictureUrl };
+        (mockPrisma.user.findUnique as jest.Mock)
+          .mockResolvedValueOnce(adminUser)
+          .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+        return player;
+      }
+
+      it('deletes the avatar object after the row is deleted', async () => {
+        const player = mockDeletablePlayer(bucketUrl);
+        (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
+
+        await expect(PlayerService.deletePlayer(player.id, 'admin-id')).resolves.toEqual({ success: true });
+
+        expect(mockDeletePreviousAvatar).toHaveBeenCalledTimes(1);
+        expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(bucketUrl, null);
+        const deleteOrder = (mockPrisma.user.delete as jest.Mock).mock.invocationCallOrder[0];
+        expect(mockDeletePreviousAvatar.mock.invocationCallOrder[0]).toBeGreaterThan(deleteOrder);
+      });
+
+      it('does not call deletePreviousAvatar when the delete throws', async () => {
+        const player = mockDeletablePlayer(bucketUrl);
+        (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+
+        await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({ statusCode: 404 });
+
+        expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+      });
+
+      it('still answers { success: true } when the S3 delete fails', async () => {
+        mockDeletePreviousAvatar.mockImplementationOnce(realUploadService.deletePreviousAvatar);
+        mockS3Send.mockRejectedValueOnce(new Error('S3 unavailable'));
+        const player = mockDeletablePlayer(bucketUrl);
+        (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
+
+        await expect(PlayerService.deletePlayer(player.id, 'admin-id')).resolves.toEqual({ success: true });
+
+        expect(mockS3Send).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        ['a WorkOS photo URL', 'https://workoscdn.com/images/photo.jpg'],
+        ['no avatar', null],
+      ])('makes no S3 call for %s', async (_label, url) => {
+        mockDeletePreviousAvatar.mockImplementationOnce(realUploadService.deletePreviousAvatar);
+        const player = mockDeletablePlayer(url);
+        (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
+
+        await expect(PlayerService.deletePlayer(player.id, 'admin-id')).resolves.toEqual({ success: true });
+
+        expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(url, null);
+        expect(mockS3Send).not.toHaveBeenCalled();
+      });
     });
 
     it('treats a tombstone as not found, even for an admin (#643)', async () => {

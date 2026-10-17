@@ -16,6 +16,8 @@
  *            └─ team A2: a2Player
  *   League B ── team B1: b1Player; staff orgBStaff
  *   adminOnly is a league admin of A and on no team.
+ *   teamlessChild is on no team; its guardian teamlessGuardian is on no team
+ *   either, so only the guardian-child branch can admit it (#821).
  */
 
 jest.unmock('../../src/models');
@@ -66,6 +68,9 @@ beforeAll(async () => {
 
   await fx.staff(await caller('orgBStaff', 'COACH'), b1);
   await caller('outsider', 'PLAYER');
+
+  await caller('teamlessChild', 'PLAYER');
+  await fx.guardian(await caller('teamlessGuardian', 'PARENT'), users.teamlessChild);
 });
 
 afterAll(async () => {
@@ -105,6 +110,27 @@ describe('GET /players/:id scoping against a real database (#685)', () => {
     ['an unaffiliated caller', 'outsider', 'target'],
   ])('%s (%s) gets 404 for %s', async (_label, key, targetKey) => {
     await expect(PlayerService.getPlayerById(users[targetKey], as(key))).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('a guardian reads a team-less child (#821)', () => {
+  it('the guardian gets 200, without email', async () => {
+    const child = await PlayerService.getPlayerById(users.teamlessChild, as('teamlessGuardian'));
+    expect(child.id).toBe(users.teamlessChild);
+    expect(child.email).toBeNull();
+  });
+
+  it.each([
+    ['an unaffiliated caller', 'outsider'],
+    ["another child's guardian", 'guardianOnly'],
+    ['league admin of A', 'adminOnly'],
+  ])('%s gets 404', async (_label, key) => {
+    await expect(PlayerService.getPlayerById(users.teamlessChild, as(key))).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('the guardian lists the child; the child stays out of everyone else\'s directory', async () => {
+    expect(await listed('teamlessGuardian')).toEqual(ids('teamlessChild'));
+    expect(await listed('outsider')).toEqual(ids('outsider'));
   });
 });
 

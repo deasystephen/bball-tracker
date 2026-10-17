@@ -22,6 +22,7 @@ const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const TEST_LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
 const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+const TEST_ASSISTANT_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
 
 // Mutable mock auth user. Team creation runs through `requireTeamCreateLimit`,
 // which enforces a tier's team cap when it has one. No tier does in production
@@ -426,7 +427,7 @@ describe('Teams API', () => {
   describe('PATCH /api/v1/teams/:id', () => {
     it('should update a team successfully', async () => {
       const updatedTeam = { ...mockTeam, name: 'Updated Lakers' };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+      mockTeamService.updateTeam.mockResolvedValue({ team: updatedTeam, affectedUserIds: [] } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -435,6 +436,24 @@ describe('Teams API', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.team.name).toBe('Updated Lakers');
+      expect(response.body.affectedUserIds).toBeUndefined();
+      // A name-only edit changes no metered count (#658).
+      expect(invalidateUsage).not.toHaveBeenCalled();
+    });
+
+    it('invalidates cached usage for every staff member on a season move (#658)', async () => {
+      mockTeamService.updateTeam.mockResolvedValue({
+        team: { ...mockTeam, seasonId: TEST_SEASON_ID },
+        affectedUserIds: [TEST_USER_ID, TEST_ASSISTANT_ID],
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
+        .send({ seasonId: TEST_SEASON_ID });
+
+      expect(response.status).toBe(200);
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(TEST_USER_ID, TEST_ASSISTANT_ID);
     });
 
     it('should return 400 for invalid update data', async () => {
@@ -485,7 +504,7 @@ describe('Teams API', () => {
 
     it('should update chatLink', async () => {
       const updatedTeam = { ...mockTeam, chatLink: 'https://t.me/team_chat' };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+      mockTeamService.updateTeam.mockResolvedValue({ team: updatedTeam, affectedUserIds: [] } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -501,7 +520,7 @@ describe('Teams API', () => {
 
     it('should clear chatLink with null', async () => {
       const updatedTeam = { ...mockTeam, chatLink: null };
-      mockTeamService.updateTeam.mockResolvedValue(updatedTeam as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+      mockTeamService.updateTeam.mockResolvedValue({ team: updatedTeam, affectedUserIds: [] } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -543,7 +562,7 @@ describe('Teams API', () => {
     });
 
     it('PATCH sets and clears the fields (null clears)', async () => {
-      mockTeamService.updateTeam.mockResolvedValue({ ...teamWithFields, ageGroup: null, gender: null } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
+      mockTeamService.updateTeam.mockResolvedValue({ team: { ...teamWithFields, ageGroup: null, gender: null }, affectedUserIds: [] } as unknown as Awaited<ReturnType<typeof mockTeamService.updateTeam>>);
 
       const response = await request(app)
         .patch(`/api/v1/teams/${TEST_TEAM_ID}`)
@@ -581,13 +600,36 @@ describe('Teams API', () => {
 
   describe('DELETE /api/v1/teams/:id', () => {
     it('should delete a team successfully', async () => {
-      mockTeamService.deleteTeam.mockResolvedValue({ success: true });
+      mockTeamService.deleteTeam.mockResolvedValue({ success: true, affectedUserIds: [TEST_USER_ID] });
 
       const response = await request(app).delete(`/api/v1/teams/${TEST_TEAM_ID}`);
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe('Team deleted successfully');
+      expect(response.body.affectedUserIds).toBeUndefined();
+    });
+
+    it('invalidates cached usage for every staff member plus the caller (#658)', async () => {
+      // An ADMIN or league admin may delete a team they are not staff on.
+      mockTeamService.deleteTeam.mockResolvedValue({
+        success: true,
+        affectedUserIds: [TEST_PLAYER_ID, TEST_ASSISTANT_ID],
+      });
+
+      const response = await request(app).delete(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+      expect(response.status).toBe(200);
+      expect(invalidateUsage).toHaveBeenCalledTimes(1);
+      expect(invalidateUsage).toHaveBeenCalledWith(TEST_USER_ID, TEST_PLAYER_ID, TEST_ASSISTANT_ID);
+    });
+
+    it('touches no usage cache when the delete is refused', async () => {
+      mockTeamService.deleteTeam.mockRejectedValue(new ForbiddenError('Not authorized'));
+
+      await request(app).delete(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+      expect(invalidateUsage).not.toHaveBeenCalled();
     });
 
     it('should return 404 for non-existent team', async () => {

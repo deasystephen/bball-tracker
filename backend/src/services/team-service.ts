@@ -257,6 +257,27 @@ export interface TeamList {
 }
 
 /**
+ * `updateTeam` result. `affectedUserIds` are the users whose cached usage
+ * counts the edit changed (the team's staff on a season move, else empty);
+ * the route invalidates them (#658).
+ */
+export interface UpdateTeamResult {
+  team: TeamWithRelations;
+  affectedUserIds: string[];
+}
+
+/** `deleteTeam` result: `affectedUserIds` are the deleted team's distinct staff (#658). */
+export interface DeleteTeamResult {
+  success: true;
+  affectedUserIds: string[];
+}
+
+/** Distinct user ids of staff rows; a user holding two roles on a team counts once. */
+function distinctUserIds(staffRows: ReadonlyArray<{ userId: string }>): string[] {
+  return [...new Set(staffRows.map((row) => row.userId))];
+}
+
+/**
  * Resolve (creating if needed) the caller's personal league and its
  * current-year season, for a team create that supplied no `seasonId` (#442).
  *
@@ -584,7 +605,7 @@ export class TeamService {
     teamId: string,
     data: UpdateTeamInput,
     userId: string
-  ): Promise<TeamWithRelations> {
+  ): Promise<UpdateTeamResult> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -674,7 +695,8 @@ export class TeamService {
       });
       // Season rollover (#461) is not built; moving a team-season row is the
       // only lineage-level change today and the one worth a line.
-      if (data.seasonId !== undefined && data.seasonId !== team.seasonId) {
+      const seasonMoved = data.seasonId !== undefined && data.seasonId !== team.seasonId;
+      if (seasonMoved) {
         logger.info('Team moved to season', {
           teamId,
           lineageId: team.lineageId,
@@ -683,7 +705,12 @@ export class TeamService {
           userId,
         });
       }
-      return updated;
+      // A season move changes the `seasons` usage metric of every staff member
+      // (#658); any other edit changes no metered count.
+      return {
+        team: updated,
+        affectedUserIds: seasonMoved ? distinctUserIds(updated.staff) : [],
+      };
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestError(SEASON_SIBLING_MESSAGE);
@@ -698,7 +725,7 @@ export class TeamService {
    * @param userId User ID (must be a head coach, league admin or system admin —
    *   assistant coaches share canManageTeam but cannot delete; role matrix B2.3)
    */
-  static async deleteTeam(teamId: string, userId: string): Promise<{ success: true }> {
+  static async deleteTeam(teamId: string, userId: string): Promise<DeleteTeamResult> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -718,7 +745,14 @@ export class TeamService {
     // its lineage if this was the last team-season on it. Season/League
     // cascades bypass this path and leave harmless orphan lineages; this is
     // the only cleanup (#462).
-    const lineageDeleted = await prisma.$transaction(async (tx) => {
+    // The staff rows go with the team, so every staff member's usage counts
+    // change (#658): read them inside the transaction, before the cascade.
+    const { lineageDeleted, staffUserIds } = await prisma.$transaction(async (tx) => {
+      const staffRows = await tx.teamStaff.findMany({
+        where: { teamId },
+        select: { userId: true },
+      });
+
       await tx.team.delete({
         where: { id: teamId },
       });
@@ -726,9 +760,9 @@ export class TeamService {
       const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
       if (remaining === 0) {
         await tx.teamLineage.delete({ where: { id: team.lineageId } });
-        return true;
+        return { lineageDeleted: true, staffUserIds: distinctUserIds(staffRows) };
       }
-      return false;
+      return { lineageDeleted: false, staffUserIds: distinctUserIds(staffRows) };
     });
 
     logger.info('Team deleted', {
@@ -739,7 +773,7 @@ export class TeamService {
       userId,
     });
 
-    return { success: true };
+    return { success: true, affectedUserIds: staffUserIds };
   }
 
   /**

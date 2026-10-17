@@ -162,11 +162,16 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       );
     }
 
-    const team = await TeamService.updateTeam(
+    const { team, affectedUserIds } = await TeamService.updateTeam(
       req.params.id as string,
       validationResult.data,
       req.user!.id
     );
+
+    // A season move changes every staff member's metered counts (#658).
+    if (affectedUserIds.length > 0) {
+      await invalidateUsage(...affectedUserIds);
+    }
 
     res.json({
       success: true,
@@ -192,10 +197,11 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
-    await TeamService.deleteTeam(req.params.id as string, req.user!.id);
+    const { affectedUserIds } = await TeamService.deleteTeam(req.params.id as string, req.user!.id);
 
-    // Deleting a team changes the user's metered counts — invalidate cache.
-    await invalidateUsage(req.user!.id);
+    // Deleting a team changes every staff member's metered counts (#658);
+    // the caller is kept in the set (harmless when not staff).
+    await invalidateUsage(req.user!.id, ...affectedUserIds);
 
     res.json({
       success: true,
