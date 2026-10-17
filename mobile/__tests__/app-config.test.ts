@@ -95,7 +95,7 @@ function atLeast(version: string, floor: string): boolean {
   return true;
 }
 
-const ENV_KEYS = ['APP_ENV', 'API_URL'] as const;
+const ENV_KEYS = ['APP_ENV', 'API_URL', 'EAS_BUILD'] as const;
 
 async function loadConfig(env: Partial<Record<(typeof ENV_KEYS)[number], string>>): Promise<ExpoConfig> {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -132,6 +132,17 @@ describe('app.config.js', () => {
     const cfg = await loadConfig({});
     expect(cfg.expo.extra.apiUrl).toBe('http://127.0.0.1:3000');
     expect(cfg.expo.extra.appEnv).toBe('development');
+  });
+
+  // #721: an EAS build profile without APP_ENV would bake the dev host into
+  // the binary. Every profile in eas.json sets it; this blocks a future one.
+  it('EAS_BUILD=true with APP_ENV unset → throws', async () => {
+    await expect(loadConfig({ EAS_BUILD: 'true' })).rejects.toThrow(/APP_ENV is unset on an EAS build/);
+  });
+
+  it('EAS_BUILD=true with APP_ENV=production → resolves', async () => {
+    const cfg = await loadConfig({ EAS_BUILD: 'true', APP_ENV: 'production' });
+    expect(cfg.expo.extra.apiUrl).toBe('https://api.hooplings.com');
   });
 
   it('API_URL overrides the host in production and preview', async () => {

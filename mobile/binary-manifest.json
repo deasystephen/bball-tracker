@@ -1,5 +1,5 @@
 {
-  "description": "Versions of every package with native code (and of react) in the newest binary of each OTA runtime. Checked by __tests__/binary-manifest.test.ts. Never edit by hand and never change an existing runtime: record a new one with `npm run binary-manifest:record` after the build is verified on a device (#562).",
+  "description": "Versions of every package with native code (and of react) in the newest binary of each OTA runtime, and `nativeConfig`, a sha256 of the native configuration in app.config.js compiled into it (#722). Checked by __tests__/binary-manifest.test.ts. Never edit by hand and never change an existing runtime: record a new one with `npm run binary-manifest:record` after the build is verified on a device (#562).",
   "runtimes": {
     "1.4.0": {
       "build": 32,
@@ -106,7 +106,8 @@
         "react-native-screens": "4.26.2",
         "react-native-svg": "15.15.5",
         "react-native-worklets": "0.10.1"
-      }
+      },
+      "nativeConfig": "882fafbd8378b5f1f444670fef856082d2ad1bd97a80d7cd2eb1649083e747a8"
     }
   }
 }
