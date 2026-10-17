@@ -162,10 +162,13 @@ updates:
   # ----------------------------------------------------------------------
   # Terraform providers (infra/) — human-reviewed, never auto-merged (#786)
   # ----------------------------------------------------------------------
-  # Bumps move infra/.terraform.lock.hcl (committed for this reason). CI never
-  # runs Terraform, so the reviewer runs `terraform init` and `terraform plan`
+  # Bumps move infra/.terraform.lock.hcl (committed for this reason). CI runs
+  # fmt/init/validate (so a bumped lock is installable and validated) but never
+  # plan or apply, so the reviewer runs `terraform init` and `terraform plan`
   # from infra/ with production credentials and merges only on "No changes."
-  # (docs/automation/daily-upgrade-scan.md, "Division of labour").
+  # A lock-only merge does not deploy (the ci.yml deploy filter excludes it);
+  # if the merge carries anything else under infra/, check for IN_PROGRESS games
+  # first (docs/automation/daily-upgrade-scan.md, "Division of labour").
   - package-ecosystem: "terraform"
     directory: "/infra"
     schedule:

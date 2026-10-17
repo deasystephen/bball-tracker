@@ -3,7 +3,8 @@
 *.tfstate.backup
 .terraform/
 # .terraform.lock.hcl is COMMITTED: it pins the provider every apply uses, and
-# Dependabot's terraform ecosystem bumps it (#786).
+# Dependabot's terraform ecosystem bumps it (#786). CI runs fmt/init/validate
+# against it but never plan or apply.
 
 # Variable files with secrets
 terraform.tfvars

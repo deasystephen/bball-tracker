@@ -21,7 +21,7 @@ Terraform manages all AWS infrastructure.
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
-| `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 so every apply uses the same provider and Dependabot can propose 5.x bumps. Review such a PR with `terraform init` + `terraform plan` ("No changes.") before merging; majors are a human migration (#866) |
+| `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose 5.x bumps. CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration (#866) |
 
 ---
 
@@ -97,8 +97,10 @@ primary_domain = "hooplings.com"
   `lifecycle { prevent_destroy = true }` (pinned by `backend/tests/infra/prevent-destroy.test.ts`),
   so `terraform destroy`, a `-replace` of a zone or a renamed `var.domains` key errors with
   "Instance cannot be destroyed" before AWS is touched. Retiring a domain is still `serve = false`.
-  The avatars bucket carries the same guard; RDS relies on `deletion_protection` instead, because
-  the restore runbook renames and imports the instance.
+  `prevent_destroy` cannot depend on `var.environment`, so tearing down a **staging** stack with
+  `terraform destroy` means lifting the guard by hand (delete the `lifecycle` block locally for that
+  run, never commit it). The avatars bucket and RDS are not guarded this way: AWS refuses to delete a
+  non-empty bucket, and RDS has `deletion_protection` (the restore runbook renames and imports it).
 - **Retiring a domain = `serve = false`**, not removing the key. The certificate, API record,
   SES identity and mail records are destroyed; the zone stays so the registrar's NS delegation
   never points at a deleted zone (the orphan-zone shape again). The domain stays registered.

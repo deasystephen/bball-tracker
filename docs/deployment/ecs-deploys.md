@@ -110,7 +110,8 @@ separate mechanisms and it is easy to conflate them:
   `terraform apply` from `infra/` (S3 remote state, DynamoDB lock) — **apply first, then merge**
   (#500). Merging the file does *not* apply it.
 - **Merging it does trigger a full ECS deploy anyway.** `detect-changes` in `ci.yml` filters on
-  `{backend/**,infra/**,docker/**,.github/workflows/ci.yml}` minus `**/*.md`, so any non-markdown
+  `{backend/**,infra/**,docker/**,.github/workflows/ci.yml}` minus `**/*.md` and
+  `infra/.terraform.lock.hcl` (a provider bump is not in the image, #786), so any other non-markdown
   file under `infra/` rebuilds the image and rolls a new task-definition revision — applying none
   of your Terraform changes.
 

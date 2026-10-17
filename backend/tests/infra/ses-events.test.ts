@@ -16,6 +16,7 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import { createSesEventConsumer, SesEventConsumer } from '../../src/services/mailer/ses-event-consumer';
+import { extractBlock } from './terraform';
 
 const ROOT = path.resolve(__dirname, '../../..');
 const SES_EVENTS_TF = path.join(ROOT, 'infra/ses-events.tf');
@@ -39,25 +40,6 @@ function get(name: string): string {
   const value = env.get(name);
   if (value === undefined) throw new Error(`${name} is missing from ${TASK_DEFINITION}`);
   return value;
-}
-
-/** Returns the body of `<kind> "<type>" "<name>" { … }`, brace-matched. */
-function extractBlock(source: string, kind: string, type: string, name: string, label: string): string {
-  const header = new RegExp(`^${kind}\\s+"${type}"\\s+"${name}"\\s*\\{`, 'm').exec(source);
-  if (!header) {
-    throw new Error(
-      `${label}: could not find ${kind} "${type}" "${name}". If the file changed shape, update ` +
-        'tests/infra/ses-events.test.ts — do not let this test pass vacuously.'
-    );
-  }
-  const start = header.index + header[0].length;
-  let depth = 1;
-  for (let i = start; i < source.length; i += 1) {
-    if (source[i] === '{') depth += 1;
-    if (source[i] === '}') depth -= 1;
-    if (depth === 0) return source.slice(start, i);
-  }
-  throw new Error(`${label}: ${kind} "${type}" "${name}" has no closing brace.`);
 }
 
 /** Resolves `attribute = "${local.name_prefix}<suffix>"` against the deployed prefix. */

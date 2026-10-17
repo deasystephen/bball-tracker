@@ -3,13 +3,6 @@ resource "aws_s3_bucket" "avatars" {
   bucket = "${var.app_name}-avatars-${var.environment}"
 
   tags = var.tags
-
-  # AWS already refuses to delete a non-empty bucket (force_destroy = false);
-  # this also refuses an empty one, at plan time. Pinned by
-  # backend/tests/infra/prevent-destroy.test.ts.
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_s3_bucket_public_access_block" "avatars" {
