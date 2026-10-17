@@ -33,12 +33,14 @@ jest.mock('../../src/models', () => ({
 jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
+  captureRequestException: jest.fn(),
 }));
-import { captureException } from '../../src/utils/sentry';
+import { captureException, captureRequestException } from '../../src/utils/sentry';
 
 const mockWorkOSService = WorkOSService as jest.Mocked<typeof WorkOSService>;
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockCaptureException = captureException as jest.Mock;
+const mockCaptureRequestException = captureRequestException as jest.Mock;
 
 describe('Auth API', () => {
   const mockUser = {
@@ -499,9 +501,12 @@ describe('Auth API', () => {
       expect(response.body.error).toBe('Authentication failed');
       // Unexpected failures must be reported to Sentry (the prior gap: the
       // callback only logged to CloudWatch, so a DB outage was invisible).
-      expect(mockCaptureException).toHaveBeenCalledWith(expect.any(Error), {
-        flow: 'auth-callback',
-      });
+      // respondWithError reports it with the request tags (user, request id, route).
+      expect(mockCaptureRequestException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ method: 'GET' }),
+        { flow: 'auth-callback' }
+      );
     });
   });
 

@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError } from '../../utils/errors';
+import { UnauthorizedError, BadRequestError, ForbiddenError, ConflictError } from '../../utils/errors';
 import {
   updateRoleSchema,
   updateProfileSchema,
@@ -21,7 +21,6 @@ import prisma from '../../models';
 import type { Prisma } from '@prisma/client';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
-import { logRouteError } from '../../utils/log-route-error';
 import { respondWithError } from '../../utils/respond-with-error';
 import { captureException } from '../../utils/sentry';
 import { authenticate } from './middleware';
@@ -701,14 +700,6 @@ router.post('/push-token', authenticate, async (req, res) => {
   } catch (error) {
     // Expected refusals: invalid Expo token (400), account deleted after
     // authenticate (401, #761), token freshly bound elsewhere (409, B2.9).
-    // A 5xx AppError keeps its status but answers the generic body, so an
-    // internal message (e.g. "Database unavailable") never reaches the client.
-    if (error instanceof AppError && error.statusCode >= 500) {
-      res.status(error.statusCode).json({ error: 'Failed to register push token' });
-      captureException(error, { flow: 'push-token-register' });
-      logRouteError(res, 'Error registering push token', error);
-      return;
-    }
     respondWithError(res, error, {
       log: 'Error registering push token',
       fallback: 'Failed to register push token',

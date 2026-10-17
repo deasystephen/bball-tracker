@@ -148,7 +148,7 @@ describe('route catch log level (#656)', () => {
     const res = await request(app).get(`/api/v1/games/${TEST_GAME_ID}/export.csv`);
 
     expect(res.status).toBe(200);
-    expect(error).toHaveBeenCalledWith('Error exporting game CSV', { status: 200, error: 'pipe broke' });
+    expect(error).toHaveBeenCalledWith('Error exporting game CSV', { streamed: true, status: 500, error: 'pipe broke' });
     expect(warn).not.toHaveBeenCalled();
   });
 });

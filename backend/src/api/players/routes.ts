@@ -177,7 +177,11 @@ router.delete('/:id/account', validateUuidParams('id'), async (req, res) => {
     const result = await AccountService.deleteAccount(childId, { actorId: req.user!.id, mode: 'guardian' });
     res.json({ success: true, erased: result.erased });
   } catch (error) {
-    respondWithError(res, error, { log: 'Error deleting player account', fallback: 'Failed to delete player account' });
+    respondWithError(res, error, {
+      log: 'Error deleting player account',
+      fallback: 'Failed to delete player account',
+      sentryFlow: 'player-account-delete',
+    });
   }
 });
 

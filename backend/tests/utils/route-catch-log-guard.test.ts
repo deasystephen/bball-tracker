@@ -10,9 +10,14 @@
  * `logger.error(...)` that wrote every 403/404 to the on-call stream (#656).
  *
  * In every `try { … } catch (e) { … }` block under `src/api/`:
- * - a catch that binds the error and writes a response calls
- *   `respondWithError(`, unless it is a listed deliberate exception;
+ * - a catch that binds the error answers only through `respondWithError(`:
+ *   any direct response write (`res.status(…)`, `res.json(…)`, …), whether an
+ *   `instanceof` allow-list or a pre-branch ahead of the helper, fails unless
+ *   the catch is a listed deliberate exception;
  * - a `logger.error(` appears only where `ALLOWED_ERROR_LOGS` lists it.
+ *
+ * Comments, strings, template text and regex literals are masked before
+ * scanning, so braces and quotes inside them do not desync the block matcher.
  */
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
@@ -39,11 +44,14 @@ const ROUTERS = [
 ];
 
 /**
- * Catches that answer without `respondWithError`, by file and a string the
- * catch contains. Each maps an error that is not an `AppError` to a status on
- * purpose.
+ * Catches that write a response themselves, by file and a string the catch
+ * contains. Each answers an outcome the helper's rules would get wrong.
  */
 const ANSWERS_WITHOUT_HELPER: Array<{ file: string; marker: string }> = [
+  // Auth callback 409 (email bound to a different WorkOS user) answers its
+  // message but logs at `error` and goes to Sentry: the WorkOS key cutover
+  // (#24) lockout signature. Every other callback error uses the helper.
+  { file: 'auth/routes.ts', marker: 'Auth callback email linked to a different WorkOS user' },
   // POST /auth/refresh: maps the WorkOS SDK's HTTP `status` (429 → 429, none
   // or 5xx → 503, other 4xx → 401) so a transient failure never logs the
   // mobile client out (audit #20).
@@ -69,14 +77,34 @@ const ALLOWED_ERROR_LOGS: Array<{ file: string; message: string }> = [
 
 const RESPONSE_WRITE = /\bres\s*\.\s*(?:status|json|send|sendStatus|end|redirect)\s*\(/;
 
-/** Blanks comments and string/template contents (keeping offsets) so braces in them are not counted. */
-function maskNonCode(source: string): string {
+/** A `/` after one of these (or a keyword like `return`) opens a regex literal, not a division. */
+const BEFORE_REGEX = /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\breturn|\btypeof|\bcase)\s*$/;
+
+/** Blanks comments, string/template contents and regex literals (keeping offsets) so braces in them are not counted. */
+export function maskNonCode(source: string): string {
   let out = '';
   let i = 0;
   while (i < source.length) {
     const c = source[i];
     const next = source[i + 1];
-    if (c === '/' && next === '/') {
+    if (c === '/' && next !== '/' && next !== '*' && BEFORE_REGEX.test(out.slice(-20))) {
+      out += c;
+      i++;
+      let inClass = false;
+      while (i < source.length && source[i] !== '\n' && (inClass || source[i] !== '/')) {
+        if (source[i] === '\\') {
+          out += '  ';
+          i += 2;
+          continue;
+        }
+        if (source[i] === '[') inClass = true;
+        else if (source[i] === ']') inClass = false;
+        out += ' ';
+        i++;
+      }
+      out += source[i] ?? '';
+      i++;
+    } else if (c === '/' && next === '/') {
       while (i < source.length && source[i] !== '\n') {
         out += ' ';
         i++;
@@ -149,9 +177,9 @@ export function catchBlocks(source: string): Block[] {
   return blocks;
 }
 
-/** A catch that answers the error itself but not through the helper. */
+/** A catch that writes a response itself instead of (or ahead of) `respondWithError`. */
 export function answersWithoutHelper(block: Block): boolean {
-  return block.bindsError && RESPONSE_WRITE.test(block.body) && !/\brespondWithError\(/.test(block.body);
+  return block.bindsError && RESPONSE_WRITE.test(block.body);
 }
 
 /** Messages of every `logger.error(` call in one catch block. */
@@ -178,7 +206,7 @@ describe('route catches answer through respondWithError (#656, #831)', () => {
     expect(catchBlocks(readFileSync(file, 'utf8')).length).toBeGreaterThan(0);
   });
 
-  it('every catch that answers an error calls respondWithError', () => {
+  it('every catch answers an error only through respondWithError', () => {
     const offenders = files.flatMap((file) =>
       catchBlocks(readFileSync(file, 'utf8'))
         .filter((block) => answersWithoutHelper(block) && !isException(file, block))
@@ -232,6 +260,16 @@ describe('the guard', () => {
     expect(answersWithoutHelper(b)).toBe(true);
   });
 
+  it('flags a pre-branch that answers ahead of the helper', () => {
+    const b = block(`
+      if (error instanceof NotFoundError) {
+        res.status(404).json({ error: 'Invitation not found' });
+        return;
+      }
+      respondWithError(res, error, { log: 'Error', fallback: 'Failed' });`);
+    expect(answersWithoutHelper(b)).toBe(true);
+  });
+
   it('flags logger.error even next to the helper', () => {
     const b = block(`
       logger.error('Twice', { error: String(error) });
@@ -240,19 +278,10 @@ describe('the guard', () => {
     expect(answersWithoutHelper(b)).toBe(false);
   });
 
-  it('accepts the helper, with or without a deliberate pre-branch', () => {
-    const plain = block(`respondWithError(res, error, { log: 'Error', fallback: 'Failed' });`);
-    const preBranch = block(`
-      if (error instanceof NotFoundError) {
-        res.status(404).json({ error: 'Invitation not found' });
-        logRouteError(res, 'Error', error);
-        return;
-      }
-      respondWithError(res, error, { log: 'Error', fallback: 'Failed' });`);
-    for (const b of [plain, preBranch]) {
-      expect(answersWithoutHelper(b)).toBe(false);
-      expect(errorLogs(b)).toEqual([]);
-    }
+  it('accepts the helper alone', () => {
+    const b = block(`respondWithError(res, error, { log: 'Error', fallback: 'Failed', notFound: 'Gone' });`);
+    expect(answersWithoutHelper(b)).toBe(false);
+    expect(errorLogs(b)).toEqual([]);
   });
 
   it('ignores a catch that answers nothing or binds no error', () => {
@@ -260,6 +289,15 @@ describe('the guard', () => {
     const forward = block(`next(error);`);
     const bare = catchBlocks(`try { x(); } catch {\n res.status(400).json({ error: 'Bad URL' });\n}`)[0];
     for (const b of [rethrow, forward, bare]) expect(answersWithoutHelper(b)).toBe(false);
+  });
+
+  it('masks regex literals, so a quote or brace inside one does not desync the scan', () => {
+    const src = `try { a(); } catch (error) {\n  const re = /['{]+/g;\n  const half = n / 2;\n  res.status(500).json({ error: 'x' });\n}\nconst after = 1;`;
+    const blocks = catchBlocks(src);
+    expect(blocks).toHaveLength(1);
+    expect(answersWithoutHelper(blocks[0])).toBe(true);
+    expect(blocks[0].raw).not.toContain('after');
+    expect(maskNonCode('x = /a{b/; y = c / d;')).toBe('x = /   /; y = c / d;');
   });
 
   it('scans try/catch only, never a promise .catch( handler', () => {

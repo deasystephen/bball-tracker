@@ -1,4 +1,4 @@
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { respondWithError } from '../../src/utils/respond-with-error';
 import {
   AppError,
@@ -8,14 +8,20 @@ import {
   ServiceUnavailableError,
 } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
-import { captureException } from '../../src/utils/sentry';
+import { captureRequestException } from '../../src/utils/sentry';
 
-jest.mock('../../src/utils/sentry', () => ({ captureException: jest.fn() }));
-const mockCapture = captureException as jest.MockedFunction<typeof captureException>;
+jest.mock('../../src/utils/sentry', () => ({
+  ...jest.requireActual('../../src/utils/sentry'),
+  captureRequestException: jest.fn(),
+}));
+const mockCapture = captureRequestException as jest.MockedFunction<typeof captureRequestException>;
+
+const REQ = { method: 'GET', originalUrl: '/api/v1/x' } as Request;
 
 /** A Response double that records what was sent, like Express does. */
 function fakeRes(headersSent = false): Response & { body?: unknown; ended: boolean } {
   const res = {
+    req: REQ,
     statusCode: 200,
     headersSent,
     body: undefined as unknown,
@@ -75,39 +81,75 @@ describe('respondWithError (#831)', () => {
     expect(res.body).toMatchObject({ code: 'last_head_coach', teams: [{ id: 't1', name: 'Hawks' }] });
   });
 
-  it('answers anything else with the fallback body at 500, logs at error, reports the flow', () => {
+  it('answers anything else with the fallback body at 500, logs at error, reports the flow with the request', () => {
     const res = fakeRes();
     const err = new Error('connection reset');
     respondWithError(res, err, { log: 'Error doing X', fallback: 'Failed to do X', sentryFlow: 'x-flow' });
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: 'Failed to do X' });
     expect(error).toHaveBeenCalledWith('Error doing X', { status: 500, error: 'connection reset' });
-    expect(mockCapture).toHaveBeenCalledWith(err, { flow: 'x-flow' });
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x-flow' });
+  });
+
+  it('never reports to Sentry without a flow', () => {
+    respondWithError(fakeRes(), new Error('boom'), { log: 'Error', fallback: 'Failed' });
+    expect(mockCapture).not.toHaveBeenCalled();
   });
 
   it('accepts a fallback body with extra fields', () => {
     const res = fakeRes();
     respondWithError(res, 'boom', { log: 'Error', fallback: { error: 'Failed', details: 'boom' } });
     expect(res.body).toEqual({ error: 'Failed', details: 'boom' });
+  });
+
+  it('keeps the status of a 5xx AppError but answers the fallback body, never its internal message', () => {
+    const res = fakeRes();
+    const err = new ServiceUnavailableError('Database unavailable');
+    respondWithError(res, err, { log: 'Error', fallback: 'Failed to do X', sentryFlow: 'auth-me' });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ error: 'Failed to do X' });
+    expect(error).toHaveBeenCalledWith('Error', { status: 503, error: 'Database unavailable' });
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'auth-me' });
+  });
+
+  it.each([
+    ['status', 429],
+    ['statusCode', 400],
+  ])('honours a 4xx %s on a non-AppError (the central handler rule) with the fallback body', (key, status) => {
+    const res = fakeRes();
+    const err = Object.assign(new Error('Rate limit exceeded'), { [key]: status });
+    respondWithError(res, err, { log: 'Error', fallback: 'Authentication failed', sentryFlow: 'auth-callback' });
+    expect(res.statusCode).toBe(status);
+    expect(res.body).toEqual({ error: 'Authentication failed' });
+    expect(warn).toHaveBeenCalledWith('Error', { status, error: 'Rate limit exceeded' });
     expect(mockCapture).not.toHaveBeenCalled();
   });
 
-  it('reports a 5xx AppError to Sentry and answers its own message', () => {
+  it('answers a 5xx status on a non-AppError with 500', () => {
     const res = fakeRes();
-    const err = new ServiceUnavailableError('Authentication service unavailable');
-    respondWithError(res, err, { log: 'Error', fallback: 'Failed', sentryFlow: 'auth-me', context: { teamId: 't1' } });
-    expect(res.statusCode).toBe(503);
-    expect(res.body).toEqual({ error: 'Authentication service unavailable' });
-    expect(error).toHaveBeenCalledWith('Error', { teamId: 't1', status: 503, error: 'Authentication service unavailable' });
-    expect(mockCapture).toHaveBeenCalledWith(err, { flow: 'auth-me' });
+    respondWithError(res, Object.assign(new Error('upstream'), { status: 502 }), { log: 'Error', fallback: 'Failed' });
+    expect(res.statusCode).toBe(500);
   });
 
-  it('ends a response a stream already started instead of answering twice', () => {
+  it('answers every NotFoundError with the notFound body when given', () => {
+    const res = fakeRes();
+    respondWithError(res, new NotFoundError('Account not found'), {
+      log: 'Error',
+      fallback: 'Failed',
+      notFound: 'Invitation not found',
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual({ error: 'Invitation not found' });
+    expect(warn).toHaveBeenCalledWith('Error', { status: 404, error: 'Account not found' });
+  });
+
+  it('ends a response a stream already started and logs it as a 500', () => {
     const res = fakeRes(true);
-    respondWithError(res, new Error('pipe broke'), { log: 'Error exporting', fallback: 'Failed', sentryFlow: 'export' });
+    const err = new Error('pipe broke');
+    respondWithError(res, err, { log: 'Error exporting', fallback: 'Failed', sentryFlow: 'export' });
     expect(res.ended).toBe(true);
     expect(res.body).toBeUndefined();
-    expect(error).toHaveBeenCalledWith('Error exporting', { status: 200, error: 'pipe broke' });
-    expect(mockCapture).toHaveBeenCalledWith(expect.any(Error), { flow: 'export' });
+    expect(error).toHaveBeenCalledWith('Error exporting', { streamed: true, status: 500, error: 'pipe broke' });
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'export' });
   });
 });
