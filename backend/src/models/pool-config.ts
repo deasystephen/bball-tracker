@@ -39,6 +39,9 @@ export const DB_CONNECTION_TIMEOUT_MS = 3_500;
  */
 export const DB_BUSY_RETRY_AFTER_SECONDS = 5;
 
+/** Body of that 503, from the central error handler and from `respondWithError`. */
+export const DB_BUSY_BODY = { error: 'Service temporarily unavailable, please retry' } as const;
+
 /** How long an idle client stays open before the pool closes it. */
 export const DB_IDLE_TIMEOUT_MS = 30_000;
 

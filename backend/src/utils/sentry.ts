@@ -279,18 +279,39 @@ export function sentryErrorHandler(
   _res: Response,
   next: NextFunction
 ): void {
-  if (initialized && !isExpectedClientError(err)) {
-    Sentry.withScope(scope => {
-      if (req.user) {
-        scope.setUser({ id: req.user.id });
-      }
-      if (req.requestId) {
-        scope.setTag('request_id', req.requestId);
-      }
-      scope.setTag('method', req.method);
-      scope.setTag('route', req.route?.path || redactUrl(req.originalUrl));
-      Sentry.captureException(err);
-    });
+  if (!isExpectedClientError(err)) {
+    captureRequestException(err, req);
   }
   next(err);
+}
+
+/** The request tags every request-scoped capture carries: user id, request id, method, route. */
+function applyRequestScope(scope: Sentry.Scope, req: Request): void {
+  if (req.user) {
+    scope.setUser({ id: req.user.id });
+  }
+  if (req.requestId) {
+    scope.setTag('request_id', req.requestId);
+  }
+  scope.setTag('method', req.method);
+  scope.setTag('route', req.route?.path || redactUrl(req.originalUrl));
+}
+
+/**
+ * Report an error raised while handling `req`, with the same request tags
+ * `sentryErrorHandler` attaches, plus `tags` (e.g. `{ flow: 'auth-me' }`).
+ * Used by `respond-with-error.ts` for a route catch that answers a 5xx itself.
+ * No-ops when Sentry is disabled.
+ */
+export function captureRequestException(
+  error: unknown,
+  req: Request | undefined,
+  tags?: Record<string, string>
+): void {
+  if (!initialized) return;
+  Sentry.withScope(scope => {
+    if (req) applyRequestScope(scope, req);
+    if (tags) scope.setTags(tags);
+    Sentry.captureException(error);
+  });
 }

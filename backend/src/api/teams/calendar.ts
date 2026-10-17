@@ -13,14 +13,8 @@ import { validateUuidParams } from '../middleware/validate-params';
 import { calendarFeedRateLimit } from '../middleware/rate-limit';
 import { requireEntitlement } from '../middleware/entitlements';
 import { Feature } from '../../services/entitlements';
-import {
-  BadRequestError,
-  NotFoundError,
-  ForbiddenError,
-  AppError,
-} from '../../utils/errors';
 import { logger } from '../../utils/logger';
-import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router({ mergeParams: true });
 
@@ -55,12 +49,7 @@ router.get(
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.status(200).send(icsText);
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to generate calendar feed' });
-    }
-    logRouteError(res, 'Error serving calendar feed', error);
+    respondWithError(res, error, { log: 'Error serving calendar feed', fallback: 'Failed to generate calendar feed' });
   }
   }
 );
@@ -92,16 +81,7 @@ router.post(
         ...result,
       });
     } catch (error) {
-      if (
-        error instanceof NotFoundError ||
-        error instanceof ForbiddenError ||
-        error instanceof BadRequestError
-      ) {
-        res.status(error.statusCode).json({ error: error.message });
-      } else {
-        res.status(500).json({ error: 'Failed to subscribe to calendar feed' });
-      }
-      logRouteError(res, 'Error subscribing to calendar feed', error);
+      respondWithError(res, error, { log: 'Error subscribing to calendar feed', fallback: 'Failed to subscribe to calendar feed' });
     }
   }
 );
@@ -126,16 +106,7 @@ router.post(
         ...result,
       });
     } catch (error) {
-      if (
-        error instanceof NotFoundError ||
-        error instanceof ForbiddenError ||
-        error instanceof BadRequestError
-      ) {
-        res.status(error.statusCode).json({ error: error.message });
-      } else {
-        res.status(500).json({ error: 'Failed to revoke calendar feed' });
-      }
-      logRouteError(res, 'Error revoking calendar feed', error);
+      respondWithError(res, error, { log: 'Error revoking calendar feed', fallback: 'Failed to revoke calendar feed' });
     }
   }
 );

@@ -14,8 +14,8 @@
 import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
-import { BadRequestError, NotFoundError } from '../../utils/errors';
-import { logRouteError } from '../../utils/log-route-error';
+import { NotFoundError } from '../../utils/errors';
+import { respondWithError } from '../../utils/respond-with-error';
 import { omitToken } from './serializers';
 import {
   invitationLookupIpRateLimit,
@@ -24,6 +24,9 @@ import {
 } from '../middleware/rate-limit';
 
 const router = Router();
+
+/** Every 404 on this public surface reads the same, whichever row was missing. */
+const INVITATION_NOT_FOUND = 'Invitation not found';
 
 const TOKEN_RE = /^[A-Za-z0-9\-_]+$/;
 
@@ -77,12 +80,11 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
     );
     res.json({ success: true, invitation: omitToken(invitation) });
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      res.status(404).json({ error: 'Invitation not found' });
-    } else {
-      res.status(500).json({ error: 'Failed to fetch invitation' });
-    }
-    logRouteError(res, 'Error fetching invitation by token', error);
+    respondWithError(res, error, {
+      log: 'Error fetching invitation by token',
+      fallback: 'Failed to fetch invitation',
+      notFound: INVITATION_NOT_FOUND,
+    });
   }
 });
 
@@ -123,14 +125,11 @@ router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
     );
     res.json({ success: true, ...result });
   } catch (error) {
-    if (error instanceof BadRequestError) {
-      res.status(400).json({ error: (error as BadRequestError).message });
-    } else if (error instanceof NotFoundError) {
-      res.status(404).json({ error: 'Invitation not found' });
-    } else {
-      res.status(500).json({ error: 'Failed to accept invitation' });
-    }
-    logRouteError(res, 'Error accepting invitation by token', error);
+    respondWithError(res, error, {
+      log: 'Error accepting invitation by token',
+      fallback: 'Failed to accept invitation',
+      notFound: INVITATION_NOT_FOUND,
+    });
   }
 });
 

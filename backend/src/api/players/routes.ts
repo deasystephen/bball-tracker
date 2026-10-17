@@ -10,13 +10,12 @@ import {
   playerQuerySchema,
 } from './schemas';
 import { authenticate } from '../auth/middleware';
-import { BadRequestError, NotFoundError, ForbiddenError, ConflictError, AppError } from '../../utils/errors';
+import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { AccountService } from '../../services/account-service';
 import { isGuardianOf } from '../../utils/permissions';
 import prisma from '../../models';
-import { logger } from '../../utils/logger';
-import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router();
 
@@ -48,17 +47,7 @@ router.post('/', async (req, res) => {
       player,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof ConflictError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create player' });
-    }
-    logRouteError(res, 'Error creating player', error);
+    respondWithError(res, error, { log: 'Error creating player', fallback: 'Failed to create player' });
   }
 });
 
@@ -88,12 +77,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    if (error instanceof BadRequestError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to list players' });
-    }
-    logRouteError(res, 'Error listing players', error);
+    respondWithError(res, error, { log: 'Error listing players', fallback: 'Failed to list players' });
   }
 });
 
@@ -113,12 +97,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    if (error instanceof NotFoundError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get player' });
-    }
-    logRouteError(res, 'Error getting player', error);
+    respondWithError(res, error, { log: 'Error getting player', fallback: 'Failed to get player' });
   }
 });
 
@@ -147,17 +126,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       player,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof ConflictError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to update player' });
-    }
-    logRouteError(res, 'Error updating player', error);
+    respondWithError(res, error, { log: 'Error updating player', fallback: 'Failed to update player' });
   }
 });
 
@@ -174,16 +143,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Player deleted successfully',
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to delete player' });
-    }
-    logRouteError(res, 'Error deleting player', error);
+    respondWithError(res, error, { log: 'Error deleting player', fallback: 'Failed to delete player' });
   }
 });
 
@@ -198,7 +158,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * the row lock. Anonymize-in-place, or erased outright when nothing references
  * the row (#529): see `AccountService.deleteAccount`. 200 `{ success, erased }`.
  */
-router.delete('/:id/account', validateUuidParams('id'), async (req, res, next) => {
+router.delete('/:id/account', validateUuidParams('id'), async (req, res) => {
   try {
     const childId = req.params.id as string;
     if (!(await isGuardianOf(req.user!.id, childId))) {
@@ -217,12 +177,11 @@ router.delete('/:id/account', validateUuidParams('id'), async (req, res, next) =
     const result = await AccountService.deleteAccount(childId, { actorId: req.user!.id, mode: 'guardian' });
     res.json({ success: true, erased: result.erased });
   } catch (error) {
-    if (error instanceof AppError) {
-      next(error);
-      return;
-    }
-    logger.error('Error deleting player account', { error: error instanceof Error ? error.message : String(error) });
-    res.status(500).json({ error: 'Failed to delete player account' });
+    respondWithError(res, error, {
+      log: 'Error deleting player account',
+      fallback: 'Failed to delete player account',
+      sentryFlow: 'player-account-delete',
+    });
   }
 });
 

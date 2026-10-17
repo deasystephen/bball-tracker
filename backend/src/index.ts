@@ -79,7 +79,7 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
-import { DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from './models/pool-config';
+import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from './models/pool-config';
 
 // `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
 // fired (pool saturated, or RDS not answering TCP), 'down' for anything else
@@ -161,7 +161,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     res
       .status(503)
       .set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS))
-      .json({ error: 'Service temporarily unavailable, please retry' });
+      .json(DB_BUSY_BODY);
     return;
   }
 
