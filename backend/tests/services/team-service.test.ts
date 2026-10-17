@@ -3,7 +3,6 @@
  */
 
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
-import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
@@ -980,7 +979,7 @@ describe('TeamService', () => {
       );
     });
 
-    it('logs one `Team updated` event naming the changed fields, never their values (#686)', async () => {
+    it('logs one `Team updated` event naming the changed fields only, never their values (#686)', async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
       const newName = 'Secret Team Name';
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
@@ -995,13 +994,17 @@ describe('TeamService', () => {
       });
       const infoSpy = spyOnInfo();
 
-      await TeamService.updateTeam(team.id, { name: newName, chatLink: 'https://chat.example.test/x' }, coach.id);
+      // `seasonId` repeats the current season: written, but not a change.
+      await TeamService.updateTeam(
+        team.id,
+        { name: newName, seasonId: team.seasonId, chatLink: 'https://chat.example.test/x' },
+        coach.id
+      );
 
       const event = domainEvent(infoSpy, 'Team updated');
       expect(event).toEqual({ teamId: team.id, fields: ['name', 'chatLink'], userId: coach.id });
       expect(JSON.stringify(event)).not.toContain(newName);
       expect(infoSpy.mock.calls.map(([msg]) => msg)).not.toContain('Team moved to season');
-      infoSpy.mockRestore();
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
@@ -1103,12 +1106,30 @@ describe('TeamService', () => {
         members: [],
       });
 
-      const result = await TeamService.updateTeam(team.id, { seasonId: otherSeason.id }, coach.id);
+      const infoSpy = spyOnInfo();
+
+      const result = await TeamService.updateTeam(
+        team.id,
+        { seasonId: otherSeason.id, name: 'Secret Moved Name' },
+        coach.id
+      );
 
       expect(result.seasonId).toBe(otherSeason.id);
       expect(mockPrisma.team.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ seasonId: otherSeason.id }) })
       );
+      // One line for the whole PATCH: the move, carrying the other changed
+      // fields too, and no separate `Team updated` (#686).
+      expect(domainEvent(infoSpy, 'Team moved to season')).toEqual({
+        teamId: team.id,
+        lineageId: team.lineageId,
+        fromSeasonId: team.seasonId,
+        toSeasonId: otherSeason.id,
+        fields: ['name', 'seasonId'],
+        userId: coach.id,
+      });
+      expect(infoSpy.mock.calls.map(([msg]) => msg)).not.toContain('Team updated');
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain('Secret Moved Name');
     });
 
     it('should throw ForbiddenError when an ASSISTANT coach moves the team (B2.3)', async () => {
@@ -2005,7 +2026,6 @@ describe('TeamService', () => {
         userId: coach.id,
       });
       expect(JSON.stringify(event)).not.toContain(target.email);
-      infoSpy.mockRestore();
     });
 
     it('throws NotFoundError when the team does not exist', async () => {
@@ -2222,7 +2242,7 @@ describe('TeamService', () => {
         );
         (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ ...team, staff: [], roles: [], members: [] });
 
-        const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+        const infoSpy = spyOnInfo();
         await TeamService.createTeam(
           { name: team.name, seasonId: season.id, ageGroup: 'U14', gender: 'BOYS' },
           coach.id
@@ -2230,19 +2250,16 @@ describe('TeamService', () => {
 
         // The domain event carries ids only — never the team name or the
         // coach's email (#617).
-        const created = infoSpy.mock.calls.find(([msg]) => msg === 'Team created');
-        expect(created?.[1]).toEqual(
-          expect.objectContaining({
-            teamId: team.id,
-            seasonId: season.id,
-            lineageId: 'lineage-new',
-            personalLeague: false,
-            userId: coach.id,
-          })
-        );
+        const created = domainEvent(infoSpy, 'Team created');
+        expect(created).toEqual({
+          teamId: team.id,
+          seasonId: season.id,
+          lineageId: 'lineage-new',
+          personalLeague: false,
+          userId: coach.id,
+        });
         expect(JSON.stringify(created)).not.toContain(team.name);
         expect(JSON.stringify(created)).not.toContain(coach.email);
-        infoSpy.mockRestore();
 
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         expect(mockPrisma.teamLineage.create).toHaveBeenCalledWith({ data: {}, select: { id: true } });

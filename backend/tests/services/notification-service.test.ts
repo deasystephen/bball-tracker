@@ -72,7 +72,26 @@ describe('NotificationService', () => {
       const event = domainEvent(infoSpy, 'Push token registered');
       expect(event).toEqual({ platform: 'android', userId: 'user-1' });
       expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(VALID_TOKEN);
-      infoSpy.mockRestore();
+    });
+
+    it('logs nothing when the transaction fails to commit (#686)', async () => {
+      (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.pushToken.upsert as jest.Mock).mockResolvedValue({ id: 'pt-1' });
+      // The callback runs (and upserts), then the COMMIT fails.
+      (mockPrisma.$transaction as jest.Mock).mockImplementationOnce(
+        async (fn: (tx: typeof mockPrisma) => Promise<unknown>) => {
+          await fn(mockPrisma);
+          throw new Error('commit failed');
+        }
+      );
+      const infoSpy = spyOnInfo();
+
+      await expect(NotificationService.registerToken('user-1', VALID_TOKEN, 'ios')).rejects.toThrow(
+        'commit failed'
+      );
+
+      expect(mockPrisma.pushToken.upsert).toHaveBeenCalled();
+      expect(infoSpy.mock.calls.map(([msg]) => msg)).not.toContain('Push token registered');
     });
 
     it('refuses (401) to attach a device to a deleted account, without writing (#444 D9)', async () => {
@@ -189,7 +208,6 @@ describe('NotificationService', () => {
 
       expect(domainEvent(infoSpy, 'Push token removed')).toEqual({ removed: 1, userId: 'user-1' });
       expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(VALID_TOKEN);
-      infoSpy.mockRestore();
     });
 
     it('never issues an unscoped delete by token value', async () => {

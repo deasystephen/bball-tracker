@@ -71,7 +71,6 @@ describe('CalendarService', () => {
       const event = domainEvent(infoSpy, 'Calendar feed subscribed');
       expect(event).toEqual({ teamId: team.id, created: true, userId: user.id });
       expect(JSON.stringify(event)).not.toContain(result.token);
-      infoSpy.mockRestore();
     });
 
     it('reuses an existing active token', async () => {
@@ -150,7 +149,6 @@ describe('CalendarService', () => {
         revoked: 2,
         userId: 'user-id',
       });
-      infoSpy.mockRestore();
     });
 
     it('throws NotFoundError when team does not exist', async () => {

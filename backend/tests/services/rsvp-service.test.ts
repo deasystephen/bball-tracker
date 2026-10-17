@@ -98,7 +98,6 @@ describe('RsvpService', () => {
         userId: 'user-1',
       });
       expect(JSON.stringify(event)).not.toContain('u@test.com');
-      infoSpy.mockRestore();
       expect(mockPrisma.gameRsvp.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { gameId_userId: { gameId: game.id, userId: 'user-1' } },

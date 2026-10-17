@@ -551,7 +551,6 @@ describe('SeasonService', () => {
         leagueId: season.leagueId,
         userId: admin.id,
       });
-      infoSpy.mockRestore();
     });
   });
 });

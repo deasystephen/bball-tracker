@@ -241,7 +241,6 @@ describe('GameEventService', () => {
         eventType: 'SHOT',
         userId: coach.id,
       });
-      infoSpy.mockRestore();
     });
 
     it('should recompute and persist homeScore from SHOT events inside a transaction (audit #6, #8)', async () => {
@@ -773,7 +772,6 @@ describe('GameEventService', () => {
         eventType: 'SHOT',
         userId: coach.id,
       });
-      infoSpy.mockRestore();
       // SHOT removal recomputes the score in a transaction and broadcasts it (audit #8)
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mockPrisma.gameEvent.delete).toHaveBeenCalledWith({ where: { id: event.id } });

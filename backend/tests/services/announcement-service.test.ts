@@ -194,7 +194,6 @@ describe('AnnouncementService', () => {
       const event = domainEvent(infoSpy, 'Announcement created');
       expect(event).toEqual({ announcementId: 'a1', teamId: team.id, userId: admin.id });
       expect(JSON.stringify(event)).not.toContain('Game moved');
-      infoSpy.mockRestore();
       expect(mockPrisma.announcement.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {

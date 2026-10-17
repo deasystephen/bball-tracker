@@ -665,6 +665,13 @@ export class TeamService {
       updateData.gender = data.gender;
     }
 
+    // Columns whose value actually changes, for the domain event: never the
+    // values, and not a key the payload merely repeats (#686).
+    const loaded: Record<string, unknown> = team;
+    const fields = Object.entries(updateData)
+      .filter(([key, value]) => value !== loaded[key])
+      .map(([key]) => key);
+
     // Update the team
     try {
       const updated = await prisma.team.update({
@@ -680,10 +687,11 @@ export class TeamService {
           lineageId: team.lineageId,
           fromSeasonId: team.seasonId,
           toSeasonId: data.seasonId,
+          fields,
           userId,
         });
       } else {
-        logger.info('Team updated', { teamId, fields: Object.keys(updateData), userId });
+        logger.info('Team updated', { teamId, fields, userId });
       }
       return updated;
     } catch (err) {

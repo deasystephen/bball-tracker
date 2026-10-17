@@ -60,7 +60,7 @@ export class NotificationService {
       throw new BadRequestError('Invalid Expo push token');
     }
 
-    return prisma.$transaction(async (tx) => {
+    const { row, rebound } = await prisma.$transaction(async (tx) => {
       const live = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "User" WHERE "id" = ${userId} AND "deletedAt" IS NULL FOR SHARE`;
       if (live.length === 0) {
@@ -83,10 +83,11 @@ export class NotificationService {
           previousOwnerId: existing.userId,
           callerId: userId,
         });
-        return tx.pushToken.update({
+        const rebind = await tx.pushToken.update({
           where: { token },
           data: { userId, platform },
         });
+        return { row: rebind, rebound: true };
       }
 
       const registered = await tx.pushToken.upsert({
@@ -101,9 +102,15 @@ export class NotificationService {
           platform,
         },
       });
-      logger.info('Push token registered', { platform, userId });
-      return registered;
+      return { row: registered, rebound: false };
     });
+
+    // After the commit, so a failed COMMIT leaves no audit line. The rebind
+    // path keeps its own `Rebinding stale push token` line.
+    if (!rebound) {
+      logger.info('Push token registered', { platform, userId });
+    }
+    return row;
   }
 
   /**

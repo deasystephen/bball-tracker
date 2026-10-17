@@ -406,7 +406,6 @@ describe('LeagueService', () => {
       await LeagueService.deleteLeague(league.id, admin.id);
 
       expect(domainEvent(infoSpy, 'League deleted')).toEqual({ leagueId: league.id, userId: admin.id });
-      infoSpy.mockRestore();
     });
 
     it('should throw ForbiddenError if user is not system admin', async () => {

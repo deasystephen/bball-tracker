@@ -1105,7 +1105,6 @@ describe('PlayerService', () => {
       const event = domainEvent(infoSpy, 'Player deleted');
       expect(event).toEqual({ playerId: player.id, userId: 'admin-id' });
       expect(JSON.stringify(event)).not.toContain(String(player.email));
-      infoSpy.mockRestore();
     });
 
     it('treats a tombstone as not found, even for an admin (#643)', async () => {

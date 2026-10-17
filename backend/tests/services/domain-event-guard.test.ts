@@ -5,9 +5,9 @@
  *
  * The rule used to be followed only by the methods #617 enumerated, so leagues,
  * seasons, players, staff, RSVPs and game events left no audit line at all.
- * This suite scans every file under `src/services/`, finds each
- * `static async` method and each top-level `async function`, and fails when a
- * body that writes through Prisma (`prisma.<model>.<write>(`,
+ * This suite scans every file under `src/services/`, finds each `static`
+ * method and each top-level `function` (async or not, generic or not), and
+ * fails when a body that writes through Prisma (`prisma.<model>.<write>(`,
  * `tx.<model>.<write>(`, `$transaction(` or `$executeRaw`) contains no
  * `logger.info(` call.
  *
@@ -46,6 +46,8 @@ const ALLOWED: Record<string, string> = {
     'inserts the row for createInvitation and Add Player, which log `Invitation sent`',
   'invitation-service.ts#createRosteredInvitedPlayer':
     'Add Player case 2 transaction; addRosterPlayer logs `Roster player added` and `Invitation sent`',
+  'invitation-service.ts#transitionPending':
+    'status-guarded PENDING exit inside accept/reject/cancel, which log `Invitation accepted` / `declined` / `cancelled`',
   'invitation-service.ts#stripUnclaimedEmail':
     'consent guard inside rejectInvitation, which logs `Invitation declined`',
   // Lazy expiry: a status fix-up applied while reading an invitation that is
@@ -63,11 +65,12 @@ const ALLOWED: Record<string, string> = {
 const MUTATION =
   /\b(?:prisma|tx)\.\w+\.(?:create|createMany|createManyAndReturn|update|updateMany|updateManyAndReturn|delete|deleteMany|upsert)\(|\$transaction\(|\$executeRaw/;
 
-/** `static async` methods (the target) and top-level `async function`s. */
-const METHOD = /\bstatic\s+async\s+(\w+)\s*\(|^\s*(?:export\s+)?async\s+function\s+(\w+)\s*\(/gm;
-
-/** Every method or function, async or not: the candidates a mutation may log through. */
-const ANY_METHOD =
+/**
+ * Every `static` method and top-level `function`, async or not, generic or not.
+ * Non-async ones count because `return prisma.x.deleteMany(…)` without `await`
+ * is a write too (the shape `NotificationService.removeToken` had before #686).
+ */
+const METHOD =
   /\bstatic\s+(?:async\s+)?(\w+)\s*[(<]|^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*[(<]/gm;
 
 /** Index of the bracket matching `source[open]`. */
@@ -106,10 +109,10 @@ export interface ScannedMethod {
   body: string;
 }
 
-/** Every method matched by `pattern` in comment-stripped `code`, with its body. */
-function scan(code: string, pattern: RegExp): ScannedMethod[] {
+/** Every method in comment-stripped `code` (see `METHOD`), with its body. */
+function scan(code: string): ScannedMethod[] {
   const methods: ScannedMethod[] = [];
-  for (const match of code.matchAll(pattern)) {
+  for (const match of code.matchAll(METHOD)) {
     const name = match[1] ?? match[2];
     let paramsOpen = (match.index ?? 0) + match[0].length - 1;
     if (code[paramsOpen] === '<') paramsOpen = code.indexOf('(', paramsOpen);
@@ -120,28 +123,32 @@ function scan(code: string, pattern: RegExp): ScannedMethod[] {
   return methods;
 }
 
-/** Every `static async` method and `async function` in `source`, with its body. */
-export function scanMethods(source: string): ScannedMethod[] {
-  return scan(stripComments(source), METHOD);
-}
-
 /** Names of the methods in `source` that write through Prisma and log no `logger.info(`. */
 export function findSilentMutations(source: string): string[] {
-  const code = stripComments(source);
-  const loggers = scan(code, ANY_METHOD)
-    .filter(({ name, body }) => /^log[A-Z]/.test(name) && body.includes('logger.info('))
-    .map(({ name }) => name);
-  const logs = (body: string): boolean =>
-    body.includes('logger.info(') || loggers.some((name) => new RegExp(`\\b${name}\\(`).test(body));
-  return scan(code, METHOD)
-    .filter(({ body }) => MUTATION.test(body) && !logs(body))
+  const methods = scan(stripComments(source));
+  // Built only when a mutating body has no `logger.info(` of its own.
+  let loggers: string[] | undefined;
+  const callsLogHelper = (body: string): boolean => {
+    loggers ??= methods
+      .filter(({ name, body: b }) => /^log[A-Z]/.test(name) && b.includes('logger.info('))
+      .map(({ name }) => name);
+    return loggers.some((name) => new RegExp(`\\b${name}\\(`).test(body));
+  };
+  return methods
+    .filter(({ body }) => MUTATION.test(body) && !body.includes('logger.info(') && !callsLogHelper(body))
     .map(({ name }) => name);
 }
 
 describe('every mutating service method logs a domain event (#686)', () => {
   let files: string[] = [];
+  // `<file relative to src/services>#<method>` for every silent mutating method.
+  let silent: string[] = [];
   beforeAll(() => {
     files = sourceFiles(SERVICES);
+    silent = files.flatMap((file) => {
+      const rel = path.relative(SERVICES, file);
+      return findSilentMutations(readFileSync(file, 'utf8')).map((name) => `${rel}#${name}`);
+    });
   });
 
   it('scans the service layer', () => {
@@ -152,23 +159,11 @@ describe('every mutating service method logs a domain event (#686)', () => {
   });
 
   it('finds no mutating method without logger.info outside the allowlist', () => {
-    const offenders = files.flatMap((file) => {
-      const rel = path.relative(SERVICES, file);
-      return findSilentMutations(readFileSync(file, 'utf8'))
-        .map((name) => `${rel}#${name}`)
-        .filter((key) => !(key in ALLOWED));
-    });
-    expect(offenders).toEqual([]);
+    expect(silent.filter((key) => !(key in ALLOWED))).toEqual([]);
   });
 
   it('keeps every allowlist entry live (no stale exceptions)', () => {
-    const silent = new Set(
-      files.flatMap((file) => {
-        const rel = path.relative(SERVICES, file);
-        return findSilentMutations(readFileSync(file, 'utf8')).map((name) => `${rel}#${name}`);
-      })
-    );
-    expect(Object.keys(ALLOWED).filter((key) => !silent.has(key))).toEqual([]);
+    expect(Object.keys(ALLOWED).filter((key) => !silent.includes(key))).toEqual([]);
   });
 
   describe('the scanner', () => {
@@ -238,6 +233,30 @@ describe('every mutating service method logs a domain event (#686)', () => {
           }
         }`;
       expect(findSilentMutations(source)).toEqual(['addThing']);
+    });
+
+    it('flags a generic method', () => {
+      const source = `
+        export class S {
+          private static async move<T extends Sel>(tx: Tx, select: T): Promise<Payload<T>> {
+            await tx.thing.updateMany({ where: {}, data: {} });
+            return tx.thing.findUniqueOrThrow({ where: {}, select });
+          }
+        }`;
+      expect(findSilentMutations(source)).toEqual(['move']);
+    });
+
+    it('flags a non-async method that returns a write promise without await', () => {
+      const source = `
+        export class S {
+          static removeThing(id: string): Promise<Prisma.BatchPayload> {
+            return prisma.thing.deleteMany({ where: { id } });
+          }
+        }
+        function dropAll(): Promise<Prisma.BatchPayload> {
+          return prisma.thing.deleteMany({});
+        }`;
+      expect(findSilentMutations(source)).toEqual(['removeThing', 'dropAll']);
     });
 
     it('does not count a logger.warn as the domain event', () => {
