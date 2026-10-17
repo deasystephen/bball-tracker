@@ -28,6 +28,7 @@ import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { useAuthStore } from '../../../store/auth-store';
 import { guardianChildrenOnTeam, isRosteredOn } from '../../../utils/guardian';
+import { childDisplayName } from '../../../utils/display-name';
 import { spacing, typography } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { getGamePermissions } from '../../../utils/game-permissions';
@@ -127,7 +128,7 @@ export default function GameDetailScreen() {
   const respondents = useMemo(() => {
     const list: { id: string | null; name: string }[] = [];
     if (selfRostered || childrenOnTeam.length === 0) list.push({ id: null, name: 'Me' });
-    for (const child of childrenOnTeam) list.push({ id: child.childId, name: child.childName });
+    for (const child of childrenOnTeam) list.push({ id: child.childId, name: childDisplayName(child) });
     return list;
   }, [selfRostered, childrenOnTeam]);
   // `undefined` = nothing picked yet → derive the default (self, or the first

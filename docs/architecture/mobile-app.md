@@ -132,9 +132,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   (guardian payloads, `guardianOf`) and `playerName`/`playerDeletedAt` (stats rows). Render them with
   `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file; the timestamp is
   optional on the client so an app that out-runs the deploy falls back to the stored name. Readers: the
-  invite screen, the Invitations tab guardian card, Profile My Kids and account deletion,
-  `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a tombstone shows the whole label,
-  never its first word).
+  invite screen, the Invitations tab guardian card, Profile My Kids, account deletion, the game
+  detail RSVP "Respond for" picker, `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a
+  tombstone shows the whole label, never its first word). Guardian list rows (`GET
+  /teams/:teamId/members/:playerId/guardians`) carry `deletedAt` and render via `displayName(row)`.
   `__tests__/utils/display-name-guard.test.ts` reads `app/` and `components/` and fails on a raw
   `.name` read off any `…player`/`…Player`, `<x>.user` (staff rows), `invitedBy` or `author`; a bare
   `user.name` passes only in a file that binds `user` from the auth store (#674). Tests:
