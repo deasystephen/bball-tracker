@@ -34,6 +34,14 @@ When adding new features or fixing bugs, always write tests that verify behavior
   (`parseLogLines(spy)` for `console.log`/`console.error` spies; a non-JSON line fails) and
   `source-scan.ts` (`sourceFiles`, `stripComments`) for the backend source-scanning guards, which
   walk the tree in `beforeAll`, never at collection time.
+- **Unused-dependency guard (#781).** `tests/utils/unused-dependencies-guard.test.ts` fails when a
+  `dependencies` entry in `backend/package.json` is not imported by any file under `src/`, `prisma/`
+  or `scripts/`, or by a root config file such as `prisma.config.ts`, and when an `@types/<x>`
+  devDependency has no `<x>` dependency, devDependency or Node built-in. An import is `from`, a bare
+  `import`, `import()`, `require` or `require.resolve`, subpaths included, with comments stripped. A
+  specifier built in a template literal or a variable is not seen. Remove the package with
+  `npm uninstall`. A package used without a visible import, or an `@types` package for a transitive,
+  goes in the test's dependency or types allowlist with its reason; both are empty today.
 
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
