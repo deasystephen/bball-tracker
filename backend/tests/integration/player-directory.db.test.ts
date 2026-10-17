@@ -16,8 +16,9 @@
  *            └─ team A2: a2Player
  *   League B ── team B1: b1Player; staff orgBStaff
  *   adminOnly is a league admin of A and on no team.
- *   teamlessChild is on no team; its guardian teamlessGuardian is on no team
- *   either, so only the guardian-child branch can admit it (#821).
+ *   teamlessChild and managedChild (isManaged, coach-created and unclaimed)
+ *   are on no team; their guardian teamlessGuardian is on no team either, so
+ *   only the guardian-child branch can admit them (#821).
  */
 
 jest.unmock('../../src/models');
@@ -71,6 +72,9 @@ beforeAll(async () => {
 
   await caller('teamlessChild', 'PLAYER');
   await fx.guardian(await caller('teamlessGuardian', 'PARENT'), users.teamlessChild);
+  await caller('managedChild', 'PLAYER');
+  await prisma.user.update({ where: { id: users.managedChild }, data: { isManaged: true } });
+  await fx.guardian(users.teamlessGuardian, users.managedChild);
 });
 
 afterAll(async () => {
@@ -114,9 +118,9 @@ describe('GET /players/:id scoping against a real database (#685)', () => {
 });
 
 describe('a guardian reads a team-less child (#821)', () => {
-  it('the guardian gets 200, without email', async () => {
-    const child = await PlayerService.getPlayerById(users.teamlessChild, as('teamlessGuardian'));
-    expect(child.id).toBe(users.teamlessChild);
+  it.each([['teamlessChild'], ['managedChild']])('the guardian reads %s: 200, without email', async (childKey) => {
+    const child = await PlayerService.getPlayerById(users[childKey], as('teamlessGuardian'));
+    expect(child.id).toBe(users[childKey]);
     expect(child.email).toBeNull();
   });
 
@@ -126,11 +130,13 @@ describe('a guardian reads a team-less child (#821)', () => {
     ['league admin of A', 'adminOnly'],
   ])('%s gets 404', async (_label, key) => {
     await expect(PlayerService.getPlayerById(users.teamlessChild, as(key))).rejects.toBeInstanceOf(NotFoundError);
+    await expect(PlayerService.getPlayerById(users.managedChild, as(key))).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('the guardian lists the child; the child stays out of everyone else\'s directory', async () => {
-    expect(await listed('teamlessGuardian')).toEqual(ids('teamlessChild'));
+  it("the guardian lists both children, managed included; they stay out of everyone else's directory", async () => {
+    expect(await listed('teamlessGuardian')).toEqual(ids('teamlessChild', 'managedChild'));
     expect(await listed('outsider')).toEqual(ids('outsider'));
+    expect(await listed('guardianOnly')).toEqual(ids('target', 'childMember', 'memberOnly'));
   });
 });
 

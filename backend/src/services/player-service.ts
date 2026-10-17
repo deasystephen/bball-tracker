@@ -24,6 +24,7 @@ import {
 } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { logger } from '../utils/logger';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -31,6 +32,11 @@ import { emailEquals, isSameEmail } from '../utils/email-match';
  * undo" flow keeps working before the player is rostered (role matrix B2.10).
  */
 export const MANAGED_PLAYER_GRACE_MS = 24 * 60 * 60 * 1000;
+
+/** What `deletePlayer` reads back from the deleted row: the avatar to clean up (#725). */
+const DELETED_PLAYER_SELECT = {
+  profilePictureUrl: true,
+} satisfies Prisma.UserSelect;
 
 const PLAYER_SELECT = {
   id: true,
@@ -101,19 +107,34 @@ export interface PlayerCaller {
 }
 
 /**
- * Prisma filter for the player directory: "users rostered on at least one team
- * `userId` may read, or `userId`'s guardian children". The team clause is the
- * shared `teamAccessWhere` (staff OR member OR league admin OR guardian of a
- * member), never a local copy: a two-branch copy here left league admins and
- * guardians with a 404 on the directory (#685). The child branch admits a
- * guardian's child regardless of roster state, matching `updatePlayer` (#821).
+ * The two halves of the player-directory scope for a non-admin caller:
+ * `sharesTeam` is "users rostered on at least one team `userId` may read", and
+ * `childIds` are `userId`'s guardian children. The team clause is the shared
+ * `teamAccessWhere` (staff OR member OR league admin OR guardian of a member),
+ * never a local copy: a two-branch copy here left league admins and guardians
+ * with a 404 on the directory (#685). The child branch admits a guardian's
+ * child regardless of roster state or `isManaged`, matching `updatePlayer`
+ * (#821).
  */
-async function sharesTeamWith(userId: string): Promise<Prisma.UserWhereInput> {
+async function directoryScope(
+  userId: string
+): Promise<{ sharesTeam: Prisma.UserWhereInput; childIds: string[] }> {
   const childIds = await getGuardianChildIds(userId);
-  const sharesTeam: Prisma.UserWhereInput = {
-    teamMembers: { some: { team: teamAccessWhere(userId, childIds) } },
+  return {
+    sharesTeam: { teamMembers: { some: { team: teamAccessWhere(userId, childIds) } } },
+    childIds,
   };
-  return childIds.length > 0 ? { OR: [sharesTeam, { id: { in: childIds } }] } : sharesTeam;
+}
+
+/** `extra` OR the caller's guardian children, when there are any (#821). */
+function orGuardianChildren(extra: Prisma.UserWhereInput, childIds: string[]): Prisma.UserWhereInput {
+  return childIds.length > 0 ? { OR: [extra, { id: { in: childIds } }] } : extra;
+}
+
+/** Detail-read filter: a player `userId` may read through a team or as their guardian. */
+async function sharesTeamWith(userId: string): Promise<Prisma.UserWhereInput> {
+  const { sharesTeam, childIds } = await directoryScope(userId);
+  return orGuardianChildren(sharesTeam, childIds);
 }
 
 export interface PlayerList {
@@ -294,16 +315,22 @@ export class PlayerService {
     const where: Prisma.UserWhereInput = {
       // Default to PLAYER role; only admins may list other roles
       role: isAdmin && role ? role : 'PLAYER',
-      // Exclude managed players by default; only admins may include them
-      isManaged: isAdmin && isManaged !== undefined ? isManaged : false,
       // Deleted accounts are tombstones (#444, D14): never offered in pickers
       deletedAt: null,
     };
 
     const conditions: Prisma.UserWhereInput[] = [];
 
-    if (!isAdmin) {
-      conditions.push({ OR: [{ id: caller.id }, await sharesTeamWith(caller.id)] });
+    if (isAdmin) {
+      // Admins exclude managed players by default and may include them
+      where.isManaged = isManaged !== undefined ? isManaged : false;
+    } else {
+      // Managed players are excluded for everyone else, except the caller's
+      // own guardian children, who are listed whatever their state (#821).
+      const { sharesTeam, childIds } = await directoryScope(caller.id);
+      conditions.push(
+        orGuardianChildren({ isManaged: false, OR: [{ id: caller.id }, sharesTeam] }, childIds)
+      );
     }
 
     if (search) {
@@ -515,18 +542,24 @@ export class PlayerService {
 
     // Guarded like every User write (#643): a deletion that tombstoned the
     // row after the unlocked read above matches nothing (P2025, a 404).
+    // The avatar URL comes from the deleted row itself, not the unlocked read
+    // above, so an avatar replaced in between is the one cleaned up.
+    let deleted: Prisma.UserGetPayload<{ select: typeof DELETED_PLAYER_SELECT }>;
     try {
-      await prisma.user.delete({
+      deleted = await prisma.user.delete({
         where: { id: playerId, deletedAt: null },
+        select: DELETED_PLAYER_SELECT,
       });
     } catch (error) {
       throw PlayerService.mapWriteError(error);
     }
 
+    logger.info('Player deleted', { playerId, userId });
+
     // Best-effort, after the delete and outside any transaction (#725): the row
     // is gone, so its avatar object is unreferenced. No-op for WorkOS photo
     // URLs and null; S3 failures are logged, never thrown.
-    await deletePreviousAvatar(player.profilePictureUrl, null);
+    await deletePreviousAvatar(deleted.profilePictureUrl, null);
 
     return { success: true };
   }

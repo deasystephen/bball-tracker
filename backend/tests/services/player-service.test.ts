@@ -19,6 +19,7 @@ import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
 import { emailEquals } from '../../src/utils/email-match';
+import { logger } from '../../src/utils/logger';
 import { BadRequestError, ConflictError, NotFoundError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
@@ -429,10 +430,13 @@ describe('PlayerService', () => {
 
       const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
       expect(call.where.role).toBe('PLAYER');
-      expect(call.where.isManaged).toBe(false);
+      // The managed exclusion sits inside the scope, so guardian children can
+      // be exempt from it (#821); with no children it is the whole scope.
+      expect(call.where.isManaged).toBeUndefined();
       // The shared team-read clause (#685): staff, member, league admin, guardian.
       expect(call.where.AND).toEqual([
         {
+          isManaged: false,
           OR: [
             { id: COACH_CALLER.id },
             { teamMembers: { some: { team: teamAccessWhere(COACH_CALLER.id, []) } } },
@@ -455,13 +459,15 @@ describe('PlayerService', () => {
       expect(call.where.AND).toEqual([
         {
           OR: [
-            { id: parent.id },
             {
+              isManaged: false,
               OR: [
+                { id: parent.id },
                 { teamMembers: { some: { team: teamAccessWhere(parent.id, ['child-1']) } } },
-                { id: { in: ['child-1'] } },
               ],
             },
+            // The guardian's own children, managed or not, on a team or not (#821).
+            { id: { in: ['child-1'] } },
           ],
         },
       ]);
@@ -474,6 +480,7 @@ describe('PlayerService', () => {
     it('ignores role and isManaged filters for non-admin callers', async () => {
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
 
       await PlayerService.listPlayers(
         { role: 'ADMIN', isManaged: true, limit: 10, offset: 0 },
@@ -482,7 +489,8 @@ describe('PlayerService', () => {
 
       const call = (mockPrisma.user.findMany as jest.Mock).mock.calls[0][0];
       expect(call.where.role).toBe('PLAYER');
-      expect(call.where.isManaged).toBe(false);
+      expect(call.where.isManaged).toBeUndefined();
+      expect(call.where.AND[0].isManaged).toBe(false);
     });
 
     it('honors role and isManaged filters for admins', async () => {
@@ -1095,6 +1103,7 @@ describe('PlayerService', () => {
 
     it('should delete player successfully', async () => {
       const player = createPlayer();
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
 
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser) // admin check
@@ -1108,8 +1117,14 @@ describe('PlayerService', () => {
       const result = await PlayerService.deletePlayer(player.id, 'admin-id');
 
       expect(result).toEqual({ success: true });
-      // Guarded like every User write (#643).
-      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: player.id, deletedAt: null } });
+      // Guarded like every User write (#643); reads back the avatar (#725).
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({
+        where: { id: player.id, deletedAt: null },
+        select: { profilePictureUrl: true },
+      });
+      // One domain event, ids only.
+      expect(infoSpy).toHaveBeenCalledWith('Player deleted', { playerId: player.id, userId: 'admin-id' });
+      infoSpy.mockRestore();
     });
 
     describe('avatar cleanup (#725)', () => {
@@ -1137,6 +1152,16 @@ describe('PlayerService', () => {
         expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(bucketUrl, null);
         const deleteOrder = (mockPrisma.user.delete as jest.Mock).mock.invocationCallOrder[0];
         expect(mockDeletePreviousAvatar.mock.invocationCallOrder[0]).toBeGreaterThan(deleteOrder);
+      });
+
+      it('cleans up the avatar the deleted row held, not the one read before the delete', async () => {
+        const replacedUrl = bucketUrl.replace('.jpg', '-new.jpg');
+        const player = mockDeletablePlayer(bucketUrl);
+        (mockPrisma.user.delete as jest.Mock).mockResolvedValue({ profilePictureUrl: replacedUrl });
+
+        await PlayerService.deletePlayer(player.id, 'admin-id');
+
+        expect(mockDeletePreviousAvatar).toHaveBeenCalledWith(replacedUrl, null);
       });
 
       it('does not call deletePreviousAvatar when the delete throws', async () => {

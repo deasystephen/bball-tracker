@@ -14,6 +14,7 @@ import {
   StaffRoleType,
 } from '../api/teams/schemas';
 import { NotificationService } from './notification-service';
+import { invalidateUsage } from './usage-service';
 import { logger } from '../utils/logger';
 import {
   NotFoundError,
@@ -254,27 +255,6 @@ export interface TeamList {
   total: number;
   limit: number;
   offset: number;
-}
-
-/**
- * `updateTeam` result. `affectedUserIds` are the users whose cached usage
- * counts the edit changed (the team's staff on a season move, else empty);
- * the route invalidates them (#658).
- */
-export interface UpdateTeamResult {
-  team: TeamWithRelations;
-  affectedUserIds: string[];
-}
-
-/** `deleteTeam` result: `affectedUserIds` are the deleted team's distinct staff (#658). */
-export interface DeleteTeamResult {
-  success: true;
-  affectedUserIds: string[];
-}
-
-/** Distinct user ids of staff rows; a user holding two roles on a team counts once. */
-function distinctUserIds(staffRows: ReadonlyArray<{ userId: string }>): string[] {
-  return [...new Set(staffRows.map((row) => row.userId))];
 }
 
 /**
@@ -605,7 +585,7 @@ export class TeamService {
     teamId: string,
     data: UpdateTeamInput,
     userId: string
-  ): Promise<UpdateTeamResult> {
+  ): Promise<TeamWithRelations> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -706,11 +686,12 @@ export class TeamService {
         });
       }
       // A season move changes the `seasons` usage metric of every staff member
-      // (#658); any other edit changes no metered count.
-      return {
-        team: updated,
-        affectedUserIds: seasonMoved ? distinctUserIds(updated.staff) : [],
-      };
+      // (#658); any other edit changes no metered count. `invalidateUsage`
+      // dedupes a user holding two roles. Best-effort, never throws.
+      if (seasonMoved) {
+        await invalidateUsage(...updated.staff.map((s) => s.userId));
+      }
+      return updated;
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new BadRequestError(SEASON_SIBLING_MESSAGE);
@@ -725,7 +706,7 @@ export class TeamService {
    * @param userId User ID (must be a head coach, league admin or system admin —
    *   assistant coaches share canManageTeam but cannot delete; role matrix B2.3)
    */
-  static async deleteTeam(teamId: string, userId: string): Promise<DeleteTeamResult> {
+  static async deleteTeam(teamId: string, userId: string): Promise<{ success: true }> {
     // Get team
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -747,7 +728,7 @@ export class TeamService {
     // the only cleanup (#462).
     // The staff rows go with the team, so every staff member's usage counts
     // change (#658): read them inside the transaction, before the cascade.
-    const { lineageDeleted, staffUserIds } = await prisma.$transaction(async (tx) => {
+    const { lineageDeleted, staffRows } = await prisma.$transaction(async (tx) => {
       const staffRows = await tx.teamStaff.findMany({
         where: { teamId },
         select: { userId: true },
@@ -760,10 +741,13 @@ export class TeamService {
       const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
       if (remaining === 0) {
         await tx.teamLineage.delete({ where: { id: team.lineageId } });
-        return { lineageDeleted: true, staffUserIds: distinctUserIds(staffRows) };
       }
-      return { lineageDeleted: false, staffUserIds: distinctUserIds(staffRows) };
+      return { lineageDeleted: remaining === 0, staffRows };
     });
+
+    // After commit: every staff member's counts changed, and the caller's may
+    // have (#658). `invalidateUsage` dedupes; best-effort, never throws.
+    await invalidateUsage(userId, ...staffRows.map((s) => s.userId));
 
     logger.info('Team deleted', {
       teamId,
@@ -773,7 +757,7 @@ export class TeamService {
       userId,
     });
 
-    return { success: true, affectedUserIds: staffUserIds };
+    return { success: true };
   }
 
   /**
