@@ -11,6 +11,9 @@
  *   any subclass they forgot (a `ConflictError` from a service came back 500).
  * - A 5xx `AppError` keeps its status but answers the route's `fallback` body:
  *   its message is internal ("Database unavailable") and never reaches a client.
+ * - A pg pool wait/connect timeout (`models/pool-config.ts#isPoolTimeoutError`,
+ *   #751) is answered 503 with `Retry-After` and the central handler's retry
+ *   body, like the central handler: the pool is saturated, not the route broken.
  * - A non-`AppError` carrying a 4xx `status`/`statusCode` (a WorkOS SDK error,
  *   an `http-errors` error) keeps that status, the rule the central error
  *   handler applies through `sentry.ts#clientErrorStatus`, with the `fallback`
@@ -31,6 +34,7 @@
  */
 
 import type { Response } from 'express';
+import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from '../models/pool-config';
 import { AppError, DetailedError, NotFoundError } from './errors';
 import { logRouteError } from './log-route-error';
 import { captureRequestException, clientErrorStatus } from './sentry';
@@ -54,6 +58,8 @@ export function respondWithError(res: Response, error: unknown, options: Respond
   const streamed = res.headersSent;
   if (streamed) {
     res.end();
+  } else if (isPoolTimeoutError(error)) {
+    res.status(503).set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS)).json(DB_BUSY_BODY);
   } else if (options.notFound !== undefined && error instanceof NotFoundError) {
     res.status(404).json({ error: options.notFound });
   } else if (error instanceof AppError && error.statusCode >= 500) {

@@ -19,15 +19,22 @@ const mockCapture = captureRequestException as jest.MockedFunction<typeof captur
 const REQ = { method: 'GET', originalUrl: '/api/v1/x' } as Request;
 
 /** A Response double that records what was sent, like Express does. */
-function fakeRes(headersSent = false): Response & { body?: unknown; ended: boolean } {
+type FakeRes = Response & { body?: unknown; ended: boolean; headers: Record<string, string> };
+
+function fakeRes(headersSent = false): FakeRes {
   const res = {
     req: REQ,
     statusCode: 200,
     headersSent,
+    headers: {} as Record<string, string>,
     body: undefined as unknown,
     ended: false,
     status(code: number) {
       res.statusCode = code;
+      return res;
+    },
+    set(name: string, value: string) {
+      res.headers[name] = value;
       return res;
     },
     json(body: unknown) {
@@ -40,7 +47,7 @@ function fakeRes(headersSent = false): Response & { body?: unknown; ended: boole
       return res;
     },
   };
-  return res as unknown as Response & { body?: unknown; ended: boolean };
+  return res as unknown as FakeRes;
 }
 
 describe('respondWithError (#831)', () => {
@@ -141,6 +148,18 @@ describe('respondWithError (#831)', () => {
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual({ error: 'Invitation not found' });
     expect(warn).toHaveBeenCalledWith('Error', { status: 404, error: 'Account not found' });
+  });
+
+  it('answers a pg pool timeout 503 with Retry-After, like the central handler (#751)', () => {
+    const res = fakeRes();
+    // Prisma may wrap it: the timeout is found through the cause chain.
+    const err = new Error('query failed', { cause: new Error('timeout exceeded when trying to connect') });
+    respondWithError(res, err, { log: 'Error getting team', fallback: 'Failed to get team', sentryFlow: 'x' });
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['Retry-After']).toBe('5');
+    expect(res.body).toEqual({ error: 'Service temporarily unavailable, please retry' });
+    expect(error).toHaveBeenCalledWith('Error getting team', { status: 503, error: 'query failed' });
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
   });
 
   it('ends a response a stream already started and logs it as a 500', () => {

@@ -152,10 +152,8 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
  */
 router.delete('/:id', validateUuidParams('id'), async (req, res) => {
   try {
+    // The service invalidates the usage cache of every staff member (#658).
     await TeamService.deleteTeam(req.params.id as string, req.user!.id);
-
-    // Deleting a team changes the user's metered counts — invalidate cache.
-    await invalidateUsage(req.user!.id);
 
     res.json({
       success: true,

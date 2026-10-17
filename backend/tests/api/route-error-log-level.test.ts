@@ -128,6 +128,20 @@ describe('route catch log level (#656)', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it('a pg pool timeout in a route catch answers 503 with Retry-After, not 500 (#751)', async () => {
+    mockTeamService.getTeamById.mockRejectedValue(new Error('timeout exceeded when trying to connect'));
+
+    const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+    expect(res.status).toBe(503);
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.body).toEqual({ error: 'Service temporarily unavailable, please retry' });
+    expect(error).toHaveBeenCalledWith('Error getting team', {
+      status: 503,
+      error: 'timeout exceeded when trying to connect',
+    });
+  });
+
   it('an export that fails after the response started keeps its error line and ends the response', async () => {
     // pipe() wrote the headers and part of the body, then threw: answering a
     // second time would throw ERR_HTTP_HEADERS_SENT and lose the log line.
