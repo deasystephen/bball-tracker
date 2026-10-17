@@ -5,7 +5,13 @@
  * as an unescaped pattern, so `_` and `%` in an email are wildcards and the
  * lookup can return somebody else's account. `emailEquals` in
  * `src/utils/email-match.ts` escapes them; this suite fails on any other
- * place in `src/` or `scripts/` that builds that filter itself. `scripts/`
+ * place in `src/` or `scripts/` whose innermost object literal holds `equals`
+ * together with `mode` spelled as the literal `'insensitive'` (either quote)
+ * or the generated enum `Prisma.QueryMode.insensitive` / `QueryMode.insensitive`
+ * (#696). It cannot see a `mode` supplied through a variable or an imported
+ * constant (`mode: INSENSITIVE`); that stays a review concern. `startsWith` /
+ * `endsWith` + insensitive are not checked either (no such call site on an
+ * address exists). `scripts/`
  * holds the operator CLI that runs against production in `operator` mode
  * (#648): the one place where a wrong row is exported or deleted with no
  * owner check in the way.
@@ -24,10 +30,11 @@ const OPERATOR_CLI = path.join(SCRIPTS, 'data-subject-request.ts');
 
 /**
  * An innermost `{ … }` (no nested braces) that holds both `equals` and
- * `mode: 'insensitive'`, in either order, on one line or across several.
+ * `mode: 'insensitive'` (or `mode: [Prisma.]QueryMode.insensitive`), in either
+ * order, on one line or across several.
  */
 const RAW_INSENSITIVE_EQUALS =
-  /\{(?=[^{}]*\bequals\b)(?=[^{}]*\bmode\s*:\s*['"]insensitive['"])[^{}]*\}/g;
+  /\{(?=[^{}]*\bequals\b)(?=[^{}]*\bmode\s*:\s*(?:['"]insensitive['"]|(?:Prisma\.)?QueryMode\.insensitive\b))[^{}]*\}/g;
 
 export function findRawInsensitiveEquals(source: string): string[] {
   return stripComments(source).match(RAW_INSENSITIVE_EQUALS) ?? [];
@@ -71,6 +78,9 @@ describe('the guard pattern', () => {
     ['where: { invitedEmail: { equals: user.email, mode: "insensitive" } }', 1],
     ["{ email: {\n  equals: address,\n  mode: 'insensitive',\n} }", 1],
     ["[{ a: { equals: x, mode: 'insensitive' } }, { b: { equals: y, mode: 'insensitive' } }]", 2],
+    ['where: { email: { equals: email, mode: Prisma.QueryMode.insensitive } }', 1],
+    ['where: { email: { mode: QueryMode.insensitive, equals: email } }', 1],
+    ['{ email: {\n  equals: address,\n  mode: Prisma.QueryMode.insensitive,\n} }', 1],
   ])('flags %j', (source, count) => {
     expect(findRawInsensitiveEquals(source)).toHaveLength(count);
   });
@@ -78,6 +88,8 @@ describe('the guard pattern', () => {
   it.each([
     ["where: { email: emailEquals(email) }"],
     ["{ name: { contains: search, mode: 'insensitive' } }"],
+    ['{ name: { contains: search, mode: Prisma.QueryMode.insensitive } }'],
+    ['{ email: { equals: email, mode: Prisma.QueryMode.default } }'],
     ["{ email: { equals: email } }"],
     ["// where: { email: { equals: email, mode: 'insensitive' } }"],
     ["/* { equals: a, mode: 'insensitive' } */"],

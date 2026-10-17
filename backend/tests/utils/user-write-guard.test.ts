@@ -7,13 +7,22 @@
  * re-populate an erased account. The rule lives in CLAUDE.md and
  * `docs/architecture/account-deletion.md`; this suite turns it from remembered
  * into enforced: any `user.update(`, `user.updateMany(`, `user.delete(`,
- * `user.deleteMany(` or `user.upsert(` in `src/` whose `where` is not an
- * object literal naming `deletedAt` fails.
+ * `user.deleteMany(` or `user.upsert(` in `src/` or `scripts/` whose `where`
+ * is not an object literal naming `deletedAt` fails. `scripts/` holds the
+ * operator tooling that runs against production (#824), so it is held to the
+ * same rule as the API.
  *
- * Allowlisted: `services/account-service.ts` only. It writes the tombstone
- * itself, scrubs `managedById` off the rows the deleted account managed, and
- * hard-deletes an account nothing references any more (#529), all under the
- * FOR UPDATE lock it takes on the row. No other file hard-deletes a User.
+ * Allowlisted, one reason each (`ALLOWLIST` below):
+ * - `src/services/account-service.ts`: it writes the tombstone itself, scrubs
+ *   `managedById` off the rows the deleted account managed, and hard-deletes an
+ *   account nothing references any more (#529), all under the FOR UPDATE lock
+ *   it takes on the row.
+ *
+ * No script is allowlisted: the operator CLI (`scripts/data-subject-request.ts`)
+ * deletes through `AccountService.deleteAccount` in `operator` mode and
+ * `scripts/data-subject-lookup.ts` only reads. A script that ever needs a raw
+ * hard delete gets its own allowlist entry with its reason, never a blanket
+ * `scripts/` exemption.
  */
 import { readFileSync } from 'fs';
 import path from 'path';
@@ -21,7 +30,16 @@ import { sourceFiles, stripComments } from '../support/source-scan';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const SRC = path.join(BACKEND, 'src');
-const ALLOWLIST = new Set([path.join(SRC, 'services/account-service.ts')]);
+const SCRIPTS = path.join(BACKEND, 'scripts');
+const OPERATOR_CLI = path.join(SCRIPTS, 'data-subject-request.ts');
+
+/** File → why it may write a `User` row without `deletedAt` in the `where`. */
+const ALLOWLIST = new Map<string, string>([
+  [
+    path.join(SRC, 'services/account-service.ts'),
+    'writes the tombstone, scrubs managedById and hard-deletes an unreferenced account under its own FOR UPDATE lock',
+  ],
+]);
 
 const USER_WRITE = /\buser\.(update|updateMany|delete|deleteMany|upsert)\(/g;
 
@@ -66,13 +84,21 @@ export function findUnguardedUserWrites(source: string): string[] {
 describe('every User write is guarded by deletedAt (#643)', () => {
   let files: string[] = [];
   beforeAll(() => {
-    files = sourceFiles(SRC);
+    files = [...sourceFiles(SRC), ...sourceFiles(SCRIPTS)];
   });
 
-  it('scans the backend source', () => {
+  it('scans the backend source and the operator scripts', () => {
     // A guard that reads nothing passes for the wrong reason.
     expect(files.length).toBeGreaterThan(50);
     expect(files).toContain(path.join(SRC, 'services/player-service.ts'));
+    expect(files).toContain(OPERATOR_CLI);
+  });
+
+  it('every allowlist entry exists and carries a reason', () => {
+    for (const [file, reason] of ALLOWLIST) {
+      expect(files).toContain(file);
+      expect(reason.length).toBeGreaterThan(20);
+    }
   });
 
   it('finds no User update outside the allowlist whose where lacks deletedAt', () => {

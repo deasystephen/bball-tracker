@@ -48,10 +48,12 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `stripUnclaimedEmail`. A request that authenticated a moment before the deletion
   committed must not re-identify the tombstone. Keep that invariant on any new write path:
   `tests/utils/user-write-guard.test.ts` fails on any `user.update(`, `user.updateMany(`,
-  `user.delete(`, `user.deleteMany(` or `user.upsert(` in `src/` whose `where` is not an object
-  literal naming `deletedAt`. Only `account-service.ts` is allowlisted: it writes the tombstone,
-  scrubs `managedById`, and hard-deletes an account nothing references, under its own `FOR UPDATE`
-  lock. Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
+  `user.delete(`, `user.deleteMany(` or `user.upsert(` in `backend/src/` or `backend/scripts/`
+  whose `where` is not an object literal naming `deletedAt`. Only `account-service.ts` is
+  allowlisted: it writes the tombstone, scrubs `managedById`, and hard-deletes an account nothing
+  references, under its own `FOR UPDATE` lock. No script is allowlisted: the operator CLI deletes
+  through `AccountService.deleteAccount` and the lookup only reads; a script that ever needs a raw
+  hard delete gets its own allowlist entry with a one-line reason. Real-Postgres cases: `tests/integration/account-deletion.db.test.ts`.
 - Structured error bodies come from ONE place: `DetailedError.body()` (`utils/errors.ts`) —
   `{ error, code, ...details }` — used by the central handler in `index.ts` and by the entitlement
   402s; never hand-roll `{ code, … }` in a route.
