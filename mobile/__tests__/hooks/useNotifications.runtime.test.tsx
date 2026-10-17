@@ -5,9 +5,9 @@
  *   - bails when no auth token
  *   - bails when not running on a physical device
  *   - bails when permissions are denied
- *   - tracks push_permission_answered only when the OS could show the
- *     prompt (#645): not when already granted or already denied with no ask
- *     left
+ *   - tracks push_permission_answered only when the prompt was certainly
+ *     shown (#645): a first ask, or a stored denial that became granted;
+ *     never when already granted or on a repeat denial
  *   - registers the push token with the backend on success
  *   - swallows backend errors silently
  *   - subscribes to tap responses and routes by data payload
@@ -271,7 +271,9 @@ describe('useNotificationSetup runtime', () => {
     expect(mockedGetToken).not.toHaveBeenCalled();
   });
 
-  it('tracks the answer on Android after a first refusal, while the OS can still ask', async () => {
+  // Android 13+ with notifications switched off in system settings reports
+  // `denied` with `canAskAgain: true` and resolves instantly with no prompt.
+  it('does not track a repeat denial even when the OS reports canAskAgain', async () => {
     setAuthenticated('jwt-token');
     mockedGetPermissions.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
     mockedRequestPermissions.mockResolvedValueOnce({ status: 'denied' });
@@ -279,9 +281,25 @@ describe('useNotificationSetup runtime', () => {
     renderHook(() => useNotificationSetup());
 
     await waitFor(() => {
+      expect(mockedRequestPermissions).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {});
+    expect(mockedTrack).not.toHaveBeenCalled();
+  });
+
+  it("tracks Android's second ask when it turns a stored denial into granted", async () => {
+    setAuthenticated('jwt-token');
+    mockedGetPermissions.mockResolvedValueOnce({ status: 'denied', canAskAgain: true });
+    mockedRequestPermissions.mockResolvedValueOnce({ status: 'granted' });
+    mockedGetToken.mockResolvedValueOnce({ data: 'ExponentPushToken[again]' });
+    mockedPost.mockResolvedValueOnce({ data: { success: true } });
+
+    renderHook(() => useNotificationSetup());
+
+    await waitFor(() => {
       expect(mockedTrack).toHaveBeenCalledTimes(1);
     });
-    expect(mockedTrack).toHaveBeenCalledWith('push_permission_answered', { granted: false });
+    expect(mockedTrack).toHaveBeenCalledWith('push_permission_answered', { granted: true });
   });
 
   it('skips the request prompt when permissions are already granted', async () => {

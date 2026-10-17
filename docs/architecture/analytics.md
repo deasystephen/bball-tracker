@@ -23,14 +23,14 @@ separate decision, documented in `mobile-app.md` under "Analytics tracking optio
   crash the app. Events tracked before `initAnalytics` has resolved are held in a bounded buffer
   (`PRE_INIT_BUFFER_LIMIT`, 50) and sent in order once init succeeds, so the launch route's
   `screen_viewed` (fired by a child of the root layout, before its init effect) is not lost; they
-  are dropped when there is no API key or init fails. Identity is held across the same window
-  (#647): an `identifyUser` before init keeps the user id, and its properties and every
-  `setUserProperties` partial are merged (later keys win, `undefined` skipped). At init the user id
-  and one merged `identify` are applied **before** the buffered events are sent, so a login that
-  completes before init (a cold start from the sign-in redirect) still sends `user_logged_in` with
-  its `user_id` instead of leaving the install anonymous. `resetUser()` before init clears the held
-  identity; it is dropped, with no SDK call, along with the events when there is no key or init
-  fails.
+  are dropped when there is no API key or init fails. Identity calls share that queue (#647):
+  `identifyUser`, `setUserProperties` and `resetUser` made before init are queued with the events
+  and **replayed in their original order** through the same post-init functions. So a login that
+  completes before init (a cold start from the sign-in redirect) applies its user id before the
+  `user_logged_in` tracked after it, a `resetUser` in the window still clears the identity the SDK
+  persisted from the last session, and two sign-ins in the window stay apart. When the queue is
+  full the oldest event is evicted first, so identity ops survive a burst of screen views. The
+  whole queue is dropped, with no SDK call, when there is no key or init fails.
 - **Identity is stamped at call time.** `amplitude.track` only enqueues, the SDK fills `user_id`
   on a later tick, and `reset()` is synchronous, so `trackEvent` passes the current user and
   device id as event options. That is what lets `user_logged_out` and `account_deleted`, tracked
@@ -118,7 +118,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `game_event_recorded` | the tracker's shot or stat is persisted | `game_id`, `event_type`; for a shot `shot_made`, `shot_points` | `hooks/useGameEvents.ts` |
 | `game_event_undone` | the tracker's undo deletes an event | `game_id`, `event_type` (when the tracker knows it) | `hooks/useGameEvents.ts` |
 | `rsvp_submitted` | an RSVP is saved | `game_id`, `status`, `on_behalf_of_child` | `hooks/useGames.ts` |
-| `push_permission_answered` | the OS push prompt was shown and answered: the stored status was `undetermined`, or `canAskAgain` was true (not when already granted, nor when already denied with no prompt left, which resolves instantly) | `granted` | `hooks/useNotifications.ts` |
+| `push_permission_answered` | the OS push prompt was certainly shown and answered: the stored status was `undetermined`, or a stored `denied` became `granted` (Android's second ask). Not when already granted, and not on a repeat `denied`, which resolves with no prompt on iOS after a refusal and on Android after two refusals or with notifications off in system settings | `granted` | `hooks/useNotifications.ts` |
 | `notification_opened` | the user taps a push notification | `target`: `game` / `announcement` / `team` / `none` | `hooks/useNotifications.ts` |
 | `entitlement_denied` | the API answers 402 `upgrade_required` | `endpoint_pattern`, `feature`, `current_tier`, `required_tier` | `services/api-client.ts#normalizeApiError` |
 | `error_shown` | a screen asks for an error's message to show it (`getApiErrorMessage`) | `code`, `status` (null for a network failure), `endpoint_pattern` | `services/api-client.ts#getApiErrorMessage` |
