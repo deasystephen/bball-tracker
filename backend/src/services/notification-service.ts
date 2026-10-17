@@ -89,7 +89,7 @@ export class NotificationService {
         });
       }
 
-      return tx.pushToken.upsert({
+      const registered = await tx.pushToken.upsert({
         where: { token },
         create: {
           userId,
@@ -101,6 +101,8 @@ export class NotificationService {
           platform,
         },
       });
+      logger.info('Push token registered', { platform, userId });
+      return registered;
     });
   }
 
@@ -113,9 +115,11 @@ export class NotificationService {
    * someone else, which callers treat as a no-op.
    */
   static async removeToken(userId: string, token: string): Promise<Prisma.BatchPayload> {
-    return prisma.pushToken.deleteMany({
+    const result = await prisma.pushToken.deleteMany({
       where: { token, userId },
     });
+    logger.info('Push token removed', { removed: result.count, userId });
+    return result;
   }
 
   /**

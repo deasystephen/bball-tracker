@@ -11,6 +11,7 @@ import {
   expectForbiddenError,
   expectNotFoundError,
 } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
@@ -82,10 +83,22 @@ describe('RsvpService', () => {
         user: { id: 'user-1', name: 'U', email: 'u@test.com' },
       };
       (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue(rsvpRow);
+      const infoSpy = spyOnInfo();
 
       const result = await RsvpService.upsertRsvp(game.id, 'user-1', 'MAYBE');
 
       expect(result).toEqual(rsvpRow);
+      // One domain event, ids and the status enum only (#686).
+      const event = domainEvent(infoSpy, 'RSVP upserted');
+      expect(event).toEqual({
+        gameId: game.id,
+        playerId: 'user-1',
+        status: 'MAYBE',
+        onBehalfOfChild: false,
+        userId: 'user-1',
+      });
+      expect(JSON.stringify(event)).not.toContain('u@test.com');
+      infoSpy.mockRestore();
       expect(mockPrisma.gameRsvp.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { gameId_userId: { gameId: game.id, userId: 'user-1' } },

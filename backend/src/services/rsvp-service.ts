@@ -136,6 +136,14 @@ export class RsvpService {
       include: RSVP_INCLUDE,
     });
 
+    logger.info('RSVP upserted', {
+      gameId,
+      playerId: rsvpUserId,
+      status,
+      onBehalfOfChild,
+      userId,
+    });
+
     // Send RSVP confirmation email (fire-and-forget; never block the response).
     // A guardian answering for a (usually email-less managed) child gets the
     // confirmation at their own address.

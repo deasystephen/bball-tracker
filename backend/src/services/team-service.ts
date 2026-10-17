@@ -682,6 +682,8 @@ export class TeamService {
           toSeasonId: data.seasonId,
           userId,
         });
+      } else {
+        logger.info('Team updated', { teamId, fields: Object.keys(updateData), userId });
       }
       return updated;
     } catch (err) {
@@ -927,6 +929,8 @@ export class TeamService {
       include: TEAM_MEMBER_INCLUDE,
     });
 
+    logger.info('Roster member updated', { teamId, playerId, userId });
+
     return updatedMember;
   }
 
@@ -1051,6 +1055,13 @@ export class TeamService {
       include: TEAM_STAFF_INCLUDE,
     });
 
+    logger.info('Staff added', {
+      teamId,
+      staffUserId: user.id,
+      roleType: role.type,
+      userId: requestingUserId,
+    });
+
     // Best-effort push notification; never fails the request.
     try {
       await NotificationService.sendToUsers([user.id], {
@@ -1107,11 +1118,21 @@ export class TeamService {
       await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
     }
 
-    return prisma.teamStaff.update({
+    const updated = await prisma.teamStaff.update({
       where: { id: current.id },
       data: { roleId: role.id },
       include: TEAM_STAFF_INCLUDE,
     });
+
+    logger.info('Staff role changed', {
+      teamId,
+      staffUserId,
+      fromRoleType: current.role.type,
+      roleType: role.type,
+      userId: requestingUserId,
+    });
+
+    return updated;
   }
 
   /**
@@ -1153,6 +1174,14 @@ export class TeamService {
 
     await prisma.teamStaff.deleteMany({
       where: { teamId, userId: staffUserId },
+    });
+
+    logger.info('Staff removed', {
+      teamId,
+      staffUserId,
+      roleId: existing.roleId,
+      self: isSelf,
+      userId: requestingUserId,
     });
 
     return { success: true };
@@ -1217,6 +1246,8 @@ export class TeamService {
         canShareStats: data.canShareStats ?? false,
       },
     });
+
+    logger.info('Custom role created', { teamId, roleId: role.id, userId: requestingUserId });
 
     return role;
   }

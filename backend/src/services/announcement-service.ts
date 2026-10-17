@@ -78,6 +78,8 @@ export class AnnouncementService {
       include: ANNOUNCEMENT_INCLUDE,
     });
 
+    logger.info('Announcement created', { announcementId: announcement.id, teamId, userId });
+
     // Email the team (async, don't block response)
     AnnouncementService.emailAnnouncement(team, announcement).catch((err: unknown) => {
       logger.error('Failed to send announcement emails', {

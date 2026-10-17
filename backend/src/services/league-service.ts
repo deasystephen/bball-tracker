@@ -7,6 +7,7 @@ import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
+import { logger } from '../utils/logger';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -191,6 +192,8 @@ export class LeagueService {
       omit: LEAGUE_OMIT,
     });
 
+    logger.info('League created', { leagueId: league.id, userId });
+
     return league;
   }
 
@@ -369,6 +372,8 @@ export class LeagueService {
       omit: LEAGUE_OMIT,
     });
 
+    logger.info('League updated', { leagueId, userId });
+
     return updatedLeague;
   }
 
@@ -410,6 +415,8 @@ export class LeagueService {
     await prisma.league.delete({
       where: { id: leagueId },
     });
+
+    logger.info('League deleted', { leagueId, userId });
 
     return { success: true };
   }
@@ -470,6 +477,8 @@ export class LeagueService {
       include: LEAGUE_ADMIN_INCLUDE,
     });
 
+    logger.info('League admin added', { leagueId, adminUserId, userId });
+
     return leagueAdmin;
   }
 
@@ -498,6 +507,8 @@ export class LeagueService {
     if (count === 0) {
       throw new NotFoundError('League admin not found');
     }
+
+    logger.info('League admin removed', { leagueId, adminUserId, userId });
 
     return { success: true };
   }
@@ -544,6 +555,8 @@ export class LeagueService {
       },
       include: SEASON_INCLUDE,
     });
+
+    logger.info('Season created', { seasonId: season.id, leagueId, userId });
 
     return season;
   }

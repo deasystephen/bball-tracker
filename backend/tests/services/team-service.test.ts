@@ -4,6 +4,7 @@
 
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { logger } from '../../src/utils/logger';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { Prisma } from '@prisma/client';
 import { mockPrisma } from '../setup';
 import {
@@ -977,6 +978,30 @@ describe('TeamService', () => {
           data: expect.objectContaining({ name: newName }),
         })
       );
+    });
+
+    it('logs one `Team updated` event naming the changed fields, never their values (#686)', async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+      const newName = 'Secret Team Name';
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.team.update as jest.Mock).mockResolvedValue({
+        ...team,
+        name: newName,
+        season: { ...season, league },
+        staff: [],
+        members: [],
+      });
+      const infoSpy = spyOnInfo();
+
+      await TeamService.updateTeam(team.id, { name: newName, chatLink: 'https://chat.example.test/x' }, coach.id);
+
+      const event = domainEvent(infoSpy, 'Team updated');
+      expect(event).toEqual({ teamId: team.id, fields: ['name', 'chatLink'], userId: coach.id });
+      expect(JSON.stringify(event)).not.toContain(newName);
+      expect(infoSpy.mock.calls.map(([msg]) => msg)).not.toContain('Team moved to season');
+      infoSpy.mockRestore();
     });
 
     it('should throw NotFoundError if team does not exist', async () => {
@@ -1953,6 +1978,34 @@ describe('TeamService', () => {
       expect(mockPrisma.teamStaff.deleteMany).toHaveBeenCalledWith({
         where: { teamId: team.id, userId: target.id },
       });
+    });
+
+    it('logs one `Staff removed` domain event with ids only (#686)', async () => {
+      const { team, coach } = createFullTeam();
+      const target = createCoach();
+      const row = createTeamStaff({ teamId: team.id, userId: target.id });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      mockStaffRequester(coach, 'HEAD_COACH');
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(({ where }) => {
+        if (where.role?.type === 'HEAD_COACH') return Promise.resolve({ id: 'hc-row' });
+        return Promise.resolve(row);
+      });
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ userId: coach.id, teamId: team.id, team: { name: team.name } }]);
+      (mockPrisma.teamStaff.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
+
+      await TeamService.removeStaffMember(team.id, target.id, coach.id);
+
+      const event = domainEvent(infoSpy, 'Staff removed');
+      expect(event).toEqual({
+        teamId: team.id,
+        staffUserId: target.id,
+        roleId: row.roleId,
+        self: false,
+        userId: coach.id,
+      });
+      expect(JSON.stringify(event)).not.toContain(target.email);
+      infoSpy.mockRestore();
     });
 
     it('throws NotFoundError when the team does not exist', async () => {

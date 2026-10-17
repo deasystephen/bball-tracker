@@ -9,6 +9,7 @@ import {
   expectNotFoundError,
   expectForbiddenError,
 } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 // Mock canAccessTeam via the permissions module
 jest.mock('../../src/utils/permissions', () => ({
@@ -47,6 +48,30 @@ describe('CalendarService', () => {
       expect(result.feedUrl).toContain(`/api/v1/teams/${team.id}/calendar.ics`);
       expect(result.feedUrl).toContain(`token=${encodeURIComponent(result.token)}`);
       expect(result.webcalUrl.startsWith('webcal://')).toBe(true);
+    });
+
+    it('logs one `Calendar feed subscribed` event that never carries the token (#686)', async () => {
+      const team = createTeam();
+      const user = createUser();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (canAccessTeam as jest.Mock).mockResolvedValue(true);
+      (mockPrisma.calendarFeedToken.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.calendarFeedToken.create as jest.Mock).mockImplementation(
+        ({ data }: { data: { userId: string; teamId: string; token: string } }) => ({
+          id: 'token-id',
+          ...data,
+          revokedAt: null,
+          createdAt: new Date(),
+        })
+      );
+      const infoSpy = spyOnInfo();
+
+      const result = await CalendarService.subscribe(team.id, user.id);
+
+      const event = domainEvent(infoSpy, 'Calendar feed subscribed');
+      expect(event).toEqual({ teamId: team.id, created: true, userId: user.id });
+      expect(JSON.stringify(event)).not.toContain(result.token);
+      infoSpy.mockRestore();
     });
 
     it('reuses an existing active token', async () => {
@@ -110,6 +135,22 @@ describe('CalendarService', () => {
         where: { userId: 'user-id', teamId: team.id, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+    });
+
+    it('logs one `Calendar feed revoked` domain event with ids and the count only (#686)', async () => {
+      const team = createTeam();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.calendarFeedToken.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+      const infoSpy = spyOnInfo();
+
+      await CalendarService.revoke(team.id, 'user-id');
+
+      expect(domainEvent(infoSpy, 'Calendar feed revoked')).toEqual({
+        teamId: team.id,
+        revoked: 2,
+        userId: 'user-id',
+      });
+      infoSpy.mockRestore();
     });
 
     it('throws NotFoundError when team does not exist', async () => {

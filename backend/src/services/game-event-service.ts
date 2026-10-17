@@ -237,6 +237,13 @@ export class GameEventService {
       return { result: { event, score } satisfies CreateGameEventResult, status: locked.status };
     });
 
+    logger.info('Game event created', {
+      gameId,
+      eventId: result.event.id,
+      eventType: data.eventType,
+      userId,
+    });
+
     // Broadcast to spectators in the game room. `emitGameEvent` no-ops if
     // Socket.io isn't initialized (e.g., in tests or CLI scripts).
     emitGameEvent(gameId, result);
@@ -345,7 +352,7 @@ export class GameEventService {
       throw new ForbiddenError('You do not have permission to delete game events');
     }
 
-    const { score, status } = await prisma.$transaction(async (tx) => {
+    const { score, status, eventType } = await prisma.$transaction(async (tx) => {
       const locked = await lockGameRow(tx, gameId);
 
       // Looked up under the lock, so a concurrent undo of the same event
@@ -363,8 +370,10 @@ export class GameEventService {
         event.eventType === GameEventType.SHOT
           ? await recomputeHomeScore(tx, gameId)
           : scoreOf(locked);
-      return { score, status: locked.status };
+      return { score, status: locked.status, eventType: event.eventType };
     });
+
+    logger.info('Game event deleted', { gameId, eventId, eventType, userId });
 
     emitGameEventRemoved(gameId, { gameId, eventId, score });
 

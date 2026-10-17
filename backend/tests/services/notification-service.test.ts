@@ -14,6 +14,7 @@
 import { Expo } from 'expo-server-sdk';
 import { NotificationService, PUSH_TOKEN_REBIND_AFTER_MS } from '../../src/services/notification-service';
 import { mockPrisma } from '../setup';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 type ExpoProto = {
   sendPushNotificationsAsync: (m: unknown[]) => Promise<unknown[]>;
@@ -54,6 +55,24 @@ describe('NotificationService', () => {
       expect(result).toEqual(
         expect.objectContaining({ token: VALID_TOKEN, platform: 'ios' })
       );
+    });
+
+    it('logs one `Push token registered` event that never carries the token (#686)', async () => {
+      (mockPrisma.pushToken.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.pushToken.upsert as jest.Mock).mockResolvedValue({
+        id: 'pt-1',
+        userId: 'user-1',
+        token: VALID_TOKEN,
+        platform: 'android',
+      });
+      const infoSpy = spyOnInfo();
+
+      await NotificationService.registerToken('user-1', VALID_TOKEN, 'android');
+
+      const event = domainEvent(infoSpy, 'Push token registered');
+      expect(event).toEqual({ platform: 'android', userId: 'user-1' });
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(VALID_TOKEN);
+      infoSpy.mockRestore();
     });
 
     it('refuses (401) to attach a device to a deleted account, without writing (#444 D9)', async () => {
@@ -160,6 +179,17 @@ describe('NotificationService', () => {
         where: { token: VALID_TOKEN, userId: 'user-1' },
       });
       expect(result).toEqual({ count: 1 });
+    });
+
+    it('logs one `Push token removed` event that never carries the token (#686)', async () => {
+      (mockPrisma.pushToken.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
+
+      await NotificationService.removeToken('user-1', VALID_TOKEN);
+
+      expect(domainEvent(infoSpy, 'Push token removed')).toEqual({ removed: 1, userId: 'user-1' });
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(VALID_TOKEN);
+      infoSpy.mockRestore();
     });
 
     it('never issues an unscoped delete by token value', async () => {

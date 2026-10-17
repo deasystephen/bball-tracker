@@ -19,6 +19,7 @@ import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
 import { getPlayerTeamAccess, isGuardianOf, readableTeamsWhere } from '../utils/permissions';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail } from '../utils/email-match';
+import { logger } from '../utils/logger';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -149,7 +150,7 @@ export class PlayerService {
 
     try {
       // Create the player (as a User with role PLAYER)
-      return await prisma.user.create({
+      const player = await prisma.user.create({
         data: {
           email: data.email,
           name: data.name,
@@ -159,6 +160,8 @@ export class PlayerService {
         },
         select: PLAYER_SELECT,
       });
+      logger.info('Player created', { playerId: player.id, userId: caller.id });
+      return player;
     } catch (error) {
       throw PlayerService.mapWriteError(error);
     }
@@ -443,6 +446,8 @@ export class PlayerService {
       await deletePreviousAvatar(player.profilePictureUrl, updatedPlayer.profilePictureUrl);
     }
 
+    logger.info('Player updated', { playerId, userId });
+
     return updatedPlayer;
   }
 
@@ -511,6 +516,8 @@ export class PlayerService {
     } catch (error) {
       throw PlayerService.mapWriteError(error);
     }
+
+    logger.info('Player deleted', { playerId, userId });
 
     return { success: true };
   }

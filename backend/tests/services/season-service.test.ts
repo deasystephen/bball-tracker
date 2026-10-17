@@ -15,6 +15,7 @@ import {
   createSeason,
 } from '../factories';
 import { expectBadRequestError, expectForbiddenError, expectNotFoundError } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 describe('SeasonService', () => {
   describe('createSeason', () => {
@@ -533,6 +534,24 @@ describe('SeasonService', () => {
       expect(mockPrisma.season.delete).toHaveBeenCalledWith({
         where: { id: season.id },
       });
+    });
+
+    it('logs one `Season deleted` domain event with ids only (#686)', async () => {
+      const admin = createAdmin();
+      const season = createSeason({ name: 'Secret Season Name' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ ...season, teams: [] });
+      (mockPrisma.season.delete as jest.Mock).mockResolvedValue(season);
+      const infoSpy = spyOnInfo();
+
+      await SeasonService.deleteSeason(season.id, admin.id);
+
+      expect(domainEvent(infoSpy, 'Season deleted')).toEqual({
+        seasonId: season.id,
+        leagueId: season.leagueId,
+        userId: admin.id,
+      });
+      infoSpy.mockRestore();
     });
   });
 });

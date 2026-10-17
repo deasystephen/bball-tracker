@@ -22,8 +22,8 @@ Loads when a file under `backend/` is read. The full as-built reference for each
 - URLs via `utils/urls.ts`, dates in email via `utils/format-date.ts`, brand via
   `services/mailer/templates/brand.ts`; every template ends with the shared footer and is listed in the
   mailer test's `renders`. Never log `req.originalUrl`; redact with `utils/redact.ts`.
-- Logging (`utils/logger.ts`, threshold `LOG_LEVEL`): a new service method that mutates data logs
-  one info-level domain event with ids only (never a name, email or token; `hashRecipient()` for an
+- Logging (`utils/logger.ts`, threshold `LOG_LEVEL`): every service method that mutates data logs
+  one info-level domain event with ids only (guard: `tests/services/domain-event-guard.test.ts`) (never a name, email or token; `hashRecipient()` for an
   address); a new external call (SES, S3, WorkOS, Redis) logs its failures at warn/error with the
   failing operation named. `requestId` and `userId` arrive from the request context; do not thread
   them through signatures. A route `catch` that answers its own error logs through

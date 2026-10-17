@@ -12,6 +12,7 @@ import {
   getReadableLeagueIds,
   canReadLeague,
 } from '../utils/permissions';
+import { logger } from '../utils/logger';
 
 const LEAGUE_SUMMARY_SELECT = {
   id: true,
@@ -149,6 +150,8 @@ export class SeasonService {
       },
       include: SEASON_INCLUDE,
     });
+
+    logger.info('Season created', { seasonId: season.id, leagueId: data.leagueId, userId });
 
     return season;
   }
@@ -344,6 +347,8 @@ export class SeasonService {
       include: SEASON_INCLUDE,
     });
 
+    logger.info('Season updated', { seasonId, leagueId: season.leagueId, userId });
+
     return updatedSeason;
   }
 
@@ -380,6 +385,8 @@ export class SeasonService {
     await prisma.season.delete({
       where: { id: seasonId },
     });
+
+    logger.info('Season deleted', { seasonId, leagueId: season.leagueId, userId });
 
     return { success: true };
   }
