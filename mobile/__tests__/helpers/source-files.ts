@@ -24,6 +24,37 @@ export function sourceFiles(dir: string, extensions: readonly string[]): string[
   });
 }
 
+/**
+ * Directories a whole-package source walk never enters: dependencies,
+ * native and build output, and `__tests__` (whose negative fixtures quote
+ * the very patterns the guards forbid).
+ */
+export const SOURCE_SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  'ios',
+  'android',
+  '.expo',
+  'dist',
+  'build',
+  'coverage',
+  '.git',
+  '__tests__',
+]);
+
+/**
+ * Every file under `root` (recursively, following symlinks), as sorted paths
+ * relative to `root`, skipping any directory whose name is in `skipDirs`.
+ */
+export function walkFiles(root: string, skipDirs: ReadonlySet<string>): string[] {
+  const visit = (dir: string): string[] =>
+    fs.readdirSync(dir).flatMap((name) => {
+      const full = path.join(dir, name);
+      if (fs.statSync(full).isDirectory()) return skipDirs.has(name) ? [] : visit(full);
+      return [path.relative(root, full)];
+    });
+  return visit(root).sort();
+}
+
 /** Every line of `text` matching `pattern`, as `<fileName>:<line> <trimmed text>`. */
 export function scanLines(fileName: string, text: string, pattern: RegExp): string[] {
   return text

@@ -230,15 +230,11 @@ global.mockSecureStore = (() => {
     __reset: () => store.clear(),
   };
 })();
-// utils/format-date.ts probes ExpoLocalization the same way; it gets the
-// expo-localization mock above, so the two never disagree.
 jest.mock('expo', () => ({
   ...jest.requireActual('expo'),
-  requireOptionalNativeModule: jest.fn((name) => {
-    if (name === 'ExpoSecureStore') return global.mockSecureStore;
-    if (name === 'ExpoLocalization') return jest.requireMock('expo-localization');
-    return null;
-  }),
+  requireOptionalNativeModule: jest.fn((name) =>
+    name === 'ExpoSecureStore' ? global.mockSecureStore : null
+  ),
 }));
 
 // Mock expo-splash-screen

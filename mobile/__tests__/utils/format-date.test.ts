@@ -1,46 +1,58 @@
 /**
- * utils/format-date.ts (#769): the locale comes from the device's full
- * language tag, read once through `requireOptionalNativeModule`, and falls
- * back to `undefined` (the runtime default) when the module is missing.
+ * utils/format-date.ts (#769): every shape formats with the device's full
+ * language tag from expo-localization, read on each call, and falls back to
+ * `undefined` (the runtime default) when the device reports none.
  */
-import { requireOptionalNativeModule } from 'expo';
+import type * as LocalizationModule from 'expo-localization';
 
 import {
   deviceLocale,
+  formatCalendarDate,
   formatClockTime,
+  formatDateTime,
   formatLongDate,
+  formatMonthDay,
+  formatMonthShort,
+  formatNumericDate,
   formatSeasonDate,
   formatShortDate,
-  resetDeviceLocaleCacheForTests,
 } from '../../utils/format-date';
 
-const mockedRequire = requireOptionalNativeModule as jest.Mock;
+type Locales = ReturnType<typeof LocalizationModule.getLocales>;
+
+// The module object the helper actually calls (jest.setup's mock); a
+// namespace import would be an interop copy that a spy cannot reach.
+const Localization = jest.requireMock<typeof LocalizationModule>('expo-localization');
 
 /** Saturday 3 October 2026, 19:30:45 local time. */
 const DATE = new Date(2026, 9, 3, 19, 30, 45);
 
-function withLocale(languageTag: string | null): void {
-  resetDeviceLocaleCacheForTests();
-  mockedRequire.mockImplementation((name: string) =>
-    name === 'ExpoLocalization' ? { getLocales: () => [{ languageTag }] } : null
-  );
+let getLocalesSpy: jest.SpyInstance<Locales, []>;
+
+function withLocales(locales: { languageTag?: string }[]): void {
+  getLocalesSpy.mockReturnValue(locales as unknown as Locales);
 }
 
 function render(): Record<string, string> {
   return {
     short: formatShortDate(DATE),
     long: formatLongDate(DATE),
+    calendar: formatCalendarDate(DATE),
     season: formatSeasonDate(DATE, 'Not set'),
+    monthDay: formatMonthDay(DATE),
+    numeric: formatNumericDate(DATE),
+    dateTime: formatDateTime(DATE),
     time: formatClockTime(DATE),
     seconds: formatClockTime(DATE, { seconds: true }),
   };
 }
 
-const defaultImplementation = mockedRequire.getMockImplementation();
+beforeEach(() => {
+  getLocalesSpy = jest.spyOn(Localization, 'getLocales');
+});
 
 afterEach(() => {
-  mockedRequire.mockImplementation(defaultImplementation);
-  resetDeviceLocaleCacheForTests();
+  getLocalesSpy.mockRestore();
 });
 
 describe('format-date', () => {
@@ -49,15 +61,23 @@ describe('format-date', () => {
     expect(render()).toEqual({
       short: 'Sat, Oct 3',
       long: 'Saturday, October 3, 2026',
+      calendar: 'October 3, 2026',
       season: 'October 3, 2026',
+      monthDay: 'Oct 3',
+      numeric: '10/3/2026',
+      dateTime: '10/3/2026, 7:30:45 PM',
       time: '7:30 PM',
       seconds: '7:30:45 PM',
     });
+    expect(formatMonthShort(DATE)).toBe('Oct');
   });
 
   it('accepts an ISO string as well as a Date', () => {
-    expect(formatLongDate(DATE.toISOString())).toBe(formatLongDate(DATE));
-    expect(formatClockTime(DATE.toISOString())).toBe(formatClockTime(DATE));
+    const iso = DATE.toISOString();
+    expect(formatShortDate(iso)).toBe(formatShortDate(DATE));
+    expect(formatLongDate(iso)).toBe(formatLongDate(DATE));
+    expect(formatNumericDate(iso)).toBe(formatNumericDate(DATE));
+    expect(formatClockTime(iso)).toBe(formatClockTime(DATE));
   });
 
   it('returns the fallback for a missing season date', () => {
@@ -65,15 +85,16 @@ describe('format-date', () => {
   });
 
   it('renders differently under en-US, en-GB and es-ES', () => {
-    withLocale('en-US');
+    withLocales([{ languageTag: 'en-US' }]);
     const us = render();
-    withLocale('en-GB');
+    withLocales([{ languageTag: 'en-GB' }]);
     const gb = render();
-    withLocale('es-ES');
+    withLocales([{ languageTag: 'es-ES' }]);
     const es = render();
 
     // en-GB: day before month, 24-hour clock.
-    expect(gb.season).toBe('3 October 2026');
+    expect(gb.calendar).toBe('3 October 2026');
+    expect(gb.numeric).toBe('03/10/2026');
     expect(gb.time).toBe('19:30');
     // es-ES: Spanish month and weekday names, 24-hour clock.
     expect(es.long.toLowerCase()).toContain('octubre');
@@ -83,36 +104,22 @@ describe('format-date', () => {
     for (const key of Object.keys(us)) {
       expect(new Set([us[key], gb[key], es[key]]).size).toBeGreaterThan(1);
     }
-    expect(us.long).not.toBe(gb.long);
-    expect(us.long).not.toBe(es.long);
-    expect(gb.long).not.toBe(es.long);
+    expect(new Set([us.long, gb.long, es.long]).size).toBe(3);
   });
 
-  it('resolves the locale once and caches it', () => {
-    withLocale('en-GB');
-    mockedRequire.mockClear();
-    expect(deviceLocale()).toBe('en-GB');
-    expect(deviceLocale()).toBe('en-GB');
-    expect(mockedRequire.mock.calls.filter(([name]) => name === 'ExpoLocalization')).toHaveLength(1);
+  it('reads the locale on every call, so a language change applies at once', () => {
+    withLocales([{ languageTag: 'en-US' }]);
+    expect(formatClockTime(DATE)).toBe('7:30 PM');
+    withLocales([{ languageTag: 'en-GB' }]);
+    expect(formatClockTime(DATE)).toBe('19:30');
   });
 
   it.each([
-    ['the module is not in the binary', () => null],
-    ['the module reports no locale', () => ({ getLocales: () => [] })],
-    ['the tag is empty', () => ({ getLocales: () => [{ languageTag: '' }] })],
-    ['the module is malformed', () => ({})],
-    [
-      'the probe throws',
-      () => {
-        throw new Error('no module');
-      },
-    ],
-  ])('falls back to the runtime default when %s', (_label, impl) => {
-    resetDeviceLocaleCacheForTests();
-    mockedRequire.mockImplementation(impl);
+    ['the device reports no locale', []],
+    ['the tag is empty', [{ languageTag: '' }]],
+  ])('falls back to the runtime default when %s', (_label, locales) => {
+    withLocales(locales);
     expect(deviceLocale()).toBeUndefined();
-    expect(formatLongDate(DATE)).toBe(
-      DATE.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-    );
+    expect(formatNumericDate(DATE)).toBe(DATE.toLocaleDateString(undefined));
   });
 });
