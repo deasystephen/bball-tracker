@@ -3,7 +3,7 @@ import { authenticate } from '../auth/middleware';
 import { avatarUploadUrlSchema } from './schemas';
 import { generateAvatarUploadUrl } from '../../services/upload-service';
 import { BadRequestError } from '../../utils/errors';
-import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router();
 
@@ -29,12 +29,7 @@ router.post('/avatar-url', async (req, res) => {
     const result = await generateAvatarUploadUrl(userId, contentType, contentLength);
     res.json(result);
   } catch (error) {
-    if (error instanceof BadRequestError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to generate upload URL' });
-    }
-    logRouteError(res, 'Error generating avatar upload URL', error);
+    respondWithError(res, error, { log: 'Error generating avatar upload URL', fallback: 'Failed to generate upload URL' });
   }
 });
 

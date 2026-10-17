@@ -13,8 +13,8 @@ import { validateUuidParams } from '../middleware/validate-params';
 import { createReplySchema, replyQuerySchema } from './schemas';
 import { AnnouncementService } from '../../services/announcement-service';
 import { AnnouncementReplyService } from '../../services/announcement-reply-service';
-import { AppError, BadRequestError } from '../../utils/errors';
-import { logRouteError } from '../../utils/log-route-error';
+import { BadRequestError } from '../../utils/errors';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router();
 
@@ -29,12 +29,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
     const announcement = await AnnouncementService.getAnnouncement(req.params.id as string, req.user!.id);
     res.json({ success: true, announcement });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to load announcement' });
-    }
-    logRouteError(res, 'Error loading announcement', error);
+    respondWithError(res, error, { log: 'Error loading announcement', fallback: 'Failed to load announcement' });
   }
 });
 
@@ -52,12 +47,7 @@ router.post('/:id/replies', validateUuidParams('id'), async (req, res) => {
     const reply = await AnnouncementReplyService.createReply(req.params.id as string, parsed.data, req.user!.id);
     res.status(201).json({ success: true, reply });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create reply' });
-    }
-    logRouteError(res, 'Error creating announcement reply', error);
+    respondWithError(res, error, { log: 'Error creating announcement reply', fallback: 'Failed to create reply' });
   }
 });
 
@@ -75,12 +65,7 @@ router.get('/:id/replies', validateUuidParams('id'), async (req, res) => {
     const result = await AnnouncementReplyService.listReplies(req.params.id as string, req.user!.id, parsed.data);
     res.json({ success: true, ...result });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to list replies' });
-    }
-    logRouteError(res, 'Error listing announcement replies', error);
+    respondWithError(res, error, { log: 'Error listing announcement replies', fallback: 'Failed to list replies' });
   }
 });
 
@@ -93,12 +78,7 @@ router.delete('/:id/replies/:replyId', validateUuidParams('id', 'replyId'), asyn
     await AnnouncementReplyService.deleteReply(req.params.id as string, req.params.replyId as string, req.user!.id);
     res.status(204).send();
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to delete reply' });
-    }
-    logRouteError(res, 'Error deleting announcement reply', error);
+    respondWithError(res, error, { log: 'Error deleting announcement reply', fallback: 'Failed to delete reply' });
   }
 });
 

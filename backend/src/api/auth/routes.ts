@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { AppError, DetailedError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError, ServiceUnavailableError } from '../../utils/errors';
+import { AppError, UnauthorizedError, BadRequestError, ForbiddenError, ConflictError } from '../../utils/errors';
 import {
   updateRoleSchema,
   updateProfileSchema,
@@ -22,6 +22,7 @@ import type { Prisma } from '@prisma/client';
 import { authRateLimit, refreshRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
 import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 import { captureException } from '../../utils/sentry';
 import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
@@ -189,8 +190,7 @@ if (process.env.NODE_ENV === 'development') {
         accessToken: `dev_${devToken}`,
       });
     } catch (error) {
-      res.status(500).json({ error: 'Dev login failed' });
-      logRouteError(res, 'Dev login error', error);
+      respondWithError(res, error, { log: 'Dev login error', fallback: 'Dev login failed' });
       return;
     }
   });
@@ -206,8 +206,7 @@ if (process.env.NODE_ENV === 'development') {
 
       res.json({ users });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to list users' });
-      logRouteError(res, 'Error listing dev users', error);
+      respondWithError(res, error, { log: 'Error listing dev users', fallback: 'Failed to list users' });
     }
   });
 }
@@ -271,11 +270,13 @@ router.get('/login', async (req, res): Promise<void> => {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    res.status(500).json({
-      error: 'Failed to generate authorization URL',
-      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+    respondWithError(res, error, {
+      log: 'Error generating authorization URL',
+      fallback: {
+        error: 'Failed to generate authorization URL',
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      },
     });
-    logRouteError(res, 'Error generating authorization URL', error);
   }
 });
 
@@ -354,9 +355,7 @@ router.get('/callback', async (req, res) => {
       refreshToken,
     });
   } catch (error) {
-    if (error instanceof BadRequestError) {
-      res.status(400).json({ error: error.message });
-    } else if (error instanceof ConflictError) {
+    if (error instanceof ConflictError) {
       // Email already bound to a different WorkOS user. Never a normal client
       // outcome: it is the signature of the WorkOS key cutover (#24), where every
       // production row still carries a staging WorkOS id and every sign-in would
@@ -369,13 +368,14 @@ router.get('/callback', async (req, res) => {
         error: error.message,
       });
       return;
-    } else {
-      // Unexpected failure (e.g. DB/WorkOS outage) — report to Sentry so we're
-      // alerted instead of only finding it in CloudWatch logs after a user hits it.
-      captureException(error, { flow: 'auth-callback' });
-      res.status(500).json({ error: 'Authentication failed' });
     }
-    logRouteError(res, 'Error in auth callback', error);
+    // Unexpected failure (e.g. DB/WorkOS outage) — report to Sentry so we're
+    // alerted instead of only finding it in CloudWatch logs after a user hits it.
+    respondWithError(res, error, {
+      log: 'Error in auth callback',
+      fallback: 'Authentication failed',
+      sentryFlow: 'auth-callback',
+    });
   }
 });
 
@@ -440,15 +440,11 @@ router.get('/me', authenticate, async (req, res) => {
 
     res.json({ success: true, user: await buildSessionUser(user) });
   } catch (error) {
-    if (error instanceof UnauthorizedError) {
-      res.status(401).json({ error: error.message });
-    } else if (error instanceof ServiceUnavailableError) {
-      res.status(503).json({ error: error.message });
-    } else {
-      captureException(error, { flow: 'auth-me' });
-      res.status(500).json({ error: 'Failed to get user information' });
-    }
-    logRouteError(res, 'Error getting user', error);
+    respondWithError(res, error, {
+      log: 'Error getting user',
+      fallback: 'Failed to get user information',
+      sentryFlow: 'auth-me',
+    });
   }
 });
 
@@ -504,13 +500,11 @@ router.patch('/me', authenticate, async (req, res) => {
 
     res.json({ success: true, user });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      captureException(error, { flow: 'auth-profile' });
-      res.status(500).json({ error: 'Failed to update profile' });
-    }
-    logRouteError(res, 'Error updating profile', error);
+    respondWithError(res, error, {
+      log: 'Error updating profile',
+      fallback: 'Failed to update profile',
+      sentryFlow: 'auth-profile',
+    });
   }
 });
 
@@ -551,13 +545,11 @@ router.patch('/me/role', authenticate, async (req, res) => {
 
     res.json({ success: true, user });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      captureException(error, { flow: 'auth-role' });
-      res.status(500).json({ error: 'Failed to update role' });
-    }
-    logRouteError(res, 'Error updating role', error);
+    respondWithError(res, error, {
+      log: 'Error updating role',
+      fallback: 'Failed to update role',
+      sentryFlow: 'auth-role',
+    });
   }
 });
 
@@ -574,7 +566,7 @@ router.patch('/me/role', authenticate, async (req, res) => {
  *   head coach of a team in an active season (hand the team over first)
  * - 401 once deleted (the token no longer resolves to a user)
  */
-router.delete('/me', authenticate, async (req, res, next) => {
+router.delete('/me', authenticate, async (req, res) => {
   try {
     const token = req.headers.authorization!.substring(7);
     let sessionId: string | undefined;
@@ -592,14 +584,12 @@ router.delete('/me', authenticate, async (req, res, next) => {
     });
     res.json({ success: true, identityDeleted: result.identityDeleted, erased: result.erased });
   } catch (error) {
-    if (error instanceof AppError) {
-      // The central handler serializes DetailedError bodies (last_head_coach + teams)
-      next(error);
-      return;
-    }
-    logger.error('Error deleting account', { error: error instanceof Error ? error.message : String(error) });
-    captureException(error, { flow: 'account-delete' });
-    res.status(500).json({ error: 'Failed to delete account' });
+    // A DetailedError answers its body (400 last_head_coach + teams).
+    respondWithError(res, error, {
+      log: 'Error deleting account',
+      fallback: 'Failed to delete account',
+      sentryFlow: 'account-delete',
+    });
   }
 });
 
@@ -672,11 +662,11 @@ router.get('/me/usage', authenticate, async (req, res) => {
     const usage = await getUsage(req.user!.id);
     res.json({ success: true, usage });
   } catch (error) {
-    logger.error('Error getting usage', {
-      error: error instanceof Error ? error.message : String(error),
+    respondWithError(res, error, {
+      log: 'Error getting usage',
+      fallback: 'Failed to get usage',
+      sentryFlow: 'auth-usage',
     });
-    captureException(error, { flow: 'auth-usage' });
-    res.status(500).json({ error: 'Failed to get usage' });
   }
 });
 
@@ -711,17 +701,20 @@ router.post('/push-token', authenticate, async (req, res) => {
   } catch (error) {
     // Expected refusals: invalid Expo token (400), account deleted after
     // authenticate (401, #761), token freshly bound elsewhere (409, B2.9).
-    if (error instanceof AppError && error.statusCode < 500) {
-      logger.warn('Push token registration refused', { status: error.statusCode, reason: error.message });
-      return res
-        .status(error.statusCode)
-        .json(error instanceof DetailedError ? error.body() : { error: error.message });
+    // A 5xx AppError keeps its status but answers the generic body, so an
+    // internal message (e.g. "Database unavailable") never reaches the client.
+    if (error instanceof AppError && error.statusCode >= 500) {
+      res.status(error.statusCode).json({ error: 'Failed to register push token' });
+      captureException(error, { flow: 'push-token-register' });
+      logRouteError(res, 'Error registering push token', error);
+      return;
     }
-    logger.error('Error registering push token', { error: error instanceof Error ? error.message : String(error) });
-    captureException(error, { flow: 'push-token-register' });
-    return res
-      .status(error instanceof AppError ? error.statusCode : 500)
-      .json({ error: 'Failed to register push token' });
+    respondWithError(res, error, {
+      log: 'Error registering push token',
+      fallback: 'Failed to register push token',
+      sentryFlow: 'push-token-register',
+    });
+    return;
   }
 });
 
@@ -744,8 +737,8 @@ router.delete('/push-token', authenticate, async (req, res) => {
 
     return res.json({ success: true });
   } catch (error) {
-    logger.error('Error removing push token', { error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ error: 'Failed to remove push token' });
+    respondWithError(res, error, { log: 'Error removing push token', fallback: 'Failed to remove push token' });
+    return;
   }
 });
 

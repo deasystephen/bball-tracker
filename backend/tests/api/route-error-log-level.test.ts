@@ -1,5 +1,6 @@
 /**
- * Route catch blocks log at the level of the status they answered (#656).
+ * Route catch blocks answer through respondWithError (#831) and log at the
+ * level of the status they answered (#656).
  *
  * Expected client outcomes (4xx) are `warn`; 5xx and unexpected exceptions are
  * `error`, so `service:bball-tracker-api @level:error` stays the on-call signal
@@ -12,7 +13,7 @@ import { app, httpServer } from '../../src/index';
 import { TeamService } from '../../src/services/team-service';
 import { CalendarService } from '../../src/services/calendar-service';
 import { StatsExportService } from '../../src/services/stats-export-service';
-import { ConflictError, ForbiddenError, NotFoundError } from '../../src/utils/errors';
+import { ConflictError, ForbiddenError, NotFoundError, PaymentRequiredError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
 
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -93,18 +94,38 @@ describe('route catch log level (#656)', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('a 4xx AppError the route does not handle is answered 500 and logged at error', async () => {
-    // GET /teams/:id answers only 400/403/404 itself; anything else is a 500
-    // and must surface on the error stream even though the error is an AppError.
-    // This pins CURRENT behaviour, not the desired one: answering every AppError
-    // with its own status is the follow-up #831.
+  it('any AppError is answered with its own status and message, logged at warn (#831)', async () => {
+    // GET /teams/:id used to list only 400/403/404 and answer 500 for any other
+    // AppError; respondWithError answers every AppError with its own status.
     mockTeamService.getTeamById.mockRejectedValue(new ConflictError('unexpected conflict'));
 
     const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
 
-    expect(res.status).toBe(500);
-    expect(error).toHaveBeenCalledWith('Error getting team', { status: 500, error: 'unexpected conflict' });
-    expect(warn).not.toHaveBeenCalled();
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'unexpected conflict' });
+    expect(warn).toHaveBeenCalledWith('Error getting team', { status: 409, error: 'unexpected conflict' });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('a DetailedError is answered with its body() (#831)', async () => {
+    // A route that never listed PaymentRequiredError still answers the 402
+    // upgrade_required payload the client renders as an upgrade CTA.
+    mockTeamService.getTeamById.mockRejectedValue(
+      new PaymentRequiredError({ feature: 'x', currentTier: 'FREE', requiredTier: 'PREMIUM' })
+    );
+
+    const res = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+    expect(res.status).toBe(402);
+    expect(res.body).toEqual({
+      error: 'Upgrade required',
+      code: 'upgrade_required',
+      feature: 'x',
+      currentTier: 'FREE',
+      requiredTier: 'PREMIUM',
+    });
+    expect(warn).toHaveBeenCalledWith('Error getting team', { status: 402, error: 'Upgrade required' });
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('an export that fails after the response started keeps its error line and ends the response', async () => {

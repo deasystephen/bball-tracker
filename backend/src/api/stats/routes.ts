@@ -5,9 +5,8 @@
 import { Router } from 'express';
 import { StatsService } from '../../services/stats-service';
 import { authenticate } from '../auth/middleware';
-import { NotFoundError, ForbiddenError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
-import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router();
 
@@ -27,15 +26,7 @@ router.get('/games/:gameId', validateUuidParams('gameId'), async (req, res) => {
       boxScore,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get box score' });
-    }
-    logRouteError(res, 'Error getting box score', error);
+    respondWithError(res, error, { log: 'Error getting box score', fallback: 'Failed to get box score' });
   }
 });
 
@@ -56,15 +47,7 @@ router.get('/games/:gameId/players/:playerId', validateUuidParams('gameId', 'pla
       stats,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get player game stats' });
-    }
-    logRouteError(res, 'Error getting player game stats', error);
+    respondWithError(res, error, { log: 'Error getting player game stats', fallback: 'Failed to get player game stats' });
   }
 });
 
@@ -84,15 +67,7 @@ router.get('/players/:playerId', validateUuidParams('playerId'), async (req, res
       ...stats,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get player stats' });
-    }
-    logRouteError(res, 'Error getting player overall stats', error);
+    respondWithError(res, error, { log: 'Error getting player overall stats', fallback: 'Failed to get player stats' });
   }
 });
 
@@ -113,15 +88,7 @@ router.get('/players/:playerId/teams/:teamId', validateUuidParams('playerId', 't
       stats,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get player season stats' });
-    }
-    logRouteError(res, 'Error getting player season stats', error);
+    respondWithError(res, error, { log: 'Error getting player season stats', fallback: 'Failed to get player season stats' });
   }
 });
 
@@ -141,15 +108,7 @@ router.get('/teams/:teamId', validateUuidParams('teamId'), async (req, res) => {
       stats,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get team season stats' });
-    }
-    logRouteError(res, 'Error getting team season stats', error);
+    respondWithError(res, error, { log: 'Error getting team season stats', fallback: 'Failed to get team season stats' });
   }
 });
 
@@ -169,15 +128,7 @@ router.get('/teams/:teamId/players', validateUuidParams('teamId'), async (req, r
       players,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get team roster stats' });
-    }
-    logRouteError(res, 'Error getting team roster stats', error);
+    respondWithError(res, error, { log: 'Error getting team roster stats', fallback: 'Failed to get team roster stats' });
   }
 });
 
