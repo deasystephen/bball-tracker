@@ -78,8 +78,17 @@ export const apiRateLimit = rateLimit({
 });
 
 /**
- * Write operation rate limit (POST, PATCH, DELETE)
- * 30 requests per minute per IP
+ * Per-IP write limit for the public invitation accept,
+ * `POST /invitations/by-token/:token/accept` (`invitations/public-routes.ts`),
+ * the only route it is mounted on: 30 requests per minute per IP. The browser
+ * calls that route directly, unauthenticated, so the key is the IP.
+ *
+ * It is NOT a general POST/PATCH/DELETE limiter (#823). The auth routes have
+ * their own (`authRateLimit` on login, callback and dev-login,
+ * `refreshRateLimit` on `POST /auth/refresh`), the three routes that can send
+ * invitation email add `inviteRateLimit`, and every other authenticated write
+ * route has only the global `apiRateLimit` (100/min per IP). Mounting this
+ * one more widely is a behaviour change and needs its own issue.
  */
 export const writeRateLimit = rateLimit({
   windowMs: 60 * 1000,
