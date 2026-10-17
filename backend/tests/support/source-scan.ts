@@ -1,9 +1,9 @@
 /**
  * Shared helpers for the source-scanning guard tests under `tests/utils/`
  * (`email-match-guard`, `user-write-guard`, `route-catch-log-guard`,
- * `prisma-mock-coverage-guard`). Call them from a `beforeAll`, never at
- * collection time, so `--testPathPattern` runs that skip a guard do not walk
- * the tree.
+ * `prisma-mock-coverage-guard`) and `tests/guards/unused-dependencies`.
+ * Call them from a `beforeAll`, never at collection time, so
+ * `--testPathPattern` runs that skip a guard do not walk the tree.
  */
 import { readdirSync } from 'fs';
 import path from 'path';

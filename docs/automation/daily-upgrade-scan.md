@@ -28,7 +28,7 @@ the deferral list current, and post a daily summary comment on the rolling
 | Who | Owns | Mechanism |
 | --- | --- | --- |
 | **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI. The web CI jobs (`Lint and Type Check (web)`, `Test Web`; #690) run on `/web` bumps but gate auto-merge only once the owner adds both to the required status checks of `main`; until then a red web job does not stop a `/web` merge |
-| **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
+| **Claude scan** | Security `overrides` for vulnerable transitives (all sides), and retiring any override whose target has left the tree ("Override shape" below); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
 | **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
 
 The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
@@ -90,6 +90,10 @@ Step 2a and the Step 3 gate):
   major and point it at another.
 - **Don't add inert entries.** If every consumer of the old line already resolves to a patched
   version with no override, there is nothing to add. #779 removed eleven such entries.
+- **Retire dead entries.** The scan also removes an override whose target has left the tree: for
+  every override key on every side it runs `npm ls <pkg> --all`, and an `(empty)` result makes the
+  removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides"). #777
+  retired the backend's `hono`, `@hono/node-server` and `fast-xml-builder` entries this way.
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but

@@ -69,7 +69,7 @@ The server will start on `http://localhost:3000`. `curl http://localhost:3000/he
 
 - `npm run dev` - Start development server with hot reload
 - `npm run build` - Build for production
-- `npm start` - Start production server
+- `npm start` - Start the compiled server from `dist/src/index.js`, the same file the Docker entrypoint runs (`tsc` keeps the `src/` segment because `tests/` is compiled too)
 - `npm run prisma:generate` - Generate Prisma client
 - `npm run prisma:migrate` - Run database migrations
 - `npm run prisma:studio` - Open Prisma Studio

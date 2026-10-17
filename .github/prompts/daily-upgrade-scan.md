@@ -108,6 +108,21 @@ under ⏸ only):
   c. Package is in the deferral list as a *direct* dep → DEFER, but still
      report it under ⚠ with the CVE.
 
+### Retire dead overrides (all sides)
+
+For every key in `backend/`, `web/` and `mobile/` `package.json#overrides`
+(top-level keys, and each nested key inside a parent block), run from that
+side's directory after `npm ci`:
+
+  npm ls <pkg> --all          # for "<pkg>@^<major>" keys, ls the bare <pkg>
+
+When it prints `(empty)` the target has left the tree and the entry is dead:
+it would silently pin any future consumer of that package. Remove the entry
+→ AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
+branch, Step 3). Remove nothing whose `npm ls` shows any copy, even one that
+already satisfies the floor; that is a human call. Name each removed key in the
+PR body and on the 🟢 line of the daily log ("override retired: <pkg>").
+
 ### Mobile patch bumps
 
   - `npm outdated` entries where `current ≠ wanted` AND `wanted` is within the
