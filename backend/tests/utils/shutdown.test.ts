@@ -31,6 +31,7 @@ function deps(overrides: Partial<ShutdownDeps> = {}): { deps: ShutdownDeps; orde
 beforeEach(() => {
   jest.spyOn(logger, 'info').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+  jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -62,13 +63,24 @@ describe('createShutdown', () => {
     expect(d.exit).toHaveBeenCalledWith(0);
   });
 
-  it('still exits 0 when Prisma or Redis fails to quit', async () => {
+  it('still exits 0 when Prisma or Redis fails to quit, and warns for each', async () => {
     const { deps: d } = deps({
       disconnectPrisma: jest.fn().mockRejectedValue(new Error('pg gone')),
       closeRedis: jest.fn().mockRejectedValue(new Error('redis gone')),
     });
     await createShutdown(d)('SIGTERM');
     expect(d.exit).toHaveBeenCalledWith(0);
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith('Shutdown: connection did not quit cleanly', {
+      signal: 'SIGTERM',
+      client: 'prisma',
+      error: 'pg gone',
+    });
+    expect(logger.warn).toHaveBeenCalledWith('Shutdown: connection did not quit cleanly', {
+      signal: 'SIGTERM',
+      client: 'redis',
+      error: 'redis gone',
+    });
   });
 
   it('exits 1 when an ordered closer throws', async () => {
@@ -92,25 +104,24 @@ describe('createShutdown', () => {
     expect(d.exit).toHaveBeenCalledTimes(1);
   });
 
-  it('unrefs the hard-exit timer so it never holds a finished process open', async () => {
-    const unref = jest.fn();
-    const realSetTimeout = global.setTimeout;
-    const spy = jest.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
-      const handle = realSetTimeout(fn, ms);
-      const originalUnref = handle.unref.bind(handle);
-      handle.unref = () => {
-        unref();
-        return originalUnref();
-      };
-      return handle;
-    }) as typeof setTimeout);
-    try {
-      const { deps: d } = deps();
-      await createShutdown(d)('SIGTERM');
-      expect(unref).toHaveBeenCalledTimes(1);
-    } finally {
-      spy.mockRestore();
-    }
+  it('keeps the hard-exit timer ref\'d, so a closer that never settles still ends in exit(1)', async () => {
+    jest.useFakeTimers();
+    const { deps: d } = deps({ io: { close: jest.fn(() => new Promise<void>(() => undefined)) } });
+    void createShutdown(d)('SIGTERM');
+    await Promise.resolve();
+
+    const timers = jest.getTimerCount();
+    expect(timers).toBe(1);
+    jest.runOnlyPendingTimers();
+    expect(d.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('clears the hard-exit timer once the sequence finishes', async () => {
+    jest.useFakeTimers();
+    const { deps: d } = deps();
+    await createShutdown(d)('SIGTERM');
+    expect(jest.getTimerCount()).toBe(0);
+    expect(d.exit).toHaveBeenCalledTimes(1);
   });
 
   it('runs once even when a second signal arrives mid-shutdown', async () => {

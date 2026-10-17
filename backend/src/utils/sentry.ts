@@ -12,7 +12,7 @@ import type { ErrorEvent, Event, EventHint, NodeOptions } from '@sentry/node';
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from './errors';
 import { logger } from './logger';
-import { redactQueryObject, redactQueryString, redactUrl } from './redact';
+import { redactQueryObject, redactQueryString, redactUrl, redactUrlsInText } from './redact';
 
 type SentryRequest = NonNullable<Event['request']>;
 /** `@sentry/node` doesn't re-export `TransactionEvent`; derive it from the option signature. */
@@ -167,12 +167,13 @@ export function initSentry(): void {
 
   Sentry.init({
     dsn,
-    // Capture unhandled rejections but write nothing to the console: the app's
-    // own listener (installProcessHandlers) is the single structured log line,
-    // and its keep-alive policy must not depend on whether a DSN is set (#750).
-    // A one-entry array merges with the defaults by name, so uncaught
-    // exceptions keep Sentry's default (capture, flush, exit).
-    integrations: [Sentry.onUnhandledRejectionIntegration({ mode: 'none' })],
+    // Drop Sentry's own unhandled-rejection integration: the app's listener
+    // (installProcessHandlers) is the single structured log line and the single
+    // tagged capture, and its keep-alive policy must not depend on whether a
+    // DSN is set (#750). Even in mode 'none' the integration still captures, so
+    // keeping it would report every rejection twice. Every other default stays,
+    // so uncaught exceptions keep Sentry's default (capture, flush, exit).
+    integrations: (defaults) => defaults.filter((i) => i.name !== UNHANDLED_REJECTION_INTEGRATION),
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
     release: process.env.SENTRY_RELEASE,
     // Conservative defaults; tune post-GA.
@@ -186,7 +187,8 @@ export function initSentry(): void {
 
 /**
  * The process-level policy for an unhandled promise rejection (#750), the same
- * whether or not `SENTRY_DSN` is set: log one structured `error` line, report it
+ * whether or not `SENTRY_DSN` is set: log one structured `error` line (message
+ * redacted, stack only outside production), report it
  * to Sentry when enabled, and keep the process alive. The API is single-replica
  * (Socket.io rooms live in process memory), so a crash-and-relaunch would drop
  * every live game. Registering any listener also turns off Node's default
@@ -201,10 +203,20 @@ export function installProcessHandlers(): void {
   process.on('unhandledRejection', onUnhandledRejection);
 }
 
+/** Name of Sentry's default integration that `initSentry` filters out. */
+export const UNHANDLED_REJECTION_INTEGRATION = 'OnUnhandledRejection';
+
+// The message may carry a URL (a failed fetch, a token link), so it goes through
+// redaction; the stack is logged only outside production, like the Express
+// error handler (Sentry still gets the full error).
 function onUnhandledRejection(reason: unknown): void {
+  const message = reason instanceof Error ? reason.message : String(reason);
   logger.error('Unhandled promise rejection', {
-    error: reason instanceof Error ? reason.message : String(reason),
-    stack: reason instanceof Error ? reason.stack : undefined,
+    error: redactUrlsInText(message),
+    stack:
+      process.env.NODE_ENV !== 'production' && reason instanceof Error && reason.stack
+        ? redactUrlsInText(reason.stack)
+        : undefined,
   });
   captureException(reason, { flow: 'process', kind: 'unhandledRejection' });
 }

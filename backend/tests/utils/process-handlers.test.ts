@@ -11,19 +11,14 @@ type LoggerModule = typeof import('../../src/utils/logger');
 const mockSentryInit = jest.fn();
 const mockSentryCapture = jest.fn();
 const mockScope = { setTags: jest.fn(), setTag: jest.fn(), setUser: jest.fn() };
-const mockRejectionIntegration = jest.fn((options: { mode: string }) => ({
-  name: 'OnUnhandledRejection',
-  options,
-}));
-
 jest.mock('@sentry/node', () => ({
   init: mockSentryInit,
   captureException: mockSentryCapture,
   withScope: (cb: (scope: typeof mockScope) => void): void => cb(mockScope),
-  onUnhandledRejectionIntegration: mockRejectionIntegration,
 }));
 
 const ORIGINAL_DSN = process.env.SENTRY_DSN;
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 let baseline: Array<(...args: unknown[]) => void>;
 
 function load(): { sentry: SentryModule; logger: LoggerModule['logger'] } {
@@ -50,6 +45,7 @@ afterEach(() => {
   for (const listener of addedListeners()) process.removeListener('unhandledRejection', listener);
   if (ORIGINAL_DSN === undefined) delete process.env.SENTRY_DSN;
   else process.env.SENTRY_DSN = ORIGINAL_DSN;
+  process.env.NODE_ENV = ORIGINAL_NODE_ENV;
 });
 
 describe.each([
@@ -88,16 +84,40 @@ describe.each([
 });
 
 describe('Sentry wiring', () => {
-  it('turns off the integration console output (mode none) when a DSN is set', () => {
+  it("drops Sentry's own rejection integration (no double capture) and keeps every other default", () => {
     process.env.SENTRY_DSN = 'https://abc@o1.ingest.sentry.io/1';
     const { sentry } = load();
     sentry.initSentry();
 
-    expect(mockRejectionIntegration).toHaveBeenCalledWith({ mode: 'none' });
-    const options = mockSentryInit.mock.calls[0][0] as { integrations: unknown[] };
-    expect(options.integrations).toEqual([
-      { name: 'OnUnhandledRejection', options: { mode: 'none' } },
+    const options = mockSentryInit.mock.calls[0][0] as {
+      integrations: (defaults: Array<{ name: string }>) => Array<{ name: string }>;
+    };
+    expect(typeof options.integrations).toBe('function');
+    const kept = options.integrations([
+      { name: 'OnUncaughtException' },
+      { name: sentry.UNHANDLED_REJECTION_INTEGRATION },
+      { name: 'Http' },
     ]);
+    expect(kept.map((i) => i.name)).toEqual(['OnUncaughtException', 'Http']);
+    expect(sentry.UNHANDLED_REJECTION_INTEGRATION).toBe('OnUnhandledRejection');
+  });
+
+  it('redacts URLs in the message and leaves the stack out in production', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SENTRY_DSN;
+    const { sentry, logger } = load();
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    sentry.initSentry();
+
+    addedListeners()[0](
+      new Error('fetch failed: https://hooplings.com/invite/abcdefghijklmnop?token=s3cret'),
+      Promise.resolve()
+    );
+
+    expect(errorSpy).toHaveBeenCalledWith('Unhandled promise rejection', {
+      error: 'fetch failed: https://hooplings.com/invite/[redacted]?token=[redacted]',
+      stack: undefined,
+    });
   });
 
   it('captures the rejection with the process tags when Sentry is enabled', () => {

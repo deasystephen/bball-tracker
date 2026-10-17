@@ -12,12 +12,15 @@
  *     server-initiated disconnect (`io server disconnect`) is NOT
  *     auto-reconnected by socket.io-client, and live games would stay dark.
  *  2. The SES event consumer stops (its in-flight long poll unwinds).
- *  3. Prisma and Redis quit, in parallel; a failure in either is ignored.
+ *  3. Prisma and Redis quit, in parallel; a failure in either is logged at
+ *     `warn` and does not change the exit code.
  *  4. `exit(0)`.
  *
  * A hard-exit timer (`exit(1)` after SHUTDOWN_GRACE_MS, under the 30 s stop
- * timeout) guarantees the process ends even if a closer hangs; it is
- * `unref()`ed so it never keeps an otherwise finished process alive.
+ * timeout) guarantees the process ends even if a closer hangs. It stays ref'd
+ * on purpose: the routine always ends in `exit()`, and an unref'd timer would
+ * let a closer that never settles (with no other handle left) drain the event
+ * loop and exit 0 with neither `Shutdown complete` nor the forced `exit(1)`.
  *
  * Collaborators are parameters so the routine is unit-testable without a server.
  */
@@ -53,12 +56,21 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
       logger.error('Shutdown grace period elapsed; forcing exit', { signal });
       deps.exit(1);
     }, deps.graceMs ?? SHUTDOWN_GRACE_MS);
-    hardExit.unref();
 
     try {
       await deps.io.close();
       await deps.consumer?.stop();
-      await Promise.allSettled([deps.disconnectPrisma(), deps.closeRedis()]);
+      const quits = await Promise.allSettled([deps.disconnectPrisma(), deps.closeRedis()]);
+      const names = ['prisma', 'redis'] as const;
+      quits.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          logger.warn('Shutdown: connection did not quit cleanly', {
+            signal,
+            client: names[i],
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          });
+        }
+      });
     } catch (err) {
       logger.error('Shutdown step failed', {
         signal,

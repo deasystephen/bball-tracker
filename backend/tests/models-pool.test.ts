@@ -10,6 +10,7 @@ import {
   DB_IDLE_TIMEOUT_MS,
   DB_POOL_MAX,
   DB_POOL_OPTIONS,
+  POOL_TIMEOUT_MESSAGES,
   isPoolTimeoutError,
 } from '../src/models/pool-config';
 
@@ -18,14 +19,15 @@ const TASK_DEFINITION = JSON.parse(
 ) as { containerDefinitions: Array<{ healthCheck?: { timeout?: number } }> };
 
 describe('pg pool bounds', () => {
-  it('sets a connect/pool timeout no longer than the container health check timeout', () => {
+  it('sets a connect/pool timeout at least 1 s under the container health check timeout', () => {
     const timeouts = TASK_DEFINITION.containerDefinitions
       .map((c) => c.healthCheck?.timeout)
       .filter((t): t is number => typeof t === 'number');
     expect(timeouts.length).toBeGreaterThan(0);
     expect(DB_CONNECTION_TIMEOUT_MS).toBeGreaterThan(0);
     for (const seconds of timeouts) {
-      expect(DB_CONNECTION_TIMEOUT_MS).toBeLessThanOrEqual(seconds * 1000);
+      // Headroom so the 503 reaches the checker before the checker gives up.
+      expect(DB_CONNECTION_TIMEOUT_MS).toBeLessThanOrEqual(seconds * 1000 - 1000);
     }
   });
 
@@ -59,6 +61,18 @@ describe('pg pool bounds', () => {
 });
 
 describe('isPoolTimeoutError', () => {
+  // A reworded message in a pg-pool bump would silently turn every timeout into
+  // db 'down'; read the literals from the installed source. Both live in
+  // pg-pool: the second wraps pg's own client connect timer ('timeout expired').
+  // Read by path: the package's `exports` map hides `pg-pool/index.js`.
+  it('matches messages pg-pool still emits', () => {
+    const sources = readFileSync(path.resolve(__dirname, '../node_modules/pg-pool/index.js'), 'utf8');
+    expect(POOL_TIMEOUT_MESSAGES).toHaveLength(2);
+    for (const message of POOL_TIMEOUT_MESSAGES) {
+      expect(sources).toContain(message);
+    }
+  });
+
   it("recognises pg-pool's wait timeout and pg's connect timeout", () => {
     expect(isPoolTimeoutError(new Error('timeout exceeded when trying to connect'))).toBe(true);
     expect(isPoolTimeoutError(new Error('Connection terminated due to connection timeout'))).toBe(true);

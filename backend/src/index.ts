@@ -79,7 +79,7 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
-import { isPoolTimeoutError } from './models/pool-config';
+import { DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from './models/pool-config';
 
 // `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
 // fired (pool saturated, or RDS not answering TCP), 'down' for anything else
@@ -120,7 +120,10 @@ app.use(sentryErrorHandler);
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
   // Expected client outcomes (expired token, 403, 404, malformed body) are
   // warnings — reserving `error` for 5xx keeps the error stream meaningful.
-  const status = err instanceof AppError ? err.statusCode : clientErrorStatus(err);
+  // pg's pool-wait/connect timeout (#751): the pool is saturated or the
+  // database is not answering. Answer 503 with Retry-After, not a generic 500.
+  const poolTimeout = isPoolTimeoutError(err);
+  const status = poolTimeout ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
   const log = status !== undefined && status < 500 ? logger.warn : logger.error;
   log(err.message, {
     requestId: _req.requestId,
@@ -151,6 +154,14 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     res.status(clientStatus).json({
       error: clientStatus === 413 ? 'Request body too large' : 'Invalid request body',
     });
+    return;
+  }
+
+  if (poolTimeout) {
+    res
+      .status(503)
+      .set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS))
+      .json({ error: 'Service temporarily unavailable, please retry' });
     return;
   }
 
@@ -189,8 +200,11 @@ if (require.main === module) {
     closeRedis,
     exit: (code) => process.exit(code),
   });
+  // `on`, not `once`: a second signal must hit the routine's own guard and be
+  // ignored. With `once` it would find no listener and Node's default would
+  // kill the process mid-shutdown.
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.once(signal, () => void shutdown(signal));
+    process.on(signal, () => void shutdown(signal));
   }
 }
 

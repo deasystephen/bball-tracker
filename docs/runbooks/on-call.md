@@ -64,7 +64,7 @@ Expect several emails for one incident. A crashed task trips `ecs-no-running-tas
    says how, and both go to [Database](#database). No response at all means the task or the ALB.
    - `"db":"down"`: the database answered with an error — connection refused, authentication,
      TLS. Look at the instance state and the security group.
-   - `"db":"timeout"`: the ping hit the pool's 5 s `connectionTimeoutMillis`. Either all 10
+   - `"db":"timeout"`: the ping hit the pool's 3.5 s `connectionTimeoutMillis`. Either all 10
      clients of the task's pool are busy (saturation: check `rds-cpu-high` and the
      `alb-response-time-p99` alarm, and Performance Insights' top SQL), or RDS is not answering
      TCP at all (a security-group or route change, a failover in progress).
@@ -152,7 +152,8 @@ as a remedy: Socket.io runs on an in-memory adapter and is single-replica only (
    2 x 10 + 1 = 21. Anything well above that means more tasks than intended are running, or an
    operator session or script was left open. Confirm `runningCount` with the `describe-services`
    command above. Pool exhaustion inside one task never shows here: it shows as
-   `"db":"timeout"` on `/health` and slow responses.
+   `"db":"timeout"` on `/health` and as 503s with `Retry-After` (or 500s from routes that answer
+   their own errors) on API requests.
 3. **CPU: open Performance Insights** for the instance and look at top SQL. `db.t3.micro` is
    burstable — sustained CPU also drains the credit balance (`CPUCreditBalance`), after which the
    instance is throttled and everything slows at once.

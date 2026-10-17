@@ -20,7 +20,6 @@ jest.mock('@sentry/node', () => {
   const scope = { setUser: jest.fn(), setTag: jest.fn(), setTags: jest.fn() };
   return {
     init: jest.fn(),
-    onUnhandledRejectionIntegration: jest.fn((options: unknown) => ({ name: 'OnUnhandledRejection', options })),
     withScope: jest.fn((cb: (s: typeof scope) => void) => cb(scope)),
     captureException: jest.fn(),
     __scope: scope,
