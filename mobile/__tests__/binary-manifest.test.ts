@@ -67,6 +67,7 @@ import path from 'path';
 
 import {
   APP_CONFIG_PATH,
+  MACHINE_LOCAL_ENTRIES,
   MOBILE_ROOT,
   introspectAppConfig,
   loadAppConfig,
@@ -158,6 +159,10 @@ function currentRuntime(): string {
  *      (first #722 cut, superseded in review).
  *   2: the whole static config minus NON_NATIVE_KEYS, the full introspected
  *      `modResults` of both platforms, and every referenced local file.
+ *      Introspection runs against a temporary root without `ios/` and
+ *      `android/` (helpers/app-config.ts#introspectionRoot); that fixed a
+ *      machine dependence without changing any hash taken on a machine that
+ *      has no native project, so the version stayed 2.
  */
 const NATIVE_CONFIG_ALGORITHM = 2;
 
@@ -217,10 +222,10 @@ async function loadExpoConfig(file: string): Promise<ExpoAppConfig> {
 }
 
 /** The structure the hash is taken over; see the file header. */
-async function nativeConfigInput(expo: ExpoAppConfig): Promise<Record<string, unknown>> {
+async function nativeConfigInput(expo: ExpoAppConfig, sourceRoot: string): Promise<Record<string, unknown>> {
   let introspected: IntrospectedConfig;
   try {
-    introspected = await introspectAppConfig(expo);
+    introspected = await introspectAppConfig(expo, undefined, sourceRoot);
   } catch (error) {
     // Typically a plugin that is not installed. Prebuild would fail the same
     // way, and a new plugin is a native change either way.
@@ -234,7 +239,7 @@ async function nativeConfigInput(expo: ExpoAppConfig): Promise<Record<string, un
   const staticConfig = nativeStaticConfig(expo);
   const files = Object.fromEntries(
     referencedFiles(staticConfig).map((file) => {
-      const absolute = path.join(MOBILE_ROOT, file);
+      const absolute = path.join(sourceRoot, file);
       return [file, fs.existsSync(absolute) && fs.statSync(absolute).isFile() ? sha256(fs.readFileSync(absolute)) : 'missing'];
     })
   );
@@ -251,14 +256,17 @@ const hashMemo = new Map<string, Promise<string>>();
 
 /**
  * sha256 of the native configuration of an app.config.js (default: the
- * working tree's). Memoised per file and publish-env snapshot: introspection
- * is the slow part of this suite.
+ * working tree's), with its plugins introspected and its files read from
+ * `sourceRoot` (default mobile/). Memoised per file, source root and
+ * publish-env snapshot: introspection is the slow part of this suite.
  */
-function nativeConfigHash(file: string = APP_CONFIG_PATH): Promise<string> {
-  const key = `${file}\0${stableStringify(publishEnvSnapshot())}`;
+function nativeConfigHash(file: string = APP_CONFIG_PATH, sourceRoot: string = MOBILE_ROOT): Promise<string> {
+  const key = `${file}\0${sourceRoot}\0${stableStringify(publishEnvSnapshot())}`;
   let hash = hashMemo.get(key);
   if (!hash) {
-    hash = loadExpoConfig(file).then(async (expo) => sha256(stableStringify(await nativeConfigInput(expo))));
+    hash = loadExpoConfig(file).then(async (expo) =>
+      sha256(stableStringify(await nativeConfigInput(expo, sourceRoot)))
+    );
     hashMemo.set(key, hash);
   }
   return hash;
@@ -572,6 +580,45 @@ function writeManifest(manifest: BinaryManifest): void {
     expect(set).toBe(unset);
     expect(unset).toBe(currentHash);
     expect(unset).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('ignores a local native project next to app.config.js', async () => {
+    // `expo run:*` and `expo prebuild` leave gitignored ios/ and android/ in
+    // mobile/. Introspection used to read them instead of Expo's templates,
+    // so the same commit hashed differently on a machine that had built
+    // locally. A copy of mobile/ with a deliberately different native
+    // project must hash exactly like mobile/ without one. Never create these
+    // directories in mobile/ itself: a developer's real project lives there.
+    const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'binary-manifest-native-'));
+    try {
+      const skipped: readonly string[] = MACHINE_LOCAL_ENTRIES;
+      for (const entry of fs.readdirSync(MOBILE_ROOT)) {
+        if (!skipped.includes(entry)) fs.symlinkSync(path.join(MOBILE_ROOT, entry), path.join(fakeRoot, entry));
+      }
+      const write = (file: string, content: string): void => {
+        fs.mkdirSync(path.dirname(path.join(fakeRoot, file)), { recursive: true });
+        fs.writeFileSync(path.join(fakeRoot, file), content);
+      };
+      const plist = (body: string): string =>
+        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ' +
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>' + body + '</dict></plist>\n';
+      write('ios/Fake/Info.plist', plist('<key>LocalOnlyKey</key><string>from a local build</string>'));
+      write('ios/Fake/Fake.entitlements', plist('<key>com.apple.developer.local-only</key><true/>'));
+      write('ios/Fake/Supporting/Expo.plist', plist('<key>EXUpdatesLocalOnly</key><true/>'));
+      write('ios/Fake.xcodeproj/project.pbxproj', '// !$*UTF8*$!\n{}\n');
+      write('ios/Podfile.properties.json', JSON.stringify({ 'local.only': 'true' }));
+      write(
+        'android/app/src/main/AndroidManifest.xml',
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">' +
+          '<uses-permission android:name="android.permission.LOCAL_ONLY"/><application/></manifest>\n'
+      );
+      write('android/gradle.properties', 'local.only=true\n');
+      write('android/app/src/main/res/values/strings.xml', '<resources><string name="local_only">x</string></resources>\n');
+
+      expect(await nativeConfigHash(APP_CONFIG_PATH, fakeRoot)).toBe(currentHash);
+    } finally {
+      fs.rmSync(fakeRoot, { recursive: true, force: true });
+    }
   });
 
   it('covers the packages this guard was written for', () => {

@@ -6,7 +6,17 @@
  * variables; `introspectAppConfig` runs its config plugins in introspection
  * mode (what `npx expo config --type introspect` does), so no native project
  * is generated.
+ *
+ * Introspection reads an existing native project instead of Expo's templates
+ * when one is present: Info.plist, entitlements, Podfile.properties.json,
+ * AndroidManifest.xml, gradle.properties, resources. `ios/` and `android/` are
+ * gitignored outputs of a local `expo run:*` / `expo prebuild`, so evaluating
+ * in place made the result depend on the machine. `introspectAppConfig`
+ * therefore runs against a temporary project root that links every entry of
+ * mobile/ except the machine-local ones (MACHINE_LOCAL_ENTRIES).
  */
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 export const MOBILE_ROOT = path.resolve(__dirname, '../..');
@@ -44,6 +54,44 @@ interface ConfigPlugins {
     config: Record<string, unknown>,
     options: { projectRoot: string; introspect: boolean; platforms: ('ios' | 'android')[] }
   ) => Promise<IntrospectedConfig>;
+}
+
+/**
+ * Gitignored, machine-local entries of mobile/ that introspection must never
+ * see: the native projects a local build generates, and Expo's caches and
+ * export output.
+ */
+export const MACHINE_LOCAL_ENTRIES = ['ios', 'android', '.expo', '.expo-shared', 'dist', 'web-build'] as const;
+
+const introspectionRoots = new Map<string, string>();
+
+// Each test file that imports this helper gets its own module instance, so
+// this hook removes that file's roots. (Jest sandboxes `process`, so an exit
+// handler would never run.) The roots hold only symlinks: removing them never
+// touches mobile/.
+afterAll(() => {
+  for (const dir of introspectionRoots.values()) fs.rmSync(dir, { recursive: true, force: true });
+  introspectionRoots.clear();
+});
+
+/**
+ * A temporary project root that links every entry of `sourceRoot` (default
+ * mobile/) except MACHINE_LOCAL_ENTRIES, created once per source root and
+ * removed after the importing test file. Links, not copies: node_modules resolves
+ * plugins exactly as it does in place, and assets are read from the source.
+ */
+export function introspectionRoot(sourceRoot: string = MOBILE_ROOT): string {
+  const existing = introspectionRoots.get(sourceRoot);
+  if (existing) return existing;
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'app-config-introspect-'));
+  const skipped: readonly string[] = MACHINE_LOCAL_ENTRIES;
+  for (const entry of fs.readdirSync(sourceRoot)) {
+    if (skipped.includes(entry)) continue;
+    fs.symlinkSync(path.join(sourceRoot, entry), path.join(root, entry));
+  }
+  introspectionRoots.set(sourceRoot, root);
+  return root;
 }
 
 /** Every variable app.config.js reads. */
@@ -109,13 +157,16 @@ export async function loadAppConfig<T = { expo: ExpoAppConfig }>(
 /**
  * Applies the config's plugins (all of them, or only `pluginNames`, with the
  * options app.config.js gives them) and evaluates their mods in introspection
- * mode. `name` and `version` are replaced by constants and `extra` is dropped,
+ * mode, against `introspectionRoot(sourceRoot)` so a local native project
+ * never leaks in. `name` and `version` are replaced by constants and `extra` is dropped,
  * so the result does not depend on the publishing environment.
  */
 export async function introspectAppConfig(
   expo: ExpoAppConfig,
-  pluginNames?: readonly string[]
+  pluginNames?: readonly string[],
+  sourceRoot: string = MOBILE_ROOT
 ): Promise<IntrospectedConfig> {
+  const projectRoot = introspectionRoot(sourceRoot);
   const { withPlugins, compileModsAsync } = jest.requireActual<ConfigPlugins>('expo/config-plugins');
   // Introspection mutates what it is given: work on deep copies.
   const base = JSON.parse(JSON.stringify(expo)) as Record<string, unknown>;
@@ -125,9 +176,9 @@ export async function introspectAppConfig(
   );
   return compileModsAsync(
     withPlugins(
-      { ...base, name: 'Hooplings', version: '0.0.0', _internal: { projectRoot: MOBILE_ROOT } },
+      { ...base, name: 'Hooplings', version: '0.0.0', _internal: { projectRoot } },
       plugins
     ),
-    { projectRoot: MOBILE_ROOT, introspect: true, platforms: ['ios', 'android'] }
+    { projectRoot, introspect: true, platforms: ['ios', 'android'] }
   );
 }
