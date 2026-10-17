@@ -31,7 +31,7 @@ import { Prisma } from '@prisma/client';
 import { WorkOSService } from '../../src/services/workos-service';
 import { ConflictError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
-import { createPlayer } from '../factories';
+import { createPlayer, uniqueViolation } from '../factories';
 
 // Get reference to the mocked module
 import { workos } from '../../src/utils/workos-client';
@@ -318,11 +318,7 @@ describe('WorkOSService', () => {
   });
 
   describe('syncUser', () => {
-    const p2002 = (): Prisma.PrismaClientKnownRequestError =>
-      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-        code: 'P2002',
-        clientVersion: 'test',
-      });
+    const p2002 = (): Prisma.PrismaClientKnownRequestError => uniqueViolation('User_email_key');
 
     beforeEach(() => {
       delete process.env.ADMIN_EMAIL;

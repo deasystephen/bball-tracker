@@ -30,6 +30,7 @@ import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getResultColor } from '../../../utils/game-result';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { BackButton } from '../../../components/BackButton';
+import { formatNumericDate } from '../../../utils/format-date';
 
 type SortKey = 'ppg' | 'rpg' | 'apg' | 'efficiency';
 
@@ -189,7 +190,7 @@ export default function TeamStatsScreen() {
                 <ListItem
                   key={game.id}
                   title={game.opponent}
-                  subtitle={new Date(game.date).toLocaleDateString()}
+                  subtitle={formatNumericDate(game.date)}
                   onPress={() => router.push(`/games/${game.id}/stats`)}
                   rightElement={
                     <View style={styles.gameResult}>

@@ -4,7 +4,7 @@
 
 import { LeagueService } from '../../src/services/league-service';
 import { mockPrisma } from '../setup';
-import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer } from '../factories';
+import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer, uniqueViolation } from '../factories';
 import { expectNotFoundError, expectBadRequestError, expectForbiddenError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
@@ -690,6 +690,31 @@ describe('LeagueService', () => {
         expectBadRequestError(error, 'A season with this name already exists in this league');
       }
       expect(mockPrisma.season.create).not.toHaveBeenCalled();
+    });
+
+    it('answers the duplicate-name 400 when a concurrent create wins the unique index (P2002, #727)', async () => {
+      const sysAdmin = createAdmin();
+      const league = createLeague();
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(uniqueViolation('Season_leagueId_name_key'));
+
+      const error = await LeagueService.createSeason(league.id, { name: 'Summer' }, sysAdmin.id).catch((e) => e);
+
+      expectBadRequestError(error, 'A season with this name already exists in this league');
+    });
+
+    it('propagates a season create failure that is not P2002', async () => {
+      const sysAdmin = createAdmin();
+      const league = createLeague();
+      const boom = new Error('connection reset');
+
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.season.create as jest.Mock).mockRejectedValue(boom);
+
+      await expect(LeagueService.createSeason(league.id, { name: 'Summer' }, sysAdmin.id)).rejects.toBe(boom);
     });
   });
 });

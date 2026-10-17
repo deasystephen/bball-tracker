@@ -17,6 +17,7 @@ import { Card } from '../Card';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import type { Game, GameStatus } from '../../types/game';
+import { formatClockTime, formatShortDate } from '../../utils/format-date';
 
 interface GameCardProps {
   game: Game;
@@ -55,23 +56,6 @@ const getStatusLabel = (status: GameStatus): string => {
     default:
       return status;
   }
-};
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-};
-
-const formatTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 };
 
 const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) => {
@@ -153,10 +137,10 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
                   </View>
                   <View style={styles.dateTime}>
                     <ThemedText variant="caption" color="textSecondary">
-                      {formatDate(game.date)}
+                      {formatShortDate(game.date)}
                     </ThemedText>
                     <ThemedText variant="caption" color="textTertiary">
-                      {formatTime(game.date)}
+                      {formatClockTime(game.date)}
                     </ThemedText>
                   </View>
                 </View>

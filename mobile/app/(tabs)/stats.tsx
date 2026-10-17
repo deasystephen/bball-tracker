@@ -2,7 +2,7 @@
  * Stats hub screen - view team and player statistics
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +12,7 @@ import {
   ThemedText,
   Card,
   EmptyState,
+  ErrorState,
   LoadingSpinner,
 } from '../../components';
 import { SeasonAverages, SeasonRecord } from '../../components/stats';
@@ -24,6 +25,18 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { describeRecord, describeResults, getResultColor } from '../../utils/game-result';
 import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { isDeletedUser, playerDisplayName } from '../../utils/display-name';
+import { showQueryError } from '../../utils/query-state';
+import { getApiErrorMessage } from '../../services/api-client';
+
+/**
+ * Podium label: a live player's first name, or the whole localized
+ * deleted-user label for a tombstone (#813), never a split of it.
+ */
+function podiumName(stats: { playerName: string; playerDeletedAt?: string | null }): string {
+  const name = playerDisplayName(stats);
+  return isDeletedUser({ name: stats.playerName, deletedAt: stats.playerDeletedAt }) ? name : name.split(' ')[0];
+}
 
 export default function Stats() {
   const router = useRouter();
@@ -33,17 +46,54 @@ export default function Stats() {
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
 
-  const { data: teams, isLoading: teamsLoading } = useTeams({ limit: TEAMS_MAX_LIMIT });
+  const {
+    data: teams,
+    isLoading: teamsLoading,
+    isFetching: teamsFetching,
+    error: teamsError,
+    refetch: refetchTeams,
+  } = useTeams({ limit: TEAMS_MAX_LIMIT });
   // Only the user's explicit choice lives in state; default to the first team during render
   const [chosenTeamId, setChosenTeamId] = useState<string | null>(null);
   const selectedTeamId = chosenTeamId ?? teams?.[0]?.id ?? null;
   const setSelectedTeamId = setChosenTeamId;
 
-  const { data: seasonStats, isLoading: statsLoading } = useTeamSeasonStats(
-    selectedTeamId || ''
+  const {
+    data: seasonStats,
+    isLoading: statsLoading,
+    isFetching: statsFetching,
+    error: statsError,
+    refetch: refetchStats,
+  } = useTeamSeasonStats(selectedTeamId || '');
+  const {
+    data: rosterStats,
+    isLoading: rosterLoading,
+    isFetching: rosterFetching,
+    error: rosterError,
+    refetch: refetchRoster,
+  } = useTeamRosterStats(selectedTeamId || '');
+
+  // A failed request is not an empty result (#728); see utils/query-state.ts.
+  const teamsFailed = showQueryError({ error: teamsError, data: teams });
+  const statsFailed = showQueryError({ error: statsError, data: seasonStats });
+  const rosterFailed = showQueryError({ error: rosterError, data: rosterStats });
+  const teamStatsError = statsFailed ? statsError : rosterFailed ? rosterError : null;
+  // TanStack keeps `error` set while a retry is in flight, so Try Again shows the spinner
+  // until the refetch settles instead of leaving the same error on screen.
+  const retryingTeamStats = (statsFailed && statsFetching) || (rosterFailed && rosterFetching);
+  const retryTeamStats = () => {
+    if (statsFailed) refetchStats();
+    if (rosterFailed) refetchRoster();
+  };
+  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
+  // failure (a new error object), not on every render.
+  const teamsErrorMessage = useMemo(
+    () => (teamsFailed ? getApiErrorMessage(teamsError, 'Failed to load teams') : ''),
+    [teamsFailed, teamsError]
   );
-  const { data: rosterStats, isLoading: rosterLoading } = useTeamRosterStats(
-    selectedTeamId || ''
+  const teamStatsErrorMessage = useMemo(
+    () => (teamStatsError ? getApiErrorMessage(teamStatsError, 'Failed to load stats') : ''),
+    [teamStatsError]
   );
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId);
@@ -59,8 +109,24 @@ export default function Stats() {
     : [];
   const topAssister = sortedByAssists[0];
 
-  if (teamsLoading) {
+  if (teamsLoading || (teamsFailed && teamsFetching)) {
     return <LoadingSpinner message="Loading..." fullScreen />;
+  }
+
+  if (teamsFailed) {
+    return (
+      <ThemedView variant="background" style={styles.container}>
+        <View
+          style={[
+            styles.header,
+            { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
+          ]}
+        >
+          <ThemedText variant="h1" heading>Statistics</ThemedText>
+        </View>
+        <ErrorState message={teamsErrorMessage} onRetry={refetchTeams} />
+      </ThemedView>
+    );
   }
 
   if (!teams || teams.length === 0) {
@@ -147,7 +213,11 @@ export default function Stats() {
           </View>
         )}
 
-        {isLoading ? (
+        {retryingTeamStats ? (
+          <LoadingSpinner message="Loading stats..." />
+        ) : teamStatsError ? (
+          <ErrorState message={teamStatsErrorMessage} onRetry={retryTeamStats} />
+        ) : isLoading ? (
           <LoadingSpinner message="Loading stats..." />
         ) : (
           <>
@@ -253,7 +323,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topRebounder.playerName.split(' ')[0]}
+                        {podiumName(topRebounder)}
                       </ThemedText>
                       <ThemedText variant="h3">
                         {topRebounder.reboundsPerGame.toFixed(1)}
@@ -294,7 +364,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topScorer.playerName.split(' ')[0]}
+                        {podiumName(topScorer)}
                       </ThemedText>
                       <ThemedText variant="h2" heading={false} /* stat value */>
                         {topScorer.pointsPerGame.toFixed(1)}
@@ -335,7 +405,7 @@ export default function Stats() {
                         numberOfLines={1}
                         style={styles.podiumName}
                       >
-                        {topAssister.playerName.split(' ')[0]}
+                        {podiumName(topAssister)}
                       </ThemedText>
                       <ThemedText variant="h3">
                         {topAssister.assistsPerGame.toFixed(1)}

@@ -17,6 +17,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useTranslation } from '../i18n';
 import { spacing, borderRadius } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { formatSeasonDate } from '../utils/format-date';
 
 export interface SeasonDateFieldsProps {
   startDate: Date | null;
@@ -25,12 +26,6 @@ export interface SeasonDateFieldsProps {
   onChangeEnd: (date: Date | null) => void;
   /** Range validation message, shown under the rows. */
   error?: string;
-}
-
-/** The long form the rows show, e.g. "March 6, 2027". */
-export function formatSeasonDate(date: Date | null, notSet: string): string {
-  if (!date) return notSet;
-  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 export function SeasonDateFields({

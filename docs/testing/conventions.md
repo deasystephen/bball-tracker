@@ -34,6 +34,14 @@ When adding new features or fixing bugs, always write tests that verify behavior
   (`parseLogLines(spy)` for `console.log`/`console.error` spies; a non-JSON line fails) and
   `source-scan.ts` (`sourceFiles`, `stripComments`) for the backend source-scanning guards, which
   walk the tree in `beforeAll`, never at collection time.
+- **Unused-dependency guard (#781).** `tests/utils/unused-dependencies-guard.test.ts` fails when a
+  `dependencies` entry in `backend/package.json` is not imported by any file under `src/`, `prisma/`
+  or `scripts/`, or by a root config file such as `prisma.config.ts`, and when an `@types/<x>`
+  devDependency has no `<x>` dependency, devDependency or Node built-in. An import is `from`, a bare
+  `import`, `import()`, `require` or `require.resolve`, subpaths included, with comments stripped. A
+  specifier built in a template literal or a variable is not seen. Remove the package with
+  `npm uninstall`. A package used without a visible import, or an `@types` package for a transitive,
+  goes in the test's dependency or types allowlist with its reason; both are empty today.
 
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
@@ -58,9 +66,28 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 ## Mobile source-scanning guards
 - Guard tests that read mobile source walk it through `mobile/__tests__/helpers/source-files.ts`
   (`MOBILE_ROOT`, `sourceFiles(dir, extensions)`, `scanLines(fileName, text, pattern)`); a new guard uses
-  it rather than copying a walker. Users today: `__tests__/a11y/{nested-pressables,error-state-way-back}`
-  and `__tests__/utils/{game-result-guard,display-name-guard}`. Each guard asserts it scanned a
-  plausible number of files and carries a self-test table of lines it must report and accept.
+  it rather than copying a walker. Users today: `__tests__/a11y/{nested-pressables,error-state-way-back}`,
+  `__tests__/utils/{game-result-guard,display-name-guard}` and `__tests__/types/shared-types-usage`.
+  Each guard asserts it scanned a plausible number of files and carries a self-test table of lines it
+  must report and accept.
+- `__tests__/types/shared-types-usage.test.ts` (#771) fails CI on an export of `shared/types/index.ts`
+  that no mobile app file imports (tests excluded). Only `mobile/` imports that file; delete a dead
+  export rather than keeping it "for later".
+
+## Mobile API contract fixtures (#767)
+- The mobile response types are hand-written; the backend's named `*_SELECT`/`*_INCLUDE` constants are
+  the contract. `mobile/__tests__/types/api-contract.test.ts` assigns JSON payloads recorded from a
+  local backend (`mobile/__tests__/fixtures/api-contract/`: auth session user, `GET /teams` item and
+  detail, `GET /games` item and detail, `GET /invitations` item, `GET /players/:id`) to the client
+  types, so `npm run type-check` fails on a required client field the API never sends, and on a field
+  typed non-null or required where the API sends `null` or omits the key. An optional client field the
+  API never sends is not caught (a non-literal assignment has no excess-property check); the test pins
+  the optional fields it was written for with explicit type assertions.
+- Fixtures, not a type import from `backend/src/services`: CI's mobile type-check job installs only
+  `mobile/` dependencies and cannot resolve `@prisma/client`. When a backend constant behind one of
+  these endpoints changes, re-record the fixture in the same PR (run the backend locally, `POST
+  /auth/dev-login` as a seeded user, call the endpoint, trim lists to one or two items) and keep the
+  hand-made null/absent variants the test header lists.
 
 ## Mobile copy & i18n
 - **Screen tests render the real i18n instance.** Never stub `useTranslation` to return the key
@@ -78,6 +105,15 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   leftover link to it fails CI, and the stripping logic is covered by a synthetic entry in the
   self-test. Scope is mobile only — `backend/tests/services/mailer.test.ts` runs the same retired
   patterns over every rendered email template.
+- **Every key in `en.json` exists in `es.json` with the same placeholders (#732).** A device set to
+  Spanish renders `es.json` and silently falls back to English for a missing key, which is how 17
+  keys (`roleOnboarding.*`, `teams.playerEmptyMessage`, `teams.playerEmptyAction`,
+  `teams.createNotAllowed`) shipped English-only on Spanish devices. `__tests__/i18n/locale-parity.test.ts`
+  flattens every file in `i18n/locales/` to dot-joined leaf keys and fails CI on a key missing from or
+  extra in a locale, a leaf that is not a string, or a shared key whose sorted `{{placeholder}}`
+  names differ from `en.json` (i18next format syntax counts by name: `{{count, number}}` is
+  `count`), naming each offender. Add a new key to both files in the same change; a new locale file is
+  picked up automatically.
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)
 - They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,

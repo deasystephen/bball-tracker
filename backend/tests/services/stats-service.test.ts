@@ -240,6 +240,7 @@ describe('StatsService', () => {
         {
           playerId: 'p1',
           playerName: 'Player 1',
+          playerDeletedAt: null,
           points: 20,
           rebounds: 5,
           assists: 3,
@@ -262,6 +263,7 @@ describe('StatsService', () => {
         {
           playerId: 'p2',
           playerName: 'Player 2',
+          playerDeletedAt: null,
           points: 15,
           rebounds: 8,
           assists: 5,

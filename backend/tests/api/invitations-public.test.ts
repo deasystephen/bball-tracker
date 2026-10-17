@@ -21,8 +21,10 @@ const mockGuardianInvitationDetails = {
   id: 'c3d4e5f6-a7b8-4012-a456-7890abcdef01',
   status: 'PENDING' as const,
   childName: 'Kid Smith',
+  childDeletedAt: null,
   teamName: 'Lakers',
   inviterName: 'Coach Smith',
+  inviterDeletedAt: null,
   relationship: 'MOTHER' as const,
   expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
 };

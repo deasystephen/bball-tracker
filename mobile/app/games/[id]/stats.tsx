@@ -24,18 +24,9 @@ import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { getGameResult, getResultColor } from '../../../utils/game-result';
+import { formatLongDate } from '../../../utils/format-date';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { BackButton } from '../../../components/BackButton';
-
-const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
-};
 
 interface ComparisonBarProps {
   label: string;
@@ -229,7 +220,7 @@ export default function GameStatsScreen() {
             </View>
           </View>
           <ThemedText variant="caption" color="textSecondary" style={styles.gameDate}>
-            {formatDate(boxScore.game.date)}
+            {formatLongDate(boxScore.game.date)}
           </ThemedText>
         </Card>
 

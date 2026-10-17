@@ -22,17 +22,41 @@ Removing the last guardian never deletes the child.
   again by `omitToken`. Uniqueness is the hand-written partial index
   `GuardianInvitation_pending_childId_invitedEmail_key … WHERE status = 'PENDING'` (migration
   `20260823120000_guardian_invitation`); a stale PENDING row is flipped to EXPIRED on re-invite.
+  The dedupe check and the insert are not one transaction, so a lost race on the partial index (a
+  double-tapped Invite) maps P2002 → 400 `A pending guardian invitation already exists for this email`
+  (`utils/prisma-errors.ts#createOrConflict`, targeted at that index, so a token collision still
+  propagates), never 500 (#727).
   The response carries the per-send `emailSent`; `hooks/useGuardians.ts#useInviteGuardian` resolves with
   `{ invitation, emailSent }` and the Guardians screen shows an error toast ("Invitation created, but the email
   to … failed to send.") instead of "Invitation sent" when it is `false`, like the roster flows (#770). The
   screen has no resend yet (#420), so the toast does not point at one.
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
-  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `teamName`, `inviterName`,
-  `relationship`, `status`, `expiresAt`) and `POST /invitations/by-token/:token/accept` returns
+  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `childDeletedAt`, `teamName`,
+  `inviterName`, `inviterDeletedAt`, `relationship`, `status`, `expiresAt`; the two `…DeletedAt` fields are
+  ISO strings or `null`, the tombstone signals for the names, #813, and the `guardianInvitations` items on
+  `GET /invitations` have the same shape) and `POST /invitations/by-token/:token/accept` returns
   `{ kind: 'guardian', invitation, guardian }` — acceptance creates the `Guardian` row inside one
   `$transaction` guarded by `updateMany … WHERE status = 'PENDING'` (loser of a race gets 400).
+  **Per-child lock (#664):** every writer of `isPrimary` holds the child's `User` row while it decides
+  primacy. Accept takes `utils/user-row-lock.ts#lockUsers(tx, [childId, parentId])` as its first
+  statement, before the invitation write: one `SELECT … WHERE "id" IN (…) ORDER BY "id" FOR NO KEY
+  UPDATE`. `removeGuardian` takes `lockUsers` on the child and only then reads the link, so `isPrimary`
+  is current. Account deletion locks its own row and every child it guards in its first statement
+  (`… OR "id" IN (SELECT "childId" FROM "Guardian" WHERE "parentId" = $1) ORDER BY "id" FOR UPDATE`).
+  Primacy is a count-then-insert, so without the lock two accepts for one child both counted 0 and both
+  inserted `isPrimary`, and an accept racing the primary's removal could insert a non-primary link while
+  the removal found nobody to promote. All rows a transaction needs are locked in one id-ordered
+  statement, which is a global order: two adults each accepting to guard the other wait instead of
+  deadlocking. `FOR NO KEY UPDATE`, not `FOR UPDATE`, so a foreign-key insert naming the child (a live
+  game's `GameEvent`, a `TeamMember`) never waits on an accept. There is no partial unique index on
+  primacy; the lock is the enforcement. Proven in `tests/integration/guardian-accept.db.test.ts` (lock
+  waits read from `pg_locks`, the end states, the mutual accept, the unblocked FK insert).
   Authenticated `POST /invitations/:id/accept|reject` try the id as a `GuardianInvitation` first and require
-  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too. **Which account
+  the caller's email to match `invitedEmail` (403 otherwise); responses carry `kind` too. Reject is guarded
+  by the same `status = 'PENDING'` predicate as accept (#726), as one conditional `update({ where: { id,
+  status: 'PENDING' } })` whose P2025 is the lost race: a reject that loses to a concurrent accept answers 400 `Cannot reject invitation: it is no longer pending` instead of overwriting
+  `ACCEPTED` under a live `Guardian` link (the unlocked status read still answers the more specific
+  `Cannot reject invitation with status: X` in the common case). **Which account
   the link lands on (#663):** the authenticated path uses the verified caller's id as `parentId` and never
   looks the adult up by email again; the by-token path resolves the adult exactly as invite time did,
   `findFirst({ email: emailEquals(invitedEmail), deletedAt: null })`, and only when nothing matches
@@ -41,14 +65,14 @@ Removing the last guardian never deletes the child.
   is byte-unique only; `syncUser` stores the address as given, and `POST /players` lower-cased only
   from #651). Proven against
   Postgres in `tests/integration/email-match.db.test.ts` (Guardian invitations). **Tombstones (#643):**
-  the parent is resolved before the transaction, unlocked, so the transaction first locks the row
-  (`FOR NO KEY UPDATE`, `deletedAt IS NULL`) and answers 404 `Account not found` when the account was
-  deleted in between. It is a write lock, not push-token registration's `FOR SHARE`, because the same
+  the parent is resolved before the transaction, unlocked, so the transaction locks the row (the
+  `lockUsers` statement above, `FOR NO KEY UPDATE`) and answers 404 `Account not found` when the row is
+  gone or carries `deletedAt` under the lock. It is a write lock, not push-token registration's `FOR SHARE`, because the same
   transaction may update the row: two concurrent accepts by one parent holding share locks deadlocked
   on the upgrade; now they serialise; the `PARENT` promotion is `updateMany({ where: { id,
   deletedAt: null } })` and zero rows aborts the transaction, so no `Guardian` row ever points at a
   tombstone.
-- **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, email?, relationship,
+- **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, deletedAt, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).
 - **What a guardian can do.** `utils/permissions.ts`: `isGuardianOf(userId, childId)`,
@@ -63,7 +87,8 @@ Removing the last guardian never deletes the child.
   default scope includes the caller's children, and `listInvitations?playerId=` accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
   /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on
   the coach-only team-member route). `GET /auth/me`, `/auth/callback` and `/auth/dev-login` add
-  `user.guardianOf: { childId, childName, relationship, isPrimary, isManaged, teams: { id, name }[] }[]`.
+  `user.guardianOf: { childId, childName, childDeletedAt, relationship, isPrimary, isManaged, teams: { id, name }[] }[]`
+  (`childDeletedAt` is the ISO tombstone signal for `childName`, #813).
   `isManaged` is true only for a managed child with no login (`isManaged && workosUserId === null`), the
   only record a guardian may delete (`DELETE /players/:id/account`, see `account-deletion.md`); `teams`
   lists the child's current team memberships and drives the Profile "Manage guardians" deep link

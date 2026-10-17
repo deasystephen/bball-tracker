@@ -1,5 +1,15 @@
 /**
- * Shared types used across mobile and backend applications
+ * The mobile client's view of the signed-in `User` payload (the session user
+ * from `GET /auth/me`, `GET /auth/callback`, `POST /auth/dev-login` and
+ * `PATCH /auth/me`; `SESSION_USER_SELECT` plus `leagueAdminOf` and
+ * `guardianOf` in `backend/src/api/auth/routes.ts`) and the enums it uses.
+ *
+ * Only `mobile/` imports this file; it sits at the repo root so a future
+ * consumer can share it, but the backend and web do not import it today.
+ * Every export must have an importer under `mobile/`
+ * (`mobile/__tests__/types/shared-types-usage.test.ts` fails otherwise), and
+ * `mobile/__tests__/types/api-contract.test.ts` pins `User` to the recorded
+ * auth payload.
  */
 
 export enum UserRole {
@@ -9,62 +19,13 @@ export enum UserRole {
   ADMIN = 'ADMIN',
 }
 
-export enum SubscriptionTier {
-  FREE = 'FREE',
-  PREMIUM = 'PREMIUM',
-  LEAGUE = 'LEAGUE',
-}
-
-export enum Feature {
-  UNLIMITED_TEAMS = 'UNLIMITED_TEAMS',
-  FULL_SEASON_HISTORY = 'FULL_SEASON_HISTORY',
-  CALENDAR_SYNC = 'CALENDAR_SYNC',
-  STATS_EXPORT = 'STATS_EXPORT',
-  ADVANCED_STATS = 'ADVANCED_STATS',
-  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
-  AD_FREE = 'AD_FREE',
-  REGISTRATION_PAYMENTS = 'REGISTRATION_PAYMENTS',
-  TOURNAMENT_BRACKETS = 'TOURNAMENT_BRACKETS',
-  ORG_MESSAGING = 'ORG_MESSAGING',
-  FINANCIAL_REPORTING = 'FINANCIAL_REPORTING',
-  MASTER_CALENDAR = 'MASTER_CALENDAR',
-}
-
-export interface Entitlements {
-  tier: SubscriptionTier;
-  features: Record<Feature, boolean>;
-  limits: {
-    maxTeams: number;
-    maxSeasons: number;
-  };
-  expiresAt: string | null;
-}
-
-export enum GameEventType {
-  SHOT = 'SHOT',
-  REBOUND = 'REBOUND',
-  ASSIST = 'ASSIST',
-  TURNOVER = 'TURNOVER',
-  FOUL = 'FOUL',
-  SUBSTITUTION = 'SUBSTITUTION',
-  STEAL = 'STEAL',
-  BLOCK = 'BLOCK',
-  TIMEOUT = 'TIMEOUT',
-}
-
-export enum GameStatus {
-  SCHEDULED = 'SCHEDULED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  FINISHED = 'FINISHED',
-  CANCELLED = 'CANCELLED',
-}
-
 export interface User {
   id: string;
-  email: string;
+  /** `User.email` is nullable: managed (roster-only) players and tombstones have none. */
+  email: string | null;
   name: string;
   role: UserRole;
-  profilePictureUrl?: string;
+  profilePictureUrl?: string | null;
   /**
    * IDs of leagues this user administers (LeagueAdmin rows). Optional: older
    * API builds omit it, and clients must treat `undefined` as `[]`.
@@ -82,8 +43,12 @@ export interface User {
    * clients treat `undefined` as `true` (the server default).
    */
   notifyOnReplies?: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  /**
+   * ISO timestamp (JSON carries strings, never `Date`). Every session payload
+   * sends it today; optional because a locally patched user may predate it.
+   * There is no `updatedAt` on any auth payload.
+   */
+  createdAt?: string;
 }
 
 export type GuardianRelationship = 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
@@ -91,6 +56,11 @@ export type GuardianRelationship = 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
 export interface GuardianOfEntry {
   childId: string;
   childName: string;
+  /**
+   * Set when the child's account was deleted (#813); render via
+   * `childDisplayName`. Optional: older API builds omit it.
+   */
+  childDeletedAt?: string | null;
   relationship: GuardianRelationship;
   isPrimary: boolean;
   /**
@@ -102,108 +72,3 @@ export interface GuardianOfEntry {
   /** Teams the child is currently rostered on (for deep-linking guardian management). */
   teams?: { id: string; name: string }[];
 }
-
-export interface League {
-  id: string;
-  name: string;
-  season: string;
-  year: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Team {
-  id: string;
-  name: string;
-  leagueId: string;
-  coachId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface TeamMember {
-  id: string;
-  teamId: string;
-  playerId: string;
-  jerseyNumber: number | null;
-  position: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Game {
-  id: string;
-  teamId: string;
-  opponent: string;
-  date: Date;
-  status: GameStatus;
-  homeScore: number;
-  awayScore: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface GameEvent {
-  id: string;
-  gameId: string;
-  playerId: string | null;
-  eventType: GameEventType;
-  timestamp: Date;
-  metadata: Record<string, unknown>;
-  createdAt: Date;
-}
-
-export interface PlayerStats {
-  playerId: string;
-  gameId: string;
-  points: number;
-  rebounds: number;
-  assists: number;
-  steals: number;
-  blocks: number;
-  turnovers: number;
-  fouls: number;
-  fieldGoalsMade: number;
-  fieldGoalsAttempted: number;
-  threePointersMade: number;
-  threePointersAttempted: number;
-  freeThrowsMade: number;
-  freeThrowsAttempted: number;
-}
-
-export interface TeamStats {
-  teamId: string;
-  gameId: string;
-  points: number;
-  rebounds: number;
-  assists: number;
-  turnovers: number;
-  fieldGoalPercentage: number;
-  threePointPercentage: number;
-  freeThrowPercentage: number;
-}
-
-export enum RsvpStatus {
-  YES = 'YES',
-  NO = 'NO',
-  MAYBE = 'MAYBE',
-}
-
-export interface GameRsvp {
-  id: string;
-  gameId: string;
-  userId: string;
-  status: RsvpStatus;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Announcement {
-  id: string;
-  teamId: string;
-  authorId: string;
-  title: string;
-  body: string;
-  createdAt: Date;
-}
-

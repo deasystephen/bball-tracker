@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
+import { createOrConflict } from '../utils/prisma-errors';
 import {
   isLeagueAdmin,
   isSystemAdmin,
@@ -13,6 +14,7 @@ import {
   canReadLeague,
 } from '../utils/permissions';
 import { logger } from '../utils/logger';
+import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const LEAGUE_SUMMARY_SELECT = {
   id: true,
@@ -40,24 +42,14 @@ const SEASON_DETAIL_INCLUDE = {
     include: {
       staff: {
         include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          // Staff emails go to every reader of the team (authorization.md).
+          user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
           role: true,
         },
       },
       members: {
         include: {
-          player: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
+          player: { select: USER_SUMMARY_SELECT },
         },
       },
       _count: {
@@ -139,17 +131,23 @@ export class SeasonService {
       throw new BadRequestError('Start date must be before end date');
     }
 
-    // Create the season
-    const season = await prisma.season.create({
-      data: {
-        leagueId: data.leagueId,
-        name: data.name,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        isActive: true,
-      },
-      include: SEASON_INCLUDE,
-    });
+    // Create the season; a lost race on @@unique([leagueId, name]) answers the
+    // pre-check's 400 (#727).
+    const season = await createOrConflict(
+      () =>
+        prisma.season.create({
+          data: {
+            leagueId: data.leagueId,
+            name: data.name,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isActive: true,
+          },
+          include: SEASON_INCLUDE,
+        }),
+      'A season with this name already exists in this league',
+      'Season_leagueId_name_key'
+    );
 
     logger.info('Season created', { seasonId: season.id, leagueId: data.leagueId, userId });
 

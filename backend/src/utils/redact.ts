@@ -105,6 +105,15 @@ function looksLikeToken(segment: string): boolean {
 }
 
 /**
+ * Redact every URL or path-with-query inside free text (an error message or a
+ * stack), leaving the rest of the text alone. Each match goes through
+ * `redactUrl`.
+ */
+export function redactUrlsInText(text: string): string {
+  return text.replace(/(?:[a-z][a-z0-9+.-]*:\/\/|\/)[^\s'"()<>]+/gi, (match) => redactUrl(match));
+}
+
+/**
  * Redact a full URL (absolute or path-only): secret path segments masked,
  * query values masked, fragment dropped.
  */

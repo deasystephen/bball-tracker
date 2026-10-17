@@ -3,7 +3,13 @@
  * derived from `deletedAt`, never from the stored name.
  */
 import { i18n } from '../../i18n';
-import { displayName, isDeletedUser } from '../../utils/display-name';
+import {
+  childDisplayName,
+  displayName,
+  inviterDisplayName,
+  isDeletedUser,
+  playerDisplayName,
+} from '../../utils/display-name';
 
 describe('displayName', () => {
   afterEach(async () => {
@@ -30,5 +36,25 @@ describe('displayName', () => {
     expect(displayName(null)).toBe('');
     expect(displayName(undefined)).toBe('');
     expect(isDeletedUser(undefined)).toBe(false);
+  });
+});
+
+describe('flattened name helpers (#813)', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en');
+  });
+
+  it('read the name beside its tombstone timestamp', async () => {
+    await i18n.changeLanguage('es');
+    const at = '2026-09-01T00:00:00.000Z';
+    expect(inviterDisplayName({ inviterName: 'Deleted user', inviterDeletedAt: at })).toBe('Usuario eliminado');
+    expect(childDisplayName({ childName: 'Deleted user', childDeletedAt: at })).toBe('Usuario eliminado');
+    expect(playerDisplayName({ playerName: 'Deleted user', playerDeletedAt: at })).toBe('Usuario eliminado');
+  });
+
+  it('fall back to the stored name when the timestamp is null or absent (older API)', () => {
+    expect(inviterDisplayName({ inviterName: 'Steve Kerr', inviterDeletedAt: null })).toBe('Steve Kerr');
+    expect(childDisplayName({ childName: 'Steph Curry' })).toBe('Steph Curry');
+    expect(playerDisplayName({ playerName: 'John Doe' })).toBe('John Doe');
   });
 });

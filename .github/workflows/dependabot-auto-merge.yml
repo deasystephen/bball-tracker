@@ -7,7 +7,9 @@
 #   backend, web : patch AND minor  → auto-merge
 #   mobile       : patch only       → auto-merge (minors can break RN peer
 #                                      deps — e.g. lottie 7.4 needed RN 0.84)
-#   anything else (majors, mobile minors, GitHub Actions) → no-op
+#   anything else (majors, mobile minors, GitHub Actions, Terraform
+#   providers, Docker / Compose images) → no-op: a human reviews them, and a
+#   Terraform bump needs a local `terraform plan` first (#786)
 name: Dependabot auto-merge
 
 on:
@@ -43,8 +45,11 @@ jobs:
           # every npm PR fell through to ok=false while the job stayed green.
           # Fail loudly on an unrecognized ecosystem so a future rename of
           # these strings surfaces as a red job instead of silent no-merge.
+          # docker, docker_compose and terraform are recognised so their PRs
+          # keep this job green, and stay at ok=false (human-reviewed, #786).
           case "$ECOSYSTEM" in
             npm_and_yarn|npm|github_actions|github-actions) ;;
+            docker|docker_compose|docker-compose|terraform) ;;
             *) echo "::error::Unrecognized ecosystem '$ECOSYSTEM' -- auto-merge gate may be stale"; exit 1 ;;
           esac
           if [ "$ECOSYSTEM" = "npm_and_yarn" ] || [ "$ECOSYSTEM" = "npm" ]; then

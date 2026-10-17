@@ -60,6 +60,17 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/relative-time.ts#formatRelativeTime`, never an inline helper. Tests:
   `__tests__/app/announcement-thread.test.tsx`, `__tests__/hooks/useAnnouncementReplies.runtime.test.tsx`,
   `__tests__/app/profile-reply-notifications.test.tsx`; Maestro `.maestro/announcement-reply.yaml`.
+- **Dates and times** (#769): every date or time string goes through `utils/format-date.ts`
+  (`formatShortDate`, `formatLongDate`, `formatCalendarDate`, `formatSeasonDate`, `formatMonthDay`,
+  `formatMonthShort`, `formatNumericDate`, `formatDateTime`, `formatClockTime`; add a shape there
+  when none fits). The locale is the device's full tag (`es-ES`, `en-GB`) from expo-localization's
+  `getLocales()[0]?.languageTag`, the same call `i18n/config.ts` makes for the app language, read on
+  every call (an Android language change can keep the JS runtime alive) and `undefined` (runtime
+  default) when the device reports none; i18next's bare `en` would give an `en-GB` device a 12-hour
+  clock. `__tests__/utils/date-locale-guard.test.ts` parses mobile source and fails CI on any
+  `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` or `Intl.DateTimeFormat` call outside
+  the helper. `jest.setup.js` pins the tag to `en-US`; `__tests__/utils/format-date.test.ts` proves
+  `en-US`, `en-GB` and `es-ES` render differently.
 - Player routes: roster cards and leaderboards link to `/players/:id/stats`. There is no
   `/teams/:id/players/:playerId` or `/notifications` route — don't add links to them.
 - `GET /stats/players/:id` returns **404** for a player with no team memberships; `app/players/[id]/stats.tsx`
@@ -127,8 +138,15 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   which would read as Active). A deleted roster row's menu offers only Remove player. The mobile
   types for invitation `player`/`invitedBy`, announcement `author` and `GameEvent.player` declare
   `deletedAt?`; until the API sends it on a payload, `displayName` falls back to the stored name. The
-  `/invite/<token>` accept screen renders the inviter as `displayName({ name: inviterName, deletedAt:
-  inviterDeletedAt })` (team by-token payload only; the guardian payload has no `inviterDeletedAt`).
+  flattened payloads carry a name string beside its timestamp (#813): `inviterName`/`inviterDeletedAt`
+  (team and guardian by-token payloads, `guardianInvitations`), `childName`/`childDeletedAt`
+  (guardian payloads, `guardianOf`) and `playerName`/`playerDeletedAt` (stats rows). Render them with
+  `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file; the timestamp is
+  optional on the client so an app that out-runs the deploy falls back to the stored name. Readers: the
+  invite screen, the Invitations tab guardian card, Profile My Kids, account deletion, the game
+  detail RSVP "Respond for" picker, `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a
+  tombstone shows the whole label, never its first word). Guardian list rows (`GET
+  /teams/:teamId/members/:playerId/guardians`) carry `deletedAt` and render via `displayName(row)`.
   `__tests__/utils/display-name-guard.test.ts` reads `app/` and `components/` and fails on a raw
   `.name` read off any `…player`/`…Player`, `<x>.user` (staff rows), `invitedBy` or `author`; a bare
   `user.name` passes only in a file that binds `user` from the auth store (#674). Tests:
@@ -245,12 +263,17 @@ never inline a role check in a screen:
 
 ### Mobile API errors, permissions & toasts
 - **The API host is decided in ONE place: `config/env.ts#getApiUrl()`** (`extra.apiUrl` from
-  `app.config.js`, else `http://127.0.0.1:3000` under `__DEV__`, else `https://api.hooplings.com`).
+  `app.config.js`, except that a release bundle ignores a loopback value and uses
+  `https://api.hooplings.com` (#721); else `http://127.0.0.1:3000` under `__DEV__`, else
+  `https://api.hooplings.com`). LAN hosts stay allowed in release, so `LOCAL_API_URL=http://<lan-ip>:3000`
+  can point a local Release build at a development backend. The device cannot report an ignored
+  manifest by itself, so `getApiUrlResolution().loopbackIgnored` is shown in the About screen's
+  "API host" row and in Share diagnostics.
   `services/api-client.ts` and `services/socket.ts` import it; never read
   `Constants.expoConfig.extra.apiUrl` elsewhere. `__tests__/config/env.test.ts` pins the resolution
   order and `__tests__/app-config.test.ts` pins the `APP_ENV` → `apiUrl` mapping plus the
-  `applinks:` entitlement (an OTA published with `APP_ENV` unset ships the dev host — see the OTA env
-  gotcha in `../deployment/mobile-builds-and-ota.md`). Domain migration #502.
+  `applinks:` entitlement (an OTA published with `APP_ENV` unset ships the dev host, which release
+  bundles now ignore; see the OTA env gotcha in `../deployment/mobile-builds-and-ota.md`). Domain migration #502.
 - `services/api-client.ts` registers an error-normalizing response interceptor **before** the 401/refresh
   interceptor. For any response with a JSON body it copies the server's `error` (or `message`) onto
   `error.message`, the server `code` onto `error.code`, and the whole body + `status` onto `error.apiError`.
@@ -279,6 +302,13 @@ never inline a role check in a screen:
   authority, not a count here). When there is nothing to
   retry, pass `onBack` without `onRetry` (the tracker's "This game is not in progress" had a
   Try Again button that left the screen). Tab screens have the tab bar and need nothing.
+  A failed load is never shown as an empty result: the Stats tab renders `ErrorState` with
+  Try Again for a failed teams or team-stats query and keeps the team chips above a per-team
+  failure (#728; `__tests__/app/stats-tab-states.test.tsx`). `utils/query-state.ts#showQueryError`
+  decides when the error wins: only when the query has no data, so a failed background refetch
+  keeps its cached data on screen. TanStack keeps `error` set while a retry is in flight, so the
+  tab shows the spinner while the failed query `isFetching`. The message comes from
+  `getApiErrorMessage` (which sends `error_shown`), memoised on the error so it fires once per failure.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that

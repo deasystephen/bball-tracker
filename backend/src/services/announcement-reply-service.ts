@@ -20,6 +20,7 @@ import { NotificationService } from './notification-service';
 import { logger } from '../utils/logger';
 import { mailer } from './mailer';
 import { announcementReplyTemplate } from './mailer/templates';
+import { USER_SUMMARY_SELECT } from '../utils/user-select';
 
 /**
  * No `email`: reply authors are players and guardians, whose addresses are
@@ -29,10 +30,8 @@ import { announcementReplyTemplate } from './mailer/templates';
 export const REPLY_INCLUDE = {
   author: {
     select: {
-      id: true,
-      name: true,
+      ...USER_SUMMARY_SELECT,
       profilePictureUrl: true,
-      deletedAt: true,
     },
   },
 } satisfies Prisma.AnnouncementReplyInclude;

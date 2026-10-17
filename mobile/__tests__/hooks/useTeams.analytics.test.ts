@@ -22,8 +22,7 @@ const me: User = {
   email: 'me@example.test',
   name: 'Me',
   role: UserRole.COACH,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 function team(id: string, myRoleType?: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER'): Team {

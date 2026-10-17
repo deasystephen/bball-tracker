@@ -11,13 +11,15 @@ import * as Sentry from '@sentry/node';
 import type { ErrorEvent, Event, EventHint, NodeOptions } from '@sentry/node';
 import type { Request, Response, NextFunction } from 'express';
 import { AppError } from './errors';
-import { redactQueryObject, redactQueryString, redactUrl } from './redact';
+import { logger } from './logger';
+import { redactQueryObject, redactQueryString, redactUrl, redactUrlsInText } from './redact';
 
 type SentryRequest = NonNullable<Event['request']>;
 /** `@sentry/node` doesn't re-export `TransactionEvent`; derive it from the option signature. */
 export type TransactionEvent = Parameters<NonNullable<NodeOptions['beforeSendTransaction']>>[0];
 
 let initialized = false;
+let processHandlersInstalled = false;
 
 /**
  * Keys that should never be forwarded to Sentry, regardless of where they appear.
@@ -150,18 +152,28 @@ export function beforeSendTransaction(event: TransactionEvent, _hint?: EventHint
 
 /**
  * Initialize Sentry. Safe to call multiple times — subsequent calls are no-ops.
+ * Always installs the unhandled-rejection policy first (`installProcessHandlers`),
+ * DSN or not.
  * No-op when `SENTRY_DSN` is unset (dev, tests) or set to the literal
  * sentinel `"disabled"` (production before a real DSN is provisioned).
  * The sentinel exists because AWS Secrets Manager rejects empty strings,
  * so the Terraform-managed secret holds "disabled" until the var is set.
  */
 export function initSentry(): void {
+  installProcessHandlers();
   if (initialized) return;
   const dsn = process.env.SENTRY_DSN;
   if (!dsn || dsn === 'disabled') return;
 
   Sentry.init({
     dsn,
+    // Drop Sentry's own unhandled-rejection integration: the app's listener
+    // (installProcessHandlers) is the single structured log line and the single
+    // tagged capture, and its keep-alive policy must not depend on whether a
+    // DSN is set (#750). Even in mode 'none' the integration still captures, so
+    // keeping it would report every rejection twice. Every other default stays,
+    // so uncaught exceptions keep Sentry's default (capture, flush, exit).
+    integrations: (defaults) => defaults.filter((i) => i.name !== UNHANDLED_REJECTION_INTEGRATION),
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
     release: process.env.SENTRY_RELEASE,
     // Conservative defaults; tune post-GA.
@@ -171,6 +183,42 @@ export function initSentry(): void {
     beforeSendTransaction: (event: TransactionEvent, hint: EventHint) => beforeSendTransaction(event, hint),
   });
   initialized = true;
+}
+
+/**
+ * The process-level policy for an unhandled promise rejection (#750), the same
+ * whether or not `SENTRY_DSN` is set: log one structured `error` line (message
+ * redacted, stack only outside production), report it
+ * to Sentry when enabled, and keep the process alive. The API is single-replica
+ * (Socket.io rooms live in process memory), so a crash-and-relaunch would drop
+ * every live game. Registering any listener also turns off Node's default
+ * `--unhandled-rejections=throw`. Uncaught exceptions are left alone: Sentry's
+ * default (or Node's, without a DSN) captures and exits, and ECS relaunches.
+ *
+ * Idempotent: `initSentry()` calls it first, and repeated calls add nothing.
+ */
+export function installProcessHandlers(): void {
+  if (processHandlersInstalled) return;
+  processHandlersInstalled = true;
+  process.on('unhandledRejection', onUnhandledRejection);
+}
+
+/** Name of Sentry's default integration that `initSentry` filters out. */
+export const UNHANDLED_REJECTION_INTEGRATION = 'OnUnhandledRejection';
+
+// The message may carry a URL (a failed fetch, a token link), so it goes through
+// redaction; the stack is logged only outside production, like the Express
+// error handler (Sentry still gets the full error).
+function onUnhandledRejection(reason: unknown): void {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  logger.error('Unhandled promise rejection', {
+    error: redactUrlsInText(message),
+    stack:
+      process.env.NODE_ENV !== 'production' && reason instanceof Error && reason.stack
+        ? redactUrlsInText(reason.stack)
+        : undefined,
+  });
+  captureException(reason, { flow: 'process', kind: 'unhandledRejection' });
 }
 
 export function isSentryEnabled(): boolean {
@@ -231,18 +279,39 @@ export function sentryErrorHandler(
   _res: Response,
   next: NextFunction
 ): void {
-  if (initialized && !isExpectedClientError(err)) {
-    Sentry.withScope(scope => {
-      if (req.user) {
-        scope.setUser({ id: req.user.id });
-      }
-      if (req.requestId) {
-        scope.setTag('request_id', req.requestId);
-      }
-      scope.setTag('method', req.method);
-      scope.setTag('route', req.route?.path || redactUrl(req.originalUrl));
-      Sentry.captureException(err);
-    });
+  if (!isExpectedClientError(err)) {
+    captureRequestException(err, req);
   }
   next(err);
+}
+
+/** The request tags every request-scoped capture carries: user id, request id, method, route. */
+function applyRequestScope(scope: Sentry.Scope, req: Request): void {
+  if (req.user) {
+    scope.setUser({ id: req.user.id });
+  }
+  if (req.requestId) {
+    scope.setTag('request_id', req.requestId);
+  }
+  scope.setTag('method', req.method);
+  scope.setTag('route', req.route?.path || redactUrl(req.originalUrl));
+}
+
+/**
+ * Report an error raised while handling `req`, with the same request tags
+ * `sentryErrorHandler` attaches, plus `tags` (e.g. `{ flow: 'auth-me' }`).
+ * Used by `respond-with-error.ts` for a route catch that answers a 5xx itself.
+ * No-ops when Sentry is disabled.
+ */
+export function captureRequestException(
+  error: unknown,
+  req: Request | undefined,
+  tags?: Record<string, string>
+): void {
+  if (!initialized) return;
+  Sentry.withScope(scope => {
+    if (req) applyRequestScope(scope, req);
+    if (tags) scope.setTags(tags);
+    Sentry.captureException(error);
+  });
 }

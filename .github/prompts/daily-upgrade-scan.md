@@ -108,6 +108,33 @@ under ⏸ only):
   c. Package is in the deferral list as a *direct* dep → DEFER, but still
      report it under ⚠ with the CVE.
 
+### Retire dead overrides (all sides)
+
+For every entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
+probe the LOCKFILE from that side's directory (`--package-lock-only`, never the
+installed tree: `npm ci` on this Linux runner skips `os`/`cpu`-gated optional
+packages such as sharp's `@img/*`, which would then look absent):
+
+  - bare root key `"<pkg>"`:
+      npm ls <pkg> --all --package-lock-only
+    dead when it prints `(empty)`.
+  - version-keyed key `"<pkg>@<range>"` (root or nested):
+      npm ls "<pkg>@<range>" --all --package-lock-only
+    dead when it prints `(empty)` (copies of `<pkg>` in other majors do not
+    keep it alive).
+  - nested key `"<parent>": { "<key>": … }`: run `npm ls <parent> --all
+    --package-lock-only` and look at the subtree under each `<parent>` copy.
+    Dead when `<parent>` is absent, or when no `<pkg>` (matching `<range>`
+    for a version-keyed `<key>`) appears anywhere beneath it. A copy of
+    `<pkg>` elsewhere in the tree does not keep a nested entry alive. When a
+    whole parent block is dead, remove the block.
+
+A dead entry would silently pin any future consumer of that package. Removing
+it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
+branch, Step 3). Remove nothing a probe above still finds, even a copy that
+already satisfies the floor; that is a human call. Name each removed entry in
+the PR body and on the 🟢 line of the daily log ("override retired: <entry>").
+
 ### Mobile patch bumps
 
   - `npm outdated` entries where `current ≠ wanted` AND `wanted` is within the
@@ -176,8 +203,24 @@ headed **`## Backend / Web — majors (human-owned)`** listing every package
 from "Backend / web majors (report only)" as `<pkg> current → latest`, grouped
 by side, with a one-line unblock note where one is known (the inline list's
 jest and prisma-generator entries keep their notes). Do not attribute these
-sides to Dependabot, which ignores majors on both. Include
-"Last refreshed: YYYY-MM-DD". Skip when `DRY_RUN=true`.
+sides to Dependabot, which ignores majors on both.
+
+It MUST also contain a section headed **`## Infra — Terraform provider and
+Docker images (human-owned)`** (report only; never edit anything under
+`infra/`, `docker/` or `docker-compose.yml`):
+  - `hashicorp/aws <locked> → <latest>`: `<locked>` is the `version` in
+    `infra/.terraform.lock.hcl`; `<latest>` is
+    `curl -s https://registry.terraform.io/v1/providers/hashicorp/aws | jq -r .version`
+    (write "registry unreachable" if the call fails). When the majors differ,
+    note that Dependabot ignores `hashicorp/aws` majors and the migration is
+    tracked in #866 (or the issue the ignore comment in `.github/dependabot.yml`
+    now names).
+  - every open Dependabot PR labelled `infra`
+    (`gh pr list --author app/dependabot --label infra --state open`) as
+    `#<n> <title>`: these wait for a human `terraform plan` or image review.
+  - "nothing deferred" when both lists are empty.
+
+Include "Last refreshed: YYYY-MM-DD". Skip when `DRY_RUN=true`.
 
 ## Step 5 — Expo SDK divergence (informational)
 

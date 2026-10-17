@@ -28,8 +28,9 @@ the deferral list current, and post a daily summary comment on the rolling
 | Who | Owns | Mechanism |
 | --- | --- | --- |
 | **Dependabot** | Version bumps: backend/web patch+minor, mobile patch | `.github/dependabot.yml` (weekly groups) + `.github/workflows/dependabot-auto-merge.yml` flips auto-merge; branch protection still gates on CI. The web CI jobs (`Lint and Type Check (web)`, `Test Web`; #690) run on `/web` bumps but gate auto-merge only once the owner adds both to the required status checks of `main`; until then a red web job does not stop a `/web` merge |
-| **Claude scan** | Security `overrides` for vulnerable transitives (all sides); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
-| **Human** | Majors, mobile minors (RN peer deps), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
+| **Dependabot (infra)** | Version PRs for the `terraform` ecosystem (`/infra`: the AWS provider in `infra/.terraform.lock.hcl`, committed since #786; `hashicorp/aws` majors ignored, the 5 → 6 move is #866), `docker` (`/docker`: the Dockerfile's `node:22-alpine`) and `docker-compose` (`/`: the dev Postgres and Redis images in `docker-compose.yml`). **Never auto-merged**: `dependabot-auto-merge.yml` recognises the three ecosystems and leaves them at `auto-merge=false` | `.github/dependabot.yml`, labels `infra` + `dependencies`. A human reviews each one. For a terraform bump the reviewer runs `terraform init` and `terraform plan` from `infra/` with production credentials and merges only on "No changes.": CI runs `fmt`/`init`/`validate` (so a bumped lock is installable and validated) but never `plan` or `apply`. A local `init` may rewrite the lock (hashes for another platform); do not commit that from the review. A lock-only merge does not deploy (the `ci.yml` deploy filter and `.github/scripts/deploy-contents.sh` exclude `infra/.terraform.lock.hcl`); if a merge still deploys, check for `IN_PROGRESS` games first. A Node or Postgres major also moves the files the config-bound tests pin (`backend/tests/infra/node-version.test.ts`, `postgres-version.test.ts`), so that PR is red until a human widens it |
+| **Claude scan** | Security `overrides` for vulnerable transitives (all sides), and retiring any override whose target has left the tree ("Override shape" below); **mobile** caret patch bumps (Dependabot's regenerated mobile lockfile drops `overrides` and fails `npm ci` — see #290/#300); deferral list, which **inventories backend/web majors into #275 (report only)**, since Dependabot ignores `semver-major` on both sides; daily log | `daily-upgrade-scan.yml` |
+| **Human** | Majors, mobile minors (RN peer deps), **Terraform provider and Docker image bumps** (see "Dependabot (infra)"), **GitHub Actions bumps** (deliberately outside the auto-merge policy — a workflow bump can change what CI itself does), Expo SDK upgrades, **any mobile package with native code and the `react` family** (they move only with a native build, see "Binary-coupled packages" below), dismissing alerts with no upstream fix | — |
 
 The Claude prompt lives at **`.github/prompts/daily-upgrade-scan.md`** and is
 the single runtime source of truth — the workflow tells Claude to read that
@@ -90,6 +91,14 @@ Step 2a and the Step 3 gate):
   major and point it at another.
 - **Don't add inert entries.** If every consumer of the old line already resolves to a patched
   version with no override, there is nothing to add. #779 removed eleven such entries.
+- **Retire dead entries.** The scan also removes an override whose target has left the tree, and
+  makes the removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides").
+  It probes the lockfile, never the installed tree, because `npm ci` on the Linux runner skips
+  `os`/`cpu`-gated optional packages (sharp's `@img/*`) and would make a live override look dead:
+  `npm ls <pkg> --all --package-lock-only` for a bare key, `npm ls "<pkg>@<range>" --all
+  --package-lock-only` for a version-keyed one, and, for a nested `"<parent>": { … }` entry,
+  whether the target still appears under `<parent>` in that tree. #777 retired the backend's
+  `hono`, `@hono/node-server` and `fast-xml-builder` entries.
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but

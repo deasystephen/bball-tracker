@@ -35,25 +35,35 @@ export interface Game {
     season?: {
       id: string;
       name: string;
-      isActive: boolean;
+      /** Only on `GET /games/:id`; the `GET /games` list item omits it. */
+      isActive?: boolean;
       league: {
         id: string;
         name: string;
       };
     };
+    /** Roster, on `GET /games/:id` only (backend `GameDetailView`). */
     members?: {
       id: string;
       playerId: string;
-      jerseyNumber?: number;
-      position?: string;
+      /** `0` is a valid jersey: test `!= null`, never truthiness. */
+      jerseyNumber?: number | null;
+      position?: string | null;
       player: {
         id: string;
         name: string;
-        email: string;
+        /** Present only for callers with `canManageRoster`; `null` when the user has no email. */
+        email?: string | null;
+        isManaged?: boolean;
+        /** Set when the account was deleted; render via `displayName`. */
+        deletedAt?: string | null;
       };
     }[];
   };
 }
+
+/** One roster row of `GET /games/:id` (the tracker's player chips). */
+export type GameRosterMember = NonNullable<NonNullable<Game['team']>['members']>[number];
 
 export interface ShotMetadata {
   made: boolean;
@@ -64,8 +74,6 @@ export interface ShotMetadata {
 export interface ReboundMetadata {
   type: 'offensive' | 'defensive';
 }
-
-export type GameEventMetadata = ShotMetadata | ReboundMetadata | Record<string, unknown>;
 
 export interface GameEvent {
   id: string;

@@ -26,9 +26,10 @@ Loads when a file under `backend/` is read. The full as-built reference for each
   one info-level domain event with ids only (guard: `tests/services/domain-event-guard.test.ts`) (never a name, email or token; `hashRecipient()` for an
   address); a new external call (SES, S3, WorkOS, Redis) logs its failures at warn/error with the
   failing operation named. `requestId` and `userId` arrive from the request context; do not thread
-  them through signatures. A route `catch` that answers its own error logs through
-  `utils/log-route-error.ts#logRouteError` as its last statement (4xx at warn, else error; a guard
-  test fails on `logger.error` on a 4xx path). No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
+  them through signatures. A route `catch` answers through
+  `utils/respond-with-error.ts#respondWithError` (every `AppError` at its own status, a 5xx with
+  the route's fallback body; logs 4xx at warn, else error); never an `instanceof` allow-list, a
+  direct `res.status(…)` or a bare `logger.error` in a catch (a guard test fails on all three). No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
 - Multi-step backfills are hand-written migrations; run `.github/scripts/migration-backfill-guard.sh`
   before pushing. Never edit a migration already on `main`.
 - Every endpoint change ships an API integration test (`tests/api/`) and a schema test

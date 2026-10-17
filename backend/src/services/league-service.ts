@@ -6,8 +6,10 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
+import { createOrConflict } from '../utils/prisma-errors';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { logger } from '../utils/logger';
+import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -19,13 +21,7 @@ import { logger } from '../utils/logger';
 const LEAGUE_OMIT = { personalOwnerId: true } satisfies Prisma.LeagueOmit;
 
 const LEAGUE_ADMIN_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  },
+  user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.LeagueAdminInclude;
 
 const LEAGUE_INCLUDE = {
@@ -51,24 +47,13 @@ const LEAGUE_DETAIL_INCLUDE = {
         include: {
           staff: {
             include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
-                },
-              },
+              user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
               role: true,
             },
           },
           members: {
             include: {
-              player: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
+              player: { select: USER_SUMMARY_SELECT },
             },
           },
         },
@@ -544,17 +529,23 @@ export class LeagueService {
       throw new BadRequestError('A season with this name already exists in this league');
     }
 
-    // Create season
-    const season = await prisma.season.create({
-      data: {
-        leagueId,
-        name: data.name,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        isActive: true,
-      },
-      include: SEASON_INCLUDE,
-    });
+    // Create season; a lost race on @@unique([leagueId, name]) answers the
+    // pre-check's 400 (#727).
+    const season = await createOrConflict(
+      () =>
+        prisma.season.create({
+          data: {
+            leagueId,
+            name: data.name,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isActive: true,
+          },
+          include: SEASON_INCLUDE,
+        }),
+      'A season with this name already exists in this league',
+      'Season_leagueId_name_key'
+    );
 
     logger.info('Season created', { seasonId: season.id, leagueId, userId });
 

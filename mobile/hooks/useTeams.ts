@@ -86,7 +86,11 @@ export interface Team {
   season?: {
     id: string;
     name: string;
-    isActive: boolean;
+    /**
+     * Only on the `GET /teams/:id` detail (`TEAM_INCLUDE` includes the whole
+     * season); `GET /teams` list items select `{ id, name, league }` only.
+     */
+    isActive?: boolean;
     league: {
       id: string;
       name: string;

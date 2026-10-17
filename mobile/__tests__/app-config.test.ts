@@ -5,9 +5,9 @@
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */
-import path from 'path';
-
 import { APP_URL_SCHEME } from '../config/env';
+
+import { introspectAppConfig, loadAppConfig, type IntrospectedConfig, type PublishEnv } from './helpers/app-config';
 
 type PluginEntry = string | [string, Record<string, unknown>?];
 
@@ -22,31 +22,8 @@ type ExpoConfig = {
   };
 };
 
-/** The subset of `expo/config-plugins` the native-config evaluation below uses. */
-type ConfigPlugins = {
-  withPlugins: (config: Record<string, unknown>, plugins: PluginEntry[]) => Record<string, unknown>;
-  compileModsAsync: (
-    config: Record<string, unknown>,
-    options: { projectRoot: string; introspect: boolean; platforms: ('ios' | 'android')[] }
-  ) => Promise<NativeConfig>;
-};
-
-type ManifestPermission = { $: Record<string, string> };
-
-type NativeConfig = {
-  ios: { infoPlist: Record<string, unknown> };
-  android?: { permissions?: string[] };
-  _internal: {
-    modResults: {
-      android: { manifest: { manifest: { 'uses-permission'?: ManifestPermission[] } } };
-    };
-  };
-};
-
 /** Expo's config-plugin fallbacks — what ships when no purpose string is given. */
 const EXPO_BOILERPLATE = /\$\(PRODUCT_NAME\)|^Allow .* to access your/;
-
-const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 function pluginOptions(config: ExpoConfig, name: string): Record<string, unknown> | undefined {
   for (const entry of config.expo.plugins) {
@@ -61,28 +38,13 @@ function pluginOptions(config: ExpoConfig, name: string): Record<string, unknown
  * evaluation as `npx expo config --type introspect`, minus the plugins that
  * do not touch permissions. No native project is generated.
  */
-async function evaluateNativePermissions(config: ExpoConfig): Promise<NativeConfig> {
+async function evaluateNativePermissions(config: ExpoConfig): Promise<IntrospectedConfig> {
   return evaluateNativeConfig(config, ['expo-image-picker', 'expo-secure-store']);
 }
 
 /** Evaluates the named plugins, with the options app.config.js gives them, in introspection mode. */
-async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promise<NativeConfig> {
-  const { withPlugins, compileModsAsync } = jest.requireActual<ConfigPlugins>('expo/config-plugins');
-  const plugins = config.expo.plugins.filter(
-    (entry) => Array.isArray(entry) && names.includes(entry[0])
-  );
-  const base = {
-    name: 'Hooplings',
-    slug: 'bball-tracker',
-    ios: { bundleIdentifier: 'com.bballtracker.mobile' },
-    android: { package: 'com.bballtracker.mobile' },
-    _internal: { projectRoot: PROJECT_ROOT },
-  };
-  return compileModsAsync(withPlugins(base, plugins), {
-    projectRoot: PROJECT_ROOT,
-    introspect: true,
-    platforms: ['ios', 'android'],
-  });
+async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promise<IntrospectedConfig> {
+  return introspectAppConfig(config.expo, names);
 }
 
 /** [major, minor, patch] compare; true when `version` >= `floor`. */
@@ -95,28 +57,8 @@ function atLeast(version: string, floor: string): boolean {
   return true;
 }
 
-const ENV_KEYS = ['APP_ENV', 'API_URL'] as const;
-
-async function loadConfig(env: Partial<Record<(typeof ENV_KEYS)[number], string>>): Promise<ExpoConfig> {
-  const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-  for (const key of ENV_KEYS) {
-    if (env[key] === undefined) delete process.env[key];
-    else process.env[key] = env[key];
-  }
-  try {
-    let config: ExpoConfig | undefined;
-    jest.isolateModules(() => {
-      // CommonJS Jest: jest.requireActual evaluates app.config.js fresh with the env above.
-      const mod = jest.requireActual<{ default?: ExpoConfig } & ExpoConfig>('../app.config.js');
-      config = mod.default ?? mod;
-    });
-    return config!;
-  } finally {
-    for (const key of ENV_KEYS) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key] as string;
-    }
-  }
+async function loadConfig(env: PublishEnv): Promise<ExpoConfig> {
+  return loadAppConfig<ExpoConfig>(env);
 }
 
 describe('app.config.js', () => {
@@ -132,6 +74,32 @@ describe('app.config.js', () => {
     const cfg = await loadConfig({});
     expect(cfg.expo.extra.apiUrl).toBe('http://127.0.0.1:3000');
     expect(cfg.expo.extra.appEnv).toBe('development');
+  });
+
+  // #721: an EAS build profile without APP_ENV would bake the dev host into
+  // the binary. Every profile in eas.json sets it; this blocks a future one.
+  it('EAS_BUILD=true with APP_ENV unset → throws', async () => {
+    await expect(loadConfig({ EAS_BUILD: 'true' })).rejects.toThrow(/APP_ENV is unset on an EAS build/);
+  });
+
+  it('EAS_BUILD=true with APP_ENV=production → resolves', async () => {
+    const cfg = await loadConfig({ EAS_BUILD: 'true', APP_ENV: 'production' });
+    expect(cfg.expo.extra.apiUrl).toBe('https://api.hooplings.com');
+  });
+
+  // #721: a release bundle ignores a loopback apiUrl and calls production, so
+  // a local Release build needs a way to reach a development backend.
+  it('APP_ENV unset + LOCAL_API_URL → that host (a local Release build pointed at a LAN backend)', async () => {
+    const cfg = await loadConfig({ LOCAL_API_URL: 'http://192.168.1.20:3000' });
+    expect(cfg.expo.extra.apiUrl).toBe('http://192.168.1.20:3000');
+    expect(cfg.expo.extra.appEnv).toBe('development');
+  });
+
+  it('APP_ENV unset + API_URL → still the loopback default the runtime guard catches', async () => {
+    // An API_URL exported in a shell must not reach an OTA published without
+    // the production environment: a LAN host would pass the runtime guard.
+    const cfg = await loadConfig({ API_URL: 'http://192.168.1.20:3000' });
+    expect(cfg.expo.extra.apiUrl).toBe('http://127.0.0.1:3000');
   });
 
   it('API_URL overrides the host in production and preview', async () => {

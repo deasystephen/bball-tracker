@@ -36,6 +36,7 @@ import type { Game } from '../../types/game';
 import { displayName } from '../../utils/display-name';
 import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../utils/touch-target';
 import { useTranslation } from '../../i18n';
+import { formatMonthDay } from '../../utils/format-date';
 
 const BELL_ICON_SIZE = 22;
 /** The bell draws at 30pt (22 + 4pt padding); the slop makes it a 44pt target. */
@@ -462,10 +463,7 @@ export default function Home() {
                   </ThemedText>
                 </View>
                 <ThemedText variant="footnote" color="textTertiary">
-                  {new Date(game.date).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
+                  {formatMonthDay(game.date)}
                 </ThemedText>
               </TouchableOpacity>
             );

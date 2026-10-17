@@ -13,10 +13,11 @@
  * covered here. Comment lines are in scope on purpose ("any line" is the documented
  * rule), so a historical note like `# was "Capyhoops"` fails CI; reword it.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, resolve } from 'path';
 
+import { SOURCE_SKIP_DIRS, walkFiles } from '../helpers/source-files';
 import en from '../../i18n/locales/en.json';
 import es from '../../i18n/locales/es.json';
 
@@ -56,8 +57,10 @@ const WEB_APP_DIR = resolve(MOBILE_ROOT, '../web/app');
 const WEB_ANCHOR_FILE = 'invite/[token]/invite-client.tsx';
 
 const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|json)$/;
-/** Tests quote retired names as negative fixtures, so `__tests__` is not user-facing surface. */
-const SOURCE_SKIP_DIRS = new Set(['node_modules', 'ios', 'android', '.expo', 'dist', 'build', 'coverage', '.git', '__tests__']);
+/**
+ * Directories come from the shared `SOURCE_SKIP_DIRS`, which includes `__tests__`: tests quote
+ * retired names as negative fixtures, so they are not user-facing surface.
+ */
 const SOURCE_SKIP_FILES = new Set(['package-lock.json']);
 
 interface Leaf {
@@ -101,23 +104,6 @@ function localeOffenders(name: string, locale: unknown): Offender[] {
   return collectStrings(locale)
     .filter((leaf) => findRetiredBrand(leaf.text))
     .map((leaf) => ({ location: `${name}:${leaf.path}`, text: leaf.text }));
-}
-
-/** Depth-first file list under `root`, relative paths, skipping the named directories. */
-function walkFiles(root: string, skipDirs: Set<string>): string[] {
-  const out: string[] = [];
-  const visit = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      const full = join(dir, entry);
-      if (statSync(full).isDirectory()) {
-        if (!skipDirs.has(entry)) visit(full);
-      } else {
-        out.push(relative(root, full));
-      }
-    }
-  };
-  visit(root);
-  return out.sort();
 }
 
 /** Line-by-line scan of the given files; `label` prefixes each reported location. */

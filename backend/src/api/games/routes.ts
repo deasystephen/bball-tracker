@@ -16,11 +16,11 @@ import {
   gameEventQuerySchema,
   upsertRsvpSchema,
 } from './schemas';
-import { BadRequestError, NotFoundError, ForbiddenError } from '../../utils/errors';
+import { BadRequestError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { exportRateLimit } from '../middleware/rate-limit';
 import { logger } from '../../utils/logger';
-import { logRouteError } from '../../utils/log-route-error';
+import { respondWithError } from '../../utils/respond-with-error';
 import { buildContentDisposition } from '../../utils/content-disposition';
 
 const router = Router();
@@ -49,16 +49,7 @@ router.post('/', async (req, res) => {
       game,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof ForbiddenError ||
-      error instanceof NotFoundError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create game' });
-    }
-    logRouteError(res, 'Error creating game', error);
+    respondWithError(res, error, { log: 'Error creating game', fallback: 'Failed to create game' });
   }
 });
 
@@ -83,16 +74,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof ForbiddenError ||
-      error instanceof NotFoundError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to list games' });
-    }
-    logRouteError(res, 'Error listing games', error);
+    respondWithError(res, error, { log: 'Error listing games', fallback: 'Failed to list games' });
   }
 });
 
@@ -109,16 +91,7 @@ router.get('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get game' });
-    }
-    logRouteError(res, 'Error getting game', error);
+    respondWithError(res, error, { log: 'Error getting game', fallback: 'Failed to get game' });
   }
 });
 
@@ -147,16 +120,7 @@ router.patch('/:id', validateUuidParams('id'), async (req, res) => {
       game,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to update game' });
-    }
-    logRouteError(res, 'Error updating game', error);
+    respondWithError(res, error, { log: 'Error updating game', fallback: 'Failed to update game' });
   }
 });
 
@@ -173,16 +137,7 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
       message: 'Game deleted successfully',
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to delete game' });
-    }
-    logRouteError(res, 'Error deleting game', error);
+    respondWithError(res, error, { log: 'Error deleting game', fallback: 'Failed to delete game' });
   }
 });
 
@@ -217,23 +172,7 @@ router.get('/:id/export.csv', exportRateLimit, validateUuidParams('id'), async (
     });
     exportFile.stream.pipe(res);
   } catch (error) {
-    if (res.headersSent) {
-      // The stream already started the response: answering again would throw
-      // ERR_HTTP_HEADERS_SENT and lose this line, so log, end it and stop.
-      logRouteError(res, 'Error exporting game CSV', error);
-      res.end();
-      return;
-    }
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to export game CSV' });
-    }
-    logRouteError(res, 'Error exporting game CSV', error);
+    respondWithError(res, error, { log: 'Error exporting game CSV', fallback: 'Failed to export game CSV' });
   }
 });
 
@@ -268,23 +207,7 @@ router.get('/:id/boxscore.pdf', exportRateLimit, validateUuidParams('id'), async
     });
     exportFile.stream.pipe(res);
   } catch (error) {
-    if (res.headersSent) {
-      // The stream already started the response: answering again would throw
-      // ERR_HTTP_HEADERS_SENT and lose this line, so log, end it and stop.
-      logRouteError(res, 'Error exporting box score PDF', error);
-      res.end();
-      return;
-    }
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to export box score PDF' });
-    }
-    logRouteError(res, 'Error exporting box score PDF', error);
+    respondWithError(res, error, { log: 'Error exporting box score PDF', fallback: 'Failed to export box score PDF' });
   }
 });
 
@@ -318,16 +241,7 @@ router.post('/:gameId/events', validateUuidParams('gameId'), async (req, res) =>
       score,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create game event' });
-    }
-    logRouteError(res, 'Error creating game event', error);
+    respondWithError(res, error, { log: 'Error creating game event', fallback: 'Failed to create game event' });
   }
 });
 
@@ -356,16 +270,7 @@ router.get('/:gameId/events', validateUuidParams('gameId'), async (req, res) => 
       ...result,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to list game events' });
-    }
-    logRouteError(res, 'Error listing game events', error);
+    respondWithError(res, error, { log: 'Error listing game events', fallback: 'Failed to list game events' });
   }
 });
 
@@ -386,16 +291,7 @@ router.get('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'), 
       event,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get game event' });
-    }
-    logRouteError(res, 'Error getting game event', error);
+    respondWithError(res, error, { log: 'Error getting game event', fallback: 'Failed to get game event' });
   }
 });
 
@@ -417,16 +313,7 @@ router.delete('/:gameId/events/:eventId', validateUuidParams('gameId', 'eventId'
       score,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError ||
-      error instanceof BadRequestError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to delete game event' });
-    }
-    logRouteError(res, 'Error deleting game event', error);
+    respondWithError(res, error, { log: 'Error deleting game event', fallback: 'Failed to delete game event' });
   }
 });
 
@@ -459,16 +346,7 @@ router.post('/:gameId/rsvp', validateUuidParams('gameId'), async (req, res) => {
       rsvp,
     });
   } catch (error) {
-    if (
-      error instanceof BadRequestError ||
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to update RSVP' });
-    }
-    logRouteError(res, 'Error upserting RSVP', error);
+    respondWithError(res, error, { log: 'Error upserting RSVP', fallback: 'Failed to update RSVP' });
   }
 });
 
@@ -488,15 +366,7 @@ router.get('/:gameId/rsvps', validateUuidParams('gameId'), async (req, res) => {
       ...result,
     });
   } catch (error) {
-    if (
-      error instanceof NotFoundError ||
-      error instanceof ForbiddenError
-    ) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get RSVPs' });
-    }
-    logRouteError(res, 'Error getting RSVPs', error);
+    respondWithError(res, error, { log: 'Error getting RSVPs', fallback: 'Failed to get RSVPs' });
   }
 });
 

@@ -14,6 +14,7 @@ import GameDetailScreen from '../../app/games/[id]/index';
 import { useAuthStore } from '../../store/auth-store';
 import type { Game, GameRsvp } from '../../types/game';
 import type { GuardianOfEntry } from '../../../shared/types';
+import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockSubmitRsvp = jest.fn();
@@ -103,6 +104,18 @@ describe('GameDetailScreen RSVP picker (guardians)', () => {
 
     fireEvent.press(getByText('Going'));
     expect(mockSubmitRsvp).toHaveBeenCalledWith({ gameId: 'g1', status: 'YES', playerId: 'steph' });
+  });
+
+  it('names a deleted child in the picker with the localized label from childDeletedAt (#813)', async () => {
+    signIn('dell', [{ ...stephLink, childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z' }]);
+    await i18n.changeLanguage('es');
+    try {
+      const { getByLabelText, queryByLabelText } = render(<GameDetailScreen />);
+      expect(getByLabelText('Respond for Usuario eliminado')).toBeTruthy();
+      expect(queryByLabelText('Respond for Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('guardian who is also rostered: "Me" first, child selectable', () => {
