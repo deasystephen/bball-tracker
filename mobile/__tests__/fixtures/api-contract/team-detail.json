@@ -1,0 +1,136 @@
+{
+  "id": "20000000-0000-4000-a000-000000000001",
+  "name": "Warriors",
+  "seasonId": "642eec66-0082-4581-96b5-f0a9c0214afe",
+  "lineageId": "21000000-0000-4000-a000-000000000001",
+  "chatLink": "https://chat.whatsapp.com/warriors-team-chat",
+  "ageGroup": "U14",
+  "gender": "BOYS",
+  "createdAt": "2026-10-04T03:01:22.476Z",
+  "updatedAt": "2026-10-05T16:26:06.104Z",
+  "season": {
+    "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+    "leagueId": "10000000-0000-4000-a000-000000000001",
+    "name": "Spring 2024",
+    "startDate": "2024-03-01T00:00:00.000Z",
+    "endDate": "2024-06-30T00:00:00.000Z",
+    "isActive": true,
+    "createdAt": "2026-10-04T03:01:22.469Z",
+    "updatedAt": "2026-10-04T03:01:22.469Z",
+    "league": {
+      "id": "10000000-0000-4000-a000-000000000001",
+      "name": "Downtown Youth Basketball League",
+      "createdAt": "2026-10-04T03:01:22.464Z",
+      "updatedAt": "2026-10-04T03:01:22.464Z"
+    }
+  },
+  "staff": [
+    {
+      "id": "a1dcbe40-72ef-4e39-a52c-0205b6adf2f2",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "userId": "1b2cbc50-f420-48df-aff0-36d0369ae748",
+      "roleId": "2ce545e5-7a10-4130-83c9-c4009e019383",
+      "createdAt": "2026-10-05T16:04:16.832Z",
+      "updatedAt": "2026-10-05T16:04:16.832Z",
+      "user": {
+        "id": "1b2cbc50-f420-48df-aff0-36d0369ae748",
+        "name": "Mike Brown",
+        "email": "mike.brown@example.com",
+        "isManaged": false,
+        "deletedAt": null
+      },
+      "role": {
+        "id": "2ce545e5-7a10-4130-83c9-c4009e019383",
+        "teamId": "20000000-0000-4000-a000-000000000001",
+        "type": "ASSISTANT_COACH",
+        "name": "Assistant Coach",
+        "description": "Assistant coach with team management access",
+        "canManageTeam": true,
+        "canManageRoster": true,
+        "canTrackStats": true,
+        "canViewStats": true,
+        "canShareStats": true,
+        "createdAt": "2026-10-04T03:01:22.479Z",
+        "updatedAt": "2026-10-04T03:01:22.479Z"
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": "9cb31b5c-a7f3-49a1-90bd-de454a4b447c",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "playerId": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+      "jerseyNumber": 3,
+      "position": "SG",
+      "createdAt": "2026-10-04T03:01:22.494Z",
+      "updatedAt": "2026-10-04T03:01:22.494Z",
+      "player": {
+        "id": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+        "name": "Jordan Poole",
+        "email": "jordan.poole@example.com",
+        "isManaged": false,
+        "deletedAt": null,
+        "emailSuppressedAt": null,
+        "emailSuppressedReason": null
+      }
+    }
+  ],
+  "roles": [
+    {
+      "id": "25a43113-1152-494c-8280-8d66783edccf",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "type": "TEAM_MANAGER",
+      "name": "Team Manager",
+      "description": "Team volunteer who helps with game day operations",
+      "canManageTeam": false,
+      "canManageRoster": false,
+      "canTrackStats": true,
+      "canViewStats": true,
+      "canShareStats": true,
+      "createdAt": "2026-10-04T22:37:28.003Z",
+      "updatedAt": "2026-10-04T22:37:28.003Z"
+    },
+    {
+      "id": "a5f09552-92b7-4748-b69a-12c97b161fc5",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "type": "HEAD_COACH",
+      "name": "Head Coach",
+      "description": "Primary team coach with full administrative access",
+      "canManageTeam": true,
+      "canManageRoster": true,
+      "canTrackStats": true,
+      "canViewStats": true,
+      "canShareStats": true,
+      "createdAt": "2026-10-04T03:01:22.479Z",
+      "updatedAt": "2026-10-04T03:01:22.479Z"
+    },
+    {
+      "id": "2ce545e5-7a10-4130-83c9-c4009e019383",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "type": "ASSISTANT_COACH",
+      "name": "Assistant Coach",
+      "description": "Assistant coach with team management access",
+      "canManageTeam": true,
+      "canManageRoster": true,
+      "canTrackStats": true,
+      "canViewStats": true,
+      "canShareStats": true,
+      "createdAt": "2026-10-04T03:01:22.479Z",
+      "updatedAt": "2026-10-04T03:01:22.479Z"
+    }
+  ],
+  "games": [
+    {
+      "id": "30000000-0000-4000-a000-000000000002",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "opponent": "Celtics",
+      "date": "2026-10-12T16:26:06.161Z",
+      "status": "SCHEDULED",
+      "homeScore": 0,
+      "awayScore": 0,
+      "createdAt": "2026-10-04T03:01:22.539Z",
+      "updatedAt": "2026-10-05T16:26:06.162Z"
+    }
+  ],
+  "invitations": []
+}

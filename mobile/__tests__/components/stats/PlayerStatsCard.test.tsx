@@ -5,7 +5,7 @@
  *   - per-game stats render (PTS/REB/AST + detailed shooting splits)
  *   - aggregated stats render per-game averages + efficiency when showAverages
  *   - compact mode hides detailed rows
- *   - jersey number / position conditional rendering
+ *   - jersey number / position conditional rendering (jersey 0 shows; null and absent hide)
  *   - onPress wraps content in a touchable and fires the handler
  */
 
@@ -14,6 +14,7 @@ import { render, fireEvent } from '@testing-library/react-native';
 
 import { PlayerStatsCard } from '../../../components/stats/PlayerStatsCard';
 import type { PlayerGameStats, AggregatedPlayerStats } from '../../../types/stats';
+import { i18n } from '../../../i18n';
 
 jest.mock('../../../hooks/useTheme', () => ({
   useTheme: () => ({
@@ -87,6 +88,17 @@ describe('PlayerStatsCard', () => {
     expect(queryByText('FG (52.9%)')).toBeNull();
   });
 
+  it('shows jersey #0 (0 is a valid jersey)', () => {
+    const { getByText } = render(<PlayerStatsCard stats={{ ...gameStats, jerseyNumber: 0 }} />);
+    expect(getByText('#0')).toBeTruthy();
+  });
+
+  it('renders no jersey, never "#null", when the API sends null', () => {
+    const { queryByText } = render(<PlayerStatsCard stats={{ ...gameStats, jerseyNumber: null }} />);
+    expect(queryByText(/#null/)).toBeNull();
+    expect(queryByText(/^#/)).toBeNull();
+  });
+
   it('omits jersey number and position when not provided', () => {
     const { queryByText } = render(
       <PlayerStatsCard
@@ -122,5 +134,17 @@ describe('PlayerStatsCard', () => {
     );
     fireEvent.press(getByText('John Doe'));
     expect(onPress).toHaveBeenCalledTimes(1);
+  });
+  it('names a deleted player with the localized label from playerDeletedAt (#813)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(
+        <PlayerStatsCard stats={{ ...gameStats, playerName: 'Deleted user', playerDeletedAt: '2026-09-01T00:00:00.000Z' }} />
+      );
+      expect(getByText('Usuario eliminado')).toBeTruthy();
+      expect(queryByText('Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

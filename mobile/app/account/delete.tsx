@@ -24,6 +24,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthUser } from '../../store/auth-store';
 import { useDeleteAccount, useDeleteChildRecord, getLastHeadCoachTeams, type BlockingTeam } from '../../hooks/useAccount';
 import { guardianChildren } from '../../utils/guardian';
+import { childDisplayName } from '../../utils/display-name';
 import { getApiErrorMessage } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { useTranslation } from '../../i18n';
@@ -51,7 +52,7 @@ export default function DeleteAccountScreen() {
   const deleteChild = useDeleteChildRecord();
 
   const child = childId ? guardianChildren(user).find((c) => c.childId === childId) : undefined;
-  const childName = child?.childName ?? '';
+  const childName = child ? childDisplayName(child) : '';
   const isChild = Boolean(childId);
 
   const [confirmation, setConfirmation] = useState('');

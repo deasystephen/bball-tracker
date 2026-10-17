@@ -117,11 +117,10 @@ describe('usePlayers', () => {
             team: {
               id: 'team-1',
               name: 'Lakers',
-              league: {
-                id: 'league-1',
-                name: 'Spring League',
-                season: 'Spring',
-                year: 2024,
+              season: {
+                id: 'season-1',
+                name: 'Spring 2024',
+                league: { id: 'league-1', name: 'Spring League' },
               },
             },
           },

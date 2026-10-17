@@ -11,6 +11,7 @@ import Constants from 'expo-constants';
 import { useAuthStore } from '../../store/auth-store';
 import { canAccessAdmin } from '../../utils/team-permissions';
 import { guardianChildren, isGuardian, relationshipLabel } from '../../utils/guardian';
+import { childDisplayName } from '../../utils/display-name';
 import type { GuardianOfEntry } from '../../../shared/types';
 import { useThemeStore } from '../../store/theme-store';
 import { useTheme } from '../../hooks/useTheme';
@@ -58,7 +59,7 @@ export default function Profile() {
     // (#444 D5); a child who has signed in deletes their own account.
     if (child.isManaged) {
       items.push({
-        label: t('account.delete.menuDeleteRecord', { name: child.childName }),
+        label: t('account.delete.menuDeleteRecord', { name: childDisplayName(child) }),
         destructive: true,
         onPress: () => router.push(`/account/delete?childId=${child.childId}`),
       });
@@ -215,14 +216,14 @@ export default function Profile() {
                     <TouchableOpacity
                       style={styles.childRowMain}
                       accessibilityRole="button"
-                      accessibilityLabel={`${child.childName}, ${relationshipLabel(child.relationship)}`}
+                      accessibilityLabel={`${childDisplayName(child)}, ${relationshipLabel(child.relationship)}`}
                       onPress={() => router.push(`/players/${child.childId}/stats`)}
                     >
                       <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
                         <Ionicons name="people" size={18} color={colors.primary} />
                       </View>
                       <View style={styles.settingContent}>
-                        <ThemedText variant="body">{child.childName}</ThemedText>
+                        <ThemedText variant="body">{childDisplayName(child)}</ThemedText>
                         <ThemedText variant="caption" color="textSecondary">
                           {relationshipLabel(child.relationship)}
                           {child.isPrimary ? ' \u00B7 Primary' : ''}
@@ -232,7 +233,7 @@ export default function Profile() {
                     <TouchableOpacity
                       style={styles.childRowMore}
                       accessibilityRole="button"
-                      accessibilityLabel={t('account.delete.menuMore', { name: child.childName })}
+                      accessibilityLabel={t('account.delete.menuMore', { name: childDisplayName(child) })}
                       testID={`child-menu-${child.childId}`}
                       onPress={() => setMenuChildId(child.childId)}
                     >
@@ -525,7 +526,7 @@ export default function Profile() {
 
       <ActionMenu
         visible={menuChild !== undefined}
-        title={menuChild?.childName ?? ''}
+        title={menuChild ? childDisplayName(menuChild) : ''}
         items={menuChild ? childMenuItems(menuChild) : []}
         onClose={() => setMenuChildId(null)}
       />

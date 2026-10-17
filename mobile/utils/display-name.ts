@@ -24,3 +24,22 @@ export function displayName(user: NamedUser | null | undefined): string {
   if (!user) return '';
   return isDeletedUser(user) ? i18n.t('account.deletedUser') : user.name;
 }
+
+/*
+ * Flattened payloads carry a name string beside its tombstone timestamp
+ * (`inviterName` / `inviterDeletedAt`, `childName` / `childDeletedAt`,
+ * `playerName` / `playerDeletedAt`, #813). These read them through
+ * `displayName`; the timestamp is optional because an older API omits it.
+ */
+
+export function inviterDisplayName(x: { inviterName: string; inviterDeletedAt?: string | null }): string {
+  return displayName({ name: x.inviterName, deletedAt: x.inviterDeletedAt });
+}
+
+export function childDisplayName(x: { childName: string; childDeletedAt?: string | null }): string {
+  return displayName({ name: x.childName, deletedAt: x.childDeletedAt });
+}
+
+export function playerDisplayName(x: { playerName: string; playerDeletedAt?: string | null }): string {
+  return displayName({ name: x.playerName, deletedAt: x.playerDeletedAt });
+}

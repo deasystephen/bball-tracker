@@ -30,7 +30,7 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { formatInvitationExpiry, isInvitationExpired } from '../../utils/invitation-expiry';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth-store';
-import { displayName } from '../../utils/display-name';
+import { childDisplayName, displayName, inviterDisplayName } from '../../utils/display-name';
 
 export default function InvitationsScreen() {
   const { colors } = useTheme();
@@ -115,7 +115,7 @@ export default function InvitationsScreen() {
       } catch {
         // useSessionRefresh will catch up on the next foreground.
       }
-      toast.showToast(`You are now ${invitation.childName}'s ${relationshipLabel(invitation.relationship).toLowerCase()}`, 'success');
+      toast.showToast(`You are now ${childDisplayName(invitation)}'s ${relationshipLabel(invitation.relationship).toLowerCase()}`, 'success');
     } catch (error) {
       toast.showToast(
         error instanceof Error ? error.message : 'Failed to accept invitation',
@@ -127,7 +127,7 @@ export default function InvitationsScreen() {
   const handleRejectGuardian = (invitation: GuardianInvitationView) => {
     Alert.alert(
       'Decline Invitation',
-      `Decline the invitation to become ${invitation.childName}'s ${relationshipLabel(invitation.relationship).toLowerCase()}?`,
+      `Decline the invitation to become ${childDisplayName(invitation)}'s ${relationshipLabel(invitation.relationship).toLowerCase()}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -164,7 +164,7 @@ export default function InvitationsScreen() {
         <View style={styles.invitationHeader}>
           <View style={styles.invitationInfo}>
             <ThemedText variant="h4">
-              Become {relationship} of {item.childName}
+              Become {relationship} of {childDisplayName(item)}
               {item.teamName ? ` on ${item.teamName}` : ''}
             </ThemedText>
             <ThemedText variant="caption" color="textSecondary">
@@ -182,7 +182,7 @@ export default function InvitationsScreen() {
           <View style={styles.detailRow}>
             <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary">
-              Invited by {item.inviterName}
+              Invited by {inviterDisplayName(item)}
             </ThemedText>
           </View>
           <View style={styles.detailRow}>
@@ -196,7 +196,7 @@ export default function InvitationsScreen() {
         <View style={styles.actionButtons}>
           {canAccept ? (
             <Button
-              title={`Accept for ${item.childName}`}
+              title={`Accept for ${childDisplayName(item)}`}
               onPress={() => handleAcceptGuardian(item)}
               loading={acceptInvitation.isPending}
               style={styles.acceptButton}

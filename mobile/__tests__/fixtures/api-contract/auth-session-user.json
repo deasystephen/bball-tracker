@@ -1,0 +1,38 @@
+[
+  {
+    "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+    "email": "steve.kerr@example.com",
+    "name": "Steve Kerr",
+    "role": "COACH",
+    "profilePictureUrl": null,
+    "notifyOnReplies": true,
+    "createdAt": "2026-10-04T03:01:22.413Z",
+    "leagueAdminOf": [],
+    "guardianOf": []
+  },
+  {
+    "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+    "email": "steve.kerr@example.com",
+    "name": "Steve Kerr",
+    "role": "COACH",
+    "profilePictureUrl": "https://example.test/avatars/me.jpg",
+    "notifyOnReplies": true,
+    "createdAt": "2026-10-04T03:01:22.413Z",
+    "leagueAdminOf": [],
+    "guardianOf": [
+      {
+        "childId": "40000000-0000-4000-a000-000000000301",
+        "childName": "Child Example",
+        "relationship": "MOTHER",
+        "isPrimary": true,
+        "isManaged": true,
+        "teams": [
+          {
+            "id": "20000000-0000-4000-a000-000000000001",
+            "name": "Warriors"
+          }
+        ]
+      }
+    ]
+  }
+]

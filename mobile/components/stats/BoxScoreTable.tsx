@@ -10,6 +10,7 @@ import { ThemedView } from '../ThemedView';
 import { useTheme } from '../../hooks/useTheme';
 import { MAX_FONT_SCALE, spacing } from '../../theme';
 import { isTablet, isWeb } from '../../utils/responsive';
+import { playerDisplayName } from '../../utils/display-name';
 import type { PlayerGameStats, TeamGameStats } from '../../types/stats';
 
 interface BoxScoreTableProps {
@@ -35,7 +36,7 @@ const baseColumns: ColumnDef[] = [
     getValue: (stats) => {
       if ('playerName' in stats) {
         const jersey = stats.jerseyNumber != null ? `#${stats.jerseyNumber} ` : '';
-        return `${jersey}${stats.playerName}`;
+        return `${jersey}${playerDisplayName(stats)}`;
       }
       return 'TEAM';
     },

@@ -32,7 +32,6 @@ export interface TeamInvitation {
     season: {
       id: string;
       name: string;
-      isActive: boolean;
       league: {
         id: string;
         name: string;
@@ -42,6 +41,11 @@ export interface TeamInvitation {
   player: {
     id: string;
     name: string;
+    /**
+     * `User.email` is nullable (managed players, tombstones). `GET
+     * /invitations/:id` omits the key for a caller who is neither a roster
+     * manager nor the invitee (`InvitationDetailView`).
+     */
     email?: string | null;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
@@ -49,7 +53,7 @@ export interface TeamInvitation {
   invitedBy: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     /** Set when the account was deleted; render via `displayName`. */
     deletedAt?: string | null;
   };
@@ -67,8 +71,12 @@ export interface GuardianInvitationView {
   id: string;
   status: InvitationStatus;
   childName: string;
+  /** Child's tombstone state (#813); render via `childDisplayName`. Older API builds omit it. */
+  childDeletedAt?: string | null;
   teamName: string | null;
   inviterName: string;
+  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. Older API builds omit it. */
+  inviterDeletedAt?: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }
@@ -214,10 +222,14 @@ export function useCreateInvitation() {
   });
 }
 
+/** Where an accept happened, for the `invitation_accepted` analytics event. */
+export type InvitationAcceptSource = 'in_app' | 'link';
+
 /**
- * Hook to accept an invitation
+ * Hook to accept an invitation. The deep-link screen (`/invite/[token]`)
+ * passes `source: 'link'`; the Invitations tab keeps the `in_app` default.
  */
-export function useAcceptInvitation() {
+export function useAcceptInvitation({ source = 'in_app' }: { source?: InvitationAcceptSource } = {}) {
   const queryClient = useQueryClient();
 
   return useMutation<InvitationResponse, Error, string>({
@@ -230,7 +242,7 @@ export function useAcceptInvitation() {
     onSuccess: (data) => {
       trackEvent(AnalyticsEvents.INVITATION_ACCEPTED, {
         kind: data.kind === 'guardian' ? 'guardian' : 'team',
-        source: 'in_app',
+        source,
       });
       // Invalidate all invitation queries
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });
