@@ -246,8 +246,11 @@ never inline a role check in a screen:
 ### Mobile API errors, permissions & toasts
 - **The API host is decided in ONE place: `config/env.ts#getApiUrl()`** (`extra.apiUrl` from
   `app.config.js`, except that a release bundle ignores a loopback value and uses
-  `https://api.hooplings.com` with one logged warning (#721); else `http://127.0.0.1:3000` under
-  `__DEV__`, else `https://api.hooplings.com`).
+  `https://api.hooplings.com` (#721); else `http://127.0.0.1:3000` under `__DEV__`, else
+  `https://api.hooplings.com`). LAN hosts stay allowed in release, so `API_URL=http://<lan-ip>:3000`
+  can point a local Release build at a development backend. The device cannot report an ignored
+  manifest by itself, so `getApiUrlResolution().loopbackIgnored` is shown in the About screen's
+  "API host" row and in Share diagnostics.
   `services/api-client.ts` and `services/socket.ts` import it; never read
   `Constants.expoConfig.extra.apiUrl` elsewhere. `__tests__/config/env.test.ts` pins the resolution
   order and `__tests__/app-config.test.ts` pins the `APP_ENV` → `apiUrl` mapping plus the

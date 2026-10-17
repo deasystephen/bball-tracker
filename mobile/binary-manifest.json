@@ -107,7 +107,8 @@
         "react-native-svg": "15.15.5",
         "react-native-worklets": "0.10.1"
       },
-      "nativeConfig": "882fafbd8378b5f1f444670fef856082d2ad1bd97a80d7cd2eb1649083e747a8"
+      "nativeConfig": "abbd845b741fddb41628a7ae00d5592331043f84a76cd3d238c0044b4152b613",
+      "nativeConfigAlgorithm": 2
     }
   }
 }

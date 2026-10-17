@@ -70,6 +70,16 @@ describe('config/env getApiUrl()', () => {
       'http://10.0.2.2',
       'https://[::1]/v1',
       'HTTP://LOCALHOST:3000',
+      'http://localhost.:3000',
+      'http://api.localhost:3000',
+      'http://127.1.2.3:8080',
+      'http://127.255.255.255',
+      'http://0.0.0.0:3000',
+      'http://[::]:3000',
+      'http://host.docker.internal:3000',
+      'http://localhost?debug=1',
+      'http://127.0.0.1:3000?x=1',
+      'http://user@localhost:3000/',
     ];
 
     it.each(LOOPBACK_URLS)('ignores %s and uses the production API', async (url) => {
@@ -87,8 +97,31 @@ describe('config/env getApiUrl()', () => {
       expect(warn).toHaveBeenCalledWith('getApiUrl: ignoring loopback apiUrl in a release bundle');
     });
 
-    it.each(['https://localhost.example.test', 'http://127.0.0.10:3000', 'https://api.example.test/127.0.0.1'])(
-      'keeps %s, which only looks like a loopback host',
+    it('reports that the manifest was ignored, for the About screen', async () => {
+      expect((await loadEnv('http://127.0.0.1:3000', false)).getApiUrlResolution()).toEqual({
+        url: 'https://api.hooplings.com',
+        loopbackIgnored: true,
+      });
+      expect((await loadEnv('https://configured.example.test', false)).getApiUrlResolution()).toEqual({
+        url: 'https://configured.example.test',
+        loopbackIgnored: false,
+      });
+      expect((await loadEnv(undefined, false)).getApiUrlResolution().loopbackIgnored).toBe(false);
+      expect((await loadEnv('http://127.0.0.1:3000', true)).getApiUrlResolution().loopbackIgnored).toBe(false);
+    });
+
+    it.each([
+      'https://localhost.example.test',
+      'http://128.0.0.1:3000',
+      'http://10.0.2.20:3000',
+      'https://api.example.test/127.0.0.1',
+      'https://api.example.test/?next=http://localhost',
+      // A LAN host stays allowed in release on purpose: it is how a local
+      // Release build is pointed at a development backend (API_URL).
+      'http://192.168.1.20:3000',
+      'http://devbox.local:3000',
+    ])(
+      'keeps %s, which is not this device',
       async (url) => {
         expect((await loadEnv(url, false)).getApiUrl()).toBe(url);
         expect(warn).not.toHaveBeenCalled();
@@ -103,6 +136,15 @@ describe('config/env getApiUrl()', () => {
     const unset = await loadEnv(undefined, true);
     expect(unset.getApiUrl()).toBe(unset.DEV_API_URL);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  describe('isLoopbackUrl', () => {
+    it('is false for strings that are not absolute URLs', async () => {
+      const env = await loadEnv(undefined, false);
+      for (const value of ['', 'localhost', '127.0.0.1:3000', '//localhost', 'http://']) {
+        expect(env.isLoopbackUrl(value)).toBe(false);
+      }
+    });
   });
 
   it('exposes the same value through the legacy config object', async () => {

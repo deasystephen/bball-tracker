@@ -36,8 +36,8 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   (`fields` names keys, not values). A new event gets a row in `docs/architecture/analytics.md`
   in the same PR; `__tests__/analytics/catalogue-guard.test.ts` fails otherwise.
 - Packages with native code (`expo-*`, Sentry, Amplitude, `react-native-*`, `react`) and native
-  config in `app.config.js` (plugins and options, `infoPlist`, entitlements, `scheme`, permissions,
-  icon/splash) move only with a native build and a runtime bump; `npm test` fails otherwise. Never edit
+  config in `app.config.js` (any key but `name`/`version`/`extra`/`web`, plugin output, referenced
+  icons/splash) move only with a native build and a runtime bump; `npm test` fails otherwise. Never edit
   `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production` (the script
   runs the drift guard, then `eas update --environment production`, which supplies `APP_ENV`);
   verify the served manifest; publish it in the

@@ -27,31 +27,33 @@
  * Android permissions, icon and splash). JavaScript that depends on such a
  * change must not reach a binary that predates it, so the same two ways out
  * apply: revert the config change, or make it a native build and record it.
- * The hash covers
- *   - the static config: `scheme`, `orientation`, `userInterfaceStyle`,
- *     `icon`, `splash`, `runtimeVersion`, `updates.url`, `plugins` (names and
- *     options, in order), `ios.{bundleIdentifier,supportsTablet,
- *     associatedDomains,infoPlist,entitlements,config}` and
- *     `android.{package,permissions,adaptiveIcon,edgeToEdgeEnabled,
- *     predictiveBackGestureEnabled}`;
+ * The hash (NATIVE_CONFIG_ALGORITHM 2) covers
+ *   - the whole static config except the keys in NON_NATIVE_KEYS (`name`,
+ *     `version`, `extra`, `web`, each with its reason), so a key prebuild reads
+ *     is covered without being listed (`plugins` and their options, `scheme`,
+ *     `jsEngine`, `newArchEnabled`, `ios.*`, `android.intentFilters`, …);
  *   - the full `plugins` list evaluated in introspection mode (what
- *     `npx expo config --type introspect` prints): the resulting
- *     `ios.infoPlist`, `ios.entitlements` and Android `uses-permission` list;
- *   - the sha256 of every referenced asset (`icon`, `splash.image`,
- *     `android.adaptiveIcon.foregroundImage`).
- * It leaves out `name`, `version` (the runtime key itself) and `extra`, which
- * depend on the publishing environment, so the hash is the same on every
- * machine whatever `APP_ENV`, `API_URL`, `SENTRY_DSN` or `AMPLITUDE_API_KEY`
- * say. JavaScript-only config plugins (`expo-build-properties`) are not pinned
- * by version: a plugin's code runs only at prebuild and creates no JavaScript
- * expectation, and whatever it writes for the options we pass is already in
- * the introspected Info.plist above.
+ *     `npx expo config --type introspect` prints): every `modResults` entry of
+ *     both platforms (Info.plist, Expo.plist, entitlements, Podfile
+ *     properties, AndroidManifest, gradle properties, resources);
+ *   - the sha256 of every local file the config names (icons, splash, …).
+ * Nothing in it depends on the publishing environment, so the hash is the
+ * same on every machine whatever `APP_ENV`, `API_URL`, `SENTRY_DSN` or
+ * `AMPLITUDE_API_KEY` say. JavaScript-only config plugins
+ * (`expo-build-properties`) are not pinned by version: a plugin's code runs
+ * only at prebuild and creates no JavaScript expectation, and what it
+ * generates for our options is already in the introspected results.
  *
- * Runtimes recorded before #722 have no `nativeConfig`. The current runtime's
- * hash was added once with
+ * Runtimes recorded before #722 have no `nativeConfig`. Two one-shot paths
+ * write the hash of an already-recorded runtime, and both refuse unless the
+ * working tree provably has the binary's native configuration (app.config.js
+ * at the recorded commit hashes identically, and every referenced file is
+ * unchanged):
  *   BINARY_MANIFEST_BACKFILL_NATIVE=1 npm run binary-manifest:record
- * which only adds a missing field, and refuses when the native configuration
- * of `app.config.js` (or a referenced asset) differs from the recorded commit.
+ *     adds a missing `nativeConfig`;
+ *   BINARY_MANIFEST_REHASH_NATIVE=1 npm run binary-manifest:record
+ *     replaces one after NATIVE_CONFIG_ALGORITHM was bumped, or after a
+ *     JavaScript-only config plugin bump changed what it generates.
  *
  * The record mode lives in this file, like a Jest snapshot update, so there is
  * exactly one implementation of "which packages count" and of "what native
@@ -63,10 +65,19 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const MOBILE_ROOT = path.resolve(__dirname, '..');
+import {
+  APP_CONFIG_PATH,
+  MOBILE_ROOT,
+  introspectAppConfig,
+  loadAppConfig,
+  publishEnvSnapshot,
+  withEnv,
+  type ExpoAppConfig,
+  type IntrospectedConfig,
+} from './helpers/app-config';
+
 const MANIFEST_PATH = path.join(MOBILE_ROOT, 'binary-manifest.json');
 const LOCKFILE_PATH = path.join(MOBILE_ROOT, 'package-lock.json');
-const APP_CONFIG_PATH = path.join(MOBILE_ROOT, 'app.config.js');
 
 /**
  * JavaScript-only packages that are still coupled to the binary. React Native
@@ -95,6 +106,8 @@ interface RuntimeEntry {
    * existed, which take no further OTAs.
    */
   nativeConfig?: string;
+  /** NATIVE_CONFIG_ALGORITHM the hash was computed with. */
+  nativeConfigAlgorithm?: number;
 }
 
 interface BinaryManifest {
@@ -138,89 +151,32 @@ function currentRuntime(): string {
 
 /* ---------- native configuration (#722) ---------- */
 
-type PluginEntry = string | [string, unknown?];
-
-interface StaticExpoConfig {
-  name?: string;
-  version?: string;
-  extra?: unknown;
-  scheme?: unknown;
-  orientation?: unknown;
-  userInterfaceStyle?: unknown;
-  icon?: string;
-  splash?: { image?: string } & Record<string, unknown>;
-  runtimeVersion?: unknown;
-  updates?: { url?: unknown };
-  plugins?: PluginEntry[];
-  ios?: Record<string, unknown>;
-  android?: { adaptiveIcon?: { foregroundImage?: string } } & Record<string, unknown>;
-}
-
-type ManifestPermission = { $: Record<string, string> };
-
-interface IntrospectedConfig {
-  ios?: { infoPlist?: Record<string, unknown>; entitlements?: Record<string, unknown> };
-  _internal?: {
-    modResults?: {
-      android?: { manifest?: { manifest?: { 'uses-permission'?: ManifestPermission[] } } };
-    };
-  };
-}
-
-/** The subset of `expo/config-plugins` the introspection uses. */
-interface ConfigPlugins {
-  withPlugins: (config: Record<string, unknown>, plugins: PluginEntry[]) => Record<string, unknown>;
-  compileModsAsync: (
-    config: Record<string, unknown>,
-    options: { projectRoot: string; introspect: boolean; platforms: ('ios' | 'android')[] }
-  ) => Promise<IntrospectedConfig>;
-}
-
-/** Variables app.config.js reads that only change environment-dependent fields. */
-const PUBLISH_ENV_KEYS = [
-  'APP_ENV',
-  'API_URL',
-  'SENTRY_DSN',
-  'SENTRY_ENVIRONMENT',
-  'SENTRY_RELEASE',
-  'AMPLITUDE_API_KEY',
-] as const;
-
-type PublishEnv = Partial<Record<(typeof PUBLISH_ENV_KEYS)[number], string>>;
-
-function withEnv<T>(env: PublishEnv, run: () => T): T {
-  const saved = Object.fromEntries(PUBLISH_ENV_KEYS.map((key) => [key, process.env[key]]));
-  for (const key of PUBLISH_ENV_KEYS) {
-    if (env[key] === undefined) delete process.env[key];
-    else process.env[key] = env[key];
-  }
-  try {
-    return run();
-  } finally {
-    for (const key of PUBLISH_ENV_KEYS) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key] as string;
-    }
-  }
-}
+/**
+ * Version of what `nativeConfigInput()` hashes. Bump it whenever that changes:
+ * every recorded hash then fails with a pointer to the re-record path.
+ *   1: allow-list of static fields + Info.plist, entitlements, uses-permission
+ *      (first #722 cut, superseded in review).
+ *   2: the whole static config minus NON_NATIVE_KEYS, the full introspected
+ *      `modResults` of both platforms, and every referenced local file.
+ */
+const NATIVE_CONFIG_ALGORITHM = 2;
 
 /**
- * Evaluates an app.config.js the way a production build does (APP_ENV is
- * forced to `production`; every other publish variable passes through, and
- * none of them reaches a hashed field).
+ * Top-level static config keys left out of the hash, and why. Everything else
+ * is hashed, so a key prebuild reads (`jsEngine`, `newArchEnabled`,
+ * `android.intentFilters`, `locales`, `notification`, `ios.privacyManifests`,
+ * …) is covered without being listed.
  */
-function loadExpoConfig(file: string): StaticExpoConfig {
-  const env: PublishEnv = Object.fromEntries(PUBLISH_ENV_KEYS.map((key) => [key, process.env[key]]));
-  return withEnv({ ...env, APP_ENV: 'production' }, () => {
-    let expo: StaticExpoConfig | undefined;
-    jest.isolateModules(() => {
-      const mod = jest.requireActual<{ default?: { expo: StaticExpoConfig }; expo?: StaticExpoConfig }>(file);
-      expo = (mod.default ?? mod).expo;
-    });
-    if (!expo) throw new Error(`${file} exports no expo config`);
-    return expo;
-  });
-}
+const NON_NATIVE_KEYS: Record<string, string> = {
+  name:
+    'Depends on APP_ENV (`Hooplings (dev)` outside production); a display-name change is cosmetic and creates no JavaScript expectation.',
+  version: 'The OTA runtime itself (runtimeVersion policy appVersion): a change is a new runtime, never drift.',
+  extra: 'The OTA manifest payload, read by JavaScript and set per publish (API host, Sentry, Amplitude).',
+  web: 'Used only by the web export; never reaches the iOS or Android binary.',
+};
+
+/** A string in the config that names a file under mobile/ (icons, splash, google services, …). */
+const LOCAL_FILE = /^\.{1,2}\//;
 
 /** JSON with object keys sorted at every level; arrays keep their order. */
 function stableStringify(value: unknown): string {
@@ -238,37 +194,33 @@ function sha256(data: string | Buffer): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-function pick(source: Record<string, unknown> | undefined, keys: readonly string[]): Record<string, unknown> {
-  return Object.fromEntries(keys.map((key) => [key, source?.[key]]));
+/** The static config with NON_NATIVE_KEYS removed, as plain JSON. */
+function nativeStaticConfig(expo: ExpoAppConfig): Record<string, unknown> {
+  const copy = JSON.parse(JSON.stringify(expo)) as Record<string, unknown>;
+  for (const key of Object.keys(NON_NATIVE_KEYS)) delete copy[key];
+  return copy;
 }
 
-/** Asset paths in the static config that are baked into the binary. */
-function referencedAssets(expo: StaticExpoConfig): string[] {
-  return [expo.icon, expo.splash?.image, expo.android?.adaptiveIcon?.foregroundImage]
-    .filter((file): file is string => typeof file === 'string')
-    .map((file) => path.normalize(file));
+/** Every local file the hashed config names, relative to mobile/, sorted. */
+function referencedFiles(value: unknown, found: Set<string> = new Set()): string[] {
+  if (typeof value === 'string' && LOCAL_FILE.test(value)) found.add(path.normalize(value));
+  else if (Array.isArray(value)) value.forEach((item) => referencedFiles(item, found));
+  else if (value !== null && typeof value === 'object') {
+    Object.values(value as Record<string, unknown>).forEach((item) => referencedFiles(item, found));
+  }
+  return [...found].sort();
 }
 
-/** The structure the hash is taken over; see the file header for what it covers. */
-async function nativeConfigInput(expo: StaticExpoConfig): Promise<Record<string, unknown>> {
-  const plugins = (expo.plugins ?? []).map((entry) =>
-    typeof entry === 'string' ? [entry, null] : [entry[0], entry[1] ?? null]
-  );
+/** Evaluates an app.config.js the way a production build does: APP_ENV forced to `production`. */
+async function loadExpoConfig(file: string): Promise<ExpoAppConfig> {
+  return (await loadAppConfig({ ...publishEnvSnapshot(), APP_ENV: 'production' }, file)).expo;
+}
 
-  // Introspection mutates the config it is given: hand it a deep copy, with
-  // the environment-dependent fields replaced by constants.
-  const base = JSON.parse(JSON.stringify(expo)) as Record<string, unknown>;
-  for (const key of ['name', 'version', 'extra', 'plugins']) delete base[key];
-  const { withPlugins, compileModsAsync } = jest.requireActual<ConfigPlugins>('expo/config-plugins');
+/** The structure the hash is taken over; see the file header. */
+async function nativeConfigInput(expo: ExpoAppConfig): Promise<Record<string, unknown>> {
   let introspected: IntrospectedConfig;
   try {
-    introspected = await compileModsAsync(
-      withPlugins(
-        { ...base, name: 'native-config-hash', version: '0.0.0', _internal: { projectRoot: MOBILE_ROOT } },
-        JSON.parse(JSON.stringify(expo.plugins ?? [])) as PluginEntry[]
-      ),
-      { projectRoot: MOBILE_ROOT, introspect: true, platforms: ['ios', 'android'] }
-    );
+    introspected = await introspectAppConfig(expo);
   } catch (error) {
     // Typically a plugin that is not installed. Prebuild would fail the same
     // way, and a new plugin is a native change either way.
@@ -279,52 +231,37 @@ async function nativeConfigInput(expo: StaticExpoConfig): Promise<Record<string,
     );
   }
 
-  const assets = Object.fromEntries(
-    referencedAssets(expo).map((file) => {
+  const staticConfig = nativeStaticConfig(expo);
+  const files = Object.fromEntries(
+    referencedFiles(staticConfig).map((file) => {
       const absolute = path.join(MOBILE_ROOT, file);
-      return [file, fs.existsSync(absolute) ? sha256(fs.readFileSync(absolute)) : 'missing'];
+      return [file, fs.existsSync(absolute) && fs.statSync(absolute).isFile() ? sha256(fs.readFileSync(absolute)) : 'missing'];
     })
   );
 
   return {
-    static: {
-      scheme: expo.scheme,
-      orientation: expo.orientation,
-      userInterfaceStyle: expo.userInterfaceStyle,
-      icon: expo.icon,
-      splash: expo.splash,
-      runtimeVersion: expo.runtimeVersion,
-      updatesUrl: expo.updates?.url,
-      plugins,
-      ios: pick(expo.ios, [
-        'bundleIdentifier',
-        'supportsTablet',
-        'associatedDomains',
-        'infoPlist',
-        'entitlements',
-        'config',
-      ]),
-      android: pick(expo.android, [
-        'package',
-        'permissions',
-        'adaptiveIcon',
-        'edgeToEdgeEnabled',
-        'predictiveBackGestureEnabled',
-      ]),
-    },
-    introspected: {
-      infoPlist: introspected.ios?.infoPlist ?? {},
-      entitlements: introspected.ios?.entitlements ?? {},
-      androidPermissions:
-        introspected._internal?.modResults?.android?.manifest?.manifest?.['uses-permission'] ?? [],
-    },
-    assets,
+    algorithm: NATIVE_CONFIG_ALGORITHM,
+    static: staticConfig,
+    modResults: introspected._internal.modResults,
+    files,
   };
 }
 
-/** sha256 of the native configuration of an app.config.js (default: the working tree's). */
-async function nativeConfigHash(file: string = APP_CONFIG_PATH): Promise<string> {
-  return sha256(stableStringify(await nativeConfigInput(loadExpoConfig(file))));
+const hashMemo = new Map<string, Promise<string>>();
+
+/**
+ * sha256 of the native configuration of an app.config.js (default: the
+ * working tree's). Memoised per file and publish-env snapshot: introspection
+ * is the slow part of this suite.
+ */
+function nativeConfigHash(file: string = APP_CONFIG_PATH): Promise<string> {
+  const key = `${file}\0${stableStringify(publishEnvSnapshot())}`;
+  let hash = hashMemo.get(key);
+  if (!hash) {
+    hash = loadExpoConfig(file).then(async (expo) => sha256(stableStringify(await nativeConfigInput(expo))));
+    hashMemo.set(key, hash);
+  }
+  return hash;
 }
 
 function git(args: string[]): { ok: boolean; out: string } {
@@ -336,18 +273,19 @@ function git(args: string[]): { ok: boolean; out: string } {
 }
 
 /**
- * Backfill safety (#722): the working tree's native configuration must be the
- * one the binary was built from. Passes when app.config.js and every
- * referenced asset are byte-identical to `commit`, or when app.config.js
- * differs only in text that does not reach the native config (its version at
- * `commit` hashes the same). When `commit` is not in the local clone, falls
- * back to history: the last commit touching app.config.js or the assets must
- * predate the day the runtime was recorded. Returns the reason it refused, or
- * null.
+ * Safety check for the backfill and re-hash paths: the working tree's native
+ * configuration must be the one the binary was built from. Passes when
+ * app.config.js and every referenced file are byte-identical to `commit`, or
+ * when app.config.js differs only in text that does not reach the native
+ * config (its version at `commit`, hashed now with the current algorithm and
+ * node_modules, equals the working tree's hash). When `commit` is not in the
+ * local clone, falls back to history: the last commit touching app.config.js
+ * or those files must predate the day the runtime was recorded. Returns the
+ * reason it refused, or null.
  */
-async function backfillRefusal(entry: RuntimeEntry, current: string): Promise<string | null> {
-  const assets = referencedAssets(loadExpoConfig(APP_CONFIG_PATH));
-  const watched = ['app.config.js', ...assets];
+async function nativeConfigRefusal(entry: RuntimeEntry, current: string): Promise<string | null> {
+  const files = referencedFiles(nativeStaticConfig(await loadExpoConfig(APP_CONFIG_PATH)));
+  const watched = ['app.config.js', ...files];
 
   if (!git(['cat-file', '-e', `${entry.commit}^{commit}`]).ok) {
     const last = git(['log', '-1', '--format=%h %cs', '--', ...watched]).out;
@@ -364,8 +302,8 @@ async function backfillRefusal(entry: RuntimeEntry, current: string): Promise<st
     return null;
   }
 
-  if (!git(['diff', '--quiet', entry.commit, '--', ...assets]).ok) {
-    return `a referenced asset (${assets.join(', ')}) differs from commit ${entry.commit}.`;
+  if (!git(['diff', '--quiet', entry.commit, '--', ...files]).ok) {
+    return `a referenced file (${files.join(', ')}) differs from commit ${entry.commit}.`;
   }
   if (git(['diff', '--quiet', entry.commit, '--', 'app.config.js']).ok) return null;
 
@@ -450,6 +388,8 @@ function diff(recorded: PackageVersions, current: PackageVersions): Drift {
 
 const RECORDING = process.env.RECORD_BINARY_MANIFEST === '1';
 const BACKFILLING_NATIVE = process.env.BINARY_MANIFEST_BACKFILL_NATIVE === '1';
+const REHASHING_NATIVE = process.env.BINARY_MANIFEST_REHASH_NATIVE === '1';
+const UPDATING_NATIVE = BACKFILLING_NATIVE || REHASHING_NATIVE;
 
 const MANIFEST_DESCRIPTION =
   'Versions of every package with native code (and of react) in the newest binary of each OTA runtime, ' +
@@ -457,41 +397,63 @@ const MANIFEST_DESCRIPTION =
   'Checked by __tests__/binary-manifest.test.ts. Never edit by hand and never change an existing runtime: ' +
   'record a new one with `npm run binary-manifest:record` after the build is verified on a device (#562).';
 
+const REHASH_COMMAND = 'BINARY_MANIFEST_REHASH_NATIVE=1 npm run binary-manifest:record';
+
 function writeManifest(manifest: BinaryManifest): void {
   fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify({ ...manifest, description: MANIFEST_DESCRIPTION }, null, 2)}\n`);
 }
 
-(RECORDING && BACKFILLING_NATIVE ? describe : describe.skip)('binary manifest: backfill nativeConfig', () => {
-  it('adds the native-config hash to the current runtime, once', async () => {
+(RECORDING && UPDATING_NATIVE ? describe : describe.skip)('binary manifest: backfill or re-hash nativeConfig', () => {
+  it('writes the native-config hash of the current runtime when the binary provably has that config', async () => {
+    if (BACKFILLING_NATIVE && REHASHING_NATIVE) {
+      throw new Error('Set BINARY_MANIFEST_BACKFILL_NATIVE or BINARY_MANIFEST_REHASH_NATIVE, not both.');
+    }
+    const mode = BACKFILLING_NATIVE ? 'backfill' : 're-hash';
     const runtime = currentRuntime();
     const manifest = readManifest();
     const entry = manifest.runtimes[runtime];
     if (!entry) throw new Error(`Runtime ${runtime} has no recorded binary; record it with BINARY_BUILD/BINARY_COMMIT.`);
-    if (entry.nativeConfig) {
+
+    if (BACKFILLING_NATIVE && entry.nativeConfig) {
       throw new Error(
-        `Runtime ${runtime} already records nativeConfig. A runtime is immutable: the backfill only adds a missing field.`
+        `Runtime ${runtime} already records nativeConfig. A runtime is immutable: the backfill only adds a missing field ` +
+          `(when the hash algorithm or a config plugin's output changed, use ${REHASH_COMMAND}).`
       );
+    }
+    if (REHASHING_NATIVE && !entry.nativeConfig) {
+      throw new Error(`Runtime ${runtime} has no nativeConfig to re-hash; use BINARY_MANIFEST_BACKFILL_NATIVE=1.`);
     }
 
     const nativeConfig = await nativeConfigHash();
-    const refusal = await backfillRefusal(entry, nativeConfig);
+    if (
+      REHASHING_NATIVE &&
+      entry.nativeConfig === nativeConfig &&
+      entry.nativeConfigAlgorithm === NATIVE_CONFIG_ALGORITHM
+    ) {
+      throw new Error(`Runtime ${runtime} already records this hash under algorithm ${NATIVE_CONFIG_ALGORITHM}; nothing to re-hash.`);
+    }
+
+    const refusal = await nativeConfigRefusal(entry, nativeConfig);
     if (refusal) {
       throw new Error(
-        `Refusing to backfill nativeConfig for runtime ${runtime} (build #${entry.build}): ${refusal} ` +
+        `Refusing to ${mode} nativeConfig for runtime ${runtime} (build #${entry.build}): ${refusal} ` +
           'The working tree would not describe the binary in the field. Revert the native change, or cut and record a new runtime.'
       );
     }
 
     writeManifest({
       ...manifest,
-      runtimes: { ...manifest.runtimes, [runtime]: { ...entry, nativeConfig } },
+      runtimes: {
+        ...manifest.runtimes,
+        [runtime]: { ...entry, nativeConfig, nativeConfigAlgorithm: NATIVE_CONFIG_ALGORITHM },
+      },
     });
 
     expect(readManifest().runtimes[runtime].nativeConfig).toBe(nativeConfig);
   });
 });
 
-(RECORDING && !BACKFILLING_NATIVE ? describe : describe.skip)('binary manifest: record', () => {
+(RECORDING && !UPDATING_NATIVE ? describe : describe.skip)('binary manifest: record', () => {
   it('records the current runtime from the lockfile and app.config.js', async () => {
     const runtime = currentRuntime();
     const manifest = readManifest();
@@ -522,6 +484,7 @@ function writeManifest(manifest: BinaryManifest): void {
           recordedAt: new Date().toISOString().slice(0, 10),
           packages: packagesFromLockfile(),
           nativeConfig: await nativeConfigHash(),
+          nativeConfigAlgorithm: NATIVE_CONFIG_ALGORITHM,
         },
       },
     });
@@ -533,6 +496,11 @@ function writeManifest(manifest: BinaryManifest): void {
 (RECORDING ? describe.skip : describe)('binary manifest (OTA drift guard)', () => {
   const runtime = currentRuntime();
   const entry: RuntimeEntry | undefined = readManifest().runtimes[runtime];
+  let currentHash = '';
+
+  beforeAll(async () => {
+    currentHash = await nativeConfigHash();
+  });
 
   it('has a recorded binary for the current OTA runtime', () => {
     // Fails right after `version` is bumped, until the build cut from that
@@ -550,27 +518,39 @@ function writeManifest(manifest: BinaryManifest): void {
     expect(drift).toEqual({ changed: [], added: [], removed: [] });
   });
 
-  it('matches the native configuration compiled into that binary', async () => {
+  it('matches the native configuration compiled into that binary', () => {
     // Only the current runtime is checked: older runtimes (1.4.0) were
     // recorded before #722 and take no further OTAs.
-    const current = await nativeConfigHash();
-    if (entry?.nativeConfig === current) return;
+    if (!entry?.nativeConfig) {
+      throw new Error(
+        `Runtime ${runtime} has no nativeConfig hash recorded, so nothing proves app.config.js still matches the ` +
+          'binary. Record it with the build (BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record), ' +
+          'or, for a runtime recorded before #722 whose app.config.js is unchanged since its commit, once with ' +
+          'BINARY_MANIFEST_BACKFILL_NATIVE=1 npm run binary-manifest:record.'
+      );
+    }
+    if (entry.nativeConfigAlgorithm !== NATIVE_CONFIG_ALGORITHM) {
+      throw new Error(
+        `Runtime ${runtime} records a nativeConfig hash made with algorithm ${entry.nativeConfigAlgorithm ?? 1}; ` +
+          `this guard hashes with algorithm ${NATIVE_CONFIG_ALGORITHM}. Re-record it with ${REHASH_COMMAND}, which ` +
+          `refuses unless app.config.js at commit ${entry.commit} hashes identically to the working tree.`
+      );
+    }
+    if (entry.nativeConfig === currentHash) return;
 
     throw new Error(
-      entry?.nativeConfig
-        ? `The native configuration in app.config.js no longer matches build #${entry.build} (runtime ${runtime}, ` +
-            `commit ${entry.commit}): plugins or their options, ios.infoPlist, entitlements, associatedDomains, scheme, ` +
-            'Android permissions or the icon/splash assets changed. Prebuild bakes these into the binary, so an OTA ' +
-            "cannot deliver them. Either\n" +
-            '  - revert the change (it waits for the next native build), or\n' +
-            '  - make it a native build: bump `version` in app.config.js, cut the build from the branch, verify it on ' +
-            'a device, then record it with BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record.\n' +
-            `See what moved: git diff ${entry.commit} -- mobile/app.config.js mobile/assets\n` +
-            `recorded ${entry.nativeConfig}\ncurrent  ${current}`
-        : `Runtime ${runtime} has no nativeConfig hash recorded, so nothing proves app.config.js still matches the ` +
-            'binary. Record it with the build (BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record), ' +
-            'or, for a runtime recorded before #722 whose app.config.js is unchanged since its commit, once with ' +
-            'BINARY_MANIFEST_BACKFILL_NATIVE=1 npm run binary-manifest:record.'
+      `The native configuration in app.config.js no longer matches build #${entry.build} (runtime ${runtime}, ` +
+        `commit ${entry.commit}): a plugin or its options, ios/android config (infoPlist, entitlements, ` +
+        'associatedDomains, intentFilters, permissions, …), scheme, an engine flag or a referenced icon/splash file ' +
+        "changed. Prebuild bakes these into the binary, so an OTA cannot deliver them. Either\n" +
+        '  - revert the change (it waits for the next native build), or\n' +
+        '  - make it a native build: bump `version` in app.config.js, cut the build from the branch, verify it on ' +
+        'a device, then record it with BINARY_BUILD=<number> BINARY_COMMIT=<sha> npm run binary-manifest:record.\n' +
+        `See what moved: git diff ${entry.commit} -- mobile/app.config.js mobile/assets\n` +
+        'If neither app.config.js nor the assets changed natively (for example a JavaScript-only config plugin bump ' +
+        `changed what it generates), re-record with ${REHASH_COMMAND}; it refuses when app.config.js at ` +
+        `${entry.commit} hashes differently from the working tree.\n` +
+        `recorded ${entry.nativeConfig}\ncurrent  ${currentHash}`
     );
   });
 
@@ -584,10 +564,12 @@ function writeManifest(manifest: BinaryManifest): void {
         SENTRY_ENVIRONMENT: 'preview',
         SENTRY_RELEASE: 'release-x',
         AMPLITUDE_API_KEY: 'amplitude-key',
+        EAS_BUILD: 'true',
       },
       () => nativeConfigHash()
     );
     expect(set).toBe(unset);
+    expect(unset).toBe(currentHash);
     expect(unset).toMatch(/^[0-9a-f]{64}$/);
   });
 
