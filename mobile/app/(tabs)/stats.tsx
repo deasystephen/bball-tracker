@@ -2,7 +2,7 @@
  * Stats hub screen - view team and player statistics
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +25,8 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { describeRecord, describeResults, getResultColor } from '../../utils/game-result';
 import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { showQueryError } from '../../utils/query-state';
+import { getApiErrorMessage } from '../../services/api-client';
 
 export default function Stats() {
   const router = useRouter();
@@ -37,6 +39,7 @@ export default function Stats() {
   const {
     data: teams,
     isLoading: teamsLoading,
+    isFetching: teamsFetching,
     error: teamsError,
     refetch: refetchTeams,
   } = useTeams({ limit: TEAMS_MAX_LIMIT });
@@ -48,25 +51,40 @@ export default function Stats() {
   const {
     data: seasonStats,
     isLoading: statsLoading,
+    isFetching: statsFetching,
     error: statsError,
     refetch: refetchStats,
   } = useTeamSeasonStats(selectedTeamId || '');
   const {
     data: rosterStats,
     isLoading: rosterLoading,
+    isFetching: rosterFetching,
     error: rosterError,
     refetch: refetchRoster,
   } = useTeamRosterStats(selectedTeamId || '');
 
-  // A failed request is not an empty result (#728). A failed background refetch keeps the
-  // cached data, so the error replaces the content only when there is nothing to show.
-  const statsFailed = Boolean(statsError && !seasonStats);
-  const rosterFailed = Boolean(rosterError && !rosterStats);
+  // A failed request is not an empty result (#728); see utils/query-state.ts.
+  const teamsFailed = showQueryError({ error: teamsError, data: teams });
+  const statsFailed = showQueryError({ error: statsError, data: seasonStats });
+  const rosterFailed = showQueryError({ error: rosterError, data: rosterStats });
   const teamStatsError = statsFailed ? statsError : rosterFailed ? rosterError : null;
+  // TanStack keeps `error` set while a retry is in flight, so Try Again shows the spinner
+  // until the refetch settles instead of leaving the same error on screen.
+  const retryingTeamStats = (statsFailed && statsFetching) || (rosterFailed && rosterFetching);
   const retryTeamStats = () => {
     if (statsFailed) refetchStats();
     if (rosterFailed) refetchRoster();
   };
+  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
+  // failure (a new error object), not on every render.
+  const teamsErrorMessage = useMemo(
+    () => (teamsFailed ? getApiErrorMessage(teamsError, 'Failed to load teams') : ''),
+    [teamsFailed, teamsError]
+  );
+  const teamStatsErrorMessage = useMemo(
+    () => (teamStatsError ? getApiErrorMessage(teamStatsError, 'Failed to load stats') : ''),
+    [teamStatsError]
+  );
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId);
   const isLoading = teamsLoading || statsLoading || rosterLoading;
@@ -81,11 +99,11 @@ export default function Stats() {
     : [];
   const topAssister = sortedByAssists[0];
 
-  if (teamsLoading) {
+  if (teamsLoading || (teamsFailed && teamsFetching)) {
     return <LoadingSpinner message="Loading..." fullScreen />;
   }
 
-  if (teamsError && !teams) {
+  if (teamsFailed) {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View
@@ -96,10 +114,7 @@ export default function Stats() {
         >
           <ThemedText variant="h1" heading>Statistics</ThemedText>
         </View>
-        <ErrorState
-          message={teamsError instanceof Error ? teamsError.message : 'Failed to load teams'}
-          onRetry={refetchTeams}
-        />
+        <ErrorState message={teamsErrorMessage} onRetry={refetchTeams} />
       </ThemedView>
     );
   }
@@ -188,13 +203,10 @@ export default function Stats() {
           </View>
         )}
 
-        {teamStatsError ? (
-          <ErrorState
-            message={
-              teamStatsError instanceof Error ? teamStatsError.message : 'Failed to load stats'
-            }
-            onRetry={retryTeamStats}
-          />
+        {retryingTeamStats ? (
+          <LoadingSpinner message="Loading stats..." />
+        ) : teamStatsError ? (
+          <ErrorState message={teamStatsErrorMessage} onRetry={retryTeamStats} />
         ) : isLoading ? (
           <LoadingSpinner message="Loading stats..." />
         ) : (

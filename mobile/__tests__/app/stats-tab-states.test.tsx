@@ -11,6 +11,7 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 
 import Stats from '../../app/(tabs)/stats';
+import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import type { TeamSeasonStats } from '../../types/stats';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -18,6 +19,7 @@ const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGo
 interface MockQuery {
   data?: unknown;
   isLoading: boolean;
+  isFetching: boolean;
   error: unknown;
   refetch: jest.Mock;
 }
@@ -28,6 +30,16 @@ let mockRosterQuery: MockQuery;
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => ({}),
+}));
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+}));
+// jest.setup mocks the whole api-client; keep the real error-message mapping, which is
+// what sends `error_shown`.
+jest.mock('../../services/api-client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), patch: jest.fn(), delete: jest.fn() },
+  getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
 }));
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn(), captureMessage: jest.fn() }));
 jest.mock('../../hooks/useStats', () => ({
@@ -67,11 +79,15 @@ function seasonStats(overrides: Partial<TeamSeasonStats> = {}): TeamSeasonStats 
 }
 
 function query(data: unknown): MockQuery {
-  return { data, isLoading: false, error: null, refetch: jest.fn() };
+  return { data, isLoading: false, isFetching: false, error: null, refetch: jest.fn() };
 }
 
 function failed(message: string): MockQuery {
-  return { data: undefined, isLoading: false, error: new Error(message), refetch: jest.fn() };
+  return { data: undefined, isLoading: false, isFetching: false, error: new Error(message), refetch: jest.fn() };
+}
+
+function errorShownCalls(): unknown[][] {
+  return (trackEvent as jest.Mock).mock.calls.filter(([event]) => event === AnalyticsEvents.ERROR_SHOWN);
 }
 
 beforeEach(() => {
@@ -95,6 +111,22 @@ describe('Stats tab — load states', () => {
     expect(mockTeamsQuery.refetch).toHaveBeenCalledTimes(1);
   });
 
+  it('reports the teams failure through getApiErrorMessage once, not on every render', () => {
+    mockTeamsQuery = failed('Network Error');
+    const view = render(<Stats />);
+    view.rerender(<Stats />);
+
+    expect(errorShownCalls()).toHaveLength(1);
+  });
+
+  it('shows the spinner, not the same error, while the teams retry is in flight', () => {
+    mockTeamsQuery = { ...failed('Network Error'), isFetching: true };
+    const view = render(<Stats />);
+
+    expect(view.getByText('Loading...')).toBeTruthy();
+    expect(view.queryByText('Something went wrong')).toBeNull();
+  });
+
   it('shows the error under the team chips, not "No Statistics Yet", when the season stats fail', () => {
     mockSeasonQuery = failed('Request failed with status code 500');
     const view = render(<Stats />);
@@ -113,16 +145,39 @@ describe('Stats tab — load states', () => {
   });
 
   it('shows the error with Try Again when the roster stats fail', () => {
-    mockRosterQuery = failed('Network Error');
+    mockRosterQuery = failed('Roster request timed out');
     const view = render(<Stats />);
 
     expect(view.getByText('Something went wrong')).toBeTruthy();
+    expect(view.getByText('Roster request timed out')).toBeTruthy();
     expect(view.queryByText('No Statistics Yet')).toBeNull();
     expect(view.getByText('Hornets')).toBeTruthy();
 
     fireEvent.press(view.getByLabelText('Try Again'));
     expect(mockRosterQuery.refetch).toHaveBeenCalledTimes(1);
     expect(mockSeasonQuery.refetch).not.toHaveBeenCalled();
+  });
+
+  it('shows the season-stats message when both per-team queries fail', () => {
+    mockSeasonQuery = failed('Season stats failed');
+    mockRosterQuery = failed('Roster stats failed');
+    const view = render(<Stats />);
+
+    expect(view.getByText('Season stats failed')).toBeTruthy();
+    expect(view.queryByText('Roster stats failed')).toBeNull();
+
+    fireEvent.press(view.getByLabelText('Try Again'));
+    expect(mockSeasonQuery.refetch).toHaveBeenCalledTimes(1);
+    expect(mockRosterQuery.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the spinner under the chips while the per-team retry is in flight', () => {
+    mockSeasonQuery = { ...failed('Season stats failed'), isFetching: true };
+    const view = render(<Stats />);
+
+    expect(view.getByText('Loading stats...')).toBeTruthy();
+    expect(view.queryByText('Something went wrong')).toBeNull();
+    expect(view.getByText('Hornets')).toBeTruthy();
   });
 
   it('keeps "No Teams Yet" for a successful empty teams list', () => {

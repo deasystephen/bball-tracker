@@ -83,8 +83,9 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   keys (`roleOnboarding.*`, `teams.playerEmptyMessage`, `teams.playerEmptyAction`,
   `teams.createNotAllowed`) shipped English-only on Spanish devices. `__tests__/i18n/locale-parity.test.ts`
   flattens every file in `i18n/locales/` to dot-joined leaf keys and fails CI on a key missing from or
-  extra in a locale, or a shared key whose sorted `{{placeholder}}` names differ from `en.json`,
-  naming each offender. Add a new key to both files in the same change; a new locale file is
+  extra in a locale, a leaf that is not a string, or a shared key whose sorted `{{placeholder}}`
+  names differ from `en.json` (i18next format syntax counts by name: `{{count, number}}` is
+  `count`), naming each offender. Add a new key to both files in the same change; a new locale file is
   picked up automatically.
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)

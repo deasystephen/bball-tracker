@@ -11,33 +11,53 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
-type LocaleTree = { [key: string]: string | LocaleTree };
+type LocaleTree = { [key: string]: unknown };
+
+/** Leaf keys mapped to their string values, plus every leaf that is not a string. */
+interface FlatLocale {
+  values: Map<string, string>;
+  nonStringLeaves: string[];
+}
 
 const LOCALES_DIR = resolve(__dirname, '../../i18n/locales');
 const REFERENCE = 'en.json';
 
-/** Dot-joined leaf keys mapped to their string values. */
-function flattenLocale(tree: LocaleTree, prefix = ''): Map<string, string> {
-  const out = new Map<string, string>();
+/**
+ * Dot-joined leaf keys mapped to their string values. Only a non-null object is a
+ * subtree; a number, boolean, null or array leaf is recorded by key, so it is reported
+ * instead of vanishing from both key sets or throwing without a name.
+ */
+function flattenLocale(tree: LocaleTree, prefix = '', out: FlatLocale = { values: new Map(), nonStringLeaves: [] }): FlatLocale {
   for (const [key, value] of Object.entries(tree)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (typeof value === 'string') {
-      out.set(path, value);
+      out.values.set(path, value);
+    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      flattenLocale(value as LocaleTree, path, out);
     } else {
-      for (const [k, v] of flattenLocale(value, path)) out.set(k, v);
+      out.nonStringLeaves.push(path);
     }
   }
   return out;
 }
 
-/** The sorted, de-duplicated `{{name}}` interpolation variables in a string. */
+/**
+ * The sorted, de-duplicated interpolation variable names in a string. i18next format
+ * syntax counts by its name: `{{count, number}}` is `count`.
+ */
 function placeholders(value: string): string[] {
-  return [...new Set([...value.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((m) => m[1]))].sort();
+  const names = [...value.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((m) => m[1].split(',')[0].trim());
+  return [...new Set(names)].sort();
 }
 
 /** Every difference between a locale and the reference, one readable line each. */
-function parityProblems(reference: Map<string, string>, locale: Map<string, string>): string[] {
-  const problems: string[] = [];
+function parityProblems(referenceFlat: FlatLocale, localeFlat: FlatLocale): string[] {
+  const reference = referenceFlat.values;
+  const locale = localeFlat.values;
+  const problems: string[] = [
+    ...referenceFlat.nonStringLeaves.map((key) => `non-string leaf in en: ${key}`),
+    ...localeFlat.nonStringLeaves.map((key) => `non-string leaf: ${key}`),
+  ];
   for (const key of reference.keys()) {
     if (!locale.has(key)) problems.push(`missing: ${key}`);
   }
@@ -54,7 +74,7 @@ function parityProblems(reference: Map<string, string>, locale: Map<string, stri
   return problems;
 }
 
-function loadLocale(file: string): Map<string, string> {
+function loadLocale(file: string): FlatLocale {
   return flattenLocale(JSON.parse(readFileSync(join(LOCALES_DIR, file), 'utf8')) as LocaleTree);
 }
 
@@ -65,13 +85,13 @@ const otherLocales = readdirSync(LOCALES_DIR)
 
 describe('locale parity', () => {
   it('reads a non-trivial reference and at least one other locale', () => {
-    expect(reference.size).toBeGreaterThan(0);
+    expect(reference.values.size).toBeGreaterThan(0);
     expect(otherLocales).toContain('es.json');
   });
 
   it.each(otherLocales)('%s has exactly the keys and placeholders of en.json', (file) => {
     const locale = loadLocale(file);
-    expect(locale.size).toBeGreaterThan(0);
+    expect(locale.values.size).toBeGreaterThan(0);
     expect(parityProblems(reference, locale)).toEqual([]);
   });
 });
@@ -85,6 +105,25 @@ describe('locale parity guard self-test', () => {
       'missing: a.c',
       'extra: e',
       'placeholders differ: a.b (en: [name], locale: [nombre])',
+    ]);
+  });
+
+  it('names a non-string leaf instead of dropping it or throwing', () => {
+    const drifted = flattenLocale({ a: { b: 'Hola {{name}}', c: 3 }, d: null, e: true });
+    expect(parityProblems(ref, drifted)).toEqual([
+      'non-string leaf: a.c',
+      'non-string leaf: d',
+      'non-string leaf: e',
+      'missing: a.c',
+      'missing: d',
+    ]);
+  });
+
+  it('reads i18next format syntax by its variable name', () => {
+    const formatted = flattenLocale({ x: '{{count, number}} games on {{date, datetime}}' });
+    expect(parityProblems(formatted, flattenLocale({ x: '{{ count,number }} partidos el {{date, datetime}}' }))).toEqual([]);
+    expect(parityProblems(formatted, flattenLocale({ x: '{{total, number}} partidos el {{date, datetime}}' }))).toEqual([
+      'placeholders differ: x (en: [count, date], locale: [date, total])',
     ]);
   });
 
