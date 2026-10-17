@@ -14,6 +14,7 @@ import {
   StaffRoleType,
 } from '../api/teams/schemas';
 import { NotificationService } from './notification-service';
+import { invalidateUsage } from './usage-service';
 import { logger } from '../utils/logger';
 import {
   NotFoundError,
@@ -44,21 +45,8 @@ import {
   canWriteLeague,
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
-
-/**
- * User shape for roster and staff rows. Exported so game-service's game
- * detail serves the same fields (`isManaged`, `deletedAt`) as the team detail.
- */
-export const USER_SUMMARY_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  // Lets clients label roster-only (managed) players (audit #64)
-  isManaged: true,
-  // Deleted accounts stay on rosters as tombstones (#444, D10/D14); clients
-  // derive a "Deleted" chip and a localized label from this, never from name.
-  deletedAt: true,
-} satisfies Prisma.UserSelect;
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
+import { createOrConflict } from '../utils/prisma-errors';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -66,7 +54,7 @@ const TEAM_SUMMARY_SELECT = {
 } satisfies Prisma.TeamSelect;
 
 const TEAM_STAFF_INCLUDE = {
-  user: { select: USER_SUMMARY_SELECT },
+  user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   role: true,
 } satisfies Prisma.TeamStaffInclude;
 
@@ -92,7 +80,7 @@ const TEAM_INCLUDE = {
   staff: { include: TEAM_STAFF_INCLUDE },
   members: {
     include: {
-      player: { select: USER_SUMMARY_SELECT },
+      player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
     },
     orderBy: ROSTER_MEMBERS_ORDER_BY,
   },
@@ -101,11 +89,11 @@ const TEAM_INCLUDE = {
 /**
  * Roster rows on `GET /teams/:id` also carry the player's email delivery state
  * (#449) so a coach can be told "this address bounced". Deliberately NOT part
- * of USER_SUMMARY_SELECT: that select also feeds staff rows, which every team
+ * of USER_SUMMARY_WITH_EMAIL_SELECT: that select also feeds staff rows, which every team
  * member reads. Stripped with the email for callers without `canManageRoster`.
  */
 const ROSTER_PLAYER_SELECT = {
-  ...USER_SUMMARY_SELECT,
+  ...USER_SUMMARY_WITH_EMAIL_SELECT,
   emailSuppressedAt: true,
   emailSuppressedReason: true,
 } satisfies Prisma.UserSelect;
@@ -188,7 +176,7 @@ const teamListInclude = (userId: string): typeof TEAM_LIST_INCLUDE => ({
 });
 
 const TEAM_MEMBER_INCLUDE = {
-  player: { select: USER_SUMMARY_SELECT },
+  player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   team: { select: TEAM_SUMMARY_SELECT },
 } satisfies Prisma.TeamMemberInclude;
 
@@ -674,7 +662,8 @@ export class TeamService {
       });
       // Season rollover (#461) is not built; moving a team-season row is the
       // only lineage-level change today and the one worth a line.
-      if (data.seasonId !== undefined && data.seasonId !== team.seasonId) {
+      const seasonMoved = data.seasonId !== undefined && data.seasonId !== team.seasonId;
+      if (seasonMoved) {
         logger.info('Team moved to season', {
           teamId,
           lineageId: team.lineageId,
@@ -682,6 +671,12 @@ export class TeamService {
           toSeasonId: data.seasonId,
           userId,
         });
+      }
+      // A season move changes the `seasons` usage metric of every staff member
+      // (#658); any other edit changes no metered count. `invalidateUsage`
+      // dedupes a user holding two roles. Best-effort, never throws.
+      if (seasonMoved) {
+        await invalidateUsage(...updated.staff.map((s) => s.userId));
       }
       return updated;
     } catch (err) {
@@ -718,7 +713,14 @@ export class TeamService {
     // its lineage if this was the last team-season on it. Season/League
     // cascades bypass this path and leave harmless orphan lineages; this is
     // the only cleanup (#462).
-    const lineageDeleted = await prisma.$transaction(async (tx) => {
+    // The staff rows go with the team, so every staff member's usage counts
+    // change (#658): read them inside the transaction, before the cascade.
+    const { lineageDeleted, staffRows } = await prisma.$transaction(async (tx) => {
+      const staffRows = await tx.teamStaff.findMany({
+        where: { teamId },
+        select: { userId: true },
+      });
+
       await tx.team.delete({
         where: { id: teamId },
       });
@@ -726,10 +728,13 @@ export class TeamService {
       const remaining = await tx.team.count({ where: { lineageId: team.lineageId } });
       if (remaining === 0) {
         await tx.teamLineage.delete({ where: { id: team.lineageId } });
-        return true;
       }
-      return false;
+      return { lineageDeleted: remaining === 0, staffRows };
     });
+
+    // After commit: every staff member's counts changed, and the caller's may
+    // have (#658). `invalidateUsage` dedupes; best-effort, never throws.
+    await invalidateUsage(userId, ...staffRows.map((s) => s.userId));
 
     logger.info('Team deleted', {
       teamId,
@@ -791,16 +796,22 @@ export class TeamService {
       throw new BadRequestError('Player is already on this team');
     }
 
-    // Add player to team
-    const teamMember = await prisma.teamMember.create({
-      data: {
-        teamId,
-        playerId: data.playerId,
-        jerseyNumber: data.jerseyNumber,
-        position: data.position,
-      },
-      include: TEAM_MEMBER_INCLUDE,
-    });
+    // Add player to team; a lost race on @@unique([teamId, playerId]) answers
+    // the pre-check's 400 (#727).
+    const teamMember = await createOrConflict(
+      () =>
+        prisma.teamMember.create({
+          data: {
+            teamId,
+            playerId: data.playerId,
+            jerseyNumber: data.jerseyNumber,
+            position: data.position,
+          },
+          include: TEAM_MEMBER_INCLUDE,
+        }),
+      'Player is already on this team',
+      'TeamMember_teamId_playerId_key'
+    );
 
     logger.info('Roster player added', { teamId, playerId: data.playerId, userId, via: 'existing-user' });
 
@@ -1041,15 +1052,23 @@ export class TeamService {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // Add staff member
-    const teamStaff = await prisma.teamStaff.create({
-      data: {
-        teamId,
-        userId: user.id,
-        roleId: role.id,
-      },
-      include: TEAM_STAFF_INCLUDE,
-    });
+    // Add staff member; a lost race on @@unique([teamId, userId, roleId])
+    // answers the pre-check's 400 (#727). That index includes the role, so only
+    // a same-role duplicate is caught; two concurrent adds with different roles
+    // still leave two rows (one role per user is #463).
+    const teamStaff = await createOrConflict(
+      () =>
+        prisma.teamStaff.create({
+          data: {
+            teamId,
+            userId: user.id,
+            roleId: role.id,
+          },
+          include: TEAM_STAFF_INCLUDE,
+        }),
+      'User is already a staff member of this team',
+      'TeamStaff_teamId_userId_roleId_key'
+    );
 
     // Best-effort push notification; never fails the request.
     try {
@@ -1203,20 +1222,26 @@ export class TeamService {
       throw new BadRequestError('A role with this name already exists');
     }
 
-    // Create the role
-    const role = await prisma.teamRole.create({
-      data: {
-        teamId,
-        type: 'CUSTOM',
-        name: data.name,
-        description: data.description,
-        canManageTeam: data.canManageTeam ?? false,
-        canManageRoster: data.canManageRoster ?? false,
-        canTrackStats: data.canTrackStats ?? false,
-        canViewStats: data.canViewStats ?? true,
-        canShareStats: data.canShareStats ?? false,
-      },
-    });
+    // Create the role; a lost race on @@unique([teamId, name]) answers the
+    // pre-check's 400 (#727).
+    const role = await createOrConflict(
+      () =>
+        prisma.teamRole.create({
+          data: {
+            teamId,
+            type: 'CUSTOM',
+            name: data.name,
+            description: data.description,
+            canManageTeam: data.canManageTeam ?? false,
+            canManageRoster: data.canManageRoster ?? false,
+            canTrackStats: data.canTrackStats ?? false,
+            canViewStats: data.canViewStats ?? true,
+            canShareStats: data.canShareStats ?? false,
+          },
+        }),
+      'A role with this name already exists',
+      'TeamRole_teamId_name_key'
+    );
 
     return role;
   }

@@ -63,7 +63,7 @@ const teamInviteForChild: TeamInvitation = {
   expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
   createdAt: '',
   updatedAt: '',
-  team: { id: 't2', name: 'Select Team', season: { id: 's', name: '2026', isActive: true, league: { id: 'l', name: 'AAU' } } },
+  team: { id: 't2', name: 'Select Team', season: { id: 's', name: '2026', league: { id: 'l', name: 'AAU' } } },
   player: { id: 'steph', name: 'Steph Curry', email: '' },
   invitedBy: { id: 'coach-2', name: 'Coach Two', email: '' },
 };
@@ -155,6 +155,33 @@ describe('InvitationsScreen guardian invitations', () => {
 
       expect(getByText('Invited by Usuario eliminado')).toBeTruthy();
       expect(queryByText('Invited by Deleted user')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+  it('names a deleted child and inviter on a guardian card with the localized label (#813)', async () => {
+    mockData = {
+      success: true,
+      invitations: [],
+      guardianInvitations: [
+        {
+          ...guardianInvite,
+          childName: 'Deleted user',
+          childDeletedAt: '2026-09-07T00:00:00Z',
+          inviterName: 'Deleted user',
+          inviterDeletedAt: '2026-09-07T00:00:00Z',
+        },
+      ],
+      pagination: { total: 0, limit: 20, offset: 0, hasMore: false },
+    };
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, queryByText } = render(<InvitationsScreen />);
+
+      expect(getByText('Become father of Usuario eliminado on Warriors')).toBeTruthy();
+      expect(getByText('Invited by Usuario eliminado')).toBeTruthy();
+      expect(getByText('Accept for Usuario eliminado')).toBeTruthy();
+      expect(queryByText(/Deleted user/)).toBeNull();
     } finally {
       await i18n.changeLanguage('en');
     }

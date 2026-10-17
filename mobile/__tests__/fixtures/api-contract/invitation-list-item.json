@@ -1,0 +1,80 @@
+[
+  {
+    "id": "c54a59c2-b6d7-412e-a84b-81a6084a80fd",
+    "teamId": "20000000-0000-4000-a000-000000000002",
+    "playerId": "40000000-0000-4000-a000-000000000221",
+    "invitedById": "c9eee46b-1614-458b-843d-970b1ded0f62",
+    "status": "PENDING",
+    "jerseyNumber": null,
+    "position": null,
+    "message": null,
+    "expiresAt": "2026-10-11T16:26:06.149Z",
+    "createdAt": "2026-10-04T16:26:06.149Z",
+    "updatedAt": "2026-10-05T16:26:06.153Z",
+    "acceptedAt": null,
+    "rejectedAt": null,
+    "team": {
+      "id": "20000000-0000-4000-a000-000000000002",
+      "name": "Lakers",
+      "season": {
+        "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+        "name": "Spring 2024",
+        "league": {
+          "id": "10000000-0000-4000-a000-000000000001",
+          "name": "Downtown Youth Basketball League"
+        }
+      }
+    },
+    "player": {
+      "id": "40000000-0000-4000-a000-000000000221",
+      "name": "Iris Invited",
+      "email": "iris.invited@example.com",
+      "deletedAt": null
+    },
+    "invitedBy": {
+      "id": "c9eee46b-1614-458b-843d-970b1ded0f62",
+      "name": "Frank Vogel",
+      "email": "frank.vogel@example.com",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "c54a59c2-b6d7-412e-a84b-81a6084a80fd",
+    "teamId": "20000000-0000-4000-a000-000000000002",
+    "playerId": "40000000-0000-4000-a000-000000000221",
+    "invitedById": "c9eee46b-1614-458b-843d-970b1ded0f62",
+    "status": "PENDING",
+    "jerseyNumber": null,
+    "position": null,
+    "message": null,
+    "expiresAt": "2026-10-11T16:26:06.149Z",
+    "createdAt": "2026-10-04T16:26:06.149Z",
+    "updatedAt": "2026-10-05T16:26:06.153Z",
+    "acceptedAt": null,
+    "rejectedAt": null,
+    "team": {
+      "id": "20000000-0000-4000-a000-000000000002",
+      "name": "Lakers",
+      "season": {
+        "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+        "name": "Spring 2024",
+        "league": {
+          "id": "10000000-0000-4000-a000-000000000001",
+          "name": "Downtown Youth Basketball League"
+        }
+      }
+    },
+    "player": {
+      "id": "40000000-0000-4000-a000-000000000221",
+      "name": "Iris Invited",
+      "email": null,
+      "deletedAt": null
+    },
+    "invitedBy": {
+      "id": "c9eee46b-1614-458b-843d-970b1ded0f62",
+      "name": "Frank Vogel",
+      "email": null,
+      "deletedAt": null
+    }
+  }
+]

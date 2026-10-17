@@ -138,7 +138,8 @@ export async function cacheDelete(...keys: string[]): Promise<void> {
 }
 
 /**
- * Close the Redis connection (used for graceful shutdown / test cleanup).
+ * Close the Redis connection. Called by the SIGTERM/SIGINT routine in
+ * `utils/shutdown.ts` (wired in `src/index.ts`) and by test cleanup.
  */
 export async function closeRedis(): Promise<void> {
   if (client) {

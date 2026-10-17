@@ -7,6 +7,11 @@
  * running, i.e. no OTA has applied yet). Share exports the same fields as
  * text for pasting into a bug report or an OTA verification thread.
  *
+ * It also shows the API host the app talks to, and says so when a release
+ * bundle ignored a loopback host from a mis-published OTA manifest and fell
+ * back to production (#721). The device cannot report that by itself: such a
+ * manifest also carries no Sentry DSN.
+ *
  * The Help card holds the support contact (#450): the row opens the mail app
  * with a message to the support address that already carries the diagnostics.
  *
@@ -27,10 +32,11 @@ import { ThemedView, ThemedText, Card, Button } from '../components';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { getHorizontalPadding } from '../utils/responsive';
-import { SUPPORT_EMAIL } from '../config/env';
+import { SUPPORT_EMAIL, getApiUrlResolution } from '../config/env';
 import { useToast } from '../components/Toast';
 import { BackButton } from '../components/BackButton';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { formatDateTime } from '../utils/format-date';
 
 export const APP_NAME = 'Hooplings';
 
@@ -43,6 +49,10 @@ export interface AboutInfo {
   updatePublishedAt: Date | null;
   channel: string | null;
   isEmbedded: boolean;
+  /** Host (and port) of the API the app talks to. */
+  apiHost: string;
+  /** The OTA manifest named a loopback host and this release bundle used production instead (#721). */
+  apiManifestIgnored: boolean;
 }
 
 /**
@@ -66,6 +76,7 @@ export function getAboutInfo(): AboutInfo {
   // In a dev client expo-updates is disabled: no update ever applies, so the
   // running JS is by definition the local bundle.
   const isEmbedded = !Updates.isEnabled || Updates.isEmbeddedLaunch || !Updates.updateId;
+  const api = getApiUrlResolution();
   return {
     appVersion: Constants.expoConfig?.version ?? 'unknown',
     buildNumber: getNativeBuildNumber(),
@@ -74,7 +85,14 @@ export function getAboutInfo(): AboutInfo {
     updatePublishedAt: isEmbedded ? null : (Updates.createdAt ?? null),
     channel: Updates.channel || null,
     isEmbedded,
+    apiHost: api.url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, ''),
+    apiManifestIgnored: api.loopbackIgnored,
   };
+}
+
+/** "api.hooplings.com", or a note that the manifest's loopback host was ignored. */
+export function formatApiHost(info: AboutInfo): string {
+  return info.apiManifestIgnored ? `${info.apiHost} (production; update's loopback host ignored)` : info.apiHost;
 }
 
 export function formatAppVersion(info: AboutInfo): string {
@@ -89,6 +107,7 @@ export function formatAboutDiagnostics(info: AboutInfo): string {
       ? 'Update: embedded build (no OTA applied)'
       : `Update: ${info.updateId} (published ${info.updatePublishedAt?.toISOString() ?? 'unknown'})`,
     `Channel: ${info.channel ?? 'none (development)'}`,
+    `API host: ${formatApiHost(info)}`,
   ].join('\n');
 }
 
@@ -133,9 +152,10 @@ export default function AboutScreen() {
       label: 'Update',
       value: info.isEmbedded
         ? 'Embedded build (no OTA applied)'
-        : `${info.updateId}\nPublished ${info.updatePublishedAt?.toLocaleString() ?? 'unknown'}`,
+        : `${info.updateId}\nPublished ${info.updatePublishedAt ? formatDateTime(info.updatePublishedAt) : 'unknown'}`,
     },
     { icon: 'git-branch', label: 'Channel', value: info.channel ?? 'none (development)' },
+    { icon: 'server', label: 'API host', value: formatApiHost(info) },
   ];
 
   return (

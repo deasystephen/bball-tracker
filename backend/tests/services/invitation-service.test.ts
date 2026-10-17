@@ -36,6 +36,7 @@ import {
   createFullInvitation,
   createTeamRole,
   createTeamStaff,
+  uniqueViolation,
 } from '../factories';
 import {
   expectNotFoundError,
@@ -2071,10 +2072,7 @@ describe('InvitationService', () => {
         return Promise.resolve(emailLookups === 1 ? null : raceWinner);
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
-        'Unique constraint failed on the fields: (`email`)',
-        { code: 'P2002', clientVersion: 'test' }
-      );
+      const p2002 = uniqueViolation('User_email_key');
       let attempt = 0;
       const txUserUpdate = jest.fn().mockResolvedValue({ count: 1 });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
@@ -2368,10 +2366,7 @@ describe('InvitationService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
-      const p2002 = new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
-        'Unique constraint failed: TeamInvitation_pending_teamId_playerId_key',
-        { code: 'P2002', clientVersion: 'test' }
-      );
+      const p2002 = uniqueViolation('TeamInvitation_pending_teamId_playerId_key');
       (mockPrisma.teamInvitation.create as jest.Mock).mockRejectedValue(p2002);
 
       await expect(
@@ -2829,10 +2824,7 @@ describe('InvitationService', () => {
       invitedBy: { id: coach.id, name: coach.name, email: coach.email },
     });
 
-    const p2002 = (): Error => new (jest.requireActual('@prisma/client') as typeof import('@prisma/client')).Prisma.PrismaClientKnownRequestError(
-      'Unique constraint failed on the fields: (`email`)',
-      { code: 'P2002', clientVersion: 'test' }
-    );
+    const p2002 = (): Error => uniqueViolation('User_email_key');
 
     const routeUserLookups = (byEmail: (call: number) => unknown): void => {
       let emailLookups = 0;

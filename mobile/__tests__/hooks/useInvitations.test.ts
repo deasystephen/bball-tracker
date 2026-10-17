@@ -115,7 +115,6 @@ describe('useInvitations', () => {
         season: {
           id: 'season-1',
           name: 'Spring 2024',
-          isActive: true,
           league: {
             id: 'league-1',
             name: 'Downtown Youth Basketball',

@@ -36,6 +36,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
+import { formatNumericDate } from '../../../utils/format-date';
 
 /** "Mar 1, 2024 - Jun 30, 2024", with a placeholder for a missing end. */
 export function formatSeasonRange(
@@ -43,8 +44,8 @@ export function formatSeasonRange(
   labels: { noStart: string; noEnd: string }
 ): string | null {
   if (!season.startDate && !season.endDate) return null;
-  const start = season.startDate ? new Date(season.startDate).toLocaleDateString() : labels.noStart;
-  const end = season.endDate ? new Date(season.endDate).toLocaleDateString() : labels.noEnd;
+  const start = season.startDate ? formatNumericDate(season.startDate) : labels.noStart;
+  const end = season.endDate ? formatNumericDate(season.endDate) : labels.noEnd;
   return `${start} - ${end}`;
 }
 

@@ -62,7 +62,7 @@ describe('AnnouncementService', () => {
 
   it('never selects the author email into the payload (#654)', () => {
     expect(ANNOUNCEMENT_INCLUDE.author.select).not.toHaveProperty('email');
-    expect(ANNOUNCEMENT_INCLUDE.author.select).toEqual({ id: true, name: true, deletedAt: true });
+    expect(ANNOUNCEMENT_INCLUDE.author.select).toEqual({ id: true, name: true, isManaged: true, deletedAt: true });
   });
 
   describe('getAnnouncement (#34)', () => {

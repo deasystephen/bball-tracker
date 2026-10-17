@@ -34,6 +34,7 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import { getGameResult, getResultColor } from '../../utils/game-result';
 import type { Game, GameStatus } from '../../types/game';
+import { formatMonthShort, formatNumericDate } from '../../utils/format-date';
 
 type FilterTab = 'ALL' | GameStatus;
 
@@ -158,9 +159,7 @@ export default function Games() {
 
       if (isUpcoming) {
         const gameDate = new Date(item.date);
-        const month = gameDate
-          .toLocaleDateString(undefined, { month: 'short' })
-          .toUpperCase();
+        const month = formatMonthShort(gameDate).toUpperCase();
         const day = gameDate.getDate();
         return (
           <TouchableOpacity
@@ -238,7 +237,7 @@ export default function Games() {
                     </ThemedText>
                   </View>
                   <ThemedText variant="footnote" color="textTertiary">
-                    {new Date(item.date).toLocaleDateString()}
+                    {formatNumericDate(item.date)}
                   </ThemedText>
                 </View>
               </View>

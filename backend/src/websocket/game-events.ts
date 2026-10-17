@@ -29,6 +29,7 @@ import prisma from '../models';
 import { canAccessTeam } from '../utils/permissions';
 import { WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
+import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
   RATE_LIMITED_MESSAGE,
@@ -74,7 +75,7 @@ export function gameRoom(gameId: string): string {
  * Resolve a bearer-style token to a local user. Mirrors the logic in
  * `src/api/auth/middleware.ts` but returns a plain value instead of mutating
  * an Express request. Returns `null` when the token is invalid/expired or the
- * user does not exist.
+ * user does not exist or is a tombstone (`deletedAt` set).
  */
 export async function resolveSocketUser(
   rawToken: string | undefined
@@ -97,8 +98,10 @@ export async function resolveSocketUser(
         return null;
       }
 
+      // Dev tokens resolve by id, so a deleted account (#444) must be refused
+      // explicitly, as the REST middleware does (#667).
       const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+        where: { id: decoded.userId, deletedAt: null },
         select: { id: true, email: true, name: true, role: true },
       });
       return user ?? null;
@@ -112,8 +115,9 @@ export async function resolveSocketUser(
     return null;
   }
 
+  // Deletion nulls workosUserId, but `deletedAt` is the tombstone signal (#667).
   const user = await prisma.user.findUnique({
-    where: { workosUserId: workosUser.id },
+    where: { workosUserId: workosUser.id, deletedAt: null },
     select: { id: true, email: true, name: true, role: true },
   });
   return user ?? null;
@@ -194,7 +198,7 @@ export interface GameSnapshot {
     homeScore: number;
     awayScore: number;
   };
-  events: Array<GameEvent & { player?: { id: string; name: string } | null }>;
+  events: Array<GameEvent & { player?: UserSummary | null }>;
 }
 
 export async function buildGameSnapshot(gameId: string): Promise<GameSnapshot | null> {
@@ -203,7 +207,8 @@ export async function buildGameSnapshot(gameId: string): Promise<GameSnapshot | 
     include: {
       events: {
         include: {
-          player: { select: { id: true, name: true } },
+          // Same player shape as every REST event payload (#813).
+          player: { select: USER_SUMMARY_SELECT },
         },
         orderBy: { timestamp: 'desc' },
         take: SNAPSHOT_EVENT_LIMIT,

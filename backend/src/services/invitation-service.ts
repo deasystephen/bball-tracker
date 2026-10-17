@@ -35,6 +35,8 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
+import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
+import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
@@ -117,15 +119,6 @@ function invitationExpiry(days: number = DEFAULT_INVITATION_EXPIRES_DAYS): Date 
   return expiresAt;
 }
 
-const USER_SUMMARY_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  // Deleted accounts stay on sent and answered invitations as tombstones
-  // (#642); clients derive a localized label from this, never from name.
-  deletedAt: true,
-} satisfies Prisma.UserSelect;
-
 /**
  * Scalar fields safe to return on authenticated responses.
  *
@@ -169,8 +162,8 @@ const INVITATION_SELECT = {
       },
     },
   },
-  player: { select: USER_SUMMARY_SELECT },
-  invitedBy: { select: USER_SUMMARY_SELECT },
+  player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
+  invitedBy: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.TeamInvitationSelect;
 
 const INVITATION_TEAM_SELECT = {
@@ -184,7 +177,7 @@ const INVITATION_TEAM_SELECT = {
 } satisfies Prisma.TeamInvitationSelect;
 
 const ACCEPTED_MEMBER_INCLUDE = {
-  player: { select: USER_SUMMARY_SELECT },
+  player: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   team: {
     select: {
       id: true,
@@ -248,8 +241,7 @@ export interface CreateInvitationResult {
 const ADDED_MEMBER_INCLUDE = {
   player: {
     select: {
-      ...USER_SUMMARY_SELECT,
-      isManaged: true,
+      ...USER_SUMMARY_WITH_EMAIL_SELECT,
       managedById: true,
     },
   },
@@ -462,17 +454,11 @@ export class InvitationService {
   private static async createInvitationRow(
     data: Prisma.TeamInvitationUncheckedCreateInput
   ): Promise<InvitationWithRelations> {
-    try {
-      return await prisma.teamInvitation.create({
-        data,
-        select: INVITATION_SELECT,
-      });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new BadRequestError('A pending invitation already exists for this player');
-      }
-      throw err;
-    }
+    return createOrConflict(
+      () => prisma.teamInvitation.create({ data, select: INVITATION_SELECT }),
+      'A pending invitation already exists for this player',
+      'TeamInvitation_pending_teamId_playerId_key'
+    );
   }
 
   /**
@@ -543,7 +529,7 @@ export class InvitationService {
         });
       });
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err)) {
         throw new BadRequestError('A pending invitation already exists for this player');
       }
       throw err;
@@ -611,7 +597,7 @@ export class InvitationService {
     email: string,
     err: unknown
   ): Promise<Prisma.UserGetPayload<Record<string, never>>> {
-    if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
+    if (!isUniqueViolation(err)) {
       throw err;
     }
     const racedUser = await prisma.user.findFirst({

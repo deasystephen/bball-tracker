@@ -22,8 +22,7 @@ const storedUser = {
   name: 'Old Name',
   role: UserRole.COACH,
   profilePictureUrl: 'https://cdn.test/old.jpg',
-  createdAt: new Date('2026-01-01'),
-  updatedAt: new Date('2026-01-01'),
+  createdAt: '2026-01-01T00:00:00.000Z',
 };
 
 describe('useUpdateProfile', () => {

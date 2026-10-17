@@ -11,6 +11,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { AxiosError, AxiosHeaders } from 'axios';
 import DeleteAccountScreen, { isConfirmed } from '../../app/account/delete';
 import { useAuthStore } from '../../store/auth-store';
+import { i18n } from '../../i18n';
 import { normalizeApiError } from '../../services/api-client';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -200,5 +201,18 @@ describe('DeleteAccountScreen (guardian, ?childId=)', () => {
       expect(mockShowToast).toHaveBeenCalledWith('Only the account owner can delete a claimed account', 'error')
     );
     expect(mockRouter.back).not.toHaveBeenCalled();
+  });
+  it('names a deleted child with the localized label from childDeletedAt (#813)', async () => {
+    signIn([
+      { childId: 'bryce', childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z', relationship: 'MOTHER', isPrimary: true, isManaged: true },
+    ]);
+    await i18n.changeLanguage('es');
+    try {
+      const { getAllByText, queryByText } = render(<DeleteAccountScreen />);
+      expect(getAllByText(/Usuario eliminado/).length).toBeGreaterThan(0);
+      expect(queryByText(/Deleted user/)).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

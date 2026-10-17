@@ -17,16 +17,19 @@ export interface Player {
   isManaged?: boolean;
   createdAt: string;
   updatedAt: string;
+  /** `GET /players/:id` only (backend `PLAYER_DETAIL_SELECT`). */
   teamMembers?: {
     id: string;
     team: {
       id: string;
       name: string;
-      league: {
+      season: {
         id: string;
         name: string;
-        season: string;
-        year: number;
+        league: {
+          id: string;
+          name: string;
+        };
       };
     };
   }[];

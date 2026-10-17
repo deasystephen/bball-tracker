@@ -1,0 +1,36 @@
+{
+  "id": "84894061-0132-404c-b674-6d96dff083ca",
+  "email": null,
+  "name": "Andrew Wiggins",
+  "role": "PLAYER",
+  "profilePictureUrl": null,
+  "emailVerified": true,
+  "createdAt": "2026-10-04T03:01:22.437Z",
+  "updatedAt": "2026-10-05T16:26:06.069Z",
+  "isManaged": false,
+  "managedById": null,
+  "deletedAt": null,
+  "teamMembers": [
+    {
+      "id": "01cf504a-c3c0-438a-8e68-c7ed3f7c5a44",
+      "teamId": "20000000-0000-4000-a000-000000000001",
+      "playerId": "84894061-0132-404c-b674-6d96dff083ca",
+      "jerseyNumber": 22,
+      "position": "SF",
+      "createdAt": "2026-10-04T03:01:22.493Z",
+      "updatedAt": "2026-10-04T03:01:22.493Z",
+      "team": {
+        "id": "20000000-0000-4000-a000-000000000001",
+        "name": "Warriors",
+        "season": {
+          "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+          "name": "Spring 2024",
+          "league": {
+            "id": "10000000-0000-4000-a000-000000000001",
+            "name": "Downtown Youth Basketball League"
+          }
+        }
+      }
+    }
+  ]
+}

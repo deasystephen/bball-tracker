@@ -1,7 +1,8 @@
 /**
  * Team overview roster ordering: jersey order by default (0 valid, nulls
  * last), a "Sort by Name" pill reorders, and the choice persists per user
- * (AsyncStorage `rosterSort:<userId>`, hydrated on the next visit).
+ * (AsyncStorage `rosterSort:<userId>`, hydrated on the next visit). Also the
+ * season "(Active)" marker, which only the detail payload can drive (#767).
  */
 
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
@@ -144,5 +145,25 @@ describe('TeamDetailsScreen — roster sort', () => {
 
     expect(screen.queryByLabelText('Sort by Name')).toBeNull();
     expect(screen.getByText('Solo Player')).toBeTruthy();
+  });
+});
+
+describe('TeamDetailsScreen — season marker (#767)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    signIn();
+  });
+
+  it('marks an active season from the GET /teams/:id season', () => {
+    mockTeam = baseTeam();
+    const screen = render(<TeamDetailsScreen />);
+    expect(screen.getByText(/\(Active\)/)).toBeTruthy();
+  });
+
+  it('renders no marker when the season carries no isActive (the GET /teams list shape)', () => {
+    mockTeam = { ...baseTeam(), season: { id: 's1', name: '2026', league: { id: 'league-1', name: 'Bay' } } };
+    const screen = render(<TeamDetailsScreen />);
+    expect(screen.getByText('Bay')).toBeTruthy();
+    expect(screen.queryByText(/\(Active\)/)).toBeNull();
   });
 });

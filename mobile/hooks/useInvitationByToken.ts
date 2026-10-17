@@ -1,7 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
-import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { AxiosError } from 'axios';
 import type { GuardianRelationship } from '../../shared/types';
 
 export type InvitationByTokenStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
@@ -30,8 +28,12 @@ export interface GuardianInvitationByToken {
   id: string;
   status: InvitationByTokenStatus;
   childName: string;
+  /** Child's tombstone state (#813); render via `childDisplayName`. Older API builds omit it. */
+  childDeletedAt?: string | null;
   teamName: string | null;
   inviterName: string;
+  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. Older API builds omit it. */
+  inviterDeletedAt?: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }
@@ -60,28 +62,5 @@ export function useInvitationByToken(token: string | undefined) {
     },
     enabled: !!token,
     retry: false,
-  });
-}
-
-export function useAcceptInvitationByToken() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (token: string) => {
-      const response = await apiClient.post<{ success: boolean; kind?: 'team' | 'guardian'; message: string }>(
-        `/invitations/by-token/${token}/accept`
-      );
-      return response.data;
-    },
-    onSuccess: (data, token) => {
-      trackEvent(AnalyticsEvents.INVITATION_ACCEPTED, {
-        kind: data.kind === 'guardian' ? 'guardian' : 'team',
-        source: 'link',
-      });
-      queryClient.invalidateQueries({ queryKey: ['invitationByToken', token] });
-      queryClient.invalidateQueries({ queryKey: ['invitations'] });
-    },
-    onError: (error: AxiosError<{ error: string }>) => {
-      return error.response?.data?.error ?? 'Failed to accept invitation';
-    },
   });
 }

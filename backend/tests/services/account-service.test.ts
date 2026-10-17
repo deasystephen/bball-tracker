@@ -100,6 +100,24 @@ describe('AccountService.deleteAccount', () => {
     jest.clearAllMocks();
   });
 
+  it('locks the row and every child it guards in one id-ordered statement (#664)', async () => {
+    armHappyPath();
+    // A child whose id sorts first comes back first; the user's row is still found.
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([
+      { ...lockedRow(), id: '00000000-0000-4000-a000-000000000000', email: null },
+      lockedRow({ profilePictureUrl: null }),
+    ]);
+
+    const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+    expect(result.success).toBe(true);
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const sql = ((mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toContain('"id" IN (SELECT "childId" FROM "Guardian" WHERE "parentId" = ?)');
+    expect(sql).toContain('ORDER BY "id"');
+    expect(sql).toContain('FOR UPDATE');
+  });
+
   it('locks the row, purges, tombstones, then deletes the avatar and the WorkOS user', async () => {
     armHappyPath(lockedRow({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/a.jpg' }));
 

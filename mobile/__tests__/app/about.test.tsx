@@ -59,6 +59,12 @@ jest.mock('expo-updates', () => ({
   get runtimeVersion() { return mockUpdates.runtimeVersion; },
 }));
 jest.mock('expo-constants', () => ({ expoConfig: { version: '1.4.0' } }));
+// The API host the screen reports (#721); lazy getter for the same reason as expo-updates.
+let mockApiResolution = { url: 'https://api.hooplings.com', loopbackIgnored: false };
+jest.mock('../../config/env', () => ({
+  ...jest.requireActual('../../config/env'),
+  getApiUrlResolution: () => mockApiResolution,
+}));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -88,6 +94,28 @@ describe('AboutScreen', () => {
     jest.clearAllMocks();
     setOtaApplied();
     mockNativeApplication = { nativeBuildVersion: '32' };
+    mockApiResolution = { url: 'https://api.hooplings.com', loopbackIgnored: false };
+  });
+
+  it('shows the API host the app talks to', () => {
+    const { getByTestId } = render(<AboutScreen />);
+    expect(getByTestId('about-api-host').props.children).toBe('api.hooplings.com');
+  });
+
+  it('says when a release bundle ignored the update\'s loopback host (#721)', () => {
+    mockApiResolution = { url: 'https://api.hooplings.com', loopbackIgnored: true };
+    const { getByTestId } = render(<AboutScreen />);
+    expect(getByTestId('about-api-host').props.children).toBe(
+      "api.hooplings.com (production; update's loopback host ignored)"
+    );
+    expect(formatAboutDiagnostics(getAboutInfo())).toContain(
+      "API host: api.hooplings.com (production; update's loopback host ignored)"
+    );
+  });
+
+  it('shows a development host with its port', () => {
+    mockApiResolution = { url: 'http://192.168.1.20:3000/', loopbackIgnored: false };
+    expect(getAboutInfo().apiHost).toBe('192.168.1.20:3000');
   });
 
   it('shows app version with native build number, runtime, applied update id and channel', () => {
@@ -130,6 +158,7 @@ describe('AboutScreen', () => {
     expect(message).toContain(OTA_ID);
     expect(message).toContain('2026-08-28T22:18:05.218Z');
     expect(message).toContain('Channel: production');
+    expect(message).toContain('API host: api.hooplings.com');
   });
 
   it('navigates back from the header', () => {

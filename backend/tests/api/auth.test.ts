@@ -33,12 +33,14 @@ jest.mock('../../src/models', () => ({
 jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
+  captureRequestException: jest.fn(),
 }));
-import { captureException } from '../../src/utils/sentry';
+import { captureException, captureRequestException } from '../../src/utils/sentry';
 
 const mockWorkOSService = WorkOSService as jest.Mocked<typeof WorkOSService>;
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockCaptureException = captureException as jest.Mock;
+const mockCaptureRequestException = captureRequestException as jest.Mock;
 
 describe('Auth API', () => {
   const mockUser = {
@@ -499,9 +501,12 @@ describe('Auth API', () => {
       expect(response.body.error).toBe('Authentication failed');
       // Unexpected failures must be reported to Sentry (the prior gap: the
       // callback only logged to CloudWatch, so a DB outage was invisible).
-      expect(mockCaptureException).toHaveBeenCalledWith(expect.any(Error), {
-        flow: 'auth-callback',
-      });
+      // respondWithError reports it with the request tags (user, request id, route).
+      expect(mockCaptureRequestException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ method: 'GET' }),
+        { flow: 'auth-callback' }
+      );
     });
   });
 
@@ -640,7 +645,7 @@ describe('Auth API', () => {
       mockWorkOSService.verifyToken.mockResolvedValue(mockWorkOSUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.verifyToken>>);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...mockUser, role: 'PARENT' });
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([
-        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One', isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 'team-1', name: 'Warriors' } }] } },
+        { childId: 'child-1', relationship: 'MOTHER', isPrimary: true, child: { name: 'Kid One', deletedAt: new Date('2026-09-02T00:00:00.000Z'), isManaged: true, workosUserId: null, teamMembers: [{ team: { id: 'team-1', name: 'Warriors' } }] } },
       ]);
 
       const response = await request(app)
@@ -649,7 +654,16 @@ describe('Auth API', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.user.guardianOf).toEqual([
-        { childId: 'child-1', childName: 'Kid One', relationship: 'MOTHER', isPrimary: true, isManaged: true, teams: [{ id: 'team-1', name: 'Warriors' }] },
+        {
+          childId: 'child-1',
+          childName: 'Kid One',
+          // Tombstone signal for the child's name (#813).
+          childDeletedAt: '2026-09-02T00:00:00.000Z',
+          relationship: 'MOTHER',
+          isPrimary: true,
+          isManaged: true,
+          teams: [{ id: 'team-1', name: 'Warriors' }],
+        },
       ]);
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { parentId: 'user-1' } })

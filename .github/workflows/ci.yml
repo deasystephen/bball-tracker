@@ -205,11 +205,14 @@ jobs:
           # count only if it matches the path brace AND is not a .md file
           # (verified against picomatch, dorny's matcher — a plain `!**/*.md`
           # under the default `some` quantifier would NOT exclude). See #184/#188.
+          # The Terraform provider lock is excluded too: it is not in the image,
+          # and a weekly Dependabot provider bump must not roll production (#786).
           predicate-quantifier: 'every'
           filters: |
             backend:
               - '{backend/**,infra/**,docker/**,.github/workflows/ci.yml}'
               - '!**/*.md'
+              - '!infra/.terraform.lock.hcl'
 
       # A run started by hand always deploys: that is what it is for. The paths
       # above are repeated in .github/scripts/deploy-contents.sh, which lists

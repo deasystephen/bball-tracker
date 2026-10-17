@@ -33,6 +33,16 @@ resource "aws_route53_zone" "main" {
   tags = {
     Name = "${local.name_prefix}-dns-${each.key}"
   }
+
+  # Registrar-created zones carry live NS delegation; a destroy here is the
+  # capyhoops.com twin-zone outage. `prevent_destroy` makes `terraform plan`
+  # refuse any destroy or replace of a zone before AWS is touched. Retire a
+  # domain with `serve = false`, never by removing its key (infra/README.md
+  # "DNS — zones, certificates, domains"). Pinned by
+  # backend/tests/infra/prevent-destroy.test.ts.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # hooplings.com (Z0154069130H854Y9T0WZ) was IMPORTED on 2026-09-07 — the zone

@@ -1,14 +1,31 @@
+// On an EAS build worker every profile in eas.json sets APP_ENV; a profile
+// that forgot it would bake the dev host into a binary (#721). Fail the build
+// instead. `eas update` sets no such variable, so the runtime guard in
+// config/env.ts#getApiUrl() is what protects an OTA.
+if (process.env.EAS_BUILD === 'true' && !process.env.APP_ENV) {
+  throw new Error(
+    'app.config.js: APP_ENV is unset on an EAS build. Set APP_ENV in the build profile (eas.json) so the binary gets the right API host.'
+  );
+}
+
 const IS_PRODUCTION = process.env.APP_ENV === 'production';
 const IS_PREVIEW = process.env.APP_ENV === 'preview';
 
 // Evaluated on the PUBLISHING machine for `eas update`: an unset APP_ENV ships
-// the dev host to every device (docs/deployment/mobile-builds-and-ota.md "OTA env gotcha"). The EAS production
-// environment provides APP_ENV; `__tests__/app-config.test.ts` pins this mapping.
+// the dev host (docs/deployment/mobile-builds-and-ota.md "OTA env gotcha"),
+// which release bundles ignore in favour of the production API (#721,
+// config/env.ts#getApiUrl). The EAS production environment provides APP_ENV;
+// `__tests__/app-config.test.ts` pins this mapping.
 const PRODUCTION_API_URL = 'https://api.hooplings.com';
 const getApiUrl = () => {
   if (IS_PRODUCTION) return process.env.API_URL || PRODUCTION_API_URL;
   if (IS_PREVIEW) return process.env.API_URL || PRODUCTION_API_URL;
-  return 'http://127.0.0.1:3000';
+  // A local Release build (APP_ENV unset) ignores the loopback default at
+  // runtime and calls production (#721); LOCAL_API_URL=http://<lan-ip>:3000
+  // points it at a development backend on purpose. Deliberately not API_URL:
+  // an API_URL exported in a shell must never reach an OTA published with
+  // APP_ENV unset, where the loopback default is what the runtime guard catches.
+  return process.env.LOCAL_API_URL || 'http://127.0.0.1:3000';
 };
 
 const getAmplitudeApiKey = () => {

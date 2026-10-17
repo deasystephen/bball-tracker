@@ -197,20 +197,60 @@ let initialized = false;
 /** True until `initAnalytics` has decided (key missing, init failed, or ready). */
 let initPending = true;
 
-interface BufferedEvent {
-  event: AnalyticsEvent;
-  properties: Record<string, AnalyticsValue> | undefined;
-}
+/**
+ * One call made before init has resolved. Identity ops are queued in the same
+ * list as events so init replays them in their original order: an
+ * `identifyUser` ahead of `user_logged_in` stamps it, and a `resetUser`
+ * between two sign-ins separates them.
+ */
+type PreInitOp =
+  | { kind: 'event'; event: AnalyticsEvent; properties: Record<string, AnalyticsValue> | undefined }
+  | { kind: 'identify'; userId: string; properties: Partial<AnalyticsUserProperties> | undefined }
+  | { kind: 'properties'; properties: Partial<AnalyticsUserProperties> }
+  | { kind: 'reset' };
 
 /**
- * Events tracked before init has resolved. The root layout's children mount
+ * Calls made before init has resolved. The root layout's children mount
  * (and the first `screen_viewed` fires) before its own `initAnalytics` effect
  * runs, and `amplitude.init` takes a moment, so the launch route would be lost
- * without this. Bounded; flushed in order once init succeeds; dropped when
- * there is no key or init fails.
+ * without this; a login can also complete in that window (a cold start from
+ * the sign-in redirect), and Amplitude persists whatever identity it has, so
+ * a dropped `setUserId` would leave the install anonymous until the next
+ * sign-in. Bounded; replayed in order through the post-init functions once
+ * init succeeds; dropped, with no SDK call, when there is no key or init fails.
  */
 export const PRE_INIT_BUFFER_LIMIT = 50;
-let preInitBuffer: BufferedEvent[] = [];
+let preInitQueue: PreInitOp[] = [];
+
+/**
+ * Queue a pre-init call if init is still pending. When full, the oldest
+ * event goes first, so the few identity ops survive a burst of screen views.
+ */
+function enqueuePreInit(op: PreInitOp): void {
+  if (!initPending) return;
+  if (preInitQueue.length >= PRE_INIT_BUFFER_LIMIT) {
+    const oldestEvent = preInitQueue.findIndex((queued) => queued.kind === 'event');
+    preInitQueue.splice(oldestEvent === -1 ? 0 : oldestEvent, 1);
+  }
+  preInitQueue.push(op);
+}
+
+function replay(op: PreInitOp): void {
+  switch (op.kind) {
+    case 'event':
+      send(op.event, op.properties);
+      return;
+    case 'identify':
+      identifyUser(op.userId, op.properties);
+      return;
+    case 'properties':
+      setUserProperties(op.properties);
+      return;
+    case 'reset':
+      resetUser();
+      return;
+  }
+}
 
 /**
  * Initialize Amplitude analytics.
@@ -221,7 +261,7 @@ export async function initAnalytics(): Promise<void> {
   if (!apiKey) {
     log.debug('[Analytics] No Amplitude API key configured, skipping initialization');
     initPending = false;
-    preInitBuffer = [];
+    preInitQueue = [];
     return;
   }
 
@@ -230,12 +270,12 @@ export async function initAnalytics(): Promise<void> {
       trackingOptions: AMPLITUDE_TRACKING_OPTIONS,
     }).promise;
     initialized = true;
-    const buffered = preInitBuffer;
-    preInitBuffer = [];
-    for (const { event, properties } of buffered) send(event, properties);
+    const queued = preInitQueue;
+    preInitQueue = [];
+    for (const op of queued) replay(op);
   } catch (error) {
     log.warn('[Analytics] Failed to initialize Amplitude', { error });
-    preInitBuffer = [];
+    preInitQueue = [];
   } finally {
     initPending = false;
   }
@@ -252,9 +292,7 @@ export function trackEvent<E extends AnalyticsEvent>(event: E, ...args: PropsArg
     send(event, properties);
     return;
   }
-  if (!initPending) return;
-  if (preInitBuffer.length >= PRE_INIT_BUFFER_LIMIT) preInitBuffer.shift();
-  preInitBuffer.push({ event, properties });
+  enqueuePreInit({ kind: 'event', event, properties });
 }
 
 /**
@@ -281,9 +319,13 @@ function send(event: AnalyticsEvent, properties: Record<string, AnalyticsValue> 
 
 /**
  * Identify the current user for analytics, optionally with user properties.
+ * Before init has resolved, the call is queued and replayed in order at init.
  */
 export function identifyUser(userId: string, properties?: Partial<AnalyticsUserProperties>): void {
-  if (!initialized) return;
+  if (!initialized) {
+    enqueuePreInit({ kind: 'identify', userId, properties });
+    return;
+  }
 
   try {
     amplitude.setUserId(userId);
@@ -302,7 +344,10 @@ export function identifyUser(userId: string, properties?: Partial<AnalyticsUserP
  * are skipped so a partial refresh never clears a property.
  */
 export function setUserProperties(properties: Partial<AnalyticsUserProperties>): void {
-  if (!initialized) return;
+  if (!initialized) {
+    enqueuePreInit({ kind: 'properties', properties });
+    return;
+  }
 
   try {
     applyUserProperties(properties);
@@ -328,10 +373,15 @@ export function appVersion(): string {
 }
 
 /**
- * Reset user identity on logout.
+ * Reset user identity on logout. Before init, the reset is queued and
+ * replayed in order, so it also clears the identity the SDK persisted from
+ * the previous session and rotates the device id.
  */
 export function resetUser(): void {
-  if (!initialized) return;
+  if (!initialized) {
+    enqueuePreInit({ kind: 'reset' });
+    return;
+  }
 
   try {
     amplitude.reset();

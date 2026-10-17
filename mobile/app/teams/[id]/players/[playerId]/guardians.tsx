@@ -111,7 +111,7 @@ export default function PlayerGuardiansScreen() {
       isSelf ? 'Leave' : 'Remove guardian',
       isSelf
         ? `Stop being ${playerName}'s ${relationshipLabel(row.relationship).toLowerCase()}?`
-        : `Remove ${row.name} as ${playerName}'s ${relationshipLabel(row.relationship).toLowerCase()}?`,
+        : `Remove ${displayName(row)} as ${playerName}'s ${relationshipLabel(row.relationship).toLowerCase()}?`,
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -254,16 +254,16 @@ export default function PlayerGuardiansScreen() {
             return (
               <ListItem
                 key={row.id}
-                title={isSelf ? `${row.name} (${t('teams.you')})` : row.name}
+                title={isSelf ? `${displayName(row)} (${t('teams.you')})` : displayName(row)}
                 subtitle={subtitle}
-                accessibilityLabel={`${row.name}, ${relationshipLabel(row.relationship)}`}
+                accessibilityLabel={`${displayName(row)}, ${relationshipLabel(row.relationship)}`}
                 rightElement={
                   showRemove ? (
                     <TouchableOpacity
                       onPress={() => handleRemove(row, isSelf)}
                       style={styles.rowButton}
                       accessibilityRole="button"
-                      accessibilityLabel={isSelf ? 'Leave' : `Remove guardian: ${row.name}`}
+                      accessibilityLabel={isSelf ? 'Leave' : `Remove guardian: ${displayName(row)}`}
                     >
                       <Ionicons
                         name={isSelf ? 'exit-outline' : 'person-remove-outline'}

@@ -10,8 +10,8 @@ import {
   updateSeasonSchema,
   seasonQuerySchema,
 } from './schemas';
-import { AppError, BadRequestError } from '../../utils/errors';
-import { logRouteError } from '../../utils/log-route-error';
+import { BadRequestError } from '../../utils/errors';
+import { respondWithError } from '../../utils/respond-with-error';
 
 const router = Router();
 
@@ -39,12 +39,7 @@ router.post('/', async (req, res) => {
       season,
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to create season' });
-    }
-    logRouteError(res, 'Error creating season', error);
+    respondWithError(res, error, { log: 'Error creating season', fallback: 'Failed to create season' });
   }
 });
 
@@ -72,12 +67,7 @@ router.get('/', async (req, res) => {
       ...result,
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to list seasons' });
-    }
-    logRouteError(res, 'Error listing seasons', error);
+    respondWithError(res, error, { log: 'Error listing seasons', fallback: 'Failed to list seasons' });
   }
 });
 
@@ -94,12 +84,7 @@ router.get('/:id', async (req, res) => {
       season,
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to get season' });
-    }
-    logRouteError(res, 'Error getting season', error);
+    respondWithError(res, error, { log: 'Error getting season', fallback: 'Failed to get season' });
   }
 });
 
@@ -128,12 +113,7 @@ router.patch('/:id', async (req, res) => {
       season,
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to update season' });
-    }
-    logRouteError(res, 'Error updating season', error);
+    respondWithError(res, error, { log: 'Error updating season', fallback: 'Failed to update season' });
   }
 });
 
@@ -150,12 +130,7 @@ router.delete('/:id', async (req, res) => {
       message: 'Season deleted successfully',
     });
   } catch (error) {
-    if (error instanceof AppError) {
-      res.status(error.statusCode).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to delete season' });
-    }
-    logRouteError(res, 'Error deleting season', error);
+    respondWithError(res, error, { log: 'Error deleting season', fallback: 'Failed to delete season' });
   }
 });
 
