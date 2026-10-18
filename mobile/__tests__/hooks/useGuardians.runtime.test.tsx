@@ -58,6 +58,7 @@ const pending: PendingGuardianInvitation = {
   expiresAt: '2026-09-01T00:00:00Z',
   createdAt: '2026-08-20T00:00:00Z',
   updatedAt: '2026-08-20T00:00:00Z',
+  canResend: true,
 };
 
 describe('useGuardians runtime', () => {

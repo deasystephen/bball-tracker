@@ -43,6 +43,8 @@ function echoLockedRows(tombstoned: string[] = []): jest.Mock {
 
 const TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const CHILD_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
+/** The caller team's lineage: the club across seasons (#420 Resend scope). */
+const LINEAGE_ID = 'lineage-warriors';
 
 function child(
   overrides: Partial<{ name: string; email: string | null }> = {}
@@ -53,7 +55,7 @@ function child(
 /** hasTeamPermission for a plain (non-admin, non-league-admin) caller. */
 function setStaffPermission(canManageRoster: boolean): void {
   (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
-    ...createTeam({ id: TEAM_ID }),
+    ...createTeam({ id: TEAM_ID, lineageId: LINEAGE_ID }),
     season: { league: { admins: [] } },
   });
   (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(
@@ -406,12 +408,21 @@ describe('GuardianService', () => {
       const resend = { ...input, supersede: true };
       const OLDER_THAN_COOLDOWN = new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 60_000);
 
+      /**
+       * `guardianInvitation.findFirst` answering per query: the cooldown read
+       * (within the lineage) sees `latest`; the cross-lineage dedupe read
+       * (`NOT: { team: { lineageId } }`) sees `elsewhere`.
+       */
+      function mockInvitationReads(latest: unknown, elsewhere: unknown = null): void {
+        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockImplementation(
+          async (args: { where: { NOT?: unknown } }) => (args.where.NOT ? elsewhere : latest)
+        );
+      }
+
       /** Happy path plus a live PENDING row for the pair, created before the cooldown window. */
       function setLivePending(): void {
         setHappyPath();
-        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
-          invitationRow({ id: 'live', createdAt: OLDER_THAN_COOLDOWN })
-        );
+        mockInvitationReads(invitationRow({ id: 'live', createdAt: OLDER_THAN_COOLDOWN }));
         (mockPrisma.guardianInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
         (mockPrisma.guardianInvitation.create as jest.Mock).mockResolvedValue(invitationRow({ id: 'fresh' }));
       }
@@ -424,7 +435,7 @@ describe('GuardianService', () => {
         // A live row would 400 without supersede; here it is expired instead.
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
         // First the lazy expiry of a lapsed row on ANY team (as the plain invite
-        // does), then the live row on the caller's team only. Both match the
+        // does), then the live row within the caller team's lineage. Both match the
         // address through emailEquals.
         expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenNthCalledWith(1, {
           where: {
@@ -436,7 +447,12 @@ describe('GuardianService', () => {
           data: { status: 'EXPIRED' },
         });
         expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenNthCalledWith(2, {
-          where: { childId: CHILD_ID, invitedEmail: emailEquals('parent@test.com'), teamId: TEAM_ID, status: 'PENDING' },
+          where: {
+            childId: CHILD_ID,
+            invitedEmail: emailEquals('parent@test.com'),
+            status: 'PENDING',
+            team: { lineageId: LINEAGE_ID },
+          },
           data: { status: 'EXPIRED' },
         });
         expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledWith(
@@ -466,9 +482,7 @@ describe('GuardianService', () => {
       it('for an existing account, skips the pre-check and refuses a cooldown inside the locked transaction', async () => {
         setLivePending();
         (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', name: 'Mom', email: 'parent@test.com' });
-        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
-          invitationRow({ id: 'live', createdAt: new Date(Date.now() - 10_000) })
-        );
+        mockInvitationReads(invitationRow({ id: 'live', createdAt: new Date(Date.now() - 10_000) }));
 
         await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id)).rejects.toBeInstanceOf(
           ResendCooldownError
@@ -478,6 +492,35 @@ describe('GuardianService', () => {
         expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledTimes(1);
         expect(mockPrisma.user.create).not.toHaveBeenCalled();
         expect(mockPrisma.guardianInvitation.create).not.toHaveBeenCalled();
+      });
+
+      it("refuses another club's live invitation with the dedupe 400 before creating an account", async () => {
+        setLivePending();
+        mockInvitationReads(null, invitationRow({ id: 'other-club', teamId: 'other-team' }));
+
+        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
+
+        expectBadRequestError(err, 'A pending guardian invitation already exists for this email');
+        expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              status: 'PENDING',
+              expiresAt: { gt: expect.any(Date) },
+              NOT: { team: { lineageId: LINEAGE_ID } },
+            }),
+          })
+        );
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('looks the address up once when it has no account (the pre-read is passed on)', async () => {
+        setLivePending();
+
+        await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
+
+        expect(mockPrisma.user.findFirst).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
       });
 
       it('creates a fresh invitation when there is no prior row for the pair', async () => {
@@ -492,9 +535,7 @@ describe('GuardianService', () => {
 
       it('refuses with 429 resend_cooldown inside the window, expiring nothing and mailing no one', async () => {
         setLivePending();
-        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
-          invitationRow({ id: 'live', createdAt: new Date(Date.now() - 30_000) })
-        );
+        mockInvitationReads(invitationRow({ id: 'live', createdAt: new Date(Date.now() - 30_000) }));
 
         const err = (await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch(
           (e: unknown) => e
@@ -507,7 +548,8 @@ describe('GuardianService', () => {
         // The newest row of ANY status counts, so a decline between resends does not reset the clock.
         expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { childId: CHILD_ID, invitedEmail: emailEquals('parent@test.com') },
+            // This club's rows only: another club's invite is not "just sent" by the caller.
+            where: { childId: CHILD_ID, invitedEmail: emailEquals('parent@test.com'), team: { lineageId: LINEAGE_ID } },
             orderBy: { createdAt: 'desc' },
           })
         );
@@ -610,9 +652,24 @@ describe('GuardianService', () => {
       setStaffPermission(true);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ player: child() });
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue(guardianRows);
-      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([invitationRow()]);
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([
+        { ...invitationRow(), team: { lineageId: LINEAGE_ID } },
+        { ...invitationRow({ id: 'inv-other' }), team: { lineageId: 'other-club' } },
+        { ...invitationRow({ id: 'inv-orphan', teamId: null }), team: null },
+      ]);
 
       const result = await GuardianService.listGuardians(TEAM_ID, CHILD_ID, 'coach-1');
+
+      // canResend (#420): same lineage as the caller team (last season's row of
+      // this club included); another club's row and a team-less row are listed
+      // without it. The lineage join is dropped from the payload.
+      expect(result.pendingInvitations.map((r) => [r.id, r.canResend])).toEqual([
+        ['inv-1', true],
+        ['inv-other', false],
+        ['inv-orphan', false],
+      ]);
+      expect(result.pendingInvitations[0]).not.toHaveProperty('team');
+      expect(result.pendingInvitations[0]).not.toHaveProperty('token');
 
       expect(result.guardians).toEqual([
         expect.objectContaining({ userId: 'parent-1', name: 'Mom', deletedAt: null, email: 'mom@test.com', isPrimary: true }),
@@ -621,7 +678,6 @@ describe('GuardianService', () => {
       expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ include: { parent: { select: USER_SUMMARY_WITH_EMAIL_SELECT } } })
       );
-      expect(result.pendingInvitations).toHaveLength(1);
       expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ childId: CHILD_ID, status: 'PENDING' }),
@@ -635,9 +691,14 @@ describe('GuardianService', () => {
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ player: child() });
       (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValue({ id: 'g-1' });
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue(guardianRows);
-      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([
+        { ...invitationRow(), team: { lineageId: LINEAGE_ID } },
+      ]);
 
       const result = await GuardianService.listGuardians(TEAM_ID, CHILD_ID, 'parent-1');
+
+      // A guardian cannot resend, even for this club's row.
+      expect(result.pendingInvitations[0].canResend).toBe(false);
 
       expect(result.guardians[0]).not.toHaveProperty('email');
       expect(result.guardians[0].name).toBe('Mom');

@@ -15,7 +15,7 @@ import {
   ForbiddenError,
   AppError,
 } from '../utils/errors';
-import { assertResendCooldown, INVITATION_RESEND_COOLDOWN_MS } from '../utils/resend-cooldown';
+import { assertResendCooldown } from '../utils/resend-cooldown';
 import { randomBytes } from 'crypto';
 import {
   hasTeamPermission,
@@ -553,9 +553,10 @@ export class InvitationService {
     const sameRecipient =
       latest.recipientHash === null || latest.recipientHash === hashRecipient(recipientEmail);
     if (sameRecipient) {
-      assertResendCooldown(latest.createdAt, INVITATION_RESEND_COOLDOWN_MS, 'player', (retryAfterSeconds) =>
-        logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds })
-      );
+      assertResendCooldown(latest.createdAt, 'player', {
+        onRefused: (retryAfterSeconds) =>
+          logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds }),
+      });
     }
     return latest;
   }

@@ -36,6 +36,13 @@ export interface PendingGuardianInvitation {
   createdAt: string;
   updatedAt: string;
   acceptedAt?: string | null;
+  /**
+   * Resend is offered (#420): the caller manages the roster and the row's
+   * team shares this team's lineage (the club across seasons, so last
+   * season's row after a rollover still qualifies). Server-derived; the API
+   * stays the authority.
+   */
+  canResend: boolean;
 }
 
 export interface GuardianList {

@@ -334,11 +334,11 @@ export default function PlayerGuardiansScreen() {
                   subtitle={`${relationshipLabel(invite.relationship)} · Pending`}
                   leftElement={<Ionicons name="mail-outline" size={20} color={colors.textTertiary} />}
                   rightElement={
-                    // Resend expires only this team's row (the API scopes the
-                    // supersede to the caller's team); another team-season's
-                    // pending row (e.g. last season's Team after rollover) is
-                    // listed without the action.
-                    canManage && invite.teamId === id ? (
+                    // `canResend` is server-derived (#420): this club's rows
+                    // (any season of the team's lineage) for a roster
+                    // manager; another club's pending row is listed without
+                    // the action.
+                    canManage && invite.canResend ? (
                       <TouchableOpacity
                         onPress={() => handleResend(invite)}
                         style={styles.rowButton}

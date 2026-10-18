@@ -33,47 +33,55 @@ Removing the last guardian never deletes the child.
   row just created whatever its send outcome, so Resend answers 429 until the window passes.
 - **Resend = supersede (#420).** The same route with `{ email, relationship, supersede: true }` (Zod default
   `false`) skips both unlocked pre-checks (the link read and the dedupe 400) and runs
-  `GuardianService.resendInvitation`. It finds the adult's account by `emailEquals` first. When the address
-  has no account yet it checks the cooldown (read-only) **before** creating the PARENT row, so a refused
-  resend creates no account; the account is created only once that passes. With the adult's id known before
+  `GuardianService.resendInvitation`. **Scope is the caller team's lineage** (the club across seasons; a
+  `Team` row is one team-season), so after a rollover last season's pending row is still this club's to
+  resend. It looks the adult's account up by `emailEquals` once. When the address has no account yet it runs
+  two read-only refusals **before** creating the PARENT row: the cooldown, and the cross-lineage dedupe (a
+  live PENDING row for the child + address on a team outside the lineage answers the plain invite's 400). So
+  a resend refused by the cooldown or the dedupe provisions no account. The plain invite path still
+  find-or-creates the account before its dedupe; that ordering is unchanged. With the adult's id known before
   the transaction, ONE `$transaction` then:
   1. takes `lockUsers(tx, [childId, parentId])` first, the same single id-ordered lock accept takes (#664),
      so an accept cannot commit between the link read and the expire;
   2. reads the `Guardian` link under that lock and answers 400 `This person is already a guardian of this
      player` when the parent accepted first;
-  3. re-checks the cooldown (the write-side check; the pre-check only spares the account create);
+  3. re-checks the cooldown and the cross-lineage dedupe (the authoritative checks; the pre-checks only spare
+     the account create);
   4. lazily expires any **lapsed** PENDING row for the child + address on **any** team (`expiresAt <= now`,
      the plain invite's lazy expiry), so a lapsed row elsewhere never blocks the insert;
-  5. expires the **live** PENDING row for the child + address on the **caller's team** only, so a coach on
-     another team of the same child cannot expire this team's invitation and re-issue it under theirs
-     (their insert hits the partial index and gets the dedupe 400);
+  5. expires the **live** PENDING row for the child + address on a team of the **caller's lineage**
+     (`team: { lineageId }`), so another club cannot expire this club's invitation and re-issue it under
+     theirs;
   6. creates the replacement with a new token, so the old link dies and a failed create never leaves the
      parent with no invitation.
 
-  Every address filter in this path (cooldown read, both expires) is `emailEquals`. The inviter's name is
-  read only after the row is committed. Logs `Guardian invitation superseded` (ids, `supersededCount`,
-  `lapsedCount`) when a row was expired, and `Guardian invitation sent` carries `supersede`. Two concurrent
-  resends for one child queue on the child lock: the first sends, the second then sees the new row and
-  answers the cooldown 429. An insert that still collides on the partial PENDING index (a plain invite,
-  which takes no row locks, committing a row under the resend) maps through `createOrConflict` (targeted at
-  that index) to the dedupe 400, never 500; a token collision still propagates. **Cooldown:** the shared
-  `utils/resend-cooldown.ts#assertResendCooldown` with `INVITATION_RESEND_COOLDOWN_MS` (2 minutes, the same
-  window and helper as team invitations' #715 cooldown). When the newest `GuardianInvitation` for the child +
-  address (any status, any team) is younger than the window the request answers **429** `resend_cooldown`
-  ("An invitation was just sent to this address…") before anything is expired or mailed, and logs
-  `Guardian invitation resend refused (cooldown)`. Only the supersede path has the cooldown.
+  Every address filter in this path (cooldown read, dedupe read, both expires) is `emailEquals`. The
+  inviter's name is read only after the row is committed. Logs `Guardian invitation superseded` (ids,
+  `supersededCount`, `lapsedCount`) when a row was expired, and `Guardian invitation sent` carries
+  `supersede`. Two concurrent resends for one child queue on the child lock: the first sends, the second then
+  sees the new row and answers the cooldown 429. A row another club commits under the resend (a plain invite
+  takes no row locks) still collides on the partial PENDING index, which `createOrConflict` (targeted at that
+  index) maps to the dedupe 400, never 500; a token collision still propagates. **Cooldown:** the shared
+  `utils/resend-cooldown.ts#assertResendCooldown` (window `INVITATION_RESEND_COOLDOWN_MS`, 2 minutes, the same
+  helper and window as team invitations' #715 cooldown). When the newest `GuardianInvitation` for the child +
+  address **within the caller's lineage** (any status, any season) is younger than the window the request
+  answers **429** `resend_cooldown` ("An invitation was just sent to this address…") before anything is
+  expired or mailed, and logs `Guardian invitation resend refused (cooldown)`. Another club's invitation to
+  the same address never triggers it (the dedupe answers that case). Only the supersede path has the
+  cooldown.
 
-  **Mobile.** The Guardians screen renders a Resend icon (`guardian-resend-<id>`, label "Resend invitation:
-  <email>") on a pending row only for `canManageRoster` callers **and only when the row's `teamId` is the
-  screen's team**: `GET …/guardians` lists the child's pending invitations from every team, but the
-  supersede expires only the caller's team's row, so another team-season's row (last season's `Team` after
-  rollover) is listed without the action. Resend sends the row's own `invitedEmail` and `relationship`
-  through the same `useInviteGuardian` hook as Invite; the form button follows its own `inviting` flag and
-  the row in flight shows a spinner (disabled, `busy`), so neither action's pending state shows on the
-  other's control. The API lists only unexpired PENDING rows, so Resend never targets a lapsed one.
-  Proven against Postgres in `tests/integration/guardian-supersede.db.test.ts` (expire + create, cooldown,
-  a refused resend creating no account, the accept that commits first, two concurrent resends, the
-  cross-team resend, a lapsed row on another team, the partial-index collision answering 400).
+  **`canResend` and mobile.** `GET …/guardians` lists the child's pending invitations from every team, each
+  with a server-derived `canResend`: true when the caller has `canManageRoster` and the row's team shares the
+  caller team's lineage (a row whose team was deleted has none, so `false`). The Guardians screen renders a
+  Resend icon (`guardian-resend-<id>`, label "Resend invitation: <email>") from that flag, never by comparing
+  team ids; another club's row is listed without the action. Resend sends the row's own `invitedEmail` and
+  `relationship` through the same `useInviteGuardian` hook as Invite; the form button follows its own
+  `inviting` flag and the row in flight shows a spinner (disabled, `busy`), so neither action's pending state
+  shows on the other's control. The API lists only unexpired PENDING rows, so Resend never targets a lapsed
+  one. Proven against Postgres in `tests/integration/guardian-supersede.db.test.ts` (expire + create,
+  cooldown, refused resends creating no account for both the cooldown and the dedupe, the accept that commits
+  first, two concurrent resends, another club's resend and listing, the rollover resend, a lapsed row on
+  another team, the partial-index collision answering 400).
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
   `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `childDeletedAt`, `teamName`,
   `inviterName`, `inviterDeletedAt`, `relationship`, `status`, `expiresAt`; the two `…DeletedAt` fields are
@@ -118,7 +126,7 @@ Removing the last guardian never deletes the child.
   tombstone.
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, deletedAt, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
-  roster managers). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).
+  roster managers; each pending row carries `canResend`, see Resend above). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).
 - **What a guardian can do.** `utils/permissions.ts`: `isGuardianOf(userId, childId)`,
   `isGuardianOfTeamMember(userId, teamId)`; `canAccessTeam` is true for a guardian of any current member and
   `getTeamPermissions` returns `canViewStats: true` only (so schedule, live games, box scores, season stats —

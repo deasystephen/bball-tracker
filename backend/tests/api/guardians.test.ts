@@ -251,7 +251,7 @@ describe('Guardians API', () => {
           },
         ],
         pendingInvitations: [
-          { ...mockInvitation, token: 'SECRET' } as unknown as Awaited<
+          { ...mockInvitation, token: 'SECRET', canResend: true } as unknown as Awaited<
             ReturnType<typeof mockGuardianService.listGuardians>
           >['pendingInvitations'][number],
         ],
@@ -264,6 +264,8 @@ describe('Guardians API', () => {
       expect(res.body.guardians[0].userId).toBe(TEST_GUARDIAN_USER_ID);
       expect(res.body.pendingInvitations).toHaveLength(1);
       expect(res.body.pendingInvitations[0]).not.toHaveProperty('token');
+      // The per-row Resend flag (#420) reaches the client.
+      expect(res.body.pendingInvitations[0].canResend).toBe(true);
       expect(mockGuardianService.listGuardians).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_PLAYER_ID, TEST_USER_ID);
     });
 

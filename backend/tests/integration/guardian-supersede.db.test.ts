@@ -262,7 +262,7 @@ describe('guardian resend (supersede, #420)', () => {
     expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'ACCEPTED' }]);
   });
 
-  it("a coach on another team cannot expire this team's live invitation; their resend answers the dedupe 400", async () => {
+  it("a coach of another club (another lineage) cannot expire this club's live invitation; their resend answers the dedupe 400", async () => {
     const { childId, email, liveId } = await childWithPending('crossteam', PAST_COOLDOWN);
     const otherOrg = await fx.org('other');
     const otherCoachId = await fx.user('other-coach', 'COACH');
@@ -279,6 +279,68 @@ describe('guardian resend (supersede, #420)', () => {
     expect(err).toBeInstanceOf(BadRequestError);
     expect((err as BadRequestError).message).toBe('A pending guardian invitation already exists for this email');
     expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
+  });
+
+  it("after a season rollover, the club's new team-season resends last season's pending invitation (lineage scope)", async () => {
+    const { childId, email, liveId } = await childWithPending('rollover', PAST_COOLDOWN);
+    const { lineageId } = await prisma.team.findUniqueOrThrow({ where: { id: org.teamId }, select: { lineageId: true } });
+    // Rollover creates a new Team row with the same lineage in the next season
+    // of the league (a Team row is a team-season; one per lineage per season).
+    const nextSeason = await prisma.season.create({
+      data: { leagueId: org.leagueId, name: `S-next-${fx.run}`, isActive: false },
+      select: { id: true },
+    });
+    const next = await prisma.team.create({
+      data: {
+        name: `rollover-next-${fx.run}`,
+        season: { connect: { id: nextSeason.id } },
+        lineage: { connect: { id: lineageId } },
+      },
+      select: { id: true },
+    });
+    const role = await prisma.teamRole.create({
+      data: {
+        teamId: next.id,
+        type: 'HEAD_COACH',
+        name: 'Head Coach',
+        canManageTeam: true,
+        canManageRoster: true,
+        canTrackStats: true,
+        canViewStats: true,
+        canShareStats: true,
+      },
+      select: { id: true },
+    });
+    await prisma.teamStaff.create({ data: { teamId: next.id, userId: coachId, roleId: role.id } });
+    await prisma.teamMember.create({ data: { teamId: next.id, playerId: childId } });
+
+    // The list on the new team-season offers Resend for last season's row.
+    const listed = await GuardianService.listGuardians(next.id, childId, coachId);
+    expect(listed.pendingInvitations).toEqual([expect.objectContaining({ id: liveId, canResend: true })]);
+
+    const result = await GuardianService.inviteGuardian(
+      next.id,
+      childId,
+      { email, relationship: 'MOTHER', supersede: true },
+      coachId
+    );
+
+    expect(await rowsFor(childId)).toEqual([
+      { id: liveId, status: 'EXPIRED' },
+      { id: result.id, status: 'PENDING' },
+    ]);
+  });
+
+  it("another club's listing shows the row without Resend", async () => {
+    const { childId } = await childWithPending('listing', PAST_COOLDOWN);
+    const otherOrg = await fx.org('listing-other');
+    const otherCoachId = await fx.user('listing-other-coach', 'COACH');
+    await fx.staff(otherCoachId, otherOrg);
+    await fx.member(childId, otherOrg);
+
+    const listed = await GuardianService.listGuardians(otherOrg.teamId, childId, otherCoachId);
+
+    expect(listed.pendingInvitations).toEqual([expect.objectContaining({ canResend: false })]);
   });
 
   it("expires a lapsed PENDING row on another team before inserting, as the plain invite's lazy expiry does", async () => {
@@ -340,5 +402,39 @@ describe('guardian resend (supersede, #420)', () => {
 
     expect(await prisma.user.count({ where: { email } })).toBe(0);
     expect(await rowsFor(childId)).toEqual([{ id: recent.id, status: 'PENDING' }]);
+  });
+
+  it("a resend refused by another club's live invitation (dedupe) for an address with no account creates no account", async () => {
+    const childId = await fx.user('noacct-dedupe-child', 'PLAYER');
+    await fx.member(childId, org);
+    const otherOrg = await fx.org('noacct-dedupe-other');
+    await fx.member(childId, otherOrg);
+    const email = `noacct-dedupe.${fx.run}@example.test`;
+    const theirs = await prisma.guardianInvitation.create({
+      data: {
+        token: randomBytes(32).toString('base64url'),
+        childId,
+        teamId: otherOrg.teamId,
+        invitedEmail: email,
+        relationship: 'FATHER',
+        invitedById: coachId,
+        createdAt: new Date(Date.now() - PAST_COOLDOWN),
+        expiresAt: new Date(Date.now() + 7 * DAY_MS),
+        status: 'PENDING',
+      },
+      select: { id: true },
+    });
+
+    const err = await GuardianService.inviteGuardian(
+      org.teamId,
+      childId,
+      { email, relationship: 'FATHER', supersede: true },
+      coachId
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestError);
+    expect((err as BadRequestError).message).toBe('A pending guardian invitation already exists for this email');
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
+    expect(await rowsFor(childId)).toEqual([{ id: theirs.id, status: 'PENDING' }]);
   });
 });

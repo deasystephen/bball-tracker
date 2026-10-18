@@ -12,13 +12,13 @@ describe('assertResendCooldown', () => {
 
   it.each([null, undefined])('never refuses when there is no prior row (%s)', (latest) => {
     const onRefused = jest.fn();
-    expect(() => assertResendCooldown(latest, INVITATION_RESEND_COOLDOWN_MS, 'player', onRefused)).not.toThrow();
+    expect(() => assertResendCooldown(latest, 'player', { onRefused })).not.toThrow();
     expect(onRefused).not.toHaveBeenCalled();
   });
 
   it('allows a resend once the window has passed', () => {
     const latest = new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 1000);
-    expect(() => assertResendCooldown(latest, INVITATION_RESEND_COOLDOWN_MS, 'player')).not.toThrow();
+    expect(() => assertResendCooldown(latest, 'player')).not.toThrow();
   });
 
   it('refuses inside the window with 429, the seconds left, and the recipient word', () => {
@@ -27,7 +27,7 @@ describe('assertResendCooldown', () => {
 
     let err: unknown;
     try {
-      assertResendCooldown(latest, INVITATION_RESEND_COOLDOWN_MS, 'address', onRefused);
+      assertResendCooldown(latest, 'address', { onRefused });
     } catch (e) {
       err = e;
     }
@@ -43,8 +43,14 @@ describe('assertResendCooldown', () => {
   });
 
   it('says "player" for a team invitation', () => {
-    expect(() => assertResendCooldown(new Date(), INVITATION_RESEND_COOLDOWN_MS, 'player')).toThrow(
+    expect(() => assertResendCooldown(new Date(), 'player')).toThrow(
       /just sent to this player/
     );
+  });
+
+  it('honours a windowMs override', () => {
+    const latest = new Date(Date.now() - 30_000);
+    expect(() => assertResendCooldown(latest, 'player', { windowMs: 10_000 })).not.toThrow();
+    expect(() => assertResendCooldown(latest, 'player', { windowMs: 60_000 })).toThrow(ResendCooldownError);
   });
 });

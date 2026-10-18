@@ -16,23 +16,24 @@ import { ResendCooldownError } from './errors';
 export const INVITATION_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 
 /**
- * Throws `ResendCooldownError` when `latestCreatedAt` is inside `windowMs`.
- * No prior row (`null`/`undefined`) never refuses. `onRefused` runs just
- * before the throw so the caller can log its own ids-only domain event.
+ * Throws `ResendCooldownError` when `latestCreatedAt` is inside the window
+ * (`INVITATION_RESEND_COOLDOWN_MS` unless `windowMs` overrides it). No prior
+ * row (`null`/`undefined`) never refuses. `onRefused` runs just before the
+ * throw so the caller can log its own ids-only domain event.
  */
 export function assertResendCooldown(
   latestCreatedAt: Date | null | undefined,
-  windowMs: number,
   recipientWord: 'player' | 'address',
-  onRefused?: (retryAfterSeconds: number) => void
+  options: { onRefused?: (retryAfterSeconds: number) => void; windowMs?: number } = {}
 ): void {
   if (!latestCreatedAt) {
     return;
   }
+  const windowMs = options.windowMs ?? INVITATION_RESEND_COOLDOWN_MS;
   const sinceLatestMs = Date.now() - latestCreatedAt.getTime();
   if (sinceLatestMs < windowMs) {
     const retryAfterSeconds = Math.ceil((windowMs - sinceLatestMs) / 1000);
-    onRefused?.(retryAfterSeconds);
+    options.onRefused?.(retryAfterSeconds);
     throw new ResendCooldownError(retryAfterSeconds, recipientWord);
   }
 }
