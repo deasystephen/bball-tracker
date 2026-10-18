@@ -36,12 +36,22 @@ export interface SyncUserInput {
   profilePictureUrl?: string;
 }
 
-/** `syncUserWithOutcome`'s result: the row plus which branch produced it (#790). */
+/** `syncUser`'s result: the row plus which branch produced it (#790). */
 export interface SyncUserResult {
   user: User;
-  /** This sign-in claimed a pre-provisioned row (invited or roster-added by email). */
+  /**
+   * This sign-in claimed ANY pre-provisioned row (one with this email and no
+   * `workosUserId`): a player a coach added by email, a `POST /players`
+   * account, or an admin pre-create, whether or not a `TeamInvitation`
+   * exists for it. `false` for a returning linked user, a new account, and a
+   * lost claim race that falls through to a create.
+   */
   claimedInvite: boolean;
-  /** The claimed row was a coach-managed player; always `false` when nothing was claimed. */
+  /**
+   * The claimed row's `isManaged` before the claim: any managed row, coach-
+   * managed roster player or guardian-managed child. Always `false` when
+   * nothing was claimed.
+   */
   wasManaged: boolean;
 }
 
@@ -190,23 +200,9 @@ export class WorkOSService {
    *
    * Unique-constraint races surface as `ConflictError` (409), not 500.
    *
-   * Callers that need to know which branch ran (the `/auth/callback` route,
-   * for the `claimed_invite` analytics property, #790) use
-   * `syncUserWithOutcome`; this method returns the row alone.
+   * Returns the row plus which branch produced it (#790): see `SyncUserResult`.
    */
-  static async syncUser(workosUser: SyncUserInput): Promise<User> {
-    const { user } = await WorkOSService.syncUserWithOutcome(workosUser);
-    return user;
-  }
-
-  /**
-   * `syncUser`, plus whether this sign-in claimed a pre-provisioned row
-   * (branch 2) rather than refreshing a linked one or creating a new one
-   * (#790). `wasManaged` is the claimed row's `isManaged` before the claim
-   * (a coach-managed roster player); it is `false` whenever nothing was
-   * claimed.
-   */
-  static async syncUserWithOutcome(workosUser: SyncUserInput): Promise<SyncUserResult> {
+  static async syncUser(workosUser: SyncUserInput): Promise<SyncUserResult> {
     const fullName = [workosUser.firstName, workosUser.lastName]
       .filter(Boolean)
       .join(' ') || workosUser.email.split('@')[0];

@@ -343,7 +343,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.user.create as jest.Mock).mockResolvedValue(player);
 
-      const result = await WorkOSService.syncUser(workosUser);
+      const { user: result } = await WorkOSService.syncUser(workosUser);
 
       expect(result).toHaveProperty('id', player.id);
       expect(result).toHaveProperty('email', 'newuser@example.com');
@@ -396,7 +396,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
 
-      const result = await WorkOSService.syncUser(workosUser);
+      const { user: result } = await WorkOSService.syncUser(workosUser);
 
       expect(result).toHaveProperty('name', 'Edited In App');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
@@ -414,7 +414,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...existingUser, email: 'new@example.com' });
 
-      const result = await WorkOSService.syncUser({ id: 'workos_123', email: 'new@example.com', emailVerified: true });
+      const { user: result } = await WorkOSService.syncUser({ id: 'workos_123', email: 'new@example.com', emailVerified: true });
 
       expect(result).toHaveProperty('email', 'new@example.com');
       // A bounce recorded against the old address says nothing about the new one (#449).
@@ -471,7 +471,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
 
-      const result = await WorkOSService.syncUser({ id: 'workos_123', email: 'gone@example.com', emailVerified: true });
+      const { user: result } = await WorkOSService.syncUser({ id: 'workos_123', email: 'gone@example.com', emailVerified: true });
 
       expect(result).toHaveProperty('id', 'fresh-id');
       expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
@@ -504,7 +504,7 @@ describe('WorkOSService', () => {
         managedById: null,
       });
 
-      const result = await WorkOSService.syncUser(workosUser);
+      const { user: result } = await WorkOSService.syncUser(workosUser);
 
       expect(result).toHaveProperty('workosUserId', 'workos_456');
       // Claim-guarded (RT4 shape) AND deletion-guarded (#444 D9)
@@ -531,7 +531,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id', workosUserId: 'workos_456' });
 
-      const result = await WorkOSService.syncUser({ id: 'workos_456', email: 'user@example.com', emailVerified: true });
+      const { user: result } = await WorkOSService.syncUser({ id: 'workos_456', email: 'user@example.com', emailVerified: true });
 
       expect(result).toHaveProperty('id', 'fresh-id');
       expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
@@ -601,20 +601,14 @@ describe('WorkOSService', () => {
         })
       );
     });
-  });
 
-  describe('syncUserWithOutcome (#790)', () => {
-    beforeEach(() => {
-      delete process.env.ADMIN_EMAIL;
-      delete process.env.ADMIN_EMAILS;
-    });
-
+    // Outcome flags (#790): which branch produced the row.
     it('reports a brand-new account as not claimed', async () => {
       const player = createPlayer({ email: 'fresh@example.com', workosUserId: 'workos_new' });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.user.create as jest.Mock).mockResolvedValue(player);
 
-      const result = await WorkOSService.syncUserWithOutcome({
+      const result = await WorkOSService.syncUser({
         id: 'workos_new',
         email: 'fresh@example.com',
         emailVerified: true,
@@ -629,7 +623,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
 
-      const result = await WorkOSService.syncUserWithOutcome({
+      const result = await WorkOSService.syncUser({
         id: 'workos_123',
         email: existingUser.email,
         emailVerified: true,
@@ -655,7 +649,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(claimedRow);
 
-      const result = await WorkOSService.syncUserWithOutcome({
+      const result = await WorkOSService.syncUser({
         id: 'workos_456',
         email: 'invited@example.com',
         emailVerified: true,
@@ -672,7 +666,7 @@ describe('WorkOSService', () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
 
-      const result = await WorkOSService.syncUserWithOutcome({
+      const result = await WorkOSService.syncUser({
         id: 'workos_456',
         email: 'user@example.com',
         emailVerified: true,

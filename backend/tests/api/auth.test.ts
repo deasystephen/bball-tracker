@@ -42,8 +42,8 @@ const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockCaptureException = captureException as jest.Mock;
 const mockCaptureRequestException = captureRequestException as jest.Mock;
 
-type SyncOutcome = Awaited<ReturnType<typeof WorkOSService.syncUserWithOutcome>>;
-/** A `syncUserWithOutcome` result; defaults to a returning user (nothing claimed). */
+type SyncOutcome = Awaited<ReturnType<typeof WorkOSService.syncUser>>;
+/** A `syncUser` result; defaults to a returning user (nothing claimed). */
 const syncOutcome = (
   user: object,
   flags: { claimedInvite?: boolean; wasManaged?: boolean } = {}
@@ -301,7 +301,7 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUserWithOutcome.mockResolvedValue(syncOutcome(mockUser));
+      mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
 
       const response = await request(app)
         .get('/api/v1/auth/callback')
@@ -329,7 +329,7 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUserWithOutcome.mockResolvedValue(
+      mockWorkOSService.syncUser.mockResolvedValue(
         syncOutcome({ ...mockUser, notifyOnReplies: false })
       );
 
@@ -352,7 +352,7 @@ describe('Auth API', () => {
       });
 
       it('reports claimedInvite: true when the sign-in claimed a pre-provisioned managed row', async () => {
-        mockWorkOSService.syncUserWithOutcome.mockResolvedValue(
+        mockWorkOSService.syncUser.mockResolvedValue(
           syncOutcome(mockUser, { claimedInvite: true, wasManaged: true })
         );
 
@@ -367,7 +367,7 @@ describe('Auth API', () => {
       });
 
       it('reports claimedInvite: false for a brand-new user', async () => {
-        mockWorkOSService.syncUserWithOutcome.mockResolvedValue(syncOutcome(mockUser));
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
 
         const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
 
@@ -377,15 +377,14 @@ describe('Auth API', () => {
         expect(response.body).toHaveProperty('wasManaged', false);
       });
 
-      it('passes the WorkOS identity to syncUserWithOutcome', async () => {
-        mockWorkOSService.syncUserWithOutcome.mockResolvedValue(syncOutcome(mockUser));
+      it('passes the WorkOS identity to syncUser', async () => {
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
 
         await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
 
-        expect(mockWorkOSService.syncUserWithOutcome).toHaveBeenCalledWith(
+        expect(mockWorkOSService.syncUser).toHaveBeenCalledWith(
           expect.objectContaining({ id: mockWorkOSUser.id, email: mockWorkOSUser.email })
         );
-        expect(mockWorkOSService.syncUser).not.toHaveBeenCalled();
       });
     });
 
@@ -395,7 +394,7 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUserWithOutcome.mockResolvedValue(syncOutcome(mockUser));
+      mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
       (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([
         { leagueId: 'downtown-youth-league' },
         { leagueId: 'spring-league' },
@@ -425,7 +424,7 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUserWithOutcome.mockRejectedValue(
+      mockWorkOSService.syncUser.mockRejectedValue(
         new ConflictError('An account with this email is already linked to a different login')
       );
 
@@ -460,7 +459,7 @@ describe('Auth API', () => {
           accessToken: 'mock-access-token',
           refreshToken: 'mock-refresh-token',
         } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-        mockWorkOSService.syncUserWithOutcome.mockResolvedValue(syncOutcome(mockUser));
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
       });
 
       it('passes code_verifier to the token exchange', async () => {

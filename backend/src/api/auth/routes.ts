@@ -53,7 +53,7 @@ const SESSION_USER_SELECT = {
 type SessionUserRow = Prisma.UserGetPayload<{ select: typeof SESSION_USER_SELECT }>;
 
 /**
- * Narrow a full `User` row (as `syncUser` returns) to the session columns.
+ * Narrow a full `User` row (as `syncUser` returns in `.user`) to the session columns.
  * The return type makes a column added to `SESSION_USER_SELECT` a compile
  * error here until it is copied.
  */
@@ -337,7 +337,7 @@ router.get('/callback', async (req, res) => {
 
     // Sync user to our database. The outcome flags feed the client's
     // `user_logged_in` analytics (#790): booleans only, never PII.
-    const { user, claimedInvite, wasManaged } = await WorkOSService.syncUserWithOutcome({
+    const { user, claimedInvite, wasManaged } = await WorkOSService.syncUser({
       id: workosUser.id,
       email: workosUser.email,
       firstName: workosUser.firstName ?? undefined,
