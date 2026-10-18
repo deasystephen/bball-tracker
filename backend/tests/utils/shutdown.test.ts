@@ -4,6 +4,7 @@
  */
 import { createShutdown, SHUTDOWN_GRACE_MS, type ShutdownDeps } from '../../src/utils/shutdown';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 
 function deps(overrides: Partial<ShutdownDeps> = {}): { deps: ShutdownDeps; order: string[] } {
   const order: string[] = [];
@@ -29,7 +30,7 @@ function deps(overrides: Partial<ShutdownDeps> = {}): { deps: ShutdownDeps; orde
 }
 
 beforeEach(() => {
-  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+  spyOnInfo();
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 });
