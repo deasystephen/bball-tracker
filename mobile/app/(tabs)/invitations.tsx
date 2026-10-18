@@ -55,7 +55,7 @@ export default function InvitationsScreen() {
   // A failed first load replaces the screen; a failed background refetch keeps the cached
   // invitations (#888, hooks/useQueryErrorState.ts).
   const errorState = useQueryErrorState(
-    { error, data: invitationsData, refetch },
+    { error, data: invitationsData, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
     'Failed to load invitations'
   );
 
@@ -477,7 +477,7 @@ export default function InvitationsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={isRefetching}
-            onRefresh={refetch}
+            onRefresh={errorState.refresh}
             tintColor={colors.primary}
           />
         }

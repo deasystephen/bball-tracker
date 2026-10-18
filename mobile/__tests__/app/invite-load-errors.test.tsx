@@ -101,6 +101,13 @@ describe('InviteDeepLinkScreen load failures (#892)', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('does not treat a request that was never valid as a network failure', () => {
+    failed(new AxiosError('bad url', 'ERR_INVALID_URL'));
+    const view = render(<InviteDeepLinkScreen />);
+
+    expect(view.getByText('Invitation Not Found')).toBeTruthy();
+  });
+
   it('does not treat a local error or a missing session as retryable', () => {
     failed(new TypeError('x is undefined'));
     const view = render(<InviteDeepLinkScreen />);

@@ -4,7 +4,8 @@
  * load shows `ErrorState` with Try Again, a failed background refetch keeps the cached list.
  */
 
-import { render, fireEvent } from '@testing-library/react-native';
+import { FlatList } from 'react-native';
+import { render, fireEvent, act } from '@testing-library/react-native';
 
 import TeamsScreen from '../../app/(tabs)/teams';
 import GamesScreen from '../../app/(tabs)/games';
@@ -47,7 +48,8 @@ jest.mock('../../services/api-client', () => ({
   getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
   describeApiError: jest.requireActual('../../services/api-client').describeApiError,
 }));
-jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
+const mockShowToast = jest.fn();
+jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
   TEAMS_MAX_LIMIT: 100,
@@ -94,6 +96,23 @@ const GAME = {
   team: { id: 'team-1', name: 'Wildcats' },
 };
 
+const CACHED = {
+  invitations: [
+    {
+      id: 'ti1',
+      teamId: 't2',
+      playerId: 'p1',
+      status: 'PENDING',
+      teamName: 'Warriors',
+      inviterName: 'Steve Kerr',
+      expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+      createdAt: new Date().toISOString(),
+      team: { id: 't2', name: 'Warriors', season: { id: 's1', name: '2026', league: { id: 'l1', name: 'City League' } } },
+    },
+  ],
+  guardianInvitations: [],
+};
+
 function errorShownCalls(): unknown[][] {
   return (trackEvent as jest.Mock).mock.calls.filter(([event]) => event === AnalyticsEvents.ERROR_SHOWN);
 }
@@ -133,6 +152,7 @@ describe('Teams tab', () => {
     const view = render(<TeamsScreen />);
     fireEvent.press(view.getByLabelText('Try Again'));
 
+    expect(view.getByText('Loading...')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();
   });
 
@@ -142,6 +162,27 @@ describe('Teams tab', () => {
     view.rerender(<TeamsScreen />);
 
     expect(errorShownCalls()).toHaveLength(1);
+  });
+});
+
+describe('failed pull-to-refresh with cached data', () => {
+  it.each([
+    ['Teams', TeamsScreen, () => mockTeamsQuery, (q: MockQuery) => { mockTeamsQuery = q; }, { teams: [TEAM] }],
+    ['Games', GamesScreen, () => mockGamesQuery, (q: MockQuery) => { mockGamesQuery = q; }, { games: [GAME] }],
+    ['Invitations', InvitationsScreen, () => mockInvitationsQuery, (q: MockQuery) => { mockInvitationsQuery = q; }, CACHED],
+  ])('%s shows an error toast and keeps the list', async (_n, Screen, get, set, data) => {
+    const q = query(data);
+    q.refetch.mockResolvedValue({ isError: true, error: new Error('Network Error') });
+    set(q);
+    const view = render(<Screen />);
+    const { RefreshControl } = jest.requireActual('react-native');
+    await act(async () => {
+      await view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    });
+
+    expect(get().refetch).toHaveBeenCalledTimes(1);
+    expect(mockShowToast).toHaveBeenCalledWith('Network Error', 'error');
+    expect(view.queryByText('Something went wrong')).toBeNull();
   });
 });
 
@@ -179,6 +220,7 @@ describe('Games tab', () => {
     const view = render(<GamesScreen />);
     fireEvent.press(view.getByLabelText('Try Again'));
 
+    expect(view.getByText('Loading games...')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();
   });
 });
@@ -203,24 +245,29 @@ describe('a failed next page keeps the list and offers a retry', () => {
   });
 });
 
-describe('Invitations tab', () => {
-  const CACHED = {
-    invitations: [
-      {
-        id: 'ti1',
-        teamId: 't2',
-        playerId: 'p1',
-        status: 'PENDING',
-        teamName: 'Warriors',
-        inviterName: 'Steve Kerr',
-        expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
-        createdAt: new Date().toISOString(),
-        team: { id: 't2', name: 'Warriors', season: { id: 's1', name: '2026', league: { id: 'l1', name: 'City League' } } },
-      },
-    ],
-    guardianInvitations: [],
-  };
+describe('end of list after a failed next page', () => {
+  it('does not auto-fetch the next page again (Teams, Games)', () => {
+    mockTeamsQuery = query({ teams: [TEAM] }, { isFetchNextPageError: true, hasNextPage: true, error: new Error('x') });
+    mockGamesQuery = query({ games: [GAME] }, { isFetchNextPageError: true, hasNextPage: true, error: new Error('x') });
+    const teams = render(<TeamsScreen />);
+    teams.UNSAFE_getByType(FlatList).props.onEndReached();
+    const games = render(<GamesScreen />);
+    games.UNSAFE_getByType(FlatList).props.onEndReached();
 
+    expect(mockTeamsQuery.fetchNextPage).not.toHaveBeenCalled();
+    expect(mockGamesQuery.fetchNextPage).not.toHaveBeenCalled();
+  });
+
+  it('still fetches the next page when the last one succeeded', () => {
+    mockTeamsQuery = query({ teams: [TEAM] }, { hasNextPage: true });
+    const teams = render(<TeamsScreen />);
+    teams.UNSAFE_getByType(FlatList).props.onEndReached();
+
+    expect(mockTeamsQuery.fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Invitations tab', () => {
   it('shows ErrorState with Try Again when the first load fails', () => {
     mockInvitationsQuery = failedFirstLoad('Network Error');
     const view = render(<InvitationsScreen />);
@@ -245,6 +292,7 @@ describe('Invitations tab', () => {
     const view = render(<InvitationsScreen />);
     fireEvent.press(view.getByLabelText('Try Again'));
 
+    expect(view.getByText('Loading...')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();
   });
 });

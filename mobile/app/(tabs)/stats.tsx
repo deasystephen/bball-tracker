@@ -27,6 +27,7 @@ import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import { isDeletedUser, playerDisplayName } from '../../utils/display-name';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
+import { showQueryError } from '../../utils/query-state';
 
 /**
  * Podium label: a live player's first name, or the whole localized
@@ -74,21 +75,24 @@ export default function Stats() {
     { error: teamsError, data: teams, refetch: refetchTeams },
     'Failed to load teams'
   );
-  const statsState = useQueryErrorState(
-    { error: statsError, data: seasonStats, refetch: refetchStats },
+  // The two per-team queries share one panel, so they share one error decision and one
+  // `error_shown` event: the season-stats failure wins when both fail.
+  const statsFailed = showQueryError({ error: statsError, data: seasonStats });
+  const rosterFailed = showQueryError({ error: rosterError, data: rosterStats });
+  const teamStatsError = statsFailed ? statsError : rosterFailed ? rosterError : null;
+  const teamStatsState = useQueryErrorState(
+    {
+      error: teamStatsError,
+      data: teamStatsError ? undefined : true,
+      refetch: () =>
+        Promise.all([statsFailed ? refetchStats() : null, rosterFailed ? refetchRoster() : null]),
+    },
     'Failed to load stats'
   );
-  const rosterState = useQueryErrorState(
-    { error: rosterError, data: rosterStats, refetch: refetchRoster },
-    'Failed to load stats'
-  );
-  const teamStatsFailed = statsState.failed || rosterState.failed;
-  const teamStatsMessage = statsState.failed ? statsState.message : rosterState.message;
-  const retryingTeamStats = statsState.retrying || rosterState.retrying;
-  const retryTeamStats = () => {
-    if (statsState.failed) statsState.retry();
-    if (rosterState.failed) rosterState.retry();
-  };
+  const teamStatsFailed = teamStatsState.failed;
+  const teamStatsMessage = teamStatsState.message;
+  const retryingTeamStats = teamStatsState.retrying;
+  const retryTeamStats = teamStatsState.retry;
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId);
   const isLoading = teamsLoading || statsLoading || rosterLoading;

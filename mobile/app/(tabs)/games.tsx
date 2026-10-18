@@ -26,6 +26,7 @@ import {
 import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
+import { useToast } from '../../components/Toast';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import { useTranslation } from '../../i18n';
 import { useTheme } from '../../hooks/useTheme';
@@ -57,6 +58,7 @@ export default function Games() {
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
   const { t } = useTranslation();
+  const toast = useToast();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
 
   // Status filtering is server-side so a long backlog of scheduled games can't
@@ -78,7 +80,7 @@ export default function Games() {
   // A failed first load replaces the screen; a failed background refetch keeps the cached
   // list (#888, hooks/useQueryErrorState.ts).
   const errorState = useQueryErrorState(
-    { error, data: data?.games, refetch },
+    { error, data: data?.games, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
     'Failed to load games'
   );
 
@@ -90,10 +92,10 @@ export default function Games() {
   const canCreate = useMemo(() => canManageAnyTeam(teams, user), [teams, user]);
 
   const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   const handleGamePress = useCallback(
     (game: Game) => {
@@ -350,7 +352,7 @@ export default function Games() {
           refreshControl={
             <RefreshControl
               refreshing={isRefetching && !isFetchingNextPage}
-              onRefresh={refetch}
+              onRefresh={errorState.refresh}
               tintColor={colors.primary}
             />
           }

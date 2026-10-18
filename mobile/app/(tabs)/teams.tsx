@@ -21,6 +21,7 @@ import {
   Button,
 } from '../../components';
 import { useInfiniteTeams, type Team } from '../../hooks/useTeams';
+import { useToast } from '../../components/Toast';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
@@ -41,6 +42,7 @@ export default function TeamsScreen() {
   const tabBarPadding = useTabBarPadding();
   const user = useAuthUser();
   const canCreate = canCreateTeams(user);
+  const toast = useToast();
 
   const {
     data,
@@ -56,7 +58,7 @@ export default function TeamsScreen() {
   const teams = data?.teams;
 
   const handleEndReached = () => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       fetchNextPage();
     }
   };
@@ -74,7 +76,10 @@ export default function TeamsScreen() {
   // loaded yet.
   // A failed first load replaces the screen; a failed background refetch keeps the
   // cached list (#888, hooks/useQueryErrorState.ts).
-  const errorState = useQueryErrorState({ error, data: teams, refetch }, 'Failed to load teams');
+  const errorState = useQueryErrorState(
+    { error, data: teams, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
+    'Failed to load teams'
+  );
 
   if (isLoading || !user || errorState.retrying) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
@@ -211,7 +216,7 @@ export default function TeamsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={isRefetching && !isFetchingNextPage}
-            onRefresh={refetch}
+            onRefresh={errorState.refresh}
             tintColor={colors.primary}
           />
         }

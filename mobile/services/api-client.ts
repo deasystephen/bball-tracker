@@ -175,14 +175,18 @@ export const UPGRADE_REQUIRED_CODE = 'upgrade_required';
 
 /**
  * True when a failed request says nothing about the thing requested, so a screen should
- * offer a retry instead of "not found" (#892): a network failure or timeout (no response),
- * a 429 and any 5xx. A local error (a TypeError thrown in a query function), a cancellation
- * and a `NoSessionError` are not transient: retrying changes nothing.
+ * offer a retry instead of "not found" (#892): a network failure or timeout (no response,
+ * code `ERR_NETWORK`, `ECONNABORTED` or `ETIMEDOUT`), a 429 and any 5xx. Anything else is
+ * not transient because retrying changes nothing: a local error (a TypeError thrown in a
+ * query function), a `NoSessionError` (not an axios error), a cancellation, or a request
+ * that was never valid (`ERR_BAD_OPTION`, `ERR_INVALID_URL`).
  */
+const NETWORK_ERROR_CODES = new Set(['ERR_NETWORK', 'ECONNABORTED', 'ETIMEDOUT']);
+
 export const isTransientRequestError = (error: unknown): boolean => {
-  if (isNoSessionError(error) || !isAxiosError(error) || isCancellation(error)) return false;
+  if (!isAxiosError(error)) return false;
   const status = error.response?.status;
-  if (status === undefined) return true;
+  if (status === undefined) return error.code !== undefined && NETWORK_ERROR_CODES.has(error.code);
   return status === 429 || status >= 500;
 };
 

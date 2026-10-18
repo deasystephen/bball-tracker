@@ -310,14 +310,14 @@ never inline a role check in a screen:
   Try Again for a failed teams or team-stats query and keeps the team chips above a per-team
   failure (#728; `__tests__/app/stats-tab-states.test.tsx`). `utils/query-state.ts#showQueryError`
   decides when the error wins: only when the query has no data, so a failed background refetch
-  keeps its cached data on screen. TanStack keeps `error` set while a retry is in flight, so the
-  tab shows the spinner while the failed query `isFetching`. The message comes from
-  `getApiErrorMessage` (which sends `error_shown`), memoised on the error so it fires once per failure.
+  keeps its cached data on screen. The message comes from `describeApiError`; `useQueryErrorState`
+  below owns the spinner during Try Again and the `error_shown` event.
   `hooks/useQueryErrorState.ts` wraps `showQueryError` and is the rule for the Teams, Games, Invitations
   and Stats tabs (#888; `__tests__/app/tab-query-error-states.test.tsx`): `failed`, `message`,
   `retry`, and `retrying`, which is true only between a press on Try Again and the refetch settling,
   so an automatic refetch never turns the error into a spinner. It sends `error_shown` from an effect
-  keyed on the error, once per failure. Home still hand-rolls its decision and moves with its redesign
+  keyed on the error, once per failure (the Stats team panel runs one hook over its two queries, so one
+  panel is one event). A failed pull-to-refresh with cached data shows an error toast through `refresh`. Home still hand-rolls its decision and moves with its redesign
   (#615). A failed next page of the Teams and Games lists keeps the rows and shows a "Couldn't load more"
   retry in the footer.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
