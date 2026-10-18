@@ -8,12 +8,18 @@
  * 400 with the PATCH hint's message, whether the pre-check sees the row or a
  * concurrent add wins the `[teamId, userId]` unique index. What Postgres does
  * with that index is covered by `tests/integration/team-staff-single-role.db.test.ts`.
+ *
+ * DELETE /teams/:teamId/staff/:userId runs the same way: the last-head-coach
+ * guard and the delete share one transaction behind the team row lock, and a
+ * target with no staff row (or one a concurrent removal took first) is a 404.
  */
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
+import { Prisma } from '@prisma/client';
 import { uniqueViolation } from '../factories';
+import { invalidateUsage } from '../../src/services/usage-service';
 
 const HEAD_COACH_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const ASSISTANT_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -130,5 +136,51 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
     expect(mockPrisma.teamStaff.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: { teamId: TEAM_ID, userId: ASSISTANT_ID, roleId: MANAGER_ROLE_ID } })
     );
+  });
+});
+
+describe('DELETE /api/v1/teams/:teamId/staff/:userId through the real TeamService (#463)', () => {
+  afterAll((done) => {
+    if (httpServer) {
+      httpServer.close(() => done());
+    } else {
+      done();
+    }
+  });
+
+  /** The caller is the team's head coach removing the assistant, who is not a head coach. */
+  function givenHeadCoachRemovingAssistant(): void {
+    givenHeadCoachAddingAssistant();
+    // lastHeadCoachTeams: the assistant holds no HEAD_COACH row anywhere.
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+  }
+
+  it('removes the staff member (200) and refreshes their usage', async () => {
+    givenHeadCoachRemovingAssistant();
+    (mockPrisma.teamStaff.delete as jest.Mock).mockResolvedValue({
+      id: 'assistant-row',
+      teamId: TEAM_ID,
+      userId: ASSISTANT_ID,
+      roleId: 'assistant-role',
+    });
+
+    const response = await request(app).delete(`/api/v1/teams/${TEAM_ID}/staff/${ASSISTANT_ID}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, message: 'Staff member removed successfully' });
+    expect(invalidateUsage).toHaveBeenCalledWith(ASSISTANT_ID);
+  });
+
+  it('answers 404 when the user holds no staff row (the delete matches nothing)', async () => {
+    givenHeadCoachRemovingAssistant();
+    (mockPrisma.teamStaff.delete as jest.Mock).mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' })
+    );
+
+    const response = await request(app).delete(`/api/v1/teams/${TEAM_ID}/staff/${ASSISTANT_ID}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('User is not a staff member of this team');
+    expect(invalidateUsage).not.toHaveBeenCalled();
   });
 });

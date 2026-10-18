@@ -62,9 +62,9 @@ describe('TeamStaff: one role per user per team (#463)', () => {
     );
     const last = touching[touching.length - 1];
 
-    expect(last.sql).toContain(`DROP INDEX "${OLD_INDEX}"`);
+    expect(last.sql).toContain(`DROP INDEX IF EXISTS "${OLD_INDEX}"`);
     expect(last.sql).toMatch(
-      new RegExp(`CREATE UNIQUE INDEX "${INDEX}" ON "TeamStaff"\\("teamId", "userId"\\)`)
+      new RegExp(`CREATE UNIQUE INDEX IF NOT EXISTS "${INDEX}" ON "TeamStaff"\\("teamId", "userId"\\)`)
     );
   });
 
@@ -73,7 +73,7 @@ describe('TeamStaff: one role per user per team (#463)', () => {
     const begin = sql.indexOf('-- BEGIN DELETE');
     const deleteAt = sql.indexOf('DELETE FROM "TeamStaff"', begin);
     const end = sql.indexOf('-- END DELETE');
-    const createAt = sql.indexOf(`CREATE UNIQUE INDEX "${INDEX}"`);
+    const createAt = sql.indexOf(`CREATE UNIQUE INDEX IF NOT EXISTS "${INDEX}"`);
 
     expect(begin).toBeGreaterThan(-1);
     expect(deleteAt).toBeGreaterThan(begin);
@@ -81,7 +81,7 @@ describe('TeamStaff: one role per user per team (#463)', () => {
     expect(createAt).toBeGreaterThan(end);
   });
 
-  it('keeps the most privileged role: role type, then flag count, then oldest, then lowest id', () => {
+  it('keeps the row granting the most of the old union: flag count, then role type, then oldest, then lowest id', () => {
     const { sql } = lastMigrationWith(INDEX);
     const order = sql.slice(sql.indexOf('ORDER BY'), sql.indexOf(') AS rn'));
     const at = (needle: string): number => {
@@ -98,13 +98,27 @@ describe('TeamStaff: one role per user per team (#463)', () => {
     ].map(at);
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
 
-    const keys = ['END ASC', '"canShareStats"::int) DESC', 'ts."createdAt" ASC', 'ts."id" ASC'].map(at);
+    const keys = ['"canShareStats"::int) DESC', 'END ASC', 'ts."createdAt" ASC', 'ts."id" ASC'].map(at);
     expect(keys).toEqual([...keys].sort((a, b) => a - b));
   });
 
   it('drops the [teamId] index, which the unique index\'s leading column covers', () => {
     expect(block).not.toMatch(/@@index\(\[teamId\]\)/);
-    expect(lastMigrationWith(INDEX).sql).toContain('DROP INDEX "TeamStaff_teamId_idx"');
+    expect(lastMigrationWith(INDEX).sql).toContain('DROP INDEX IF EXISTS "TeamStaff_teamId_idx"');
+  });
+
+  it('reports the deleted row count and keeps every statement re-runnable after a failure', () => {
+    const { sql } = lastMigrationWith(INDEX);
+    const block = sql.slice(sql.indexOf('-- BEGIN DELETE'), sql.indexOf('-- END DELETE'));
+
+    expect(block).toMatch(/^-- BEGIN DELETE\nDO \$\$/);
+    expect(block).toContain('GET DIAGNOSTICS deleted_rows = ROW_COUNT;');
+    // WARNING, not NOTICE: only WARNING reaches the server log at Postgres's default level.
+    expect(block).toContain("RAISE WARNING 'TeamStaff single-role: deleted % rows', deleted_rows;");
+    // Outside the DELETE block, no index statement fails when run a second time.
+    const ddl = sql.slice(sql.indexOf('-- END DELETE'));
+    expect(ddl).not.toMatch(/DROP INDEX (?!IF EXISTS)/);
+    expect(ddl).not.toMatch(/CREATE UNIQUE INDEX (?!IF NOT EXISTS)/);
   });
 
   it('TeamService.addStaffMember maps a P2002 on that same index to its 400', () => {

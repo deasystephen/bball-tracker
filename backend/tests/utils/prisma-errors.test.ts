@@ -7,9 +7,10 @@ import {
   createOrConflict,
   isRecordNotFound,
   isUniqueViolation,
+  orNotFound,
   violatedConstraint,
 } from '../../src/utils/prisma-errors';
-import { BadRequestError } from '../../src/utils/errors';
+import { BadRequestError, NotFoundError } from '../../src/utils/errors';
 import { uniqueViolation } from '../factories';
 
 function knownError(code: string, meta?: Record<string, unknown>): Prisma.PrismaClientKnownRequestError {
@@ -101,5 +102,24 @@ describe('createOrConflict', () => {
   it('rethrows any other error unchanged', async () => {
     const fkError = knownError('P2003');
     await expect(createOrConflict(failWith(fkError), 'Already exists', 'X_key')).rejects.toBe(fkError);
+  });
+});
+
+describe('orNotFound (#463)', () => {
+  const gone = new NotFoundError('User is not a staff member of this team');
+
+  it('returns the result when the write matches a row', async () => {
+    await expect(orNotFound(async () => 'row', gone)).resolves.toBe('row');
+  });
+
+  it('throws the given error for a P2025', async () => {
+    await expect(orNotFound(failWith(knownError('P2025')), gone)).rejects.toBe(gone);
+  });
+
+  it('propagates every other error unchanged', async () => {
+    const p2002 = knownError('P2002');
+    const boom = new Error('connection reset');
+    await expect(orNotFound(failWith(p2002), gone)).rejects.toBe(p2002);
+    await expect(orNotFound(failWith(boom), gone)).rejects.toBe(boom);
   });
 });

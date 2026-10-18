@@ -46,7 +46,8 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isRecordNotFound } from '../utils/prisma-errors';
+import { createOrConflict, orNotFound } from '../utils/prisma-errors';
+import { lockTeamRow } from '../utils/team-row-lock';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -1018,9 +1019,13 @@ export class TeamService {
    * Throw if `staffUserId` is the team's only head coach. Used before any
    * change that would remove their HEAD_COACH row.
    */
-  private static async assertNotLastHeadCoach(teamId: string, staffUserId: string): Promise<void> {
+  private static async assertNotLastHeadCoach(
+    teamId: string,
+    staffUserId: string,
+    db: Prisma.TransactionClient
+  ): Promise<void> {
     // Shared rule with account deletion (#444) — see utils/permissions.
-    const blocking = await lastHeadCoachTeams(staffUserId, prisma, { teamIds: [teamId] });
+    const blocking = await lastHeadCoachTeams(staffUserId, db, { teamIds: [teamId] });
     if (blocking.length > 0) {
       throw new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.');
     }
@@ -1127,28 +1132,36 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to manage team staff');
     }
 
-    const current = await prisma.teamStaff.findUnique({
-      where: { teamId_userId: { teamId, userId: staffUserId } },
-      include: { role: true },
-    });
-    if (!current) {
-      throw new NotFoundError('User is not a staff member of this team');
-    }
-
     const role = await TeamService.findRoleByType(teamId, roleType);
-    if (current.roleId === role.id) {
-      throw new BadRequestError('User already has this role on the team');
-    }
 
-    // Demoting the only head coach would leave the team unmanageable.
-    if (current.role.type === 'HEAD_COACH') {
-      await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
-    }
+    // The read, the last-head-coach guard and the write run behind the team
+    // row lock, so two concurrent demotions (or a demotion and a removal) of
+    // a team's two head coaches cannot both pass the guard (#463).
+    const { current, updated } = await prisma.$transaction(async (tx) => {
+      await lockTeamRow(tx, teamId);
 
-    const updated = await prisma.teamStaff.update({
-      where: { id: current.id },
-      data: { roleId: role.id },
-      include: TEAM_STAFF_INCLUDE,
+      const current = await tx.teamStaff.findUnique({
+        where: { teamId_userId: { teamId, userId: staffUserId } },
+        include: { role: true },
+      });
+      if (!current) {
+        throw new NotFoundError('User is not a staff member of this team');
+      }
+      if (current.roleId === role.id) {
+        throw new BadRequestError('User already has this role on the team');
+      }
+
+      // Demoting the only head coach would leave the team unmanageable.
+      if (current.role.type === 'HEAD_COACH') {
+        await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+      }
+
+      const updated = await tx.teamStaff.update({
+        where: { id: current.id },
+        data: { roleId: role.id },
+        include: TEAM_STAFF_INCLUDE,
+      });
+      return { current, updated };
     });
 
     logger.info('Staff role changed', {
@@ -1190,30 +1203,24 @@ export class TeamService {
       }
     }
 
-    const existing = await prisma.teamStaff.findUnique({
-      where: { teamId_userId: { teamId, userId: staffUserId } },
+    // The guard and the delete run behind the team row lock, so two
+    // concurrent removals (or a removal and a demotion) of a team's two head
+    // coaches cannot both pass the guard (#463). A target with no staff row
+    // holds no HEAD_COACH row, passes the guard, and its delete matches
+    // nothing: 404.
+    const removed = await prisma.$transaction(async (tx) => {
+      await lockTeamRow(tx, teamId);
+      await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+      return orNotFound(
+        () => tx.teamStaff.delete({ where: { teamId_userId: { teamId, userId: staffUserId } } }),
+        new NotFoundError('User is not a staff member of this team')
+      );
     });
-    if (!existing) {
-      throw new NotFoundError('User is not a staff member of this team');
-    }
-
-    await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
-
-    // A concurrent removal that wins between the read and the delete answers
-    // the same 404 as the read, not a P2025 500.
-    await prisma.teamStaff
-      .delete({ where: { teamId_userId: { teamId, userId: staffUserId } } })
-      .catch((err: unknown) => {
-        if (isRecordNotFound(err)) {
-          throw new NotFoundError('User is not a staff member of this team');
-        }
-        throw err;
-      });
 
     logger.info('Staff removed', {
       teamId,
       staffUserId,
-      roleId: existing.roleId,
+      roleId: removed.roleId,
       self: isSelf,
       userId: requestingUserId,
     });

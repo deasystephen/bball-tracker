@@ -81,3 +81,20 @@ export async function createOrConflict<T>(
     throw err;
   }
 }
+
+/**
+ * Run an `update`/`delete` whose target may vanish under a concurrent writer.
+ * A P2025 (the guarded `where` matched nothing) throws `error`, the answer the
+ * caller's own pre-check or lock gives for that state; every other error
+ * propagates.
+ */
+export async function orNotFound<T>(run: () => Promise<T>, error: Error): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isRecordNotFound(err)) {
+      throw error;
+    }
+    throw err;
+  }
+}

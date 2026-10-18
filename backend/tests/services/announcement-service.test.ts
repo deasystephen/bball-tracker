@@ -37,7 +37,7 @@ function setSystemAdmin(): void {
 function setNoAccess(): void {
   (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createCoach());
   (mockPrisma.team.findUnique as jest.Mock).mockResolvedValueOnce(null); // permissions helper team lookup
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null); // getTeamPermissions: no staff row
   (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
   (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 }

@@ -41,14 +41,13 @@ const VIEW_ONLY_PERMISSIONS: TeamPermissions = {
   canShareStats: false,
 };
 
-/** The five permission flags of a staff row's role. */
-const STAFF_ROLE_FLAGS_SELECT = {
-  canManageTeam: true,
-  canManageRoster: true,
-  canTrackStats: true,
-  canViewStats: true,
-  canShareStats: true,
-} satisfies Prisma.TeamRoleSelect;
+/**
+ * Selects exactly the `TeamPermissions` flags of a staff row's role, derived
+ * from `NO_PERMISSIONS` so the five keys are spelled out in one place.
+ */
+const STAFF_ROLE_FLAGS_SELECT = Object.fromEntries(
+  Object.keys(NO_PERMISSIONS).map((key) => [key, true])
+) as Record<keyof TeamPermissions, true> satisfies Prisma.TeamRoleSelect;
 
 /**
  * Is `userId` a guardian (PARENT role link) of `childId`?
