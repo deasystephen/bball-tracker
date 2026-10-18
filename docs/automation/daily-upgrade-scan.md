@@ -116,10 +116,22 @@ Step 2a and the Step 3 gate):
 
 Current minimatch overrides: mobile's `"eas-cli": { "minimatch@^5": "^5.1.8" }` floors eas-cli's
 exact `5.1.2` pin. It is version-keyed because eas-cli's subtree also holds `glob@10`/`glob@13`,
-which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and stays as it is
-(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning). The backend has no minimatch or
-brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
-newest 1.x release, so the old root floors were inert.
+which need `^9`/`^10`. The `@oclif/core` block keys its floor as `"minimatch@^10": "^10.2.5"`
+(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning). Until #925 it was a bare
+`"minimatch"` child, which also dragged `filelist` (jake, inside @oclif/core's and eas-cli's graph,
+declares `^5.0.1`) onto 10.x; `filelist` now resolves to 5.1.9 under the eas-cli key. The
+`minimatch@^10` key is inert today (@oclif/core 4.11.4 already declares `^10.2.5`) and is kept on
+purpose as the #343 regression guard; being version-keyed, it can never match eas-cli's exact
+`5.1.2` edge. The same change re-keyed mobile's root `"ws"` and `"js-yaml"` as `"ws@^8"` and
+`"js-yaml@^4"`: the `^7` ws consumers (Metro, the React Native dev middleware,
+`react-devtools-core`) and `@istanbuljs/load-nyc-config`'s `js-yaml ^3` had been forced across a
+major. Each advisory has a patched release in the older major (ws 7.5.11 for GHSA-96hv-2xvq-fx4p,
+js-yaml 3.15.2 for GHSA-2883-xcg3-v3hh) and those consumers resolve to 7.5.13 and 3.15.2 with no
+override, so no `@^7`/`@^3` floor was added (inert, see above) and nothing in mobile is accepted
+cross-major. It also retired the inert `"@oclif/core": { "js-yaml": "^3.15.2" }` child: its only
+declarers, the two nested @oclif/core 2.16.0 copies, declare `^3.14.1` and resolve to 3.15.2
+without it. The backend has no minimatch or brace-expansion override: the `^3` consumers resolve to
+3.1.5, and brace-expansion 1.1.21 is the newest 1.x release, so the old root floors were inert.
 
 **Accepted cross-major overrides.** The list is `.github/scripts/accepted-overrides.json`, keyed by package directory (`override`, `consumer`, `gets` = the range the override resolves to, `ghsa`, `why` with the retirement condition); the gate script reads it, prints a listed mismatch as `accepted … (GHSA, accepted-overrides.json)` with exit 0, and its `--overrides` mode prints a listed key `live (accepted …)` while something still declares it and `STALE` once nothing does, for a human to retire with the entry. Adding or retiring an entry is a human decision made in a reviewed PR together with the reasoning here; the scan never edits the file. `backend/tests/infra/check-override-ranges.test.ts` pins the file's shape, the script's verdicts on fixtures (with their own accept list through `ACCEPTED_OVERRIDES_FILE`), and one live fact: the real backend lockfile still produces the accepted `deepmerge-ts` line. **That last test goes red on purpose the day a Prisma release declares `deepmerge-ts` 8.x** (a Dependabot or scan PR for that bump fails `Test Backend`); the retire procedure is then one PR that removes the override, its accept entry and that expectation, after which `--overrides` would otherwise have reported the key `STALE`. Today's only entry: the backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares the exact pin `7.1.5`, inside the `^7` key) to 8.x on purpose (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
 
