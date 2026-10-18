@@ -174,9 +174,12 @@ role, on a team. `getTeamPermissions` reads that one row by the compound key and
 its role's five flags as they are; there is no aggregation across rows. A change of
 role is `PATCH /staff/:userId`, which updates the row in place. Migration
 `20261018120000_team_staff_single_role` replaced the old `[teamId, userId, roleId]`
-index; before creating the new one it deleted every extra row of a user holding several
-roles on one team, keeping the HEAD_COACH-type row if there was one, else the oldest
-(`createdAt`, then lowest `id`). Tests: `tests/schemas/team-staff-unique.test.ts` pins
+index (and dropped the `[teamId]` index, which the new one's leading column covers);
+before creating the new one it deleted every extra row of a user holding several roles
+on one team, keeping the most privileged: role type HEAD_COACH > ASSISTANT_COACH >
+TEAM_MANAGER > CUSTOM, then the most permission flags, then the oldest `createdAt`, then
+the lowest `id`. Before the migration `getTeamPermissions` granted the union of a user's
+roles, so ranking by privilege rather than age keeps a user's access. Tests: `tests/schemas/team-staff-unique.test.ts` pins
 the schema, the migration and the service's conflict target to one index name;
 `tests/integration/team-staff-single-role.db.test.ts` proves the index, the survivor
 rule and the last-head-coach guard against Postgres.
@@ -196,7 +199,7 @@ Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
 - `GET /roles` → `{ success, roles: [{ id, teamId, type, name, description, canManageTeam, canManageRoster, canTrackStats, canViewStats, canShareStats }] }` (definitions only, no holders).
 - `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 `User is already a staff member of this team` if the user already holds any role on the team (one role per user; use PATCH). A concurrent add that loses the race on the `[teamId, userId]` unique index, with the same role or another, answers the same 400 through the P2002 mapping (`createOrConflict`, see `docs/architecture/backend-services.md`), never a 500 and never a second row (#463). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
 - `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
-- `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal).
+- `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal). 404 when the target is not staff, including when a concurrent removal wins between the read and the delete (P2025 maps to the same 404).
 
 POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the usage meter (and any tier team cap) counts.
 

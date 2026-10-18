@@ -63,6 +63,13 @@ function givenHeadCoachAddingAssistant(): void {
     type: 'TEAM_MANAGER',
     name: 'Team Manager',
   });
+  // canManageStaff: the caller holds the team's HEAD_COACH row.
+  (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue({ id: 'head-row' });
+}
+
+/** The target's existing staff row on the team, or none. */
+function givenTargetStaffRow(row: Record<string, unknown> | null): void {
+  (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(row);
 }
 
 describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)', () => {
@@ -76,16 +83,8 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
 
   it('answers 400 when the user already holds a role on the team, and writes nothing', async () => {
     givenHeadCoachAddingAssistant();
-    (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(
-      (args: { where: { userId: string; role?: unknown } }) =>
-        Promise.resolve(
-          args.where.role
-            ? // canManageStaff: the caller's HEAD_COACH row
-              { id: 'head-row' }
-            : // the pre-check: the target already holds an ASSISTANT_COACH row
-              { id: 'assistant-row', teamId: TEAM_ID, userId: ASSISTANT_ID, roleId: 'assistant-role' }
-        )
-    );
+    // The target already holds an ASSISTANT_COACH row on the team.
+    givenTargetStaffRow({ id: 'assistant-row', teamId: TEAM_ID, userId: ASSISTANT_ID, roleId: 'assistant-role' });
 
     const response = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/staff`)
@@ -93,17 +92,12 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe(ALREADY_STAFF);
-    expect(mockPrisma.teamStaff.findFirst).toHaveBeenCalledWith({
-      where: { teamId: TEAM_ID, userId: ASSISTANT_ID },
-    });
     expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
   });
 
   it('answers the same 400 when a concurrent add with another role wins the [teamId, userId] index', async () => {
     givenHeadCoachAddingAssistant();
-    (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(
-      (args: { where: { role?: unknown } }) => Promise.resolve(args.where.role ? { id: 'head-row' } : null)
-    );
+    givenTargetStaffRow(null);
     (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(
       uniqueViolation('TeamStaff_teamId_userId_key')
     );
@@ -118,9 +112,7 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
 
   it('adds a user who holds no role on the team (201)', async () => {
     givenHeadCoachAddingAssistant();
-    (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(
-      (args: { where: { role?: unknown } }) => Promise.resolve(args.where.role ? { id: 'head-row' } : null)
-    );
+    givenTargetStaffRow(null);
     (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue({
       id: 'new-row',
       teamId: TEAM_ID,

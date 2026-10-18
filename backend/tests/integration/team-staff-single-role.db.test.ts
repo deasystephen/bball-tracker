@@ -8,9 +8,10 @@
  *
  * - Postgres refuses a second role for the same user on the same team, under
  *   the index name `TeamService.addStaffMember` maps to its 400;
- * - the migration's DELETE keeps, per (team, user), the HEAD_COACH row if
- *   there is one, else the oldest row (ties: lowest id), and touches nothing
- *   else. It runs against a session-local TEMP copy of `TeamStaff`, which
+ * - the migration's DELETE keeps, per (team, user), the most privileged
+ *   row: role type (HEAD_COACH > ASSISTANT_COACH > TEAM_MANAGER > CUSTOM),
+ *   then flag count, then the oldest, then the lowest id, and touches
+ *   nothing else. It runs against a session-local TEMP copy of `TeamStaff`, which
  *   shadows the real table inside one transaction that is rolled back, so the
  *   shared database's index is never dropped;
  * - the last-head-coach guard holds on real rows: the sole head coach can be
@@ -34,26 +35,30 @@ const MIGRATION = path.resolve(
   '../../prisma/migrations/20261018120000_team_staff_single_role/migration.sql'
 );
 
-/** The migration's DELETE statement, exactly as it ships. */
+/** The migration's DELETE statement, exactly as it ships, between its sentinel lines. */
 function migrationDelete(): string {
   const sql = readFileSync(MIGRATION, 'utf8');
-  const start = sql.indexOf('DELETE FROM "TeamStaff"');
-  const end = sql.indexOf(';', start);
-  if (start < 0 || end < 0) throw new Error('DELETE statement not found in the migration');
-  return sql.slice(start, end + 1);
+  const begin = sql.indexOf('-- BEGIN DELETE\n');
+  const end = sql.indexOf('-- END DELETE');
+  if (begin < 0 || end < begin) throw new Error('BEGIN/END DELETE sentinels not found in the migration');
+  return sql.slice(begin + '-- BEGIN DELETE\n'.length, end).trim();
 }
 
 const fx = new DbFixtures(prisma, 'StaffSingleRole');
 let org: Org;
-const roles = {} as Record<TeamRoleType, string>;
+const roles = {} as Record<TeamRoleType | 'CUSTOM_FEW' | 'CUSTOM_MANY' | 'CUSTOM_MANY_2', string>;
 
-/** Adds the team's ASSISTANT_COACH and TEAM_MANAGER roles beside the fixture's HEAD_COACH one. */
-async function addRole(type: TeamRoleType, flags: Partial<Record<string, boolean>>): Promise<string> {
+/** Adds a role to the fixture team beside its HEAD_COACH one, named with the run id. */
+async function addRole(
+  type: TeamRoleType,
+  flags: Partial<Record<string, boolean>>,
+  label: string = type
+): Promise<string> {
   const role = await prisma.teamRole.create({
     data: {
       teamId: org.teamId,
       type,
-      name: type,
+      name: `${label}-${fx.run}`,
       canManageTeam: false,
       canManageRoster: false,
       canTrackStats: false,
@@ -77,9 +82,23 @@ beforeAll(async () => {
     canShareStats: true,
   });
   roles.TEAM_MANAGER = await addRole('TEAM_MANAGER', { canTrackStats: true, canShareStats: true });
+  // CUSTOM roles: viewStats is on by default, so FEW has 2 flags and MANY has 4.
+  roles.CUSTOM_FEW = await addRole('CUSTOM', { canTrackStats: true }, 'CUSTOM_FEW');
+  roles.CUSTOM_MANY = await addRole(
+    'CUSTOM',
+    { canTrackStats: true, canShareStats: true, canManageRoster: true },
+    'CUSTOM_MANY'
+  );
+  roles.CUSTOM_MANY_2 = await addRole(
+    'CUSTOM',
+    { canTrackStats: true, canShareStats: true, canManageTeam: true },
+    'CUSTOM_MANY_2'
+  );
   await fx.user('head', 'COACH');
   await fx.user('second', 'COACH');
   await fx.user('manager', 'COACH');
+  await fx.user('custom', 'COACH');
+  await fx.user('tie', 'COACH');
 });
 
 afterAll(async () => {
@@ -114,11 +133,11 @@ describe('TeamStaff_teamId_userId_key (#463)', () => {
   });
 });
 
-describe('the migration DELETE keeps HEAD_COACH, else the oldest row (#463)', () => {
+describe('the migration DELETE keeps the most privileged row (#463)', () => {
   const ROLLBACK = new Error('rollback: the temp-table rehearsal never commits');
 
   it('keeps exactly the rows the survivor rule names', async () => {
-    const users = { head: fx.users.head, second: fx.users.second, manager: fx.users.manager };
+    const u = fx.users;
     const t0 = new Date('2026-01-01T00:00:00Z').getTime();
     const at = (minutes: number): Date => new Date(t0 + minutes * 60_000);
     const id = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -126,18 +145,26 @@ describe('the migration DELETE keeps HEAD_COACH, else the oldest row (#463)', ()
     // [id, userId, roleId, createdAt]
     const rows: [string, string, string, Date][] = [
       // head: HEAD_COACH is the NEWEST of three rows and still survives.
-      [id(1), users.head, roles.TEAM_MANAGER, at(0)],
-      [id(2), users.head, roles.ASSISTANT_COACH, at(1)],
-      [id(3), users.head, roles.HEAD_COACH, at(2)],
-      // second: no HEAD_COACH; the oldest (the assistant row) survives.
-      [id(4), users.second, roles.TEAM_MANAGER, at(5)],
-      [id(5), users.second, roles.ASSISTANT_COACH, at(3)],
-      // manager: a tie on createdAt; the lowest id survives.
-      [id(7), users.manager, roles.ASSISTANT_COACH, at(4)],
-      [id(6), users.manager, roles.TEAM_MANAGER, at(4)],
+      [id(1), u.head, roles.TEAM_MANAGER, at(0)],
+      [id(2), u.head, roles.ASSISTANT_COACH, at(1)],
+      [id(3), u.head, roles.HEAD_COACH, at(2)],
+      // second: TEAM_MANAGER first, ASSISTANT_COACH later (the #727 race). The
+      // union granted manageTeam/manageRoster; the newer assistant row survives.
+      [id(4), u.second, roles.TEAM_MANAGER, at(3)],
+      [id(5), u.second, roles.ASSISTANT_COACH, at(5)],
+      // manager: TEAM_MANAGER (3 flags) outranks an older CUSTOM role with 4.
+      [id(6), u.manager, roles.CUSTOM_MANY, at(0)],
+      [id(7), u.manager, roles.TEAM_MANAGER, at(4)],
+      // custom: two CUSTOM roles; more flags beats older.
+      [id(8), u.custom, roles.CUSTOM_FEW, at(0)],
+      [id(9), u.custom, roles.CUSTOM_MANY, at(6)],
+      // tie: same type, same flag count, same createdAt; the lowest id survives.
+      [id(11), u.tie, roles.CUSTOM_MANY, at(7)],
+      [id(10), u.tie, roles.CUSTOM_MANY_2, at(7)],
     ];
 
     let survivors: { id: string; userId: string }[] = [];
+    let deleted = -1;
     const outcome = await prisma
       .$transaction(async (tx) => {
         // A TEMP table of the same name shadows public."TeamStaff" for this
@@ -152,20 +179,22 @@ describe('the migration DELETE keeps HEAD_COACH, else the oldest row (#463)', ()
             VALUES (${rowId}, ${org.teamId}, ${userId}, ${roleId}, ${createdAt}, ${createdAt})`;
         }
 
-        const deleted = await tx.$executeRawUnsafe(migrationDelete());
+        deleted = await tx.$executeRawUnsafe(migrationDelete());
         survivors = await tx.$queryRaw<{ id: string; userId: string }[]>`
           SELECT "id", "userId" FROM "TeamStaff" ORDER BY "id"`;
-        expect(deleted).toBe(rows.length - 3);
         throw ROLLBACK;
       })
       .catch((e: unknown) => e);
 
     expect(outcome).toBe(ROLLBACK);
     expect(survivors).toEqual([
-      { id: id(3), userId: users.head },
-      { id: id(5), userId: users.second },
-      { id: id(6), userId: users.manager },
+      { id: id(3), userId: u.head },
+      { id: id(5), userId: u.second },
+      { id: id(7), userId: u.manager },
+      { id: id(9), userId: u.custom },
+      { id: id(10), userId: u.tie },
     ]);
+    expect(deleted).toBe(rows.length - survivors.length);
     // The real table was never touched by the rehearsal.
     expect(await prisma.teamStaff.count({ where: { id: { in: rows.map(([rowId]) => rowId) } } })).toBe(0);
   });

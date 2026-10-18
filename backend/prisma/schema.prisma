@@ -352,7 +352,6 @@ model TeamStaff {
 
   // One role per user per team (#463): re-role with PATCH, never a second row.
   @@unique([teamId, userId])
-  @@index([teamId])
   @@index([userId])
   @@index([roleId])
 }

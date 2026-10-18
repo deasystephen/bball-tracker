@@ -46,7 +46,7 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict } from '../utils/prisma-errors';
+import { createOrConflict, isRecordNotFound } from '../utils/prisma-errors';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -1056,8 +1056,9 @@ export class TeamService {
     const role = await TeamService.findRoleByType(teamId, data.roleType);
 
     // One role per user: existing staff must be re-roled via changeStaffRole
-    const existingStaff = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: user.id },
+    const existingStaff = await prisma.teamStaff.findUnique({
+      where: { teamId_userId: { teamId, userId: user.id } },
+      select: { id: true },
     });
 
     if (existingStaff) {
@@ -1126,8 +1127,8 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to manage team staff');
     }
 
-    const current = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: staffUserId },
+    const current = await prisma.teamStaff.findUnique({
+      where: { teamId_userId: { teamId, userId: staffUserId } },
       include: { role: true },
     });
     if (!current) {
@@ -1189,8 +1190,8 @@ export class TeamService {
       }
     }
 
-    const existing = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: staffUserId },
+    const existing = await prisma.teamStaff.findUnique({
+      where: { teamId_userId: { teamId, userId: staffUserId } },
     });
     if (!existing) {
       throw new NotFoundError('User is not a staff member of this team');
@@ -1198,9 +1199,16 @@ export class TeamService {
 
     await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
 
-    await prisma.teamStaff.deleteMany({
-      where: { teamId, userId: staffUserId },
-    });
+    // A concurrent removal that wins between the read and the delete answers
+    // the same 404 as the read, not a P2025 500.
+    await prisma.teamStaff
+      .delete({ where: { teamId_userId: { teamId, userId: staffUserId } } })
+      .catch((err: unknown) => {
+        if (isRecordNotFound(err)) {
+          throw new NotFoundError('User is not a staff member of this team');
+        }
+        throw err;
+      });
 
     logger.info('Staff removed', {
       teamId,
