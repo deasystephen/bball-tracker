@@ -12,7 +12,7 @@ import {
   sentryErrorHandler,
   type TransactionEvent,
 } from '../../src/utils/sentry';
-import { AppError, NotFoundError, UnauthorizedError } from '../../src/utils/errors';
+import { AppError, NotFoundError, TransactionTimeoutError, UnauthorizedError } from '../../src/utils/errors';
 import { transactionClosed } from '../factories';
 import type { Event } from '@sentry/node';
 import type { Request, Response } from 'express';
@@ -221,14 +221,20 @@ describe('sentryErrorHandler', () => {
     expect(next).toHaveBeenCalledWith(err);
   });
 
-  it('does not capture a lock-wait transaction timeout (P2028, #908)', () => {
+  it('skips a TransactionTimeoutError marked expected but captures an unmarked one and a raw P2028 (#908)', () => {
     const next = jest.fn();
-    const err = transactionClosed();
-    sentryErrorHandler(err, req, res, next);
+    sentryErrorHandler(new TransactionTimeoutError(true, transactionClosed()), req, res, next);
     expect(mockCapture).not.toHaveBeenCalled();
-    expect(next).toHaveBeenCalledWith(err);
-    expect(isExpectedClientError(err)).toBe(true);
-    expect(isExpectedClientError(transactionClosed('Transaction already closed: committed'))).toBe(false);
+
+    const unmarked = new TransactionTimeoutError();
+    sentryErrorHandler(unmarked, req, res, next);
+    const raw = transactionClosed();
+    sentryErrorHandler(raw, req, res, next);
+    expect(mockCapture).toHaveBeenCalledTimes(2);
+    expect(mockCapture).toHaveBeenCalledWith(unmarked);
+    expect(mockCapture).toHaveBeenCalledWith(raw);
+    expect(isExpectedClientError(new TransactionTimeoutError(true))).toBe(true);
+    expect(isExpectedClientError(raw)).toBe(false);
   });
 
   it('still captures plain errors, tagging a redacted route', () => {

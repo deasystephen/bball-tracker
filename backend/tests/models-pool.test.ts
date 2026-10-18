@@ -11,9 +11,10 @@ import {
   DB_POOL_MAX,
   DB_POOL_OPTIONS,
   POOL_TIMEOUT_MESSAGES,
-  isDbBusyError,
+  TRANSACTION_EXPIRED_MESSAGE,
+  TRANSACTION_START_MESSAGE,
+  classifyDbError,
   isPoolTimeoutError,
-  isTransactionTimeoutError,
 } from '../src/models/pool-config';
 import { transactionClosed } from './factories';
 
@@ -93,29 +94,35 @@ describe('isPoolTimeoutError', () => {
   });
 });
 
-describe('isTransactionTimeoutError / isDbBusyError (#908)', () => {
+describe('classifyDbError (#908)', () => {
   const maxWait = transactionClosed('Transaction API error: Unable to start a transaction in the given time.');
   const closed = transactionClosed(
     'Transaction API error: Transaction already closed: A query cannot be executed on a committed transaction.'
   );
 
-  it('matches a P2028 for an expired interactive transaction, also behind a cause', () => {
-    expect(isTransactionTimeoutError(transactionClosed())).toBe(true);
-    expect(isTransactionTimeoutError(new Error('wrapper', { cause: transactionClosed() }))).toBe(true);
-    expect(isDbBusyError(transactionClosed())).toBe(false);
+  // The classification is a substring match on Prisma's English wording: read
+  // both strings out of the installed client so a reworded message in a bump
+  // fails CI instead of silently turning every lock wait into a 500.
+  it('matches messages the installed Prisma client still emits', () => {
+    const runtime = readFileSync(path.resolve(__dirname, '../node_modules/@prisma/client/runtime/client.js'), 'utf8');
+    expect(runtime).toContain(TRANSACTION_EXPIRED_MESSAGE);
+    expect(runtime).toContain(TRANSACTION_START_MESSAGE);
   });
 
-  it('treats maxWait exhaustion as a busy database, not a lock wait', () => {
-    expect(isTransactionTimeoutError(maxWait)).toBe(false);
-    expect(isDbBusyError(maxWait)).toBe(true);
+  it('classifies an expired interactive transaction as lock_wait, also behind a cause', () => {
+    expect(classifyDbError(transactionClosed())).toBe('lock_wait');
+    expect(classifyDbError(new Error('wrapper', { cause: transactionClosed() }))).toBe('lock_wait');
+  });
+
+  it('classifies maxWait exhaustion and pool timeouts as busy', () => {
+    expect(classifyDbError(maxWait)).toBe('busy');
+    expect(classifyDbError(new Error('timeout exceeded when trying to connect'))).toBe('busy');
   });
 
   it('requires the P2028 code and leaves a query on a closed transaction alone', () => {
-    expect(isTransactionTimeoutError(closed)).toBe(false);
-    expect(isDbBusyError(closed)).toBe(false);
-    expect(isTransactionTimeoutError(new Error('The timeout for this transaction was 1 ms'))).toBe(false);
-    expect(isDbBusyError(new Error('Unable to start a transaction in the given time'))).toBe(false);
-    expect(isDbBusyError(new Error('timeout exceeded when trying to connect'))).toBe(true);
-    expect(isDbBusyError(undefined)).toBe(false);
+    expect(classifyDbError(closed)).toBeUndefined();
+    expect(classifyDbError(new Error('The timeout for this transaction was 1 ms'))).toBeUndefined();
+    expect(classifyDbError(new Error('Unable to start a transaction in the given time'))).toBeUndefined();
+    expect(classifyDbError(undefined)).toBeUndefined();
   });
 });

@@ -112,11 +112,14 @@ export const observeError = (error: unknown): Promise<never> => {
     const config = error.config as RetriableConfig | undefined;
     const pattern = configPattern(config);
     const status = error.response?.status;
+    // A lock-wait 503 (`transaction_timeout`, backend #908) is a retryable
+    // contention outcome the user sees as a toast; the server tracks it.
+    const retryable = (error.response?.data as { code?: unknown } | undefined)?.code === 'transaction_timeout';
     addBreadcrumb({
       category: 'http',
       type: 'http',
       // A 4xx and a cancellation are the caller's own outcome: warning crumbs, never errors.
-      level: (status !== undefined && status < 500) || isCancellation(error) ? 'warning' : 'error',
+      level: (status !== undefined && status < 500) || retryable || isCancellation(error) ? 'warning' : 'error',
       data: {
         method: configMethod(config),
         url: pattern,
@@ -131,7 +134,7 @@ export const observeError = (error: unknown): Promise<never> => {
         { endpoint: pattern, code: error.code },
         { endpoint_pattern: pattern, status: 'network' }
       );
-    } else if (status !== undefined && status >= 500) {
+    } else if (status !== undefined && status >= 500 && !retryable) {
       captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status });
     }
   }

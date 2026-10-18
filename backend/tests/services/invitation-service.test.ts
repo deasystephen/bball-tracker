@@ -5,7 +5,7 @@
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { GuardianService } from '../../src/services/guardian-service';
-import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
+import { BadRequestError, ResendCooldownError, TransactionTimeoutError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
@@ -2414,7 +2414,7 @@ describe('InvitationService', () => {
       });
     });
 
-    it('lets a P2028 from the supersede transaction reach the central 503 mapping (#908)', async () => {
+    it('marks a P2028 from the supersede transaction as expected lock-wait contention (#908)', async () => {
       const coach = createCoach();
       const league = createLeague();
       const season = createSeason({ leagueId: league.id });
@@ -2431,9 +2431,14 @@ describe('InvitationService', () => {
       const aborted = transactionClosed();
       (mockPrisma.$transaction as jest.Mock).mockRejectedValue(aborted);
 
-      await expect(
-        InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true, expiresInDays: 7 }, coach.id)
-      ).rejects.toBe(aborted);
+      const err = await InvitationService.createInvitation(
+        team.id,
+        { playerId: player.id, supersede: true, expiresInDays: 7 },
+        coach.id
+      ).catch((e) => e);
+
+      expect(err).toBeInstanceOf(TransactionTimeoutError);
+      expect(err).toMatchObject({ statusCode: 503, expected: true, cause: aborted });
     });
 
     it('does not report a token-collision P2002 in the supersede transaction as the dedupe 400', async () => {

@@ -24,20 +24,28 @@
 import type { Response } from 'express';
 import { logger } from './logger';
 
+export interface LogRouteErrorOptions {
+  /**
+   * The 5xx just answered is an expected outcome (a marked lock-wait timeout,
+   * #908): log at `warn` so it stays out of `@level:error`.
+   */
+  expected?: boolean;
+}
+
 export function logRouteError(
   res: Pick<Response, 'statusCode'>,
   message: string,
   error: unknown,
-  context: Record<string, unknown> = {}
+  context: Record<string, unknown> = {},
+  options: LogRouteErrorOptions = {}
 ): void {
   const status = res.statusCode;
-  // `expected: true` marks a 5xx that is an expected outcome (a lock-wait
-  // timeout answered 503, #908): warn, so it stays out of `@level:error`.
-  const { expected, ...fields } = context;
-  const log = (status >= 400 && status < 500) || expected === true ? logger.warn : logger.error;
+  const log = (status >= 400 && status < 500) || options.expected === true ? logger.warn : logger.error;
   log(message, {
-    ...fields,
+    ...context,
     status,
     error: error instanceof Error ? error.message : String(error),
+    // Prisma's own message (timeout, elapsed ms) rides on a wrapped error's cause.
+    ...(error instanceof Error && error.cause instanceof Error ? { cause: error.cause.message } : {}),
   });
 }

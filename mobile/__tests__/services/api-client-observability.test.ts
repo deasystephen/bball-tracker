@@ -132,6 +132,15 @@ describe('api-client observability (#617)', () => {
     expect(tags).toEqual({ endpoint_pattern: '/api/v1/games/:id', status: 503 });
   });
 
+  it('does not capture a lock-wait 503 (transaction_timeout), only a warning breadcrumb', async () => {
+    reply = () => ({ status: 503, data: { error: 'Another request is still being processed', code: 'transaction_timeout' } });
+
+    await expect(apiClient.post('/teams/12345/invitations', {})).rejects.toBeDefined();
+
+    expect(lastCrumb()).toMatchObject({ level: 'warning', data: { status_code: 503 } });
+    expect(mockedCapture).not.toHaveBeenCalled();
+  });
+
   it('captures a network failure with status "network" and the axios code', async () => {
     reply = (config) => ({ throw: networkError(config) });
 

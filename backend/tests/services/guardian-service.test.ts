@@ -6,7 +6,7 @@ import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
 import { GuardianService } from '../../src/services/guardian-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
-import { ResendCooldownError } from '../../src/utils/errors';
+import { ResendCooldownError, TransactionTimeoutError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
 import { createAdmin, createCoach, createPlayer, createTeam, createUser, transactionClosed, uniqueViolation } from '../factories';
@@ -612,12 +612,15 @@ describe('GuardianService', () => {
         expect(mockedMailerSend).not.toHaveBeenCalled();
       });
 
-      it('lets a P2028 from the supersede transaction reach the central 503 mapping (#908)', async () => {
+      it('marks a P2028 from the supersede transaction as expected lock-wait contention (#908)', async () => {
         setLivePending();
         const aborted = transactionClosed();
         (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(aborted);
 
-        await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id)).rejects.toBe(aborted);
+        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
+
+        expect(err).toBeInstanceOf(TransactionTimeoutError);
+        expect(err).toMatchObject({ statusCode: 503, expected: true, cause: aborted });
         expect(mockedMailerSend).not.toHaveBeenCalled();
       });
 

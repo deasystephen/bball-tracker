@@ -61,58 +61,64 @@ export const POOL_TIMEOUT_MESSAGES = [
   'Connection terminated due to connection timeout',
 ];
 
+/** `err` and its `cause` chain, at most five deep (Prisma may wrap what pg threw). */
+function* causeChain(err: unknown): Generator<unknown> {
+  let current: unknown = err;
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    yield current;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+}
+
+const messageOf = (candidate: unknown): string =>
+  candidate instanceof Error ? candidate.message : String(candidate);
+
 /**
  * True when `err` (or any error in its `cause` chain, in case Prisma wraps it)
  * is one of pg's connect/pool timeouts: the pool is saturated or the database
  * is not answering TCP.
  */
 export function isPoolTimeoutError(err: unknown): boolean {
-  return findInCauseChain(err, (candidate) => {
-    const message = candidate instanceof Error ? candidate.message : String(candidate);
-    return POOL_TIMEOUT_MESSAGES.some((m) => message.includes(m));
-  });
-}
-
-/** Prisma P2028 when an interactive transaction gets no connection within `maxWait`: pool saturation. */
-const TRANSACTION_START_MESSAGE = 'Unable to start a transaction in the given time';
-
-/** Prisma P2028 message of an interactive transaction that outlived its timeout. */
-const TRANSACTION_EXPIRED_MESSAGE = 'The timeout for this transaction was';
-
-/** First error in `err`'s `cause` chain (at most five deep) that satisfies `predicate`. */
-function findInCauseChain(err: unknown, predicate: (candidate: unknown) => boolean): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current && depth < 5; depth += 1) {
-    if (predicate(current)) return true;
-    current = current instanceof Error ? current.cause : undefined;
+  for (const candidate of causeChain(err)) {
+    if (POOL_TIMEOUT_MESSAGES.some((m) => messageOf(candidate).includes(m))) return true;
   }
   return false;
 }
 
-const isP2028With =
-  (text: string) =>
-  (candidate: unknown): boolean =>
-    (candidate as { code?: unknown }).code === 'P2028' &&
-    candidate instanceof Error &&
-    candidate.message.includes(text);
+/** Prisma P2028 when an interactive transaction gets no connection within `maxWait`: pool saturation. */
+export const TRANSACTION_START_MESSAGE = 'Unable to start a transaction in the given time';
+
+/** Prisma P2028 message of an interactive transaction that outlived its timeout. */
+export const TRANSACTION_EXPIRED_MESSAGE = 'The timeout for this transaction was';
+
+export type DbErrorKind = 'lock_wait' | 'busy';
 
 /**
- * True for Prisma `P2028` raised because an interactive transaction outlived
- * its timeout, in practice a waiter stuck on a row lock held by a concurrent
- * twin request (the supersede-resend, accept and Add Player transactions;
- * #908). A query on an already committed or rolled-back transaction is also
- * P2028 but is a bug and stays a 500. Duck-typed so this module keeps no
- * Prisma import.
+ * Classify a database error that should be answered 503 with `Retry-After`
+ * (#908), walking the cause chain once:
+ *
+ * - `lock_wait`: Prisma `P2028` for an interactive transaction that outlived
+ *   its timeout, in practice a waiter stuck on a row lock held by a concurrent
+ *   twin request. It says nothing about whether contention was expected at the
+ *   call site; see `TransactionTimeoutError.expected`.
+ * - `busy`: a pg pool wait/connect timeout, or P2028 for `maxWait`
+ *   exhaustion. Answered with `DB_BUSY_BODY`.
+ *
+ * A query on an already committed or rolled-back transaction is also P2028 but
+ * is a bug and stays unclassified (500). Duck-typed on `code` so this module
+ * keeps no Prisma import.
  */
-export function isTransactionTimeoutError(err: unknown): boolean {
-  return findInCauseChain(err, isP2028With(TRANSACTION_EXPIRED_MESSAGE));
-}
-
-/**
- * True when the database is busy rather than the route broken: a pg pool
- * timeout, or Prisma P2028 for `maxWait` exhaustion (no connection to start a
- * transaction). Answered 503 with `Retry-After` and `DB_BUSY_BODY`.
- */
-export function isDbBusyError(err: unknown): boolean {
-  return isPoolTimeoutError(err) || findInCauseChain(err, isP2028With(TRANSACTION_START_MESSAGE));
+export function classifyDbError(err: unknown): DbErrorKind | undefined {
+  for (const candidate of causeChain(err)) {
+    const message = messageOf(candidate);
+    const isP2028 = (candidate as { code?: unknown }).code === 'P2028';
+    if (isP2028 && message.includes(TRANSACTION_EXPIRED_MESSAGE)) return 'lock_wait';
+    if (
+      (isP2028 && message.includes(TRANSACTION_START_MESSAGE)) ||
+      POOL_TIMEOUT_MESSAGES.some((m) => message.includes(m))
+    ) {
+      return 'busy';
+    }
+  }
+  return undefined;
 }

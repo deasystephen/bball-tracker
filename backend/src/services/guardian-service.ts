@@ -23,7 +23,7 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT, type UserSummaryWithEmail } from '../utils/user-select';
-import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors';
+import { createOrConflict, isRecordNotFound, isUniqueViolation, lockWaitExpected } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
@@ -604,48 +604,51 @@ export class GuardianService {
     const token = this.generateToken();
     const row = guardianInvitationRow({ token, teamId, childId, email, relationship, invitedById });
 
-    const invitation = await createOrConflict(
-      () =>
-        prisma.$transaction(async (tx) => {
-          await lockUsers(tx, [childId, parentId]);
-          const linked = await tx.guardian.findUnique({
-            where: { parentId_childId: { parentId, childId } },
-            select: { id: true },
-          });
-          if (linked) {
-            throw new BadRequestError('This person is already a guardian of this player');
-          }
-
-          await this.assertGuardianResendCooldown(tx, { ...scope, invitedById });
-          await this.assertNoLivePendingElsewhere(tx, scope);
-
-          const { count: lapsedCount } = await tx.guardianInvitation.updateMany({
-            where: {
-              childId,
-              invitedEmail: emailEquals(email),
-              status: 'PENDING',
-              expiresAt: { lte: new Date() },
-            },
-            data: { status: 'EXPIRED' },
-          });
-          const { count: supersededCount } = await tx.guardianInvitation.updateMany({
-            where: { childId, invitedEmail: emailEquals(email), status: 'PENDING', team: { lineageId } },
-            data: { status: 'EXPIRED' },
-          });
-          if (lapsedCount + supersededCount > 0) {
-            logger.info('Guardian invitation superseded', {
-              childId,
-              teamId,
-              invitedById,
-              supersededCount,
-              lapsedCount,
+    // A lock-wait timeout on a double-tapped Resend is expected contention (#908).
+    const invitation = await lockWaitExpected(() =>
+      createOrConflict(
+        () =>
+          prisma.$transaction(async (tx) => {
+            await lockUsers(tx, [childId, parentId]);
+            const linked = await tx.guardian.findUnique({
+              where: { parentId_childId: { parentId, childId } },
+              select: { id: true },
             });
-          }
+            if (linked) {
+              throw new BadRequestError('This person is already a guardian of this player');
+            }
 
-          return tx.guardianInvitation.create({ data: row, select: GUARDIAN_INVITATION_SELECT });
-        }),
-      PENDING_GUARDIAN_CONFLICT,
-      PENDING_GUARDIAN_INDEX
+            await this.assertGuardianResendCooldown(tx, { ...scope, invitedById });
+            await this.assertNoLivePendingElsewhere(tx, scope);
+
+            const { count: lapsedCount } = await tx.guardianInvitation.updateMany({
+              where: {
+                childId,
+                invitedEmail: emailEquals(email),
+                status: 'PENDING',
+                expiresAt: { lte: new Date() },
+              },
+              data: { status: 'EXPIRED' },
+            });
+            const { count: supersededCount } = await tx.guardianInvitation.updateMany({
+              where: { childId, invitedEmail: emailEquals(email), status: 'PENDING', team: { lineageId } },
+              data: { status: 'EXPIRED' },
+            });
+            if (lapsedCount + supersededCount > 0) {
+              logger.info('Guardian invitation superseded', {
+                childId,
+                teamId,
+                invitedById,
+                supersededCount,
+                lapsedCount,
+              });
+            }
+
+            return tx.guardianInvitation.create({ data: row, select: GUARDIAN_INVITATION_SELECT });
+          }),
+        PENDING_GUARDIAN_CONFLICT,
+        PENDING_GUARDIAN_INDEX
+      )
     );
 
     return { parent, invitation, token };

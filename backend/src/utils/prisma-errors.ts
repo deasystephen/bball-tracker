@@ -5,7 +5,8 @@
  */
 
 import { Prisma } from '@prisma/client';
-import { BadRequestError } from './errors';
+import { classifyDbError } from '../models/pool-config';
+import { BadRequestError, TransactionTimeoutError } from './errors';
 
 /** True for a unique-constraint violation (Prisma `P2002`). */
 export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnownRequestError {
@@ -77,6 +78,24 @@ export async function createOrConflict<T>(
   } catch (err) {
     if (isUniqueViolation(err) && (target === undefined || violates(err, target))) {
       throw new BadRequestError(message);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Run a transaction where a lock-wait timeout is expected contention (the two
+ * supersede-resend transactions, #908): a P2028 expiry becomes a
+ * `TransactionTimeoutError` marked `expected` (503, warn-level, not Sentry).
+ * Any other error propagates; a P2028 from a transaction that is not wrapped
+ * here is still answered 503 but logged at error and captured.
+ */
+export async function lockWaitExpected<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (classifyDbError(err) === 'lock_wait') {
+      throw new TransactionTimeoutError(true, err);
     }
     throw err;
   }

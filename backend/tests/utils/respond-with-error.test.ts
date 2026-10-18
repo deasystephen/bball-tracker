@@ -6,6 +6,7 @@ import {
   LastHeadCoachError,
   NotFoundError,
   ServiceUnavailableError,
+  TransactionTimeoutError,
 } from '../../src/utils/errors';
 import { transactionClosed } from '../factories';
 import { logger } from '../../src/utils/logger';
@@ -159,22 +160,54 @@ describe('respondWithError (#831)', () => {
     expect(res.statusCode).toBe(503);
     expect(res.headers['Retry-After']).toBe('5');
     expect(res.body).toEqual({ error: 'Service temporarily unavailable, please retry' });
-    expect(error).toHaveBeenCalledWith('Error getting team', { status: 503, error: 'query failed' });
+    expect(error).toHaveBeenCalledWith('Error getting team', {
+      status: 503,
+      error: 'query failed',
+      cause: 'timeout exceeded when trying to connect',
+    });
     expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
   });
 
-  it('answers a lock-wait transaction timeout (P2028) as 503 transaction_timeout, warns and skips Sentry (#908)', () => {
+  it('answers a marked TransactionTimeoutError as 503 transaction_timeout, warns and skips Sentry (#908)', () => {
     const res = fakeRes();
-    respondWithError(res, transactionClosed(), { log: 'Error inviting', fallback: 'Failed', sentryFlow: 'x' });
+    respondWithError(res, new TransactionTimeoutError(true, transactionClosed()), {
+      log: 'Error inviting',
+      fallback: 'Failed',
+      sentryFlow: 'x',
+    });
     expect(res.statusCode).toBe(503);
     expect(res.headers['Retry-After']).toBe('5');
     expect(res.body).toEqual({
       error: 'Another request for this record is still being processed; please retry',
       code: 'transaction_timeout',
     });
-    expect(warn).toHaveBeenCalledWith('Error inviting', expect.objectContaining({ status: 503 }));
+    expect(warn).toHaveBeenCalledWith(
+      'Error inviting',
+      expect.objectContaining({ status: 503, cause: expect.stringContaining('The timeout for this transaction was') })
+    );
     expect(error).not.toHaveBeenCalled();
     expect(mockCapture).not.toHaveBeenCalled();
+  });
+
+  it('answers a raw P2028 lock-wait expiry with the same 503 but logs at error and captures it (#908)', () => {
+    const res = fakeRes();
+    const err = transactionClosed();
+    respondWithError(res, err, { log: 'Error deleting', fallback: 'Failed', sentryFlow: 'x' });
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['Retry-After']).toBe('5');
+    expect(res.body).toEqual({
+      error: 'Another request for this record is still being processed; please retry',
+      code: 'transaction_timeout',
+    });
+    expect(error).toHaveBeenCalledWith('Error deleting', expect.objectContaining({ status: 503 }));
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
+  });
+
+  it('puts Retry-After on every 503, ServiceUnavailableError included', () => {
+    const res = fakeRes();
+    respondWithError(res, new ServiceUnavailableError('Database unavailable'), { log: 'Error', fallback: 'Failed' });
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['Retry-After']).toBe('5');
   });
 
   it('answers maxWait exhaustion (P2028) with the pool-busy 503 body', () => {

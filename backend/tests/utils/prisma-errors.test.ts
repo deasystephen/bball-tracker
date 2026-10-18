@@ -7,10 +7,11 @@ import {
   createOrConflict,
   isRecordNotFound,
   isUniqueViolation,
+  lockWaitExpected,
   violatedConstraint,
 } from '../../src/utils/prisma-errors';
-import { BadRequestError } from '../../src/utils/errors';
-import { uniqueViolation } from '../factories';
+import { BadRequestError, TransactionTimeoutError } from '../../src/utils/errors';
+import { transactionClosed, uniqueViolation } from '../factories';
 
 function knownError(code: string, meta?: Record<string, unknown>): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Prisma error', { code, clientVersion: 'test', meta });
@@ -101,5 +102,22 @@ describe('createOrConflict', () => {
   it('rethrows any other error unchanged', async () => {
     const fkError = knownError('P2003');
     await expect(createOrConflict(failWith(fkError), 'Already exists', 'X_key')).rejects.toBe(fkError);
+  });
+});
+
+describe('lockWaitExpected (#908)', () => {
+  it('marks a lock-wait P2028 as an expected TransactionTimeoutError, keeping Prisma\'s error as cause', async () => {
+    const aborted = transactionClosed();
+    const err = await lockWaitExpected(failWith(aborted)).catch((e) => e);
+    expect(err).toBeInstanceOf(TransactionTimeoutError);
+    expect(err).toMatchObject({ statusCode: 503, expected: true, cause: aborted });
+  });
+
+  it('passes every other error through, maxWait and closed-transaction P2028 included, and returns results', async () => {
+    const maxWait = transactionClosed('Transaction API error: Unable to start a transaction in the given time.');
+    await expect(lockWaitExpected(failWith(maxWait))).rejects.toBe(maxWait);
+    const boom = new Error('boom');
+    await expect(lockWaitExpected(failWith(boom))).rejects.toBe(boom);
+    await expect(lockWaitExpected(async () => 7)).resolves.toBe(7);
   });
 });
