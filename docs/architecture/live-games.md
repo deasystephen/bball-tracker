@@ -135,6 +135,12 @@ current score so a client can drop events and still converge.
   so a shot committed in between cannot be overwritten by the client value
   (#666); a PATCH without `homeScore` takes no lock. `awayScore` is always
   client-supplied (opponent points).
+- **The database enforces non-negative scores (#825):** migration
+  `20261018000000_game_score_non_negative` adds the CHECK constraint
+  `Game_score_non_negative_check` (`homeScore >= 0 AND awayScore >= 0`). Prisma does
+  not model CHECK constraints, so it lives only in the migration SQL. A write path
+  that bypasses Zod and the derivation fails with a constraint error instead of
+  storing a negative score; `tests/integration/game-score-check.db.test.ts` proves it.
 - Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
   renders `game.homeScore` from the detail cache, which
   `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.
