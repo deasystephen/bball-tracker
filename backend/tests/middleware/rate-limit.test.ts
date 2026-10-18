@@ -25,6 +25,13 @@ function buildApp(): express.Express {
   return app;
 }
 
+// Each supertest call opens its own server and socket, so a 61-request loop
+// sits near the 10 s default on a saturated machine (#804). Budget 150 ms per
+// request, derived from the count; the global timeout in jest.config.js stays.
+const PER_REQUEST_BUDGET_MS = 150;
+const REFRESH_LIMIT = 60;
+const LOOP_TIMEOUT_MS = (REFRESH_LIMIT + 1) * PER_REQUEST_BUDGET_MS;
+
 describe('refreshRateLimit', () => {
   it('keys on the refresh token, so 60 distinct tokens from one IP all pass', async () => {
     const app = buildApp();
@@ -32,7 +39,7 @@ describe('refreshRateLimit', () => {
       const res = await request(app).post('/refresh').send({ refreshToken: `token-${i}` });
       expect(res.status).toBe(200);
     }
-  });
+  }, LOOP_TIMEOUT_MS);
 
   it('returns 429 when one token is replayed more than 60 times in the window', async () => {
     const app = buildApp();
@@ -48,7 +55,7 @@ describe('refreshRateLimit', () => {
     // Throttling one token does not affect another device's token.
     const other = await request(app).post('/refresh').send({ refreshToken: 'other-device' });
     expect(other.status).toBe(200);
-  });
+  }, LOOP_TIMEOUT_MS);
 
   it('falls back to the client IP when the body carries no token', async () => {
     const app = buildApp();
@@ -57,7 +64,7 @@ describe('refreshRateLimit', () => {
     }
     const blocked = await request(app).post('/refresh').send({ refreshToken: 123 });
     expect(blocked.status).toBe(429);
-  });
+  }, LOOP_TIMEOUT_MS);
 });
 
 /**
@@ -157,7 +164,7 @@ describe('inviteRateLimit (#715)', () => {
     // Another coach on the same IP keeps their own budget.
     const other = await request(app).post('/teams/t1/invitations').set('x-test-user', 'another-coach');
     expect(other.status).toBe(201);
-  });
+  }, LOOP_TIMEOUT_MS);
 });
 
 describe('skipGlobalApiLimit (#718)', () => {

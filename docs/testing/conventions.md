@@ -43,6 +43,10 @@ When adding new features or fixing bugs, always write tests that verify behavior
   `npm uninstall`. A package used without a visible import, or an `@types` package for a transitive,
   goes in the test's dependency or types allowlist with its reason; both are empty today.
 
+## Slow suites and timeouts (#804)
+
+The global Jest timeout stays at 10 s and is never raised to quiet a flake. A test that legitimately issues many sequential requests (`invitation-lookup-rate-limit.test.ts` sends 601) passes a per-test timeout (the third `it` argument) derived from its request count (`(count + 1) * per-request budget`), with a comment showing the arithmetic. Prefer shortening the work first: order-independent requests go out in bounded concurrent chunks. A timeout in a test that does not loop is usually a request that never ends or a reused supertest agent against a closed server; on a saturated machine, rerun it alone first, and fix the synchronisation, not the clock.
+
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
 - Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields
