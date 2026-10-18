@@ -45,8 +45,8 @@ const team: Team = {
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
   staff: [
-    { id: 'ts1', userId: 'u-head', user: { id: 'u-head', name: 'A', email: 'a@x' }, role: coachRole },
-    { id: 'ts2', userId: 'u-asst', user: { id: 'u-asst', name: 'B', email: 'b@x' }, role: assistantRole },
+    { id: 'ts1', userId: 'u-head', user: { id: 'u-head', name: 'A', email: 'a@x', isManaged: false, deletedAt: null }, role: coachRole },
+    { id: 'ts2', userId: 'u-asst', user: { id: 'u-asst', name: 'B', email: 'b@x', isManaged: false, deletedAt: null }, role: assistantRole },
   ],
 };
 
@@ -131,7 +131,7 @@ describe('useTeams pure helpers', () => {
           {
             id: 'ts3',
             userId: 'u-mgr',
-            user: { id: 'u-mgr', name: 'C' },
+            user: { id: 'u-mgr', name: 'C', isManaged: false, deletedAt: null },
             role: { ...coachRole, id: 'r-mgr', name: 'Team Manager', type: 'TEAM_MANAGER' },
           },
         ],

@@ -515,7 +515,7 @@ describe('auth-store updateUser', () => {
     expect(setUserProperties).not.toHaveBeenCalled();
 
     useAuthStore.getState().updateUser({
-      guardianOf: [{ childId: 'c1', childName: 'Kid', relationship: 'MOTHER', isPrimary: true }],
+      guardianOf: [{ childId: 'c1', childName: 'Kid', childDeletedAt: null, relationship: 'MOTHER', isPrimary: true, isManaged: false }],
     });
     expect(setUserProperties).toHaveBeenCalledWith(expect.objectContaining({ role: UserRole.COACH, is_parent: true }));
     expect(JSON.stringify((setUserProperties as jest.Mock).mock.calls)).not.toContain('Kid');

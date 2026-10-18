@@ -99,7 +99,7 @@ export default function AnnouncementThreadScreen() {
         teamId: id,
         announcementId,
         body: trimmed,
-        author: { id: user.id, name: user.name, profilePictureUrl: user.profilePictureUrl ?? null, deletedAt: null },
+        author: { id: user.id, name: user.name, profilePictureUrl: user.profilePictureUrl ?? null, isManaged: false, deletedAt: null },
       });
     } catch (err) {
       // The optimistic row was rolled back; hand the text back for a retry.

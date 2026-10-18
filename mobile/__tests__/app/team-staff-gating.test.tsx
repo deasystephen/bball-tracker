@@ -66,7 +66,7 @@ const makeRow = (userId: string, name: string, role: TeamStaff['role']): TeamSta
   roleId: role.id,
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
-  user: { id: userId, name, email: `${userId}@example.com` },
+  user: { id: userId, name, email: `${userId}@example.com`, isManaged: false, deletedAt: null },
   role,
 });
 

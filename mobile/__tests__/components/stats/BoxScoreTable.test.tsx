@@ -22,6 +22,7 @@ jest.mock('../../../hooks/useTheme', () => ({
 const player: PlayerGameStats = {
   playerId: 'p1',
   playerName: 'John Doe',
+  playerDeletedAt: null,
   jerseyNumber: 23,
   position: 'Guard',
   points: 24,

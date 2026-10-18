@@ -25,6 +25,7 @@ const serverEvent = (
   timestamp: `2026-05-16T10:00:${id.padStart(2, '0')}Z`,
   metadata,
   createdAt: '2026-05-16T10:00:00Z',
+  player: null,
 });
 
 const madeTwo: Omit<CreateGameEventInput, 'playerId'> = {

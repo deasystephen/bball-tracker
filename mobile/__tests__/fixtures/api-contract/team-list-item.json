@@ -7,7 +7,7 @@
   "ageGroup": "U14",
   "gender": "BOYS",
   "createdAt": "2026-10-04T03:01:22.476Z",
-  "updatedAt": "2026-10-05T16:26:06.104Z",
+  "updatedAt": "2026-10-18T03:32:34.150Z",
   "season": {
     "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
     "name": "Spring 2024",
@@ -27,9 +27,9 @@
       "user": {
         "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
         "name": "Steve Kerr",
-        "email": "steve.kerr@example.com",
         "isManaged": false,
-        "deletedAt": null
+        "deletedAt": null,
+        "email": "steve.kerr@example.com"
       },
       "role": {
         "id": "a5f09552-92b7-4748-b69a-12c97b161fc5",

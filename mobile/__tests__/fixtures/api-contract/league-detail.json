@@ -1,0 +1,95 @@
+{
+  "id": "10000000-0000-4000-a000-000000000001",
+  "name": "Downtown Youth Basketball League",
+  "createdAt": "2026-10-04T03:01:22.464Z",
+  "updatedAt": "2026-10-04T03:01:22.464Z",
+  "seasons": [
+    {
+      "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
+      "leagueId": "10000000-0000-4000-a000-000000000001",
+      "name": "Spring 2024",
+      "startDate": "2024-03-01T00:00:00.000Z",
+      "endDate": "2024-06-30T00:00:00.000Z",
+      "isActive": true,
+      "createdAt": "2026-10-04T03:01:22.469Z",
+      "updatedAt": "2026-10-04T03:01:22.469Z",
+      "teams": [
+        {
+          "id": "20000000-0000-4000-a000-000000000001",
+          "name": "Warriors",
+          "seasonId": "642eec66-0082-4581-96b5-f0a9c0214afe",
+          "lineageId": "21000000-0000-4000-a000-000000000001",
+          "chatLink": "https://chat.whatsapp.com/warriors-team-chat",
+          "ageGroup": "U14",
+          "gender": "BOYS",
+          "createdAt": "2026-10-04T03:01:22.476Z",
+          "updatedAt": "2026-10-18T03:32:34.150Z",
+          "staff": [
+            {
+              "id": "a1dcbe40-72ef-4e39-a52c-0205b6adf2f2",
+              "teamId": "20000000-0000-4000-a000-000000000001",
+              "userId": "1b2cbc50-f420-48df-aff0-36d0369ae748",
+              "roleId": "2ce545e5-7a10-4130-83c9-c4009e019383",
+              "createdAt": "2026-10-05T16:04:16.832Z",
+              "updatedAt": "2026-10-05T16:04:16.832Z",
+              "user": {
+                "id": "1b2cbc50-f420-48df-aff0-36d0369ae748",
+                "name": "Mike Brown",
+                "isManaged": false,
+                "deletedAt": null,
+                "email": "mike.brown@example.com"
+              },
+              "role": {
+                "id": "2ce545e5-7a10-4130-83c9-c4009e019383",
+                "teamId": "20000000-0000-4000-a000-000000000001",
+                "type": "ASSISTANT_COACH",
+                "name": "Assistant Coach",
+                "description": "Assistant coach with team management access",
+                "canManageTeam": true,
+                "canManageRoster": true,
+                "canTrackStats": true,
+                "canViewStats": true,
+                "canShareStats": true,
+                "createdAt": "2026-10-04T03:01:22.479Z",
+                "updatedAt": "2026-10-04T03:01:22.479Z"
+              }
+            }
+          ],
+          "members": [
+            {
+              "id": "1c375d68-2c5e-4ea4-8ca3-07eda6737b86",
+              "teamId": "20000000-0000-4000-a000-000000000001",
+              "playerId": "54f38e66-b308-4327-b274-d572ea3a6b63",
+              "jerseyNumber": 30,
+              "position": "PG",
+              "createdAt": "2026-10-04T03:01:22.488Z",
+              "updatedAt": "2026-10-04T03:01:22.488Z",
+              "player": {
+                "id": "54f38e66-b308-4327-b274-d572ea3a6b63",
+                "name": "Steph Curry",
+                "isManaged": false,
+                "deletedAt": null
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "admins": [
+    {
+      "id": "dad62a59-77a3-4f3a-bb86-61bfc10067f7",
+      "leagueId": "10000000-0000-4000-a000-000000000001",
+      "userId": "9472abf2-019c-4a8e-8036-7ead7b6c40e3",
+      "createdAt": "2026-10-04T03:01:22.467Z",
+      "updatedAt": "2026-10-04T03:01:22.467Z",
+      "user": {
+        "id": "9472abf2-019c-4a8e-8036-7ead7b6c40e3",
+        "name": "System Admin",
+        "isManaged": false,
+        "deletedAt": null,
+        "email": "admin@bball-tracker.com"
+      }
+    }
+  ]
+}

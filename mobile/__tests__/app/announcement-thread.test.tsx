@@ -90,7 +90,7 @@ const announcement: Announcement = {
   title: 'Practice moved',
   body: 'Practice is at 5pm now.',
   createdAt: '2026-10-01T00:00:00Z',
-  author: { id: 'coach-1', name: 'Frank Vogel' },
+  author: { id: 'coach-1', name: 'Frank Vogel', isManaged: false, deletedAt: null },
   _count: { replies: 2 },
 };
 
@@ -100,7 +100,7 @@ const reply = (id: string, authorId: string, name: string, body: string): Announ
   authorId,
   body,
   createdAt: '2026-10-01T01:00:00Z',
-  author: { id: authorId, name, profilePictureUrl: null, deletedAt: null },
+  author: { id: authorId, name, profilePictureUrl: null, deletedAt: null, isManaged: false },
 });
 
 const signIn = (id: string, role: 'PLAYER' | 'COACH' | 'ADMIN' | 'PARENT' = 'PLAYER') => {
@@ -144,7 +144,7 @@ describe('AnnouncementThreadScreen', () => {
     signIn('lebron');
     mockAnnouncement = {
       ...announcement,
-      author: { id: 'coach-1', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z' },
+      author: { id: 'coach-1', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z', isManaged: false },
     };
     mockReplies = [];
     await i18n.changeLanguage('es');
@@ -183,7 +183,7 @@ describe('AnnouncementThreadScreen', () => {
       teamId: 't1',
       announcementId: 'a1',
       body: 'On my way',
-      author: { id: 'lebron', name: 'User lebron', profilePictureUrl: null, deletedAt: null },
+      author: { id: 'lebron', name: 'User lebron', profilePictureUrl: null, deletedAt: null, isManaged: false },
     });
     expect(getByTestId('reply-input').props.value).toBe('');
   });

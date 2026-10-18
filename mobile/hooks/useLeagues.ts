@@ -14,7 +14,11 @@ export interface LeagueAdmin {
   user: {
     id: string;
     name: string;
-    email?: string;
+    /** `null` for a user without an address. */
+    email?: string | null;
+    isManaged: boolean;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt: string | null;
   };
 }
 

@@ -11,25 +11,40 @@
     "guardianOf": []
   },
   {
-    "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
-    "email": "steve.kerr@example.com",
-    "name": "Steve Kerr",
-    "role": "COACH",
+    "id": "af8e845b-65ee-4611-b424-7c5dae90c1f9",
+    "email": "gloria.james@example.com",
+    "name": "Gloria James",
+    "role": "PARENT",
     "profilePictureUrl": "https://example.test/avatars/me.jpg",
     "notifyOnReplies": true,
-    "createdAt": "2026-10-04T03:01:22.413Z",
+    "createdAt": "2026-10-04T03:01:22.449Z",
     "leagueAdminOf": [],
     "guardianOf": [
       {
-        "childId": "40000000-0000-4000-a000-000000000301",
-        "childName": "Child Example",
+        "childId": "94d385be-be74-48b4-a102-f04917906137",
+        "childName": "LeBron James",
+        "childDeletedAt": null,
+        "relationship": "MOTHER",
+        "isPrimary": true,
+        "isManaged": false,
+        "teams": [
+          {
+            "id": "20000000-0000-4000-a000-000000000002",
+            "name": "Lakers"
+          }
+        ]
+      },
+      {
+        "childId": "40000000-0000-4000-a000-000000000109",
+        "childName": "Bryce James",
+        "childDeletedAt": null,
         "relationship": "MOTHER",
         "isPrimary": true,
         "isManaged": true,
         "teams": [
           {
-            "id": "20000000-0000-4000-a000-000000000001",
-            "name": "Warriors"
+            "id": "20000000-0000-4000-a000-000000000002",
+            "name": "Lakers"
           }
         ]
       }

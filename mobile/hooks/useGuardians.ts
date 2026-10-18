@@ -15,9 +15,8 @@ export interface GuardianRow {
   id: string;
   userId: string;
   name: string;
-  /** Set when the guardian's account was deleted (#813); render via `displayName`. Older API builds omit it. */
-  deletedAt?: string | null;
-  isManaged?: boolean;
+  /** Set when the guardian's account was deleted (#813); render via `displayName`. */
+  deletedAt: string | null;
   /** Only present when the caller has `canManageRoster` on the team. */
   email?: string | null;
   relationship: GuardianRelationship;

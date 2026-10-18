@@ -30,7 +30,7 @@ jest.mock('../../hooks/useTeams', () => ({
       id: 't1',
       name: 'Warriors',
       staff: [{ userId: 'coach-1', role: { canManageRoster: true } }],
-      members: [{ playerId: 'steph', player: { id: 'steph', name: 'Steph Curry' } }],
+      members: [{ playerId: 'steph', player: { id: 'steph', name: 'Steph Curry', isManaged: false, deletedAt: null } }],
     },
     isLoading: false,
     error: null,
@@ -70,7 +70,6 @@ describe('PlayerGuardiansScreen guardian names', () => {
         userId: 'gone',
         name: 'Deleted user',
         deletedAt: '2026-09-01T00:00:00.000Z',
-        isManaged: false,
         email: null,
         relationship: 'MOTHER',
         isPrimary: true,
@@ -87,7 +86,7 @@ describe('PlayerGuardiansScreen guardian names', () => {
 
   it('names a live guardian by name', () => {
     mockGuardians = [
-      { id: 'g2', userId: 'sonya', name: 'Sonya Curry', relationship: 'MOTHER', isPrimary: true, createdAt: '2026-08-01T00:00:00.000Z' },
+      { id: 'g2', userId: 'sonya', name: 'Sonya Curry', deletedAt: null, relationship: 'MOTHER', isPrimary: true, createdAt: '2026-08-01T00:00:00.000Z' },
     ];
     const { getByText } = render(<PlayerGuardiansScreen />);
     expect(getByText('Sonya Curry')).toBeTruthy();

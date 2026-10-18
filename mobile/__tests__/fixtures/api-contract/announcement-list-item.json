@@ -1,0 +1,17 @@
+{
+  "id": "cc66b01a-262a-4579-838b-e1a5c8f73d82",
+  "teamId": "20000000-0000-4000-a000-000000000001",
+  "authorId": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+  "title": "Practice moved",
+  "body": "Practice is at 5pm.",
+  "createdAt": "2026-10-18T04:08:54.028Z",
+  "author": {
+    "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+    "name": "Steve Kerr",
+    "isManaged": false,
+    "deletedAt": null
+  },
+  "_count": {
+    "replies": 1
+  }
+}

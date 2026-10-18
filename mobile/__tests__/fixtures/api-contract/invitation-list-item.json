@@ -1,6 +1,6 @@
 [
   {
-    "id": "c54a59c2-b6d7-412e-a84b-81a6084a80fd",
+    "id": "eb12c2f4-2223-4afc-9880-8fb0d3b006dc",
     "teamId": "20000000-0000-4000-a000-000000000002",
     "playerId": "40000000-0000-4000-a000-000000000221",
     "invitedById": "c9eee46b-1614-458b-843d-970b1ded0f62",
@@ -8,9 +8,9 @@
     "jerseyNumber": null,
     "position": null,
     "message": null,
-    "expiresAt": "2026-10-11T16:26:06.149Z",
-    "createdAt": "2026-10-04T16:26:06.149Z",
-    "updatedAt": "2026-10-05T16:26:06.153Z",
+    "expiresAt": "2026-10-24T03:32:35.082Z",
+    "createdAt": "2026-10-17T03:32:35.082Z",
+    "updatedAt": "2026-10-18T03:32:35.101Z",
     "acceptedAt": null,
     "rejectedAt": null,
     "team": {
@@ -28,18 +28,20 @@
     "player": {
       "id": "40000000-0000-4000-a000-000000000221",
       "name": "Iris Invited",
-      "email": "iris.invited@example.com",
-      "deletedAt": null
+      "isManaged": true,
+      "deletedAt": null,
+      "email": "iris.invited@example.com"
     },
     "invitedBy": {
       "id": "c9eee46b-1614-458b-843d-970b1ded0f62",
       "name": "Frank Vogel",
-      "email": "frank.vogel@example.com",
-      "deletedAt": null
+      "isManaged": false,
+      "deletedAt": null,
+      "email": "frank.vogel@example.com"
     }
   },
   {
-    "id": "c54a59c2-b6d7-412e-a84b-81a6084a80fd",
+    "id": "eb12c2f4-2223-4afc-9880-8fb0d3b006dc",
     "teamId": "20000000-0000-4000-a000-000000000002",
     "playerId": "40000000-0000-4000-a000-000000000221",
     "invitedById": "c9eee46b-1614-458b-843d-970b1ded0f62",
@@ -47,9 +49,9 @@
     "jerseyNumber": null,
     "position": null,
     "message": null,
-    "expiresAt": "2026-10-11T16:26:06.149Z",
-    "createdAt": "2026-10-04T16:26:06.149Z",
-    "updatedAt": "2026-10-05T16:26:06.153Z",
+    "expiresAt": "2026-10-24T03:32:35.082Z",
+    "createdAt": "2026-10-17T03:32:35.082Z",
+    "updatedAt": "2026-10-18T03:32:35.101Z",
     "acceptedAt": null,
     "rejectedAt": null,
     "team": {
@@ -67,14 +69,16 @@
     "player": {
       "id": "40000000-0000-4000-a000-000000000221",
       "name": "Iris Invited",
-      "email": null,
-      "deletedAt": null
+      "isManaged": true,
+      "deletedAt": null,
+      "email": null
     },
     "invitedBy": {
       "id": "c9eee46b-1614-458b-843d-970b1ded0f62",
       "name": "Frank Vogel",
-      "email": null,
-      "deletedAt": null
+      "isManaged": false,
+      "deletedAt": null,
+      "email": null
     }
   }
 ]

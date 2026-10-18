@@ -74,7 +74,7 @@ const makeMember = (
   playerId,
   jerseyNumber: 12,
   position: 'Guard',
-  player: { id: playerId, name, isManaged: true, email: `${playerId}@exmaple.com`, ...player },
+  player: { id: playerId, name, isManaged: true, deletedAt: null, email: `${playerId}@exmaple.com`, ...player },
 });
 
 const bounced = { emailSuppressedAt: BOUNCED_AT, emailSuppressedReason: 'BOUNCE' as const };
@@ -87,7 +87,7 @@ const baseTeam = (): Team => ({
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
   season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
-  staff: [{ id: 'ts-coach', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach' }, role: headRole }],
+  staff: [{ id: 'ts-coach', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', isManaged: false, deletedAt: null }, role: headRole }],
   members: [
     makeMember('invited', 'Ivy Invited', bounced),
     makeMember('expired', 'Eli Expired', bounced),

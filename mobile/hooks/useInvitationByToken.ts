@@ -11,11 +11,8 @@ export interface TeamInvitationByToken {
   status: InvitationByTokenStatus;
   teamName: string;
   inviterName: string;
-  /**
-   * Set when the inviter's account was deleted (#642); render the inviter via
-   * `displayName`. Older API builds omit it.
-   */
-  inviterDeletedAt?: string | null;
+  /** Set when the inviter's account was deleted (#642); render the inviter via `displayName`. */
+  inviterDeletedAt: string | null;
   position: string | null;
   jerseyNumber: number | null;
   message: string | null;
@@ -28,12 +25,12 @@ export interface GuardianInvitationByToken {
   id: string;
   status: InvitationByTokenStatus;
   childName: string;
-  /** Child's tombstone state (#813); render via `childDisplayName`. Older API builds omit it. */
-  childDeletedAt?: string | null;
+  /** Child's tombstone state (#813); render via `childDisplayName`. */
+  childDeletedAt: string | null;
   teamName: string | null;
   inviterName: string;
-  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. Older API builds omit it. */
-  inviterDeletedAt?: string | null;
+  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. */
+  inviterDeletedAt: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }

@@ -43,7 +43,7 @@ function team(id: string, myRoleType?: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_
     createdAt: '2026-01-01',
     updatedAt: '2026-01-01',
     staff: myRoleType
-      ? [{ id: `st-${id}`, userId: 'me', user: { id: 'me', name: 'Me' }, role: role(myRoleType) }]
+      ? [{ id: `st-${id}`, userId: 'me', user: { id: 'me', name: 'Me', isManaged: false, deletedAt: null }, role: role(myRoleType) }]
       : [],
   };
 }
@@ -67,7 +67,7 @@ describe('reportTeamUserProperties', () => {
   it('reads only the caller\'s own staff rows', () => {
     const other: Team = {
       ...team('x'),
-      staff: [{ id: 'st', userId: 'someone-else', user: { id: 'someone-else', name: 'Other' }, role: team('x', 'HEAD_COACH').staff![0].role }],
+      staff: [{ id: 'st', userId: 'someone-else', user: { id: 'someone-else', name: 'Other', isManaged: false, deletedAt: null }, role: team('x', 'HEAD_COACH').staff![0].role }],
     };
     reportTeamUserProperties([other, team('y', 'ASSISTANT_COACH')], 2);
     expect(mockedSet).toHaveBeenCalledWith({ team_count: 2, is_head_coach: false, is_assistant_coach: true });
