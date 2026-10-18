@@ -34,8 +34,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { loadAcceptList } from './accept-list.mjs';
 
 const USAGE =
   'usage: check-override-ranges.mjs <package> [<package> ...]\n' +
@@ -63,12 +63,8 @@ function loadSemver() {
     process.exit(2);
   }
 }
-const acceptFile =
-  process.env.ACCEPTED_OVERRIDES_FILE ?? join(dirname(fileURLToPath(import.meta.url)), 'accepted-overrides.json');
-const acceptedBySide = JSON.parse(readFileSync(acceptFile, 'utf8'));
-const sides = Object.keys(acceptedBySide).filter((k) => !k.startsWith('_'));
-const side = basename(process.cwd());
-if (!sides.includes(side) || !existsSync(join(process.cwd(), 'package-lock.json'))) {
+const { entries: accepted, sides } = loadAcceptList('accepted-overrides.json', 'ACCEPTED_OVERRIDES_FILE');
+if (!existsSync(join(process.cwd(), 'package-lock.json'))) {
   process.stderr.write(
     `check-override-ranges.mjs: run from a package directory (${sides.join(', ')}) that has a package-lock.json; cwd is ${process.cwd()}\n`,
   );
@@ -76,7 +72,6 @@ if (!sides.includes(side) || !existsSync(join(process.cwd(), 'package-lock.json'
 }
 const semver = loadSemver();
 const { packages } = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
-const accepted = acceptedBySide[side];
 
 // Node's lookup: <consumer>/node_modules/<name>, then each ancestor's node_modules, then the root.
 function resolvePath(consumer, name) {

@@ -9,83 +9,99 @@
 //   node ../.github/scripts/check-audit-floor.mjs --report a.json # reads a saved report (tests)
 //
 // npm audit has no allow-list of its own, so this reads its JSON: every advisory object in a
-// vulnerability's `via` list, keyed by the GHSA id at the end of its URL. Output: one `FAIL`,
-// `accepted` or `stale` line per advisory. Exit 0 when nothing fails, 1 when an advisory fails,
-// 2 when the audit itself could not run (no network, bad report): the gate fails closed.
-// Tests point it at their own allow-list through ACCEPTED_ADVISORIES_FILE.
+// vulnerability's `via` list, one per (GHSA id at the end of its URL, package). An allow-list entry
+// matches on `ghsa` AND `package`, and pins the vulnerable `range` it was reviewed against (like
+// `gets` in accepted-overrides.json): when npm audit reports a different range the advisory has
+// moved (usually a patch was published) and it FAILs until a human re-reviews the entry.
+//
+// Output: one `FAIL`, `accepted` or `stale` line per advisory or entry. Exit 0 when nothing fails,
+// 1 when something fails, 2 when the gate could not run (no network, npm missing, unreadable
+// file): it fails closed. Tests point it at their own list through ACCEPTED_ADVISORIES_FILE.
 // Rules: docs/automation/daily-upgrade-scan.md, "Audit floor gate".
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { basename, dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fail, loadAcceptList } from './accept-list.mjs';
 
 const FAILING = new Set(['high', 'critical']);
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const ALLOW_FILE =
-  process.env.ACCEPTED_ADVISORIES_FILE ?? join(dirname(fileURLToPath(import.meta.url)), 'accepted-advisories.json');
-const ALLOW_NAME = relative(ROOT, ALLOW_FILE).startsWith('..') ? ALLOW_FILE : relative(ROOT, ALLOW_FILE);
-
-function die(message) {
-  process.stderr.write(`check-audit-floor: ${message}\n`);
-  process.exit(2);
-}
 
 const args = process.argv.slice(2);
-const reportAt = args.indexOf('--report');
-if (args.length !== 0 && !(args.length === 2 && reportAt === 0)) {
-  die('usage: check-audit-floor.mjs [--report <npm-audit.json>]');
+if (args.length !== 0 && !(args.length === 2 && args[0] === '--report')) {
+  fail('usage: check-audit-floor.mjs [--report <npm-audit.json>]');
 }
-
-const side = basename(process.cwd());
-const allowList = JSON.parse(readFileSync(ALLOW_FILE, 'utf8'));
-if (!Array.isArray(allowList[side])) die(`no "${side}" key in ${ALLOW_NAME}; run from backend/, web/ or mobile/`);
-const accepted = new Map(allowList[side].map((entry) => [entry.ghsa, entry]));
+const { side, entries, label } = loadAcceptList('accepted-advisories.json', 'ACCEPTED_ADVISORIES_FILE');
 
 let raw;
-if (reportAt === 0) {
-  raw = readFileSync(args[1], 'utf8');
+if (args[0] === '--report') {
+  try {
+    raw = readFileSync(args[1], 'utf8');
+  } catch (error) {
+    fail(`cannot read the report ${args[1]}: ${error.message}`);
+  }
 } else {
   try {
     raw = execFileSync('npm', ['audit', '--omit=dev', '--json'], { encoding: 'utf8', maxBuffer: 64 << 20 });
   } catch (error) {
-    raw = error.stdout; // npm audit exits 1 whenever it finds anything; the JSON is still on stdout
+    // npm audit exits 1 whenever it finds anything; the JSON is still on stdout.
+    if (typeof error.stdout !== 'string' || error.stdout.trim() === '') {
+      const stderr = typeof error.stderr === 'string' ? error.stderr.trim() : '';
+      fail(`npm audit produced no output (${error.code ?? `exit ${error.status ?? error.signal}`})${stderr ? `: ${stderr}` : ''}`);
+    }
+    if (typeof error.stderr === 'string' && error.stderr.trim()) process.stderr.write(error.stderr);
+    raw = error.stdout;
   }
 }
 let report;
 try {
   report = JSON.parse(raw);
 } catch {
-  die('npm audit did not return JSON');
+  fail(`npm audit did not return JSON: ${String(raw).slice(0, 200)}`);
 }
-if (report.error || !report.vulnerabilities) die(`npm audit failed: ${JSON.stringify(report.error ?? report)}`);
+if (report.error || !report.vulnerabilities) {
+  const detail = report.message ?? report.error?.summary ?? JSON.stringify(report.error ?? report);
+  fail(`npm audit failed: ${detail}${report.error?.detail ? ` (${report.error.detail})` : ''}`);
+}
 
+const ghsaOf = (via) => String(via.url ?? '').split('/').pop() || `npm-${via.source}`;
 const advisories = new Map();
 for (const vulnerability of Object.values(report.vulnerabilities)) {
   for (const via of vulnerability.via) {
     if (typeof via !== 'object' || !FAILING.has(via.severity)) continue;
-    const id = String(via.url ?? '').split('/').pop() || `npm-${via.source}`;
-    advisories.set(id, via);
+    advisories.set(`${ghsaOf(via)} ${via.name}`, via);
   }
 }
+const entryKey = (entry) => `${entry.ghsa} ${entry.package}`;
+const accepted = new Map(entries.map((entry) => [entryKey(entry), entry]));
 
 let failed = 0;
-for (const [id, via] of [...advisories].sort(([a], [b]) => a.localeCompare(b))) {
+for (const [key, via] of [...advisories].sort(([a], [b]) => a.localeCompare(b))) {
+  const id = ghsaOf(via);
   const where = `${via.name} ${via.range} (${via.severity}): ${via.title}`;
-  if (accepted.has(id)) {
-    process.stdout.write(`accepted ${id} ${where} (${ALLOW_NAME})\n`);
-  } else {
+  const entry = accepted.get(key);
+  if (!entry) {
     failed += 1;
     process.stdout.write(`FAIL ${id} ${where} ${via.url ?? ''}\n`);
+  } else if (entry.range !== via.range) {
+    failed += 1;
+    process.stdout.write(
+      `FAIL ${id} ${via.name}: the advisory moved. ${label} accepts range "${entry.range}" but npm audit now reports "${via.range}"; ` +
+        `a patched version has usually been published: apply it, or re-review the entry and update its range (${via.url ?? ''})\n`,
+    );
+  } else {
+    process.stdout.write(`accepted ${id} ${where} (${label})\n`);
   }
 }
-for (const id of accepted.keys()) {
-  if (!advisories.has(id)) process.stdout.write(`stale ${id} is listed for ${side} in ${ALLOW_NAME} but npm audit no longer reports it\n`);
+for (const [key, entry] of accepted) {
+  if (!advisories.has(key)) {
+    process.stdout.write(
+      `stale ${entry.ghsa} ${entry.package} is listed for ${side} in ${label} but npm audit no longer reports it for that package\n`,
+    );
+  }
 }
 if (failed > 0) {
   process.stdout.write(
-    `\n${failed} high or critical advisor${failed === 1 ? 'y' : 'ies'} in ${side}'s production dependencies. ` +
+    `\n${failed} high or critical advisor${failed === 1 ? 'y' : 'ies'} failed in ${side}'s production dependencies. ` +
       `Lift the resolved version above the advisory's first patched version (an overrides entry, docs/automation/daily-upgrade-scan.md "Override shape"), ` +
-      `or, only when no patched version exists, list it for ${side} in ${ALLOW_NAME} in a reviewed PR.\n`,
+      `or, only when no patched version exists, list it for ${side} in ${label} in a reviewed PR.\n`,
   );
   process.exit(1);
 }

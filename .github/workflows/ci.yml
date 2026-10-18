@@ -81,7 +81,8 @@ jobs:
       
       - name: Install dependencies
         working-directory: backend
-        run: npm ci
+        # --no-audit: the audit floor step below is the one audit call.
+        run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
         # #924: fails when the lockfile resolves a production dependency under a
@@ -124,7 +125,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: mobile
-        run: npm ci
+        # --no-audit: the audit floor step below is the one audit call.
+        run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
         # #924: fails when the lockfile resolves a production dependency under a
@@ -162,7 +164,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        # --no-audit: the audit floor step below is the one audit call.
+        run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
         # #924: fails when the lockfile resolves a production dependency under a

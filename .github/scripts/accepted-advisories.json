@@ -1,17 +1,19 @@
 {
-  "_doc": "High or critical advisories the audit floor gate (check-audit-floor.mjs) accepts on purpose, keyed by package directory (the keys are also the only directories the script runs from). Fields: `ghsa` the advisory id as `npm audit` reports it; `package` the vulnerable package; `why` the reasoning (why no override can fix it); `revisit` the condition that retires the entry. A listed advisory prints as `accepted` and does not fail the gate; a listed advisory the audit no longer reports prints as `stale`, for a human to remove in a reviewed PR. The scan never edits this file. Tests point the script at their own copy through ACCEPTED_ADVISORIES_FILE. Reasoning: docs/automation/daily-upgrade-scan.md, 'Audit floor gate'.",
+  "_doc": "High or critical advisories the audit floor gate (check-audit-floor.mjs) accepts on purpose, keyed by package directory (the keys are also the only directories the script runs from). Fields: `ghsa` the advisory id as `npm audit` reports it; `package` the vulnerable package (an entry matches on ghsa AND package); `range` the vulnerable range exactly as `npm audit` reported it when the entry was reviewed (when npm audit reports a different range the advisory has moved, usually because a patch was published, and the gate FAILs until a human re-reviews the entry); `why` the reasoning (why no override can fix it); `revisit` the condition that retires the entry. A matching advisory prints as `accepted` and does not fail the gate; an entry the audit no longer reports prints as `stale`, for a human to remove in a reviewed PR. The scan never edits this file. Tests point the script at their own copy through ACCEPTED_ADVISORIES_FILE. Reasoning: docs/automation/daily-upgrade-scan.md, 'Audit floor gate'.",
   "backend": [],
   "web": [],
   "mobile": [
     {
       "ghsa": "GHSA-vfj7-8cjw-p6xm",
       "package": "braces",
+      "range": "<=3.0.3",
       "why": "Stack-exhaustion DoS through deeply nested brace patterns. Every published braces (<= 3.0.3, the latest) is affected and the advisory lists no patched version, so no override can lift it. In the production tree it arrives through metro's micromatch (build-time tooling under @sentry/react-native and expo), never in the app bundle, and only parses patterns from our own config. The GitHub alert was dismissed by the owner on 2026-10-18 (#924).",
       "revisit": "When braces publishes a release the advisory names as patched: add an override (or take the upstream bump) and remove this entry in the same PR."
     },
     {
       "ghsa": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
+      "range": "<=1.4.0",
       "why": "RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements. Every published node-forge (<= 1.4.0, the latest) is affected and the advisory lists no patched version. It arrives through @expo/code-signing-certificates (expo-updates and @expo/cli), which this app does not use: EAS Update code signing is not configured. The GitHub alert was dismissed by the owner on 2026-10-18 (#924).",
       "revisit": "When node-forge publishes a release the advisory names as patched, or Expo drops node-forge: add an override (or take the upstream bump) and remove this entry in the same PR."
     }
