@@ -98,9 +98,10 @@ Step 2a and the Step 3 gate):
   and it decides on **declared specs, never resolved versions**:
   `node ../.github/scripts/check-override-ranges.mjs --overrides` prints `live` or `DEAD` per key
   (nested blocks at every depth), live when some lockfile entry still declares the package as a
-  regular, optional or peer dependency, or through an `npm:` alias, with a spec that intersects
-  the key's range; inside a nested `"<parent>": { … }` block only the parent copies and their
-  dependency graph count (`bin` names never do). The resolved version is the wrong signal because
+  regular, optional or installed peer dependency with a spec that intersects the key's range (an
+  `npm:` alias is matched under the alias name, never the aliased package, as npm does); inside a
+  nested `"<parent>": { … }` block only the parent copies and their dependency graph count (`bin`
+  names and uninstalled peers never do). `STALE` and `ORPHAN` lines are for a human, never the scan. The resolved version is the wrong signal because
   an override changes it: `npm ls "<pkg>@<range>"` prints `(empty)` for a working cross-major
   redirect, which is how the scan retired the accepted `deepmerge-ts@^7` entry below (PR #919,
   2026-10-18, deployed unattended, GHSA-ggr8-5vv4-36mx reopened; PR #923 restored it and replaced

@@ -22,7 +22,16 @@ import path from 'path';
 const ROOT = path.resolve(__dirname, '../../..');
 const SCRIPT = path.join(ROOT, '.github/scripts/check-override-ranges.mjs');
 const REAL_ACCEPT_FILE = path.join(ROOT, '.github/scripts/accepted-overrides.json');
-const SEMVER_DIR = path.dirname(require.resolve('semver/package.json'));
+// The script's own lookup order: this package's node_modules, then npm's bundled copy.
+function semverDir(): string {
+  try {
+    return path.dirname(require.resolve('semver/package.json'));
+  } catch {
+    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
+    return path.join(globalRoot, 'npm', 'node_modules', 'semver');
+  }
+}
+const SEMVER_DIR = semverDir();
 
 type LockEntry = {
   name?: string;
@@ -142,16 +151,12 @@ describe('range mode', () => {
     expect(floor.stdout).toMatch(/0 cross-major mismatch\(es\), 0 accepted, 1 same-major floor/);
   });
 
-  it('counts a peer edge as a consumer, but not an optional peer that is not installed', () => {
+  it('counts an installed peer edge as a consumer, but not a peer that nothing installed', () => {
     const f = fixture(
       { foo: '^2.0.0' },
       {
         'node_modules/host': { version: '1.0.0', peerDependencies: { foo: '^1' } },
-        'node_modules/optional-host': {
-          version: '1.0.0',
-          peerDependencies: { ghost: '^1' },
-          peerDependenciesMeta: { ghost: { optional: true } },
-        },
+        'node_modules/optional-host': { version: '1.0.0', peerDependencies: { ghost: '^1' } },
         'node_modules/foo': { version: '2.0.0' },
       },
     );
@@ -285,7 +290,9 @@ describe('--overrides liveness', () => {
       [ACCEPT_DEEPMERGE],
     );
     const result = run(viaOther.dir, ['--overrides'], viaOther.acceptFile);
-    expect(result.stdout).toContain('STALE "deepmerge-ts@^7"  (accepted GHSA-TEST-0001, but node_modules/@prisma/config no longer declares it; still declared by node_modules/other declares deepmerge-ts@7.1.5');
+    expect(result.stdout).toContain(
+      'STALE "deepmerge-ts@^7"  (accepted GHSA-TEST-0001, but node_modules/@prisma/config no longer declares it; other declarers: node_modules/other declares deepmerge-ts@7.1.5',
+    );
     expect(result.stdout).toContain('0 live, 1 stale, 0 dead override key(s)');
 
     const nobody = fixture(
@@ -310,7 +317,38 @@ describe('--overrides liveness', () => {
     const { stdout } = run(f.dir, ['--overrides'], f.acceptFile);
     expect(stdout).toContain('live  "eas-cli" > "deepmerge-ts@^7"  <- node_modules/eas-cli declares deepmerge-ts@7.1.5');
     expect(stdout).toContain('ORPHAN "deepmerge-ts@^7"  (accepted GHSA-TEST-0001, but package.json#overrides has no such key');
-    expect(stdout).toContain('1 live, 1 stale, 0 dead override key(s)');
+    expect(stdout).toContain('1 live, 0 stale, 0 dead override key(s), 1 orphan accept entry');
+  });
+
+  it('does not call a block-shaped accepted key ORPHAN, and accepts only its `.` child', () => {
+    const f = fixture(
+      { 'foo@^1': { '.': '^2.0.0', bar: '^3' } },
+      {
+        'node_modules/consumer': { version: '1.0.0', dependencies: { foo: '^1.0.0' } },
+        'node_modules/foo': { version: '2.0.0', dependencies: { bar: '^3.1.0' } },
+        'node_modules/bar': { version: '3.1.0' },
+      },
+      [{ ...ACCEPT_DEEPMERGE, override: 'foo@^1', consumer: 'node_modules/foo', gets: '^2.0.0' }],
+    );
+    const { stdout } = run(f.dir, ['--overrides'], f.acceptFile);
+    expect(stdout).not.toContain('ORPHAN');
+    expect(stdout).toContain('live  "foo@^1" > "."  (accepted GHSA-TEST-0001; node_modules/foo declares foo@2.0.0)');
+    expect(stdout).toContain('live  "foo@^1" > "bar"  <- node_modules/foo declares bar@^3.1.0');
+  });
+
+  it('ignores a peer edge that nothing installed, in both modes', () => {
+    const f = fixture(
+      { react: '^19.2.0' },
+      {
+        'node_modules/studio': { version: '1.0.0', peerDependencies: { react: '^18 || ^19' } },
+        'node_modules/host': { version: '1.0.0', peerDependencies: { installed: '^1' } },
+        'node_modules/installed': { version: '1.5.0' },
+      },
+    );
+    expect(run(f.dir, ['--overrides'], f.acceptFile).stdout).toContain('DEAD  "react"');
+    const range = run(f.dir, ['react', 'installed'], f.acceptFile);
+    expect(range.status).toBe(0);
+    expect(range.stdout).not.toContain('react@');
   });
 
   it('counts an unsupported override value separately from DEAD', () => {

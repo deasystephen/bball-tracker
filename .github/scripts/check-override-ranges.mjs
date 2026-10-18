@@ -9,8 +9,8 @@
 //    raised to 5.1.9) and is listed, not failed. An `overrides` entry hides that mismatch from
 //    `npm ls` (it prints "overridden", never "invalid"), so a root override that drags a newer
 //    major down only shows up as a runtime TypeError later (#779). Consumers are every lockfile
-//    entry's dependencies, optionalDependencies and peerDependencies (an optional peer that is not
-//    installed is skipped). Run after `npm install`:
+//    entry's dependencies, optionalDependencies and peerDependencies (a peer that nothing installed
+//    is skipped). Run after `npm install`:
 //      node ../.github/scripts/check-override-ranges.mjs minimatch brace-expansion
 //    A mismatch listed in accepted-overrides.json (same directory as this script, keyed by package
 //    directory) prints as `accepted` and does not fail the gate, so exit status alone is the gate.
@@ -18,8 +18,9 @@
 // 2. Override liveness (`--overrides`, no package names): prints one `live` or `DEAD` line per key
 //    in package.json#overrides, nested blocks included. A key is live when some lockfile entry
 //    still DECLARES the package (dependencies, optionalDependencies, peerDependencies, the root's
-//    devDependencies; an `npm:` alias counts under the ALIAS name with the aliased range, which is
-//    what npm matches an override against) with a spec that intersects the key's range; for a
+//    devDependencies, skipping a peer that nothing installed; an `npm:` alias counts under the
+//    ALIAS name with the aliased range, which is what npm matches an override against, never under
+//    the aliased package) with a spec that intersects the key's range; for a
 //    nested `"<parent>": { … }` block only the parent copies (by the key range or the block's `.`
 //    value) and their dependency graph count, at every depth. It never looks at resolved versions:
 //    a version-keyed override that redirects out of its own range (the backend's `deepmerge-ts@^7`
@@ -124,15 +125,19 @@ function declared(path) {
   declaredCache.set(path, out);
   return out;
 }
-// A peer that is optional (peerDependenciesMeta) and not installed is no edge at all.
-function unresolvedOptionalPeer(path, name) {
+// A peer edge that nothing installed (legitimate under `legacy-peer-deps=true`, optional or not)
+// is no edge at all: npm has nothing to override and the gate has nothing to compare.
+function peerOnly(path, name) {
   const entry = packages[path];
   return (
     entry.peerDependencies?.[name] !== undefined &&
     entry.dependencies?.[name] === undefined &&
     entry.optionalDependencies?.[name] === undefined &&
-    entry.peerDependenciesMeta?.[name]?.optional === true
+    !(path === '' && entry.devDependencies?.[name] !== undefined)
   );
+}
+function uninstalledPeer(path, name) {
+  return peerOnly(path, name) && resolvePath(path, name) === undefined;
 }
 
 if (liveness) {
@@ -149,10 +154,11 @@ if (liveness) {
     const found = [];
     for (const path of scope) {
       const spec = declared(path)[name];
-      if (spec !== undefined && keeps(spec, range)) found.push(`${path || '(root)'} declares ${name}@${spec}`);
+      if (spec !== undefined && keeps(spec, range) && !uninstalledPeer(path, name)) found.push({ path, name, spec });
     }
     return found;
   }
+  const describe = ({ path, name, spec }) => `${path || '(root)'} declares ${name}@${spec}`;
   // The parent and everything reachable from it through declared dependencies, memoised.
   const graphs = new Map();
   function graphFrom(root) {
@@ -190,20 +196,22 @@ if (liveness) {
 
   let live = 0;
   let stale = 0;
+  let orphan = 0;
   let dead = 0;
   let unsupported = 0;
   const visited = new Set();
   // An accepted key stays live through its LISTED consumer only; any other declarer is reported
   // but does not make the acceptance hold.
   function report(label, found, accept) {
-    const shown = found.slice(0, 3).join('; ') + (found.length > 3 ? `; +${found.length - 3} more` : '');
-    const viaConsumer = accept && found.some((line) => line.startsWith(`${accept.consumer} declares `));
+    const shown =
+      found.slice(0, 3).map(describe).join('; ') + (found.length > 3 ? `; +${found.length - 3} more` : '');
+    const viaConsumer = accept && found.some((d) => d.path === accept.consumer);
     if (accept && viaConsumer) {
       process.stdout.write(`live  ${label}  (accepted ${accept.ghsa}; ${shown})\n`);
       live += 1;
     } else if (accept) {
       process.stdout.write(
-        `STALE ${label}  (accepted ${accept.ghsa}, but ${accept.consumer} no longer declares it${found.length ? `; still declared by ${shown}` : ''}: retire it by hand together with its accepted-overrides.json entry)\n`,
+        `STALE ${label}  (accepted ${accept.ghsa}, but ${accept.consumer} no longer declares it${found.length ? `; other declarers: ${shown}` : ''}: retire it by hand together with its accepted-overrides.json entry)\n`,
       );
       stale += 1;
     } else if (found.length) {
@@ -230,13 +238,15 @@ if (liveness) {
       unsupported += 1;
       return;
     }
+    if (topLevel) visited.add(key); // an accept entry may name a block-shaped key; only its `.` is accepted
     const parent = parseKey(key);
     const parents = parentCopies(scope, parent, value['.']);
     const graph = [...new Set(parents.flatMap(graphFrom))];
     for (const [childKey, childValue] of Object.entries(value)) {
       const childLabel = `${label} > "${childKey}"`;
       if (childKey === '.') {
-        report(childLabel, parents.map((p) => `${p} is ${parent.name}@${packages[p].version}`));
+        const accept = topLevel ? accepted.find((a) => a.override === key) : undefined;
+        report(childLabel, parents.map((p) => ({ path: p, name: parent.name, spec: packages[p].version })), accept);
         continue;
       }
       walk(childLabel, childKey, childValue, graph);
@@ -249,12 +259,12 @@ if (liveness) {
   for (const a of accepted) {
     if (visited.has(a.override)) continue;
     process.stdout.write(
-      `ORPHAN "${a.override}"  (accepted ${a.ghsa}, but package.json#overrides has no such key: remove the accepted-overrides.json entry)\n`,
+      `ORPHAN "${a.override}"  (accepted ${a.ghsa}, but package.json#overrides has no such key: a human removes the accepted-overrides.json entry)\n`,
     );
-    stale += 1;
+    orphan += 1;
   }
   process.stdout.write(
-    `${live} live, ${stale} stale, ${dead} dead override key(s)${unsupported ? `, ${unsupported} unsupported` : ''}\n`,
+    `${live} live, ${stale} stale, ${dead} dead override key(s)${orphan ? `, ${orphan} orphan accept entr${orphan === 1 ? 'y' : 'ies'}` : ''}${unsupported ? `, ${unsupported} unsupported` : ''}\n`,
   );
   process.exit(0);
 }
@@ -269,7 +279,7 @@ for (const [path, entry] of Object.entries(packages)) {
     const range = declaredHere[name];
     if (!range || !semver.validRange(range)) continue;
     const resolved = resolve(path, name);
-    if (!resolved && (entry.optionalDependencies?.[name] || unresolvedOptionalPeer(path, name))) continue;
+    if (!resolved && (entry.optionalDependencies?.[name] || peerOnly(path, name))) continue;
     if (resolved && semver.satisfies(resolved.version, range)) continue;
     if (resolved && semver.intersects(range, `${semver.major(resolved.version)}.x`)) {
       floors += 1;

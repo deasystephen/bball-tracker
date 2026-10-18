@@ -118,15 +118,17 @@ skips `os`/`cpu`-gated optional packages such as sharp's `@img/*`, which would
 otherwise look absent), and needs no prior `npm install` (it falls back to
 npm's own `semver`). It prints one `live` or `DEAD` line per
 `package.json#overrides` key, nested blocks included. A key is live when some
-lockfile entry still DECLARES the package (regular, optional or peer
-dependency, or an `npm:` alias of it) with a spec that intersects the key's
-range; inside a nested `"<parent>": { … }` block only the parent copies and
-their dependency graph count. Keys listed in
-`.github/scripts/accepted-overrides.json` are never retired by the scan: they
-print `live (accepted …)` while something declares them, and `STALE` once
-nothing does, which you report under ⚠ Needs attention for a human to retire
-together with the accept entry (reasons: `docs/automation/daily-upgrade-scan.md`,
-"Accepted cross-major overrides"). The script never looks at resolved
+lockfile entry still DECLARES the package (as a regular, optional or installed
+peer dependency; an `npm:` alias is matched under the alias name, never the
+aliased package) with a spec that intersects the key's range; inside a nested
+`"<parent>": { … }` block only the parent copies and their dependency graph
+count. Keys listed in `.github/scripts/accepted-overrides.json` are never
+retired by the scan: they print `live (accepted …)` while their listed
+consumer declares them and `STALE` once it does not. `STALE`, `ORPHAN` (an
+accept entry whose key is gone) and `??` (an override value the script does
+not understand) all go under ⚠ Needs attention for a human; never act on them
+and never edit the accept file (reasons:
+`docs/automation/daily-upgrade-scan.md`, "Accepted cross-major overrides"). The script never looks at resolved
 versions, and neither may you: a version-keyed override that redirects out of
 its own range (`deepmerge-ts@^7` → 8.0.2) makes `npm ls "<pkg>@<range>"` print
 `(empty)` precisely because it works. Do not substitute an `npm ls` probe for
