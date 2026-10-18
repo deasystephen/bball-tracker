@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { displayName } from '../../../lib/display-name';
+import { childDisplayName, inviterDisplayName } from '../../../lib/display-name';
 import { acceptInvitationByTokenUrl } from '../../../lib/api-urls';
 import { formatExpiry } from '../../../lib/format-date';
 import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
@@ -35,9 +35,8 @@ export function InviteClient({ invitation, token }: Props) {
   const guardian = invitation.kind === 'guardian' ? invitation : null;
   const teamInvite = invitation.kind === 'guardian' ? null : invitation;
   // Tombstoned child: label from deletedAt, never from the stored name (#894).
-  const childLabel = guardian
-    ? displayName({ name: guardian.childName, deletedAt: guardian.childDeletedAt })
-    : '';
+  const childLabel = guardian ? childDisplayName(guardian) : '';
+  const childRole = guardian ? `${childLabel}'s ${RELATIONSHIP_LABEL[guardian.relationship]}` : '';
   // What the invitation is "to" / "for" in the status copy below.
   const subject = guardian ? (
     <>
@@ -77,7 +76,7 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="logo">✅</div>
           <p className="success-state">
             {guardian
-              ? `You are now ${childLabel}'s ${RELATIONSHIP_LABEL[guardian.relationship]}!`
+              ? `You are now ${childRole}!`
               : `You've joined ${invitation.teamName}!`}
           </p>
           <p>
@@ -147,7 +146,11 @@ export function InviteClient({ invitation, token }: Props) {
             This invitation {preposition} {subject} expired on{' '}
             {formatExpiry(invitation.expiresAt)}.
           </p>
-          <p className="footer">Ask the team coach to send a new invitation.</p>
+          <p className="footer">
+            {guardian?.childDeletedAt
+              ? "This player's record was removed."
+              : 'Ask the team coach to send a new invitation.'}
+          </p>
         </div>
       </main>
     );
@@ -160,7 +163,7 @@ export function InviteClient({ invitation, token }: Props) {
         <div className="logo">{guardian ? '👨‍👧' : '🏀'}</div>
         <h1>
           {guardian
-            ? `You're invited to be ${childLabel}'s ${RELATIONSHIP_LABEL[guardian.relationship]}`
+            ? `You're invited to be ${childRole}`
             : "You're invited to join a team!"}
         </h1>
 
@@ -191,7 +194,7 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="invite-meta-row">
             <span className="meta-label">From</span>
             <span className="meta-value">
-              {displayName({ name: invitation.inviterName, deletedAt: invitation.inviterDeletedAt })}
+              {inviterDisplayName(invitation)}
             </span>
           </div>
           {teamInvite?.position && (

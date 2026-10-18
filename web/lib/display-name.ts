@@ -17,3 +17,17 @@ export function displayName(user: NamedUser | null | undefined): string {
   if (!user) return '';
   return user.deletedAt ? STRINGS.deletedUser : user.name;
 }
+
+/*
+ * Flattened payloads carry a name string beside its tombstone timestamp
+ * (`inviterName` / `inviterDeletedAt`, `childName` / `childDeletedAt`, #813).
+ * These read them through `displayName`, mirroring the mobile helpers.
+ */
+
+export function inviterDisplayName(x: { inviterName: string; inviterDeletedAt?: string | null }): string {
+  return displayName({ name: x.inviterName, deletedAt: x.inviterDeletedAt });
+}
+
+export function childDisplayName(x: { childName: string; childDeletedAt?: string | null }): string {
+  return displayName({ name: x.childName, deletedAt: x.childDeletedAt });
+}
