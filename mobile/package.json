@@ -109,7 +109,9 @@
     "@oclif/core": {
       "js-yaml": "^3.15.2",
       "minimatch": "^10.2.5"
-    }
+    },
+    "moment": "^2.31.0",
+    "joi": "^17.13.8"
   },
   "private": true
 }
