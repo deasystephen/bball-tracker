@@ -67,6 +67,7 @@ jest.mock('../../hooks/useGuardians', () => ({
 
 const pending = {
   id: 'gi1',
+  teamId: 't1',
   invitedEmail: 'sonya.curry@example.test',
   relationship: 'MOTHER',
   expiresAt: new Date(Date.now() + 86400000).toISOString(),
@@ -222,6 +223,34 @@ describe('PlayerGuardiansScreen Resend (#420)', () => {
       )
     );
     expect(mockShowToast).not.toHaveBeenCalledWith(expect.anything(), 'success');
+  });
+
+  it("lists another team-season's pending invite without Resend (the supersede is team-scoped)", () => {
+    mockGuardianData = {
+      guardians: [],
+      pendingInvitations: [pending, { ...pending, id: 'gi-old', teamId: 'last-season', invitedEmail: 'dell.curry@example.test' }],
+    };
+    const screen = render(<PlayerGuardiansScreen />);
+
+    expect(screen.getByText('dell.curry@example.test')).toBeTruthy();
+    expect(screen.queryByTestId('guardian-resend-gi-old')).toBeNull();
+    expect(screen.getByTestId('guardian-resend-gi1')).toBeTruthy();
+  });
+
+  it('keeps the invite form button idle while a resend is in flight', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    mockInvite.mutateAsync.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const screen = render(<PlayerGuardiansScreen />);
+
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+    await waitFor(() => expect(screen.getByTestId('guardian-resending-gi1')).toBeTruthy());
+    fireEvent.press(screen.getByText('Invite a parent'));
+
+    const submit = screen.getByTestId('guardian-invite-submit');
+    expect(submit.props.accessibilityState).toEqual(expect.objectContaining({ disabled: false }));
+
+    finish({ invitation: pending, emailSent: true });
+    await waitFor(() => expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull());
   });
 
   it('renders no Resend for a viewer who cannot manage the roster', () => {

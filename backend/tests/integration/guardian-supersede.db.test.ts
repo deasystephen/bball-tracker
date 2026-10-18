@@ -280,4 +280,65 @@ describe('guardian resend (supersede, #420)', () => {
     expect((err as BadRequestError).message).toBe('A pending guardian invitation already exists for this email');
     expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
   });
+
+  it("expires a lapsed PENDING row on another team before inserting, as the plain invite's lazy expiry does", async () => {
+    const childId = await fx.user('lapsed-child', 'PLAYER');
+    await fx.member(childId, org);
+    const email = await emailOf(await fx.user('lapsed-parent', 'PLAYER'));
+    const lapsedOrg = await fx.org('lapsed-other');
+    await fx.member(childId, lapsedOrg);
+    const lapsed = await prisma.guardianInvitation.create({
+      data: {
+        token: randomBytes(32).toString('base64url'),
+        childId,
+        teamId: lapsedOrg.teamId,
+        invitedEmail: email,
+        relationship: 'MOTHER',
+        invitedById: coachId,
+        createdAt: new Date(Date.now() - 9 * DAY_MS),
+        expiresAt: new Date(Date.now() - 2 * DAY_MS),
+        status: 'PENDING',
+      },
+      select: { id: true },
+    });
+
+    const result = await GuardianService.inviteGuardian(
+      org.teamId,
+      childId,
+      { email, relationship: 'MOTHER', supersede: true },
+      coachId
+    );
+
+    expect(await rowsFor(childId)).toEqual([
+      { id: lapsed.id, status: 'EXPIRED' },
+      { id: result.id, status: 'PENDING' },
+    ]);
+  });
+
+  it('a resend refused by the cooldown for an address with no account creates no account', async () => {
+    const childId = await fx.user('noacct-child', 'PLAYER');
+    await fx.member(childId, org);
+    const email = `noacct.${fx.run}@example.test`;
+    const recent = await prisma.guardianInvitation.create({
+      data: {
+        token: randomBytes(32).toString('base64url'),
+        childId,
+        teamId: org.teamId,
+        invitedEmail: email,
+        relationship: 'FATHER',
+        invitedById: coachId,
+        createdAt: new Date(Date.now() - 20_000),
+        expiresAt: new Date(Date.now() + 7 * DAY_MS),
+        status: 'PENDING',
+      },
+      select: { id: true },
+    });
+
+    await expect(
+      GuardianService.inviteGuardian(org.teamId, childId, { email, relationship: 'FATHER', supersede: true }, coachId)
+    ).rejects.toBeInstanceOf(ResendCooldownError);
+
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
+    expect(await rowsFor(childId)).toEqual([{ id: recent.id, status: 'PENDING' }]);
+  });
 });

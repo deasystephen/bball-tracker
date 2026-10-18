@@ -423,9 +423,20 @@ describe('GuardianService', () => {
 
         // A live row would 400 without supersede; here it is expired instead.
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-        // Scoped to the caller's team: another team's live invitation is not expired.
-        expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenCalledWith({
-          where: { childId: CHILD_ID, invitedEmail: 'parent@test.com', teamId: TEAM_ID, status: 'PENDING' },
+        // First the lazy expiry of a lapsed row on ANY team (as the plain invite
+        // does), then the live row on the caller's team only. Both match the
+        // address through emailEquals.
+        expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenNthCalledWith(1, {
+          where: {
+            childId: CHILD_ID,
+            invitedEmail: emailEquals('parent@test.com'),
+            status: 'PENDING',
+            expiresAt: { lte: expect.any(Date) },
+          },
+          data: { status: 'EXPIRED' },
+        });
+        expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenNthCalledWith(2, {
+          where: { childId: CHILD_ID, invitedEmail: emailEquals('parent@test.com'), teamId: TEAM_ID, status: 'PENDING' },
           data: { status: 'EXPIRED' },
         });
         expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledWith(
@@ -450,6 +461,23 @@ describe('GuardianService', () => {
         const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
 
         expect(result).toMatchObject({ id: 'fresh', emailSent: false });
+      });
+
+      it('for an existing account, skips the pre-check and refuses a cooldown inside the locked transaction', async () => {
+        setLivePending();
+        (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', name: 'Mom', email: 'parent@test.com' });
+        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
+          invitationRow({ id: 'live', createdAt: new Date(Date.now() - 10_000) })
+        );
+
+        await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id)).rejects.toBeInstanceOf(
+          ResendCooldownError
+        );
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(mockPrisma.guardianInvitation.create).not.toHaveBeenCalled();
       });
 
       it('creates a fresh invitation when there is no prior row for the pair', async () => {
@@ -479,10 +507,18 @@ describe('GuardianService', () => {
         // The newest row of ANY status counts, so a decline between resends does not reset the clock.
         expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { childId: CHILD_ID, invitedEmail: 'parent@test.com' },
+            where: { childId: CHILD_ID, invitedEmail: emailEquals('parent@test.com') },
             orderBy: { createdAt: 'desc' },
           })
         );
+        // No account existed for the address: the refusal creates none (the
+        // cooldown pre-check runs before the create) and never reads the inviter.
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith({
+          where: { id: coach.id },
+          select: { name: true, email: true },
+        });
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
         expect(mockPrisma.guardianInvitation.updateMany).not.toHaveBeenCalled();
         expect(mockPrisma.guardianInvitation.create).not.toHaveBeenCalled();
         expect(mockedMailerSend).not.toHaveBeenCalled();
