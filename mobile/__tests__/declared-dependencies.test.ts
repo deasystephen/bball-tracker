@@ -35,9 +35,6 @@ const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 
 /** Packages that are used without ever being imported, each with the reason. */
 const NO_IMPORT_ALLOW_LIST: Record<string, string> = {
-  // Removed with the next binary, #780 step 2: native, so it moves only with a new runtime.
-  'lottie-react-native': 'unused; removed with the next binary, #780 step 2',
-  'expo-status-bar': 'unused; removed with the next binary, #780 step 2',
   // Used by tooling or native code without an importable name.
   'react-test-renderer': 'peer of @testing-library/react-native, loaded by it',
   'react-native-screens': 'peer dependency of expo-router; native screens are used through the router',

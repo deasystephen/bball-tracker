@@ -6,7 +6,8 @@
 # Policy (see docs/automation/daily-upgrade-scan.md):
 #   backend, web : patch AND minor  → auto-merge
 #   mobile       : patch only       → auto-merge (minors can break RN peer
-#                                      deps — e.g. lottie 7.4 needed RN 0.84)
+#                                      deps — e.g. reanimated 4.4 / worklets
+#                                      0.9 against the SDK 55 pins, #175)
 #   anything else (majors, mobile minors, GitHub Actions, Terraform
 #   providers, Docker / Compose images) → no-op: a human reviews them, and a
 #   Terraform bump needs a local `terraform plan` first (#786)

@@ -5,18 +5,28 @@
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { APP_URL_SCHEME } from '../config/env';
 
 import { introspectAppConfig, loadAppConfig, type IntrospectedConfig, type PublishEnv } from './helpers/app-config';
 
 type PluginEntry = string | [string, Record<string, unknown>?];
 
+type AndroidIntentFilter = {
+  action: string;
+  autoVerify?: boolean;
+  data: { scheme: string; host: string; pathPattern?: string }[];
+  category: string[];
+};
+
 type ExpoConfig = {
   expo: {
     version: string;
     scheme: string | string[];
     ios: { associatedDomains: string[]; infoPlist?: Record<string, unknown> };
-    android: { permissions?: string[] };
+    android: { permissions?: string[]; intentFilters: AndroidIntentFilter[] };
     plugins: PluginEntry[];
     extra: { apiUrl: string; appEnv: string };
   };
@@ -46,6 +56,9 @@ async function evaluateNativePermissions(config: ExpoConfig): Promise<Introspect
 async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promise<IntrospectedConfig> {
   return introspectAppConfig(config.expo, names);
 }
+
+/** The lowest OTA runtime `version` may ever be again; history at the test that uses it. */
+const RUNTIME_FLOOR = '1.6.0';
 
 /** [major, minor, patch] compare; true when `version` >= `floor`. */
 function atLeast(version: string, floor: string): boolean {
@@ -112,6 +125,33 @@ describe('app.config.js', () => {
     expect((await loadConfig({ APP_ENV: 'production' })).expo.ios.associatedDomains).toEqual(['applinks:hooplings.com']);
   });
 
+  // Android App Links (#716): the manifest half of the association. Its host
+  // and path are tied to the iOS side (the applinks apex and the AASA
+  // component) so a domain or path change cannot move one platform and not
+  // the other.
+  it('Android App Links intent filter claims the same links as the iOS association', async () => {
+    const { android, ios } = (await loadConfig({ APP_ENV: 'production' })).expo;
+    expect(android.intentFilters).toHaveLength(1);
+    const [filter] = android.intentFilters;
+    expect(filter).toEqual({
+      action: 'VIEW',
+      autoVerify: true,
+      data: [{ scheme: 'https', host: 'hooplings.com', pathPattern: '/invite/.*' }],
+      category: ['BROWSABLE', 'DEFAULT'],
+    });
+    const iosApexes = ios.associatedDomains.map((d) => d.replace(/^applinks:/, ''));
+    expect(iosApexes).toEqual([filter.data[0].host]);
+
+    // The AASA '/invite/*' (a glob) and the manifest '/invite/.*' (Android's
+    // pathPattern, where '.*' is any run of characters) name the same set.
+    const aasa = JSON.parse(
+      readFileSync(join(__dirname, '../../web/public/.well-known/apple-app-site-association'), 'utf8')
+    ) as { applinks: { details: { components: { '/': string }[] }[] } };
+    const iosPaths = aasa.applinks.details.flatMap((d) => d.components.map((c) => c['/']));
+    expect(iosPaths).toEqual(['/invite/*']);
+    expect(iosPaths.map((p) => p.replace(/\*$/, '.*'))).toEqual([filter.data[0].pathPattern]);
+  });
+
   // URL scheme rename (#504); the pre-rename scheme overlap ended with #513,
   // so the binary registers exactly one scheme. The sign-in redirect asks for
   // APP_URL_SCHEME explicitly rather than reading this value.
@@ -124,27 +164,21 @@ describe('app.config.js', () => {
     expect(Array.isArray(scheme) ? scheme : [scheme]).toContain(APP_URL_SCHEME);
   });
 
-  it('keeps the OTA runtime at or past the 1.3.0 scheme boundary', async () => {
-    // expo-linking resolves the redirect scheme from the OTA manifest. Every
-    // manifest that names `hooplings` must stay unreachable from the 1.2.0
-    // binaries (#25-#30), which register only the old scheme: runtimeVersion
-    // policy is appVersion, so the version can never drop below 1.3.0 again.
-    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.3.0')).toBe(true);
-  });
-
-  it('keeps the OTA runtime at or past the 1.4.0 dependency boundary', async () => {
-    // Build #31 (runtime 1.3.0) carries older native code for Amplitude,
-    // Sentry and expo-updates than the JavaScript on main expects (#562). An
-    // OTA from main must never reach it, so the version can never drop below
-    // 1.4.0 again.
-    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.4.0')).toBe(true);
-  });
-
-  it('keeps the OTA runtime at or past the 1.5.0 Expo SDK 57 boundary', async () => {
-    // Build #32 (runtime 1.4.0) is an SDK 55 binary: React Native 0.83 and the
-    // SDK 55 native modules. JavaScript built against SDK 57 must never reach
-    // it (#576), so the version can never drop below 1.5.0 again.
-    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.5.0')).toBe(true);
+  // OTA runtime floor. runtimeVersion policy is appVersion, so lowering
+  // `version` would send JavaScript from main to binaries that cannot run it.
+  // Each boundary, newest last:
+  // - 1.3.0: URL scheme rename (#504). expo-linking resolves the redirect
+  //   scheme from the OTA manifest, and the 1.2.0 binaries (#25-#30) register
+  //   only the old scheme.
+  // - 1.4.0: dependency drift (#562). Build #31 (runtime 1.3.0) carries older
+  //   native code for Amplitude, Sentry and expo-updates.
+  // - 1.5.0: Expo SDK 57 (#576). Build #32 (runtime 1.4.0) is an SDK 55
+  //   binary (React Native 0.83 and the SDK 55 native modules).
+  // - 1.6.0: build #33 (runtime 1.5.0) still compiles lottie-react-native and
+  //   expo-status-bar, has no Android App Links filter (#716, #780) and
+  //   predates the binary-coupled Expo SDK 57 patch bumps.
+  it(`keeps the OTA runtime at or past ${RUNTIME_FLOOR}`, async () => {
+    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, RUNTIME_FLOOR)).toBe(true);
   });
 
   // Xcode 27 / iOS 27 SDK (#576). Without the scene life cycle an app built

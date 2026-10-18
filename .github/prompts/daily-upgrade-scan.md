@@ -41,7 +41,6 @@ NEVER bump these. Surface them in the deferred tracking issue + daily log only.
     - react-native-gesture-handler, react-native-reanimated
     - react-native-safe-area-context, react-native-screens
     - react-native-svg, react-native-worklets
-    - lottie-react-native (SDK 57 pins ~7.3.8)
     - jest, @types/jest
 
   Mobile (binary-coupled — defer until the next native build, #562):
