@@ -95,10 +95,19 @@ Step 2a and the Step 3 gate):
   makes the removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides").
   It probes the lockfile, never the installed tree, because `npm ci` on the Linux runner skips
   `os`/`cpu`-gated optional packages (sharp's `@img/*`) and would make a live override look dead:
-  `npm ls <pkg> --all --package-lock-only` for a bare key, `npm ls "<pkg>@<range>" --all
-  --package-lock-only` for a version-keyed one, and, for a nested `"<parent>": { … }` entry,
-  whether the target still appears under `<parent>` in that tree. #777 retired the backend's
-  `hono`, `@hono/node-server` and `fast-xml-builder` entries.
+  and it decides on **declared specs, never resolved versions**:
+  `node ../.github/scripts/check-override-ranges.mjs --overrides` prints `live` or `DEAD` per key
+  (nested blocks at every depth), live when some lockfile entry still declares the package as a
+  regular, optional or installed peer dependency with a spec that intersects the key's range (an
+  `npm:` alias is matched under the alias name, never the aliased package, as npm does); inside a
+  nested `"<parent>": { … }` block only the parent copies and their dependency graph count (`bin`
+  names and uninstalled peers never do). `STALE` and `ORPHAN` lines are for a human, never the scan. The resolved version is the wrong signal because
+  an override changes it: `npm ls "<pkg>@<range>"` prints `(empty)` for a working cross-major
+  redirect, which is how the scan retired the accepted `deepmerge-ts@^7` entry below (PR #919,
+  2026-10-18, deployed unattended, GHSA-ggr8-5vv4-36mx reopened; PR #923 restored it and replaced
+  the `npm ls` probes with the script). Keys listed in `.github/scripts/accepted-overrides.json`
+  are reported `live (accepted …)` and never retired. #777 retired the backend's `hono`,
+  `@hono/node-server` and `fast-xml-builder` entries.
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but
@@ -112,7 +121,7 @@ which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and s
 brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
 newest 1.x release, so the old root floors were inert.
 
-**Accepted cross-major overrides.** The backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares `^7`) to 8.x on purpose, so the gate reports `MISMATCH node_modules/@prisma/config declares deepmerge-ts@7.1.5 but gets 8.0.2` and that line is accepted, not cleared (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
+**Accepted cross-major overrides.** The list is `.github/scripts/accepted-overrides.json`, keyed by package directory (`override`, `consumer`, `gets` = the range the override resolves to, `ghsa`, `why` with the retirement condition); the gate script reads it, prints a listed mismatch as `accepted … (GHSA, accepted-overrides.json)` with exit 0, and its `--overrides` mode prints a listed key `live (accepted …)` while something still declares it and `STALE` once nothing does, for a human to retire with the entry. Adding or retiring an entry is a human decision made in a reviewed PR together with the reasoning here; the scan never edits the file. `backend/tests/infra/check-override-ranges.test.ts` pins the file's shape, the script's verdicts on fixtures (with their own accept list through `ACCEPTED_OVERRIDES_FILE`), and one live fact: the real backend lockfile still produces the accepted `deepmerge-ts` line. **That last test goes red on purpose the day a Prisma release declares `deepmerge-ts` 8.x** (a Dependabot or scan PR for that bump fails `Test Backend`); the retire procedure is then one PR that removes the override, its accept entry and that expectation, after which `--overrides` would otherwise have reported the key `STALE`. Today's only entry: the backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares the exact pin `7.1.5`, inside the `^7` key) to 8.x on purpose (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
 
 ## Binary-coupled packages (#562)
 

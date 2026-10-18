@@ -109,28 +109,36 @@ under ⏸ only):
 
 ### Retire dead overrides (all sides)
 
-For every entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
-probe the LOCKFILE from that side's directory (`--package-lock-only`, never the
-installed tree: `npm ci` on this Linux runner skips `os`/`cpu`-gated optional
-packages such as sharp's `@img/*`, which would then look absent):
+For every side (`backend/`, `web/`, `mobile/`), run from that side's directory:
 
-  - bare root key `"<pkg>"`:
-      npm ls <pkg> --all --package-lock-only
-    dead when it prints `(empty)`.
-  - version-keyed key `"<pkg>@<range>"` (root or nested):
-      npm ls "<pkg>@<range>" --all --package-lock-only
-    dead when it prints `(empty)` (copies of `<pkg>` in other majors do not
-    keep it alive).
-  - nested key `"<parent>": { "<key>": … }`: run `npm ls <parent> --all
-    --package-lock-only` and look at the subtree under each `<parent>` copy.
-    Dead when `<parent>` is absent, or when no `<pkg>` (matching `<range>`
-    for a version-keyed `<key>`) appears anywhere beneath it. A copy of
-    `<pkg>` elsewhere in the tree does not keep a nested entry alive. When a
-    whole parent block is dead, remove the block.
+    node ../.github/scripts/check-override-ranges.mjs --overrides
+
+It reads the LOCKFILE, never the installed tree (`npm ci` on this Linux runner
+skips `os`/`cpu`-gated optional packages such as sharp's `@img/*`, which would
+otherwise look absent), and needs no prior `npm install` (it falls back to
+npm's own `semver`). It prints one `live` or `DEAD` line per
+`package.json#overrides` key, nested blocks included. A key is live when some
+lockfile entry still DECLARES the package (as a regular, optional or installed
+peer dependency; an `npm:` alias is matched under the alias name, never the
+aliased package) with a spec that intersects the key's range; inside a nested
+`"<parent>": { … }` block only the parent copies and their dependency graph
+count. Keys listed in `.github/scripts/accepted-overrides.json` are never
+retired by the scan: they print `live (accepted …)` while their listed
+consumer declares them and `STALE` once it does not. `STALE`, `ORPHAN` (an
+accept entry whose key is gone) and `??` (an override value the script does
+not understand) all go under ⚠ Needs attention for a human; never act on them
+and never edit the accept file (reasons:
+`docs/automation/daily-upgrade-scan.md`, "Accepted cross-major overrides"). The script never looks at resolved
+versions, and neither may you: a version-keyed override that redirects out of
+its own range (`deepmerge-ts@^7` → 8.0.2) makes `npm ls "<pkg>@<range>"` print
+`(empty)` precisely because it works. Do not substitute an `npm ls` probe for
+the liveness decision of any key shape (the `npm ls <pkg> --all` shape check
+when ADDING an override, above, answers a different question and stays). When
+every child of a nested block is `DEAD`, remove the block.
 
 A dead entry would silently pin any future consumer of that package. Removing
 it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
-branch, Step 3). Remove nothing a probe above still finds, even a copy that
+branch, Step 3). Remove nothing the probe reports `live`, even a copy that
 already satisfies the floor; that is a human call. Name each removed entry in
 the PR body and on the 🟢 line of the daily log ("override retired: <entry>").
 
@@ -180,8 +188,10 @@ For each side with ≥1 auto-fix item:
      Plus for every package you added or changed an override for, from `<side>/`:
        node ../.github/scripts/check-override-ranges.mjs <pkg> [<pkg> ...]
      It must exit 0 (no consumer resolved into a different major from the
-     range it declares; `npm ls` cannot show this, an override hides it). Put
-     its output and `npm ls <pkg> --all` in the PR body.
+     range it declares; `npm ls` cannot show this, an override hides it). A
+     mismatch listed in `.github/scripts/accepted-overrides.json` prints as
+     `accepted` and does not count; never edit that file from a scan run. Put
+     the output and `npm ls <pkg> --all` in the PR body.
   4. DIFF GUARD — `git diff --name-only` must contain ONLY
      `<side>/package.json` and/or `<side>/package-lock.json`.
      Anything else → abort the whole batch → ⚠ Needs attention.
