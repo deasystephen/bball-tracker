@@ -31,11 +31,9 @@
 //      node ../.github/scripts/check-override-ranges.mjs --overrides
 //
 // Rules: docs/automation/daily-upgrade-scan.md, "Override shape" and "Retire dead entries".
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { loadAcceptList } from './accept-list.mjs';
+import { loadAcceptList, loadSemver } from './accept-list.mjs';
 
 const USAGE =
   'usage: check-override-ranges.mjs <package> [<package> ...]\n' +
@@ -49,20 +47,6 @@ if (args.length === 0 || flags.some((f) => f !== '--overrides') || (liveness && 
   process.exit(2);
 }
 
-function loadSemver() {
-  try {
-    return createRequire(join(process.cwd(), 'package.json'))('semver');
-  } catch {
-    /* no install in this directory: fall through to npm's own copy */
-  }
-  try {
-    const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
-    return createRequire(join(globalRoot, 'npm', 'package.json'))('semver');
-  } catch {
-    process.stderr.write('check-override-ranges.mjs: cannot load semver; run `npm install` in this package first\n');
-    process.exit(2);
-  }
-}
 const { entries: accepted, sides } = loadAcceptList('accepted-overrides.json', 'ACCEPTED_OVERRIDES_FILE');
 if (!existsSync(join(process.cwd(), 'package-lock.json'))) {
   process.stderr.write(

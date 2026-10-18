@@ -10,9 +10,10 @@
 //
 // npm audit has no allow-list of its own, so this reads its JSON: every advisory object in a
 // vulnerability's `via` list, one per (GHSA id at the end of its URL, package). An allow-list entry
-// matches on `ghsa` AND `package`, and pins the vulnerable `range` it was reviewed against (like
-// `gets` in accepted-overrides.json): when npm audit reports a different range the advisory has
-// moved (usually a patch was published) and it FAILs until a human re-reviews the entry.
+// matches on `ghsa` AND `package`, and pins the vulnerable `range` and `severity` it was reviewed
+// against (like `gets` in accepted-overrides.json): when npm audit reports a different range (as a
+// semver set, not a string) or severity, the advisory has moved or been re-scored and it FAILs
+// until a human re-reviews the entry.
 //
 // An accepted entry also FAILs when npm reports a reachable fix (`fixAvailable` true, or a
 // non-major parent change): a patch was published, so apply it and retire the entry. An advisory
@@ -24,7 +25,7 @@
 // Rules: docs/automation/daily-upgrade-scan.md, "Audit floor gate".
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { fail, loadAcceptList } from './accept-list.mjs';
+import { fail, loadAcceptList, loadSemver } from './accept-list.mjs';
 
 const FAILING = new Set(['high', 'critical']);
 
@@ -61,11 +62,32 @@ try {
   fail(`npm audit did not return JSON: ${String(raw).slice(0, 200)}`);
 }
 if (report.error || !report.vulnerabilities) {
-  const detail = report.message ?? report.error?.summary ?? JSON.stringify(report.error ?? report);
-  fail(`npm audit failed: ${detail}${report.error?.detail ? ` (${report.error.detail})` : ''}`);
+  // npm's own failure body is { message, error: { summary: '', detail: '' } }: empty strings, so `||`.
+  const detail = report.message || report.error?.summary || JSON.stringify(report.error ?? report);
+  const code = report.error?.code ? ` [${report.error.code}]` : '';
+  fail(`npm audit failed${code}: ${detail}${report.error?.detail ? ` (${report.error.detail})` : ''}`);
 }
 
-const ghsaOf = (via) => String(via.url ?? '').split('/').pop() || `npm-${via.source}`;
+// The GHSA id anywhere in the advisory URL (github.com/advisories/GHSA-…, with or without a
+// trailing slash); otherwise (a legacy npmjs.com advisory URL, or none) npm's numeric source id.
+const ghsaOf = (via) => {
+  const match = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i.exec(String(via.url ?? ''));
+  return match ? match[0] : `npm-${via.source}`;
+};
+// Ranges compare as version sets, so a re-formatting npm or GitHub applies to the same range
+// (`<=3.0.3` vs `<= 3.0.3`, or reordered `||` sets) is not "moved". semver loads only when an
+// accepted entry's range string differs.
+let semver;
+function sameRange(a, b) {
+  if (a === b) return true;
+  semver ??= loadSemver();
+  try {
+    const options = { includePrerelease: true };
+    return semver.subset(a, b, options) && semver.subset(b, a, options);
+  } catch {
+    return false; // an unparseable range is never "the same"
+  }
+}
 // Every advisory object at any severity, keyed (id, package): an accepted advisory that npm now
 // reports at moderate must read as downgraded, not as gone.
 const advisories = new Map();
@@ -102,18 +124,24 @@ for (const [key, via] of [...advisories].sort(([a], [b]) => a.localeCompare(b)))
   const fix = reachableFix(via.name);
   if (!entry) {
     failed += 1;
-    const listAs = via.url ? '' : ` (no GitHub advisory URL: an allow-list entry for it uses "ghsa": "${id}")`;
+    const listAs = id.startsWith('npm-') ? ` (no GHSA id in the advisory URL: an allow-list entry for it uses "ghsa": "${id}")` : '';
     process.stdout.write(`FAIL ${id} ${where} ${via.url ?? ''}${listAs}\n`);
   } else if (fix) {
     failed += 1;
     process.stdout.write(
       `FAIL ${id} ${via.name}: a patched version exists (${fix}); apply it and remove the entry from ${label} (${via.url ?? ''})\n`,
     );
-  } else if (entry.range !== via.range) {
+  } else if (!sameRange(entry.range, via.range)) {
     failed += 1;
     process.stdout.write(
       `FAIL ${id} ${via.name}: the advisory moved. ${label} accepts range "${entry.range}" but npm audit now reports "${via.range}"; ` +
         `a patched version has usually been published: apply it, or re-review the entry and update its range (${via.url ?? ''})\n`,
+    );
+  } else if (entry.severity !== via.severity) {
+    failed += 1;
+    process.stdout.write(
+      `FAIL ${id} ${via.name}: the advisory was re-scored. ${label} accepts severity "${entry.severity}" but npm audit now reports "${via.severity}"; ` +
+        `re-review the entry and update its severity, or apply a fix (${via.url ?? ''})\n`,
     );
   } else {
     process.stdout.write(`accepted ${id} ${where} (${label})\n`);
