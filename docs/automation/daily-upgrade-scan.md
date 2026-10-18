@@ -116,8 +116,16 @@ Step 2a and the Step 3 gate):
 
 Current minimatch overrides: mobile's `"eas-cli": { "minimatch@^5": "^5.1.8" }` floors eas-cli's
 exact `5.1.2` pin. It is version-keyed because eas-cli's subtree also holds `glob@10`/`glob@13`,
-which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and stays as it is
-(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning). The backend has no minimatch or
+which need `^9`/`^10`. The `@oclif/core` block keys its floor as `"minimatch@^10": "^10.2.5"`
+(`docs/deployment/mobile-builds-and-ota.md`, eas-cli pinning): until #925 it was a bare
+`"minimatch"` child, which also dragged `filelist` (jake, inside @oclif/core's and eas-cli's
+graph, declares `^5.0.1`) onto 10.x; `filelist` now resolves to 5.1.9 under the eas-cli key. The
+same change re-keyed mobile's root `"ws"` and `"js-yaml"` as `"ws@^8"` and `"js-yaml@^4"`: the
+`^7` ws consumers (Metro, the React Native dev middleware, `react-devtools-core`) and
+`@istanbuljs/load-nyc-config`'s `js-yaml ^3` had been forced across a major. Each advisory has a
+patched release in the older major (ws 7.5.11 for GHSA-96hv-2xvq-fx4p, js-yaml 3.15.2 for
+GHSA-2883-xcg3-v3hh) and those consumers resolve to 7.5.13 and 3.15.2 with no override, so no
+`@^7`/`@^3` floor was added (inert, see above) and nothing in mobile is accepted cross-major. The backend has no minimatch or
 brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
 newest 1.x release, so the old root floors were inert.
 
