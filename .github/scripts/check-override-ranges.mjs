@@ -16,18 +16,20 @@
 // 2. Override liveness (`--overrides`, no package names): prints one `live` or `DEAD` line per key
 //    in package.json#overrides, nested blocks included. A key is live when some lockfile entry
 //    still DECLARES the package (dependencies, optionalDependencies, peerDependencies, the root's
-//    devDependencies, and `npm:` aliases resolved to the aliased name) with a spec that intersects
-//    the key's range; for a nested `"<parent>": { … }` block only the parent copies and their
-//    dependency graph count, at every depth. It never looks at resolved versions: a version-keyed
-//    override that redirects out of its own range (the backend's `deepmerge-ts@^7` → 8.0.2) makes
-//    `npm ls "<pkg>@<range>"` print `(empty)` precisely because it works, which is how the daily
-//    scan once retired a security override (#919). Keys in accepted-overrides.json are reported
-//    `live` whatever the tree says. Always exits 0; the daily scan reads the lines.
+//    devDependencies; an `npm:` alias counts under the ALIAS name with the aliased range, which is
+//    what npm matches an override against) with a spec that intersects the key's range; for a
+//    nested `"<parent>": { … }` block only the parent copies (by the key range or the block's `.`
+//    value) and their dependency graph count, at every depth. It never looks at resolved versions:
+//    a version-keyed override that redirects out of its own range (the backend's `deepmerge-ts@^7`
+//    → 8.0.2) makes `npm ls "<pkg>@<range>"` print `(empty)` precisely because it works, which is
+//    how the daily scan once retired a security override (#919). A key in accepted-overrides.json
+//    is `live (accepted …)` while something still declares it and `STALE` once nothing does; a
+//    human retires it with its accept entry. Always exits 0; the daily scan reads the lines.
 //      node ../.github/scripts/check-override-ranges.mjs --overrides
 //
 // Rules: docs/automation/daily-upgrade-scan.md, "Override shape" and "Retire dead entries".
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,11 +60,19 @@ function loadSemver() {
     process.exit(2);
   }
 }
+const acceptFile = join(dirname(fileURLToPath(import.meta.url)), 'accepted-overrides.json');
+const acceptedBySide = JSON.parse(readFileSync(acceptFile, 'utf8'));
+const sides = Object.keys(acceptedBySide).filter((k) => !k.startsWith('_'));
+const side = basename(process.cwd());
+if (!sides.includes(side) || !existsSync(join(process.cwd(), 'package-lock.json'))) {
+  process.stderr.write(
+    `check-override-ranges.mjs: run from a package directory (${sides.join(', ')}) that has a package-lock.json; cwd is ${process.cwd()}\n`,
+  );
+  process.exit(2);
+}
 const semver = loadSemver();
 const { packages } = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
-const side = basename(process.cwd());
-const acceptFile = join(dirname(fileURLToPath(import.meta.url)), 'accepted-overrides.json');
-const accepted = JSON.parse(readFileSync(acceptFile, 'utf8'))[side] ?? [];
+const accepted = acceptedBySide[side];
 
 // Node's lookup: <consumer>/node_modules/<name>, then each ancestor's node_modules, then the root.
 function resolvePath(consumer, name) {
@@ -91,9 +101,10 @@ function nameOf(path) {
 if (liveness) {
   const { overrides = {} } = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
 
-  // Every edge npm applies overrides to, keyed by the package the edge really points at: an
-  // `npm:` alias (`"al": "npm:aliased@^2"`) counts for `aliased`. The root's devDependencies are
-  // installed too; nobody else's are.
+  // Every edge npm applies overrides to, keyed the way npm matches an override rule: by the
+  // dependency key. An `npm:` alias (`"string-width-cjs": "npm:string-width@^4"`) therefore counts
+  // for `string-width-cjs` with spec `^4`, never for `string-width`. The root's devDependencies
+  // are installed too; nobody else's are.
   function declared(path, entry) {
     const raw = {
       ...entry.peerDependencies,
@@ -105,8 +116,7 @@ if (liveness) {
     for (const [dep, spec] of Object.entries(raw)) {
       if (typeof spec !== 'string') continue;
       if (spec.startsWith('npm:')) {
-        const target = parseKey(spec.slice('npm:'.length));
-        out[target.name] ??= target.range ?? '*';
+        out[dep] ??= parseKey(spec.slice('npm:'.length)).range ?? '*';
       } else {
         out[dep] ??= spec;
       }
@@ -148,24 +158,35 @@ if (liveness) {
     graphs.set(root, [...seen]);
     return graphs.get(root);
   }
-  function parentCopies(scope, parent) {
+  // npm applies a nested block to copies matching the key range OR the block's `.` value (the
+  // version the block itself redirects the parent to).
+  function parentCopies(scope, parent, dot) {
+    const fits = (version, range) =>
+      typeof range === 'string' && semver.validRange(range) && semver.satisfies(version, range);
     return scope.filter(
       (p) =>
         p !== '' &&
         nameOf(p) === parent.name &&
         (parent.range === null ||
           !semver.validRange(parent.range) ||
-          semver.satisfies(packages[p].version, parent.range)),
+          fits(packages[p].version, parent.range) ||
+          fits(packages[p].version, dot)),
     );
   }
 
   let live = 0;
+  let stale = 0;
   let dead = 0;
   function report(label, found, accept) {
     const shown = found.slice(0, 3).join('; ') + (found.length > 3 ? `; +${found.length - 3} more` : '');
-    if (accept) {
-      process.stdout.write(`live  ${label}  (accepted ${accept.ghsa}; ${found.length ? shown : 'no declarer found'})\n`);
+    if (accept && found.length) {
+      process.stdout.write(`live  ${label}  (accepted ${accept.ghsa}; ${shown})\n`);
       live += 1;
+    } else if (accept) {
+      process.stdout.write(
+        `STALE ${label}  (accepted ${accept.ghsa}, but nothing declares it any more: retire it by hand together with its accepted-overrides.json entry)\n`,
+      );
+      stale += 1;
     } else if (found.length) {
       process.stdout.write(`live  ${label}  <- ${shown}\n`);
       live += 1;
@@ -187,7 +208,7 @@ if (liveness) {
       return;
     }
     const parent = parseKey(key);
-    const parents = parentCopies(scope, parent);
+    const parents = parentCopies(scope, parent, value['.']);
     const graph = [...new Set(parents.flatMap(graphFrom))];
     for (const [childKey, childValue] of Object.entries(value)) {
       const childLabel = `${label} > "${childKey}"`;
@@ -201,7 +222,7 @@ if (liveness) {
 
   const everyPath = Object.keys(packages).filter((p) => !packages[p].link);
   for (const [key, value] of Object.entries(overrides)) walk(`"${key}"`, key, value, everyPath);
-  process.stdout.write(`${live} live, ${dead} dead override key(s)\n`);
+  process.stdout.write(`${live} live, ${stale} stale, ${dead} dead override key(s)\n`);
   process.exit(0);
 }
 
@@ -224,13 +245,18 @@ for (const [path, entry] of Object.entries(packages)) {
       );
       continue;
     }
-    const accept = accepted.find(
-      (a) =>
+    const accept = accepted.find((a) => {
+      const key = parseKey(a.override);
+      return (
         a.consumer === (path || '(root)') &&
-        parseKey(a.override).name === name &&
+        key.name === name &&
+        (key.range === null || semver.intersects(range, key.range)) &&
         resolved !== undefined &&
-        String(semver.major(resolved.version)) === String(a.gets),
-    );
+        typeof a.gets === 'string' &&
+        semver.validRange(a.gets) &&
+        semver.satisfies(resolved.version, a.gets)
+      );
+    });
     if (accept) {
       acceptedCount += 1;
       process.stdout.write(

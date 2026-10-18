@@ -122,14 +122,17 @@ lockfile entry still DECLARES the package (regular, optional or peer
 dependency, or an `npm:` alias of it) with a spec that intersects the key's
 range; inside a nested `"<parent>": { … }` block only the parent copies and
 their dependency graph count. Keys listed in
-`.github/scripts/accepted-overrides.json` print `live (accepted …)` whatever
-the tree says and are never retired; their reasons are in
-`docs/automation/daily-upgrade-scan.md`, "Accepted cross-major overrides".
-The script never looks at resolved versions, and neither may you: a
-version-keyed override that redirects out of its own range (`deepmerge-ts@^7`
-→ 8.0.2) makes `npm ls "<pkg>@<range>"` print `(empty)` precisely because it
-works. Do not substitute an `npm ls` probe for any key shape. When every child
-of a nested block is `DEAD`, remove the block.
+`.github/scripts/accepted-overrides.json` are never retired by the scan: they
+print `live (accepted …)` while something declares them, and `STALE` once
+nothing does, which you report under ⚠ Needs attention for a human to retire
+together with the accept entry (reasons: `docs/automation/daily-upgrade-scan.md`,
+"Accepted cross-major overrides"). The script never looks at resolved
+versions, and neither may you: a version-keyed override that redirects out of
+its own range (`deepmerge-ts@^7` → 8.0.2) makes `npm ls "<pkg>@<range>"` print
+`(empty)` precisely because it works. Do not substitute an `npm ls` probe for
+the liveness decision of any key shape (the `npm ls <pkg> --all` shape check
+when ADDING an override, above, answers a different question and stays). When
+every child of a nested block is `DEAD`, remove the block.
 
 A dead entry would silently pin any future consumer of that package. Removing
 it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
