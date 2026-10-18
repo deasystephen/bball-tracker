@@ -26,7 +26,7 @@ Removing the last guardian never deletes the child.
   double-tapped Invite) maps P2002 → 400 `A pending guardian invitation already exists for this email`
   (`utils/prisma-errors.ts#createOrConflict`, targeted at that index, so a token collision still
   propagates), never 500 (#727).
-  The Resend (supersede) transaction waits on the child/adult row locks; a waiter Prisma aborts (P2028, 5 s interactive-transaction timeout) is mapped by the same `createOrConflict` to a retryable 409 `transaction_timeout`, never 500 (#908). Nothing was written, so the client repeats the request.
+  The Resend (supersede) transaction waits on the child/adult row locks; a waiter Prisma aborts (P2028, 5 s interactive-transaction timeout) is answered by the central error handler as a retryable 503 with `Retry-After` and code `transaction_timeout` (`models/pool-config.ts#dbBusyBody`), never 500 (#908). Nothing was written, so the client repeats the request.
   The response carries the per-send `emailSent`; `hooks/useGuardians.ts#useInviteGuardian` resolves with
   `{ invitation, emailSent }` and the Guardians screen shows an error toast instead of "Invitation sent"
   when it is `false`, like the roster flows (#770). That toast, and the Add Player toast for a failed

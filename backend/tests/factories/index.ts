@@ -679,14 +679,6 @@ export function createTeamStats(options: CreateTeamStatsOptions = {}): TeamStats
  * 2026-10-17). Pass the index name a service's `createOrConflict` targets;
  * omit it for a violation that names no constraint.
  */
-/** Prisma's "Transaction already closed" abort (interactive-transaction timeout), P2028 (#908). */
-export function transactionClosed(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Transaction API error: Transaction already closed', {
-    code: 'P2028',
-    clientVersion: 'test',
-  });
-}
-
 export function uniqueViolation(target?: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',
@@ -701,4 +693,15 @@ export function uniqueViolation(target?: string): Prisma.PrismaClientKnownReques
             },
           },
   });
+}
+
+/**
+ * Prisma's P2028 for an interactive transaction that outlived its timeout
+ * (the lock-wait loser, #908), worded as the client builds it. `message`
+ * overrides it for the other P2028 variants.
+ */
+export function transactionClosed(
+  message = 'Transaction API error: A commit cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5003 ms passed since the start of the transaction.'
+): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(message, { code: 'P2028', clientVersion: 'test' });
 }

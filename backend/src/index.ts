@@ -79,7 +79,7 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
-import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from './models/pool-config';
+import { DB_BUSY_RETRY_AFTER_SECONDS, dbBusyBody, isPoolTimeoutError } from './models/pool-config';
 
 // `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
 // fired (pool saturated, or RDS not answering TCP), 'down' for anything else
@@ -122,8 +122,10 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // warnings — reserving `error` for 5xx keeps the error stream meaningful.
   // pg's pool-wait/connect timeout (#751): the pool is saturated or the
   // database is not answering. Answer 503 with Retry-After, not a generic 500.
-  const poolTimeout = isPoolTimeoutError(err);
-  const status = poolTimeout ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
+  // An interactive transaction that expired waiting on a row lock (Prisma
+  // P2028, #908) is the same retryable 503, whichever service opened it.
+  const busyBody = dbBusyBody(err);
+  const status = busyBody ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
   const log = status !== undefined && status < 500 ? logger.warn : logger.error;
   log(err.message, {
     requestId: _req.requestId,
@@ -157,11 +159,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     return;
   }
 
-  if (poolTimeout) {
+  if (busyBody) {
     res
       .status(503)
       .set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS))
-      .json(DB_BUSY_BODY);
+      .json(busyBody);
     return;
   }
 

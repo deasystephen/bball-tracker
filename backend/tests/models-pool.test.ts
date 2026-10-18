@@ -11,7 +11,11 @@ import {
   DB_POOL_MAX,
   DB_POOL_OPTIONS,
   POOL_TIMEOUT_MESSAGES,
+  dbBusyBody,
   isPoolTimeoutError,
+  isTransactionTimeoutError,
+  DB_BUSY_BODY,
+  TRANSACTION_TIMEOUT_BODY,
 } from '../src/models/pool-config';
 
 const TASK_DEFINITION = JSON.parse(
@@ -87,5 +91,47 @@ describe('isPoolTimeoutError', () => {
     expect(isPoolTimeoutError(new Error('connect ECONNREFUSED 127.0.0.1:5432'))).toBe(false);
     expect(isPoolTimeoutError(new Error('no pg_hba.conf entry ... no encryption'))).toBe(false);
     expect(isPoolTimeoutError(undefined)).toBe(false);
+  });
+});
+
+describe('isTransactionTimeoutError / dbBusyBody (#908)', () => {
+  const p2028 = (message: string): Error =>
+    Object.assign(new Error(message), { code: 'P2028' });
+  const expired = p2028(
+    'Transaction API error: A commit cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5003 ms passed since the start of the transaction.',
+  );
+
+  it('matches a P2028 for an expired interactive transaction, also behind a cause', () => {
+    expect(isTransactionTimeoutError(expired)).toBe(true);
+    expect(
+      isTransactionTimeoutError(new Error('wrapper', { cause: expired })),
+    ).toBe(true);
+    expect(dbBusyBody(expired)).toBe(TRANSACTION_TIMEOUT_BODY);
+  });
+
+  it('answers maxWait exhaustion with the pool-busy body, not the lock-wait one', () => {
+    const maxWait = p2028(
+      'Transaction API error: Unable to start a transaction in the given time.',
+    );
+    expect(isTransactionTimeoutError(maxWait)).toBe(false);
+    expect(dbBusyBody(maxWait)).toBe(DB_BUSY_BODY);
+  });
+
+  it('leaves a query on an already closed transaction, other codes and non-errors alone', () => {
+    const closed = p2028(
+      'Transaction API error: Transaction already closed: A query cannot be executed on a committed transaction.',
+    );
+    expect(dbBusyBody(closed)).toBeUndefined();
+    expect(
+      isTransactionTimeoutError(
+        Object.assign(new Error('The timeout for this transaction was 1 ms'), {
+          code: 'P2002',
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      dbBusyBody(new Error('timeout exceeded when trying to connect')),
+    ).toBe(DB_BUSY_BODY);
+    expect(dbBusyBody(undefined)).toBeUndefined();
   });
 });

@@ -130,25 +130,6 @@ export class ResendCooldownError extends DetailedError<ResendCooldownDetails> {
   }
 }
 
-/**
- * 409 — an interactive transaction was aborted by Prisma (P2028, the 5 s
- * default timeout) while it waited on a row lock held by a concurrent twin
- * request (#908). Nothing was written; the client may repeat the request.
- * `DetailedError` carries no response headers, so this is a 409 with a
- * machine-readable code rather than a 503 with `Retry-After`.
- */
-export class TransactionTimeoutError extends DetailedError<Record<string, never>> {
-  constructor() {
-    super(
-      'transaction_timeout',
-      {},
-      'Another request for this player is still being processed. Nothing was changed; try again in a moment.',
-      409
-    );
-    Object.setPrototypeOf(this, TransactionTimeoutError.prototype);
-  }
-}
-
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

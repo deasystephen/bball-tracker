@@ -5,7 +5,7 @@
  */
 
 import { Prisma } from '@prisma/client';
-import { BadRequestError, TransactionTimeoutError } from './errors';
+import { BadRequestError } from './errors';
 
 /** True for a unique-constraint violation (Prisma `P2002`). */
 export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnownRequestError {
@@ -15,22 +15,6 @@ export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnown
 /** True when the record an `update`/`delete` targeted matched nothing (Prisma `P2025`). */
 export function isRecordNotFound(err: unknown): err is Prisma.PrismaClientKnownRequestError {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025';
-}
-
-/** True when Prisma aborted an interactive transaction (`P2028`, e.g. the 5 s timeout while waiting on a row lock). */
-export function isTransactionClosed(err: unknown): err is Prisma.PrismaClientKnownRequestError {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2028';
-}
-
-/**
- * Re-throw `err`, mapping a P2028 to the retryable 409 `transaction_timeout`
- * (#908) so a lock-wait loser never answers 500. Any other error propagates.
- */
-export function rethrowTransactionTimeout(err: unknown): never {
-  if (isTransactionClosed(err)) {
-    throw new TransactionTimeoutError();
-  }
-  throw err;
 }
 
 /**
@@ -81,9 +65,7 @@ function violates(err: Prisma.PrismaClientKnownRequestError, target: string | st
  * `target` names the unique the pre-check stands in for (index name, or column
  * list). A P2002 on any other unique of the model (`token @unique` on the
  * invitation tables) is not the race the message describes and propagates,
- * as does every other error, except a P2028 (transaction aborted while
- * waiting on a lock), which maps to the retryable 409 `transaction_timeout`
- * (#908). Without `target`, any P2002 maps.
+ * as does every other error. Without `target`, any P2002 maps.
  */
 export async function createOrConflict<T>(
   run: () => Promise<T>,
@@ -96,6 +78,6 @@ export async function createOrConflict<T>(
     if (isUniqueViolation(err) && (target === undefined || violates(err, target))) {
       throw new BadRequestError(message);
     }
-    return rethrowTransactionTimeout(err);
+    throw err;
   }
 }

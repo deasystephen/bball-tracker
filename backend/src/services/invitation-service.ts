@@ -36,7 +36,7 @@ import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isUniqueViolation, rethrowTransactionTimeout } from '../utils/prisma-errors';
+import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
@@ -463,68 +463,65 @@ export class InvitationService {
     data: Prisma.TeamInvitationUncheckedCreateInput,
     recipientEmail: string | null
   ): Promise<InvitationWithRelations> {
-    try {
-      return await prisma.$transaction(async (tx) => {
-        const accepted = await tx.teamInvitation.findFirst({
-          where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
-          select: { id: true },
-        });
-        if (accepted) {
-          throw new BadRequestError('Player already has access to this team');
-        }
-
-        const latest = await this.latestAfterCooldown(
-          tx,
-          { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
-          recipientEmail
-        );
-
-        // A bare resend ({ playerId, supersede: true }) must not wipe the
-        // jersey/position/message the coach set at add time: for invite-only
-        // players (case 3) the roster row is born from the live invitation at
-        // accept, so a superseding row created without them would roster the
-        // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
-        // caller omits inherit from the row being superseded; explicitly
-        // provided values still win. The source is the newest row for the pair
-        // and only when it is PENDING (the row the updateMany below expires;
-        // at most one exists and nothing is created after it) or EXPIRED (a
-        // lapsed invitation the player's dead-link tap already flipped, #678).
-        // A newest row that is CANCELLED or REJECTED means the coach or the
-        // player ended it, so nothing older is revived.
-        const superseded =
-          latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
-
-        const { count: supersededCount } = await tx.teamInvitation.updateMany({
-          where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
-          data: { status: 'EXPIRED' },
-        });
-        if (supersededCount > 0) {
-          logger.info('Invitation superseded', {
-            teamId: data.teamId,
-            playerId: data.playerId,
-            invitedById: data.invitedById,
-            supersededCount,
+    return createOrConflict(
+      () =>
+        prisma.$transaction(async (tx) => {
+          const accepted = await tx.teamInvitation.findFirst({
+            where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
+            select: { id: true },
           });
-        }
+          if (accepted) {
+            throw new BadRequestError('Player already has access to this team');
+          }
 
-        return tx.teamInvitation.create({
-          data: {
-            ...data,
-            jerseyNumber:
-              data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
-            position: data.position === undefined ? superseded?.position : data.position,
-            message: data.message === undefined ? superseded?.message : data.message,
-          },
-          select: INVITATION_SELECT,
-        });
-      });
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new BadRequestError('A pending invitation already exists for this player');
-      }
-      // A lock-wait loser aborted by Prisma (P2028) is a retryable 409 (#908).
-      return rethrowTransactionTimeout(err);
-    }
+          const latest = await this.latestAfterCooldown(
+            tx,
+            { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
+            recipientEmail
+          );
+
+          // A bare resend ({ playerId, supersede: true }) must not wipe the
+          // jersey/position/message the coach set at add time: for invite-only
+          // players (case 3) the roster row is born from the live invitation at
+          // accept, so a superseding row created without them would roster the
+          // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
+          // caller omits inherit from the row being superseded; explicitly
+          // provided values still win. The source is the newest row for the pair
+          // and only when it is PENDING (the row the updateMany below expires;
+          // at most one exists and nothing is created after it) or EXPIRED (a
+          // lapsed invitation the player's dead-link tap already flipped, #678).
+          // A newest row that is CANCELLED or REJECTED means the coach or the
+          // player ended it, so nothing older is revived.
+          const superseded =
+            latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
+
+          const { count: supersededCount } = await tx.teamInvitation.updateMany({
+            where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
+            data: { status: 'EXPIRED' },
+          });
+          if (supersededCount > 0) {
+            logger.info('Invitation superseded', {
+              teamId: data.teamId,
+              playerId: data.playerId,
+              invitedById: data.invitedById,
+              supersededCount,
+            });
+          }
+
+          return tx.teamInvitation.create({
+            data: {
+              ...data,
+              jerseyNumber:
+                data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
+              position: data.position === undefined ? superseded?.position : data.position,
+              message: data.message === undefined ? superseded?.message : data.message,
+            },
+            select: INVITATION_SELECT,
+          });
+        }),
+      'A pending invitation already exists for this player',
+      'TeamInvitation_pending_teamId_playerId_key'
+    );
   }
 
   /**

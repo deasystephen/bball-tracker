@@ -14,6 +14,9 @@
  * - A pg pool wait/connect timeout (`models/pool-config.ts#isPoolTimeoutError`,
  *   #751) is answered 503 with `Retry-After` and the central handler's retry
  *   body, like the central handler: the pool is saturated, not the route broken.
+ *   An interactive transaction that expired waiting on a row lock (Prisma
+ *   P2028, `isTransactionTimeoutError`, #908) is the same 503 with a
+ *   `transaction_timeout` code.
  * - A non-`AppError` carrying a 4xx `status`/`statusCode` (a WorkOS SDK error,
  *   an `http-errors` error) keeps that status, the rule the central error
  *   handler applies through `sentry.ts#clientErrorStatus`, with the `fallback`
@@ -34,7 +37,7 @@
  */
 
 import type { Response } from 'express';
-import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from '../models/pool-config';
+import { DB_BUSY_RETRY_AFTER_SECONDS, dbBusyBody } from '../models/pool-config';
 import { AppError, DetailedError, NotFoundError } from './errors';
 import { logRouteError } from './log-route-error';
 import { captureRequestException, clientErrorStatus } from './sentry';
@@ -56,10 +59,11 @@ export interface RespondWithErrorOptions {
 export function respondWithError(res: Response, error: unknown, options: RespondWithErrorOptions): void {
   const fallback = typeof options.fallback === 'string' ? { error: options.fallback } : options.fallback;
   const streamed = res.headersSent;
+  const busyBody = dbBusyBody(error);
   if (streamed) {
     res.end();
-  } else if (isPoolTimeoutError(error)) {
-    res.status(503).set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS)).json(DB_BUSY_BODY);
+  } else if (busyBody) {
+    res.status(503).set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS)).json(busyBody);
   } else if (options.notFound !== undefined && error instanceof NotFoundError) {
     res.status(404).json({ error: options.notFound });
   } else if (error instanceof AppError && error.statusCode >= 500) {

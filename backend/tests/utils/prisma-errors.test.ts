@@ -6,13 +6,11 @@ import { Prisma } from '@prisma/client';
 import {
   createOrConflict,
   isRecordNotFound,
-  isTransactionClosed,
-  rethrowTransactionTimeout,
   isUniqueViolation,
   violatedConstraint,
 } from '../../src/utils/prisma-errors';
-import { BadRequestError, DetailedError } from '../../src/utils/errors';
-import { transactionClosed, uniqueViolation } from '../factories';
+import { BadRequestError } from '../../src/utils/errors';
+import { uniqueViolation } from '../factories';
 
 function knownError(code: string, meta?: Record<string, unknown>): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Prisma error', { code, clientVersion: 'test', meta });
@@ -103,36 +101,5 @@ describe('createOrConflict', () => {
   it('rethrows any other error unchanged', async () => {
     const fkError = knownError('P2003');
     await expect(createOrConflict(failWith(fkError), 'Already exists', 'X_key')).rejects.toBe(fkError);
-  });
-});
-
-describe('P2028 (transaction aborted, #908)', () => {
-  it('isTransactionClosed matches only a known request error with code P2028', () => {
-    expect(isTransactionClosed(transactionClosed())).toBe(true);
-    expect(isTransactionClosed(uniqueViolation())).toBe(false);
-    expect(isTransactionClosed(new Error('P2028'))).toBe(false);
-  });
-
-  it('rethrowTransactionTimeout maps P2028 to the 409 transaction_timeout body and passes others through', () => {
-    const mapped = (() => {
-      try {
-        return rethrowTransactionTimeout(transactionClosed());
-      } catch (e) {
-        return e;
-      }
-    })();
-    expect(mapped).toBeInstanceOf(DetailedError);
-    expect((mapped as DetailedError<Record<string, never>>).statusCode).toBe(409);
-    expect((mapped as DetailedError<Record<string, never>>).body().code).toBe('transaction_timeout');
-
-    const boom = new Error('boom');
-    expect(() => rethrowTransactionTimeout(boom)).toThrow(boom);
-  });
-
-  it('createOrConflict maps P2028 whatever the target, and still propagates other errors', async () => {
-    await expect(createOrConflict(failWith(transactionClosed()), 'dup', 'Some_index')).rejects.toMatchObject({
-      statusCode: 409,
-      code: 'transaction_timeout',
-    });
   });
 });
