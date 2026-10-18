@@ -78,7 +78,14 @@ export type AnalyticsValue = string | number | boolean;
 export interface AnalyticsEventProps {
   app_opened: undefined;
   screen_viewed: { screen: string; params_kind: string };
-  user_logged_in: undefined;
+  /**
+   * `claimed_invite`: this sign-in claimed a pre-provisioned account (an
+   * invited or roster-added player) rather than creating one; `was_managed`:
+   * that account was a coach-managed player (#790). Both come from the
+   * `/auth/callback` response and are omitted when it does not carry them
+   * (an API older than #790), so an unknown is never counted as `false`.
+   */
+  user_logged_in: { claimed_invite?: boolean; was_managed?: boolean };
   user_logged_out: { reason: 'user' | 'session_expired' | 'account_deleted' };
   onboarding_step_completed: { step: 'name' | 'role'; role?: string };
   profile_updated: {

@@ -85,10 +85,10 @@ export default function AuthCallbackScreen() {
         const response = await apiClient.get('/auth/callback', {
           params: { code, state: pending.state, code_verifier: pending.verifier },
         });
-        const { accessToken, refreshToken, user } = response.data;
+        const { accessToken, refreshToken, user, claimedInvite, wasManaged } = response.data;
 
         setAuthToken(accessToken, refreshToken ?? null);
-        setUser(user);
+        setUser(user, { claimedInvite, wasManaged });
 
         router.replace(await postLoginRoute(user));
       } catch (err) {

@@ -101,7 +101,44 @@ describe('auth-store', () => {
       app_version: '1.5.0',
     });
     expect(JSON.stringify((identifyUser as jest.Mock).mock.calls)).not.toContain('test@example.com');
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN);
+    // No outcome passed: the flags are left out rather than reported as false (#790)
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
+  });
+
+  describe('user_logged_in outcome flags (#790)', () => {
+    it('carries claimed_invite: true and was_managed for a sign-in that claimed a pre-provisioned row', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true, wasManaged: true });
+
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
+        claimed_invite: true,
+        was_managed: true,
+      });
+    });
+
+    it('carries claimed_invite: false for a brand-new or returning account', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: false, wasManaged: false });
+
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
+        claimed_invite: false,
+        was_managed: false,
+      });
+    });
+
+    it('leaves out a flag the API did not send, or sent as a non-boolean', () => {
+      useAuthStore
+        .getState()
+        .setUser(makeUser(), { claimedInvite: undefined, wasManaged: 'yes' as unknown as boolean });
+
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
+    });
+
+    it('sends booleans only, never the user\'s email or name', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true, wasManaged: false });
+
+      const props = (trackEvent as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
+      expect(Object.values(props).every((v) => typeof v === 'boolean')).toBe(true);
+      expect(JSON.stringify(props)).not.toContain('test@example.com');
+    });
   });
 
   it('logout clears token + user, resets auth flags, and notifies analytics', async () => {

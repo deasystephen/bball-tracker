@@ -34,6 +34,27 @@ export function userPropertiesFrom(user: User): Partial<AnalyticsUserProperties>
   };
 }
 
+/**
+ * What the sign-in response says about the account it signed in to (#790):
+ * `/auth/callback` and `/auth/dev-login` carry `claimedInvite` and
+ * `wasManaged` next to the tokens. Optional because an API older than #790
+ * sends neither.
+ */
+export interface LoginOutcome {
+  claimedInvite?: boolean;
+  wasManaged?: boolean;
+}
+
+/** `user_logged_in` properties from a login outcome; a flag the API did not send is left out. */
+export function loginEventPropsFrom(
+  outcome: LoginOutcome = {}
+): AnalyticsEventProps['user_logged_in'] {
+  return {
+    ...(typeof outcome.claimedInvite === 'boolean' && { claimed_invite: outcome.claimedInvite }),
+    ...(typeof outcome.wasManaged === 'boolean' && { was_managed: outcome.wasManaged }),
+  };
+}
+
 interface AuthState {
   accessToken: string | null;
   /**
@@ -46,7 +67,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
-  setUser: (user: User) => void;
+  /** Sign-in only: store the user and fire `user_logged_in` with the response's outcome flags. */
+  setUser: (user: User, outcome?: LoginOutcome) => void;
   /** Merge fields into the current user without re-firing login analytics. */
   updateUser: (patch: Partial<User>) => void;
   /**
@@ -101,9 +123,9 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken: token, refreshToken, isAuthenticated: true });
       },
 
-      setUser: (user: User) => {
+      setUser: (user: User, outcome?: LoginOutcome) => {
         identifyUser(user.id, userPropertiesFrom(user));
-        trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+        trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(outcome));
         set({ user, isAuthenticated: true, isLoading: false });
       },
 

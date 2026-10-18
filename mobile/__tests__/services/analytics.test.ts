@@ -266,7 +266,7 @@ describe('analytics service', () => {
       const { initAnalytics, identifyUser, trackEvent, AnalyticsEvents } = withKey();
 
       identifyUser('user-1', { role: 'COACH', is_parent: false });
-      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN, { claimed_invite: false });
       expect(mockAmplitude.setUserId).not.toHaveBeenCalled();
       expect(mockAmplitude.identify).not.toHaveBeenCalled();
 
@@ -289,10 +289,10 @@ describe('analytics service', () => {
       const { initAnalytics, identifyUser, trackEvent, AnalyticsEvents } = withKey();
 
       identifyUser('user-1');
-      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN, { claimed_invite: false });
       await initAnalytics();
 
-      expect(mockAmplitude.track).toHaveBeenCalledWith('user_logged_in', undefined, {
+      expect(mockAmplitude.track).toHaveBeenCalledWith('user_logged_in', { claimed_invite: false }, {
         user_id: 'user-1',
         device_id: 'd1',
       });
@@ -363,11 +363,11 @@ describe('analytics service', () => {
       const { initAnalytics, identifyUser, trackEvent, resetUser, AnalyticsEvents } = withKey();
 
       identifyUser('user-1');
-      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN, { claimed_invite: false });
       trackEvent(AnalyticsEvents.USER_LOGGED_OUT, { reason: 'user' });
       resetUser();
       identifyUser('user-2');
-      trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+      trackEvent(AnalyticsEvents.USER_LOGGED_IN, { claimed_invite: false });
       await initAnalytics();
 
       expect(mockAmplitude.track.mock.calls.map((call) => [call[0], call[2].user_id])).toEqual([

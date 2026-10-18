@@ -12,6 +12,7 @@ import AuthCallbackScreen from '../../app/auth/callback';
 import { apiClient } from '../../services/api-client';
 import { consumePendingLogin } from '../../utils/pkce';
 import { useAuthStore } from '../../store/auth-store';
+import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 
 const mockParams: { code?: string; state?: string; error?: string } = {};
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -30,6 +31,12 @@ jest.mock('../../utils/role-onboarding', () => ({
 }));
 
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
+
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+  identifyUser: jest.fn(),
+}));
 
 const mockedGet = apiClient.get as jest.Mock;
 const mockedConsume = consumePendingLogin as jest.Mock;
@@ -59,6 +66,38 @@ describe('AuthCallbackScreen', () => {
       params: { code: 'code-1', state: 'state-1', code_verifier: 'verifier-1' },
     });
     expect(useAuthStore.getState()).toMatchObject({ accessToken: 'at', refreshToken: 'rt', isAuthenticated: true });
+  });
+
+  it.each([
+    { claimedInvite: true, wasManaged: true },
+    { claimedInvite: false, wasManaged: false },
+  ])('fires user_logged_in with the callback outcome flags %o (#790)', async ({ claimedInvite, wasManaged }) => {
+    mockParams.code = 'code-1';
+    mockParams.state = 'state-1';
+    mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+    mockedGet.mockResolvedValue({
+      data: { accessToken: 'at', refreshToken: 'rt', user, claimedInvite, wasManaged },
+    });
+
+    render(<AuthCallbackScreen />);
+
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
+      claimed_invite: claimedInvite,
+      was_managed: wasManaged,
+    });
+  });
+
+  it('fires user_logged_in without the flags when the API does not send them', async () => {
+    mockParams.code = 'code-1';
+    mockParams.state = 'state-1';
+    mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+    mockedGet.mockResolvedValue({ data: { accessToken: 'at', refreshToken: 'rt', user } });
+
+    render(<AuthCallbackScreen />);
+
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
   });
 
   it('refuses to exchange the code when the state does not match a sign-in from this device', async () => {

@@ -112,10 +112,10 @@ export default function Login() {
       setShowDevLogin(false);
 
       const response = await apiClient.post('/auth/dev-login', { email });
-      const { accessToken, user } = response.data;
+      const { accessToken, user, claimedInvite, wasManaged } = response.data;
 
       setAuthToken(accessToken);
-      setUser(user);
+      setUser(user, { claimedInvite, wasManaged });
 
       router.replace(await postLoginRoute(user));
     } catch (error) {
