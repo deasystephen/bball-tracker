@@ -22,6 +22,7 @@ interface MockQuery {
   fetchNextPage: jest.Mock;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
+  isFetchNextPageError?: boolean;
 }
 let mockTeamsQuery: MockQuery;
 let mockGamesQuery: MockQuery;
@@ -44,6 +45,7 @@ jest.mock('../../services/sentry', () => ({ captureException: jest.fn(), capture
 jest.mock('../../services/api-client', () => ({
   apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), patch: jest.fn(), delete: jest.fn() },
   getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
+  describeApiError: jest.requireActual('../../services/api-client').describeApiError,
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../../hooks/useTeams', () => ({
@@ -126,8 +128,10 @@ describe('Teams tab', () => {
   });
 
   it('shows the spinner, not the same error, while Try Again is in flight', () => {
-    mockTeamsQuery = { ...failedFirstLoad('Network Error'), isFetching: true };
+    mockTeamsQuery = failedFirstLoad('Network Error');
+    mockTeamsQuery.refetch.mockReturnValue(new Promise(() => {}));
     const view = render(<TeamsScreen />);
+    fireEvent.press(view.getByLabelText('Try Again'));
 
     expect(view.queryByText('Something went wrong')).toBeNull();
   });
@@ -138,6 +142,15 @@ describe('Teams tab', () => {
     view.rerender(<TeamsScreen />);
 
     expect(errorShownCalls()).toHaveLength(1);
+  });
+});
+
+describe('automatic refetch', () => {
+  it('keeps the error on screen when a refetch starts without Try Again', () => {
+    mockTeamsQuery = { ...failedFirstLoad('Network Error'), isFetching: true };
+    const view = render(<TeamsScreen />);
+
+    expect(view.getByText('Something went wrong')).toBeTruthy();
   });
 });
 
@@ -161,10 +174,32 @@ describe('Games tab', () => {
   });
 
   it('shows the spinner, not the same error, while Try Again is in flight', () => {
-    mockGamesQuery = { ...failedFirstLoad('Network Error'), isFetching: true };
+    mockGamesQuery = failedFirstLoad('Network Error');
+    mockGamesQuery.refetch.mockReturnValue(new Promise(() => {}));
     const view = render(<GamesScreen />);
+    fireEvent.press(view.getByLabelText('Try Again'));
 
     expect(view.queryByText('Something went wrong')).toBeNull();
+  });
+});
+
+describe('a failed next page keeps the list and offers a retry', () => {
+  it('Teams', () => {
+    mockTeamsQuery = query({ teams: [TEAM] }, { isFetchNextPageError: true, error: new Error('x') });
+    const view = render(<TeamsScreen />);
+
+    expect(view.getByText('Wildcats')).toBeTruthy();
+    fireEvent.press(view.getByText("Couldn't load more. Tap to retry"));
+    expect(mockTeamsQuery.fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('Games', () => {
+    mockGamesQuery = query({ games: [GAME] }, { isFetchNextPageError: true, error: new Error('x') });
+    const view = render(<GamesScreen />);
+
+    expect(view.getByText(/Hornets/)).toBeTruthy();
+    fireEvent.press(view.getByText("Couldn't load more. Tap to retry"));
+    expect(mockGamesQuery.fetchNextPage).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -205,8 +240,10 @@ describe('Invitations tab', () => {
   });
 
   it('shows the spinner, not the same error, while Try Again is in flight', () => {
-    mockInvitationsQuery = { ...failedFirstLoad('Network Error'), isFetching: true };
+    mockInvitationsQuery = failedFirstLoad('Network Error');
+    mockInvitationsQuery.refetch.mockReturnValue(new Promise(() => {}));
     const view = render(<InvitationsScreen />);
+    fireEvent.press(view.getByLabelText('Try Again'));
 
     expect(view.queryByText('Something went wrong')).toBeNull();
   });

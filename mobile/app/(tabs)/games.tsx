@@ -21,12 +21,13 @@ import {
   EmptyState,
   LoadingSpinner,
   ErrorState,
+  Button,
 } from '../../components';
 import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
-import { getApiErrorMessage } from '../../services/api-client';
-import { showQueryError } from '../../utils/query-state';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
+import { useTranslation } from '../../i18n';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useAuthUser } from '../../store/auth-store';
@@ -55,6 +56,7 @@ export default function Games() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
+  const { t } = useTranslation();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
 
   // Status filtering is server-side so a long backlog of scheduled games can't
@@ -62,25 +64,22 @@ export default function Games() {
   const {
     data,
     isLoading,
-    isFetching,
     error,
     refetch,
     isRefetching,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetchNextPageError,
   } = useInfiniteGames(activeFilter === 'ALL' ? undefined : { status: activeFilter });
 
   const filteredGames = useMemo(() => data?.games ?? [], [data]);
 
   // A failed first load replaces the screen; a failed background refetch keeps the cached
-  // list (#888, utils/query-state.ts). Try Again shows the spinner until the retry settles.
-  const failed = showQueryError({ error, data: data?.games });
-  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
-  // failure (a new error object), not on every render.
-  const errorMessage = useMemo(
-    () => (failed ? getApiErrorMessage(error, 'Failed to load games') : ''),
-    [failed, error]
+  // list (#888, hooks/useQueryErrorState.ts).
+  const errorState = useQueryErrorState(
+    { error, data: data?.games, refetch },
+    'Failed to load games'
   );
 
   // Creating a game needs `canManageTeam` on the chosen team (backend
@@ -264,12 +263,12 @@ export default function Games() {
     [handleGamePress, colors]
   );
 
-  if (isLoading || (failed && isFetching)) {
+  if (isLoading || errorState.retrying) {
     return <LoadingSpinner message="Loading games..." fullScreen />;
   }
 
-  if (failed) {
-    return <ErrorState message={errorMessage} onRetry={refetch} />;
+  if (errorState.failed) {
+    return <ErrorState message={errorState.message} onRetry={errorState.retry} />;
   }
 
   return (
@@ -338,7 +337,15 @@ export default function Games() {
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
-            isFetchingNextPage ? <LoadingSpinner message="Loading more..." /> : null
+            isFetchingNextPage ? (
+              <LoadingSpinner message="Loading more..." />
+            ) : isFetchNextPageError ? (
+              <Button
+                title={t('common.loadMoreFailed')}
+                variant="ghost"
+                onPress={() => fetchNextPage()}
+              />
+            ) : null
           }
           refreshControl={
             <RefreshControl

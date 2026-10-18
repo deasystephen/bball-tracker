@@ -2,7 +2,7 @@
  * Stats hub screen - view team and player statistics
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,8 +26,7 @@ import { describeRecord, describeResults, getResultColor } from '../../utils/gam
 import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import { isDeletedUser, playerDisplayName } from '../../utils/display-name';
-import { showQueryError } from '../../utils/query-state';
-import { getApiErrorMessage } from '../../services/api-client';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 
 /**
  * Podium label: a live player's first name, or the whole localized
@@ -49,7 +48,6 @@ export default function Stats() {
   const {
     data: teams,
     isLoading: teamsLoading,
-    isFetching: teamsFetching,
     error: teamsError,
     refetch: refetchTeams,
   } = useTeams({ limit: TEAMS_MAX_LIMIT });
@@ -61,40 +59,36 @@ export default function Stats() {
   const {
     data: seasonStats,
     isLoading: statsLoading,
-    isFetching: statsFetching,
     error: statsError,
     refetch: refetchStats,
   } = useTeamSeasonStats(selectedTeamId || '');
   const {
     data: rosterStats,
     isLoading: rosterLoading,
-    isFetching: rosterFetching,
     error: rosterError,
     refetch: refetchRoster,
   } = useTeamRosterStats(selectedTeamId || '');
 
-  // A failed request is not an empty result (#728); see utils/query-state.ts.
-  const teamsFailed = showQueryError({ error: teamsError, data: teams });
-  const statsFailed = showQueryError({ error: statsError, data: seasonStats });
-  const rosterFailed = showQueryError({ error: rosterError, data: rosterStats });
-  const teamStatsError = statsFailed ? statsError : rosterFailed ? rosterError : null;
-  // TanStack keeps `error` set while a retry is in flight, so Try Again shows the spinner
-  // until the refetch settles instead of leaving the same error on screen.
-  const retryingTeamStats = (statsFailed && statsFetching) || (rosterFailed && rosterFetching);
+  // A failed request is not an empty result (#728); see hooks/useQueryErrorState.ts.
+  const teamsState = useQueryErrorState(
+    { error: teamsError, data: teams, refetch: refetchTeams },
+    'Failed to load teams'
+  );
+  const statsState = useQueryErrorState(
+    { error: statsError, data: seasonStats, refetch: refetchStats },
+    'Failed to load stats'
+  );
+  const rosterState = useQueryErrorState(
+    { error: rosterError, data: rosterStats, refetch: refetchRoster },
+    'Failed to load stats'
+  );
+  const teamStatsFailed = statsState.failed || rosterState.failed;
+  const teamStatsMessage = statsState.failed ? statsState.message : rosterState.message;
+  const retryingTeamStats = statsState.retrying || rosterState.retrying;
   const retryTeamStats = () => {
-    if (statsFailed) refetchStats();
-    if (rosterFailed) refetchRoster();
+    if (statsState.failed) statsState.retry();
+    if (rosterState.failed) rosterState.retry();
   };
-  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
-  // failure (a new error object), not on every render.
-  const teamsErrorMessage = useMemo(
-    () => (teamsFailed ? getApiErrorMessage(teamsError, 'Failed to load teams') : ''),
-    [teamsFailed, teamsError]
-  );
-  const teamStatsErrorMessage = useMemo(
-    () => (teamStatsError ? getApiErrorMessage(teamStatsError, 'Failed to load stats') : ''),
-    [teamStatsError]
-  );
 
   const selectedTeam = teams?.find((t) => t.id === selectedTeamId);
   const isLoading = teamsLoading || statsLoading || rosterLoading;
@@ -109,11 +103,11 @@ export default function Stats() {
     : [];
   const topAssister = sortedByAssists[0];
 
-  if (teamsLoading || (teamsFailed && teamsFetching)) {
+  if (teamsLoading || teamsState.retrying) {
     return <LoadingSpinner message="Loading..." fullScreen />;
   }
 
-  if (teamsFailed) {
+  if (teamsState.failed) {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View
@@ -124,7 +118,7 @@ export default function Stats() {
         >
           <ThemedText variant="h1" heading>Statistics</ThemedText>
         </View>
-        <ErrorState message={teamsErrorMessage} onRetry={refetchTeams} />
+        <ErrorState message={teamsState.message} onRetry={teamsState.retry} />
       </ThemedView>
     );
   }
@@ -215,8 +209,8 @@ export default function Stats() {
 
         {retryingTeamStats ? (
           <LoadingSpinner message="Loading stats..." />
-        ) : teamStatsError ? (
-          <ErrorState message={teamStatsErrorMessage} onRetry={retryTeamStats} />
+        ) : teamStatsFailed ? (
+          <ErrorState message={teamStatsMessage} onRetry={retryTeamStats} />
         ) : isLoading ? (
           <LoadingSpinner message="Loading stats..." />
         ) : (

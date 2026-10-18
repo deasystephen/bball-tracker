@@ -2,7 +2,7 @@
  * Invitations list screen - View and manage team invitations
  */
 
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   View,
   StyleSheet,
@@ -20,8 +20,8 @@ import {
   type GuardianInvitationView,
 } from '../../hooks/useInvitations';
 import { relationshipLabel } from '../../utils/guardian';
-import { apiClient, getApiErrorMessage } from '../../services/api-client';
-import { showQueryError } from '../../utils/query-state';
+import { apiClient } from '../../services/api-client';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import type { User } from '../../../shared/types';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
@@ -43,7 +43,6 @@ export default function InvitationsScreen() {
   const {
     data: invitationsData,
     isLoading,
-    isFetching,
     error,
     refetch,
     isRefetching,
@@ -54,13 +53,10 @@ export default function InvitationsScreen() {
   const toast = useToast();
 
   // A failed first load replaces the screen; a failed background refetch keeps the cached
-  // invitations (#888, utils/query-state.ts). Try Again shows the spinner until it settles.
-  const failed = showQueryError({ error, data: invitationsData });
-  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
-  // failure (a new error object), not on every render.
-  const errorMessage = useMemo(
-    () => (failed ? getApiErrorMessage(error, 'Failed to load invitations') : ''),
-    [failed, error]
+  // invitations (#888, hooks/useQueryErrorState.ts).
+  const errorState = useQueryErrorState(
+    { error, data: invitationsData, refetch },
+    'Failed to load invitations'
   );
 
   const invitations = invitationsData?.invitations || [];
@@ -375,12 +371,12 @@ export default function InvitationsScreen() {
     );
   };
 
-  if (isLoading || (failed && isFetching)) {
+  if (isLoading || errorState.retrying) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
-  if (failed) {
-    return <ErrorState message={errorMessage} onRetry={refetch} />;
+  if (errorState.failed) {
+    return <ErrorState message={errorState.message} onRetry={errorState.retry} />;
   }
 
   const renderDebugCard = () => {

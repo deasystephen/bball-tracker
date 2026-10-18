@@ -15,6 +15,7 @@
     "hoursAgo": "hace {{count}} h",
     "yesterday": "Ayer",
     "changePhoto": "Cambiar foto",
+    "loadMoreFailed": "No se pudo cargar más. Toca para reintentar",
     "profilePhoto": "Foto de perfil"
   },
   "navigation": {
@@ -243,6 +244,7 @@
     "streakLabel_other": "Últimos {{count}} partidos, del más reciente al más antiguo: {{results}}"
   },
   "invite": {
-    "loadFailed": "No pudimos cargar esta invitación. Revisa tu conexión e inténtalo de nuevo."
+    "loadFailed": "No pudimos cargar esta invitación. Revisa tu conexión e inténtalo de nuevo.",
+    "rateLimited": "Demasiadas solicitudes. Espera unos minutos e inténtalo de nuevo."
   }
 }

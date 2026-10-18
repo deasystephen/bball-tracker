@@ -11,12 +11,12 @@ import { ThemedView, ThemedText, LoadingSpinner, Button, Card, ErrorState } from
 import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useGoBack } from '../../hooks/useGoBack';
-import { isTransientLoadError } from '../../utils/query-state';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
+import { apiClient, isRateLimitedError, isTransientRequestError } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
 import { relationshipLabel } from '../../utils/guardian';
 import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
-import { apiClient } from '../../services/api-client';
 import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
 import { setPendingReturnPath } from '../../utils/return-path';
@@ -34,7 +34,14 @@ export default function InviteDeepLinkScreen() {
   const goBack = useGoBack('/');
   const { isAuthenticated, updateUser } = useAuthStore();
 
-  const { data: invitation, isLoading, error, refetch, isFetching } = useInvitationByToken(token);
+  const { data: invitation, isLoading, error, refetch } = useInvitationByToken(token);
+  // Only a transient failure is a retryable error state (and an `error_shown` event); a
+  // 400/404 stays the not-found screen below (#892).
+  const transientError = error && isTransientRequestError(error) ? error : null;
+  const loadState = useQueryErrorState(
+    { error: transientError, data: invitation, refetch },
+    'Failed to load invitation'
+  );
   const acceptById = useAcceptInvitation({ source: 'link' });
 
   /**
@@ -120,11 +127,19 @@ export default function InviteDeepLinkScreen() {
   }
 
   // A network failure, 429 or 5xx says nothing about the token (#892): offer a retry
-  // rather than a dead-link screen. TanStack keeps `error` set while Try Again is in
-  // flight, so show the spinner until it settles.
-  if (error && isTransientLoadError(error)) {
-    if (isFetching) return <LoadingSpinner message="Loading invitation…" fullScreen />;
-    return <ErrorState message={t('invite.loadFailed')} onRetry={refetch} onBack={goBack} />;
+  // rather than a dead-link screen.
+  if (loadState.retrying) {
+    return <LoadingSpinner message="Loading invitation…" fullScreen />;
+  }
+
+  if (loadState.failed) {
+    return (
+      <ErrorState
+        message={isRateLimitedError(error) ? t('invite.rateLimited') : t('invite.loadFailed')}
+        onRetry={loadState.retry}
+        onBack={goBack}
+      />
+    );
   }
 
   if (error || !invitation) {

@@ -174,6 +174,23 @@ export type NormalizedApiError = AxiosError & {
 export const UPGRADE_REQUIRED_CODE = 'upgrade_required';
 
 /**
+ * True when a failed request says nothing about the thing requested, so a screen should
+ * offer a retry instead of "not found" (#892): a network failure or timeout (no response),
+ * a 429 and any 5xx. A local error (a TypeError thrown in a query function), a cancellation
+ * and a `NoSessionError` are not transient: retrying changes nothing.
+ */
+export const isTransientRequestError = (error: unknown): boolean => {
+  if (isNoSessionError(error) || !isAxiosError(error) || isCancellation(error)) return false;
+  const status = error.response?.status;
+  if (status === undefined) return true;
+  return status === 429 || status >= 500;
+};
+
+/** True for a 429 response (rate limited). */
+export const isRateLimitedError = (error: unknown): boolean =>
+  isAxiosError(error) && error.response?.status === 429;
+
+/**
  * Lift the server's error body onto the thrown error so every
  * `error instanceof Error ? error.message : …` site shows the real reason
  * (e.g. "You do not have permission to create teams in this league") instead
@@ -228,6 +245,15 @@ export const isUpgradeRequiredError = (error: unknown): error is NormalizedApiEr
  */
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {
   trackErrorShown(error);
+  return describeApiError(error, fallback);
+};
+
+/**
+ * The text `getApiErrorMessage` returns, without sending `error_shown`. For a render that
+ * needs the message every time while the event is sent once, from an effect
+ * (`hooks/useQueryErrorState.ts`).
+ */
+export const describeApiError = (error: unknown, fallback: string): string => {
   if (isAxiosError(error)) {
     const info = (error as NormalizedApiError).apiError;
     if (info?.error) return info.error;

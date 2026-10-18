@@ -1,4 +1,4 @@
-import { showQueryError, isTransientLoadError } from '../../utils/query-state';
+import { showQueryError } from '../../utils/query-state';
 
 describe('showQueryError', () => {
   it('is true for a failed query with nothing cached', () => {
@@ -13,23 +13,5 @@ describe('showQueryError', () => {
   it('is false without an error, loaded or not', () => {
     expect(showQueryError({ error: null, data: undefined })).toBe(false);
     expect(showQueryError({ error: null, data: [] })).toBe(false);
-  });
-});
-
-describe('isTransientLoadError', () => {
-  const http = (status: number) => ({ response: { status } });
-
-  it('is true for a network failure, 429 and any 5xx', () => {
-    expect(isTransientLoadError(new Error('Network Error'))).toBe(true);
-    expect(isTransientLoadError(http(429))).toBe(true);
-    expect(isTransientLoadError(http(500))).toBe(true);
-    expect(isTransientLoadError(http(503))).toBe(true);
-  });
-
-  it('is false for 400/404, other client errors and no error', () => {
-    expect(isTransientLoadError(http(400))).toBe(false);
-    expect(isTransientLoadError(http(404))).toBe(false);
-    expect(isTransientLoadError(http(403))).toBe(false);
-    expect(isTransientLoadError(null)).toBe(false);
   });
 });
