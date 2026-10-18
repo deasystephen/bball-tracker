@@ -6,10 +6,10 @@ import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
 import { GuardianService } from '../../src/services/guardian-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
-import { ResendCooldownError } from '../../src/utils/errors';
+import { DetailedError, ResendCooldownError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
-import { createAdmin, createCoach, createPlayer, createTeam, createUser, uniqueViolation } from '../factories';
+import { createAdmin, createCoach, createPlayer, createTeam, createUser, transactionClosed, uniqueViolation } from '../factories';
 import {
   expectBadRequestError,
   expectForbiddenError,
@@ -609,6 +609,18 @@ describe('GuardianService', () => {
         const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
 
         expectBadRequestError(err, 'A pending guardian invitation already exists for this email');
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+      });
+
+      it('answers a retryable 409 transaction_timeout when the supersede transaction is aborted (P2028, #908)', async () => {
+        setLivePending();
+        (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(transactionClosed());
+
+        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
+
+        expect(err).toBeInstanceOf(DetailedError);
+        expect(err.statusCode).toBe(409);
+        expect(err.body()).toMatchObject({ code: 'transaction_timeout' });
         expect(mockedMailerSend).not.toHaveBeenCalled();
       });
 

@@ -85,6 +85,7 @@ eng-review amendments recorded there).
   Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are
   not one transaction, so a lost create race on the partial unique index (double-tap resend) maps
   P2002 → 400 `A pending invitation already exists for this player` (`createInvitationRow`), never 500.
+  The supersede transaction waits on that index's row lock; if the holder is slow and Prisma aborts the waiter (P2028, the 5 s interactive-transaction timeout), `createInvitationRowSuperseding` answers a retryable 409 `transaction_timeout` (`TransactionTimeoutError`, `utils/prisma-errors.ts#rethrowTransactionTimeout`), never 500 (#908). Nothing was written, so the client repeats the request. 409 rather than 503 because `DetailedError` carries no `Retry-After` header; the default timeout is kept.
 - **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
   (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
   "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,

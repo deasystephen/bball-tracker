@@ -679,6 +679,14 @@ export function createTeamStats(options: CreateTeamStatsOptions = {}): TeamStats
  * 2026-10-17). Pass the index name a service's `createOrConflict` targets;
  * omit it for a violation that names no constraint.
  */
+/** Prisma's "Transaction already closed" abort (interactive-transaction timeout), P2028 (#908). */
+export function transactionClosed(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Transaction API error: Transaction already closed', {
+    code: 'P2028',
+    clientVersion: 'test',
+  });
+}
+
 export function uniqueViolation(target?: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',

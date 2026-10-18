@@ -36,7 +36,7 @@ import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
+import { createOrConflict, isUniqueViolation, rethrowTransactionTimeout } from '../utils/prisma-errors';
 import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
@@ -522,7 +522,8 @@ export class InvitationService {
       if (isUniqueViolation(err)) {
         throw new BadRequestError('A pending invitation already exists for this player');
       }
-      throw err;
+      // A lock-wait loser aborted by Prisma (P2028) is a retryable 409 (#908).
+      return rethrowTransactionTimeout(err);
     }
   }
 
