@@ -81,8 +81,12 @@ current score so a client can drop events and still converge.
     `unavailable` and reported to Sentry (`flow: 'socket-refresh-auth'`); a malformed payload is
     `bad_request`. Each offer is recorded as `socket.data.latestOfferedToken` when it arrives,
     and a verification that finishes after a newer offer is discarded and acked `superseded`, so
-    two offers completing out of order can never leave the socket on the older token. `refresh-auth` is limited to `MAX_REFRESH_AUTHS_PER_WINDOW` (10) per minute
-    per socket (`websocket/rate-limit.ts`, ack `rate_limited`), checked before any verification.
+    two offers completing out of order can never leave the socket on the older token. An offer
+    equal to the token the server already holds is acked `{ success: true }` at once, with no
+    verify and no room re-check. `refresh-auth` is limited to `MAX_REFRESH_AUTHS_PER_WINDOW`
+    (10) per minute per socket (`websocket/rate-limit.ts`, ack `rate_limited`), checked before
+    any verification but after the offer is recorded as the latest, so a rate-limited newer
+    offer still stops an older in-flight one from winning.
   - **Re-check timer, the fallback.** `scheduleSocketReauth` keeps one timer per socket, due at
     the held token's expiry plus `REAUTH_GRACE_MS` (35s: the verifier's 30s clock tolerance,
     `JWT_CLOCK_TOLERANCE_SECONDS`, plus 5s, so the re-check really fails) plus a per-socket
@@ -91,7 +95,21 @@ current score so a client can drop events and still converge.
     (15 min) away; a token without `exp` is re-checked every 15 min. A valid token is never cut
     off early. When it fires, `reverifySocket` first checks the held expiry: a token past its
     expiry plus grace is known dead and is cut off (`reason: 'expired'`) with no JWKS check or
-    user lookup. Only a token still inside its lifetime (no `exp`, or a long-lived token hitting
+    user lookup, with two exceptions (`handleExpiredToken`):
+    - a `refresh-auth` offer still being verified (`socket.data.offerPending`) defers the cut
+      once, by `REAUTH_PENDING_OFFER_WAIT_MS` (10s); if the offer lands meanwhile it replaces
+      the timer, otherwise the next check cuts;
+    - while the verifier is down (`isSocketVerifierDown()`: the most recent socket verification
+      anywhere in the process threw an outage rather than returning or throwing a 4xx; every
+      handshake, offer and re-check updates it), the client could not reconnect either (its
+      handshake would get `Service unavailable` and its back-off gives up after about a minute),
+      so the socket is kept: every `REAUTH_RETRY_MS` (60s) the expired token is probed through
+      `resolveSocketSession`, and the cut happens once a probe completes (the verifier is back)
+      or once the token is past its expiry by one more token lifetime (`exp - iat`, from
+      `VerifiedToken.issuedAt`; 15 min when unknown). Probes log a warning and are not sent to
+      Sentry per socket.
+
+    Only a token still inside its lifetime (no `exp`, or a long-lived token hitting
     the 15-minute cap: deletion and role re-checks) is re-run through `resolveSocketSession`. The
     token is captured before that await, and the result is discarded (`skipped`) if an accepted
     `refresh-auth` replaced it meanwhile, so a stale rejection never closes a socket that just
@@ -107,17 +125,17 @@ current score so a client can drop events and still converge.
       before #49) still recovers through the `Unauthorized` path below;
     - any other throw (JWKS or database outage) → reported to Sentry
       (`flow: 'socket-reauth'`) and retried after `REAUTH_RETRY_MS` (60s), so an outage never
-      cuts off a valid session; once the token is past expiry plus grace the next check cuts it
-      off without consulting the verifier.
+      cuts off a valid session; past expiry the outage hold above applies.
   - **Logging.** The expected cycle is `debug` (`Socket auth refreshed`, `Socket reauth check
     passed`, and `Socket reauth required` with `reason: 'expired'`). Anomalies are `info`:
     `Socket reauth required` with `reason: 'rejected'` (the verifier refused an unexpired token,
     or the account was deleted) or `'user_changed'`, `Socket refresh-auth rejected`, and `Socket
     evicted from game room`. Ids only.
   - **Room access (audit #72).** Every accepted `refresh-auth` and every passing re-check runs
-    `pruneGameRooms`, which checks every `game:<id>` room in parallel with `canViewGame` (the
-    same rule `join-game` applies: the game exists and `canAccessTeam` passes) and leaves each
-    one that fails, so a removed coach stops receiving broadcasts within one token
+    `pruneGameRooms`, which resolves every `game:<id>` room at once with `viewableGameIds`: one
+    `game.findMany` with `id in` the rooms and `team` filtered by `readableTeamsWhere` (the
+    `teamAccessWhere` set form), skipped for a system ADMIN, the same rule `canViewGame` applies
+    with `canAccessTeam` to a single `join-game`. It leaves the set difference, so a removed coach stops receiving broadcasts within one token
     lifetime even though the socket stays connected. A lookup failure keeps the rooms and is
     reported to Sentry; the next refresh or re-check tries again. The client is not told it was
     evicted; it simply stops receiving that game's broadcasts.
@@ -155,13 +173,18 @@ current score so a client can drop events and still converge.
     token changes (any `refreshAccessToken()`, REST-triggered or not) while connected, and
     emits `refresh-auth`; `connect` does the same if a refresh landed during the handshake. The
     held token moves only on a success ack, so a refused offer never makes the client believe
-    the server holds it; a refused offer is retried once (not when `superseded`), and a token
-    already in flight is not sent twice.
+    the server holds it. Only an offer refused as `unavailable` or `internal` is retried, once;
+    `unauthorized`, `bad_request`, `rate_limited` and `superseded` never are. A token already in
+    flight is not sent twice.
   - **Proactive:** while connected, a timer refreshes `PROACTIVE_REFRESH_LEAD_MS` (60s) before
     the held token expires (expiry read by `utils/token-expiry.ts`, unverified). The delay is
     the largest of remaining lifetime minus the lead, half the remaining lifetime, and
-    `MIN_PROACTIVE_REFRESH_DELAY_MS` (30s), so a device clock running ahead of WorkOS cannot
-    loop `/auth/refresh`. `scheduleProactiveRefresh` is the timer's single owner, called on
+    `MIN_PROACTIVE_REFRESH_DELAY_MS` (30s). **Clock skew turns it off for the session** (until
+    `resetSocket()`): a token whose `iat` is more than `CLOCK_SKEW_TOLERANCE_MS` (60s) in the
+    device's future (clock behind), or a freshly accepted token whose remaining life minus the
+    lead is under the floor (clock ahead by about the token lifetime), would otherwise make the
+    timer loop `/auth/refresh` or fire late. The server fallback still recovers such a device.
+    `scheduleProactiveRefresh` is the timer's single owner, called on
     `connect` and on each accepted `refresh-auth`. The refresh is needed because a
     spectator who makes no REST calls would otherwise never refresh and the server would close
     the socket every token lifetime. The resulting store change sends `refresh-auth`. The timer

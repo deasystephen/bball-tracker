@@ -11,16 +11,13 @@ jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
 }));
-jest.mock('../../src/utils/permissions', () => ({
-  ...jest.requireActual('../../src/utils/permissions'),
-  canAccessTeam: jest.fn(),
-}));
 
 import {
   GAME_ROOM_PREFIX,
   REAUTH_GRACE_MS,
   REAUTH_JITTER_MAX_MS,
   REAUTH_MAX_INTERVAL_MS,
+  REAUTH_PENDING_OFFER_WAIT_MS,
   REAUTH_REQUIRED_EVENT,
   REAUTH_RETRY_MS,
   clearSocketReauth,
@@ -29,15 +26,18 @@ import {
   pendingReauthCount,
   pruneGameRooms,
   reauthDelayMs,
+  isSocketVerifierDown,
+  resetSocketVerifierHealth,
+  resolveSocketSession,
   reverifySocket,
   scheduleSocketReauth,
+  viewableGameIds,
   type GameSocket,
 } from '../../src/websocket/game-events';
 import { MAX_REFRESH_AUTHS_PER_WINDOW } from '../../src/websocket/rate-limit';
 import { WorkOSService, JWT_CLOCK_TOLERANCE_SECONDS } from '../../src/services/workos-service';
 import { ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
-import { canAccessTeam } from '../../src/utils/permissions';
 import { logger } from '../../src/utils/logger';
 import { mockPrisma } from '../setup';
 import { devToken } from '../support/auth-fixtures';
@@ -45,7 +45,6 @@ import { devToken } from '../support/auth-fixtures';
 const USER = { id: 'user-1', email: null, name: 'Coach', role: 'COACH' };
 const MINUTE = 60_000;
 const mockCapture = captureException as jest.Mock;
-const mockCanAccessTeam = canAccessTeam as jest.Mock;
 
 interface FakeSocket {
   id: string;
@@ -57,6 +56,8 @@ interface FakeSocket {
     authToken?: string;
     reauthJitterMs?: number;
     latestOfferedToken?: string;
+    offerPending?: boolean;
+    tokenLifetimeMs?: number | null;
   };
   rooms: Set<string>;
   emit: jest.Mock;
@@ -110,7 +111,7 @@ describe('socket re-auth (#49)', () => {
     infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
     debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => logger);
     jest.spyOn(logger, 'warn').mockImplementation(() => logger);
-    mockCanAccessTeam.mockResolvedValue(true);
+    resetSocketVerifierHealth();
   });
 
   afterEach(() => {
@@ -344,7 +345,7 @@ describe('socket re-auth (#49)', () => {
       expect(socket.conn.close).toHaveBeenCalledTimes(1);
     });
 
-    it('cuts off an expired token without consulting the verifier, so an outage cannot keep it alive', async () => {
+    it('cuts off an expired token without consulting the verifier while no outage is known', async () => {
       const verify = jest
         .spyOn(WorkOSService, 'verifyToken')
         .mockRejectedValue(new ServiceUnavailableError('JWKS unreachable'));
@@ -385,7 +386,7 @@ describe('socket re-auth (#49)', () => {
 
       expect(await reverifySocket(asGameSocket(socket))).toBe('skipped');
       expect(socket.data.tokenExpiresAt).toBe(exp + 10 * MINUTE);
-      expect(mockPrisma.game.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.game.findMany).not.toHaveBeenCalled();
     });
 
     it('discards a stale outage too (no Sentry, no retry timer)', async () => {
@@ -411,23 +412,24 @@ describe('socket re-auth (#49)', () => {
   });
 
   describe('room re-check (audit #72)', () => {
-    it('leaves game rooms the user can no longer access when a valid token is re-checked', async () => {
+    it('leaves game rooms the user can no longer view, in one query for the whole set', async () => {
       workosSession(Date.now() + 60 * MINUTE);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
-      (mockPrisma.game.findUnique as jest.Mock).mockImplementation(
-        (args: { where: { id: string } }) =>
-          Promise.resolve(args.where.id === 'gone' ? null : { teamId: `team-${args.where.id}` })
-      );
-      mockCanAccessTeam.mockImplementation((_userId: string, teamId: string) =>
-        Promise.resolve(teamId === 'team-kept')
-      );
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: 'kept' }]);
       const socket = makeSocket('workos.jwt.token', Date.now() + 60 * MINUTE);
       ['kept', 'removed', 'gone'].forEach((g) => socket.rooms.add(`${GAME_ROOM_PREFIX}${g}`));
 
       expect(await reverifySocket(asGameSocket(socket))).toBe('kept');
 
       expect([...socket.rooms]).toEqual([socket.id, `${GAME_ROOM_PREFIX}kept`]);
-      expect(mockCanAccessTeam).toHaveBeenCalledWith(USER.id, 'team-removed');
+      expect(mockPrisma.game.findMany).toHaveBeenCalledTimes(1);
+      const where = (mockPrisma.game.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.id).toEqual({ in: ['kept', 'removed', 'gone'] });
+      // The caller-access clause (teamAccessWhere via readableTeamsWhere).
+      expect(where.team.OR).toEqual(
+        expect.arrayContaining([{ staff: { some: { userId: USER.id } } }])
+      );
+      expect(mockPrisma.game.findUnique).not.toHaveBeenCalled();
       expect(infoSpy).toHaveBeenCalledWith('Socket evicted from game room', {
         socketId: socket.id,
         userId: USER.id,
@@ -437,8 +439,22 @@ describe('socket re-auth (#49)', () => {
       clearSocketReauth(socket.id);
     });
 
+    it('does not scope a system ADMIN to their teams', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ role: 'ADMIN' });
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: 'g1' }]);
+
+      expect(await viewableGameIds('admin-1', ['g1', 'g2'])).toEqual(new Set(['g1']));
+      expect((mockPrisma.game.findMany as jest.Mock).mock.calls[0][0].where).toEqual({ id: { in: ['g1', 'g2'] } });
+    });
+
+    it('runs no query for a socket in no game room', async () => {
+      const socket = makeSocket('workos.jwt.token', null);
+      expect(await pruneGameRooms(asGameSocket(socket))).toEqual([]);
+      expect(mockPrisma.game.findMany).not.toHaveBeenCalled();
+    });
+
     it('keeps the rooms and reports to Sentry when the access lookup fails', async () => {
-      (mockPrisma.game.findUnique as jest.Mock).mockRejectedValue(new Error('db down'));
+      (mockPrisma.game.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
       const socket = makeSocket('workos.jwt.token', null);
       socket.rooms.add(`${GAME_ROOM_PREFIX}g1`);
 
@@ -451,13 +467,100 @@ describe('socket re-auth (#49)', () => {
     });
   });
 
+  describe('expiry with a pending offer or a verifier outage', () => {
+    const markVerifierDown = async (): Promise<void> => {
+      const spy = jest
+        .spyOn(WorkOSService, 'verifyToken')
+        .mockRejectedValueOnce(new ServiceUnavailableError('JWKS unreachable'));
+      await expect(resolveSocketSession('probe.jwt.token')).rejects.toThrow('JWKS unreachable');
+      expect(isSocketVerifierDown()).toBe(true);
+      spy.mockClear();
+    };
+
+    it('defers the cut once while a refresh-auth is still being verified, then cuts if it never lands', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() - REAUTH_GRACE_MS);
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(() => new Promise(() => undefined));
+      void handleRefreshAuth(asGameSocket(socket), { token: 'new.jwt.token' });
+      expect(socket.data.offerPending).toBe(true);
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('deferred');
+      expect(socket.conn.close).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(REAUTH_PENDING_OFFER_WAIT_MS);
+      await flush();
+      expect(socket.conn.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the socket when the pending offer lands during the deferral', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() - REAUTH_GRACE_MS);
+      let resolveVerify: (v: { id: string; expiresAt: number }) => void = () => undefined;
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveVerify = resolve;
+          })
+      );
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
+      const offer = handleRefreshAuth(asGameSocket(socket), { token: 'new.jwt.token' });
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('deferred');
+      resolveVerify({ id: 'workos-1', expiresAt: (Date.now() + 10 * MINUTE) / 1000 });
+      expect(await offer).toEqual({ ok: true });
+
+      await jest.advanceTimersByTimeAsync(REAUTH_PENDING_OFFER_WAIT_MS);
+      await flush();
+      expect(socket.conn.close).not.toHaveBeenCalled();
+      expect(socket.data.authToken).toBe('new.jwt.token');
+      clearSocketReauth(socket.id);
+    });
+
+    it('keeps an expired socket through a long verifier outage and cuts once a verify runs again', async () => {
+      await markVerifierDown();
+      const socket = makeSocket('old.jwt.token', Date.now() - REAUTH_GRACE_MS);
+      socket.data.tokenLifetimeMs = 30 * MINUTE;
+      const verify = jest
+        .spyOn(WorkOSService, 'verifyToken')
+        .mockRejectedValue(new ServiceUnavailableError('JWKS unreachable'));
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('retry');
+      // Several minutes of outage: still connected, still probing every minute.
+      for (let i = 0; i < 5; i += 1) {
+        await jest.advanceTimersByTimeAsync(REAUTH_RETRY_MS);
+        await flush();
+      }
+      expect(socket.conn.close).not.toHaveBeenCalled();
+      expect(verify.mock.calls.length).toBeGreaterThanOrEqual(6);
+      // Not reported to Sentry per socket and per probe.
+      expect(mockCapture).not.toHaveBeenCalled();
+
+      // The verifier is back: the expired token verifies to null and is cut.
+      verify.mockResolvedValue(null);
+      await jest.advanceTimersByTimeAsync(REAUTH_RETRY_MS);
+      await flush();
+      expect(socket.conn.close).toHaveBeenCalledTimes(1);
+      expect(isSocketVerifierDown()).toBe(false);
+      expect(reauthLogs(debugSpy)).toEqual([{ socketId: socket.id, userId: USER.id, reason: 'expired' }]);
+    });
+
+    it('cuts at the outage bound (one extra token lifetime) even while the verifier is still down', async () => {
+      await markVerifierDown();
+      const socket = makeSocket('old.jwt.token', Date.now() - 5 * MINUTE - 1);
+      socket.data.tokenLifetimeMs = 5 * MINUTE;
+      const verify = jest.spyOn(WorkOSService, 'verifyToken');
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('reauth_required');
+      expect(verify).not.toHaveBeenCalled();
+      expect(socket.conn.close).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('handleRefreshAuth (in-band refresh)', () => {
     it('moves the socket onto a fresh token for the same user without disconnecting', async () => {
       const oldExp = Date.now() + MINUTE;
       const newExp = Date.now() + 10 * MINUTE;
       const socket = makeSocket('old.jwt.token', oldExp);
       socket.rooms.add(`${GAME_ROOM_PREFIX}g1`);
-      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ teamId: 'team-1' });
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([{ id: 'g1' }]);
       scheduleSocketReauth(asGameSocket(socket));
 
       const verify = workosSession(newExp);
@@ -467,7 +570,8 @@ describe('socket re-auth (#49)', () => {
       expect(verify).toHaveBeenCalledWith('new.jwt.token');
       expect(socket.data.authToken).toBe('new.jwt.token');
       expect(socket.data.tokenExpiresAt).toBe(newExp);
-      expect(mockCanAccessTeam).toHaveBeenCalledWith(USER.id, 'team-1');
+      expect(mockPrisma.game.findMany).toHaveBeenCalledTimes(1);
+      expect(socket.rooms.has(`${GAME_ROOM_PREFIX}g1`)).toBe(true);
       expect(socket.emit).not.toHaveBeenCalled();
       expect(debugSpy).toHaveBeenCalledWith('Socket auth refreshed', { socketId: socket.id, userId: USER.id });
       expect(JSON.stringify([...infoSpy.mock.calls, ...debugSpy.mock.calls])).not.toContain('new.jwt.token');
@@ -495,8 +599,7 @@ describe('socket re-auth (#49)', () => {
       socket.rooms.add(`${GAME_ROOM_PREFIX}g1`);
       workosSession(Date.now() + 10 * MINUTE);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
-      (mockPrisma.game.findUnique as jest.Mock).mockResolvedValue({ teamId: 'team-1' });
-      mockCanAccessTeam.mockResolvedValue(false);
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
 
       expect(await handleRefreshAuth(asGameSocket(socket), { token: 'new.jwt.token' })).toEqual({ ok: true });
       expect(socket.leave).toHaveBeenCalledWith(`${GAME_ROOM_PREFIX}g1`);
@@ -569,6 +672,42 @@ describe('socket re-auth (#49)', () => {
         socketId: socket.id,
       });
       expect(socket.conn.close).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits an offer of the token the server already holds (no verify, no prune)', async () => {
+      const verify = jest.spyOn(WorkOSService, 'verifyToken');
+      const socket = makeSocket('held.jwt.token', Date.now() + MINUTE);
+      socket.rooms.add(`${GAME_ROOM_PREFIX}g1`);
+
+      expect(await handleRefreshAuth(asGameSocket(socket), { token: 'held.jwt.token' })).toEqual({ ok: true });
+      expect(verify).not.toHaveBeenCalled();
+      expect(mockPrisma.game.findMany).not.toHaveBeenCalled();
+      expect(socket.data.offerPending).toBe(false);
+    });
+
+    it('lets a rate-limited newer offer supersede an older one still in flight', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() + MINUTE);
+      let resolveOlder: (v: { id: string; expiresAt: number }) => void = () => undefined;
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation((token: string) =>
+        token === 'older.jwt.token'
+          ? new Promise((resolve) => {
+              resolveOlder = resolve;
+            })
+          : Promise.resolve(null)
+      );
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
+      for (let i = 0; i < MAX_REFRESH_AUTHS_PER_WINDOW - 1; i += 1) {
+        await handleRefreshAuth(asGameSocket(socket), { token: `spent-${i}.jwt.token` });
+      }
+      const older = handleRefreshAuth(asGameSocket(socket), { token: 'older.jwt.token' });
+      expect(await handleRefreshAuth(asGameSocket(socket), { token: 'newer.jwt.token' })).toEqual({
+        ok: false,
+        code: 'rate_limited',
+      });
+
+      resolveOlder({ id: 'workos-1', expiresAt: (Date.now() + 10 * MINUTE) / 1000 });
+      expect(await older).toEqual({ ok: false, code: 'superseded' });
+      expect(socket.data.authToken).toBe('old.jwt.token');
     });
 
     it('ignores an older offer that finishes after a newer one (out-of-order completion)', async () => {

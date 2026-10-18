@@ -1,4 +1,4 @@
-import { isTokenUnexpired, tokenExpiresAt } from '../../utils/token-expiry';
+import { isTokenUnexpired, tokenExpiresAt, tokenIssuedAt } from '../../utils/token-expiry';
 
 const b64url = (value: object): string =>
   Buffer.from(JSON.stringify(value)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -34,5 +34,17 @@ describe('isTokenUnexpired', () => {
     expect(isTokenUnexpired(jwt({ exp: now / 1000 + 60 }), now)).toBe(true);
     expect(isTokenUnexpired(jwt({ exp: now / 1000 - 1 }), now)).toBe(false);
     expect(isTokenUnexpired('opaque-token', now)).toBe(false);
+  });
+});
+
+describe('tokenIssuedAt', () => {
+  it('reads a JWT iat (seconds) as epoch ms', () => {
+    expect(tokenIssuedAt(jwt({ iat: 1_799_999_700, exp: 1_800_000_000 }))).toBe(1_799_999_700_000);
+  });
+
+  it('returns null when there is no numeric iat', () => {
+    expect(tokenIssuedAt(jwt({ exp: 1_800_000_000 }))).toBeNull();
+    expect(tokenIssuedAt(dev({ userId: 'u', exp: 1_800_000_000_000 }))).toBeNull();
+    expect(tokenIssuedAt('opaque-token')).toBeNull();
   });
 });

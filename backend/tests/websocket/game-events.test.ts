@@ -255,6 +255,13 @@ describe('websocket/game-events', () => {
       });
       const resolved = await resolveSocketSession('Bearer some.jwt.token');
       expect(resolved?.expiresAt).toBe(1_800_000_000_000);
+      // No `iat` from the verifier: the lifetime is unknown.
+      expect(resolved?.lifetimeMs).toBeNull();
+
+      jest
+        .spyOn(WorkOSService, 'verifyToken')
+        .mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000, issuedAt: 1_799_999_700 });
+      expect((await resolveSocketSession('Bearer some.jwt.token'))?.lifetimeMs).toBe(300_000);
     });
 
     it('resolves a valid dev token to the corresponding user', async () => {

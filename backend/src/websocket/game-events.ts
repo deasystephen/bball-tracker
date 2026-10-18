@@ -29,9 +29,9 @@
  */
 
 import type { Server as SocketServer, Socket } from 'socket.io';
-import type { GameEvent, GameStatus } from '@prisma/client';
+import { UserRole, type GameEvent, type GameStatus, type Prisma } from '@prisma/client';
 import prisma from '../models';
-import { canAccessTeam } from '../utils/permissions';
+import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { JWT_CLOCK_TOLERANCE_SECONDS, WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
@@ -80,6 +80,12 @@ export interface GameSocketData {
    * can never leave the socket on the older token (#49).
    */
   latestOfferedToken?: string;
+  /** True while the latest `refresh-auth` offer is still being verified. */
+  offerPending?: boolean;
+  /** Set once an expiry cut-off was deferred for a pending offer (one deferral only). */
+  expiryDeferred?: boolean;
+  /** The current token's lifetime (`exp - iat`) in ms, when known; bounds an outage hold. */
+  tokenLifetimeMs?: number | null;
 }
 
 // We intentionally keep the event-map generics at their default (untyped) and
@@ -96,6 +102,48 @@ export interface SocketSession {
   user: AuthenticatedSocketUser;
   /** Epoch ms at which the token expires; null when it carries no expiry. */
   expiresAt: number | null;
+  /** `exp - iat` in ms; null when the token carries no `iat` (dev tokens). */
+  lifetimeMs: number | null;
+}
+
+/**
+ * When the last verification threw an outage (JWKS unreachable, database
+ * failover), or null once one completed again. Every socket verification
+ * (handshake, `refresh-auth`, re-check) updates it, so it reflects the most
+ * recent attempt across the process (#49).
+ */
+let verifierDownSince: number | null = null;
+
+/** True while the most recent socket verification failed with an outage. */
+export function isSocketVerifierDown(): boolean {
+  return verifierDownSince !== null;
+}
+
+/** Forget the outage marker. Test-only. */
+export function resetSocketVerifierHealth(): void {
+  verifierDownSince = null;
+}
+
+/**
+ * Resolve a bearer-style token to a local user and the token's expiry (see
+ * `resolveSessionFromToken`), recording whether the verifier is reachable: a
+ * throw that is not a 4xx AppError marks an outage, anything else clears it.
+ */
+export async function resolveSocketSession(
+  rawToken: string | undefined
+): Promise<SocketSession | null> {
+  try {
+    const session = await resolveSessionFromToken(rawToken);
+    verifierDownSince = null;
+    return session;
+  } catch (error) {
+    if (isExpectedClientError(error)) {
+      verifierDownSince = null;
+    } else if (verifierDownSince === null) {
+      verifierDownSince = Date.now();
+    }
+    throw error;
+  }
 }
 
 /**
@@ -105,7 +153,7 @@ export interface SocketSession {
  * invalid/expired or the user does not exist or is a tombstone (`deletedAt`
  * set).
  */
-export async function resolveSocketSession(
+async function resolveSessionFromToken(
   rawToken: string | undefined
 ): Promise<SocketSession | null> {
   if (!rawToken || typeof rawToken !== 'string') {
@@ -140,7 +188,7 @@ export async function resolveSocketSession(
         select: { id: true, email: true, name: true, role: true },
       });
       // Dev token `exp` is epoch milliseconds.
-      return user ? { user, expiresAt: decoded.exp } : null;
+      return user ? { user, expiresAt: decoded.exp, lifetimeMs: null } : null;
     } catch {
       return null;
     }
@@ -156,8 +204,12 @@ export async function resolveSocketSession(
     where: { workosUserId: workosUser.id, deletedAt: null },
     select: { id: true, email: true, name: true, role: true },
   });
-  // A WorkOS `exp` is epoch seconds.
-  return user ? { user, expiresAt: workosUser.expiresAt * 1000 } : null;
+  // A WorkOS `exp` and `iat` are epoch seconds.
+  const lifetimeMs =
+    typeof workosUser.issuedAt === 'number'
+      ? (workosUser.expiresAt - workosUser.issuedAt) * 1000
+      : null;
+  return user ? { user, expiresAt: workosUser.expiresAt * 1000, lifetimeMs } : null;
 }
 
 /** The bearer token a socket presented at its handshake. */
@@ -184,6 +236,7 @@ export async function authenticateSocket(
 
     socket.data.user = session.user;
     socket.data.tokenExpiresAt = session.expiresAt;
+    socket.data.tokenLifetimeMs = session.lifetimeMs;
     socket.data.authToken = handshakeToken(socket);
     next();
   } catch (error) {
@@ -226,7 +279,10 @@ export async function authenticateSocket(
 //    clock tolerance, so the re-check really fails) plus a per-socket jitter
 //    (so expiries that cluster at tip-off do not all close in one second),
 //    and never more than REAUTH_MAX_INTERVAL_MS away. When it fires, a token
-//    past its expiry plus grace is known dead and cut off with no verify;
+//    past its expiry plus grace is known dead and cut off with no verify
+//    (`handleExpiredToken` waits once for a `refresh-auth` still being
+//    verified, and holds the socket through a verifier outage, bounded by one
+//    extra token lifetime, because the client could not reconnect during it);
 //    otherwise (no `exp`, or a long-lived token hitting the interval cap) the
 //    held token is re-run through `resolveSocketSession`:
 //      - still valid → refresh
@@ -246,8 +302,9 @@ export async function authenticateSocket(
 //    Both async paths capture the token they verify and discard the result
 //    if a newer token was accepted or offered meanwhile.
 //
-// Room re-checks (`pruneGameRooms`, audit #72) leave every game room whose
-// team the user can no longer access, so a removed coach stops receiving
+// Room re-checks (`pruneGameRooms`, audit #72) leave every game room the user
+// can no longer view (one `game.findMany` over `readableTeamsWhere` for the
+// whole set, the same rule `canViewGame` applies to a single join), so a removed coach stops receiving
 // broadcasts at the next refresh or re-check rather than at disconnect.
 // Timers live in process memory, like rooms and rate-limit counters (the API
 // is single-replica), and are cleared on disconnect.
@@ -265,6 +322,8 @@ export const REAUTH_JITTER_MAX_MS = 20 * 1000;
 export const REAUTH_MAX_INTERVAL_MS = 15 * 60 * 1000;
 /** Re-check delay after the verifier threw on a token that has not expired. */
 export const REAUTH_RETRY_MS = 60 * 1000;
+/** How long an expiry cut-off waits, once, for a `refresh-auth` still being verified. */
+export const REAUTH_PENDING_OFFER_WAIT_MS = 10 * 1000;
 
 const reauthTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -355,19 +414,37 @@ function requireReauth(socket: GameSocket, reason: ReauthReason): void {
 }
 
 /**
- * Leave every game room the socket's user can no longer view (audit #72),
- * by the same rule `join-game` applies (`canViewGame`). The rooms are checked
- * in parallel. Returns the game ids left. A lookup failure keeps the rooms
- * (reported to Sentry); the next refresh or re-check tries again.
+ * The subset of `gameIds` the user may view live: the same rule as
+ * `canViewGame` (system ADMIN, or the game's team passes the caller-access
+ * clause), resolved for the whole set in one `game.findMany` over
+ * `readableTeamsWhere` (#49).
+ */
+export async function viewableGameIds(userId: string, gameIds: string[]): Promise<Set<string>> {
+  if (gameIds.length === 0) return new Set();
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  const where: Prisma.GameWhereInput = { id: { in: gameIds } };
+  if (user?.role !== UserRole.ADMIN) {
+    where.team = await readableTeamsWhere(userId);
+  }
+  const rows = await prisma.game.findMany({ where, select: { id: true } });
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * Leave every game room the socket's user can no longer view (audit #72): the
+ * set difference between the rooms and `viewableGameIds`. Returns the game ids
+ * left. A lookup failure keeps the rooms (reported to Sentry); the next
+ * refresh or re-check tries again.
  */
 export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
   const userId = socket.data.user.id;
   const gameIds = [...socket.rooms]
     .filter((room) => room.startsWith(GAME_ROOM_PREFIX))
     .map((room) => room.slice(GAME_ROOM_PREFIX.length));
+  if (gameIds.length === 0) return [];
   try {
-    const verdicts = await Promise.all(gameIds.map((gameId) => canViewGame(userId, gameId)));
-    const left = gameIds.filter((_, i) => verdicts[i] !== 'allowed');
+    const viewable = await viewableGameIds(userId, gameIds);
+    const left = gameIds.filter((gameId) => !viewable.has(gameId));
     await Promise.all(
       left.map(async (gameId) => {
         await socket.leave(gameRoom(gameId));
@@ -390,11 +467,66 @@ export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
 async function adoptSession(socket: GameSocket, session: SocketSession): Promise<void> {
   socket.data.user = session.user;
   socket.data.tokenExpiresAt = session.expiresAt;
+  socket.data.tokenLifetimeMs = session.lifetimeMs;
+  socket.data.expiryDeferred = false;
   await pruneGameRooms(socket);
   if (socket.connected) scheduleSocketReauth(socket);
 }
 
-export type ReverifyOutcome = 'kept' | 'reauth_required' | 'retry' | 'skipped';
+export type ReverifyOutcome = 'kept' | 'reauth_required' | 'retry' | 'deferred' | 'skipped';
+
+/**
+ * True once a held token is past its expiry by more than one more token
+ * lifetime (or REAUTH_MAX_INTERVAL_MS when the lifetime is unknown): the bound
+ * on keeping a socket through a verifier outage.
+ */
+function pastOutageBound(socket: GameSocket, now: number = Date.now()): boolean {
+  const extra = socket.data.tokenLifetimeMs ?? REAUTH_MAX_INTERVAL_MS;
+  return pastExpiry(socket, Math.max(extra, REAUTH_GRACE_MS), now);
+}
+
+/**
+ * The held token is past its expiry plus grace, so it is dead. Cut the socket
+ * off, except in two cases (#49):
+ *   - a `refresh-auth` offer is still being verified → wait for it, once, for
+ *     REAUTH_PENDING_OFFER_WAIT_MS;
+ *   - the verifier is down → the client could not reconnect either (its
+ *     handshake would get `Service unavailable`), so keep the socket and
+ *     retry, until a verify completes again (then cut) or the outage bound
+ *     passes.
+ */
+async function handleExpiredToken(socket: GameSocket): Promise<ReverifyOutcome> {
+  const ids = { socketId: socket.id, userId: socket.data.user?.id };
+
+  if (socket.data.offerPending && !socket.data.expiryDeferred) {
+    socket.data.expiryDeferred = true;
+    logger.debug('Socket reauth deferred for a pending refresh-auth', ids);
+    scheduleSocketReauth(socket, REAUTH_PENDING_OFFER_WAIT_MS);
+    return 'deferred';
+  }
+
+  if (isSocketVerifierDown() && !pastOutageBound(socket)) {
+    // Probe: an expired token verifies to null (or a 4xx) once the verifier is
+    // back; a throw means it is still down. Not reported to Sentry per socket:
+    // the outage is already reported where it was first seen.
+    const token = heldToken(socket);
+    let stillDown = false;
+    try {
+      await resolveSocketSession(token);
+    } catch (error) {
+      stillDown = !isExpectedClientError(error);
+    }
+    if (!socket.connected || heldToken(socket) !== token) return 'skipped';
+    if (stillDown) {
+      logger.warn('Socket kept past token expiry during verifier outage', ids);
+      scheduleSocketReauth(socket, REAUTH_RETRY_MS);
+      return 'retry';
+    }
+  }
+
+  requireReauth(socket, 'expired');
+  return 'reauth_required';
+}
 
 /**
  * Re-check the socket's held token (see the section comment above). Exported
@@ -404,11 +536,11 @@ export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcom
   if (!socket.connected) return 'skipped';
 
   // Past expiry plus grace the token is dead: no JWKS check or user lookup
-  // needed. The verify below is for tokens still inside their lifetime
-  // (no-exp tokens, deletion and role re-checks).
+  // needed (unless an offer is pending or the verifier is down, see
+  // handleExpiredToken). The verify below is for tokens still inside their
+  // lifetime (no-exp tokens, deletion and role re-checks).
   if (pastExpiry(socket, REAUTH_GRACE_MS)) {
-    requireReauth(socket, 'expired');
-    return 'reauth_required';
+    return handleExpiredToken(socket);
   }
 
   // Capture the token before the await: an accepted `refresh-auth` may swap
@@ -470,9 +602,6 @@ export async function handleRefreshAuth(
   socket: GameSocket,
   payload: unknown
 ): Promise<RefreshAuthResult> {
-  if (!checkRefreshAuthAllowed(socket)) {
-    return { ok: false, code: 'rate_limited' };
-  }
   const token =
     payload && typeof payload === 'object' ? (payload as { token?: unknown }).token : undefined;
   if (typeof token !== 'string' || token.length === 0) {
@@ -480,14 +609,28 @@ export async function handleRefreshAuth(
   }
 
   // Two offers in flight can finish out of order; only the latest may act.
+  // Recorded before the rate limit, so a limited newer offer still stops an
+  // older in-flight one from winning.
   socket.data.latestOfferedToken = token;
   const superseded = (): boolean => socket.data.latestOfferedToken !== token;
+
+  // The token the server already holds: nothing to verify or re-check.
+  if (token === heldToken(socket)) {
+    socket.data.offerPending = false;
+    return { ok: true };
+  }
+  if (!checkRefreshAuthAllowed(socket)) {
+    socket.data.offerPending = false;
+    return { ok: false, code: 'rate_limited' };
+  }
+  socket.data.offerPending = true;
 
   let session: SocketSession | null;
   try {
     session = await resolveSocketSession(token);
   } catch (error) {
     if (superseded()) return { ok: false, code: 'superseded' };
+    socket.data.offerPending = false;
     if (isExpectedClientError(error)) {
       return { ok: false, code: 'unauthorized' };
     }
@@ -496,6 +639,7 @@ export async function handleRefreshAuth(
   }
 
   if (superseded()) return { ok: false, code: 'superseded' };
+  socket.data.offerPending = false;
   if (!socket.connected) return { ok: false, code: 'unauthorized' };
 
   if (!session) {

@@ -713,6 +713,9 @@ describe('WorkOSService', () => {
 
       expect(result).toMatchObject({ id: 'user_123', sessionId: 'session_abc' });
       expect(typeof result?.expiresAt).toBe('number');
+      // `iat` is surfaced so the socket re-auth can bound an outage hold (#49).
+      expect(typeof result?.issuedAt).toBe('number');
+      expect(result!.expiresAt).toBeGreaterThan(result!.issuedAt as number);
       // Verification is purely local — no WorkOS API round-trip per request.
       expect(mockWorkos.userManagement.getUser).not.toHaveBeenCalled();
     });

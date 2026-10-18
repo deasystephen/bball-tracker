@@ -12,18 +12,35 @@
  * no numeric `exp`.
  */
 export function tokenExpiresAt(token: string | null | undefined): number | null {
+  return claimMs(token, 'exp');
+}
+
+/**
+ * The token's `iat` in epoch milliseconds, or null (dev tokens carry none).
+ * Used to spot a device clock behind the issuer: a just-issued token whose
+ * `iat` is in the future.
+ */
+export function tokenIssuedAt(token: string | null | undefined): number | null {
+  return claimMs(token, 'iat');
+}
+
+function claimMs(token: string | null | undefined, claim: 'exp' | 'iat'): number | null {
   if (!token) return null;
   try {
     if (token.startsWith('dev_')) {
-      const payload = JSON.parse(atob(token.slice(4))) as { exp?: unknown };
-      return typeof payload.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp : null;
+      // Dev-token claims are already epoch ms.
+      const payload = JSON.parse(atob(token.slice(4))) as Record<string, unknown>;
+      const value = payload[claim];
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
     }
     const part = token.split('.')[1];
     if (!part) return null;
     const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
     const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
-    return typeof payload.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
+    const payload = JSON.parse(atob(padded)) as Record<string, unknown>;
+    const value = payload[claim];
+    // JWT NumericDate claims are epoch seconds.
+    return typeof value === 'number' && Number.isFinite(value) ? value * 1000 : null;
   } catch {
     return null;
   }

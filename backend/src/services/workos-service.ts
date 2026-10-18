@@ -24,6 +24,8 @@ export interface VerifiedToken {
   id: string;
   sessionId?: string;
   expiresAt: number;
+  /** `iat`, epoch seconds, when the token carries one. */
+  issuedAt?: number;
 }
 
 /** The WorkOS identity fields `syncUser` reads. */
@@ -362,6 +364,7 @@ export class WorkOSService {
         id: payload.sub,
         sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
         expiresAt: payload.exp,
+        issuedAt: typeof payload.iat === 'number' ? payload.iat : undefined,
       };
     } catch (error) {
       if (error instanceof joseErrors.JOSEError && !(error instanceof joseErrors.JWKSTimeout)) {

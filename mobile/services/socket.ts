@@ -43,7 +43,7 @@ import { useAuthStore } from '../store/auth-store';
 import { refreshAccessToken } from './api-client';
 import { getApiUrl } from '../config/env';
 import { addBreadcrumb } from './sentry';
-import { isTokenUnexpired, tokenExpiresAt } from '../utils/token-expiry';
+import { isTokenUnexpired, tokenExpiresAt, tokenIssuedAt } from '../utils/token-expiry';
 
 // Same host as the REST client — decided once in config/env.ts.
 const getBaseURL = (): string => getApiUrl();
@@ -65,6 +65,10 @@ export const PROACTIVE_REFRESH_LEAD_MS = 60_000;
  * nearly expired and loop `/auth/refresh` until WorkOS answered 429.
  */
 export const MIN_PROACTIVE_REFRESH_DELAY_MS = 30_000;
+/** A token issued further than this in the device's future means the device clock is behind. */
+export const CLOCK_SKEW_TOLERANCE_MS = 60_000;
+/** Server `refresh-auth` ack codes worth one retry: transient server-side failures only. */
+const RETRYABLE_REFRESH_AUTH_CODES = new Set(['unavailable', 'internal']);
 
 /** Consecutive `Unauthorized` handshakes we will try to refresh through. */
 export const MAX_AUTH_REFRESHES = 2;
@@ -89,6 +93,13 @@ let handshakeToken: string | null = null;
 let serverToken: string | null = null;
 /** The token a `refresh-auth` is in flight for, so it is not sent twice. */
 let pendingToken: string | null = null;
+/**
+ * Set once the device clock is found to disagree with the issuer's. Proactive
+ * refresh is then off until `resetSocket()`: every token would look nearly
+ * expired (clock ahead) or long-lived (clock behind), so the timer would loop
+ * or fire late. The server fallback (`reauth_required`) still recovers.
+ */
+let clockSkewed = false;
 let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribeAuth: (() => void) | null = null;
 
@@ -122,11 +133,24 @@ const clearProactiveTimer = (): void => {
  * `refresh-auth` is accepted. The delay is the larger of (remaining lifetime -
  * lead), half the remaining lifetime, and MIN_PROACTIVE_REFRESH_DELAY_MS.
  */
-const scheduleProactiveRefresh = (target: Socket): void => {
+const scheduleProactiveRefresh = (target: Socket, freshlyMinted = false): void => {
   clearProactiveTimer();
+  if (clockSkewed) return;
   const expiresAt = tokenExpiresAt(serverToken);
   if (expiresAt === null) return;
-  const remaining = expiresAt - Date.now();
+  const now = Date.now();
+  const remaining = expiresAt - now;
+  const issuedAt = tokenIssuedAt(serverToken);
+  // Clock behind: the token was issued in the device's future. Clock ahead: a
+  // token minted just now already looks too close to expiry to refresh ahead.
+  const behind = issuedAt !== null && issuedAt > now + CLOCK_SKEW_TOLERANCE_MS;
+  const ahead =
+    freshlyMinted && remaining - PROACTIVE_REFRESH_LEAD_MS < MIN_PROACTIVE_REFRESH_DELAY_MS;
+  if (behind || ahead) {
+    clockSkewed = true;
+    socketCrumb('clock skew detected: proactive refresh off', { behind, ahead }, 'warning');
+    return;
+  }
   const delay = Math.max(
     remaining - PROACTIVE_REFRESH_LEAD_MS,
     remaining / 2,
@@ -146,8 +170,8 @@ const scheduleProactiveRefresh = (target: Socket): void => {
 /**
  * Send the stored access token to the server if it differs from the one the
  * server holds and none is in flight for it. `serverToken` moves only when the
- * server acks success; a refused offer is retried once (unless a newer offer
- * superseded it). Exported for tests; driven by the auth-store subscription
+ * server acks success; an offer refused as `unavailable` or `internal` is
+ * retried once. Exported for tests; driven by the auth-store subscription
  * and by `connect`.
  */
 export function syncSocketToken(target: Socket, allowRetry = true): void {
@@ -161,12 +185,18 @@ export function syncSocketToken(target: Socket, allowRetry = true): void {
     if (ack?.success) {
       serverToken = token;
       socketCrumb('auth refreshed in-band');
-      scheduleProactiveRefresh(target);
+      // A token the server just accepted was just minted by a refresh.
+      scheduleProactiveRefresh(target, true);
       return;
     }
     // The server still holds its previous token; `serverToken` already says so.
     socketCrumb('in-band refresh refused', { code: ack?.code }, 'warning');
-    if (allowRetry && ack?.code !== 'superseded') syncSocketToken(target, false);
+    // Only a transient server-side failure is worth a retry: `unauthorized`,
+    // `bad_request` and `rate_limited` would fail again, and `superseded`
+    // means a newer offer is already in flight.
+    if (allowRetry && ack?.code && RETRYABLE_REFRESH_AUTH_CODES.has(ack.code)) {
+      syncSocketToken(target, false);
+    }
   });
 }
 
@@ -330,6 +360,7 @@ export function resetSocket(): void {
   handshakeToken = null;
   serverToken = null;
   pendingToken = null;
+  clockSkewed = false;
   authRefreshes = 0;
   unavailableRetries = 0;
   recovering = false;
