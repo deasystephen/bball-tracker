@@ -37,7 +37,7 @@ npm run build       # production build only: it skips lint and type errors, run 
 1. Coach creates invitation → backend (#131 mailer) sends an email with a link to `https://hooplings.com/invite/<token>`.
 2. Recipient taps the link:
    - **iOS with app installed** → Universal Link routes directly into `mobile/app/invite/[token].tsx`.
-   - **Android with app installed** → same, once both halves of the App Links association exist: the real signing fingerprint in `assetlinks.json` (#139) and the app manifest's `autoVerify` https intent filter for `hooplings.com/invite` (`android.intentFilters` in `mobile/app.config.js`, #716, which ships only in a native build from runtime 1.6.0 on). Without the filter Android never consults `assetlinks.json` and opens Chrome.
+   - **Android with app installed** → same, once both halves of the App Links association exist: the real signing fingerprint in `assetlinks.json` (#139) and the app manifest's `autoVerify` https intent filter for `hooplings.com/invite/*` (`android.intentFilters` in `mobile/app.config.js`, #716, which ships only in a native build from runtime 1.6.0 on). Without the filter Android never consults `assetlinks.json` and opens Chrome. While the fingerprint half is missing, verification fails: Android 12+ opens the browser, but Android 6–11 shows the system app chooser for every `hooplings.com/invite/*` link.
    - **No app installed / desktop** → this Next.js page renders. Token state (PENDING / EXPIRED / ACCEPTED / etc.) is fetched from `backend/src/api/invitations/public-routes.ts`. User can accept inline or get the App Store / Play Store link.
 
 ## Configuration

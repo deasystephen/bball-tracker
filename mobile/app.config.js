@@ -51,15 +51,17 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.5.0 = OTA runtime boundary for the Expo SDK 57 upgrade (#576): React
-    // Native 0.83 -> 0.86, React 19.3.0 -> 19.2.3 (the version the 0.86
-    // renderer is built against), and every expo-* native module. An OTA ships
+    // 1.6.0 = OTA runtime boundary for the "next native binary" bundle: the
+    // Android App Links intent filter (#716), dropping the unused native
+    // packages lottie-react-native and expo-status-bar (#780), and the
+    // binary-coupled Expo SDK 57 patch bumps held on #275. An OTA ships
     // JavaScript from the lockfile and runs it against the native code frozen
-    // in the binary, so SDK 57 JavaScript must never reach an SDK 55 binary.
-    // runtimeVersion policy is appVersion: every OTA from here on reaches
-    // 1.5.0 builds only, and build #32 stays on the last 1.4.0 OTA.
+    // in the binary. runtimeVersion policy is appVersion: every OTA from here
+    // on reaches 1.6.0 builds only, and build #33 stays on the last 1.5.0 OTA.
     //
-    // Earlier boundaries: 1.4.0 was dependency drift (#562: Amplitude, Sentry,
+    // Earlier boundaries: 1.5.0 was the Expo SDK 57 upgrade (#576: React
+    // Native 0.83 -> 0.86, React 19.3.0 -> 19.2.3, every expo-* native module;
+    // build #32 stays on the last 1.4.0 OTA); 1.4.0 was dependency drift (#562: Amplitude, Sentry,
     // expo-updates and react moved on main after build #31 was cut); 1.3.0 was
     // the URL scheme rename (#504: the sign-in redirect scheme is resolved
     // from the OTA MANIFEST while the schemes a binary answers are baked into
@@ -116,14 +118,20 @@ export default {
       // half is https://hooplings.com/.well-known/assetlinks.json (#139).
       // Without an autoVerify https filter Android never consults
       // assetlinks.json and hooplings.com/invite/<token> opens Chrome instead
-      // of the app (#716). The intent filter is native: it rides the next EAS
-      // build, an OTA update cannot change it; and it stays inert until the
-      // web deploy (#30) serves the apex and #139 supplies the fingerprint.
+      // of the app (#716). pathPattern '/invite/.*' matches the iOS AASA
+      // component '/invite/*' (web/public/.well-known/), so both platforms
+      // claim the same links; a pathPrefix would also claim '/invite' and
+      // '/invite-anything'. The intent filter is native: it rides the next EAS
+      // build, an OTA update cannot change it. Until the web deploy (#30)
+      // serves the apex and #139 supplies the fingerprint, verification fails:
+      // on Android 12+ the link then opens the browser (the filter is inert),
+      // but on Android 6-11 a failed autoVerify falls back to the system
+      // app chooser for every hooplings.com/invite/* link.
       intentFilters: [
         {
           action: 'VIEW',
           autoVerify: true,
-          data: [{ scheme: 'https', host: 'hooplings.com', pathPrefix: '/invite' }],
+          data: [{ scheme: 'https', host: 'hooplings.com', pathPattern: '/invite/.*' }],
           category: ['BROWSABLE', 'DEFAULT'],
         },
       ],

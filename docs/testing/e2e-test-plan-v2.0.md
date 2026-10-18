@@ -1257,8 +1257,8 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 
 ### S.1 — ⚠ Android Universal Link
 - [ ] Verified-broken / Notes
-- **Issue:** #139 — production Android signing not set up; `assetlinks.json` has placeholder fingerprint
-- **Expected fail mode:** On Android, tapping the invite link opens Chrome and tries to load `hooplings.com/invite/<token>` → goes to S.2 (web not deployed).
+- **Issue:** #139 — production Android signing not set up; `assetlinks.json` has placeholder fingerprint. From runtime 1.6.0 the manifest half is present (#716: an `autoVerify` https intent filter for `hooplings.com/invite/*`), so only the fingerprint half (#139) is missing; a pre-1.6.0 binary lacks both.
+- **Expected fail mode:** verification fails, and the result depends on the Android version. **Android 12+:** tapping the invite link opens Chrome and tries to load `hooplings.com/invite/<token>` → goes to S.2 (web not deployed). **Android 6–11:** the system app chooser appears for every `hooplings.com/invite/*` link (Hooplings or a browser); picking the browser goes to S.2.
 - **Notes:** ___________
 
 ### S.2 — ⚠ Web fallback page (hooplings.com not deployed)
