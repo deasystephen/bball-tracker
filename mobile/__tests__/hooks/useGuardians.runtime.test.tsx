@@ -22,7 +22,15 @@ import { invitationKeys } from '../../hooks/useInvitations';
 import { gameKeys } from '../../hooks/query-keys';
 import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
+import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import { createQueryWrapper } from '../utils/queryWrapper';
+
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+}));
+
+const mockedTrack = trackEvent as jest.Mock;
 
 const mockedGet = apiClient.get as jest.Mock;
 const mockedPost = apiClient.post as jest.Mock;
@@ -50,6 +58,7 @@ const pending: PendingGuardianInvitation = {
   expiresAt: '2026-09-01T00:00:00Z',
   createdAt: '2026-08-20T00:00:00Z',
   updatedAt: '2026-08-20T00:00:00Z',
+  canResend: true,
 };
 
 describe('useGuardians runtime', () => {
@@ -109,6 +118,41 @@ describe('useGuardians runtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: guardianKeys.player('t1', 'steph') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: invitationKeys.all });
+    expect(mockedTrack).toHaveBeenCalledWith(AnalyticsEvents.GUARDIAN_INVITED, {
+      team_id: 't1',
+      relationship: 'MOTHER',
+      resend: false,
+      email_sent: true,
+    });
+  });
+
+  it('useInviteGuardian with supersede is Resend: POSTs the flag and tracks resend + the send outcome (#420)', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: false } });
+    const { wrapper, client } = createQueryWrapper();
+    const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useInviteGuardian(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        teamId: 't1',
+        playerId: 'steph',
+        data: { email: 'sonya.curry@example.com', relationship: 'MOTHER', supersede: true },
+      });
+    });
+
+    expect(mockedPost).toHaveBeenCalledWith('/teams/t1/members/steph/guardians', {
+      email: 'sonya.curry@example.com',
+      relationship: 'MOTHER',
+      supersede: true,
+    });
+    // ids, enums and booleans only: never the address
+    expect(mockedTrack).toHaveBeenCalledWith(AnalyticsEvents.GUARDIAN_INVITED, {
+      team_id: 't1',
+      relationship: 'MOTHER',
+      resend: true,
+      email_sent: false,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: guardianKeys.player('t1', 'steph') });
   });
 
   it('useInviteGuardian surfaces emailSent: false when the email failed (#770)', async () => {

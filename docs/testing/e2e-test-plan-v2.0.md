@@ -590,7 +590,15 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** guardian from E.12b (no staff row)
 - **Steps:** Try to record a game event (`POST /games/<id>/events`), send a team invitation, post an announcement, export stats.
-- **Expected:** 403 on each (`getTeamPermissions` → `canViewStats` only); in the app no Start/End/Delete/Continue Tracking/Add Player/Add staff controls render. Second guardian invited for the same child is `isPrimary: false`. Re-inviting the same email while PENDING → 400 "A pending guardian invitation already exists for this email".
+- **Expected:** 403 on each (`getTeamPermissions` → `canViewStats` only); in the app no Start/End/Delete/Continue Tracking/Add Player/Add staff controls render. Second guardian invited for the same child is `isPrimary: false`. Re-inviting the same email while PENDING → 400 "A pending guardian invitation already exists for this email" (Resend, E.12a1, is the way to send it again).
+- **Notes:** ___________
+
+### E.12a1 — Coach resends a pending guardian invite (#420)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH (canManageRoster)
+- **Prereq:** a PENDING guardian invite from E.12a that has **not** been accepted (invite a second address for the same child if E.12b already used the first), created more than 2 minutes ago
+- **Steps:** On `/teams/<id>/players/<playerId>/guardians`, tap the refresh icon on the pending row (VoiceOver: "Resend invitation: <email>"). API: `POST …/guardians { email, relationship, supersede: true }`. Tap it again at once.
+- **Expected:** First tap: 201, toast "Invitation re-sent to <email>", 📧 a new email whose link works; the previous email's link now shows the expired state. Second tap within 2 minutes: 429 `resend_cooldown`, the toast says to try again in N seconds, and no email goes out. A guardian (no `canManageRoster`) sees no resend icon.
 - **Notes:** ___________
 
 ### E.12d — Remove a guardian

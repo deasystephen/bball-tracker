@@ -4,13 +4,16 @@
  * docs/plans/parent-role-spec.md, role matrix decision 1).
  *
  * Readable by roster managers and by the player's own guardians (the API
- * strips `email` for guardians). Invite / remove-others render only with
- * `canManageRoster`; a guardian always gets "Leave" on their own row. The
- * API remains the authority (403 / 400).
+ * strips `email` for guardians). Invite / remove-others / Resend render only
+ * with `canManageRoster`; a guardian always gets "Leave" on their own row. The
+ * API remains the authority (403 / 400 / 429).
+ *
+ * Resend (#420) is the invite call with `supersede: true`: the server expires
+ * the pending invitation and mails a fresh link, so the old one dies.
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +35,7 @@ import {
   useInviteGuardian,
   useRemoveGuardian,
   type GuardianRow,
+  type PendingGuardianInvitation,
 } from '../../../../../hooks/useGuardians';
 import { useTheme } from '../../../../../hooks/useTheme';
 import { useTranslation } from '../../../../../i18n';
@@ -67,8 +71,14 @@ export default function PlayerGuardiansScreen() {
     error: guardiansError,
     refetch: refetchGuardians,
   } = usePlayerGuardians(id, playerId);
+  // One hook for Invite and Resend (the same call; Resend adds `supersede`).
+  // Pending state is tracked per action: `inviting` drives the form button,
+  // `resendingIds` the row in flight (spinner, taps ignored), so neither
+  // action's pending state leaks into the other's controls.
   const inviteGuardian = useInviteGuardian();
   const removeGuardian = useRemoveGuardian();
+  const [inviting, setInviting] = useState(false);
+  const [resendingIds, setResendingIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState('');
@@ -86,6 +96,7 @@ export default function PlayerGuardiansScreen() {
       return;
     }
     setEmailError(undefined);
+    setInviting(true);
     try {
       const result = await inviteGuardian.mutateAsync({
         teamId: id,
@@ -97,12 +108,40 @@ export default function PlayerGuardiansScreen() {
       setEmail('');
       setShowForm(false);
       if (result.emailSent === false) {
-        toast.showToast(`Invitation created, but the email to ${trimmed} failed to send.`, 'error');
+        toast.showToast(t('guardians.inviteEmailFailed', { email: trimmed }), 'error');
       } else {
-        toast.showToast(`Invitation sent to ${trimmed}`, 'success');
+        toast.showToast(t('guardians.sent', { email: trimmed }), 'success');
       }
     } catch (err) {
-      toast.showToast(getApiErrorMessage(err, 'Failed to send invitation'), 'error');
+      toast.showToast(getApiErrorMessage(err, t('guardians.inviteFailed')), 'error');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleResend = async (invite: PendingGuardianInvitation) => {
+    if (resendingIds.has(invite.id)) return;
+    setResendingIds((ids) => new Set(ids).add(invite.id));
+    try {
+      const result = await inviteGuardian.mutateAsync({
+        teamId: id,
+        playerId,
+        data: { email: invite.invitedEmail, relationship: invite.relationship, supersede: true },
+      });
+      if (result.emailSent === false) {
+        toast.showToast(t('guardians.resentEmailFailed', { email: invite.invitedEmail }), 'error');
+      } else {
+        toast.showToast(t('guardians.resent', { email: invite.invitedEmail }), 'success');
+      }
+    } catch (err) {
+      // 429 resend_cooldown and the lost-race 400 carry their own message.
+      toast.showToast(getApiErrorMessage(err, t('guardians.resendFailed')), 'error');
+    } finally {
+      setResendingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(invite.id);
+        return next;
+      });
     }
   };
 
@@ -215,8 +254,8 @@ export default function PlayerGuardiansScreen() {
                   <Button
                     title="Send invite"
                     onPress={handleInvite}
-                    loading={inviteGuardian.isPending}
-                    disabled={inviteGuardian.isPending}
+                    loading={inviting}
+                    disabled={inviting}
                     style={styles.actionButton}
                     testID="guardian-invite-submit"
                   />
@@ -286,14 +325,44 @@ export default function PlayerGuardiansScreen() {
                 {pendingInvitations.length}
               </ThemedText>
             </View>
-            {pendingInvitations.map((invite) => (
-              <ListItem
-                key={invite.id}
-                title={invite.invitedEmail}
-                subtitle={`${relationshipLabel(invite.relationship)} · Pending`}
-                leftElement={<Ionicons name="mail-outline" size={20} color={colors.textTertiary} />}
-              />
-            ))}
+            {pendingInvitations.map((invite) => {
+              const resending = resendingIds.has(invite.id);
+              return (
+                <ListItem
+                  key={invite.id}
+                  title={invite.invitedEmail}
+                  subtitle={`${relationshipLabel(invite.relationship)} · Pending`}
+                  leftElement={<Ionicons name="mail-outline" size={20} color={colors.textTertiary} />}
+                  rightElement={
+                    // `canResend` is server-derived (#420): this club's rows
+                    // (any season of the team's lineage) for a roster
+                    // manager; another club's pending row is listed without
+                    // the action.
+                    canManage && invite.canResend ? (
+                      <TouchableOpacity
+                        onPress={() => handleResend(invite)}
+                        style={styles.rowButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('guardians.resendA11y', { email: invite.invitedEmail })}
+                        accessibilityState={{ disabled: resending, busy: resending }}
+                        disabled={resending}
+                        testID={`guardian-resend-${invite.id}`}
+                      >
+                        {resending ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={colors.primary}
+                            testID={`guardian-resending-${invite.id}`}
+                          />
+                        ) : (
+                          <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
           </>
         )}
       </ScrollView>

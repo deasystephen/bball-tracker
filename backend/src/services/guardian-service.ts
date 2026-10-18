@@ -13,6 +13,7 @@ import { GuardianRelationship, Prisma, UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
+import { assertResendCooldown } from '../utils/resend-cooldown';
 import { getGuardianChildIds, hasTeamPermission, isGuardianOf } from '../utils/permissions';
 import { mailer } from './mailer';
 import { guardianInvitationTemplate } from './mailer/templates';
@@ -26,6 +27,10 @@ import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/
 import { lockUsers } from '../utils/user-row-lock';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
+
+/** The partial unique index that allows one PENDING row per child + address. */
+const PENDING_GUARDIAN_INDEX = 'GuardianInvitation_pending_childId_invitedEmail_key';
+const PENDING_GUARDIAN_CONFLICT = 'A pending guardian invitation already exists for this email';
 
 /** Same bound as invitation-service: an awaited send must stay well under
  * the mobile client's 10s request timeout. */
@@ -44,6 +49,42 @@ const GUARDIAN_INVITATION_SELECT = {
   createdAt: true,
   updatedAt: true,
   acceptedAt: true,
+} satisfies Prisma.GuardianInvitationSelect;
+
+/** Which invitations a Resend may see: one child + address, within one team lineage (the club across seasons). */
+interface GuardianResendScope {
+  childId: string;
+  email: string;
+  lineageId: string;
+}
+
+/** One shape for guardian invitation birth (plain invite and Resend). */
+function guardianInvitationRow(params: {
+  token: string;
+  teamId: string;
+  childId: string;
+  email: string;
+  relationship: GuardianRelationship;
+  invitedById: string;
+}): Prisma.GuardianInvitationUncheckedCreateInput {
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + GUARDIAN_INVITE_EXPIRES_DAYS);
+  return {
+    token: params.token,
+    childId: params.childId,
+    teamId: params.teamId,
+    invitedEmail: params.email,
+    relationship: params.relationship,
+    invitedById: params.invitedById,
+    expiresAt,
+    status: 'PENDING',
+  };
+}
+
+/** The listed pending row plus its team's lineage, from which `canResend` is derived (then dropped). */
+const PENDING_GUARDIAN_INVITATION_SELECT = {
+  ...GUARDIAN_INVITATION_SELECT,
+  team: { select: { lineageId: true } },
 } satisfies Prisma.GuardianInvitationSelect;
 
 const GUARDIAN_INCLUDE = {
@@ -70,9 +111,17 @@ export interface GuardianSummary {
   createdAt: Date;
 }
 
+/**
+ * A pending invitation as `GET …/guardians` lists it. `canResend` (#420) is
+ * true when the caller manages the roster and the row's team shares the
+ * caller team's lineage (the club across seasons), the scope Resend may
+ * supersede; another club's row is listed without the action.
+ */
+export type PendingGuardianInvitationView = GuardianInvitationSummary & { canResend: boolean };
+
 export interface GuardianList {
   guardians: GuardianSummary[];
-  pendingInvitations: GuardianInvitationSummary[];
+  pendingInvitations: PendingGuardianInvitationView[];
 }
 
 export interface GuardianOfEntry {
@@ -91,6 +140,12 @@ export interface GuardianOfEntry {
 export interface InviteGuardianInput {
   email: string;
   relationship: GuardianRelationship;
+  /**
+   * Resend (#420): expire the live PENDING invitation for this child + email
+   * and create its replacement (new token, the old link dies) in one
+   * transaction, instead of answering the dedupe 400.
+   */
+  supersede?: boolean;
 }
 
 /** Limited, unauthenticated view of a guardian invitation (public token lookup). */
@@ -257,6 +312,10 @@ export class GuardianService {
    * Requires `canManageRoster` on the team. Creates (or reuses) the adult's
    * `User` row with role PARENT and a PENDING `GuardianInvitation`, then emails
    * a `${PUBLIC_APP_URL}/invite/<token>` link.
+   *
+   * With `data.supersede` this is Resend (#420, `resendInvitation`): the live
+   * PENDING invitation for the child + email on this team is expired and
+   * replaced in one transaction instead of answering the dedupe 400.
    */
   static async inviteGuardian(
     teamId: string,
@@ -266,7 +325,7 @@ export class GuardianService {
   ): Promise<GuardianInvitationSummary & { emailSent: boolean }> {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, lineageId: true },
     });
 
     if (!team) {
@@ -285,94 +344,67 @@ export class GuardianService {
       throw new BadRequestError('A player cannot be their own guardian');
     }
 
-    // Find or create the adult's account. A brand-new account created through
-    // a guardian invite is PARENT; an existing account keeps its role (a coach
-    // who is also a parent stays COACH).
-    let parent = await prisma.user.findFirst({
-      where: { email: emailEquals(email) },
-      select: { id: true, name: true, email: true },
-    });
+    let parent: UserSummaryWithEmail;
+    let invitation: GuardianInvitationSummary;
+    let token: string;
+    if (data.supersede) {
+      ({ parent, invitation, token } = await this.resendInvitation({
+        teamId,
+        lineageId: team.lineageId,
+        childId: playerId,
+        email,
+        relationship: data.relationship,
+        invitedById: userId,
+      }));
+    } else {
+      parent = await this.findOrCreateParent(email);
 
-    if (!parent) {
-      try {
-        parent = await prisma.user.create({
-          data: {
-            name: email.split('@')[0],
-            email,
-            role: 'PARENT',
-            emailVerified: false,
-          },
-          select: { id: true, name: true, email: true },
-        });
-      } catch (err) {
-        // Two concurrent invites for the same new guardian email: the loser
-        // reuses the winner's row instead of surfacing a 500 (red-team RT8 —
-        // same catch-and-reuse as invitation-service).
-        if (!isUniqueViolation(err)) {
-          throw err;
-        }
-        parent = await prisma.user.findFirst({
-          where: { email: emailEquals(email) },
-          select: { id: true, name: true, email: true },
-        });
-        if (!parent) {
-          throw err;
-        }
-      }
-    }
-
-    const alreadyLinked = await prisma.guardian.findUnique({
-      where: { parentId_childId: { parentId: parent.id, childId: playerId } },
-    });
-    if (alreadyLinked) {
-      throw new BadRequestError('This person is already a guardian of this player');
-    }
-
-    // Dedupe: one live PENDING invitation per child/email. An expired PENDING
-    // row is flipped to EXPIRED and does not block (same lazy expiry as
-    // TeamInvitation).
-    const existing = await prisma.guardianInvitation.findFirst({
-      where: { childId: playerId, invitedEmail: email, status: 'PENDING' },
-    });
-    if (existing) {
-      if (existing.expiresAt.getTime() > Date.now()) {
-        throw new BadRequestError('A pending guardian invitation already exists for this email');
-      }
-      await prisma.guardianInvitation.updateMany({
-        where: { id: existing.id, status: 'PENDING' },
-        data: { status: 'EXPIRED' },
+      const alreadyLinked = await prisma.guardian.findUnique({
+        where: { parentId_childId: { parentId: parent.id, childId: playerId } },
       });
+      if (alreadyLinked) {
+        throw new BadRequestError('This person is already a guardian of this player');
+      }
+
+      // Dedupe: one live PENDING invitation per child/email. An expired PENDING
+      // row is flipped to EXPIRED and does not block (same lazy expiry as
+      // TeamInvitation).
+      const existing = await prisma.guardianInvitation.findFirst({
+        where: { childId: playerId, invitedEmail: email, status: 'PENDING' },
+      });
+      if (existing) {
+        if (existing.expiresAt.getTime() > Date.now()) {
+          throw new BadRequestError(PENDING_GUARDIAN_CONFLICT);
+        }
+        await prisma.guardianInvitation.updateMany({
+          where: { id: existing.id, status: 'PENDING' },
+          data: { status: 'EXPIRED' },
+        });
+      }
+
+      token = this.generateToken();
+      const row = guardianInvitationRow({
+        token,
+        teamId,
+        childId: playerId,
+        email,
+        relationship: data.relationship,
+        invitedById: userId,
+      });
+      // The dedupe above and this insert are not one transaction: a request that
+      // loses the race on the partial PENDING index answers the dedupe's 400 (#727).
+      invitation = await createOrConflict(
+        () => prisma.guardianInvitation.create({ data: row, select: GUARDIAN_INVITATION_SELECT }),
+        PENDING_GUARDIAN_CONFLICT,
+        PENDING_GUARDIAN_INDEX
+      );
     }
 
+    // Read only once the row is committed: a refused request never pays for it.
     const inviter = await prisma.user.findUnique({
       where: { id: userId },
       select: { name: true, email: true },
     });
-
-    const token = this.generateToken();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + GUARDIAN_INVITE_EXPIRES_DAYS);
-
-    // The dedupe above and this insert are not one transaction: a request that
-    // loses the race on the partial PENDING index answers the dedupe's 400 (#727).
-    const invitation = await createOrConflict(
-      () =>
-        prisma.guardianInvitation.create({
-          data: {
-            token,
-            childId: playerId,
-            teamId,
-            invitedEmail: email,
-            relationship: data.relationship,
-            invitedById: userId,
-            expiresAt,
-            status: 'PENDING',
-          },
-          select: GUARDIAN_INVITATION_SELECT,
-        }),
-      'A pending guardian invitation already exists for this email',
-      'GuardianInvitation_pending_childId_invitedEmail_key'
-    );
 
     const acceptUrl = `${publicAppUrl()}/invite/${token}`;
     // Awaited so callers can surface a failed send to the coach (unification
@@ -416,10 +448,207 @@ export class GuardianService {
       parentId: parent.id,
       invitedById: userId,
       userId,
+      supersede: !!data.supersede,
       emailSent,
     });
 
     return { ...invitation, emailSent };
+  }
+
+  /**
+   * Find or create the invited adult's account. A brand-new account created
+   * through a guardian invite is PARENT; an existing account keeps its role (a
+   * coach who is also a parent stays COACH). Two concurrent invites for the
+   * same new address: the loser reuses the winner's row instead of surfacing a
+   * 500 (red-team RT8, same catch-and-reuse as invitation-service).
+   */
+  private static async findOrCreateParent(
+    email: string,
+    /** The by-email lookup the caller already ran (null: no account); omitted, it is run here. */
+    preRead?: UserSummaryWithEmail | null
+  ): Promise<UserSummaryWithEmail> {
+    const existing =
+      preRead !== undefined
+        ? preRead
+        : await prisma.user.findFirst({
+            where: { email: emailEquals(email) },
+            select: USER_SUMMARY_WITH_EMAIL_SELECT,
+          });
+    if (existing) {
+      return existing;
+    }
+    try {
+      return await prisma.user.create({
+        data: { name: email.split('@')[0], email, role: 'PARENT', emailVerified: false },
+        select: USER_SUMMARY_WITH_EMAIL_SELECT,
+      });
+    } catch (err) {
+      if (!isUniqueViolation(err)) {
+        throw err;
+      }
+      const raced = await prisma.user.findFirst({
+        where: { email: emailEquals(email) },
+        select: USER_SUMMARY_WITH_EMAIL_SELECT,
+      });
+      if (!raced) {
+        throw err;
+      }
+      return raced;
+    }
+  }
+
+  /**
+   * The resend cooldown for a guardian address (#420): the newest invitation
+   * row for the child + address sent by this club (any status, any
+   * team-season of the caller team's lineage) must be older than the shared
+   * window, else 429. Another club's invitation to the same address does not
+   * count: it was not "just sent" by this caller, and the cross-lineage
+   * dedupe answers that case instead.
+   */
+  private static async assertGuardianResendCooldown(
+    db: Prisma.TransactionClient,
+    ids: GuardianResendScope & { invitedById: string }
+  ): Promise<void> {
+    const latest = await db.guardianInvitation.findFirst({
+      where: { childId: ids.childId, invitedEmail: emailEquals(ids.email), team: { lineageId: ids.lineageId } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    assertResendCooldown(latest?.createdAt, 'address', {
+      onRefused: (retryAfterSeconds) =>
+        logger.info('Guardian invitation resend refused (cooldown)', {
+          childId: ids.childId,
+          invitedById: ids.invitedById,
+          retryAfterSeconds,
+        }),
+    });
+  }
+
+  /**
+   * The dedupe for Resend (#420): a live PENDING invitation for the child +
+   * address on a team outside the caller team's lineage (another club) is not
+   * the caller's to supersede, so the request answers the plain invite's 400.
+   * Read-only; run once before the account create (so this refusal provisions
+   * nothing) and again inside the locked transaction (the authoritative check;
+   * the partial index is the final backstop).
+   */
+  private static async assertNoLivePendingElsewhere(
+    db: Prisma.TransactionClient,
+    scope: GuardianResendScope
+  ): Promise<void> {
+    const elsewhere = await db.guardianInvitation.findFirst({
+      where: {
+        childId: scope.childId,
+        invitedEmail: emailEquals(scope.email),
+        status: 'PENDING',
+        expiresAt: { gt: new Date() },
+        NOT: { team: { lineageId: scope.lineageId } },
+      },
+      select: { id: true },
+    });
+    if (elsewhere) {
+      throw new BadRequestError(PENDING_GUARDIAN_CONFLICT);
+    }
+  }
+
+  /**
+   * Resend = atomic supersede for guardian invitations (#420), mirroring
+   * `invitation-service.ts#createInvitationRowSuperseding`.
+   *
+   * The adult's account is needed before the transaction so the child and the
+   * adult can be locked together in ONE id-ordered `lockUsers` statement, the
+   * same lock accept takes (#664). When the address has no account yet, the
+   * cooldown and the cross-lineage dedupe are checked first (read-only) so a
+   * resend refused by either creates no PARENT row; the account is created
+   * only after both pass.
+   *
+   * Scope is the caller team's LINEAGE (the club across seasons, since a
+   * `Team` row is one team-season): after a rollover last season's pending
+   * row is still this club's to resend.
+   *
+   * Inside ONE transaction: lock child + adult; read the link (authoritative
+   * under the lock, so a parent who accepted first is refused rather than
+   * sent a second invitation); re-check the cooldown and the cross-lineage
+   * dedupe (the authoritative checks; the pre-checks only spare the account
+   * create); lazily expire any lapsed PENDING row for the child + address on
+   * ANY team (the plain invite's lazy expiry, so a lapsed row elsewhere never
+   * blocks the insert); expire the live PENDING row within the lineage; create
+   * the replacement with a new token. A failed create therefore never leaves
+   * the parent with a dead link and no invitation. A row another club commits
+   * under the resend still collides on the partial index and answers the
+   * dedupe 400; a P2002 on any other unique (a token collision) propagates.
+   */
+  private static async resendInvitation(params: {
+    teamId: string;
+    lineageId: string;
+    childId: string;
+    email: string;
+    relationship: GuardianRelationship;
+    invitedById: string;
+  }): Promise<{ parent: UserSummaryWithEmail; invitation: GuardianInvitationSummary; token: string }> {
+    const { teamId, lineageId, childId, email, relationship, invitedById } = params;
+    const scope: GuardianResendScope = { childId, email, lineageId };
+
+    const existing = await prisma.user.findFirst({
+      where: { email: emailEquals(email) },
+      select: USER_SUMMARY_WITH_EMAIL_SELECT,
+    });
+    if (!existing) {
+      // Read-only refusals first, so a refused resend provisions no account.
+      await this.assertGuardianResendCooldown(prisma, { ...scope, invitedById });
+      await this.assertNoLivePendingElsewhere(prisma, scope);
+    }
+    const parent = await this.findOrCreateParent(email, existing);
+    const parentId = parent.id;
+
+    const token = this.generateToken();
+    const row = guardianInvitationRow({ token, teamId, childId, email, relationship, invitedById });
+
+    const invitation = await createOrConflict(
+      () =>
+        prisma.$transaction(async (tx) => {
+          await lockUsers(tx, [childId, parentId]);
+          const linked = await tx.guardian.findUnique({
+            where: { parentId_childId: { parentId, childId } },
+            select: { id: true },
+          });
+          if (linked) {
+            throw new BadRequestError('This person is already a guardian of this player');
+          }
+
+          await this.assertGuardianResendCooldown(tx, { ...scope, invitedById });
+          await this.assertNoLivePendingElsewhere(tx, scope);
+
+          const { count: lapsedCount } = await tx.guardianInvitation.updateMany({
+            where: {
+              childId,
+              invitedEmail: emailEquals(email),
+              status: 'PENDING',
+              expiresAt: { lte: new Date() },
+            },
+            data: { status: 'EXPIRED' },
+          });
+          const { count: supersededCount } = await tx.guardianInvitation.updateMany({
+            where: { childId, invitedEmail: emailEquals(email), status: 'PENDING', team: { lineageId } },
+            data: { status: 'EXPIRED' },
+          });
+          if (lapsedCount + supersededCount > 0) {
+            logger.info('Guardian invitation superseded', {
+              childId,
+              teamId,
+              invitedById,
+              supersededCount,
+              lapsedCount,
+            });
+          }
+
+          return tx.guardianInvitation.create({ data: row, select: GUARDIAN_INVITATION_SELECT });
+        }),
+      PENDING_GUARDIAN_CONFLICT,
+      PENDING_GUARDIAN_INDEX
+    );
+
+    return { parent, invitation, token };
   }
 
   /**
@@ -435,7 +664,7 @@ export class GuardianService {
       throw new ForbiddenError("You do not have access to this player's guardians");
     }
 
-    const [guardians, pendingInvitations] = await Promise.all([
+    const [guardians, pendingInvitations, team] = await Promise.all([
       prisma.guardian.findMany({
         where: { childId: playerId },
         include: GUARDIAN_INCLUDE,
@@ -443,14 +672,18 @@ export class GuardianService {
       }),
       prisma.guardianInvitation.findMany({
         where: { childId: playerId, status: 'PENDING', expiresAt: { gt: new Date() } },
-        select: GUARDIAN_INVITATION_SELECT,
+        select: PENDING_GUARDIAN_INVITATION_SELECT,
         orderBy: { createdAt: 'asc' },
       }),
+      prisma.team.findUnique({ where: { id: teamId }, select: { lineageId: true } }),
     ]);
 
     return {
       guardians: guardians.map((g) => toSummary(g, canManageRoster)),
-      pendingInvitations,
+      pendingInvitations: pendingInvitations.map(({ team: rowTeam, ...row }) => ({
+        ...row,
+        canResend: canManageRoster && !!team && rowTeam?.lineageId === team.lineageId,
+      })),
     };
   }
 

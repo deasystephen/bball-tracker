@@ -246,5 +246,15 @@
   "invite": {
     "loadFailed": "We couldn't load this invitation. Check your connection and try again.",
     "rateLimited": "Too many requests. Wait a few minutes and try again."
+  },
+  "guardians": {
+    "resendA11y": "Resend invitation: {{email}}",
+    "resent": "Invitation re-sent to {{email}}",
+    "resentEmailFailed": "Invitation refreshed, but the email to {{email}} failed to send. You can resend it again in a couple of minutes.",
+    "resendFailed": "Failed to resend invitation",
+    "inviteEmailFailed": "Invitation created, but the email to {{email}} failed to send. Resend on the pending invite becomes available in a couple of minutes.",
+    "addPlayerEmailFailed": "The parent invite email failed to send. Resend on the player’s Guardians screen becomes available in a couple of minutes.",
+    "sent": "Invitation sent to {{email}}",
+    "inviteFailed": "Failed to send invitation"
   }
 }

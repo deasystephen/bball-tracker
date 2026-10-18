@@ -7,7 +7,7 @@
 import request from 'supertest';
 import { app } from '../../src/index';
 import { GuardianService } from '../../src/services/guardian-service';
-import { NotFoundError, ForbiddenError, BadRequestError } from '../../src/utils/errors';
+import { NotFoundError, ForbiddenError, BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -74,9 +74,83 @@ describe('Guardians API', () => {
       expect(mockGuardianService.inviteGuardian).toHaveBeenCalledWith(
         TEST_TEAM_ID,
         TEST_PLAYER_ID,
-        { email: 'parent@example.com', relationship: 'MOTHER' },
+        // supersede defaults to false: a plain invite still answers the dedupe 400
+        { email: 'parent@example.com', relationship: 'MOTHER', supersede: false },
         TEST_USER_ID
       );
+    });
+
+    describe('supersede (Resend, #420)', () => {
+      it('passes supersede through and returns the fresh invitation without its token, emailSent beside it', async () => {
+        mockGuardianService.inviteGuardian.mockResolvedValue({
+          ...mockInvitation,
+          token: 'NEW-SECRET',
+          emailSent: true,
+        } as unknown as Awaited<ReturnType<typeof mockGuardianService.inviteGuardian>>);
+
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: true });
+
+        expect(res.status).toBe(201);
+        expect(res.body.invitation.id).toBe(mockInvitation.id);
+        expect(res.body.invitation).not.toHaveProperty('token');
+        expect(res.body.emailSent).toBe(true);
+        expect(mockGuardianService.inviteGuardian).toHaveBeenCalledWith(
+          TEST_TEAM_ID,
+          TEST_PLAYER_ID,
+          { email: 'parent@example.com', relationship: 'MOTHER', supersede: true },
+          TEST_USER_ID
+        );
+      });
+
+      it('reports a failed resend email as emailSent: false (201, never thrown)', async () => {
+        mockGuardianService.inviteGuardian.mockResolvedValue({
+          ...mockInvitation,
+          emailSent: false,
+        } as unknown as Awaited<ReturnType<typeof mockGuardianService.inviteGuardian>>);
+
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: true });
+
+        expect(res.status).toBe(201);
+        expect(res.body.emailSent).toBe(false);
+      });
+
+      it('answers 400 when a concurrent resend won the partial PENDING index', async () => {
+        mockGuardianService.inviteGuardian.mockRejectedValue(
+          new BadRequestError('A pending guardian invitation already exists for this email')
+        );
+
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: true });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('A pending guardian invitation already exists for this email');
+      });
+
+      it('answers 429 resend_cooldown with retryAfterSeconds inside the window', async () => {
+        mockGuardianService.inviteGuardian.mockRejectedValue(new ResendCooldownError(87, 'address'));
+
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: true });
+
+        expect(res.status).toBe(429);
+        expect(res.body).toMatchObject({ code: 'resend_cooldown', retryAfterSeconds: 87 });
+        expect(res.body.error).toContain('this address');
+      });
+
+      it('rejects a non-boolean supersede with 400 before the service runs', async () => {
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: 'yes' });
+
+        expect(res.status).toBe(400);
+        expect(mockGuardianService.inviteGuardian).not.toHaveBeenCalled();
+      });
     });
 
     it('surfaces a failed guardian email as emailSent: false', async () => {
@@ -177,7 +251,7 @@ describe('Guardians API', () => {
           },
         ],
         pendingInvitations: [
-          { ...mockInvitation, token: 'SECRET' } as unknown as Awaited<
+          { ...mockInvitation, token: 'SECRET', canResend: true } as unknown as Awaited<
             ReturnType<typeof mockGuardianService.listGuardians>
           >['pendingInvitations'][number],
         ],
@@ -190,6 +264,8 @@ describe('Guardians API', () => {
       expect(res.body.guardians[0].userId).toBe(TEST_GUARDIAN_USER_ID);
       expect(res.body.pendingInvitations).toHaveLength(1);
       expect(res.body.pendingInvitations[0]).not.toHaveProperty('token');
+      // The per-row Resend flag (#420) reaches the client.
+      expect(res.body.pendingInvitations[0].canResend).toBe(true);
       expect(mockGuardianService.listGuardians).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_PLAYER_ID, TEST_USER_ID);
     });
 

@@ -118,11 +118,12 @@ export interface ResendCooldownDetails extends Record<string, unknown> {
  * (#715). Bounds how often one recipient can be mailed through Resend.
  */
 export class ResendCooldownError extends DetailedError<ResendCooldownDetails> {
-  constructor(retryAfterSeconds: number) {
+  /** `recipient` names who was just mailed: the team invite's player, or a guardian invite's address (#420). */
+  constructor(retryAfterSeconds: number, recipient: 'player' | 'address' = 'player') {
     super(
       'resend_cooldown',
       { retryAfterSeconds },
-      `An invitation was just sent to this player. Try again in ${retryAfterSeconds} seconds.`,
+      `An invitation was just sent to this ${recipient}. Try again in ${retryAfterSeconds} seconds.`,
       429
     );
     Object.setPrototypeOf(this, ResendCooldownError.prototype);

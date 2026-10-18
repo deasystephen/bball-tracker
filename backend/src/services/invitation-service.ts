@@ -14,8 +14,8 @@ import {
   BadRequestError,
   ForbiddenError,
   AppError,
-  ResendCooldownError,
 } from '../utils/errors';
+import { assertResendCooldown } from '../utils/resend-cooldown';
 import { randomBytes } from 'crypto';
 import {
   hasTeamPermission,
@@ -51,16 +51,6 @@ const EMAIL_SEND_TIMEOUT_MS = 5_000;
 /** Default invitation lifetime — single source for every creation path (the
  * Zod schema's expiresInDays default mirrors it). */
 const DEFAULT_INVITATION_EXPIRES_DAYS = 7;
-
-/**
- * Per-recipient resend cooldown (#715): an expire-and-recreate (Resend, or
- * Add Player re-adding the same email) whose newest invitation row for the
- * pair (any status) is younger than this, and went to the address the player
- * still has, is refused with 429 before anything is expired or mailed. Every
- * invitation row is one email, so this caps one address at one message per
- * window; a corrected address is not held back.
- */
-export const INVITATION_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** One shape for invitation birth — every creation path builds its row here so
  * a future field cannot be added to only some paths (maintainability). */
@@ -483,7 +473,7 @@ export class InvitationService {
           throw new BadRequestError('Player already has access to this team');
         }
 
-        const latest = await this.assertResendCooldown(
+        const latest = await this.latestAfterCooldown(
           tx,
           { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
           recipientEmail
@@ -544,9 +534,10 @@ export class InvitationService {
    * than INVITATION_RESEND_COOLDOWN_MS and went to the address the player
    * still has (a row from before #715 has no hash and counts as the same
    * address). No current address means no email goes out, so no cooldown.
-   * Returns the row so the caller can inherit from it.
+   * Returns the row so the caller can inherit from it. The window itself is
+   * `utils/resend-cooldown.ts`, shared with guardian invitations (#420).
    */
-  private static async assertResendCooldown(
+  private static async latestAfterCooldown(
     tx: Prisma.TransactionClient,
     ids: { teamId: string; playerId: string; invitedById: string },
     recipientEmail: string | null
@@ -561,11 +552,11 @@ export class InvitationService {
     }
     const sameRecipient =
       latest.recipientHash === null || latest.recipientHash === hashRecipient(recipientEmail);
-    const sinceLatestMs = Date.now() - latest.createdAt.getTime();
-    if (sameRecipient && sinceLatestMs < INVITATION_RESEND_COOLDOWN_MS) {
-      const retryAfterSeconds = Math.ceil((INVITATION_RESEND_COOLDOWN_MS - sinceLatestMs) / 1000);
-      logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds });
-      throw new ResendCooldownError(retryAfterSeconds);
+    if (sameRecipient) {
+      assertResendCooldown(latest.createdAt, 'player', {
+        onRefused: (retryAfterSeconds) =>
+          logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds }),
+      });
     }
     return latest;
   }
@@ -1343,7 +1334,7 @@ export class InvitationService {
 
       // Re-adding a removed player with the same address is an
       // expire-and-recreate too, so the resend cooldown applies (#715).
-      await this.assertResendCooldown(tx, { teamId, playerId, invitedById: userId }, email);
+      await this.latestAfterCooldown(tx, { teamId, playerId, invitedById: userId }, email);
 
       await tx.teamInvitation.updateMany({
         where: { teamId, playerId, status: 'PENDING' },

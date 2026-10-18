@@ -121,7 +121,7 @@ export interface AnalyticsEventProps {
   invitation_accepted: { kind: 'team' | 'guardian'; source: 'in_app' | 'link' };
   invitation_declined: { invitation_id: string };
   invitation_cancelled: { team_id: string; invitation_id: string };
-  guardian_invited: { team_id: string; relationship: string };
+  guardian_invited: { team_id: string; relationship: string; resend: boolean; email_sent: boolean };
   guardian_removed: { team_id: string };
   announcement_created: { team_id: string };
   announcement_reply_created: { team_id: string; announcement_id: string };

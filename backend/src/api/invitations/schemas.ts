@@ -46,6 +46,10 @@ export const inviteGuardianSchema = z.object({
   relationship: z.nativeEnum(GuardianRelationship, {
     error: 'Relationship must be MOTHER, FATHER, GUARDIAN or OTHER',
   }),
+  // Resend (#420): expire the live PENDING invitation for this child + email
+  // (if any) and create a fresh one (new token) in one transaction. Without
+  // it a live PENDING invitation for the pair is a 400 (dedupe).
+  supersede: z.boolean().default(false),
 });
 
 export type InviteGuardianInput = z.infer<typeof inviteGuardianSchema>;
