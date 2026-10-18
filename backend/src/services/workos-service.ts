@@ -3,7 +3,7 @@
  */
 
 import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
-import { getWorkOS, getWorkOSClientId, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
+import { assertWorkOSConfig, getWorkOS, getWorkOSClientId, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
 import { Prisma, User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
@@ -338,10 +338,10 @@ export class WorkOSService {
       return null;
     }
 
-    // Resolved outside the try: a missing WorkOS config is a 500, not an outage.
-    const jwks = getWorkOSJwks();
+    // Outside the try: a missing WorkOS config is a 500, not a JWKS outage.
+    assertWorkOSConfig();
     try {
-      const { payload } = await jwtVerify(accessToken, jwks, {
+      const { payload } = await jwtVerify(accessToken, getWorkOSJwks(), {
         algorithms: ALLOWED_JWT_ALGS,
         issuer: WORKOS_JWT_ISSUER,
         requiredClaims: ['exp', 'sub'],

@@ -7,13 +7,10 @@
  */
 
 const mockGetWorkOSJwks = jest.fn();
-jest.mock('../../src/utils/workos-client', () => ({
-  getWorkOS: (): unknown => ({ userManagement: {} }),
-  getWorkOSClientId: (): string => 'test-client-id',
-  WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
-  WORKOS_JWT_ISSUER: 'https://api.workos.com',
-  getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
-}));
+jest.mock('../../src/utils/workos-client', () =>
+  jest.requireActual('../support/workos-mock').mockWorkOSClientModule({
+    getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
+  }));
 
 import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet, errors as joseErrors, type KeyLike } from 'jose';
 import type { Request, Response, NextFunction } from 'express';

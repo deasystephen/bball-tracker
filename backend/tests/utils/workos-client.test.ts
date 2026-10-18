@@ -31,10 +31,12 @@ describe('workos-client', () => {
 
   it('throws at call time when the API key is unset', () => {
     delete process.env.WORKOS_API_KEY;
+    process.env.WORKOS_CLIENT_ID = 'client_unit';
     expect(() => loadActual().getWorkOS()).toThrow('WORKOS_API_KEY environment variable is required');
   });
 
   it('throws at call time when the client id is unset', () => {
+    process.env.WORKOS_API_KEY = 'sk_test_unit';
     delete process.env.WORKOS_CLIENT_ID;
     expect(() => loadActual().getWorkOSClientId()).toThrow('WORKOS_CLIENT_ID environment variable is required');
   });
@@ -63,6 +65,11 @@ describe('workos-client', () => {
     delete process.env.WORKOS_API_KEY;
     process.env.WORKOS_CLIENT_ID = 'client_unit';
     expect(() => loadActual().assertWorkOSConfig()).toThrow('WORKOS_API_KEY');
+    try {
+      loadActual().assertWorkOSConfig();
+    } catch (error) {
+      expect((error as { variable?: string }).variable).toBe('WORKOS_API_KEY');
+    }
     process.env.WORKOS_API_KEY = 'sk_test_unit';
     expect(() => loadActual().assertWorkOSConfig()).not.toThrow();
   });

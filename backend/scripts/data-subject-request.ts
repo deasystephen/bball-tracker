@@ -35,18 +35,20 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  if (command === 'delete') {
-    // Before any DB access: a delete without WorkOS credentials would erase the
-    // row and leave the identity-provider user behind.
-    assertWorkOSConfig();
-  }
-
   const userId = await findActiveUserIdByEmail(prisma, email);
 
   if (command === 'export') {
     const data = await AccountService.exportUserData(userId);
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;
+  }
+
+  // Before anything is erased: a delete without WorkOS credentials would
+  // anonymise the row and leave the identity-provider user behind. A row with
+  // no workosUserId never reaches WorkOS, so it needs no credentials.
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { workosUserId: true } });
+  if (target?.workosUserId) {
+    assertWorkOSConfig();
   }
 
   const result = await AccountService.deleteAccount(userId, { actorId: 'operator', mode: 'operator' });
