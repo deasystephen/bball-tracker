@@ -65,7 +65,7 @@ export default {
     // from the OTA MANIFEST while the schemes a binary answers are baked into
     // Info.plist, so builds #25-#30 stay on the last 1.2.0 OTA); 1.2.0 was
     // expo-secure-store (audit #52).
-    version: '1.5.0',
+    version: '1.6.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -112,6 +112,21 @@ export default {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       package: 'com.bballtracker.mobile',
+      // Android App Links: the manifest half of the association whose site
+      // half is https://hooplings.com/.well-known/assetlinks.json (#139).
+      // Without an autoVerify https filter Android never consults
+      // assetlinks.json and hooplings.com/invite/<token> opens Chrome instead
+      // of the app (#716). The intent filter is native: it rides the next EAS
+      // build, an OTA update cannot change it; and it stays inert until the
+      // web deploy (#30) serves the apex and #139 supplies the fingerprint.
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          data: [{ scheme: 'https', host: 'hooplings.com', pathPrefix: '/invite' }],
+          category: ['BROWSABLE', 'DEFAULT'],
+        },
+      ],
     },
     web: {
       favicon: './assets/favicon.png',

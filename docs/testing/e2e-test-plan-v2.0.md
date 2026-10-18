@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build on OTA runtime 1.5.0 (v1.5.0, Expo SDK 57; build #33 or newer, cut 2026-09-29 from `b408645` / #576, see `mobile/binary-manifest.json`), with the latest production OTA applied — #32 and older are 1.4.0-or-earlier binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build on OTA runtime 1.6.0 (v1.6.0, Expo SDK 57; the build recorded under 1.6.0 in `mobile/binary-manifest.json` or newer, #716 / #780), with the latest production OTA applied — #33 (runtime 1.5.0, cut 2026-09-29 from `b408645` / #576) and older are binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
 **Checkboxes:** count all with `grep -c '^- \[[ x]\]' docs/testing/e2e-test-plan-v2.0.md` and the passed ones with `grep -c '^- \[x\]'`; a ticked box keeps the `Pass / Fail / Skipped` selector and records the date, who ran it, the device and the OTA or build on its Notes line. This line states no total on purpose, so a PR that adds a section does not need to touch it.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy

@@ -11,12 +11,19 @@ import { introspectAppConfig, loadAppConfig, type IntrospectedConfig, type Publi
 
 type PluginEntry = string | [string, Record<string, unknown>?];
 
+type AndroidIntentFilter = {
+  action: string;
+  autoVerify?: boolean;
+  data: { scheme: string; host: string; pathPrefix?: string }[];
+  category: string[];
+};
+
 type ExpoConfig = {
   expo: {
     version: string;
     scheme: string | string[];
     ios: { associatedDomains: string[]; infoPlist?: Record<string, unknown> };
-    android: { permissions?: string[] };
+    android: { permissions?: string[]; intentFilters: AndroidIntentFilter[] };
     plugins: PluginEntry[];
     extra: { apiUrl: string; appEnv: string };
   };
@@ -112,6 +119,23 @@ describe('app.config.js', () => {
     expect((await loadConfig({ APP_ENV: 'production' })).expo.ios.associatedDomains).toEqual(['applinks:hooplings.com']);
   });
 
+  // Android App Links (#716): the manifest half of the association. Its host
+  // is tied to the iOS applinks apex so a domain change cannot move one
+  // platform and not the other.
+  it('Android App Links intent filter names the same apex as the Universal Links entitlement', async () => {
+    const { android, ios } = (await loadConfig({ APP_ENV: 'production' })).expo;
+    expect(android.intentFilters).toHaveLength(1);
+    const [filter] = android.intentFilters;
+    expect(filter).toEqual({
+      action: 'VIEW',
+      autoVerify: true,
+      data: [{ scheme: 'https', host: 'hooplings.com', pathPrefix: '/invite' }],
+      category: ['BROWSABLE', 'DEFAULT'],
+    });
+    const iosApexes = ios.associatedDomains.map((d) => d.replace(/^applinks:/, ''));
+    expect(iosApexes).toEqual([filter.data[0].host]);
+  });
+
   // URL scheme rename (#504); the pre-rename scheme overlap ended with #513,
   // so the binary registers exactly one scheme. The sign-in redirect asks for
   // APP_URL_SCHEME explicitly rather than reading this value.
@@ -145,6 +169,14 @@ describe('app.config.js', () => {
     // SDK 55 native modules. JavaScript built against SDK 57 must never reach
     // it (#576), so the version can never drop below 1.5.0 again.
     expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.5.0')).toBe(true);
+  });
+
+  it('keeps the OTA runtime at or past the 1.6.0 boundary', async () => {
+    // Build #33 (runtime 1.5.0) still compiles lottie-react-native and
+    // expo-status-bar and has no Android App Links filter (#716, #780). Its
+    // successor drops both packages, so the version can never drop below
+    // 1.6.0 again.
+    expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, '1.6.0')).toBe(true);
   });
 
   // Xcode 27 / iOS 27 SDK (#576). Without the scene life cycle an app built
