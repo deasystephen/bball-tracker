@@ -58,17 +58,19 @@ export interface GuardianOfEntry {
   childName: string;
   /**
    * Set when the child's account was deleted (#813); render via
-   * `childDisplayName`. Optional: older API builds omit it.
+   * `childDisplayName`. A user rehydrated from storage before #875 lacks it
+   * until the launch-time `GET /auth/me` refresh; the display helpers treat
+   * `undefined` as live.
    */
-  childDeletedAt?: string | null;
+  childDeletedAt: string | null;
   relationship: GuardianRelationship;
   isPrimary: boolean;
   /**
    * True when the child is a managed, unclaimed record (`isManaged` and no
    * login yet) — the only kind of child record a guardian may delete via
-   * `DELETE /players/:id/account` (#444). Optional: older API builds omit it.
+   * `DELETE /players/:id/account` (#444).
    */
-  isManaged?: boolean;
+  isManaged: boolean;
   /** Teams the child is currently rostered on (for deep-linking guardian management). */
   teams?: { id: string; name: string }[];
 }

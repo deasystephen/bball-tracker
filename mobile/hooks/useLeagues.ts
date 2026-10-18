@@ -15,6 +15,9 @@ export interface LeagueAdmin {
     id: string;
     name: string;
     email?: string;
+    isManaged: boolean;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt: string | null;
   };
 }
 

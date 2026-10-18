@@ -78,7 +78,7 @@ const game: Game = {
     members: [],
     season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
     staff: [
-      { id: 'ts1', userId: 'asst-1', user: { id: 'asst-1', name: 'Asst', email: 'a@x' }, role: trackerRole },
+      { id: 'ts1', userId: 'asst-1', user: { id: 'asst-1', name: 'Asst', email: 'a@x', isManaged: false, deletedAt: null }, role: trackerRole },
     ],
   },
 };

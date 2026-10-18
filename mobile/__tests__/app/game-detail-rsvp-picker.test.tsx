@@ -43,7 +43,7 @@ jest.mock('../../hooks/useStats', () => ({
 const member = (playerId: string, name: string) => ({
   id: `m-${playerId}`,
   playerId,
-  player: { id: playerId, name, email: '' },
+  player: { id: playerId, name, email: '', isManaged: false, deletedAt: null },
 });
 
 const baseGame: Game = {
@@ -75,8 +75,8 @@ const signIn = (id: string, guardianOf?: GuardianOfEntry[]) => {
   });
 };
 
-const stephLink: GuardianOfEntry = { childId: 'steph', childName: 'Steph Curry', relationship: 'FATHER', isPrimary: true };
-const sethLink: GuardianOfEntry = { childId: 'seth', childName: 'Seth Curry', relationship: 'FATHER', isPrimary: true };
+const stephLink: GuardianOfEntry = { childId: 'steph', childName: 'Steph Curry', childDeletedAt: null, relationship: 'FATHER', isPrimary: true, isManaged: false };
+const sethLink: GuardianOfEntry = { childId: 'seth', childName: 'Seth Curry', childDeletedAt: null, relationship: 'FATHER', isPrimary: true, isManaged: false };
 
 describe('GameDetailScreen RSVP picker (guardians)', () => {
   beforeEach(() => {
@@ -144,7 +144,7 @@ describe('GameDetailScreen RSVP picker (guardians)', () => {
         status: 'NO',
         createdAt: '',
         updatedAt: '',
-        user: { id: 'steph', name: 'Steph Curry' },
+        user: { id: 'steph', name: 'Steph Curry', isManaged: false, deletedAt: null },
       },
     ];
     signIn('dell', [stephLink]);

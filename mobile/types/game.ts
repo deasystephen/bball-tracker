@@ -54,9 +54,9 @@ export interface Game {
         name: string;
         /** Present only for callers with `canManageRoster`; `null` when the user has no email. */
         email?: string | null;
-        isManaged?: boolean;
+        isManaged: boolean;
         /** Set when the account was deleted; render via `displayName`. */
-        deletedAt?: string | null;
+        deletedAt: string | null;
       };
     }[];
   };
@@ -86,8 +86,9 @@ export interface GameEvent {
   player?: {
     id: string;
     name: string;
+    isManaged: boolean;
     /** Set when the account was deleted; render via `displayName`. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
   };
 }
 
@@ -143,6 +144,9 @@ export interface GameRsvp {
     id: string;
     name: string;
     email?: string;
+    isManaged: boolean;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt: string | null;
   };
 }
 

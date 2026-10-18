@@ -47,7 +47,7 @@ const makeEvent = (
     timestamp: '2026-08-29T19:00:00.000Z',
     metadata,
     createdAt: '2026-08-29T19:00:00.000Z',
-    player: { id: `player-${nextId}`, name: playerName },
+    player: { id: `player-${nextId}`, name: playerName, isManaged: false, deletedAt: null },
   };
 };
 
@@ -102,7 +102,7 @@ describe('EventTimeline', () => {
     const event = makeEvent('ASSIST', {}, 'Deleted user');
     const tombstone: GameEvent = {
       ...event,
-      player: { id: event.playerId ?? 'gone', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z' },
+      player: { id: event.playerId ?? 'gone', name: 'Deleted user', deletedAt: '2026-09-07T00:00:00Z', isManaged: false },
     };
     await i18n.changeLanguage('es');
     try {

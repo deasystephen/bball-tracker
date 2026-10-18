@@ -49,7 +49,7 @@ const row: TeamStaffRow = {
   roleId: 'r-head',
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
-  user: { id: 'coach-1', name: 'Frank', email: 'frank@example.com' },
+  user: { id: 'coach-1', name: 'Frank', email: 'frank@example.com', isManaged: false, deletedAt: null },
   role: headCoachRole,
 };
 

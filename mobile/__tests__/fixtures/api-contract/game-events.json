@@ -1,0 +1,32 @@
+[
+  {
+    "id": "a24bc6c1-536a-4d2d-bd33-74568662ff00",
+    "gameId": "30000000-0000-4000-a000-000000000003",
+    "playerId": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+    "eventType": "FOUL",
+    "timestamp": "2026-10-11T06:23:35.135Z",
+    "metadata": {},
+    "createdAt": "2026-10-18T03:32:35.361Z",
+    "player": {
+      "id": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+      "name": "Jordan Poole",
+      "isManaged": false,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "7c771aa3-5ceb-452b-9222-1db757e650d1",
+    "gameId": "30000000-0000-4000-a000-000000000003",
+    "playerId": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+    "eventType": "FOUL",
+    "timestamp": "2026-10-11T06:22:35.135Z",
+    "metadata": {},
+    "createdAt": "2026-10-18T03:32:35.361Z",
+    "player": {
+      "id": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
+      "name": "Jordan Poole",
+      "isManaged": false,
+      "deletedAt": null
+    }
+  }
+]

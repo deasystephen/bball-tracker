@@ -33,7 +33,7 @@ const mockedPost = apiClient.post as jest.Mock;
 const mockedDelete = apiClient.delete as jest.Mock;
 const mockedTrack = trackEvent as jest.Mock;
 
-const author = { id: 'u1', name: 'LeBron James', profilePictureUrl: null, deletedAt: null };
+const author = { id: 'u1', name: 'LeBron James', profilePictureUrl: null, isManaged: false, deletedAt: null };
 
 const reply = (id: string, body = `body ${id}`): AnnouncementReply => ({
   id,

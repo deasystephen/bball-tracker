@@ -114,6 +114,8 @@ describe('useTeams', () => {
               id: 'user-1',
               name: 'Coach Smith',
               email: 'coach@example.com',
+              isManaged: false,
+              deletedAt: null,
             },
             role: {
               id: 'role-1',
@@ -150,6 +152,8 @@ describe('useTeams', () => {
               id: 'player-1',
               name: 'John Doe',
               email: 'john@example.com',
+              isManaged: false,
+              deletedAt: null,
             },
           },
         ],

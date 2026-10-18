@@ -47,15 +47,17 @@ export interface TeamInvitation {
      * manager nor the invitee (`InvitationDetailView`).
      */
     email?: string | null;
+    isManaged: boolean;
     /** Set when the account was deleted; render via `displayName`. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
   };
   invitedBy: {
     id: string;
     name: string;
     email: string | null;
+    isManaged: boolean;
     /** Set when the account was deleted; render via `displayName`. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
   };
 }
 
@@ -71,12 +73,12 @@ export interface GuardianInvitationView {
   id: string;
   status: InvitationStatus;
   childName: string;
-  /** Child's tombstone state (#813); render via `childDisplayName`. Older API builds omit it. */
-  childDeletedAt?: string | null;
+  /** Child's tombstone state (#813); render via `childDisplayName`. */
+  childDeletedAt: string | null;
   teamName: string | null;
   inviterName: string;
-  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. Older API builds omit it. */
-  inviterDeletedAt?: string | null;
+  /** Inviter's tombstone state (#813); render via `inviterDisplayName`. */
+  inviterDeletedAt: string | null;
   relationship: GuardianRelationship;
   expiresAt: string;
 }

@@ -11,8 +11,8 @@ import {
   GUARDIAN_RELATIONSHIPS,
 } from '../../utils/guardian';
 
-const steph = { childId: 'steph', childName: 'Steph Curry', relationship: 'FATHER' as const, isPrimary: true };
-const seth = { childId: 'seth', childName: 'Seth Curry', relationship: 'FATHER' as const, isPrimary: true };
+const steph = { childId: 'steph', childName: 'Steph Curry', childDeletedAt: null, relationship: 'FATHER' as const, isPrimary: true, isManaged: false };
+const seth = { childId: 'seth', childName: 'Seth Curry', childDeletedAt: null, relationship: 'FATHER' as const, isPrimary: true, isManaged: false };
 const dell = { id: 'dell', name: 'Dell Curry', email: 'dell.curry@example.com', guardianOf: [steph, seth] };
 
 describe('utils/guardian', () => {

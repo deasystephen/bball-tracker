@@ -27,9 +27,9 @@ export interface TeamStaff {
     name: string;
     /** Only present when the caller has `canManageRoster` (GET /teams/:id/staff). */
     email?: string | null;
-    isManaged?: boolean;
+    isManaged: boolean;
     /** Set for a deleted account (tombstone, #444); render via utils/display-name. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
   };
   role: {
     id: string;
@@ -52,9 +52,9 @@ export interface TeamMember {
     id: string;
     name: string;
     email?: string | null;
-    isManaged?: boolean;
+    isManaged: boolean;
     /** Set for a deleted account (tombstone, #444); render via utils/display-name. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
     /**
      * What SES reported for `email` (#449). Roster managers only, and absent
      * from a backend that predates it; derive via utils/email-delivery.

@@ -7,8 +7,8 @@ import type { GameResult } from '../utils/game-result';
 export interface PlayerGameStats {
   playerId: string;
   playerName: string;
-  /** Tombstone state for `playerName` (#813); render via `playerDisplayName`. Older API builds omit it. */
-  playerDeletedAt?: string | null;
+  /** Tombstone state for `playerName` (#813); render via `playerDisplayName`. */
+  playerDeletedAt: string | null;
   /**
    * `0` is a valid jersey: test `!= null`, never truthiness or `!== undefined`.
    * The stats service omits the key for a player without a number today;
@@ -116,6 +116,9 @@ export interface PlayerOverallStats {
   player: {
     id: string;
     name: string;
+    isManaged: boolean;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt: string | null;
   };
   teams: {
     teamId: string;
