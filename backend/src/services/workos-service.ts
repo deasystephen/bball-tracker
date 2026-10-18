@@ -55,6 +55,13 @@ export interface SyncUserResult {
   wasManaged: boolean;
 }
 
+/**
+ * Clock-skew tolerance, in seconds, applied to `exp` when verifying an access
+ * token. The socket re-auth timer (`websocket/game-events.ts`) waits past it so
+ * a token re-verified after expiry is really rejected (#49).
+ */
+export const JWT_CLOCK_TOLERANCE_SECONDS = 30;
+
 export class WorkOSService {
   /**
    * Get authorization URL for user login
@@ -344,7 +351,7 @@ export class WorkOSService {
         issuer: WORKOS_JWT_ISSUER,
         requiredClaims: ['exp', 'sub'],
         // Small tolerance for clock skew between WorkOS and the API host.
-        clockTolerance: 30,
+        clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
       });
 
       if (typeof payload.sub !== 'string' || payload.sub.length === 0 || typeof payload.exp !== 'number') {

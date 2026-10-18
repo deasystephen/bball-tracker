@@ -10,7 +10,9 @@ import {
   getSocket,
   resetSocket,
   handleConnectError,
+  handleReauthRequired,
   isSocketRecovering,
+  REAUTH_REQUIRED_EVENT,
   MAX_AUTH_REFRESHES,
   MAX_UNAVAILABLE_RETRIES,
   BASE_BACKOFF_MS,
@@ -354,6 +356,66 @@ describe('socket wrapper', () => {
 
       expect(mockedRefresh).toHaveBeenCalledTimes(1);
       expect(fake.connect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('server re-auth (#49)', () => {
+    it('listens for reauth_required and refreshes the token without forcing a reconnect', async () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      mockedRefresh.mockResolvedValue({ status: 'ok', accessToken: 'fresh' });
+      getSocket();
+
+      expect(REAUTH_REQUIRED_EVENT).toBe('reauth_required');
+      fake.fire(REAUTH_REQUIRED_EVENT, {});
+      expect(isSocketRecovering()).toBe(true);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockedRefresh).toHaveBeenCalledTimes(1);
+      // The server closed the transport; socket.io reconnects on its own and
+      // the auth callback reads the refreshed token.
+      expect(fake.connect).not.toHaveBeenCalled();
+      expect(socketCrumbs().map((c) => c.message)).toContain('reauth required: refreshing token');
+
+      fake.fire('connect');
+      expect(isSocketRecovering()).toBe(false);
+    });
+
+    it('stops recovering when the refresh token is rejected', async () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      mockedRefresh.mockResolvedValue({ status: 'rejected' });
+      const socket = getSocket();
+
+      await handleReauthRequired(socket);
+
+      expect(isSocketRecovering()).toBe(false);
+      expect(socketCrumbs().map((c) => c.message)).toContain('reauth abandoned: refresh rejected');
+    });
+
+    it('keeps recovering when the refresh is unavailable, leaving the retry to connect_error', async () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      mockedRefresh.mockResolvedValue({ status: 'unavailable' });
+      const socket = getSocket();
+
+      await handleReauthRequired(socket);
+
+      expect(isSocketRecovering()).toBe(true);
+      expect(fake.connect).not.toHaveBeenCalled();
+    });
+
+    it('ignores the signal for a socket that was reset (logout)', async () => {
+      const fake = makeFake();
+      mockedIo.mockReturnValue(fake);
+      const socket = getSocket();
+      resetSocket();
+
+      await handleReauthRequired(socket);
+
+      expect(mockedRefresh).not.toHaveBeenCalled();
+      expect(isSocketRecovering()).toBe(false);
     });
   });
 });

@@ -50,12 +50,15 @@ first (#452), capacity second.
 | server → client | `game-event-removed` | `{ gameId, eventId, score }` (on delete/undo; post-delete score) |
 | server → client | `game-score-change`  | `{ gameId, score }` (on `PATCH /games/:id` score edits)        |
 | server → client | `game-status-change` | `{ gameId, previousStatus, status, score }` (on transition)    |
+| server → client | `reauth_required`    | `{}` (handshake token expired; the transport closes next, #49) |
 
 `score` is always `{ homeScore, awayScore }`. Every broadcast carries the
 current score so a client can drop events and still converge.
 
 - Handshake auth: bearer token via `socket.handshake.auth.token` (or
-  `Authorization` header). Checked once at connect; see `authenticateSocket`. A rejected or
+  `Authorization` header). Checked at connect by `authenticateSocket`, which also records the
+  token's expiry in `socket.data.tokenExpiresAt` (WorkOS `exp` in seconds and dev-token `exp` in
+  milliseconds are both stored as epoch ms), and re-checked mid-session (next bullet). A rejected or
   expired token is `connect_error: Unauthorized` and is log-only (an expected client outcome), as
   is a thrown 4xx `AppError` (filtered by `isExpectedClientError`). Every other throw (a
   JWKS/WorkOS outage, a database failover) is `connect_error: Service unavailable`, so the client
@@ -64,6 +67,34 @@ current score so a client can drop events and still converge.
   never reach the Express chain and `sentryErrorHandler` (#672). A deleted account (tombstone,
   `deletedAt` set) is refused like REST refuses it: both lookups in `resolveSocketUser` filter on
   `deletedAt: null`, so a still-valid dev token for a deleted user cannot join a game room (#667).
+- **Mid-session re-verification (#49).** A socket keeps its handshake for life, so the
+  connection handler schedules one timer per socket (`scheduleSocketReauth` in
+  `websocket/game-events.ts`), due at the token's expiry plus `REAUTH_GRACE_MS` (35s: the
+  verifier's 30s clock tolerance, `JWT_CLOCK_TOLERANCE_SECONDS`, plus 5s, so the re-check really
+  fails) and never more than `REAUTH_MAX_INTERVAL_MS` (15 min) away; a token without `exp` is
+  re-checked every 15 min. A valid token is therefore never cut off early. When the timer fires,
+  `reverifySocket` re-runs the handshake token through `resolveSocketSession`:
+  - still valid (dev tokens, which live 24h) → `socket.data` is refreshed and the next check is
+    scheduled;
+  - rejected (expired, revoked, account deleted, or now a different user) → the server emits
+    `reauth_required`, logs `Socket reauth required` at info with `socketId`/`userId` only, and
+    closes the Engine.IO connection (`socket.conn.close()`). It deliberately does **not** call
+    `socket.disconnect()`: with or without `true` that sends a namespace DISCONNECT, which
+    socket.io-client reports as `io server disconnect` and never auto-reconnects from. A
+    transport close is `transport close` on the client, which auto-reconnects, so a client
+    built before #49 still recovers through the `Unauthorized` path below;
+  - the verifier throws (JWKS or database outage) → a token already past expiry plus grace is
+    rejected as above; otherwise the check is retried after `REAUTH_RETRY_MS` (60s), so an
+    outage never cuts off a valid session.
+
+  The timer is cleared on `disconnect` (`clearSocketReauth`) and `unref`'d. Timers live in
+  process memory like rooms (single replica). In production every WorkOS access token is
+  short-lived (minutes), so every socket reconnects about once per token lifetime: a token
+  refresh, a new handshake and a `join-game` with a fresh snapshot. That rejoin re-runs
+  `canAccessTeam`, which is what evicts a user removed from a team (audit #72) within one token
+  lifetime. Tests: `tests/websocket/socket-reauth.test.ts` (fake timers) and the "mid-session
+  re-auth" block of `tests/websocket/game-events.integration.test.ts` (real transport: event
+  delivered, `transport close`, timer cleared, automatic reconnect with a fresh token).
 - Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
   handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
   max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
@@ -84,6 +115,13 @@ current score so a client can drop events and still converge.
   (2s·2ⁿ, max `MAX_UNAVAILABLE_RETRIES` = 5). A successful `connect` resets
   both budgets; `resetSocket()` cancels any pending retry. `useLiveGame`
   reports `reconnecting` while `isSocketRecovering()` and `error` otherwise.
+- Server re-auth recovery (mobile `services/socket.ts#handleReauthRequired`, #49): on
+  `reauth_required` the client starts the single-flight `refreshAccessToken()` at once and
+  marks itself recovering; it does not call `connect()`, because socket.io reconnects by itself
+  after the transport close and the `auth` callback reads the new token. If the reconnect wins
+  the race it is refused `Unauthorized` and `handleConnectError` awaits the same in-flight
+  refresh. A `rejected` refresh ends recovery (the next REST 401 logs out). `useLiveGame`
+  rejoins its room on `connect`, and the snapshot merge keeps events streamed meanwhile.
 
 ## Game score (server-derived, audit #6/#8/#38)
 

@@ -13,6 +13,9 @@
  *    persisted (via `emitGameEvent`).
  *  - Server broadcasts `game-status-change` to `game:<gameId>` whenever a
  *    game transitions state (via `emitGameStatusChange`).
+ *  - Server re-verifies the handshake token when it expires (at most every
+ *    15 minutes); on failure it emits `reauth_required` and closes the
+ *    transport, and the client reconnects with a fresh token (#49).
  *  - Socket.io's built-in ping/pong handles heartbeats. Clients that reconnect
  *    must re-emit `join-game` to resubscribe; they will receive a fresh
  *    `game-snapshot`.
@@ -27,7 +30,7 @@ import type { Server as SocketServer, Socket } from 'socket.io';
 import type { GameEvent, GameStatus } from '@prisma/client';
 import prisma from '../models';
 import { canAccessTeam } from '../utils/permissions';
-import { WorkOSService } from '../services/workos-service';
+import { JWT_CLOCK_TOLERANCE_SECONDS, WorkOSService } from '../services/workos-service';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
@@ -59,6 +62,8 @@ export interface AuthenticatedSocketUser {
  */
 export interface GameSocketData {
   user: AuthenticatedSocketUser;
+  /** Epoch ms at which the handshake token expires; null when it carries no `exp`. */
+  tokenExpiresAt: number | null;
 }
 
 // We intentionally keep the event-map generics at their default (untyped) and
@@ -71,15 +76,22 @@ export function gameRoom(gameId: string): string {
   return `${GAME_ROOM_PREFIX}${gameId}`;
 }
 
+export interface SocketSession {
+  user: AuthenticatedSocketUser;
+  /** Epoch ms at which the token expires; null when it carries no expiry. */
+  expiresAt: number | null;
+}
+
 /**
- * Resolve a bearer-style token to a local user. Mirrors the logic in
- * `src/api/auth/middleware.ts` but returns a plain value instead of mutating
- * an Express request. Returns `null` when the token is invalid/expired or the
- * user does not exist or is a tombstone (`deletedAt` set).
+ * Resolve a bearer-style token to a local user and the token's expiry. Mirrors
+ * the logic in `src/api/auth/middleware.ts` but returns a plain value instead
+ * of mutating an Express request. Returns `null` when the token is
+ * invalid/expired or the user does not exist or is a tombstone (`deletedAt`
+ * set).
  */
-export async function resolveSocketUser(
+export async function resolveSocketSession(
   rawToken: string | undefined
-): Promise<AuthenticatedSocketUser | null> {
+): Promise<SocketSession | null> {
   if (!rawToken || typeof rawToken !== 'string') {
     return null;
   }
@@ -104,7 +116,8 @@ export async function resolveSocketUser(
         where: { id: decoded.userId, deletedAt: null },
         select: { id: true, email: true, name: true, role: true },
       });
-      return user ?? null;
+      // Dev token `exp` is epoch milliseconds.
+      return user ? { user, expiresAt: decoded.exp } : null;
     } catch {
       return null;
     }
@@ -120,36 +133,42 @@ export async function resolveSocketUser(
     where: { workosUserId: workosUser.id, deletedAt: null },
     select: { id: true, email: true, name: true, role: true },
   });
-  return user ?? null;
+  // A WorkOS `exp` is epoch seconds.
+  return user ? { user, expiresAt: workosUser.expiresAt * 1000 } : null;
+}
+
+/** `resolveSocketSession` without the expiry: the user, or null. */
+export async function resolveSocketUser(
+  rawToken: string | undefined
+): Promise<AuthenticatedSocketUser | null> {
+  const session = await resolveSocketSession(rawToken);
+  return session?.user ?? null;
+}
+
+/** The bearer token a socket presented at its handshake. */
+function handshakeToken(socket: GameSocket): string | undefined {
+  const authPayload = socket.handshake.auth as { token?: string } | undefined;
+  return authPayload?.token ?? socket.handshake.headers.authorization;
 }
 
 /**
  * Socket.io connection authentication middleware. Runs once per socket during
- * the handshake.
- *
- * JWT TTL expectation: authentication is checked ONLY at handshake time. If
- * the bearer token expires mid-session, the socket remains connected and
- * authorized until the client disconnects (network drop, tab close, explicit
- * `disconnect()`). For spectator sessions (<2hr games) this is acceptable —
- * WorkOS access tokens live long enough to cover a game. Periodic re-auth on
- * long-lived sockets is deferred; tracked in issue #49.
+ * the handshake. Records the token's expiry so the connection handler can
+ * schedule the re-verification below (#49).
  */
 export async function authenticateSocket(
   socket: GameSocket,
   next: (err?: Error) => void
 ): Promise<void> {
   try {
-    const authPayload = socket.handshake.auth as { token?: string } | undefined;
-    const headerToken = socket.handshake.headers.authorization;
-    const token = authPayload?.token ?? headerToken;
-
-    const user = await resolveSocketUser(token);
-    if (!user) {
+    const session = await resolveSocketSession(handshakeToken(socket));
+    if (!session) {
       next(new Error('Unauthorized'));
       return;
     }
 
-    socket.data.user = user;
+    socket.data.user = session.user;
+    socket.data.tokenExpiresAt = session.expiresAt;
     next();
   } catch (error) {
     logger.error('Socket authentication failed', {
@@ -171,6 +190,138 @@ export async function authenticateSocket(
     // retries instead of refreshing its credentials and logging out.
     next(new Error('Service unavailable'));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mid-session re-verification (#49)
+//
+// The handshake token is checked once at connect, and a socket keeps its
+// handshake for life, so without this an access token that expires mid-game
+// would stay authorized until the client disconnected. Each connected socket
+// gets one timer, due when its token expires (plus the verifier's clock-skew
+// tolerance, so the re-check really fails) and never more than
+// REAUTH_MAX_INTERVAL_MS away. When it fires the handshake token is re-run
+// through `resolveSocketSession`:
+//   - still valid (no `exp`, or a long-lived dev token) → keep the socket,
+//     refresh `socket.data`, schedule the next check;
+//   - rejected (expired, revoked, account deleted) → emit `reauth_required`
+//     and close the underlying Engine.IO connection (`socket.conn.close()`).
+//     Not `socket.disconnect()`: with or without `true` it sends a namespace
+//     DISCONNECT packet, which socket.io-client reports as `io server
+//     disconnect` and never auto-reconnects from, stranding every client
+//     built before this change. A transport close is `transport close` on the
+//     client, so socket.io auto-reconnects; a client that ignores the event
+//     then gets `connect_error: Unauthorized`, refreshes and connects again. Every reconnect re-joins its rooms through `join-game`, which
+//     re-runs `canAccessTeam`, so a user removed from a team is evicted within
+//     one token lifetime (audit #72);
+//   - the verifier throws (JWKS or database outage) → if the token is already
+//     past its expiry, it is rejected as above; otherwise check again after
+//     REAUTH_RETRY_MS, so an outage never cuts off a valid session.
+// Timers live in process memory, like rooms and rate-limit counters (the API
+// is single-replica), and are cleared on disconnect.
+// ---------------------------------------------------------------------------
+
+/** Server → client event sent just before a re-auth disconnect. */
+export const REAUTH_REQUIRED_EVENT = 'reauth_required';
+/** Wait this long past `exp`: the verifier accepts a token for its clock tolerance. */
+export const REAUTH_GRACE_MS = (JWT_CLOCK_TOLERANCE_SECONDS + 5) * 1000;
+/** Upper bound between checks, and the interval for a token without `exp`. */
+export const REAUTH_MAX_INTERVAL_MS = 15 * 60 * 1000;
+/** Re-check delay after the verifier threw on a token that has not expired. */
+export const REAUTH_RETRY_MS = 60 * 1000;
+
+const reauthTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Delay until a socket's next re-verification. */
+export function reauthDelayMs(expiresAt: number | null, now: number = Date.now()): number {
+  if (expiresAt === null || !Number.isFinite(expiresAt)) {
+    return REAUTH_MAX_INTERVAL_MS;
+  }
+  return Math.min(Math.max(expiresAt - now, 0) + REAUTH_GRACE_MS, REAUTH_MAX_INTERVAL_MS);
+}
+
+/** Number of sockets with a pending re-verification (for leak tests). */
+export function pendingReauthCount(): number {
+  return reauthTimers.size;
+}
+
+/** True while a socket has a re-verification scheduled (for leak tests). */
+export function hasPendingReauth(socketId: string): boolean {
+  return reauthTimers.has(socketId);
+}
+
+/** Cancel a socket's pending re-verification. Safe to call more than once. */
+export function clearSocketReauth(socketId: string): void {
+  const timer = reauthTimers.get(socketId);
+  if (timer) {
+    clearTimeout(timer);
+    reauthTimers.delete(socketId);
+  }
+}
+
+/** Schedule (or reschedule) a socket's next re-verification. */
+export function scheduleSocketReauth(socket: GameSocket, delayMs?: number): void {
+  clearSocketReauth(socket.id);
+  const delay = delayMs ?? reauthDelayMs(socket.data.tokenExpiresAt ?? null);
+  const timer = setTimeout(() => {
+    reauthTimers.delete(socket.id);
+    void reverifySocket(socket);
+  }, delay);
+  // Never keep the process alive for a re-check.
+  timer.unref();
+  reauthTimers.set(socket.id, timer);
+}
+
+function requireReauth(socket: GameSocket): void {
+  logger.info('Socket reauth required', {
+    socketId: socket.id,
+    userId: socket.data.user?.id,
+  });
+  socket.emit(REAUTH_REQUIRED_EVENT, {});
+  // Engine.IO flushes the queued event before it closes the transport.
+  socket.conn.close();
+}
+
+export type ReverifyOutcome = 'kept' | 'reauth_required' | 'retry' | 'skipped';
+
+/**
+ * Re-run the handshake token through `resolveSocketSession` and act on the
+ * result (see the section comment above). Exported for tests.
+ */
+export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcome> {
+  if (!socket.connected) return 'skipped';
+
+  let session: SocketSession | null;
+  try {
+    session = await resolveSocketSession(handshakeToken(socket));
+  } catch (error) {
+    if (!socket.connected) return 'skipped';
+    const expiresAt = socket.data.tokenExpiresAt ?? null;
+    if (expiresAt !== null && expiresAt + REAUTH_GRACE_MS <= Date.now()) {
+      requireReauth(socket);
+      return 'reauth_required';
+    }
+    logger.warn('Socket reauth check failed, retrying', {
+      socketId: socket.id,
+      userId: socket.data.user?.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    scheduleSocketReauth(socket, REAUTH_RETRY_MS);
+    return 'retry';
+  }
+
+  // The client may have gone while the check was in flight.
+  if (!socket.connected) return 'skipped';
+
+  if (!session || session.user.id !== socket.data.user?.id) {
+    requireReauth(socket);
+    return 'reauth_required';
+  }
+
+  socket.data.user = session.user;
+  socket.data.tokenExpiresAt = session.expiresAt;
+  scheduleSocketReauth(socket);
+  return 'kept';
 }
 
 interface JoinGamePayload {
@@ -306,6 +457,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     const userId = typedSocket.data.user?.id;
     const ip = socketClientIp(socket);
     registerConnection(ip);
+    scheduleSocketReauth(typedSocket);
     logger.info('Socket connected', { socketId: socket.id, userId });
 
     socket.on('join-game', (payload: unknown, ack?: (response: unknown) => void) => {
@@ -354,6 +506,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
 
     socket.on('disconnect', (reason: string) => {
       releaseConnection(ip);
+      clearSocketReauth(socket.id);
       logger.info('Socket disconnected', { socketId: socket.id, userId, reason });
     });
   });

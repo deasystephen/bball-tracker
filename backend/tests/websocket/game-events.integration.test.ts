@@ -24,6 +24,12 @@ import { ServiceUnavailableError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
 import { setIo } from '../../src/websocket/io-registry';
 import {
+  REAUTH_REQUIRED_EVENT,
+  hasPendingReauth,
+  reverifySocket,
+  type GameSocket,
+} from '../../src/websocket/game-events';
+import {
   MAX_HANDSHAKES_PER_WINDOW,
   RATE_LIMITED_MESSAGE,
   checkHandshakeAllowed,
@@ -246,4 +252,112 @@ describe('websocket integration (socket.io-client)', () => {
       });
     });
   }, 10000);
+
+  describe('mid-session re-auth (#49)', () => {
+    function mockDevUser(userId: string): void {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: userId,
+        email: null,
+        name: 'Coach',
+        role: 'COACH',
+      });
+    }
+
+    function serverSocket(clientId: string | undefined): GameSocket {
+      const socket = io.of('/').sockets.get(clientId as string);
+      if (!socket) throw new Error('server socket not found');
+      return socket as unknown as GameSocket;
+    }
+
+    it('schedules a re-check per socket and clears it when the client disconnects', (done) => {
+      const coach = createCoach();
+      mockDevUser(coach.id);
+      const client = connect(buildDevToken(coach.id));
+
+      client.on('connect_error', (err) => {
+        client.close();
+        done(err);
+      });
+      client.on('connect', () => {
+        const sock = serverSocket(client.id);
+        expect(hasPendingReauth(sock.id)).toBe(true);
+        sock.once('disconnect', () => {
+          // The handler that clears it is registered before this listener.
+          expect(hasPendingReauth(sock.id)).toBe(false);
+          done();
+        });
+        client.close();
+      });
+    }, 10000);
+
+    it('emits reauth_required and closes the transport when the token has expired', (done) => {
+      const coach = createCoach();
+      mockDevUser(coach.id);
+      const client = connect(devToken({ userId: coach.id, exp: Date.now() + 300 }));
+      let gotEvent = false;
+
+      client.on('connect_error', (err) => {
+        client.close();
+        done(err);
+      });
+      client.on(REAUTH_REQUIRED_EVENT, () => {
+        gotEvent = true;
+      });
+      client.on('disconnect', (reason) => {
+        try {
+          expect(gotEvent).toBe(true);
+          // A transport close, not a namespace DISCONNECT ("io server
+          // disconnect"): socket.io-client auto-reconnects from it, so a client
+          // that ignores the event still recovers through `Unauthorized`.
+          expect(reason).toBe('transport close');
+          client.close();
+          done();
+        } catch (error) {
+          client.close();
+          done(error);
+        }
+      });
+      client.on('connect', () => {
+        const sock = serverSocket(client.id);
+        setTimeout(() => {
+          void reverifySocket(sock).then((outcome) => {
+            expect(outcome).toBe('reauth_required');
+          });
+        }, 400);
+      });
+    }, 10000);
+
+    it('lets an auto-reconnecting client back in with a fresh token', (done) => {
+      const coach = createCoach();
+      mockDevUser(coach.id);
+      const tokens = [
+        devToken({ userId: coach.id, exp: Date.now() + 300 }),
+        devToken({ userId: coach.id, exp: Date.now() + 60_000 }),
+      ];
+      let connects = 0;
+      const client = ioClient(`http://localhost:${port}`, {
+        transports: ['websocket'],
+        forceNew: true,
+        reconnection: true,
+        reconnectionDelay: 50,
+        reconnectionDelayMax: 50,
+        auth: (cb) => cb({ token: tokens.length > 1 ? tokens.shift() : tokens[0] }),
+      });
+
+      client.on('connect_error', (err) => {
+        client.close();
+        done(err);
+      });
+      client.on('connect', () => {
+        connects += 1;
+        if (connects === 1) {
+          const sock = serverSocket(client.id);
+          setTimeout(() => void reverifySocket(sock), 400);
+          return;
+        }
+        client.close();
+        done();
+      });
+    }, 10000);
+  });
 });

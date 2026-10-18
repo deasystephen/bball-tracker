@@ -17,6 +17,13 @@
  *     exponentially and reconnect, capped at MAX_UNAVAILABLE_RETRIES.
  * A successful `connect` resets both counters.
  *
+ * Mid-session re-auth (#49): when the handshake token expires the server
+ * emits `reauth_required` and closes the transport. socket.io reconnects on
+ * its own after a transport close, so this module only starts the token
+ * refresh early; the reconnect's auth callback then reads the new token. If
+ * the reconnect wins the race it is refused `Unauthorized`, and the path above
+ * awaits the same single-flight refresh.
+ *
  * RN note: pin transport to ['websocket']. The polling fallback works poorly
  * on iOS/Android and adds latency.
  */
@@ -34,6 +41,9 @@ export const UNAUTHORIZED_MESSAGE = 'Unauthorized';
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service unavailable';
 /** Backend socket rate limiter rejected the handshake (audit #16). */
 export const RATE_LIMITED_MESSAGE = 'Rate limited';
+
+/** Server → client: the handshake token expired and the connection is closing (#49). */
+export const REAUTH_REQUIRED_EVENT = 'reauth_required';
 
 /** Consecutive `Unauthorized` handshakes we will try to refresh through. */
 export const MAX_AUTH_REFRESHES = 2;
@@ -142,6 +152,26 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
   recovering = false;
 }
 
+/**
+ * The server is about to close the connection because the handshake token
+ * expired. Refresh now so socket.io's automatic reconnect carries a fresh
+ * token. Exported for tests; wired to the singleton in `getSocket()`.
+ */
+export async function handleReauthRequired(target: Socket): Promise<void> {
+  if (target !== socket) return;
+  recovering = true;
+  socketCrumb('reauth required: refreshing token');
+  const outcome = await refreshAccessToken();
+  if (target !== socket) return;
+  if (outcome.status === 'rejected') {
+    // The refresh token is dead; the next REST 401 logs the user out.
+    socketCrumb('reauth abandoned: refresh rejected', undefined, 'warning');
+    recovering = false;
+  }
+  // `ok`: the reconnect reads the new token. `unavailable`: the reconnect is
+  // refused `Unauthorized` and handleConnectError backs off and retries.
+}
+
 export function getSocket(): Socket {
   if (socket) return socket;
 
@@ -166,6 +196,9 @@ export function getSocket(): Socket {
   });
   created.on('disconnect', (reason: string) => {
     socketCrumb('disconnected', { reason }, 'warning');
+  });
+  created.on(REAUTH_REQUIRED_EVENT, () => {
+    void handleReauthRequired(created);
   });
   created.on('connect_error', (err: Error) => {
     socketCrumb('connect_error', { message: err.message }, 'warning');
