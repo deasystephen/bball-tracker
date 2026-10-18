@@ -99,7 +99,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
 | `invitation_declined` | the invitee rejects | `invitation_id` | `hooks/useInvitations.ts` |
 | `invitation_cancelled` | a coach cancels a pending invitation | `team_id`, `invitation_id` | `hooks/useInvitations.ts` |
-| `guardian_invited` | a parent is invited for a roster player | `team_id`, `relationship` | `hooks/useGuardians.ts` |
+| `guardian_invited` | a parent is invited for a roster player, or a pending guardian invite is re-sent (#420) | `team_id`, `relationship`, `resend`, `email_sent` | `hooks/useGuardians.ts` |
 | `guardian_removed` | a guardian link is removed | `team_id` | `hooks/useGuardians.ts` |
 | `announcement_created` | a team announcement is posted | `team_id` | `hooks/useAnnouncements.ts` |
 | `announcement_reply_created` | a reply is posted under an announcement (#34) | `team_id`, `announcement_id` | `hooks/useAnnouncementReplies.ts` |
@@ -157,7 +157,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `rostered`, `invited`, `guardian_invited` | boolean | what Add Player did (case 1–3 of the unification spec) |
 | `has_*` | boolean | an optional input was supplied (`has_jersey`, `has_position`, `has_photo`, `has_bracket`, `has_dates`) |
 | `*_changed`, `*_cleared` | boolean | which optional profile fields the save carried |
-| `resend` | boolean | the invitation superseded a pending one |
+| `resend` | boolean | the invitation (team or guardian) superseded a pending one |
 | `email_sent` | boolean or null | per-send delivery flag from the API; null when there was no address |
 | `erased` | boolean | the account row was deleted outright rather than tombstoned (#529) |
 | `own` | boolean | the caller wrote the announcement reply they deleted (#34) |

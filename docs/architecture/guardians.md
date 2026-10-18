@@ -28,8 +28,29 @@ Removing the last guardian never deletes the child.
   propagates), never 500 (#727).
   The response carries the per-send `emailSent`; `hooks/useGuardians.ts#useInviteGuardian` resolves with
   `{ invitation, emailSent }` and the Guardians screen shows an error toast ("Invitation created, but the email
-  to … failed to send.") instead of "Invitation sent" when it is `false`, like the roster flows (#770). The
-  screen has no resend yet (#420), so the toast does not point at one.
+  to … failed to send. Use Resend on the pending invite to try again.") instead of "Invitation sent" when it is
+  `false`, like the roster flows (#770). The Add Player toast for a failed guardian email points at the same
+  Resend on the player's Guardians screen.
+- **Resend = supersede (#420).** The same route with `{ email, relationship, supersede: true }` (Zod default
+  `false`) skips the dedupe 400 and runs `GuardianService.createInvitationRowSuperseding`: ONE `$transaction`
+  that (1) re-reads the `Guardian` link and answers 400 `This person is already a guardian of this player`
+  when the parent accepted in the window, (2) applies the resend cooldown, (3) flips every PENDING row for
+  the child + address (live or lapsed) to EXPIRED and (4) creates the replacement with a new token, so the
+  old link dies and a failed create never leaves the parent with no invitation. Logs `Guardian invitation
+  superseded` (ids and `supersededCount`) when a row was expired, and `Guardian invitation sent` carries
+  `supersede`. Two concurrent resends both pass their reads and queue on the expire; the loser's insert
+  hits the partial PENDING index and `createOrConflict` (targeted at that index) answers the dedupe 400,
+  never 500; a token collision still propagates. **Cooldown:** when the newest `GuardianInvitation` for the
+  child + address (any status) is younger than `GUARDIAN_INVITATION_RESEND_COOLDOWN_MS` (2 minutes, the
+  same window as team invitations' #715 cooldown) the request answers **429** `resend_cooldown`
+  (`ResendCooldownError(retryAfterSeconds, 'address')`, "An invitation was just sent to this address…")
+  before anything is expired or mailed, and logs `Guardian invitation resend refused (cooldown)`. Only the
+  supersede path has the cooldown; a plain invite of an address with no live row is not held back. The
+  Guardians screen renders a Resend icon (`guardian-resend-<id>`, label "Resend invitation: <email>") on
+  each pending row for `canManageRoster` callers only, sending the row's own `invitedEmail` and
+  `relationship`; the API lists only unexpired PENDING rows, so Resend never targets a lapsed one. Proven
+  against Postgres in `tests/integration/guardian-supersede.db.test.ts` (expire + create, cooldown, the
+  lost race answering 400).
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
   `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `childDeletedAt`, `teamName`,
   `inviterName`, `inviterDeletedAt`, `relationship`, `status`, `expiresAt`; the two `…DeletedAt` fields are
@@ -100,6 +121,7 @@ Removing the last guardian never deletes the child.
   caller's pending, unexpired `GuardianInvitation`s matched on `invitedEmail` case-insensitively
   (`GuardianService.listPendingForUser`), no token — which the mobile Invitations tab renders as "Accept for <child>".
 - Tests: `tests/services/guardian-service.test.ts`, `tests/api/guardians.test.ts`,
-  `tests/utils/permissions.test.ts`, `tests/schemas/guardian.test.ts`, guardian cases in the rsvp /
+  `tests/utils/permissions.test.ts`, `tests/schemas/guardian.test.ts`,
+  `tests/integration/guardian-supersede.db.test.ts`, guardian cases in the rsvp /
   invitation / notification / player-service / auth suites. Out of scope (v1): claim-by-code, parent-to-parent
   invites, `respondedBy` on RSVPs.

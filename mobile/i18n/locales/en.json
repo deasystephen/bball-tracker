@@ -241,5 +241,13 @@
     "seasonRecordLabel": "Season record: {{record}}",
     "streakLabel_one": "Last game: {{results}}",
     "streakLabel_other": "Last {{count}} games, most recent first: {{results}}"
+  },
+  "guardians": {
+    "resendA11y": "Resend invitation: {{email}}",
+    "resent": "Invitation re-sent to {{email}}",
+    "resentEmailFailed": "Invitation refreshed, but the email to {{email}} failed to send. Use Resend to try again.",
+    "resendFailed": "Failed to resend invitation",
+    "inviteEmailFailed": "Invitation created, but the email to {{email}} failed to send. Use Resend on the pending invite to try again.",
+    "addPlayerEmailFailed": "The parent invite email failed to send. Use Resend on the player’s Guardians screen to try again."
   }
 }

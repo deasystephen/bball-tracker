@@ -47,6 +47,13 @@ export interface GuardianList {
 export interface InviteGuardianInput {
   email: string;
   relationship: GuardianRelationship;
+  /**
+   * Resend (#420): the server expires the live PENDING invitation for this
+   * child + email and creates a fresh one (new token, the old link dies) in
+   * one transaction. "Invite" and "Resend" are the same call, as for team
+   * invitations.
+   */
+  supersede?: boolean;
 }
 
 export const guardianKeys = {
@@ -109,10 +116,12 @@ export function useInviteGuardian() {
       // refused the email, and the screen must say so (#770).
       return response.data;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       trackEvent(AnalyticsEvents.GUARDIAN_INVITED, {
         team_id: variables.teamId,
         relationship: variables.data.relationship,
+        resend: !!variables.data.supersede,
+        email_sent: result.emailSent,
       });
       invalidate(variables.teamId, variables.playerId);
       queryClient.invalidateQueries({ queryKey: invitationKeys.all });

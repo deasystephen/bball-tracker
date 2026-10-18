@@ -41,6 +41,28 @@ describe('inviteGuardianSchema', () => {
     expect(inviteGuardianSchema.safeParse({ email: '', relationship: 'MOTHER' }).success).toBe(false);
   });
 
+  it('defaults supersede to false (a plain invite keeps the dedupe 400)', () => {
+    const result = inviteGuardianSchema.safeParse({ email: 'p@example.com', relationship: 'MOTHER' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.supersede).toBe(false);
+    }
+  });
+
+  it('accepts supersede: true (Resend, #420)', () => {
+    const result = inviteGuardianSchema.safeParse({ email: 'p@example.com', relationship: 'MOTHER', supersede: true });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.supersede).toBe(true);
+    }
+  });
+
+  it('rejects a non-boolean supersede', () => {
+    expect(
+      inviteGuardianSchema.safeParse({ email: 'p@example.com', relationship: 'MOTHER', supersede: 'true' }).success
+    ).toBe(false);
+  });
+
   it('rejects an over-long email', () => {
     const email = `${'a'.repeat(250)}@example.com`;
     expect(inviteGuardianSchema.safeParse({ email, relationship: 'MOTHER' }).success).toBe(false);

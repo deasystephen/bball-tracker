@@ -4,9 +4,12 @@
  * docs/plans/parent-role-spec.md, role matrix decision 1).
  *
  * Readable by roster managers and by the player's own guardians (the API
- * strips `email` for guardians). Invite / remove-others render only with
- * `canManageRoster`; a guardian always gets "Leave" on their own row. The
- * API remains the authority (403 / 400).
+ * strips `email` for guardians). Invite / remove-others / Resend render only
+ * with `canManageRoster`; a guardian always gets "Leave" on their own row. The
+ * API remains the authority (403 / 400 / 429).
+ *
+ * Resend (#420) is the invite call with `supersede: true`: the server expires
+ * the pending invitation and mails a fresh link, so the old one dies.
  */
 
 import React, { useState } from 'react';
@@ -32,6 +35,7 @@ import {
   useInviteGuardian,
   useRemoveGuardian,
   type GuardianRow,
+  type PendingGuardianInvitation,
 } from '../../../../../hooks/useGuardians';
 import { useTheme } from '../../../../../hooks/useTheme';
 import { useTranslation } from '../../../../../i18n';
@@ -68,6 +72,8 @@ export default function PlayerGuardiansScreen() {
     refetch: refetchGuardians,
   } = usePlayerGuardians(id, playerId);
   const inviteGuardian = useInviteGuardian();
+  // A second instance so a Resend in flight does not spin the invite form's button.
+  const resendGuardian = useInviteGuardian();
   const removeGuardian = useRemoveGuardian();
 
   const [showForm, setShowForm] = useState(false);
@@ -97,12 +103,30 @@ export default function PlayerGuardiansScreen() {
       setEmail('');
       setShowForm(false);
       if (result.emailSent === false) {
-        toast.showToast(`Invitation created, but the email to ${trimmed} failed to send.`, 'error');
+        toast.showToast(t('guardians.inviteEmailFailed', { email: trimmed }), 'error');
       } else {
         toast.showToast(`Invitation sent to ${trimmed}`, 'success');
       }
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, 'Failed to send invitation'), 'error');
+    }
+  };
+
+  const handleResend = async (invite: PendingGuardianInvitation) => {
+    try {
+      const result = await resendGuardian.mutateAsync({
+        teamId: id,
+        playerId,
+        data: { email: invite.invitedEmail, relationship: invite.relationship, supersede: true },
+      });
+      if (result.emailSent === false) {
+        toast.showToast(t('guardians.resentEmailFailed', { email: invite.invitedEmail }), 'error');
+      } else {
+        toast.showToast(t('guardians.resent', { email: invite.invitedEmail }), 'success');
+      }
+    } catch (err) {
+      // 429 resend_cooldown and the lost-race 400 carry their own message.
+      toast.showToast(getApiErrorMessage(err, t('guardians.resendFailed')), 'error');
     }
   };
 
@@ -292,6 +316,20 @@ export default function PlayerGuardiansScreen() {
                 title={invite.invitedEmail}
                 subtitle={`${relationshipLabel(invite.relationship)} · Pending`}
                 leftElement={<Ionicons name="mail-outline" size={20} color={colors.textTertiary} />}
+                rightElement={
+                  canManage ? (
+                    <TouchableOpacity
+                      onPress={() => handleResend(invite)}
+                      style={styles.rowButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('guardians.resendA11y', { email: invite.invitedEmail })}
+                      disabled={resendGuardian.isPending}
+                      testID={`guardian-resend-${invite.id}`}
+                    >
+                      <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+                    </TouchableOpacity>
+                  ) : undefined
+                }
               />
             ))}
           </>

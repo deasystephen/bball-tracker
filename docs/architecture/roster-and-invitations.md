@@ -77,7 +77,8 @@ eng-review amendments recorded there).
   address skips the cooldown, so "Fix email address → Save & send invitation" goes out at once. A
   row from before the column existed has a null hash and counts as the same address; a player
   with no address gets no email, so no cooldown. Account deletion clears the hash on the deleted
-  user's invitation rows. On top of it the email-sending roster routes share the per-user
+  user's invitation rows. Guardian invitations have the same Resend and the same 2-minute window
+  (#420, keyed on child + address; `docs/architecture/guardians.md`). On top of it the email-sending roster routes share the per-user
   `inviteRateLimit` (60 / hour; see `docs/architecture/backend-services.md`, Rate limits). With `supersede` an existing **member** is allowed (a rostered case-2 player);
   a claimed account that is already a member answers 400 `Player already has access to this team`.
   Resend/"Invite" actions must only target PENDING rows client-side. Expiry-check and insert are

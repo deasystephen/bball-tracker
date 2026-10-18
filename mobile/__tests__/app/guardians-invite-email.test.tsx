@@ -1,7 +1,9 @@
 /**
  * Player guardians screen — invite toast reflects the per-send `emailSent`
  * flag (#770). A failed SES send creates the pending invitation but must be
- * reported as an error, never as a green "Invitation sent".
+ * reported as an error, never as a green "Invitation sent", and points at
+ * Resend (#420). Resend on a pending row is the invite call with
+ * `supersede: true`.
  *
  * Renders the real i18n instance (docs/testing/conventions.md).
  */
@@ -15,6 +17,11 @@ import { i18n } from '../../i18n';
 const mockShowToast = jest.fn();
 const mockInvite = { mutateAsync: jest.fn(), isPending: false };
 const mockRemove = { mutateAsync: jest.fn(), isPending: false };
+let mockGuardianData: { guardians: unknown[]; pendingInvitations: unknown[] } = {
+  guardians: [],
+  pendingInvitations: [],
+};
+let mockCanManageRoster = true;
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
@@ -26,13 +33,19 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
+// jest.setup mocks the whole api-client; keep the real error-message mapping
+// so the refused-resend test asserts what production shows.
+jest.mock('../../services/api-client', () => ({
+  apiClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
+  getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
+}));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
   useTeam: () => ({
     data: {
       id: 't1',
       name: 'Warriors',
-      staff: [{ userId: 'coach-1', role: { canManageRoster: true } }],
+      staff: [{ userId: 'coach-1', role: { canManageRoster: mockCanManageRoster } }],
       members: [{ playerId: 'steph', player: { id: 'steph', name: 'Steph Curry' } }],
     },
     isLoading: false,
@@ -43,7 +56,7 @@ jest.mock('../../hooks/useTeams', () => ({
 jest.mock('../../hooks/useGuardians', () => ({
   ...jest.requireActual('../../hooks/useGuardians'),
   usePlayerGuardians: () => ({
-    data: { guardians: [], pendingInvitations: [] },
+    data: mockGuardianData,
     isLoading: false,
     error: null,
     refetch: jest.fn(),
@@ -102,12 +115,104 @@ describe('PlayerGuardiansScreen invite toast', () => {
 
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(
-        'Invitation created, but the email to sonya.curry@example.test failed to send.',
+        'Invitation created, but the email to sonya.curry@example.test failed to send. Use Resend on the pending invite to try again.',
         'error'
       )
     );
     expect(mockShowToast).not.toHaveBeenCalledWith(expect.anything(), 'success');
     // The pending invitation exists server-side, so the form still closes.
     expect(screen.queryByTestId('guardian-email-input')).toBeNull();
+  });
+});
+
+describe('PlayerGuardiansScreen Resend (#420)', () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage('en');
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockCanManageRoster = true;
+    mockGuardianData = { guardians: [], pendingInvitations: [pending] };
+    useAuthStore.setState({
+      user: { id: 'coach-1', role: 'COACH', email: 'coach@example.test', name: 'Coach' } as never,
+      isAuthenticated: true,
+      accessToken: 't',
+      refreshToken: null,
+      isLoading: false,
+    });
+  });
+
+  afterAll(() => {
+    mockGuardianData = { guardians: [], pendingInvitations: [] };
+  });
+
+  it('resends the pending invitation with supersede and confirms the new send', async () => {
+    mockInvite.mutateAsync.mockResolvedValueOnce({ invitation: pending, emailSent: true });
+    const screen = render(<PlayerGuardiansScreen />);
+
+    expect(screen.getByRole('button', { name: 'Resend invitation: sonya.curry@example.test' })).toBeTruthy();
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+
+    await waitFor(() =>
+      expect(mockInvite.mutateAsync).toHaveBeenCalledWith({
+        teamId: 't1',
+        playerId: 'steph',
+        data: { email: 'sonya.curry@example.test', relationship: 'MOTHER', supersede: true },
+      })
+    );
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to sonya.curry@example.test', 'success')
+    );
+  });
+
+  it('reports a failed resend email as an error, never as "re-sent"', async () => {
+    mockInvite.mutateAsync.mockResolvedValueOnce({ invitation: pending, emailSent: false });
+    const screen = render(<PlayerGuardiansScreen />);
+
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'Invitation refreshed, but the email to sonya.curry@example.test failed to send. Use Resend to try again.',
+        'error'
+      )
+    );
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.anything(), 'success');
+  });
+
+  it('shows the server message when the resend is refused (cooldown)', async () => {
+    // The api-client's response interceptor normalizes the body onto `apiError`.
+    const cooldown = Object.assign(new Error('Request failed with status code 429'), {
+      isAxiosError: true,
+      response: { status: 429 },
+      apiError: {
+        error: 'An invitation was just sent to this address. Try again in 87 seconds.',
+        code: 'resend_cooldown',
+      },
+    });
+    mockInvite.mutateAsync.mockRejectedValueOnce(cooldown);
+    const screen = render(<PlayerGuardiansScreen />);
+
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'An invitation was just sent to this address. Try again in 87 seconds.',
+        'error'
+      )
+    );
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.anything(), 'success');
+  });
+
+  it('renders no Resend for a viewer who cannot manage the roster', () => {
+    mockCanManageRoster = false;
+    useAuthStore.setState({
+      user: { id: 'parent-1', role: 'PARENT', email: 'parent@example.test', name: 'Parent' } as never,
+    });
+    const screen = render(<PlayerGuardiansScreen />);
+
+    expect(screen.getByText('sonya.curry@example.test')).toBeTruthy();
+    expect(screen.queryByTestId('guardian-resend-gi1')).toBeNull();
   });
 });

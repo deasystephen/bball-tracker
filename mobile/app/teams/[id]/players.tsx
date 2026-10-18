@@ -250,7 +250,7 @@ export default function ManagePlayersScreen() {
       if (!result.guardianInvited && result.guardianReason) {
         toast.showToast(result.guardianReason, 'info');
       } else if (result.emails?.guardian === false) {
-        toast.showToast('The parent invite email failed to send — retry from the player’s Guardians screen.', 'error');
+        toast.showToast(t('guardians.addPlayerEmailFailed'), 'error');
       }
     }
   };

@@ -4,7 +4,8 @@
 
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
-import { GuardianService } from '../../src/services/guardian-service';
+import { GuardianService, GUARDIAN_INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/guardian-service';
+import { ResendCooldownError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
 import { createAdmin, createCoach, createPlayer, createTeam, createUser, uniqueViolation } from '../factories';
@@ -398,6 +399,125 @@ describe('GuardianService', () => {
       (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(boom);
 
       await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, input, coach.id)).rejects.toBe(boom);
+    });
+
+    describe('supersede (Resend, #420)', () => {
+      const resend = { ...input, supersede: true };
+      const OLDER_THAN_COOLDOWN = new Date(Date.now() - GUARDIAN_INVITATION_RESEND_COOLDOWN_MS - 60_000);
+
+      /** Happy path plus a live PENDING row for the pair, created before the cooldown window. */
+      function setLivePending(): void {
+        setHappyPath();
+        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
+          invitationRow({ id: 'live', createdAt: OLDER_THAN_COOLDOWN })
+        );
+        (mockPrisma.guardianInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.guardianInvitation.create as jest.Mock).mockResolvedValue(invitationRow({ id: 'fresh' }));
+      }
+
+      it('expires the live PENDING row and creates the replacement in one transaction, then mails the new link', async () => {
+        setLivePending();
+
+        const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
+
+        // A live row would 400 without supersede; here it is expired instead.
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenCalledWith({
+          where: { childId: CHILD_ID, invitedEmail: 'parent@test.com', status: 'PENDING' },
+          data: { status: 'EXPIRED' },
+        });
+        expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ childId: CHILD_ID, invitedEmail: 'parent@test.com', status: 'PENDING', token: expect.any(String) }),
+          })
+        );
+        // Expire before create: the partial index allows one PENDING row.
+        expect(mockPrisma.guardianInvitation.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+          mockPrisma.guardianInvitation.create.mock.invocationCallOrder[0]
+        );
+        expect(result).toMatchObject({ id: 'fresh', emailSent: true });
+        expect(result).not.toHaveProperty('token');
+        expect(mockedMailerSend).toHaveBeenCalledTimes(1);
+        expect(mockedMailerSend.mock.calls[0][0].to).toBe('parent@test.com');
+      });
+
+      it('reports emailSent: false when the resend email fails, with the replacement committed', async () => {
+        setLivePending();
+        mockedMailerSend.mockRejectedValueOnce(new Error('SES down'));
+
+        const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
+
+        expect(result).toMatchObject({ id: 'fresh', emailSent: false });
+      });
+
+      it('creates a fresh invitation when there is no prior row for the pair', async () => {
+        setHappyPath();
+        (mockPrisma.guardianInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+        const result = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
+
+        expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledTimes(1);
+        expect(result.emailSent).toBe(true);
+      });
+
+      it('refuses with 429 resend_cooldown inside the window, expiring nothing and mailing no one', async () => {
+        setLivePending();
+        (mockPrisma.guardianInvitation.findFirst as jest.Mock).mockResolvedValue(
+          invitationRow({ id: 'live', createdAt: new Date(Date.now() - 30_000) })
+        );
+
+        const err = (await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch(
+          (e: unknown) => e
+        )) as ResendCooldownError;
+
+        expect(err).toBeInstanceOf(ResendCooldownError);
+        expect(err.statusCode).toBe(429);
+        expect(err.body()).toMatchObject({ code: 'resend_cooldown', retryAfterSeconds: expect.any(Number) });
+        expect(err.message).toMatch(/just sent to this address/);
+        // The newest row of ANY status counts, so a decline between resends does not reset the clock.
+        expect(mockPrisma.guardianInvitation.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { childId: CHILD_ID, invitedEmail: 'parent@test.com' },
+            orderBy: { createdAt: 'desc' },
+          })
+        );
+        expect(mockPrisma.guardianInvitation.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.guardianInvitation.create).not.toHaveBeenCalled();
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+      });
+
+      it('refuses when the parent accepted in the race window, without expiring or creating', async () => {
+        setLivePending();
+        // Pre-check: not linked yet. Inside the transaction: the link exists.
+        (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'g-1' });
+
+        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
+
+        expectBadRequestError(err, 'This person is already a guardian of this player');
+        expect(mockPrisma.guardianInvitation.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.guardianInvitation.create).not.toHaveBeenCalled();
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+      });
+
+      it('answers the dedupe 400 when a concurrent resend wins the partial PENDING index (P2002)', async () => {
+        setLivePending();
+        (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(
+          uniqueViolation('GuardianInvitation_pending_childId_invitedEmail_key')
+        );
+
+        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
+
+        expectBadRequestError(err, 'A pending guardian invitation already exists for this email');
+        expect(mockedMailerSend).not.toHaveBeenCalled();
+      });
+
+      it('propagates a P2002 on another unique (token collision) from the supersede transaction', async () => {
+        setLivePending();
+        const tokenClash = uniqueViolation('GuardianInvitation_token_key');
+        (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(tokenClash);
+
+        await expect(GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id)).rejects.toBe(tokenClash);
+      });
     });
   });
 
