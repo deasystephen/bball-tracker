@@ -17,7 +17,7 @@ const fx = new DbFixtures(prisma, 'ScoreCheck');
 let org: Org;
 let gameId: string;
 
-const scores = () =>
+const scores = (): Promise<{ homeScore: number; awayScore: number }> =>
   prisma.game.findUniqueOrThrow({
     where: { id: gameId },
     select: { homeScore: true, awayScore: true },
