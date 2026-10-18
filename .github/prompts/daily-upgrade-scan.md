@@ -109,41 +109,32 @@ under ⏸ only):
 
 ### Retire dead overrides (all sides)
 
-For every entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
-probe the LOCKFILE from that side's directory (`--package-lock-only`, never the
-installed tree: `npm ci` on this Linux runner skips `os`/`cpu`-gated optional
-packages such as sharp's `@img/*`, which would then look absent):
+Entries listed under "Accepted cross-major overrides" in
+`docs/automation/daily-upgrade-scan.md` are never retired, whatever a probe
+says (today: the backend's `"deepmerge-ts@^7": "^8.0.2"`).
 
-  - bare root key `"<pkg>"`:
-      npm ls <pkg> --all --package-lock-only
-    dead when it prints `(empty)`.
-  - version-keyed key `"<pkg>@<range>"` (root or nested): the key matches what
-    consumers DECLARE, not what resolves, so probe the declared specs:
-      grep -n "\"<pkg>\": \"" package-lock.json
-    lists every `dependencies`/`optionalDependencies` spec for `<pkg>`. Dead
-    only when none of those specs intersects `<range>` (`npx semver -r
-    "<range>" <spec>` or by eye). Cross-check from the package directory after
-    `npm install`:
-      node ../.github/scripts/check-override-ranges.mjs <pkg>
-    A `MISMATCH … declares <pkg>@<spec> but gets <version>` line IS the
-    override working across majors, never a dead entry. **`npm ls
-    "<pkg>@<range>"` is not a valid probe for this key shape**: it matches
-    resolved versions, so a redirect out of `<range>` prints `(empty)`
-    precisely because the override works. That probe retired the backend's
-    `"deepmerge-ts@^7": "^8.0.2"` security override (PR #919, deployed
-    unattended on 2026-10-18) and reopened GHSA-ggr8-5vv4-36mx; it was restored
-    the same day. Entries listed under "Accepted cross-major overrides" in
-    `docs/automation/daily-upgrade-scan.md` are never retired by the scan.
-  - nested key `"<parent>": { "<key>": … }`: run `npm ls <parent> --all
-    --package-lock-only` and look at the subtree under each `<parent>` copy.
-    Dead when `<parent>` is absent, or when no `<pkg>` (matching `<range>`
-    for a version-keyed `<key>`) appears anywhere beneath it. A copy of
-    `<pkg>` elsewhere in the tree does not keep a nested entry alive. When a
-    whole parent block is dead, remove the block.
+For every other entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
+run from that side's directory, after `npm install` (the script reads the
+LOCKFILE, never the installed tree: `npm ci` on this Linux runner skips
+`os`/`cpu`-gated optional packages such as sharp's `@img/*`, which would
+otherwise look absent):
+
+    node ../.github/scripts/check-override-ranges.mjs --overrides
+
+It prints one `live` or `DEAD` line per override key. A key is live when some
+lockfile entry still DECLARES the package with a spec that intersects the
+key's range (any spec for a bare key; for a nested `"<parent>": { … }` block
+only the parent and its dependency graph count). It never looks at resolved
+versions, and neither may you: a version-keyed override that redirects out of
+its own range (`deepmerge-ts@^7` → 8.0.2) makes `npm ls "<pkg>@<range>"`
+print `(empty)` precisely because it works. Do not substitute an `npm ls`
+probe for any key shape, and a `MISMATCH` line from the plain gate is the
+override working, not a dead entry. When every child of a nested block is
+`DEAD`, remove the block.
 
 A dead entry would silently pin any future consumer of that package. Removing
 it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
-branch, Step 3). Remove nothing a probe above still finds, even a copy that
+branch, Step 3). Remove nothing the probe reports `live`, even a copy that
 already satisfies the floor; that is a human call. Name each removed entry in
 the PR body and on the 🟢 line of the daily log ("override retired: <entry>").
 
@@ -193,8 +184,10 @@ For each side with ≥1 auto-fix item:
      Plus for every package you added or changed an override for, from `<side>/`:
        node ../.github/scripts/check-override-ranges.mjs <pkg> [<pkg> ...]
      It must exit 0 (no consumer resolved into a different major from the
-     range it declares; `npm ls` cannot show this, an override hides it). Put
-     its output and `npm ls <pkg> --all` in the PR body.
+     range it declares; `npm ls` cannot show this, an override hides it),
+     except that the lines listed under "Accepted cross-major overrides" in
+     `docs/automation/daily-upgrade-scan.md` are expected and do not fail the
+     gate. Put its output and `npm ls <pkg> --all` in the PR body.
   4. DIFF GUARD — `git diff --name-only` must contain ONLY
      `<side>/package.json` and/or `<side>/package-lock.json`.
      Anything else → abort the whole batch → ⚠ Needs attention.
