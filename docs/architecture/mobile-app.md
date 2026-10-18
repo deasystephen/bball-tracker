@@ -139,14 +139,16 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   user summary (staff `user`, roster and invitation `player`, `invitedBy`, announcement and reply
   `author`, `GameEvent.player`, RSVP `user`, league admin `user`, overall stats `player`) carries the
   backend's `USER_SUMMARY_SELECT` (`isManaged`, `deletedAt`), and the mobile types declare both
-  required (#889; `Player.isManaged` stays optional because `GET /players` omits it). The
+  required (#889; `Player.isManaged`/`deletedAt` stay optional because `GET /players` omits them,
+  `GameEvent.player` is `null` for a player-less event). The
   flattened payloads carry a name string beside its timestamp (#813): `inviterName`/`inviterDeletedAt`
   (team and guardian by-token payloads, `guardianInvitations`), `childName`/`childDeletedAt`
   (guardian payloads, `guardianOf`) and `playerName`/`playerDeletedAt` (stats rows). Render them with
   `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file. The timestamps
   are required in the client types since #889 (the API has sent them since PR #875); the helpers still
   accept `undefined`, so a session user rehydrated from storage before its `GET /auth/me` refresh
-  falls back to the stored name. Readers: the
+  falls back to the stored name. `GuardianOfEntry.isManaged` stays optional for that persisted state
+  (Profile treats `undefined` as not deletable). Readers: the
   invite screen, the Invitations tab guardian card, Profile My Kids, account deletion, the game
   detail RSVP "Respond for" picker, `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a
   tombstone shows the whole label, never its first word). Guardian list rows (`GET

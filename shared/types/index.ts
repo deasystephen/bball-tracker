@@ -68,9 +68,11 @@ export interface GuardianOfEntry {
   /**
    * True when the child is a managed, unclaimed record (`isManaged` and no
    * login yet) — the only kind of child record a guardian may delete via
-   * `DELETE /players/:id/account` (#444).
+   * `DELETE /players/:id/account` (#444). Every API payload sends it; optional
+   * because a session user stored before #875 lacks it until the launch-time
+   * `GET /auth/me` refresh (persisted state, not a fresh payload).
    */
-  isManaged: boolean;
+  isManaged?: boolean;
   /** Teams the child is currently rostered on (for deep-linking guardian management). */
   teams?: { id: string; name: string }[];
 }
