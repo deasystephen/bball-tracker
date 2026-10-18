@@ -140,7 +140,11 @@ current score so a client can drop events and still converge.
   `Game_score_non_negative_check` (`homeScore >= 0 AND awayScore >= 0`). Prisma does
   not model CHECK constraints, so it lives only in the migration SQL. A write path
   that bypasses Zod and the derivation fails with a constraint error instead of
-  storing a negative score; `tests/integration/game-score-check.db.test.ts` proves it.
+  storing a negative score (`tests/integration/game-score-check.db.test.ts` proves
+  it). The error reaches the API as a `PrismaClientUnknownRequestError` (500 plus
+  Sentry), so the constraint is defence in depth and the Zod `.min(0)` in
+  `api/games/schemas.ts` stays the client-facing 400 layer. The migration adds it
+  `NOT VALID` and then validates, so it does not block live-game writes.
 - Mobile tracker (`app/games/[id]/track.tsx`) never sends `homeScore`; it
   renders `game.homeScore` from the detail cache, which
   `useCreateGameEvent`/`useDeleteGameEvent` update from the response score.
