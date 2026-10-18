@@ -42,6 +42,18 @@ const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockCaptureException = captureException as jest.Mock;
 const mockCaptureRequestException = captureRequestException as jest.Mock;
 
+type SyncOutcome = Awaited<ReturnType<typeof WorkOSService.syncUser>>;
+/** A `syncUser` result; defaults to a returning user (nothing claimed). */
+const syncOutcome = (
+  user: object,
+  flags: { claimedInvite?: boolean; wasManaged?: boolean } = {}
+): SyncOutcome =>
+  ({
+    user,
+    claimedInvite: flags.claimedInvite ?? false,
+    wasManaged: flags.wasManaged ?? false,
+  }) as unknown as SyncOutcome;
+
 describe('Auth API', () => {
   const mockUser = {
     id: 'user-1',
@@ -289,7 +301,7 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+      mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
 
       const response = await request(app)
         .get('/api/v1/auth/callback')
@@ -317,10 +329,9 @@ describe('Auth API', () => {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUser.mockResolvedValue({
-        ...mockUser,
-        notifyOnReplies: false,
-      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+      mockWorkOSService.syncUser.mockResolvedValue(
+        syncOutcome({ ...mockUser, notifyOnReplies: false })
+      );
 
       const response = await request(app)
         .get('/api/v1/auth/callback')
@@ -331,13 +342,59 @@ describe('Auth API', () => {
       expect(response.body.user).toHaveProperty('notifyOnReplies', false);
     });
 
+    describe('claimed-invite outcome (#790)', () => {
+      beforeEach(() => {
+        mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+          user: mockWorkOSUser,
+          accessToken: 'mock-access-token',
+          refreshToken: 'mock-refresh-token',
+        } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      });
+
+      it('reports claimedInvite: true when the sign-in claimed a pre-provisioned managed row', async () => {
+        mockWorkOSService.syncUser.mockResolvedValue(
+          syncOutcome(mockUser, { claimedInvite: true, wasManaged: true })
+        );
+
+        const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+        expect(response.status).toBe(200);
+        expect(response.body.claimedInvite).toBe(true);
+        expect(response.body.wasManaged).toBe(true);
+        // The session fields are unchanged next to the flags
+        expect(response.body.accessToken).toBe('mock-access-token');
+        expect(response.body.user.email).toBe('test@example.com');
+      });
+
+      it('reports claimedInvite: false for a brand-new user', async () => {
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
+
+        const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+        expect(response.status).toBe(200);
+        // Present and false, never absent: the client reads a missing flag as unknown
+        expect(response.body).toHaveProperty('claimedInvite', false);
+        expect(response.body).toHaveProperty('wasManaged', false);
+      });
+
+      it('passes the WorkOS identity to syncUser', async () => {
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
+
+        await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+        expect(mockWorkOSService.syncUser).toHaveBeenCalledWith(
+          expect.objectContaining({ id: mockWorkOSUser.id, email: mockWorkOSUser.email })
+        );
+      });
+    });
+
     it('returns the league ids the user administers as leagueAdminOf (decision 3)', async () => {
       mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
         user: mockWorkOSUser,
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
       } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-      mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+      mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
       (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([
         { leagueId: 'downtown-youth-league' },
         { leagueId: 'spring-league' },
@@ -402,7 +459,7 @@ describe('Auth API', () => {
           accessToken: 'mock-access-token',
           refreshToken: 'mock-refresh-token',
         } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
-        mockWorkOSService.syncUser.mockResolvedValue(mockUser as unknown as Awaited<ReturnType<typeof mockWorkOSService.syncUser>>);
+        mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
       });
 
       it('passes code_verifier to the token exchange', async () => {
