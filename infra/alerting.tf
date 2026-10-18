@@ -65,7 +65,7 @@ locals {
   alert_topic_publishers = {
     CloudWatchAlarms = {
       service    = "cloudwatch.amazonaws.com"
-      source_arn = "arn:aws:cloudwatch:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:alarm:*"
+      source_arn = "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:*"
     }
   }
 }
