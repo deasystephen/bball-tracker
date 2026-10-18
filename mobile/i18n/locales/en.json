@@ -241,5 +241,8 @@
     "seasonRecordLabel": "Season record: {{record}}",
     "streakLabel_one": "Last game: {{results}}",
     "streakLabel_other": "Last {{count}} games, most recent first: {{results}}"
+  },
+  "invite": {
+    "loadFailed": "We couldn't load this invitation. Check your connection and try again."
   }
 }

@@ -2,7 +2,7 @@
  * Teams list screen with color-header team cards
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -20,6 +20,8 @@ import {
   ErrorState,
 } from '../../components';
 import { useInfiniteTeams, type Team } from '../../hooks/useTeams';
+import { getApiErrorMessage } from '../../services/api-client';
+import { showQueryError } from '../../utils/query-state';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useTranslation } from '../../i18n';
@@ -43,6 +45,7 @@ export default function TeamsScreen() {
   const {
     data,
     isLoading,
+    isFetching,
     error,
     refetch,
     isRefetching,
@@ -69,17 +72,23 @@ export default function TeamsScreen() {
   // `user` is null while the persisted session rehydrates; don't render the
   // player empty state (no Create button) for a coach who simply isn't
   // loaded yet.
-  if (isLoading || !user) {
+  // A failed first load replaces the screen; a failed background refetch keeps the
+  // cached list (#888, utils/query-state.ts). TanStack keeps `error` set while Try Again is
+  // in flight, so the spinner shows until the retry settles.
+  const failed = showQueryError({ error, data: teams });
+  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
+  // failure (a new error object), not on every render.
+  const errorMessage = useMemo(
+    () => (failed ? getApiErrorMessage(error, 'Failed to load teams') : ''),
+    [failed, error]
+  );
+
+  if (isLoading || !user || (failed && isFetching)) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
-  if (error) {
-    return (
-      <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load teams'}
-        onRetry={refetch}
-      />
-    );
+  if (failed) {
+    return <ErrorState message={errorMessage} onRetry={refetch} />;
   }
 
   if (!teams || teams.length === 0) {

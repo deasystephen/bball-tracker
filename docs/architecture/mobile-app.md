@@ -47,6 +47,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and
   cold start) consumes it (30-minute TTL, in-app absolute paths only) after the role-onboarding check, so the
   user lands back on the deep link.
+  The by-token lookup separates a dead link from a failed one (#892): a 400/404 shows "Invitation Not Found",
+  while a network failure, 429 or 5xx (`utils/query-state.ts#isTransientLoadError`) shows `ErrorState` with Try Again
+  and a way back, because a blip says nothing about the token (`__tests__/app/invite-load-errors.test.tsx`).
 - **Announcement threads** (#34): `/teams/[id]/announcements` lists announcements (each card opens
   its thread and shows the served `_count.replies`); `/teams/[id]/announcements/[announcementId]`
   (`hooks/useAnnouncement`, `hooks/useAnnouncementReplies.ts`) shows the announcement, the replies
@@ -309,6 +312,9 @@ never inline a role check in a screen:
   keeps its cached data on screen. TanStack keeps `error` set while a retry is in flight, so the
   tab shows the spinner while the failed query `isFetching`. The message comes from
   `getApiErrorMessage` (which sends `error_shown`), memoised on the error so it fires once per failure.
+  `showQueryError` is the rule for every data tab: Teams, Games and Invitations decide error-vs-content
+  through it too, so a failed background refetch never replaces a cached list (#888;
+  `__tests__/app/tab-query-error-states.test.tsx`).
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that

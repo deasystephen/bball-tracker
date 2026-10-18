@@ -5,10 +5,13 @@
 
 import React from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
+import { useTranslation } from '../../i18n';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ThemedView, ThemedText, LoadingSpinner, Button, Card } from '../../components';
+import { ThemedView, ThemedText, LoadingSpinner, Button, Card, ErrorState } from '../../components';
 import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
+import { useGoBack } from '../../hooks/useGoBack';
+import { isTransientLoadError } from '../../utils/query-state';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
 import { relationshipLabel } from '../../utils/guardian';
@@ -27,9 +30,11 @@ export default function InviteDeepLinkScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const toast = useToast();
+  const { t } = useTranslation();
+  const goBack = useGoBack('/');
   const { isAuthenticated, updateUser } = useAuthStore();
 
-  const { data: invitation, isLoading, error } = useInvitationByToken(token);
+  const { data: invitation, isLoading, error, refetch, isFetching } = useInvitationByToken(token);
   const acceptById = useAcceptInvitation({ source: 'link' });
 
   /**
@@ -112,6 +117,14 @@ export default function InviteDeepLinkScreen() {
 
   if (isLoading) {
     return <LoadingSpinner message="Loading invitation…" fullScreen />;
+  }
+
+  // A network failure, 429 or 5xx says nothing about the token (#892): offer a retry
+  // rather than a dead-link screen. TanStack keeps `error` set while Try Again is in
+  // flight, so show the spinner until it settles.
+  if (error && isTransientLoadError(error)) {
+    if (isFetching) return <LoadingSpinner message="Loading invitation…" fullScreen />;
+    return <ErrorState message={t('invite.loadFailed')} onRetry={refetch} onBack={goBack} />;
   }
 
   if (error || !invitation) {

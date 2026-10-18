@@ -25,6 +25,8 @@ import {
 import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
+import { getApiErrorMessage } from '../../services/api-client';
+import { showQueryError } from '../../utils/query-state';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useAuthUser } from '../../store/auth-store';
@@ -60,6 +62,7 @@ export default function Games() {
   const {
     data,
     isLoading,
+    isFetching,
     error,
     refetch,
     isRefetching,
@@ -69,6 +72,16 @@ export default function Games() {
   } = useInfiniteGames(activeFilter === 'ALL' ? undefined : { status: activeFilter });
 
   const filteredGames = useMemo(() => data?.games ?? [], [data]);
+
+  // A failed first load replaces the screen; a failed background refetch keeps the cached
+  // list (#888, utils/query-state.ts). Try Again shows the spinner until the retry settles.
+  const failed = showQueryError({ error, data: data?.games });
+  // getApiErrorMessage sends the catalogued `error_shown` event, so it runs once per
+  // failure (a new error object), not on every render.
+  const errorMessage = useMemo(
+    () => (failed ? getApiErrorMessage(error, 'Failed to load games') : ''),
+    [failed, error]
+  );
 
   // Creating a game needs `canManageTeam` on the chosen team (backend
   // `game-service.createGame`), so only show the entry point to users who can
@@ -251,19 +264,12 @@ export default function Games() {
     [handleGamePress, colors]
   );
 
-  if (isLoading) {
+  if (isLoading || (failed && isFetching)) {
     return <LoadingSpinner message="Loading games..." fullScreen />;
   }
 
-  if (error) {
-    return (
-      <ErrorState
-        message={
-          error instanceof Error ? error.message : 'Failed to load games'
-        }
-        onRetry={refetch}
-      />
-    );
+  if (failed) {
+    return <ErrorState message={errorMessage} onRetry={refetch} />;
   }
 
   return (

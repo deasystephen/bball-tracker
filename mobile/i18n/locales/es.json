@@ -241,5 +241,8 @@
     "seasonRecordLabel": "Récord de la temporada: {{record}}",
     "streakLabel_one": "Último partido: {{results}}",
     "streakLabel_other": "Últimos {{count}} partidos, del más reciente al más antiguo: {{results}}"
+  },
+  "invite": {
+    "loadFailed": "No pudimos cargar esta invitación. Revisa tu conexión e inténtalo de nuevo."
   }
 }
