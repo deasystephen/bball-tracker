@@ -45,6 +45,25 @@ describe('workos-client', () => {
     const mod = loadActual();
     expect(mod.getWorkOS()).toBe(mod.getWorkOS());
     expect(mod.getWorkOSClientId()).toBe('client_unit');
+    process.env.WORKOS_CLIENT_ID = 'client_changed_later';
+    expect(mod.getWorkOSClientId()).toBe('client_unit');
     expect(mod.getWorkOSJwks()).toBe(mod.getWorkOSJwks());
+  });
+
+  it('getWorkOSJwks throws the client id error when only the API key is set', () => {
+    process.env.WORKOS_API_KEY = 'sk_test_unit';
+    delete process.env.WORKOS_CLIENT_ID;
+    expect(() => loadActual().getWorkOSJwks()).toThrow('WORKOS_CLIENT_ID environment variable is required');
+  });
+
+  it('assertWorkOSConfig throws when either variable is missing', () => {
+    process.env.WORKOS_API_KEY = 'sk_test_unit';
+    delete process.env.WORKOS_CLIENT_ID;
+    expect(() => loadActual().assertWorkOSConfig()).toThrow('WORKOS_CLIENT_ID');
+    delete process.env.WORKOS_API_KEY;
+    process.env.WORKOS_CLIENT_ID = 'client_unit';
+    expect(() => loadActual().assertWorkOSConfig()).toThrow('WORKOS_API_KEY');
+    process.env.WORKOS_API_KEY = 'sk_test_unit';
+    expect(() => loadActual().assertWorkOSConfig()).not.toThrow();
   });
 });

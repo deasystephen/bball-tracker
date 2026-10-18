@@ -8,35 +8,51 @@
 import { WorkOS } from '@workos-inc/node';
 import { createRemoteJWKSet } from 'jose';
 
-let client: WorkOS | undefined;
+export const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'http://localhost:3000/api/v1/auth/callback';
+
+interface WorkOSConfig {
+  client: WorkOS;
+  clientId: string;
+}
+
+let config: WorkOSConfig | undefined;
 
 /**
- * The WorkOS client, constructed on first use so that importing this module
- * (the database seed does, through the websocket emitter) needs no WorkOS
- * environment. The "required" error is raised at call time.
+ * The WorkOS client and client id, resolved together on first use and then
+ * frozen, so the two can never drift. Importing this module (the database seed
+ * does, through the websocket emitter) needs no WorkOS environment; the
+ * "required" errors are raised here, at call time.
  */
-export function getWorkOS(): WorkOS {
-  if (!client) {
+function getWorkOSConfig(): WorkOSConfig {
+  if (!config) {
     const apiKey = process.env.WORKOS_API_KEY;
     if (!apiKey) {
       throw new Error('WORKOS_API_KEY environment variable is required');
     }
-    client = new WorkOS(apiKey, {
-      apiHostname: 'api.workos.com', // Production and sandbox share the hostname
-    });
+    const clientId = process.env.WORKOS_CLIENT_ID;
+    if (!clientId) {
+      throw new Error('WORKOS_CLIENT_ID environment variable is required');
+    }
+    config = { client: new WorkOS(apiKey), clientId };
   }
-  return client;
+  return config;
 }
 
-export const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'http://localhost:3000/api/v1/auth/callback';
+export function getWorkOS(): WorkOS {
+  return getWorkOSConfig().client;
+}
 
-/** The AuthKit client id; read at call time, throws when unset. */
+/** The AuthKit client id. */
 export function getWorkOSClientId(): string {
-  const clientId = process.env.WORKOS_CLIENT_ID;
-  if (!clientId) {
-    throw new Error('WORKOS_CLIENT_ID environment variable is required');
-  }
-  return clientId;
+  return getWorkOSConfig().clientId;
+}
+
+/**
+ * Fail-fast for entry points that need WorkOS (the API server, the
+ * data-subject delete script). Throws when either variable is missing.
+ */
+export function assertWorkOSConfig(): void {
+  getWorkOSConfig();
 }
 
 /**
@@ -54,7 +70,7 @@ let jwks: Jwks | undefined;
  * handled without a restart.
  */
 export function getWorkOSJwks(): Jwks {
-  jwks ??= createRemoteJWKSet(new URL(getWorkOS().userManagement.getJwksUrl(getWorkOSClientId())), {
+  jwks ??= createRemoteJWKSet(new URL(getWorkOSConfig().client.userManagement.getJwksUrl(getWorkOSConfig().clientId)), {
     cooldownDuration: 5 * 60 * 1000,
     cacheMaxAge: 10 * 60 * 1000,
   });

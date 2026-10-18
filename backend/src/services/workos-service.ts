@@ -338,8 +338,10 @@ export class WorkOSService {
       return null;
     }
 
+    // Resolved outside the try: a missing WorkOS config is a 500, not an outage.
+    const jwks = getWorkOSJwks();
     try {
-      const { payload } = await jwtVerify(accessToken, getWorkOSJwks(), {
+      const { payload } = await jwtVerify(accessToken, jwks, {
         algorithms: ALLOWED_JWT_ALGS,
         issuer: WORKOS_JWT_ISSUER,
         requiredClaims: ['exp', 'sub'],

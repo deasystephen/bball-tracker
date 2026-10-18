@@ -803,5 +803,17 @@ describe('WorkOSService', () => {
 
       await expect(WorkOSService.verifyToken(token)).rejects.toMatchObject({ statusCode: 503 });
     });
+
+    it('lets a config error through unchanged instead of answering 503', async () => {
+      mockGetWorkOSJwks.mockImplementation(() => {
+        throw new Error('WORKOS_CLIENT_ID environment variable is required');
+      });
+      const token = await sign({ sub: 'user_123' });
+
+      const error = await WorkOSService.verifyToken(token).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { statusCode?: number }).statusCode).toBeUndefined();
+      expect((error as Error).message).toContain('WORKOS_CLIENT_ID');
+    });
   });
 });

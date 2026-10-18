@@ -17,6 +17,7 @@ import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
+import { assertWorkOSConfig } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 import { createShutdown } from './utils/shutdown';
 import { closeRedis } from './utils/redis';
@@ -182,6 +183,9 @@ if (require.main === module) {
   // Exits non-zero before the server listens when the replica ceiling would
   // split live games across tasks (#446). Must stay ahead of `listen`.
   enforceReplicaGuard();
+  // The WorkOS client is lazy (the seed imports it without credentials), so the
+  // server checks its config here: a task without it must fail its deploy.
+  assertWorkOSConfig();
   warnMissingUrlConfig();
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
