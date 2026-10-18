@@ -14,13 +14,14 @@ import { parseLogLines } from '../support/log-lines';
 
 describe('requestContext middleware', () => {
   let infoSpy: jest.SpyInstance;
+  let consoleSpy: jest.SpyInstance;
 
   beforeEach(() => {
     infoSpy = spyOnInfo();
-    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
   afterEach(() => {
-    jest.restoreAllMocks();
+    consoleSpy.mockRestore();
   });
 
   function buildApp(): express.Express {

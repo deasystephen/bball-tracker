@@ -417,6 +417,7 @@ describe('InvitationService', () => {
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(stale);
       (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
       (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
         ...fresh,
         team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
@@ -434,6 +435,10 @@ describe('InvitationService', () => {
       expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
         where: { id: stale.id, status: 'PENDING' },
         data: { status: 'EXPIRED' },
+      });
+      expect(domainEvent(infoSpy, 'Invitation expired')).toEqual({
+        invitationId: stale.id,
+        teamId: team.id,
       });
       expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
     });
@@ -1585,16 +1590,20 @@ describe('InvitationService', () => {
       };
 
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(expired);
-      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({
-        ...expired,
-        status: 'EXPIRED',
-      });
+      (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
+      expect.assertions(5);
 
       try {
         await InvitationService.acceptInvitationByToken(invitation.token);
       } catch (error) {
         expectBadRequestError(error, 'This invitation has expired');
       }
+      // Unauthenticated path: the line carries requestId only, never a userId.
+      expect(domainEvent(infoSpy, 'Invitation expired')).toEqual({
+        invitationId: invitation.id,
+        teamId: invitation.teamId,
+      });
     });
 
     it('accepts by token when the player is already rostered (unified add, case 2)', async () => {
