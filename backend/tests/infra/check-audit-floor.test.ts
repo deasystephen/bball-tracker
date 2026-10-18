@@ -54,10 +54,10 @@ const NPM_FAILURE = {
 };
 
 /** An `npm audit --json` report: each advisory's package, plus one parent that only points at it. */
-function report(advisories: Advisory[]): object {
+function report(advisories: Advisory[], fixAvailable: Record<string, unknown> = {}): object {
   const vulnerabilities: Record<string, object> = {};
   for (const a of advisories) {
-    vulnerabilities[a.name] = { name: a.name, severity: a.severity, isDirect: false, via: [a], effects: [`parent-of-${a.name}`], range: a.range, nodes: [`node_modules/${a.name}`], fixAvailable: false };
+    vulnerabilities[a.name] = { name: a.name, severity: a.severity, isDirect: false, via: [a], effects: [`parent-of-${a.name}`], range: a.range, nodes: [`node_modules/${a.name}`], fixAvailable: fixAvailable[a.name] ?? false };
     vulnerabilities[`parent-of-${a.name}`] = { name: `parent-of-${a.name}`, severity: a.severity, isDirect: true, via: [a.name], effects: [], range: '*', nodes: [`node_modules/parent-of-${a.name}`], fixAvailable: false };
   }
   return { auditReportVersion: 2, vulnerabilities, metadata: { vulnerabilities: {} } };
@@ -128,7 +128,8 @@ describe('accepted-advisories.json (the real list)', () => {
     for (const side of sides) {
       for (const entry of list[side] as AllowEntry[]) {
         expect(entry).toEqual({
-          ghsa: expect.stringMatching(/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/),
+          // A GitHub advisory id, or `npm-<source id>` for an advisory npm reports without a GitHub URL.
+          ghsa: expect.stringMatching(/^(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|npm-\d+)$/),
           package: expect.any(String),
           range: expect.any(String),
           why: expect.any(String),
@@ -206,6 +207,47 @@ describe('check-audit-floor.mjs verdicts (saved report through --report)', () =>
     expect(result.stdout).toContain('FAIL GHSA-vfj7-8cjw-p6xm');
   });
 
+  it('fails an accepted advisory when npm reports a reachable fix (fixAvailable true): a patch was published', () => {
+    const result = gate('mobile', report([BRACES], { braces: true }), { allow: { mobile: [accept(BRACES)] } });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('FAIL GHSA-vfj7-8cjw-p6xm braces: a patched version exists (npm audit fix resolves it within the declared ranges); apply it and remove the entry');
+  });
+
+  it('fails an accepted advisory when npm proposes a non-major parent change', () => {
+    const fix = { name: 'jest', version: '29.7.1', isSemVerMajor: false };
+    const result = gate('mobile', report([BRACES], { braces: fix }), { allow: { mobile: [accept(BRACES)] } });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('a patched version exists (jest@29.7.1 (not semver-major) resolves it)');
+  });
+
+  it("still accepts when npm's only suggestion is a semver-major parent change (today's braces and node-forge shape)", () => {
+    const fix = { name: 'expo-updates', version: '0.11.7', isSemVerMajor: true };
+    const result = gate('mobile', report([BRACES], { braces: fix }), { allow: { mobile: [accept(BRACES)] } });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('accepted GHSA-vfj7-8cjw-p6xm braces');
+  });
+
+  it('reads an accepted advisory npm now reports at moderate as downgraded, not gone, and does not fail', () => {
+    const downgraded = { ...BRACES, severity: 'moderate' as const };
+    const result = gate('mobile', report([downgraded]), { allow: { mobile: [accept(BRACES)] } });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('stale GHSA-vfj7-8cjw-p6xm braces is listed for mobile');
+    expect(result.stdout).toContain('now reports it at moderate, below the gate');
+    expect(result.stdout).not.toContain('no longer reports it');
+  });
+
+  it('keys an advisory without a GitHub URL as npm-<source>, says so in the FAIL line, and accepts an entry under that id', () => {
+    const bare = { ...advisory('legacy-pkg', 'unused', 'high', '<1.0.0'), url: '', source: 1234567 };
+    const failing = gate('backend', report([bare]));
+    expect(failing.status).toBe(1);
+    expect(failing.stdout).toContain('FAIL npm-1234567 legacy-pkg <1.0.0 (high)');
+    expect(failing.stdout).toContain('an allow-list entry for it uses "ghsa": "npm-1234567"');
+    const entry = { ghsa: 'npm-1234567', package: 'legacy-pkg', range: '<1.0.0', why: 'fixture', revisit: 'fixture' };
+    const passing = gate('backend', report([bare]), { allow: { backend: [entry] } });
+    expect(passing.status).toBe(0);
+    expect(passing.stdout).toContain('accepted npm-1234567 legacy-pkg');
+  });
+
   it('ignores moderate and lower advisories', () => {
     const result = gate('backend', report([SPRINTF]));
     expect(result.status).toBe(0);
@@ -241,6 +283,12 @@ describe('check-audit-floor.mjs could not run (exit 2, never a stack trace)', ()
     expect(noList.status).toBe(2);
     expect(noList.stderr).toContain('cannot read');
     expect(noList.stderr).not.toContain('    at ');
+  });
+
+  it('refuses a duplicate (ghsa, package) entry instead of letting the last one win', () => {
+    const result = gate('mobile', report([BRACES]), { allow: { mobile: [accept(BRACES), accept(BRACES, { range: '<3.0.4' })] } });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('duplicate entry for GHSA-vfj7-8cjw-p6xm braces under "mobile"');
   });
 
   it('refuses to run from a directory the allow-list does not name, and names the valid ones', () => {

@@ -14,6 +14,10 @@
 // `gets` in accepted-overrides.json): when npm audit reports a different range the advisory has
 // moved (usually a patch was published) and it FAILs until a human re-reviews the entry.
 //
+// An accepted entry also FAILs when npm reports a reachable fix (`fixAvailable` true, or a
+// non-major parent change): a patch was published, so apply it and retire the entry. An advisory
+// npm reports without a GitHub URL is keyed `npm-<source id>`; an entry lists it under that id.
+//
 // Output: one `FAIL`, `accepted` or `stale` line per advisory or entry. Exit 0 when nothing fails,
 // 1 when something fails, 2 when the gate could not run (no network, npm missing, unreadable
 // file): it fails closed. Tests point it at their own list through ACCEPTED_ADVISORIES_FILE.
@@ -62,24 +66,49 @@ if (report.error || !report.vulnerabilities) {
 }
 
 const ghsaOf = (via) => String(via.url ?? '').split('/').pop() || `npm-${via.source}`;
+// Every advisory object at any severity, keyed (id, package): an accepted advisory that npm now
+// reports at moderate must read as downgraded, not as gone.
 const advisories = new Map();
 for (const vulnerability of Object.values(report.vulnerabilities)) {
   for (const via of vulnerability.via) {
-    if (typeof via !== 'object' || !FAILING.has(via.severity)) continue;
-    advisories.set(`${ghsaOf(via)} ${via.name}`, via);
+    if (typeof via === 'object') advisories.set(`${ghsaOf(via)} ${via.name}`, via);
   }
 }
+// npm's fixAvailable for the vulnerable package: `true` (npm audit fix reaches a patched version
+// inside the declared ranges) or `{ name, version, isSemVerMajor }` (change that parent). A
+// semver-major parent change is npm's suggestion even when no patched version exists (on
+// 2026-10-18 it proposed jest 30.5.2 for braces and expo-updates 0.11.7, a downgrade, for
+// node-forge), so only `true` or a non-major parent change counts as "a patch is reachable".
+function reachableFix(packageName) {
+  const fix = report.vulnerabilities[packageName]?.fixAvailable;
+  if (fix === true) return 'npm audit fix resolves it within the declared ranges';
+  if (fix && typeof fix === 'object' && fix.isSemVerMajor === false) return `${fix.name}@${fix.version} (not semver-major) resolves it`;
+  return null;
+}
+
 const entryKey = (entry) => `${entry.ghsa} ${entry.package}`;
-const accepted = new Map(entries.map((entry) => [entryKey(entry), entry]));
+const accepted = new Map();
+for (const entry of entries) {
+  if (accepted.has(entryKey(entry))) fail(`duplicate entry for ${entryKey(entry)} under "${side}" in ${label}`);
+  accepted.set(entryKey(entry), entry);
+}
 
 let failed = 0;
 for (const [key, via] of [...advisories].sort(([a], [b]) => a.localeCompare(b))) {
+  if (!FAILING.has(via.severity)) continue;
   const id = ghsaOf(via);
   const where = `${via.name} ${via.range} (${via.severity}): ${via.title}`;
   const entry = accepted.get(key);
+  const fix = reachableFix(via.name);
   if (!entry) {
     failed += 1;
-    process.stdout.write(`FAIL ${id} ${where} ${via.url ?? ''}\n`);
+    const listAs = via.url ? '' : ` (no GitHub advisory URL: an allow-list entry for it uses "ghsa": "${id}")`;
+    process.stdout.write(`FAIL ${id} ${where} ${via.url ?? ''}${listAs}\n`);
+  } else if (fix) {
+    failed += 1;
+    process.stdout.write(
+      `FAIL ${id} ${via.name}: a patched version exists (${fix}); apply it and remove the entry from ${label} (${via.url ?? ''})\n`,
+    );
   } else if (entry.range !== via.range) {
     failed += 1;
     process.stdout.write(
@@ -91,9 +120,14 @@ for (const [key, via] of [...advisories].sort(([a], [b]) => a.localeCompare(b)))
   }
 }
 for (const [key, entry] of accepted) {
-  if (!advisories.has(key)) {
+  const via = advisories.get(key);
+  if (!via) {
     process.stdout.write(
       `stale ${entry.ghsa} ${entry.package} is listed for ${side} in ${label} but npm audit no longer reports it for that package\n`,
+    );
+  } else if (!FAILING.has(via.severity)) {
+    process.stdout.write(
+      `stale ${entry.ghsa} ${entry.package} is listed for ${side} in ${label} but npm audit now reports it at ${via.severity}, below the gate\n`,
     );
   }
 }

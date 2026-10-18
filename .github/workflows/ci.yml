@@ -36,7 +36,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.project }}
-        run: npm ci
+        # --no-audit: the test jobs' audit floor step is the one audit call per package.
+        run: npm ci --no-audit --no-fund
 
       - name: Generate Prisma client
         if: matrix.project == 'backend'
@@ -81,7 +82,7 @@ jobs:
       
       - name: Install dependencies
         working-directory: backend
-        # --no-audit: the audit floor step below is the one audit call.
+        # --no-audit: the audit floor step below is the one audit call per package.
         run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
@@ -125,7 +126,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: mobile
-        # --no-audit: the audit floor step below is the one audit call.
+        # --no-audit: the audit floor step below is the one audit call per package.
         run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
@@ -164,7 +165,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        # --no-audit: the audit floor step below is the one audit call.
+        # --no-audit: the audit floor step below is the one audit call per package.
         run: npm ci --no-audit --no-fund
 
       - name: Audit floor (no unaccepted high/critical advisory in production deps)
@@ -343,7 +344,7 @@ jobs:
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_BACKEND }}
           SENTRY_RELEASE: ${{ github.sha }}
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           npx prisma generate
           npm run build
           npx @sentry/cli releases new "$SENTRY_RELEASE"
