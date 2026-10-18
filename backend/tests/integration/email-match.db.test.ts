@@ -27,6 +27,7 @@ import { TeamService } from '../../src/services/team-service';
 import { NotFoundError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { findActiveUserIdByEmail } from '../../scripts/data-subject-lookup';
 
 jest.setTimeout(30000);
@@ -59,6 +60,10 @@ let teamId: string;
 let coachId: string;
 let kidId: string;
 
+beforeEach(() => {
+  spyOnInfo();
+});
+
 beforeAll(async () => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -70,7 +75,6 @@ beforeAll(async () => {
       { cause: err }
     );
   }
-  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 

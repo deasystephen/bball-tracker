@@ -25,6 +25,7 @@ import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
 import { BadRequestError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 import { backendPid, track, waitForBlockedBy } from '../support/db-locks';
 import { lockUsers } from '../../src/utils/user-row-lock';
@@ -112,9 +113,12 @@ async function childWithInvitations(
   return { childId, parentIds, invitationIds };
 }
 
+beforeEach(() => {
+  spyOnInfo();
+});
+
 beforeAll(async () => {
   await fx.requireDatabase();
-  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 

@@ -1,6 +1,7 @@
 import { FakeMailer, createMailer, MailSendParams } from '../../src/services/mailer';
 import { MailSendError, SesMailer, hashRecipient } from '../../src/services/mailer/ses-mailer';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { invitationTemplate } from '../../src/services/mailer/templates/invitation';
 import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rsvp-confirmation';
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
@@ -231,7 +232,7 @@ describe('SesMailer', () => {
   // Audit #48 / #640: recipient addresses must not reach the logs at any
   // level (debug is reachable in production through LOG_LEVEL since #617).
   it('logs a hashed recipient, never the address at any level', async () => {
-    const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const infoSpy = spyOnInfo();
     const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
     try {
       const mailerInstance = new SesMailer({ region: 'us-east-1', fromAddress: 'x@y.com' });
@@ -248,7 +249,6 @@ describe('SesMailer', () => {
       expect(debugSpy).not.toHaveBeenCalled();
       expect(JSON.stringify([...infoSpy.mock.calls, ...debugSpy.mock.calls])).not.toMatch(/example\.com/i);
     } finally {
-      infoSpy.mockRestore();
       debugSpy.mockRestore();
     }
   });

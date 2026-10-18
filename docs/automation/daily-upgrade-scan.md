@@ -112,6 +112,8 @@ which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and s
 brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
 newest 1.x release, so the old root floors were inert.
 
+**Accepted cross-major overrides.** The backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares `^7`) to 8.x on purpose, so the gate reports `MISMATCH node_modules/@prisma/config declares deepmerge-ts@7.1.5 but gets 8.0.2` and that line is accepted, not cleared (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
+
 ## Binary-coupled packages (#562)
 
 An OTA (`eas update`) ships JavaScript from `mobile/package-lock.json` and runs

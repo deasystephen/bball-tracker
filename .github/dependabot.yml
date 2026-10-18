@@ -37,6 +37,14 @@ updates:
       # docs/automation/daily-upgrade-scan.md.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Prisma 7.10.1 pins 8.1.0 engines; Prisma moves only by a deliberate PR,
+      # see #275.
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "@prisma/adapter-pg"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor"]
 
   # ----------------------------------------------------------------------
   # Mobile (React Native / Expo)
