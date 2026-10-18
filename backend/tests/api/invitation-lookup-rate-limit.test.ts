@@ -18,6 +18,14 @@ jest.mock('../../src/services/guardian-service');
 
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
 
+// The test drives INVITATION_LOOKUP_IP_MAX_PER_15_MIN + 1 sequential supertest
+// requests (601 today). Unloaded that takes 2-11 s; with a dozen Jest runs
+// sharing the machine it passes the 10 s default (#804). Budget 150 ms per
+// request, derived from the count so a changed ceiling rescales it, instead of
+// raising the global timeout in jest.config.js.
+const PER_REQUEST_BUDGET_MS = 150;
+const SUITE_TIMEOUT_MS = (INVITATION_LOOKUP_IP_MAX_PER_15_MIN + 1) * PER_REQUEST_BUDGET_MS;
+
 describe('public invitation lookup IP ceiling (#718)', () => {
   it('admits the SSR pattern well past 100/min, then answers 429 past its own ceiling', async () => {
     mockInvitationService.getInvitationByToken.mockResolvedValue({
@@ -42,5 +50,5 @@ describe('public invitation lookup IP ceiling (#718)', () => {
     expect(blocked.status).toBe(429);
     expect(blocked.body).toEqual({ error: 'Too many invitation lookups, please try again later' });
     expect(mockInvitationService.getInvitationByToken).toHaveBeenCalledTimes(INVITATION_LOOKUP_IP_MAX_PER_15_MIN);
-  });
+  }, SUITE_TIMEOUT_MS);
 });
