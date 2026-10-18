@@ -617,7 +617,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:**
   - `curl -i https://api.hooplings.com/api/v1/invitations/by-token/abc` (token too short)
   - `curl -i https://api.hooplings.com/api/v1/invitations/by-token/<valid-token>`
-- **Expected:** Short/invalid token → 400 or 404; valid token → 200 with `invitation.kind: "team"` (or `"guardian"`) and never the token itself. No auth header required for either. The lookup is limited to 30 requests / 15 min **per token** (audit #36); the accept `POST` uses the IP-keyed write limiter.
+- **Expected:** Short/invalid token → 400 or 404; valid token → 200 with `invitation.kind: "team"` (or `"guardian"`) and never the token itself. No auth header required for either. The lookup is limited to 30 requests / 15 min **per token** (audit #36); the accept `POST` uses the IP-keyed `inviteAcceptRateLimit` (30 / min per IP).
 - **Notes:** ___________
 
 ### E.16 — 📧 SES bounce handling for invalid recipient

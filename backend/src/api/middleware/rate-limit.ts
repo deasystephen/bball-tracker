@@ -96,7 +96,7 @@ export const inviteAcceptRateLimit = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many write requests, please try again later' },
+  message: { error: 'Too many invitation accept attempts, please try again later' },
 });
 
 /**
