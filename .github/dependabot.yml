@@ -105,7 +105,6 @@ updates:
       - dependency-name: "expo-*"
       - dependency-name: "react-native-svg"
       - dependency-name: "react"
-      - dependency-name: "react-dom"
       # react-test-renderer must equal the react version exactly.
       - dependency-name: "react-test-renderer"
       # lottie-react-native is pinned by the Expo SDK (SDK 57: ~7.3.8, see
