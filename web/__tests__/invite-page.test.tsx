@@ -168,6 +168,7 @@ describe('invite page inviter tombstone (#814)', () => {
       id: 'ginv-1',
       status: 'PENDING',
       childName: 'Sam',
+      childDeletedAt: null,
       teamName: null,
       inviterName: 'Stored Literal Name',
       inviterDeletedAt: '2026-10-01T00:00:00.000Z',
@@ -178,5 +179,24 @@ describe('invite page inviter tombstone (#814)', () => {
     const html = await renderPage();
     expect(html).toContain(STRINGS.deletedUser);
     expect(html).not.toContain('Stored Literal Name');
+  });
+
+  it('labels a tombstoned child from childDeletedAt, never the stored name (#894)', async () => {
+    const invitation: GuardianInvitationDetails = {
+      kind: 'guardian',
+      id: 'ginv-2',
+      status: 'PENDING',
+      childName: 'Stored Child Literal',
+      childDeletedAt: '2026-10-01T00:00:00.000Z',
+      teamName: null,
+      inviterName: 'Coach Carter',
+      inviterDeletedAt: null,
+      relationship: 'FATHER',
+      expiresAt: future(),
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { success: true, invitation })));
+    const html = await renderPage();
+    expect(html).toContain(STRINGS.deletedUser);
+    expect(html).not.toContain('Stored Child Literal');
   });
 });
