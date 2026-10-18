@@ -79,9 +79,10 @@ export interface AnalyticsEventProps {
   app_opened: undefined;
   screen_viewed: { screen: string; params_kind: string };
   /**
-   * `claimed_invite`: this sign-in claimed a pre-provisioned account (an
-   * invited or roster-added player) rather than creating one; `was_managed`:
-   * that account was a coach-managed player (#790). Both come from the
+   * `claimed_invite`: this sign-in claimed any pre-provisioned account (a
+   * coach add-by-email, `POST /players` or an admin pre-create, with or
+   * without a team invitation) rather than creating one; `was_managed`: that
+   * account was any managed row, coach or guardian (#790). Both come from the
    * `/auth/callback` response and are omitted when it does not carry them
    * (an API older than #790), so an unknown is never counted as `false`.
    */

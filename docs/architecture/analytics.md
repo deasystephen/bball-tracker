@@ -162,8 +162,8 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `erased` | boolean | the account row was deleted outright rather than tombstoned (#529) |
 | `own` | boolean | the caller wrote the announcement reply they deleted (#34) |
 | `granted` | boolean | push permission outcome |
-| `claimed_invite` | boolean | the sign-in claimed a pre-provisioned account (a player a coach added or invited by email) rather than creating a new one or signing in to a linked one; the step after `invitation_accepted` in the invite funnel (#790) |
-| `was_managed` | boolean | the claimed account was a coach-managed player; `false` when nothing was claimed (#790) |
+| `claimed_invite` | boolean | the sign-in claimed **any** pre-provisioned account (a player a coach added by email, a `POST /players` account or an admin pre-create, whether or not a team invitation exists for it) rather than creating a new one or signing in to a linked one; the step after `invitation_accepted` in the invite funnel. Left out, never sent as `false`, when the API response does not carry it (#790) |
+| `was_managed` | boolean | the claimed account was any managed row (a coach-managed roster player or a guardian-managed child); `false` when nothing was claimed. Left out when the API does not send it (#790) |
 | `target` | enum | what a tapped notification opened: `game`, `announcement`, `team`, `none` |
 | `endpoint_pattern` | string | `endpointPattern(url)`: redacted route with ids collapsed to `:id` (`/api/v1/teams/:id/players`) |
 | `code` | string | server error code (`upgrade_required`, `last_head_coach`), axios code (`ECONNABORTED`), `http_error`, an Error's name, or `unknown` |
