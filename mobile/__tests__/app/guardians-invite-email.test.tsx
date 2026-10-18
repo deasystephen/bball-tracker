@@ -8,7 +8,7 @@
  * Renders the real i18n instance (docs/testing/conventions.md).
  */
 
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 import PlayerGuardiansScreen from '../../app/teams/[id]/players/[playerId]/guardians';
 import { useAuthStore } from '../../store/auth-store';
@@ -182,9 +182,17 @@ describe('PlayerGuardiansScreen Resend (#420)', () => {
     fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
     expect(mockInvite.mutateAsync).toHaveBeenCalledTimes(1);
 
-    finish({ invitation: pending, emailSent: true });
-    await waitFor(() => expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull());
-    expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to sonya.curry@example.test', 'success');
+    // Settle inside act so React flushes the handler's continuation (toast,
+    // then the `finally` that clears the row's pending state) before the
+    // assertions; a bare resolve left that to a later tick on a slow runner.
+    await act(async () => {
+      finish({ invitation: pending, emailSent: true });
+    });
+    // The toast proves the continuation ran; only then is the spinner checked.
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to sonya.curry@example.test', 'success')
+    );
+    expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull();
   });
 
   it('reports a failed resend email as an error, never as "re-sent"', async () => {
@@ -255,8 +263,14 @@ describe('PlayerGuardiansScreen Resend (#420)', () => {
     const submit = screen.getByTestId('guardian-invite-submit');
     expect(submit.props.accessibilityState).toEqual(expect.objectContaining({ disabled: false }));
 
-    finish({ invitation: pending, emailSent: true });
-    await waitFor(() => expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull());
+    // Same deterministic settle as the spinner test above.
+    await act(async () => {
+      finish({ invitation: pending, emailSent: true });
+    });
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to sonya.curry@example.test', 'success')
+    );
+    expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull();
   });
 
   it('renders no Resend for a viewer who cannot manage the roster', () => {
