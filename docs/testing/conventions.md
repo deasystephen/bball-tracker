@@ -45,7 +45,7 @@ When adding new features or fixing bugs, always write tests that verify behavior
 
 ## Slow suites and timeouts (#804)
 
-The global Jest timeout stays at 10 s and is never raised to quiet a flake. A test that legitimately issues many sequential requests (`invitation-lookup-rate-limit.test.ts` sends 601) passes a per-test timeout derived from its request count (`(count + 1) * per-request budget`), with a comment showing the arithmetic. A timeout in a suite that does not loop is a request that never ends or a reused supertest agent against a closed server: fix the synchronisation, not the clock.
+The global Jest timeout stays at 10 s and is never raised to quiet a flake. A test that legitimately issues many sequential requests (`invitation-lookup-rate-limit.test.ts` sends 601) passes a per-test timeout (the third `it` argument) derived from its request count (`(count + 1) * per-request budget`), with a comment showing the arithmetic. Prefer shortening the work first: order-independent requests go out in bounded concurrent chunks. A timeout in a test that does not loop is usually a request that never ends or a reused supertest agent against a closed server; on a saturated machine, rerun it alone first, and fix the synchronisation, not the clock.
 
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
