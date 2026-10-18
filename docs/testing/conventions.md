@@ -107,6 +107,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   (`t: (k) => k`): that is how the #431 rebrand missed `roleOnboarding.title` for a week (#474) —
   Jest pressed `roleOnboarding.coachTitle` and never saw a locale value. `jest.setup.js` pins
   `expo-localization` to `en`, so `getByText('I coach a team')` works with no extra mocks.
+- `__tests__/declared-dependencies.test.ts` (#780) fails CI when a `package.json` dependency is named nowhere in source or config and is not on its commented allow-list. Runtime dependencies count only source and build config (a `jest.mock` does not keep one alive); `devDependencies` also count tests and Jest/ESLint config.
 - `__tests__/i18n/brand-guard.test.ts` fails CI on a retired brand name (the pre-rename product
   name and the pre-migration domain name; separators tolerated) in any `en.json`/`es.json` value,
   any line of any `.maestro/**/*.{yaml,yml}` (nested directories included), or any line of mobile

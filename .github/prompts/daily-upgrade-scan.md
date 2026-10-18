@@ -50,7 +50,7 @@ NEVER bump these. Surface them in the deferred tracking issue + daily log only.
       read it, do not work from memory. It holds every package with native
       code (all `expo-*` modules, `expo` itself, `@sentry/react-native`,
       `@amplitude/analytics-react-native`, `react-native-*`, …) and `react`.
-    - react-dom and react-test-renderer (they must equal the `react` version).
+    - react-test-renderer (it must equal the `react` version).
     Why: an OTA ships JavaScript from the lockfile and runs it against the
     native code frozen in the binary. Bumping one of these on `main` makes the
     next OTA deliver JavaScript no binary has ever run. This applies to
