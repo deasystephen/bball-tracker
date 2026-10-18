@@ -1,0 +1,15 @@
+{
+  "_doc": "Cross-major overrides accepted on purpose, per package directory. check-override-ranges.mjs reports the matching MISMATCH as `accepted` (exit 0) and `--overrides` never reports the key DEAD. The reasoning lives in docs/automation/daily-upgrade-scan.md, 'Accepted cross-major overrides'.",
+  "backend": [
+    {
+      "override": "deepmerge-ts@^7",
+      "consumer": "node_modules/@prisma/config",
+      "declares": "7.1.5",
+      "gets": "8",
+      "ghsa": "GHSA-ggr8-5vv4-36mx",
+      "why": "Every deepmerge-ts below 8.0.0 is vulnerable and no patched 7.x exists; Prisma 7.10.1 itself declares 8.0.2, so the API is compatible. Retire when Prisma is bumped to a release that declares 8.x (#890, #923)."
+    }
+  ],
+  "web": [],
+  "mobile": []
+}

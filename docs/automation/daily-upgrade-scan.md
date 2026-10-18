@@ -96,15 +96,17 @@ Step 2a and the Step 3 gate):
   It probes the lockfile, never the installed tree, because `npm ci` on the Linux runner skips
   `os`/`cpu`-gated optional packages (sharp's `@img/*`) and would make a live override look dead:
   and it decides on **declared specs, never resolved versions**:
-  `node ../.github/scripts/check-override-ranges.mjs --overrides` prints `live` or `DEAD` per key,
-  live when some lockfile entry still declares the package with a spec that intersects the key's
-  range (any spec for a bare key; for a nested `"<parent>": { … }` block only the parent and its
-  dependency graph count; `peerDependencies` and `bin` names never count). The resolved version is
-  the wrong signal because an override changes it: `npm ls "<pkg>@<range>"` prints `(empty)` for a
-  working cross-major redirect, which is how the scan retired the accepted `deepmerge-ts@^7` entry
-  below (PR #919, 2026-10-18, deployed unattended, GHSA-ggr8-5vv4-36mx reopened; PR #923 restored
-  it and replaced the `npm ls` probes with the script). Accepted entries are never retired. #777
-  retired the backend's `hono`, `@hono/node-server` and `fast-xml-builder` entries.
+  `node ../.github/scripts/check-override-ranges.mjs --overrides` prints `live` or `DEAD` per key
+  (nested blocks at every depth), live when some lockfile entry still declares the package as a
+  regular, optional or peer dependency, or through an `npm:` alias, with a spec that intersects
+  the key's range; inside a nested `"<parent>": { … }` block only the parent copies and their
+  dependency graph count (`bin` names never do). The resolved version is the wrong signal because
+  an override changes it: `npm ls "<pkg>@<range>"` prints `(empty)` for a working cross-major
+  redirect, which is how the scan retired the accepted `deepmerge-ts@^7` entry below (PR #919,
+  2026-10-18, deployed unattended, GHSA-ggr8-5vv4-36mx reopened; PR #923 restored it and replaced
+  the `npm ls` probes with the script). Keys listed in `.github/scripts/accepted-overrides.json`
+  are reported `live (accepted …)` and never retired. #777 retired the backend's `hono`,
+  `@hono/node-server` and `fast-xml-builder` entries.
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but
@@ -118,7 +120,7 @@ which need `^9`/`^10`. The `@oclif/core > minimatch ^10` block is separate and s
 brace-expansion override: the `^3` consumers resolve to 3.1.5, and brace-expansion 1.1.21 is the
 newest 1.x release, so the old root floors were inert.
 
-**Accepted cross-major overrides.** The backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares the exact pin `7.1.5`, inside the `^7` key) to 8.x on purpose, so the gate reports `MISMATCH node_modules/@prisma/config declares deepmerge-ts@7.1.5 but gets 8.0.2` and that line is accepted, not cleared (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
+**Accepted cross-major overrides.** The list is `.github/scripts/accepted-overrides.json`, keyed by package directory; the gate script reads it, prints a listed mismatch as `accepted … (GHSA, accepted-overrides.json)` with exit 0, and its `--overrides` mode never reports a listed key `DEAD`. Adding an entry is a human decision made in a reviewed PR together with the reasoning here; the scan never edits the file. Today's only entry: the backend's `"deepmerge-ts@^7": "^8.0.2"` redirects `@prisma/config` (which declares the exact pin `7.1.5`, inside the `^7` key) to 8.x on purpose (#890). GHSA-ggr8-5vv4-36mx covers every version below 8.0.0 and its first patch is 8.0.0, so no patched 7.x exists and the override is the security fix. Prisma 7.10.1 itself declares `deepmerge-ts` 8.0.2, which shows the API is compatible. The entry retires when Prisma is bumped deliberately to a release that declares 8.x (7.10.1 also carries 8.1.0 engines, so that is a separate decision).
 
 ## Binary-coupled packages (#562)
 

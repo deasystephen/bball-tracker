@@ -109,28 +109,27 @@ under ⏸ only):
 
 ### Retire dead overrides (all sides)
 
-Entries listed under "Accepted cross-major overrides" in
-`docs/automation/daily-upgrade-scan.md` are never retired, whatever a probe
-says (today: the backend's `"deepmerge-ts@^7": "^8.0.2"`).
-
-For every other entry in `backend/`, `web/` and `mobile/` `package.json#overrides`,
-run from that side's directory, after `npm install` (the script reads the
-LOCKFILE, never the installed tree: `npm ci` on this Linux runner skips
-`os`/`cpu`-gated optional packages such as sharp's `@img/*`, which would
-otherwise look absent):
+For every side (`backend/`, `web/`, `mobile/`), run from that side's directory:
 
     node ../.github/scripts/check-override-ranges.mjs --overrides
 
-It prints one `live` or `DEAD` line per override key. A key is live when some
-lockfile entry still DECLARES the package with a spec that intersects the
-key's range (any spec for a bare key; for a nested `"<parent>": { … }` block
-only the parent and its dependency graph count). It never looks at resolved
-versions, and neither may you: a version-keyed override that redirects out of
-its own range (`deepmerge-ts@^7` → 8.0.2) makes `npm ls "<pkg>@<range>"`
-print `(empty)` precisely because it works. Do not substitute an `npm ls`
-probe for any key shape, and a `MISMATCH` line from the plain gate is the
-override working, not a dead entry. When every child of a nested block is
-`DEAD`, remove the block.
+It reads the LOCKFILE, never the installed tree (`npm ci` on this Linux runner
+skips `os`/`cpu`-gated optional packages such as sharp's `@img/*`, which would
+otherwise look absent), and needs no prior `npm install` (it falls back to
+npm's own `semver`). It prints one `live` or `DEAD` line per
+`package.json#overrides` key, nested blocks included. A key is live when some
+lockfile entry still DECLARES the package (regular, optional or peer
+dependency, or an `npm:` alias of it) with a spec that intersects the key's
+range; inside a nested `"<parent>": { … }` block only the parent copies and
+their dependency graph count. Keys listed in
+`.github/scripts/accepted-overrides.json` print `live (accepted …)` whatever
+the tree says and are never retired; their reasons are in
+`docs/automation/daily-upgrade-scan.md`, "Accepted cross-major overrides".
+The script never looks at resolved versions, and neither may you: a
+version-keyed override that redirects out of its own range (`deepmerge-ts@^7`
+→ 8.0.2) makes `npm ls "<pkg>@<range>"` print `(empty)` precisely because it
+works. Do not substitute an `npm ls` probe for any key shape. When every child
+of a nested block is `DEAD`, remove the block.
 
 A dead entry would silently pin any future consumer of that package. Removing
 it → AUTO-FIX for that side (refresh the lockfile with `npm install` in the same
@@ -184,10 +183,10 @@ For each side with ≥1 auto-fix item:
      Plus for every package you added or changed an override for, from `<side>/`:
        node ../.github/scripts/check-override-ranges.mjs <pkg> [<pkg> ...]
      It must exit 0 (no consumer resolved into a different major from the
-     range it declares; `npm ls` cannot show this, an override hides it),
-     except that the lines listed under "Accepted cross-major overrides" in
-     `docs/automation/daily-upgrade-scan.md` are expected and do not fail the
-     gate. Put its output and `npm ls <pkg> --all` in the PR body.
+     range it declares; `npm ls` cannot show this, an override hides it). A
+     mismatch listed in `.github/scripts/accepted-overrides.json` prints as
+     `accepted` and does not count; never edit that file from a scan run. Put
+     the output and `npm ls <pkg> --all` in the PR body.
   4. DIFF GUARD — `git diff --name-only` must contain ONLY
      `<side>/package.json` and/or `<side>/package-lock.json`.
      Anything else → abort the whole batch → ⚠ Needs attention.
