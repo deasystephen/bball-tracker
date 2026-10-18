@@ -9,8 +9,7 @@ import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import { DB_BUSY_RETRY_AFTER_SECONDS } from '../../src/models/pool-config';
 import { mockPrisma } from '../setup';
-import { transactionClosed } from '../factories';
-import { TransactionTimeoutError } from '../../src/utils/errors';
+import { lockTimeout, transactionClosed } from '../factories';
 import { logger } from '../../src/utils/logger';
 
 jest.mock('../../src/services/workos-service');
@@ -52,20 +51,14 @@ describe('database pool timeout through the central error handler', () => {
     });
   });
 
-  it('answers a marked TransactionTimeoutError the same 503 and logs it at warn (#908)', async () => {
-    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-    (mockPrisma.user.findUnique as jest.Mock).mockRejectedValueOnce(new TransactionTimeoutError(true, transactionClosed()));
+  it("answers PostgreSQL's lock_timeout (55P03) as 503 transaction_timeout (#908)", async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockRejectedValueOnce(lockTimeout());
 
     const res = await request(app).get('/api/v1/teams').set('Authorization', 'Bearer signed.jwt.token');
 
     expect(res.status).toBe(503);
     expect(res.headers['retry-after']).toBe(String(DB_BUSY_RETRY_AFTER_SECONDS));
     expect(res.body.code).toBe('transaction_timeout');
-    expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 503 }));
-    expect(error).not.toHaveBeenCalled();
-    warn.mockRestore();
-    error.mockRestore();
   });
 
   it('logs a raw lock-wait P2028 at error', async () => {

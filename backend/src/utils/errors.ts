@@ -139,22 +139,15 @@ export class ConflictError extends AppError {
 
 
 /**
- * 503 — an interactive transaction expired (Prisma P2028) while it waited on a
- * row lock (#908). Nothing was written, so the user can safely retry. The
- * central error handler and `respondWithError` render it with `Retry-After`.
- *
- * `expected` is true only where the thrower knows lock contention is normal (a
- * double-tapped Resend: `prisma-errors.ts#lockWaitExpected`); those are logged
- * at `warn` and kept out of Sentry. A raw P2028 from any other transaction is
- * rendered the same 503 with `expected` false, so a slow transaction still
- * shows up at `error` and in Sentry. `cause` keeps Prisma's message (timeout
- * and elapsed ms).
+ * 503 — a transaction was cancelled while it waited on a row lock (#908):
+ * Prisma's interactive-transaction timeout (P2028) or PostgreSQL's
+ * `lock_timeout` (55P03). Nothing was written, so the user can safely retry.
+ * The central error handler and `respondWithError` render it with
+ * `Retry-After`; `models/pool-config.ts#classifyDbError` makes one from the raw
+ * database error, which rides on `cause` with its timing.
  */
 export class TransactionTimeoutError extends DetailedError<Record<string, unknown>> {
-  constructor(
-    public readonly expected: boolean = false,
-    cause?: unknown
-  ) {
+  constructor(cause?: unknown) {
     super(
       'transaction_timeout',
       {},

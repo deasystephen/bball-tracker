@@ -8,7 +8,7 @@ import {
   ServiceUnavailableError,
   TransactionTimeoutError,
 } from '../../src/utils/errors';
-import { transactionClosed } from '../factories';
+import { lockTimeout, transactionClosed } from '../factories';
 import { logger } from '../../src/utils/logger';
 import { captureRequestException } from '../../src/utils/sentry';
 
@@ -168,46 +168,40 @@ describe('respondWithError (#831)', () => {
     expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
   });
 
-  it('answers a marked TransactionTimeoutError as 503 transaction_timeout, warns and skips Sentry (#908)', () => {
+  it.each([
+    ['a P2028 lock-wait expiry', () => transactionClosed()],
+    ["PostgreSQL's lock_timeout (55P03, P2039)", () => lockTimeout('P2039')],
+    ['a raw-query lock_timeout (P2010)', () => lockTimeout('P2010')],
+    ['a TransactionTimeoutError', () => new TransactionTimeoutError(transactionClosed())],
+  ])('answers %s as 503 transaction_timeout with Retry-After, logged at error and captured (#908)', (_name, make) => {
     const res = fakeRes();
-    respondWithError(res, new TransactionTimeoutError(true, transactionClosed()), {
-      log: 'Error inviting',
-      fallback: 'Failed',
-      sentryFlow: 'x',
-    });
+    const err = make();
+    respondWithError(res, err, { log: 'Error inviting', fallback: 'Failed', sentryFlow: 'x' });
     expect(res.statusCode).toBe(503);
     expect(res.headers['Retry-After']).toBe('5');
     expect(res.body).toEqual({
       error: 'Another request for this record is still being processed; please retry',
       code: 'transaction_timeout',
     });
-    expect(warn).toHaveBeenCalledWith(
-      'Error inviting',
-      expect.objectContaining({ status: 503, cause: expect.stringContaining('The timeout for this transaction was') })
-    );
-    expect(error).not.toHaveBeenCalled();
-    expect(mockCapture).not.toHaveBeenCalled();
-  });
-
-  it('answers a raw P2028 lock-wait expiry with the same 503 but logs at error and captures it (#908)', () => {
-    const res = fakeRes();
-    const err = transactionClosed();
-    respondWithError(res, err, { log: 'Error deleting', fallback: 'Failed', sentryFlow: 'x' });
-    expect(res.statusCode).toBe(503);
-    expect(res.headers['Retry-After']).toBe('5');
-    expect(res.body).toEqual({
-      error: 'Another request for this record is still being processed; please retry',
-      code: 'transaction_timeout',
-    });
-    expect(error).toHaveBeenCalledWith('Error deleting', expect.objectContaining({ status: 503 }));
+    expect(error).toHaveBeenCalledWith('Error inviting', expect.objectContaining({ status: 503 }));
     expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
   });
 
-  it('puts Retry-After on every 503, ServiceUnavailableError included', () => {
+  it('redacts URLs in the logged cause', () => {
     const res = fakeRes();
-    respondWithError(res, new ServiceUnavailableError('Database unavailable'), { log: 'Error', fallback: 'Failed' });
+    const err = new Error('outer', { cause: new Error('timeout exceeded when trying to connect https://x.test/?token=abc') });
+    respondWithError(res, err, { log: 'Error', fallback: 'Failed' });
+    expect(JSON.stringify(error.mock.calls)).not.toContain('token=abc');
+  });
+
+  it('leaves a 5xx AppError alone, even with a pool timeout in its cause, and sends no Retry-After for it', () => {
+    const res = fakeRes();
+    const err = new ServiceUnavailableError('Database unavailable');
+    err.cause = new Error('timeout exceeded when trying to connect');
+    respondWithError(res, err, { log: 'Error', fallback: 'Failed' });
     expect(res.statusCode).toBe(503);
-    expect(res.headers['Retry-After']).toBe('5');
+    expect(res.body).toEqual({ error: 'Failed' });
+    expect(res.headers['Retry-After']).toBeUndefined();
   });
 
   it('answers maxWait exhaustion (P2028) with the pool-busy 503 body', () => {

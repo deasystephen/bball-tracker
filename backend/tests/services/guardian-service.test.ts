@@ -6,16 +6,20 @@ import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
 import { GuardianService } from '../../src/services/guardian-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
-import { ResendCooldownError, TransactionTimeoutError } from '../../src/utils/errors';
+import { ResendCooldownError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
-import { createAdmin, createCoach, createPlayer, createTeam, createUser, transactionClosed, uniqueViolation } from '../factories';
+import { createAdmin, createCoach, createPlayer, createTeam, createUser, uniqueViolation } from '../factories';
 import {
   expectBadRequestError,
   expectForbiddenError,
   expectNotFoundError,
 } from '../helpers';
 
+jest.mock('../../src/utils/lock-timeout', () => ({
+  ...jest.requireActual('../../src/utils/lock-timeout'),
+  setLocalLockTimeout: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
 }));
@@ -609,18 +613,6 @@ describe('GuardianService', () => {
         const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
 
         expectBadRequestError(err, 'A pending guardian invitation already exists for this email');
-        expect(mockedMailerSend).not.toHaveBeenCalled();
-      });
-
-      it('marks a P2028 from the supersede transaction as expected lock-wait contention (#908)', async () => {
-        setLivePending();
-        const aborted = transactionClosed();
-        (mockPrisma.guardianInvitation.create as jest.Mock).mockRejectedValue(aborted);
-
-        const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
-
-        expect(err).toBeInstanceOf(TransactionTimeoutError);
-        expect(err).toMatchObject({ statusCode: 503, expected: true, cause: aborted });
         expect(mockedMailerSend).not.toHaveBeenCalled();
       });
 

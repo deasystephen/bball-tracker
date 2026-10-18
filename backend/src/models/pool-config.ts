@@ -73,6 +73,9 @@ function* causeChain(err: unknown): Generator<unknown> {
 const messageOf = (candidate: unknown): string =>
   candidate instanceof Error ? candidate.message : String(candidate);
 
+const matchesPoolTimeout = (candidate: unknown): boolean =>
+  POOL_TIMEOUT_MESSAGES.some((m) => messageOf(candidate).includes(m));
+
 /**
  * True when `err` (or any error in its `cause` chain, in case Prisma wraps it)
  * is one of pg's connect/pool timeouts: the pool is saturated or the database
@@ -80,7 +83,7 @@ const messageOf = (candidate: unknown): string =>
  */
 export function isPoolTimeoutError(err: unknown): boolean {
   for (const candidate of causeChain(err)) {
-    if (POOL_TIMEOUT_MESSAGES.some((m) => messageOf(candidate).includes(m))) return true;
+    if (matchesPoolTimeout(candidate)) return true;
   }
   return false;
 }
@@ -91,32 +94,41 @@ export const TRANSACTION_START_MESSAGE = 'Unable to start a transaction in the g
 /** Prisma P2028 message of an interactive transaction that outlived its timeout. */
 export const TRANSACTION_EXPIRED_MESSAGE = 'The timeout for this transaction was';
 
+/** PostgreSQL SQLSTATE for `lock_timeout` ("canceling statement due to lock timeout"). */
+export const LOCK_TIMEOUT_SQLSTATE = '55P03';
+
 export type DbErrorKind = 'lock_wait' | 'busy';
+
+/** The pg driver adapter's SQLSTATE, which Prisma 7 puts on `meta` (P2010 for raw queries, P2039 for the ORM). */
+function driverSqlState(candidate: unknown): unknown {
+  const meta = (candidate as { meta?: { driverAdapterError?: { cause?: { code?: unknown } } } }).meta;
+  return meta?.driverAdapterError?.cause?.code;
+}
 
 /**
  * Classify a database error that should be answered 503 with `Retry-After`
  * (#908), walking the cause chain once:
  *
- * - `lock_wait`: Prisma `P2028` for an interactive transaction that outlived
- *   its timeout, in practice a waiter stuck on a row lock held by a concurrent
- *   twin request. It says nothing about whether contention was expected at the
- *   call site; see `TransactionTimeoutError.expected`.
+ * - `lock_wait`: the transaction was cancelled waiting on a lock held by
+ *   another request. Either Prisma `P2028` for an interactive transaction that
+ *   outlived its timeout, or PostgreSQL's `lock_timeout` (55P03,
+ *   `lock-timeout.ts`), which Prisma wraps as P2010 or P2039 with the SQLSTATE
+ *   on `meta.driverAdapterError.cause.code`.
  * - `busy`: a pg pool wait/connect timeout, or P2028 for `maxWait`
  *   exhaustion. Answered with `DB_BUSY_BODY`.
  *
  * A query on an already committed or rolled-back transaction is also P2028 but
- * is a bug and stays unclassified (500). Duck-typed on `code` so this module
- * keeps no Prisma import.
+ * is a bug and stays unclassified (500). Duck-typed so this module keeps no
+ * Prisma import.
  */
 export function classifyDbError(err: unknown): DbErrorKind | undefined {
   for (const candidate of causeChain(err)) {
     const message = messageOf(candidate);
     const isP2028 = (candidate as { code?: unknown }).code === 'P2028';
-    if (isP2028 && message.includes(TRANSACTION_EXPIRED_MESSAGE)) return 'lock_wait';
-    if (
-      (isP2028 && message.includes(TRANSACTION_START_MESSAGE)) ||
-      POOL_TIMEOUT_MESSAGES.some((m) => message.includes(m))
-    ) {
+    if ((isP2028 && message.includes(TRANSACTION_EXPIRED_MESSAGE)) || driverSqlState(candidate) === LOCK_TIMEOUT_SQLSTATE) {
+      return 'lock_wait';
+    }
+    if ((isP2028 && message.includes(TRANSACTION_START_MESSAGE)) || matchesPoolTimeout(candidate)) {
       return 'busy';
     }
   }

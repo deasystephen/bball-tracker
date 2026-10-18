@@ -705,3 +705,29 @@ export function transactionClosed(
 ): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError(message, { code: 'P2028', clientVersion: 'test' });
 }
+
+/**
+ * PostgreSQL's `lock_timeout` cancel (55P03) as Prisma 7 with the pg driver
+ * adapter surfaces it for an ORM query: P2039 with the SQLSTATE on
+ * `meta.driverAdapterError.cause` (a raw query is P2010, same meta; verified
+ * against Postgres 18, 2026-10-18).
+ */
+export function lockTimeout(code: 'P2039' | 'P2010' = 'P2039'): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Database error. Code: `55P03`. Message: `canceling statement due to lock timeout`', {
+    code,
+    clientVersion: 'test',
+    meta: {
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: {
+          originalCode: '55P03',
+          originalMessage: 'canceling statement due to lock timeout',
+          kind: 'postgres',
+          code: '55P03',
+          severity: 'ERROR',
+          message: 'canceling statement due to lock timeout',
+        },
+      },
+    },
+  });
+}

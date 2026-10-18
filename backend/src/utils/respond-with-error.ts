@@ -14,14 +14,11 @@
  * - A pg pool wait/connect timeout (`models/pool-config.ts#isPoolTimeoutError`,
  *   #751) is answered 503 with `Retry-After` and the central handler's retry
  *   body, like the central handler: the pool is saturated, not the route broken.
- *   An interactive transaction that expired waiting on a row lock (Prisma
- *   P2028, #908) is the `transaction_timeout` 503 (`TransactionTimeoutError`,
- *   `DetailedError.body()`) with the same `Retry-After`; classification and
- *   rendering are shared with the central handler (`utils/db-busy.ts`). Only a
- *   `TransactionTimeoutError` marked `expected` (the two supersede-resend
- *   transactions) is logged at `warn` and kept out of Sentry; a raw P2028 from
- *   any other transaction is logged at `error` and captured.
- *   Every 503 answered here carries `Retry-After`.
+ *   A transaction cancelled waiting on a lock (Prisma P2028 or PostgreSQL
+ *   `lock_timeout`, #908) is the `transaction_timeout` 503
+ *   (`TransactionTimeoutError`, `DetailedError.body()`) with the same
+ *   `Retry-After`. Classification and rendering are shared with the central
+ *   handler (`utils/db-busy.ts`); both 503s are logged at `error` and captured.
  * - A non-`AppError` carrying a 4xx `status`/`statusCode` (a WorkOS SDK error,
  *   an `http-errors` error) keeps that status, the rule the central error
  *   handler applies through `sentry.ts#clientErrorStatus`, with the `fallback`
@@ -42,7 +39,7 @@
  */
 
 import type { Response } from 'express';
-import { dbBusyOutcome, sendJson } from './db-busy';
+import { dbBusyOutcome, sendDbBusy } from './db-busy';
 import { AppError, DetailedError, NotFoundError } from './errors';
 import { logRouteError } from './log-route-error';
 import { captureRequestException, clientErrorStatus } from './sentry';
@@ -68,29 +65,26 @@ export function respondWithError(res: Response, error: unknown, options: Respond
   if (streamed) {
     res.end();
   } else if (busy) {
-    sendJson(res, 503, busy.body);
+    sendDbBusy(res, busy);
   } else if (options.notFound !== undefined && error instanceof NotFoundError) {
     res.status(404).json({ error: options.notFound });
   } else if (error instanceof AppError && error.statusCode >= 500) {
-    sendJson(res, error.statusCode, fallback);
+    res.status(error.statusCode).json(fallback);
   } else if (error instanceof DetailedError) {
-    sendJson(res, error.statusCode, error.body());
+    res.status(error.statusCode).json(error.body());
   } else if (error instanceof AppError) {
-    sendJson(res, error.statusCode, { error: error.message });
+    res.status(error.statusCode).json({ error: error.message });
   } else {
     res.status(clientErrorStatus(error) ?? 500).json(fallback);
   }
 
   const status = streamed ? 500 : res.statusCode;
-  // Expected contention (a marked TransactionTimeoutError) is quiet, except on
-  // a streamed response, which is a failed export whatever the cause.
-  const quiet = !streamed && busy?.expected === true;
-  if (options.sentryFlow && status >= 500 && !quiet) {
+  if (options.sentryFlow && status >= 500) {
     captureRequestException(error, res.req, { flow: options.sentryFlow });
   }
   if (streamed) {
     logRouteError({ statusCode: 500 }, options.log, error, { streamed: true });
   } else {
-    logRouteError(res, options.log, error, {}, { expected: quiet });
+    logRouteError(res, options.log, error);
   }
 }

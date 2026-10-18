@@ -221,20 +221,15 @@ describe('sentryErrorHandler', () => {
     expect(next).toHaveBeenCalledWith(err);
   });
 
-  it('skips a TransactionTimeoutError marked expected but captures an unmarked one and a raw P2028 (#908)', () => {
+  it('captures a lock-wait 503 (TransactionTimeoutError) and a raw P2028 like any 5xx (#908)', () => {
     const next = jest.fn();
-    sentryErrorHandler(new TransactionTimeoutError(true, transactionClosed()), req, res, next);
-    expect(mockCapture).not.toHaveBeenCalled();
-
-    const unmarked = new TransactionTimeoutError();
-    sentryErrorHandler(unmarked, req, res, next);
+    const timeout = new TransactionTimeoutError(transactionClosed());
     const raw = transactionClosed();
+    sentryErrorHandler(timeout, req, res, next);
     sentryErrorHandler(raw, req, res, next);
-    expect(mockCapture).toHaveBeenCalledTimes(2);
-    expect(mockCapture).toHaveBeenCalledWith(unmarked);
+    expect(mockCapture).toHaveBeenCalledWith(timeout);
     expect(mockCapture).toHaveBeenCalledWith(raw);
-    expect(isExpectedClientError(new TransactionTimeoutError(true))).toBe(true);
-    expect(isExpectedClientError(raw)).toBe(false);
+    expect(isExpectedClientError(timeout)).toBe(false);
   });
 
   it('still captures plain errors, tagging a redacted route', () => {

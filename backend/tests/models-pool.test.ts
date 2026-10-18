@@ -16,7 +16,7 @@ import {
   classifyDbError,
   isPoolTimeoutError,
 } from '../src/models/pool-config';
-import { transactionClosed } from './factories';
+import { lockTimeout, transactionClosed } from './factories';
 
 const TASK_DEFINITION = JSON.parse(
   readFileSync(path.resolve(__dirname, '../../infra/task-definition.json'), 'utf8')
@@ -112,6 +112,11 @@ describe('classifyDbError (#908)', () => {
   it('classifies an expired interactive transaction as lock_wait, also behind a cause', () => {
     expect(classifyDbError(transactionClosed())).toBe('lock_wait');
     expect(classifyDbError(new Error('wrapper', { cause: transactionClosed() }))).toBe('lock_wait');
+  });
+
+  it("classifies PostgreSQL's lock_timeout (55P03) behind P2039 or P2010 as lock_wait", () => {
+    expect(classifyDbError(lockTimeout('P2039'))).toBe('lock_wait');
+    expect(classifyDbError(lockTimeout('P2010'))).toBe('lock_wait');
   });
 
   it('classifies maxWait exhaustion and pool timeouts as busy', () => {

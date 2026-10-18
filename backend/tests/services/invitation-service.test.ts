@@ -5,12 +5,16 @@
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { GuardianService } from '../../src/services/guardian-service';
-import { BadRequestError, ResendCooldownError, TransactionTimeoutError } from '../../src/utils/errors';
+import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { hashRecipient, MailSendError } from '../../src/services/mailer/ses-mailer';
 
+jest.mock('../../src/utils/lock-timeout', () => ({
+  ...jest.requireActual('../../src/utils/lock-timeout'),
+  setLocalLockTimeout: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
 }));
@@ -38,7 +42,6 @@ import {
   createFullInvitation,
   createTeamRole,
   createTeamStaff,
-  transactionClosed,
   uniqueViolation,
 } from '../factories';
 import {
@@ -2412,33 +2415,6 @@ describe('InvitationService', () => {
         statusCode: 400,
         message: 'A pending invitation already exists for this player',
       });
-    });
-
-    it('marks a P2028 from the supersede transaction as expected lock-wait contention (#908)', async () => {
-      const coach = createCoach();
-      const league = createLeague();
-      const season = createSeason({ leagueId: league.id });
-      const team = createTeam({ seasonId: season.id });
-      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
-      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
-      const player = createPlayer();
-
-      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
-      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
-      const aborted = transactionClosed();
-      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(aborted);
-
-      const err = await InvitationService.createInvitation(
-        team.id,
-        { playerId: player.id, supersede: true, expiresInDays: 7 },
-        coach.id
-      ).catch((e) => e);
-
-      expect(err).toBeInstanceOf(TransactionTimeoutError);
-      expect(err).toMatchObject({ statusCode: 503, expected: true, cause: aborted });
     });
 
     it('does not report a token-collision P2002 in the supersede transaction as the dedupe 400', async () => {

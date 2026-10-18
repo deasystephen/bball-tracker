@@ -10,7 +10,7 @@
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent, Event, EventHint, NodeOptions } from '@sentry/node';
 import type { Request, Response, NextFunction } from 'express';
-import { AppError, TransactionTimeoutError } from './errors';
+import { AppError } from './errors';
 import { logger } from './logger';
 import { redactQueryObject, redactQueryString, redactUrl, redactUrlsInText } from './redact';
 
@@ -265,9 +265,6 @@ export function clientErrorStatus(err: unknown): number | undefined {
  * 5xx and other non-AppError throws are still captured.
  */
 export function isExpectedClientError(err: unknown): boolean {
-  // Lock-wait contention marked expected where it is normal (#908). A raw
-  // P2028 from any other transaction is not: a slow transaction must be seen.
-  if (err instanceof TransactionTimeoutError) return err.expected;
   if (err instanceof AppError) return err.isOperational && err.statusCode < 500;
   return clientErrorStatus(err) !== undefined;
 }

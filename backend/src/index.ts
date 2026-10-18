@@ -112,8 +112,9 @@ app.use('/api/v1', apiRouter);
 setupWebSocketHandlers(io);
 
 // Error handling middleware
-import { AppError, DetailedError, TransactionTimeoutError } from './utils/errors';
-import { dbBusyOutcome, sendJson } from './utils/db-busy';
+import { AppError, DetailedError } from './utils/errors';
+import { dbBusyOutcome, sendDbBusy } from './utils/db-busy';
+import { redactUrlsInText } from './utils/redact';
 
 // Forward exceptions to Sentry before the app's own error handler renders a response.
 app.use(sentryErrorHandler);
@@ -123,20 +124,20 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // warnings — reserving `error` for 5xx keeps the error stream meaningful.
   // pg's pool-wait/connect timeout (#751): the pool is saturated or the
   // database is not answering. Answer 503 with Retry-After, not a generic 500.
-  // An interactive transaction that expired waiting on a row lock (Prisma
-  // P2028, #908) is a 503 `transaction_timeout` whichever service opened it;
-  // only a TransactionTimeoutError marked `expected` is warn-level. An AppError
-  // other than that keeps its own status.
-  const busy = err instanceof AppError && !(err instanceof TransactionTimeoutError) ? undefined : dbBusyOutcome(err);
+  // A transaction cancelled waiting on a lock (Prisma P2028 or PostgreSQL
+  // lock_timeout, #908) is a 503 `transaction_timeout` whichever service opened
+  // it, like a pool timeout: logged at error and captured, because a lock
+  // holder that outlasts the wait is a slow-database signal.
+  const busy = dbBusyOutcome(err);
   const status = busy ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
-  const log = busy?.expected || (status !== undefined && status < 500) ? logger.warn : logger.error;
+  const log = status !== undefined && status < 500 ? logger.warn : logger.error;
   log(err.message, {
     requestId: _req.requestId,
     method: _req.method,
     path: loggablePath(_req),
     status,
     // Prisma's own message (configured timeout, elapsed ms) rides on `cause`.
-    cause: err.cause instanceof Error ? err.cause.message : undefined,
+    cause: err.cause instanceof Error ? redactUrlsInText(err.cause.message) : undefined,
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 
@@ -144,15 +145,17 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // machine-readable `code` and its structured payload (402 upgrade_required,
   // 400 last_head_coach); `body()` is the single serialization rule for those.
   if (busy) {
-    sendJson(res, 503, busy.body);
+    sendDbBusy(res, busy);
     return;
   }
   if (err instanceof DetailedError) {
-    sendJson(res, err.statusCode, err.body());
+    res.status(err.statusCode).json(err.body());
     return;
   }
   if (err instanceof AppError) {
-    sendJson(res, err.statusCode, { error: err.message });
+    res.status(err.statusCode).json({
+      error: err.message,
+    });
     return;
   }
 

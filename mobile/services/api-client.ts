@@ -112,9 +112,10 @@ export const observeError = (error: unknown): Promise<never> => {
     const config = error.config as RetriableConfig | undefined;
     const pattern = configPattern(config);
     const status = error.response?.status;
-    // A lock-wait 503 (`transaction_timeout`, backend #908) is a retryable
-    // contention outcome the user sees as a toast; the server tracks it.
-    const retryable = (error.response?.data as { code?: unknown } | undefined)?.code === 'transaction_timeout';
+    // A 503 with `Retry-After` is the backend's retryable busy-database answer
+    // (pool timeout or lock-wait `transaction_timeout`, backend #908): the user
+    // sees a toast and the server already tracks it, so no mobile Sentry event.
+    const retryable = status === 503 && error.response?.headers?.['retry-after'] !== undefined;
     addBreadcrumb({
       category: 'http',
       type: 'http',
