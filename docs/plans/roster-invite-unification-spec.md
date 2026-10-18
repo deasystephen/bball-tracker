@@ -221,9 +221,9 @@ user-visible outcome.
   open, so the account remains in the sandbox.
 - **Invite-funnel analytics** — shipped under #616 (closed 2026-10-03) as `invitation_sent`
   (with `resend: true` for a resend) and `invitation_accepted` (`source: in_app | link`). The
-  claimed-via-login signal (`invite_claimed_via_login`) shipped under #790 as the
-  `claimed_invite` (and `was_managed`) properties on `user_logged_in`, fed by the
-  `claimedInvite` / `wasManaged` flags on the `/auth/callback` response.
+  claimed-via-login signal (`invite_claimed_via_login`) is built under #790 as the
+  `claimed_invite` (and `was_managed`) properties on `user_logged_in`: backend in #899
+  (`claimedInvite` / `wasManaged` on the `/auth/callback` response), mobile in #903.
 - **Deprecated endpoint removal** — done in PR #603 (#418), merged and deployed 2026-09-29, once
   OTA adoption of the unified Add Player flow was confirmed.
 

@@ -82,9 +82,11 @@ export interface AnalyticsEventProps {
    * `claimed_invite`: this sign-in claimed any pre-provisioned account (a
    * coach add-by-email, `POST /players` or an admin pre-create, with or
    * without a team invitation) rather than creating one; `was_managed`: that
-   * account was any managed row, coach or guardian (#790). Both come from the
-   * `/auth/callback` response and are omitted when it does not carry them
-   * (an API older than #790), so an unknown is never counted as `false`.
+   * account was any managed row, coach or guardian, sent only alongside
+   * `claimed_invite` (#790). Both come from the `/auth/callback` response and
+   * are omitted when it does not carry them (an API older than #790), so an
+   * unknown is never counted as `false`. A dev login (`/auth/dev-login`)
+   * never sends them: a dev session is not a datum.
    */
   user_logged_in: { claimed_invite?: boolean; was_managed?: boolean };
   user_logged_out: { reason: 'user' | 'session_expired' | 'account_deleted' };

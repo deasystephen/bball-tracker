@@ -20,7 +20,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedView, ThemedText, LoadingSpinner, Button } from '../../components';
 import { useTheme } from '../../hooks/useTheme';
-import { useAuthActions } from '../../store/auth-store';
+import { useAuthActions, type AuthCallbackResponse } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { log } from '../../services/log';
@@ -82,7 +82,7 @@ export default function AuthCallbackScreen() {
           );
           return;
         }
-        const response = await apiClient.get('/auth/callback', {
+        const response = await apiClient.get<AuthCallbackResponse>('/auth/callback', {
           params: { code, state: pending.state, code_verifier: pending.verifier },
         });
         const { accessToken, refreshToken, user, claimedInvite, wasManaged } = response.data;

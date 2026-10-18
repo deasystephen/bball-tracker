@@ -48,6 +48,12 @@ jest.mock('../../services/analytics', () => ({
   },
 }));
 
+/** The properties of the last `user_logged_in` call, exactly as passed. */
+const loggedInProps = (): unknown => {
+  const calls = (trackEvent as jest.Mock).mock.calls.filter(([event]) => event === 'user_logged_in');
+  return calls[calls.length - 1]?.[1];
+};
+
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-1',
   email: 'test@example.com',
@@ -101,8 +107,10 @@ describe('auth-store', () => {
       app_version: '1.5.0',
     });
     expect(JSON.stringify((identifyUser as jest.Mock).mock.calls)).not.toContain('test@example.com');
-    // No outcome passed: the flags are left out rather than reported as false (#790)
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
+    // No outcome passed: the flags are left out rather than reported as false (#790).
+    // toStrictEqual, because toHaveBeenCalledWith treats { claimed_invite: undefined } as {}.
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, expect.anything());
+    expect(loggedInProps()).toStrictEqual({});
   });
 
   describe('user_logged_in outcome flags (#790)', () => {
@@ -129,7 +137,19 @@ describe('auth-store', () => {
         .getState()
         .setUser(makeUser(), { claimedInvite: undefined, wasManaged: 'yes' as unknown as boolean });
 
-      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
+      expect(loggedInProps()).toStrictEqual({});
+    });
+
+    it('sends was_managed only alongside claimed_invite', () => {
+      useAuthStore.getState().setUser(makeUser(), { wasManaged: true });
+
+      expect(loggedInProps()).toStrictEqual({});
+    });
+
+    it('reports was_managed: false when a claim arrives without the managed flag', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true });
+
+      expect(loggedInProps()).toStrictEqual({ claimed_invite: true, was_managed: false });
     });
 
     it('sends booleans only, never the user\'s email or name', () => {

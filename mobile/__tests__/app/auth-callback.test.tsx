@@ -33,9 +33,12 @@ jest.mock('../../utils/role-onboarding', () => ({
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 
 jest.mock('../../services/analytics', () => ({
-  ...jest.requireActual('../../services/analytics'),
   trackEvent: jest.fn(),
   identifyUser: jest.fn(),
+  resetUser: jest.fn(),
+  setUserProperties: jest.fn(),
+  appVersion: () => '1.5.0',
+  AnalyticsEvents: { USER_LOGGED_IN: 'user_logged_in', USER_LOGGED_OUT: 'user_logged_out' },
 }));
 
 const mockedGet = apiClient.get as jest.Mock;
@@ -82,10 +85,8 @@ describe('AuthCallbackScreen', () => {
     render(<AuthCallbackScreen />);
 
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
-      claimed_invite: claimedInvite,
-      was_managed: wasManaged,
-    });
+    const call = (trackEvent as jest.Mock).mock.calls.find(([event]) => event === AnalyticsEvents.USER_LOGGED_IN);
+    expect(call?.[1]).toStrictEqual({ claimed_invite: claimedInvite, was_managed: wasManaged });
   });
 
   it('fires user_logged_in without the flags when the API does not send them', async () => {
@@ -97,7 +98,9 @@ describe('AuthCallbackScreen', () => {
     render(<AuthCallbackScreen />);
 
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {});
+    // Strict: toHaveBeenCalledWith would accept { claimed_invite: undefined } as {}
+    const call = (trackEvent as jest.Mock).mock.calls.find(([event]) => event === AnalyticsEvents.USER_LOGGED_IN);
+    expect(call?.[1]).toStrictEqual({});
   });
 
   it('refuses to exchange the code when the state does not match a sign-in from this device', async () => {
