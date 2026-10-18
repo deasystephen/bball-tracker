@@ -13,6 +13,7 @@ import {
   type TransactionEvent,
 } from '../../src/utils/sentry';
 import { AppError, NotFoundError, UnauthorizedError } from '../../src/utils/errors';
+import { transactionClosed } from '../factories';
 import type { Event } from '@sentry/node';
 import type { Request, Response } from 'express';
 
@@ -218,6 +219,16 @@ describe('sentryErrorHandler', () => {
     expect(mockCapture).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(2);
     expect(next).toHaveBeenCalledWith(err);
+  });
+
+  it('does not capture a lock-wait transaction timeout (P2028, #908)', () => {
+    const next = jest.fn();
+    const err = transactionClosed();
+    sentryErrorHandler(err, req, res, next);
+    expect(mockCapture).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(err);
+    expect(isExpectedClientError(err)).toBe(true);
+    expect(isExpectedClientError(transactionClosed('Transaction already closed: committed'))).toBe(false);
   });
 
   it('still captures plain errors, tagging a redacted route', () => {

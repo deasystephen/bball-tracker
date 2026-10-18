@@ -138,6 +138,26 @@ export class ConflictError extends AppError {
 }
 
 
+/**
+ * 503 — an interactive transaction expired (Prisma P2028) while it waited on a
+ * row lock held by a concurrent twin request (#908). Nothing was written, so
+ * the user can safely retry. The central error handler and `respondWithError`
+ * create it from the Prisma error (`models/pool-config.ts#isTransactionTimeoutError`)
+ * and set `Retry-After` when they render it; an expected contention outcome,
+ * logged at warn and not sent to Sentry.
+ */
+export class TransactionTimeoutError extends DetailedError<Record<string, unknown>> {
+  constructor() {
+    super(
+      'transaction_timeout',
+      {},
+      'Another request for this record is still being processed; please retry',
+      503
+    );
+    Object.setPrototypeOf(this, TransactionTimeoutError.prototype);
+  }
+}
+
 export class ServiceUnavailableError extends AppError {
   constructor(message: string = 'Service unavailable') {
     super(message, 503);

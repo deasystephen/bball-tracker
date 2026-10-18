@@ -153,7 +153,10 @@ as a remedy: Socket.io runs on an in-memory adapter and is single-replica only (
    operator session or script was left open. Confirm `runningCount` with the `describe-services`
    command above. Pool exhaustion inside one task never shows here: it shows as
    `"db":"timeout"` on `/health` and as 503s with `Retry-After` (or 500s from routes that answer
-   their own errors) on API requests.
+   their own errors) on API requests. A 503 with body code `transaction_timeout` is different: one
+   request waited past Prisma's 5 s interactive-transaction timeout on a row lock held by a
+   concurrent request for the same record (#908). It is logged at `warn` and not sent to Sentry; a
+   burst of them means a slow lock holder, not pool exhaustion.
 3. **CPU: open Performance Insights** for the instance and look at top SQL. `db.t3.micro` is
    burstable — sustained CPU also drains the credit balance (`CPUCreditBalance`), after which the
    instance is throttled and everything slows at once.

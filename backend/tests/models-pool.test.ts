@@ -11,12 +11,11 @@ import {
   DB_POOL_MAX,
   DB_POOL_OPTIONS,
   POOL_TIMEOUT_MESSAGES,
-  dbBusyBody,
+  isDbBusyError,
   isPoolTimeoutError,
   isTransactionTimeoutError,
-  DB_BUSY_BODY,
-  TRANSACTION_TIMEOUT_BODY,
 } from '../src/models/pool-config';
+import { transactionClosed } from './factories';
 
 const TASK_DEFINITION = JSON.parse(
   readFileSync(path.resolve(__dirname, '../../infra/task-definition.json'), 'utf8')
@@ -94,44 +93,29 @@ describe('isPoolTimeoutError', () => {
   });
 });
 
-describe('isTransactionTimeoutError / dbBusyBody (#908)', () => {
-  const p2028 = (message: string): Error =>
-    Object.assign(new Error(message), { code: 'P2028' });
-  const expired = p2028(
-    'Transaction API error: A commit cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5003 ms passed since the start of the transaction.',
+describe('isTransactionTimeoutError / isDbBusyError (#908)', () => {
+  const maxWait = transactionClosed('Transaction API error: Unable to start a transaction in the given time.');
+  const closed = transactionClosed(
+    'Transaction API error: Transaction already closed: A query cannot be executed on a committed transaction.'
   );
 
   it('matches a P2028 for an expired interactive transaction, also behind a cause', () => {
-    expect(isTransactionTimeoutError(expired)).toBe(true);
-    expect(
-      isTransactionTimeoutError(new Error('wrapper', { cause: expired })),
-    ).toBe(true);
-    expect(dbBusyBody(expired)).toBe(TRANSACTION_TIMEOUT_BODY);
+    expect(isTransactionTimeoutError(transactionClosed())).toBe(true);
+    expect(isTransactionTimeoutError(new Error('wrapper', { cause: transactionClosed() }))).toBe(true);
+    expect(isDbBusyError(transactionClosed())).toBe(false);
   });
 
-  it('answers maxWait exhaustion with the pool-busy body, not the lock-wait one', () => {
-    const maxWait = p2028(
-      'Transaction API error: Unable to start a transaction in the given time.',
-    );
+  it('treats maxWait exhaustion as a busy database, not a lock wait', () => {
     expect(isTransactionTimeoutError(maxWait)).toBe(false);
-    expect(dbBusyBody(maxWait)).toBe(DB_BUSY_BODY);
+    expect(isDbBusyError(maxWait)).toBe(true);
   });
 
-  it('leaves a query on an already closed transaction, other codes and non-errors alone', () => {
-    const closed = p2028(
-      'Transaction API error: Transaction already closed: A query cannot be executed on a committed transaction.',
-    );
-    expect(dbBusyBody(closed)).toBeUndefined();
-    expect(
-      isTransactionTimeoutError(
-        Object.assign(new Error('The timeout for this transaction was 1 ms'), {
-          code: 'P2002',
-        }),
-      ),
-    ).toBe(false);
-    expect(
-      dbBusyBody(new Error('timeout exceeded when trying to connect')),
-    ).toBe(DB_BUSY_BODY);
-    expect(dbBusyBody(undefined)).toBeUndefined();
+  it('requires the P2028 code and leaves a query on a closed transaction alone', () => {
+    expect(isTransactionTimeoutError(closed)).toBe(false);
+    expect(isDbBusyError(closed)).toBe(false);
+    expect(isTransactionTimeoutError(new Error('The timeout for this transaction was 1 ms'))).toBe(false);
+    expect(isDbBusyError(new Error('Unable to start a transaction in the given time'))).toBe(false);
+    expect(isDbBusyError(new Error('timeout exceeded when trying to connect'))).toBe(true);
+    expect(isDbBusyError(undefined)).toBe(false);
   });
 });

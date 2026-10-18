@@ -10,6 +10,7 @@
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent, Event, EventHint, NodeOptions } from '@sentry/node';
 import type { Request, Response, NextFunction } from 'express';
+import { isTransactionTimeoutError } from '../models/pool-config';
 import { AppError } from './errors';
 import { logger } from './logger';
 import { redactQueryObject, redactQueryString, redactUrl, redactUrlsInText } from './redact';
@@ -265,6 +266,8 @@ export function clientErrorStatus(err: unknown): number | undefined {
  * 5xx and other non-AppError throws are still captured.
  */
 export function isExpectedClientError(err: unknown): boolean {
+  // Lock-wait contention answered 503 `transaction_timeout` (#908): expected.
+  if (isTransactionTimeoutError(err)) return true;
   if (err instanceof AppError) return err.isOperational && err.statusCode < 500;
   return clientErrorStatus(err) !== undefined;
 }

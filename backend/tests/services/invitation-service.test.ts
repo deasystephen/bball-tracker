@@ -2428,8 +2428,6 @@ describe('InvitationService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(transactionClosed());
-
       const aborted = transactionClosed();
       (mockPrisma.$transaction as jest.Mock).mockRejectedValue(aborted);
 

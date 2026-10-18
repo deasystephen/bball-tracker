@@ -79,7 +79,7 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
-import { DB_BUSY_RETRY_AFTER_SECONDS, dbBusyBody, isPoolTimeoutError } from './models/pool-config';
+import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isDbBusyError, isPoolTimeoutError, isTransactionTimeoutError } from './models/pool-config';
 
 // `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
 // fired (pool saturated, or RDS not answering TCP), 'down' for anything else
@@ -112,7 +112,7 @@ app.use('/api/v1', apiRouter);
 setupWebSocketHandlers(io);
 
 // Error handling middleware
-import { AppError, DetailedError } from './utils/errors';
+import { AppError, DetailedError, TransactionTimeoutError } from './utils/errors';
 
 // Forward exceptions to Sentry before the app's own error handler renders a response.
 app.use(sentryErrorHandler);
@@ -123,10 +123,13 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // pg's pool-wait/connect timeout (#751): the pool is saturated or the
   // database is not answering. Answer 503 with Retry-After, not a generic 500.
   // An interactive transaction that expired waiting on a row lock (Prisma
-  // P2028, #908) is the same retryable 503, whichever service opened it.
-  const busyBody = dbBusyBody(err);
-  const status = busyBody ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
-  const log = status !== undefined && status < 500 ? logger.warn : logger.error;
+  // P2028, #908) becomes a DetailedError 503 `transaction_timeout`, whichever
+  // service opened it. Expected contention: warn, not error, and not Sentry.
+  const lockWait = isTransactionTimeoutError(err);
+  const mapped: Error = lockWait ? new TransactionTimeoutError() : err;
+  const busy = isDbBusyError(err);
+  const status = busy ? 503 : mapped instanceof AppError ? mapped.statusCode : clientErrorStatus(mapped);
+  const log = lockWait || (status !== undefined && status < 500) ? logger.warn : logger.error;
   log(err.message, {
     requestId: _req.requestId,
     method: _req.method,
@@ -138,13 +141,14 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // If it's an AppError, use its status code. A DetailedError also carries a
   // machine-readable `code` and its structured payload (402 upgrade_required,
   // 400 last_head_coach); `body()` is the single serialization rule for those.
-  if (err instanceof DetailedError) {
-    res.status(err.statusCode).json(err.body());
+  if (mapped instanceof DetailedError) {
+    if (mapped.statusCode === 503) res.set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS));
+    res.status(mapped.statusCode).json(mapped.body());
     return;
   }
-  if (err instanceof AppError) {
-    res.status(err.statusCode).json({
-      error: err.message,
+  if (mapped instanceof AppError) {
+    res.status(mapped.statusCode).json({
+      error: mapped.message,
     });
     return;
   }
@@ -159,11 +163,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     return;
   }
 
-  if (busyBody) {
+  if (busy) {
     res
       .status(503)
       .set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS))
-      .json(busyBody);
+      .json(DB_BUSY_BODY);
     return;
   }
 

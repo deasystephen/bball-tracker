@@ -31,9 +31,12 @@ export function logRouteError(
   context: Record<string, unknown> = {}
 ): void {
   const status = res.statusCode;
-  const log = status >= 400 && status < 500 ? logger.warn : logger.error;
+  // `expected: true` marks a 5xx that is an expected outcome (a lock-wait
+  // timeout answered 503, #908): warn, so it stays out of `@level:error`.
+  const { expected, ...fields } = context;
+  const log = (status >= 400 && status < 500) || expected === true ? logger.warn : logger.error;
   log(message, {
-    ...context,
+    ...fields,
     status,
     error: error instanceof Error ? error.message : String(error),
   });
