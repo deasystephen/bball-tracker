@@ -1136,7 +1136,7 @@ Cross-cuts E, I, J — but worth aggregating here.
 ### P.9 — Token expiry mid-session (Socket.io)
 - [ ] Pass / Fail / Skipped
 - **Steps:** Open spectator view on an `IN_PROGRESS` game and leave it open past the access-token lifetime (minutes). Record an event from a second device before and after.
-- **Expected:** About 35s after the token expires the server emits `reauth_required` and closes the connection (#49); the view shows `reconnecting` briefly, the client refreshes and reconnects, rejoins the room with a fresh snapshot and keeps receiving events with the right score. The mobile half ships by OTA; a client without it still recovers through the `Unauthorized` path. A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
+- **Expected:** With the #49 OTA the client refreshes about a minute before the token expires and hands the new token to the open socket (`refresh-auth`): the view never shows `reconnecting` and events keep arriving with the right score. A client without the OTA is closed with `reauth_required` 35–55s after expiry, shows `reconnecting` briefly, refreshes, reconnects and rejoins with a fresh snapshot. A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
 - **Notes:** ___________
 
 ### P.10 — VoiceOver Headings rotor finds screen titles and sections (#775)
@@ -1292,7 +1292,7 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 - **Expected fail mode:** 1 ECS task in steady state. A rolling deploy briefly runs 2 tasks and splits rooms for that window — don't test live games across a deploy.
 
 ### S.8 — Mid-session Socket.io JWT reauth (resolved)
-- **Issue:** #49. The server re-verifies the handshake token at expiry and closes the connection with `reauth_required`; the client refreshes and reconnects. Verify through P.9.
+- **Issue:** #49. The client refreshes ahead of expiry and sends the new token in-band (`refresh-auth`); the server closes a socket with no valid token by expiry (`reauth_required`) and the client reconnects. Verify through P.9.
 
 ### S.9 — ✓ Mobile ESLint
 - Resolved in #132 (ESLint + eslint-config-expo wired up in `mobile/eslint.config.mjs`, CI lints mobile) and #346 (all warnings burned down; `--max-warnings 0` enforced in both packages). Nothing to verify manually.

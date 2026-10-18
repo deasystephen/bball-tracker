@@ -25,6 +25,7 @@ import { captureException } from '../../src/utils/sentry';
 import { setIo } from '../../src/websocket/io-registry';
 import {
   REAUTH_REQUIRED_EVENT,
+  REFRESH_AUTH_EVENT,
   hasPendingReauth,
   reverifySocket,
   type GameSocket,
@@ -169,7 +170,7 @@ describe('websocket integration (socket.io-client)', () => {
     });
     const existingEvent = createGameEvent({ gameId: game.id, eventType: 'SHOT' });
 
-    // Mock resolveSocketUser -> dev token path pulls user by id.
+    // Mock resolveSocketSession -> dev token path pulls user by id.
     (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id?: string } }) => {
       if (args?.where?.id === coach.id) {
         return Promise.resolve({
@@ -324,6 +325,48 @@ describe('websocket integration (socket.io-client)', () => {
             expect(outcome).toBe('reauth_required');
           });
         }, 400);
+      });
+    }, 10000);
+
+    it('keeps the connection when the client refreshes in-band with refresh-auth', (done) => {
+      const coach = createCoach();
+      mockDevUser(coach.id);
+      const client = connect(devToken({ userId: coach.id, exp: Date.now() + 300 }));
+
+      client.on('connect_error', (err) => {
+        client.close();
+        done(err);
+      });
+      client.on(REAUTH_REQUIRED_EVENT, () => {
+        client.close();
+        done(new Error('reauth_required after a successful refresh-auth'));
+      });
+      client.on('connect', () => {
+        const sock = serverSocket(client.id);
+        const fresh = devToken({ userId: coach.id, exp: Date.now() + 60_000 });
+        client.emit(REFRESH_AUTH_EVENT, { token: fresh }, (ack: unknown) => {
+          try {
+            expect(ack).toEqual({ success: true });
+          } catch (error) {
+            client.close();
+            done(error);
+            return;
+          }
+          // Past the handshake token's expiry the socket still verifies.
+          setTimeout(() => {
+            void reverifySocket(sock).then((outcome) => {
+              try {
+                expect(outcome).toBe('kept');
+                expect(client.connected).toBe(true);
+                client.close();
+                done();
+              } catch (error) {
+                client.close();
+                done(error);
+              }
+            });
+          }, 400);
+        });
       });
     }, 10000);
 

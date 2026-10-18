@@ -17,12 +17,22 @@
  *     exponentially and reconnect, capped at MAX_UNAVAILABLE_RETRIES.
  * A successful `connect` resets both counters.
  *
- * Mid-session re-auth (#49): when the handshake token expires the server
- * emits `reauth_required` and closes the transport. socket.io reconnects on
- * its own after a transport close, so this module only starts the token
- * refresh early; the reconnect's auth callback then reads the new token. If
- * the reconnect wins the race it is refused `Unauthorized`, and the path above
- * awaits the same single-flight refresh.
+ * Mid-session re-auth (#49). The server re-verifies the token it holds for
+ * this socket when that token expires. Normal path, no reconnect:
+ *   - Whenever the stored access token changes (any `refreshAccessToken()`,
+ *     REST-triggered or ours) while connected, this module emits
+ *     `refresh-auth { token }` and the server moves the socket onto it.
+ *   - While connected it also refreshes PROACTIVE_REFRESH_LEAD_MS before the
+ *     token the server holds expires, so a spectator who makes no REST calls
+ *     still refreshes in time.
+ * Fallback: if no valid token reached the server in time it emits
+ * `reauth_required` and closes the transport; socket.io reconnects on its
+ * own. If the stored token is already newer than the one the server held and
+ * unexpired, the reconnect's auth callback simply carries it; only otherwise
+ * is a refresh started (a refresh rotates the WorkOS refresh token, so it is
+ * never spent for nothing). A reconnect that wins the race against that
+ * refresh is refused `Unauthorized`, and the path above awaits the same
+ * single-flight refresh.
  *
  * RN note: pin transport to ['websocket']. The polling fallback works poorly
  * on iOS/Android and adds latency.
@@ -33,6 +43,7 @@ import { useAuthStore } from '../store/auth-store';
 import { refreshAccessToken } from './api-client';
 import { getApiUrl } from '../config/env';
 import { addBreadcrumb } from './sentry';
+import { isTokenUnexpired, tokenExpiresAt } from '../utils/token-expiry';
 
 // Same host as the REST client — decided once in config/env.ts.
 const getBaseURL = (): string => getApiUrl();
@@ -44,6 +55,10 @@ export const RATE_LIMITED_MESSAGE = 'Rate limited';
 
 /** Server → client: the handshake token expired and the connection is closing (#49). */
 export const REAUTH_REQUIRED_EVENT = 'reauth_required';
+/** Client → server: a fresh access token for the open connection (#49). */
+export const REFRESH_AUTH_EVENT = 'refresh-auth';
+/** Refresh this long before the server-held token expires (#49). */
+export const PROACTIVE_REFRESH_LEAD_MS = 60_000;
 
 /** Consecutive `Unauthorized` handshakes we will try to refresh through. */
 export const MAX_AUTH_REFRESHES = 2;
@@ -59,6 +74,12 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let recovering = false;
 /** True once this socket has connected at least once, so a later `connect` is a reconnect. */
 let hasConnected = false;
+/** The token the current handshake carried. */
+let handshakeToken: string | null = null;
+/** The token the server holds for the open connection (handshake or last `refresh-auth`). */
+let serverToken: string | null = null;
+let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
+let unsubscribeAuth: (() => void) | null = null;
 
 /**
  * Socket lifecycle breadcrumbs (#617): connect / reconnect / disconnect and
@@ -76,6 +97,50 @@ const clearRetryTimer = (): void => {
     retryTimer = null;
   }
 };
+
+const clearProactiveTimer = (): void => {
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer);
+    proactiveTimer = null;
+  }
+};
+
+/** Refresh ahead of the server-held token's expiry while connected (#49). */
+const scheduleProactiveRefresh = (target: Socket): void => {
+  clearProactiveTimer();
+  const expiresAt = tokenExpiresAt(serverToken);
+  if (expiresAt === null) return;
+  const delay = Math.max(expiresAt - Date.now() - PROACTIVE_REFRESH_LEAD_MS, 0);
+  proactiveTimer = setTimeout(() => {
+    proactiveTimer = null;
+    if (target !== socket || !target.connected) return;
+    socketCrumb('refreshing token ahead of expiry');
+    // On `ok` the store changes and the subscription sends `refresh-auth`.
+    // Otherwise the server's fallback closes the connection at expiry and the
+    // reconnect path recovers.
+    void refreshAccessToken();
+  }, delay);
+};
+
+/**
+ * Send the stored access token to the server if it differs from the one the
+ * server holds. Exported for tests; driven by the auth-store subscription and
+ * by `connect`.
+ */
+export function syncSocketToken(target: Socket): void {
+  if (target !== socket || !target.connected) return;
+  const token = useAuthStore.getState().accessToken;
+  if (!token || token === serverToken) return;
+  serverToken = token;
+  target.emit(REFRESH_AUTH_EVENT, { token }, (ack?: { success?: boolean; code?: string }) => {
+    socketCrumb(
+      ack?.success ? 'auth refreshed in-band' : 'in-band refresh refused',
+      ack?.success ? undefined : { code: ack?.code },
+      ack?.success ? 'info' : 'warning'
+    );
+  });
+  scheduleProactiveRefresh(target);
+}
 
 const scheduleReconnect = (target: Socket, delayMs: number): void => {
   clearRetryTimer();
@@ -160,6 +225,15 @@ export async function handleConnectError(target: Socket, err: Error): Promise<vo
 export async function handleReauthRequired(target: Socket): Promise<void> {
   if (target !== socket) return;
   recovering = true;
+  clearProactiveTimer();
+  const stored = useAuthStore.getState().accessToken;
+  if (stored && stored !== serverToken && isTokenUnexpired(stored)) {
+    // A refresh already landed after the server's copy; the reconnect's auth
+    // callback carries it. Spending another rotating refresh token would gain
+    // nothing and, on a lossy network, risk losing the session.
+    socketCrumb('reauth required: reconnecting with stored token');
+    return;
+  }
   socketCrumb('reauth required: refreshing token');
   const outcome = await refreshAccessToken();
   if (target !== socket) return;
@@ -181,6 +255,7 @@ export function getSocket(): Socket {
     autoConnect: true,
     auth: (cb) => {
       const token = useAuthStore.getState().accessToken;
+      handshakeToken = token ?? null;
       cb({ token: token ?? '' });
     },
   });
@@ -193,9 +268,18 @@ export function getSocket(): Socket {
     unavailableRetries = 0;
     recovering = false;
     clearRetryTimer();
+    serverToken = handshakeToken;
+    // A refresh may have landed while the handshake was in flight.
+    syncSocketToken(created);
+    scheduleProactiveRefresh(created);
   });
   created.on('disconnect', (reason: string) => {
     socketCrumb('disconnected', { reason }, 'warning');
+    clearProactiveTimer();
+  });
+  unsubscribeAuth?.();
+  unsubscribeAuth = useAuthStore.subscribe((state) => {
+    if (state.accessToken && state.accessToken !== serverToken) syncSocketToken(created);
   });
   created.on(REAUTH_REQUIRED_EVENT, () => {
     void handleReauthRequired(created);
@@ -210,6 +294,11 @@ export function getSocket(): Socket {
 
 export function resetSocket(): void {
   clearRetryTimer();
+  clearProactiveTimer();
+  unsubscribeAuth?.();
+  unsubscribeAuth = null;
+  handshakeToken = null;
+  serverToken = null;
   authRefreshes = 0;
   unavailableRetries = 0;
   recovering = false;

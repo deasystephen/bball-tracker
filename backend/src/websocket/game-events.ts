@@ -13,9 +13,11 @@
  *    persisted (via `emitGameEvent`).
  *  - Server broadcasts `game-status-change` to `game:<gameId>` whenever a
  *    game transitions state (via `emitGameStatusChange`).
- *  - Server re-verifies the handshake token when it expires (at most every
- *    15 minutes); on failure it emits `reauth_required` and closes the
- *    transport, and the client reconnects with a fresh token (#49).
+ *  - Client emits `refresh-auth` with `{ token }` after each token refresh;
+ *    the socket keeps its connection on the new token (#49). Without one the
+ *    server re-verifies at expiry (at most every 15 minutes); on failure it
+ *    emits `reauth_required` and closes the transport, and the client
+ *    reconnects with a fresh token.
  *  - Socket.io's built-in ping/pong handles heartbeats. Clients that reconnect
  *    must re-emit `join-game` to resubscribe; they will receive a fresh
  *    `game-snapshot`.
@@ -38,6 +40,7 @@ import {
   RATE_LIMITED_MESSAGE,
   checkHandshakeAllowed,
   checkJoinAllowed,
+  checkRefreshAuthAllowed,
   hasConcurrentCapacity,
   registerConnection,
   releaseConnection,
@@ -62,8 +65,15 @@ export interface AuthenticatedSocketUser {
  */
 export interface GameSocketData {
   user: AuthenticatedSocketUser;
-  /** Epoch ms at which the handshake token expires; null when it carries no `exp`. */
+  /** Epoch ms at which the current token expires; null when it carries no `exp`. */
   tokenExpiresAt: number | null;
+  /**
+   * The newest bearer token this socket has proven: the handshake token, then
+   * each accepted `refresh-auth`. Server memory only; never logged.
+   */
+  authToken?: string;
+  /** Per-socket jitter added to the re-check grace (#49), fixed at first schedule. */
+  reauthJitterMs?: number;
 }
 
 // We intentionally keep the event-map generics at their default (untyped) and
@@ -104,9 +114,16 @@ export async function resolveSocketSession(
     try {
       const decoded = JSON.parse(
         Buffer.from(token.substring(4), 'base64').toString()
-      ) as { userId?: string; exp?: number };
+      ) as { userId?: unknown; exp?: unknown };
 
-      if (!decoded.userId || !decoded.exp || decoded.exp < Date.now()) {
+      // A numeric string would pass `<` by coercion and then string-concatenate
+      // in the re-auth arithmetic, so both claims must have the right type.
+      if (
+        typeof decoded.userId !== 'string' ||
+        typeof decoded.exp !== 'number' ||
+        !Number.isFinite(decoded.exp) ||
+        decoded.exp < Date.now()
+      ) {
         return null;
       }
 
@@ -137,14 +154,6 @@ export async function resolveSocketSession(
   return user ? { user, expiresAt: workosUser.expiresAt * 1000 } : null;
 }
 
-/** `resolveSocketSession` without the expiry: the user, or null. */
-export async function resolveSocketUser(
-  rawToken: string | undefined
-): Promise<AuthenticatedSocketUser | null> {
-  const session = await resolveSocketSession(rawToken);
-  return session?.user ?? null;
-}
-
 /** The bearer token a socket presented at its handshake. */
 function handshakeToken(socket: GameSocket): string | undefined {
   const authPayload = socket.handshake.auth as { token?: string } | undefined;
@@ -169,13 +178,14 @@ export async function authenticateSocket(
 
     socket.data.user = session.user;
     socket.data.tokenExpiresAt = session.expiresAt;
+    socket.data.authToken = handshakeToken(socket);
     next();
   } catch (error) {
     logger.error('Socket authentication failed', {
       socketId: socket.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    // A rejected token returns null from resolveSocketUser and never throws, so
+    // A rejected token returns null from resolveSocketSession and never throws, so
     // a throw is either an expected client error (a 4xx AppError, kept out of
     // Sentry like the REST path does) or an outage/defect: JWKS unreachable,
     // the database failing over. Middleware errors never reach the Express
@@ -195,36 +205,52 @@ export async function authenticateSocket(
 // ---------------------------------------------------------------------------
 // Mid-session re-verification (#49)
 //
-// The handshake token is checked once at connect, and a socket keeps its
-// handshake for life, so without this an access token that expires mid-game
-// would stay authorized until the client disconnected. Each connected socket
-// gets one timer, due when its token expires (plus the verifier's clock-skew
-// tolerance, so the re-check really fails) and never more than
-// REAUTH_MAX_INTERVAL_MS away. When it fires the handshake token is re-run
-// through `resolveSocketSession`:
-//   - still valid (no `exp`, or a long-lived dev token) → keep the socket,
-//     refresh `socket.data`, schedule the next check;
-//   - rejected (expired, revoked, account deleted) → emit `reauth_required`
-//     and close the underlying Engine.IO connection (`socket.conn.close()`).
-//     Not `socket.disconnect()`: with or without `true` it sends a namespace
-//     DISCONNECT packet, which socket.io-client reports as `io server
-//     disconnect` and never auto-reconnects from, stranding every client
-//     built before this change. A transport close is `transport close` on the
-//     client, so socket.io auto-reconnects; a client that ignores the event
-//     then gets `connect_error: Unauthorized`, refreshes and connects again. Every reconnect re-joins its rooms through `join-game`, which
-//     re-runs `canAccessTeam`, so a user removed from a team is evicted within
-//     one token lifetime (audit #72);
-//   - the verifier throws (JWKS or database outage) → if the token is already
-//     past its expiry, it is rejected as above; otherwise check again after
-//     REAUTH_RETRY_MS, so an outage never cuts off a valid session.
+// A socket's handshake token is checked once at connect, so without this an
+// access token that expired mid-game would stay authorized until the client
+// disconnected. Two mechanisms:
+//
+// 1. In-band refresh (the normal path). Whenever the client refreshes its
+//    access token it emits `refresh-auth { token }`. `handleRefreshAuth` runs
+//    the token through `resolveSocketSession`; if it is valid and names the
+//    same user, the socket keeps its connection and its rooms, `socket.data`
+//    takes the new token and expiry, room access is re-checked and the timer
+//    below is rescheduled. No disconnect, no new handshake, no snapshot.
+// 2. The re-check timer (the fallback). Each socket has one timer, due at the
+//    current token's expiry plus REAUTH_GRACE_MS (longer than the verifier's
+//    clock tolerance, so the re-check really fails) plus a per-socket jitter
+//    (so expiries that cluster at tip-off do not all close in one second),
+//    and never more than REAUTH_MAX_INTERVAL_MS away. When it fires the
+//    current token is re-run through `resolveSocketSession`:
+//      - still valid (no `exp`, or a long-lived token) → refresh
+//        `socket.data`, re-check room access, schedule the next check;
+//      - rejected → emit `reauth_required` and close the Engine.IO
+//        connection (`socket.conn.close()`). Not `socket.disconnect()`: with
+//        or without `true` it sends a namespace DISCONNECT, which
+//        socket.io-client reports as `io server disconnect` and never
+//        auto-reconnects from. A transport close is `transport close` on the
+//        client, which auto-reconnects, so a client that never sends
+//        `refresh-auth` (built before #49) gets `connect_error:
+//        Unauthorized`, refreshes and connects again;
+//      - a 4xx AppError is a rejection; any other throw (JWKS or database
+//        outage) goes to Sentry and, unless the token has already expired,
+//        is retried after REAUTH_RETRY_MS so an outage never cuts off a
+//        valid session.
+//
+// Room re-checks (`pruneGameRooms`, audit #72) leave every game room whose
+// team the user can no longer access, so a removed coach stops receiving
+// broadcasts at the next refresh or re-check rather than at disconnect.
 // Timers live in process memory, like rooms and rate-limit counters (the API
 // is single-replica), and are cleared on disconnect.
 // ---------------------------------------------------------------------------
 
-/** Server → client event sent just before a re-auth disconnect. */
+/** Client → server: a fresh access token for the open connection. */
+export const REFRESH_AUTH_EVENT = 'refresh-auth';
+/** Server → client event sent just before a re-auth transport close. */
 export const REAUTH_REQUIRED_EVENT = 'reauth_required';
 /** Wait this long past `exp`: the verifier accepts a token for its clock tolerance. */
 export const REAUTH_GRACE_MS = (JWT_CLOCK_TOLERANCE_SECONDS + 5) * 1000;
+/** Upper bound of the per-socket jitter added to the grace. */
+export const REAUTH_JITTER_MAX_MS = 20 * 1000;
 /** Upper bound between checks, and the interval for a token without `exp`. */
 export const REAUTH_MAX_INTERVAL_MS = 15 * 60 * 1000;
 /** Re-check delay after the verifier threw on a token that has not expired. */
@@ -233,11 +259,18 @@ export const REAUTH_RETRY_MS = 60 * 1000;
 const reauthTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Delay until a socket's next re-verification. */
-export function reauthDelayMs(expiresAt: number | null, now: number = Date.now()): number {
+export function reauthDelayMs(
+  expiresAt: number | null,
+  now: number = Date.now(),
+  jitterMs = 0
+): number {
   if (expiresAt === null || !Number.isFinite(expiresAt)) {
     return REAUTH_MAX_INTERVAL_MS;
   }
-  return Math.min(Math.max(expiresAt - now, 0) + REAUTH_GRACE_MS, REAUTH_MAX_INTERVAL_MS);
+  return Math.min(
+    Math.max(expiresAt - now, 0) + REAUTH_GRACE_MS + jitterMs,
+    REAUTH_MAX_INTERVAL_MS
+  );
 }
 
 /** Number of sockets with a pending re-verification (for leak tests). */
@@ -262,7 +295,12 @@ export function clearSocketReauth(socketId: string): void {
 /** Schedule (or reschedule) a socket's next re-verification. */
 export function scheduleSocketReauth(socket: GameSocket, delayMs?: number): void {
   clearSocketReauth(socket.id);
-  const delay = delayMs ?? reauthDelayMs(socket.data.tokenExpiresAt ?? null);
+  if (socket.data.reauthJitterMs === undefined) {
+    socket.data.reauthJitterMs = Math.floor(Math.random() * REAUTH_JITTER_MAX_MS);
+  }
+  const delay =
+    delayMs ??
+    reauthDelayMs(socket.data.tokenExpiresAt ?? null, Date.now(), socket.data.reauthJitterMs);
   const timer = setTimeout(() => {
     reauthTimers.delete(socket.id);
     void reverifySocket(socket);
@@ -272,33 +310,95 @@ export function scheduleSocketReauth(socket: GameSocket, delayMs?: number): void
   reauthTimers.set(socket.id, timer);
 }
 
-function requireReauth(socket: GameSocket): void {
-  logger.info('Socket reauth required', {
-    socketId: socket.id,
-    userId: socket.data.user?.id,
-  });
+function tokenExpired(socket: GameSocket, now: number = Date.now()): boolean {
+  const expiresAt = socket.data.tokenExpiresAt ?? null;
+  return expiresAt !== null && Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+/** Why a socket was cut off. Only `expired` is the expected cycle. */
+export type ReauthReason = 'expired' | 'rejected' | 'user_changed';
+
+function requireReauth(socket: GameSocket, reason: ReauthReason): void {
+  clearSocketReauth(socket.id);
+  const meta = { socketId: socket.id, userId: socket.data.user?.id, reason };
+  // An expired token on a client that never sent `refresh-auth` is the
+  // expected cycle; a rejected unexpired token, a deleted account or a
+  // different user is an anomaly worth seeing at the production level.
+  if (reason === 'expired') {
+    logger.debug('Socket reauth required', meta);
+  } else {
+    logger.info('Socket reauth required', meta);
+  }
   socket.emit(REAUTH_REQUIRED_EVENT, {});
   // Engine.IO flushes the queued event before it closes the transport.
   socket.conn.close();
 }
 
+/**
+ * Leave every game room whose team the socket's user can no longer access
+ * (audit #72). Returns the game ids left. A lookup failure keeps the rooms
+ * (reported to Sentry); the next refresh or re-check tries again.
+ */
+export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
+  const left: string[] = [];
+  const userId = socket.data.user.id;
+  try {
+    for (const room of [...socket.rooms]) {
+      if (!room.startsWith(GAME_ROOM_PREFIX)) continue;
+      const gameId = room.slice(GAME_ROOM_PREFIX.length);
+      const game = await prisma.game.findUnique({
+        where: { id: gameId },
+        select: { teamId: true },
+      });
+      const allowed = game ? await canAccessTeam(userId, game.teamId) : false;
+      if (!allowed) {
+        await socket.leave(room);
+        left.push(gameId);
+        logger.info('Socket evicted from game room', { socketId: socket.id, userId, gameId });
+      }
+    }
+  } catch (error) {
+    logger.warn('Socket room re-check failed', {
+      socketId: socket.id,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    captureException(error, { flow: 'socket-reauth', socketId: socket.id });
+  }
+  return left;
+}
+
+/** Adopt a verified session for the same user, re-check rooms, reschedule. */
+async function adoptSession(socket: GameSocket, session: SocketSession): Promise<void> {
+  socket.data.user = session.user;
+  socket.data.tokenExpiresAt = session.expiresAt;
+  await pruneGameRooms(socket);
+  if (socket.connected) scheduleSocketReauth(socket);
+}
+
 export type ReverifyOutcome = 'kept' | 'reauth_required' | 'retry' | 'skipped';
 
 /**
- * Re-run the handshake token through `resolveSocketSession` and act on the
- * result (see the section comment above). Exported for tests.
+ * Re-run the socket's current token through `resolveSocketSession` and act on
+ * the result (see the section comment above). Exported for tests.
  */
 export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcome> {
   if (!socket.connected) return 'skipped';
 
   let session: SocketSession | null;
   try {
-    session = await resolveSocketSession(handshakeToken(socket));
+    session = await resolveSocketSession(socket.data.authToken ?? handshakeToken(socket));
   } catch (error) {
     if (!socket.connected) return 'skipped';
-    const expiresAt = socket.data.tokenExpiresAt ?? null;
-    if (expiresAt !== null && expiresAt + REAUTH_GRACE_MS <= Date.now()) {
-      requireReauth(socket);
+    if (isExpectedClientError(error)) {
+      requireReauth(socket, tokenExpired(socket) ? 'expired' : 'rejected');
+      return 'reauth_required';
+    }
+    // Same split as authenticateSocket: an outage or defect reaches Sentry,
+    // because a timer callback never reaches the Express error chain (#672).
+    captureException(error, { flow: 'socket-reauth', socketId: socket.id });
+    if (tokenExpired(socket)) {
+      requireReauth(socket, 'expired');
       return 'reauth_required';
     }
     logger.warn('Socket reauth check failed, retrying', {
@@ -313,15 +413,71 @@ export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcom
   // The client may have gone while the check was in flight.
   if (!socket.connected) return 'skipped';
 
-  if (!session || session.user.id !== socket.data.user?.id) {
-    requireReauth(socket);
+  if (!session) {
+    requireReauth(socket, tokenExpired(socket) ? 'expired' : 'rejected');
+    return 'reauth_required';
+  }
+  if (session.user.id !== socket.data.user?.id) {
+    requireReauth(socket, 'user_changed');
     return 'reauth_required';
   }
 
-  socket.data.user = session.user;
-  socket.data.tokenExpiresAt = session.expiresAt;
-  scheduleSocketReauth(socket);
+  await adoptSession(socket, session);
+  logger.debug('Socket reauth check passed', { socketId: socket.id, userId: session.user.id });
   return 'kept';
+}
+
+export type RefreshAuthResult =
+  | { ok: true }
+  | { ok: false; code: 'bad_request' | 'rate_limited' | 'unauthorized' | 'unavailable' };
+
+/**
+ * Handle `refresh-auth { token }`: swap the socket onto a fresh token for the
+ * same user without reconnecting. A rejected token leaves the socket on its
+ * current token and timer; a token for another user ends the connection.
+ */
+export async function handleRefreshAuth(
+  socket: GameSocket,
+  payload: unknown
+): Promise<RefreshAuthResult> {
+  if (!checkRefreshAuthAllowed(socket)) {
+    return { ok: false, code: 'rate_limited' };
+  }
+  const token =
+    payload && typeof payload === 'object' ? (payload as { token?: unknown }).token : undefined;
+  if (typeof token !== 'string' || token.length === 0) {
+    return { ok: false, code: 'bad_request' };
+  }
+
+  let session: SocketSession | null;
+  try {
+    session = await resolveSocketSession(token);
+  } catch (error) {
+    if (isExpectedClientError(error)) {
+      return { ok: false, code: 'unauthorized' };
+    }
+    captureException(error, { flow: 'socket-refresh-auth', socketId: socket.id });
+    return { ok: false, code: 'unavailable' };
+  }
+
+  if (!socket.connected) return { ok: false, code: 'unauthorized' };
+
+  if (!session) {
+    logger.info('Socket refresh-auth rejected', {
+      socketId: socket.id,
+      userId: socket.data.user?.id,
+    });
+    return { ok: false, code: 'unauthorized' };
+  }
+  if (session.user.id !== socket.data.user?.id) {
+    requireReauth(socket, 'user_changed');
+    return { ok: false, code: 'unauthorized' };
+  }
+
+  socket.data.authToken = token;
+  await adoptSession(socket, session);
+  logger.debug('Socket auth refreshed', { socketId: socket.id, userId: session.user.id });
+  return { ok: true };
 }
 
 interface JoinGamePayload {
@@ -492,6 +648,22 @@ export function registerGameEventHandlers(io: SocketServer): void {
         });
         if (ack) ack({ success: false, error: 'Internal error', code: 'internal' });
       });
+    });
+
+    socket.on(REFRESH_AUTH_EVENT, (payload: unknown, ack?: (response: unknown) => void) => {
+      void handleRefreshAuth(typedSocket, payload)
+        .then((result) => {
+          if (!ack) return;
+          ack(result.ok ? { success: true } : { success: false, code: result.code });
+        })
+        .catch((error) => {
+          logger.error('Socket refresh-auth error', {
+            socketId: socket.id,
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          if (ack) ack({ success: false, code: 'internal' });
+        });
     });
 
     socket.on('leave-game', (payload: unknown, ack?: (response: unknown) => void) => {
