@@ -35,8 +35,8 @@
     "@aws-sdk/client-sesv2": "^3.1152.0",
     "@aws-sdk/client-sqs": "^3.1152.0",
     "@aws-sdk/s3-presigned-post": "^3.1152.0",
-    "@prisma/adapter-pg": "^7.10.1",
-    "@prisma/client": "^7.10.1",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
     "@sentry/node": "^10.76.2",
     "@workos-inc/node": "^8.13.0",
     "cors": "^2.8.5",
@@ -51,7 +51,7 @@
     "jose": "^5.10.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.23.1",
-    "prisma": "^7.10.1",
+    "prisma": "^7.10.0",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
@@ -59,6 +59,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "overrides": {
+    "deepmerge-ts@^7": "^8.0.2",
     "fast-uri": "^3.1.8",
     "form-data": "^4.0.6",
     "ip-address": "^10.7.2",
