@@ -12,6 +12,7 @@ import {
   handleConnectError,
   handleReauthRequired,
   isSocketRecovering,
+  MIN_PROACTIVE_REFRESH_DELAY_MS,
   PROACTIVE_REFRESH_LEAD_MS,
   REAUTH_REQUIRED_EVENT,
   REFRESH_AUTH_EVENT,
@@ -418,6 +419,106 @@ describe('socket wrapper', () => {
           data: { code: 'unauthorized' },
         });
         expect(JSON.stringify(socketCrumbs())).not.toContain('tok_fresh');
+      });
+
+      it('keeps the held token on a refused ack and retries the sync exactly once', () => {
+        jest.useFakeTimers();
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        mockedRefresh.mockResolvedValue({ status: 'unavailable' });
+        getSocket();
+        connectWith(fake, jwt(Date.now() + 5 * 60_000));
+        const offered = jwt(Date.now() + 60 * 60_000);
+
+        setStoredToken(offered);
+        const ack1 = refreshAuthEmits(fake)[0][2] as (r: unknown) => void;
+        ack1({ success: false, code: 'unauthorized' });
+        expect(refreshAuthEmits(fake)).toHaveLength(2);
+        expect(refreshAuthEmits(fake)[1][1]).toEqual({ token: offered });
+        const ack2 = refreshAuthEmits(fake)[1][2] as (r: unknown) => void;
+        ack2({ success: false, code: 'unauthorized' });
+        expect(refreshAuthEmits(fake)).toHaveLength(2);
+
+        // The server still holds the handshake token, so the proactive refresh
+        // stays keyed to its expiry (4 min), not the refused token's (59 min).
+        jest.advanceTimersByTime(5 * 60_000 - PROACTIVE_REFRESH_LEAD_MS);
+        expect(mockedRefresh).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not retry an offer the server superseded with a newer one', () => {
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        getSocket();
+        connectWith(fake, 'tok_handshake');
+        setStoredToken('tok_1');
+        setStoredToken('tok_2');
+        expect(refreshAuthEmits(fake).map((c) => c[1])).toEqual([{ token: 'tok_1' }, { token: 'tok_2' }]);
+
+        (refreshAuthEmits(fake)[0][2] as (r: unknown) => void)({ success: false, code: 'superseded' });
+        expect(refreshAuthEmits(fake)).toHaveLength(2);
+      });
+
+      it('moves the proactive timer to the accepted token only on a success ack', () => {
+        jest.useFakeTimers();
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        mockedRefresh.mockResolvedValue({ status: 'unavailable' });
+        getSocket();
+        connectWith(fake, jwt(Date.now() + 5 * 60_000));
+        setStoredToken(jwt(Date.now() + 60 * 60_000));
+        (refreshAuthEmits(fake)[0][2] as (r: unknown) => void)({ success: true });
+        expect(jest.getTimerCount()).toBe(1);
+
+        jest.advanceTimersByTime(30 * 60_000);
+        expect(mockedRefresh).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(29 * 60_000);
+        expect(mockedRefresh).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps one proactive timer when connect also sends a refresh that landed mid-handshake', () => {
+        jest.useFakeTimers();
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        getSocket();
+        mockAccessToken = jwt(Date.now() + 5 * 60_000);
+        const options = mockedIo.mock.calls[0][1] as { auth: (cb: (data: unknown) => void) => void };
+        options.auth(() => undefined);
+        mockAccessToken = jwt(Date.now() + 10 * 60_000);
+        fake.connected = true;
+        fake.fire('connect');
+
+        expect(refreshAuthEmits(fake)).toHaveLength(1);
+        expect(jest.getTimerCount()).toBe(1);
+      });
+
+      it('never refreshes sooner than the floor when the device clock runs ahead of WorkOS', () => {
+        jest.useFakeTimers();
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        mockedRefresh.mockResolvedValue({ status: 'ok', accessToken: 'fresh' });
+        getSocket();
+        // To a clock 10 minutes fast, a fresh 5-minute token already looks expired.
+        connectWith(fake, jwt(Date.now() - 5 * 60_000));
+
+        jest.advanceTimersByTime(MIN_PROACTIVE_REFRESH_DELAY_MS - 1);
+        expect(mockedRefresh).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(mockedRefresh).toHaveBeenCalledTimes(1);
+      });
+
+      it('waits half the remaining lifetime when that is longer than lifetime minus the lead', () => {
+        jest.useFakeTimers();
+        const fake = makeFake();
+        mockedIo.mockReturnValue(fake);
+        mockedRefresh.mockResolvedValue({ status: 'ok', accessToken: 'fresh' });
+        jest.setSystemTime(new Date('2026-10-18T12:00:00Z')); // whole second: JWT exp is in seconds
+        getSocket();
+        connectWith(fake, jwt(Date.now() + 90_000));
+
+        jest.advanceTimersByTime(45_000 - 1);
+        expect(mockedRefresh).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(1);
+        expect(mockedRefresh).toHaveBeenCalledTimes(1);
       });
 
       it('does not send refresh-auth while disconnected, or for a cleared token', () => {

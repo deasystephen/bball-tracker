@@ -59,6 +59,12 @@ export const REAUTH_REQUIRED_EVENT = 'reauth_required';
 export const REFRESH_AUTH_EVENT = 'refresh-auth';
 /** Refresh this long before the server-held token expires (#49). */
 export const PROACTIVE_REFRESH_LEAD_MS = 60_000;
+/**
+ * Never schedule a proactive refresh sooner than this. A device clock ahead of
+ * WorkOS by more than (lifetime - lead) would make every new token look
+ * nearly expired and loop `/auth/refresh` until WorkOS answered 429.
+ */
+export const MIN_PROACTIVE_REFRESH_DELAY_MS = 30_000;
 
 /** Consecutive `Unauthorized` handshakes we will try to refresh through. */
 export const MAX_AUTH_REFRESHES = 2;
@@ -76,8 +82,13 @@ let recovering = false;
 let hasConnected = false;
 /** The token the current handshake carried. */
 let handshakeToken: string | null = null;
-/** The token the server holds for the open connection (handshake or last `refresh-auth`). */
+/**
+ * The token the server holds for the open connection: the handshake token,
+ * then each token a `refresh-auth` ack accepted. Never set before the ack.
+ */
 let serverToken: string | null = null;
+/** The token a `refresh-auth` is in flight for, so it is not sent twice. */
+let pendingToken: string | null = null;
 let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribeAuth: (() => void) | null = null;
 
@@ -105,12 +116,22 @@ const clearProactiveTimer = (): void => {
   }
 };
 
-/** Refresh ahead of the server-held token's expiry while connected (#49). */
+/**
+ * Refresh ahead of the server-held token's expiry while connected (#49). The
+ * single owner of the proactive timer: called on `connect` and when a
+ * `refresh-auth` is accepted. The delay is the larger of (remaining lifetime -
+ * lead), half the remaining lifetime, and MIN_PROACTIVE_REFRESH_DELAY_MS.
+ */
 const scheduleProactiveRefresh = (target: Socket): void => {
   clearProactiveTimer();
   const expiresAt = tokenExpiresAt(serverToken);
   if (expiresAt === null) return;
-  const delay = Math.max(expiresAt - Date.now() - PROACTIVE_REFRESH_LEAD_MS, 0);
+  const remaining = expiresAt - Date.now();
+  const delay = Math.max(
+    remaining - PROACTIVE_REFRESH_LEAD_MS,
+    remaining / 2,
+    MIN_PROACTIVE_REFRESH_DELAY_MS
+  );
   proactiveTimer = setTimeout(() => {
     proactiveTimer = null;
     if (target !== socket || !target.connected) return;
@@ -124,22 +145,29 @@ const scheduleProactiveRefresh = (target: Socket): void => {
 
 /**
  * Send the stored access token to the server if it differs from the one the
- * server holds. Exported for tests; driven by the auth-store subscription and
- * by `connect`.
+ * server holds and none is in flight for it. `serverToken` moves only when the
+ * server acks success; a refused offer is retried once (unless a newer offer
+ * superseded it). Exported for tests; driven by the auth-store subscription
+ * and by `connect`.
  */
-export function syncSocketToken(target: Socket): void {
+export function syncSocketToken(target: Socket, allowRetry = true): void {
   if (target !== socket || !target.connected) return;
   const token = useAuthStore.getState().accessToken;
-  if (!token || token === serverToken) return;
-  serverToken = token;
+  if (!token || token === serverToken || token === pendingToken) return;
+  pendingToken = token;
   target.emit(REFRESH_AUTH_EVENT, { token }, (ack?: { success?: boolean; code?: string }) => {
-    socketCrumb(
-      ack?.success ? 'auth refreshed in-band' : 'in-band refresh refused',
-      ack?.success ? undefined : { code: ack?.code },
-      ack?.success ? 'info' : 'warning'
-    );
+    if (target !== socket) return;
+    if (pendingToken === token) pendingToken = null;
+    if (ack?.success) {
+      serverToken = token;
+      socketCrumb('auth refreshed in-band');
+      scheduleProactiveRefresh(target);
+      return;
+    }
+    // The server still holds its previous token; `serverToken` already says so.
+    socketCrumb('in-band refresh refused', { code: ack?.code }, 'warning');
+    if (allowRetry && ack?.code !== 'superseded') syncSocketToken(target, false);
   });
-  scheduleProactiveRefresh(target);
 }
 
 const scheduleReconnect = (target: Socket, delayMs: number): void => {
@@ -269,13 +297,15 @@ export function getSocket(): Socket {
     recovering = false;
     clearRetryTimer();
     serverToken = handshakeToken;
+    pendingToken = null;
+    scheduleProactiveRefresh(created);
     // A refresh may have landed while the handshake was in flight.
     syncSocketToken(created);
-    scheduleProactiveRefresh(created);
   });
   created.on('disconnect', (reason: string) => {
     socketCrumb('disconnected', { reason }, 'warning');
     clearProactiveTimer();
+    pendingToken = null;
   });
   unsubscribeAuth?.();
   unsubscribeAuth = useAuthStore.subscribe((state) => {
@@ -299,6 +329,7 @@ export function resetSocket(): void {
   unsubscribeAuth = null;
   handshakeToken = null;
   serverToken = null;
+  pendingToken = null;
   authRefreshes = 0;
   unavailableRetries = 0;
   recovering = false;

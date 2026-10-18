@@ -74,6 +74,12 @@ export interface GameSocketData {
   authToken?: string;
   /** Per-socket jitter added to the re-check grace (#49), fixed at first schedule. */
   reauthJitterMs?: number;
+  /**
+   * The most recent token offered by `refresh-auth`. A verification that
+   * finishes after a newer offer is discarded, so out-of-order completions
+   * can never leave the socket on the older token (#49).
+   */
+  latestOfferedToken?: string;
 }
 
 // We intentionally keep the event-map generics at their default (untyped) and
@@ -219,9 +225,11 @@ export async function authenticateSocket(
 //    current token's expiry plus REAUTH_GRACE_MS (longer than the verifier's
 //    clock tolerance, so the re-check really fails) plus a per-socket jitter
 //    (so expiries that cluster at tip-off do not all close in one second),
-//    and never more than REAUTH_MAX_INTERVAL_MS away. When it fires the
-//    current token is re-run through `resolveSocketSession`:
-//      - still valid (no `exp`, or a long-lived token) → refresh
+//    and never more than REAUTH_MAX_INTERVAL_MS away. When it fires, a token
+//    past its expiry plus grace is known dead and cut off with no verify;
+//    otherwise (no `exp`, or a long-lived token hitting the interval cap) the
+//    held token is re-run through `resolveSocketSession`:
+//      - still valid → refresh
 //        `socket.data`, re-check room access, schedule the next check;
 //      - rejected → emit `reauth_required` and close the Engine.IO
 //        connection (`socket.conn.close()`). Not `socket.disconnect()`: with
@@ -232,9 +240,11 @@ export async function authenticateSocket(
 //        `refresh-auth` (built before #49) gets `connect_error:
 //        Unauthorized`, refreshes and connects again;
 //      - a 4xx AppError is a rejection; any other throw (JWKS or database
-//        outage) goes to Sentry and, unless the token has already expired,
-//        is retried after REAUTH_RETRY_MS so an outage never cuts off a
-//        valid session.
+//        outage) goes to Sentry and is retried after REAUTH_RETRY_MS, so an
+//        outage never cuts off a valid session (an expired one is cut off at
+//        the next check without a verify).
+//    Both async paths capture the token they verify and discard the result
+//    if a newer token was accepted or offered meanwhile.
 //
 // Room re-checks (`pruneGameRooms`, audit #72) leave every game room whose
 // team the user can no longer access, so a removed coach stops receiving
@@ -310,9 +320,19 @@ export function scheduleSocketReauth(socket: GameSocket, delayMs?: number): void
   reauthTimers.set(socket.id, timer);
 }
 
-function tokenExpired(socket: GameSocket, now: number = Date.now()): boolean {
+/**
+ * True when the held token's expiry, plus `graceMs`, has passed. With the full
+ * grace (past the verifier's clock tolerance) the token is known dead without
+ * a JWKS check or a user lookup.
+ */
+function pastExpiry(socket: GameSocket, graceMs = 0, now: number = Date.now()): boolean {
   const expiresAt = socket.data.tokenExpiresAt ?? null;
-  return expiresAt !== null && Number.isFinite(expiresAt) && expiresAt <= now;
+  return expiresAt !== null && Number.isFinite(expiresAt) && expiresAt + graceMs <= now;
+}
+
+/** The token the server currently holds for a socket. */
+function heldToken(socket: GameSocket): string | undefined {
+  return socket.data.authToken ?? handshakeToken(socket);
 }
 
 /** Why a socket was cut off. Only `expired` is the expected cycle. */
@@ -335,28 +355,26 @@ function requireReauth(socket: GameSocket, reason: ReauthReason): void {
 }
 
 /**
- * Leave every game room whose team the socket's user can no longer access
- * (audit #72). Returns the game ids left. A lookup failure keeps the rooms
+ * Leave every game room the socket's user can no longer view (audit #72),
+ * by the same rule `join-game` applies (`canViewGame`). The rooms are checked
+ * in parallel. Returns the game ids left. A lookup failure keeps the rooms
  * (reported to Sentry); the next refresh or re-check tries again.
  */
 export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
-  const left: string[] = [];
   const userId = socket.data.user.id;
+  const gameIds = [...socket.rooms]
+    .filter((room) => room.startsWith(GAME_ROOM_PREFIX))
+    .map((room) => room.slice(GAME_ROOM_PREFIX.length));
   try {
-    for (const room of [...socket.rooms]) {
-      if (!room.startsWith(GAME_ROOM_PREFIX)) continue;
-      const gameId = room.slice(GAME_ROOM_PREFIX.length);
-      const game = await prisma.game.findUnique({
-        where: { id: gameId },
-        select: { teamId: true },
-      });
-      const allowed = game ? await canAccessTeam(userId, game.teamId) : false;
-      if (!allowed) {
-        await socket.leave(room);
-        left.push(gameId);
+    const verdicts = await Promise.all(gameIds.map((gameId) => canViewGame(userId, gameId)));
+    const left = gameIds.filter((_, i) => verdicts[i] !== 'allowed');
+    await Promise.all(
+      left.map(async (gameId) => {
+        await socket.leave(gameRoom(gameId));
         logger.info('Socket evicted from game room', { socketId: socket.id, userId, gameId });
-      }
-    }
+      })
+    );
+    return left;
   } catch (error) {
     logger.warn('Socket room re-check failed', {
       socketId: socket.id,
@@ -364,8 +382,8 @@ export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
       error: error instanceof Error ? error.message : String(error),
     });
     captureException(error, { flow: 'socket-reauth', socketId: socket.id });
+    return [];
   }
-  return left;
 }
 
 /** Adopt a verified session for the same user, re-check rooms, reschedule. */
@@ -379,28 +397,37 @@ async function adoptSession(socket: GameSocket, session: SocketSession): Promise
 export type ReverifyOutcome = 'kept' | 'reauth_required' | 'retry' | 'skipped';
 
 /**
- * Re-run the socket's current token through `resolveSocketSession` and act on
- * the result (see the section comment above). Exported for tests.
+ * Re-check the socket's held token (see the section comment above). Exported
+ * for tests.
  */
 export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcome> {
   if (!socket.connected) return 'skipped';
 
+  // Past expiry plus grace the token is dead: no JWKS check or user lookup
+  // needed. The verify below is for tokens still inside their lifetime
+  // (no-exp tokens, deletion and role re-checks).
+  if (pastExpiry(socket, REAUTH_GRACE_MS)) {
+    requireReauth(socket, 'expired');
+    return 'reauth_required';
+  }
+
+  // Capture the token before the await: an accepted `refresh-auth` may swap
+  // it meanwhile, and a result for the old token must then change nothing.
+  const token = heldToken(socket);
+  const superseded = (): boolean => !socket.connected || heldToken(socket) !== token;
+
   let session: SocketSession | null;
   try {
-    session = await resolveSocketSession(socket.data.authToken ?? handshakeToken(socket));
+    session = await resolveSocketSession(token);
   } catch (error) {
-    if (!socket.connected) return 'skipped';
+    if (superseded()) return 'skipped';
     if (isExpectedClientError(error)) {
-      requireReauth(socket, tokenExpired(socket) ? 'expired' : 'rejected');
+      requireReauth(socket, pastExpiry(socket) ? 'expired' : 'rejected');
       return 'reauth_required';
     }
     // Same split as authenticateSocket: an outage or defect reaches Sentry,
     // because a timer callback never reaches the Express error chain (#672).
     captureException(error, { flow: 'socket-reauth', socketId: socket.id });
-    if (tokenExpired(socket)) {
-      requireReauth(socket, 'expired');
-      return 'reauth_required';
-    }
     logger.warn('Socket reauth check failed, retrying', {
       socketId: socket.id,
       userId: socket.data.user?.id,
@@ -410,11 +437,11 @@ export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcom
     return 'retry';
   }
 
-  // The client may have gone while the check was in flight.
-  if (!socket.connected) return 'skipped';
+  // The client may have gone, or refreshed, while the check was in flight.
+  if (superseded()) return 'skipped';
 
   if (!session) {
-    requireReauth(socket, tokenExpired(socket) ? 'expired' : 'rejected');
+    requireReauth(socket, pastExpiry(socket) ? 'expired' : 'rejected');
     return 'reauth_required';
   }
   if (session.user.id !== socket.data.user?.id) {
@@ -429,7 +456,10 @@ export async function reverifySocket(socket: GameSocket): Promise<ReverifyOutcom
 
 export type RefreshAuthResult =
   | { ok: true }
-  | { ok: false; code: 'bad_request' | 'rate_limited' | 'unauthorized' | 'unavailable' };
+  | {
+      ok: false;
+      code: 'bad_request' | 'rate_limited' | 'unauthorized' | 'unavailable' | 'superseded';
+    };
 
 /**
  * Handle `refresh-auth { token }`: swap the socket onto a fresh token for the
@@ -449,10 +479,15 @@ export async function handleRefreshAuth(
     return { ok: false, code: 'bad_request' };
   }
 
+  // Two offers in flight can finish out of order; only the latest may act.
+  socket.data.latestOfferedToken = token;
+  const superseded = (): boolean => socket.data.latestOfferedToken !== token;
+
   let session: SocketSession | null;
   try {
     session = await resolveSocketSession(token);
   } catch (error) {
+    if (superseded()) return { ok: false, code: 'superseded' };
     if (isExpectedClientError(error)) {
       return { ok: false, code: 'unauthorized' };
     }
@@ -460,6 +495,7 @@ export async function handleRefreshAuth(
     return { ok: false, code: 'unavailable' };
   }
 
+  if (superseded()) return { ok: false, code: 'superseded' };
   if (!socket.connected) return { ok: false, code: 'unauthorized' };
 
   if (!session) {
@@ -541,6 +577,27 @@ export async function buildGameSnapshot(gameId: string): Promise<GameSnapshot | 
 }
 
 /**
+ * Whether a user may view a game's live room: the one rule `join-game` and the
+ * re-auth room re-check (`pruneGameRooms`) share.
+ *
+ * All games are currently team-private: only members of the game's team can
+ * spectate via Socket.io. The Game model has no `isPublic`/`visibility` field
+ * yet. Public spectator mode (open join for any authenticated user) is tracked
+ * in issue #48.
+ */
+export async function canViewGame(
+  userId: string,
+  gameId: string
+): Promise<'allowed' | 'not_found' | 'forbidden'> {
+  const game = await prisma.game.findUnique({
+    where: { id: gameId },
+    select: { id: true, teamId: true },
+  });
+  if (!game) return 'not_found';
+  return (await canAccessTeam(userId, game.teamId)) ? 'allowed' : 'forbidden';
+}
+
+/**
  * Authorize and join the requesting user into the `game:<gameId>` room.
  * Exposed separately so unit tests can exercise authorization without wiring
  * a full Socket.io server.
@@ -557,21 +614,11 @@ export async function handleJoinGame(
     return { ok: false, code: 'bad_request', message: 'gameId is required' };
   }
 
-  const game = await prisma.game.findUnique({
-    where: { id: gameId },
-    select: { id: true, teamId: true },
-  });
-  if (!game) {
+  const verdict = await canViewGame(socket.data.user.id, gameId);
+  if (verdict === 'not_found') {
     return { ok: false, code: 'not_found', message: 'Game not found' };
   }
-
-  // All games are currently team-private: only members of the game's team can
-  // spectate via Socket.io. The Game model has no `isPublic`/`visibility`
-  // field yet. Public spectator mode (open join for any authenticated user)
-  // is tracked in issue #48.
-  const user = socket.data.user;
-  const hasAccess = await canAccessTeam(user.id, game.teamId);
-  if (!hasAccess) {
+  if (verdict === 'forbidden') {
     return { ok: false, code: 'forbidden', message: 'You do not have access to this game' };
   }
 

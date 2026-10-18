@@ -56,6 +56,7 @@ interface FakeSocket {
     tokenExpiresAt: number | null;
     authToken?: string;
     reauthJitterMs?: number;
+    latestOfferedToken?: string;
   };
   rooms: Set<string>;
   emit: jest.Mock;
@@ -212,18 +213,35 @@ describe('socket re-auth (#49)', () => {
       clearSocketReauth(socket.id);
     });
 
-    it('re-verifies a WorkOS token at expiry and disconnects when the verifier rejects it', async () => {
+    it('cuts a token off at expiry + grace from the held expiry alone, with no verify or user lookup', async () => {
       const exp = Date.now() + MINUTE;
-      const verify = jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue(null);
+      const verify = jest.spyOn(WorkOSService, 'verifyToken');
       const socket = makeSocket('workos.jwt.token', exp);
 
       scheduleSocketReauth(asGameSocket(socket));
       await jest.advanceTimersByTimeAsync(MINUTE + REAUTH_GRACE_MS);
       await flush();
 
-      expect(verify).toHaveBeenCalledTimes(1);
+      expect(verify).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
       expect(socket.emit).toHaveBeenCalledWith(REAUTH_REQUIRED_EVENT, {});
       expect(socket.conn.close).toHaveBeenCalledTimes(1);
+      expect(reauthLogs(debugSpy)).toEqual([{ socketId: socket.id, userId: USER.id, reason: 'expired' }]);
+    });
+
+    it('verifies a token that is still inside its lifetime when the interval cap fires', async () => {
+      const exp = Date.now() + 60 * MINUTE;
+      const verify = jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue(null);
+      const socket = makeSocket('workos.jwt.token', exp);
+
+      scheduleSocketReauth(asGameSocket(socket));
+      await jest.advanceTimersByTimeAsync(REAUTH_MAX_INTERVAL_MS);
+      await flush();
+
+      expect(verify).toHaveBeenCalledWith('workos.jwt.token');
+      expect(socket.conn.close).toHaveBeenCalledTimes(1);
+      // The verifier refused an unexpired token: an anomaly, logged at info.
+      expect(reauthLogs(infoSpy)).toEqual([{ socketId: socket.id, userId: USER.id, reason: 'rejected' }]);
     });
 
     it('cuts off a deleted account with an unexpired token and logs it at info', async () => {
@@ -326,15 +344,60 @@ describe('socket re-auth (#49)', () => {
       expect(socket.conn.close).toHaveBeenCalledTimes(1);
     });
 
-    it('cuts off an expired token even when the verifier is down', async () => {
-      jest
+    it('cuts off an expired token without consulting the verifier, so an outage cannot keep it alive', async () => {
+      const verify = jest
         .spyOn(WorkOSService, 'verifyToken')
         .mockRejectedValue(new ServiceUnavailableError('JWKS unreachable'));
       const socket = makeSocket('workos.jwt.token', Date.now() - REAUTH_GRACE_MS);
 
       expect(await reverifySocket(asGameSocket(socket))).toBe('reauth_required');
+      expect(verify).not.toHaveBeenCalled();
+      expect(mockCapture).not.toHaveBeenCalled();
       expect(socket.emit).toHaveBeenCalledWith(REAUTH_REQUIRED_EVENT, {});
       expect(socket.conn.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('discards a stale rejection when refresh-auth swapped the token during the check', async () => {
+      const exp = Date.now() + 60 * MINUTE;
+      const socket = makeSocket('old.jwt.token', exp);
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(async () => {
+        // An accepted refresh-auth lands while the old token is being verified.
+        socket.data.authToken = 'new.jwt.token';
+        socket.data.tokenExpiresAt = exp + 10 * MINUTE;
+        return null;
+      });
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('skipped');
+      expect(socket.emit).not.toHaveBeenCalled();
+      expect(socket.conn.close).not.toHaveBeenCalled();
+      expect(socket.data.tokenExpiresAt).toBe(exp + 10 * MINUTE);
+    });
+
+    it('discards a stale "kept" so it cannot overwrite the newer token expiry', async () => {
+      const exp = Date.now() + 60 * MINUTE;
+      const socket = makeSocket('old.jwt.token', exp);
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(async () => {
+        socket.data.authToken = 'new.jwt.token';
+        socket.data.tokenExpiresAt = exp + 10 * MINUTE;
+        return { id: 'workos-1', expiresAt: exp / 1000 };
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('skipped');
+      expect(socket.data.tokenExpiresAt).toBe(exp + 10 * MINUTE);
+      expect(mockPrisma.game.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('discards a stale outage too (no Sentry, no retry timer)', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() + 60 * MINUTE);
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(async () => {
+        socket.data.authToken = 'new.jwt.token';
+        throw new ServiceUnavailableError('JWKS unreachable');
+      });
+
+      expect(await reverifySocket(asGameSocket(socket))).toBe('skipped');
+      expect(mockCapture).not.toHaveBeenCalled();
+      expect(hasPendingReauth(socket.id)).toBe(false);
     });
 
     it('requires re-auth, logged at info, if the token now resolves to a different user', async () => {
@@ -416,11 +479,15 @@ describe('socket re-auth (#49)', () => {
       expect(verify).not.toHaveBeenCalled();
       expect(socket.conn.close).not.toHaveBeenCalled();
 
-      // The next re-check, at the new expiry, verifies the new token.
-      await jest.advanceTimersByTimeAsync(9 * MINUTE);
+      // The timer moved to the new token's expiry: without another refresh the
+      // socket is cut off there (from the held expiry, no verify needed).
+      await jest.advanceTimersByTimeAsync(9 * MINUTE - 1);
       await flush();
-      expect(verify).toHaveBeenCalledWith('new.jwt.token');
-      clearSocketReauth(socket.id);
+      expect(socket.conn.close).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
+      await flush();
+      expect(verify).not.toHaveBeenCalled();
+      expect(socket.conn.close).toHaveBeenCalledTimes(1);
     });
 
     it('evicts a removed user from a game room on refresh (audit #72)', async () => {
@@ -502,6 +569,50 @@ describe('socket re-auth (#49)', () => {
         socketId: socket.id,
       });
       expect(socket.conn.close).not.toHaveBeenCalled();
+    });
+
+    it('ignores an older offer that finishes after a newer one (out-of-order completion)', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() + MINUTE);
+      const pending = new Map<string, (v: { id: string; expiresAt: number }) => void>();
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(
+        (token: string) =>
+          new Promise((resolve) => {
+            pending.set(token, resolve);
+          })
+      );
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(USER);
+      const t1Exp = Date.now() + 5 * MINUTE;
+      const t2Exp = Date.now() + 10 * MINUTE;
+
+      const first = handleRefreshAuth(asGameSocket(socket), { token: 't1.jwt.token' });
+      const second = handleRefreshAuth(asGameSocket(socket), { token: 't2.jwt.token' });
+      await flush();
+
+      pending.get('t2.jwt.token')?.({ id: 'workos-1', expiresAt: t2Exp / 1000 });
+      expect(await second).toEqual({ ok: true });
+      pending.get('t1.jwt.token')?.({ id: 'workos-1', expiresAt: t1Exp / 1000 });
+      expect(await first).toEqual({ ok: false, code: 'superseded' });
+
+      expect(socket.data.authToken).toBe('t2.jwt.token');
+      expect(socket.data.tokenExpiresAt).toBe(t2Exp);
+      clearSocketReauth(socket.id);
+    });
+
+    it('does not report a superseded offer whose verification threw', async () => {
+      const socket = makeSocket('old.jwt.token', Date.now() + MINUTE);
+      jest.spyOn(WorkOSService, 'verifyToken').mockImplementation(async (token: string) => {
+        if (token === 't1.jwt.token') {
+          socket.data.latestOfferedToken = 't2.jwt.token';
+          throw new ServiceUnavailableError('JWKS unreachable');
+        }
+        return null;
+      });
+
+      expect(await handleRefreshAuth(asGameSocket(socket), { token: 't1.jwt.token' })).toEqual({
+        ok: false,
+        code: 'superseded',
+      });
+      expect(mockCapture).not.toHaveBeenCalled();
     });
 
     it('answers unauthorized, without Sentry, for a thrown 4xx AppError', async () => {
