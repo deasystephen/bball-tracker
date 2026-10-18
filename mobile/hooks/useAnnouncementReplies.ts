@@ -25,8 +25,9 @@ export interface AnnouncementReply {
     id: string;
     name: string;
     profilePictureUrl?: string | null;
+    isManaged: boolean;
     /** Set when the author's account was deleted; render via `displayName`. */
-    deletedAt?: string | null;
+    deletedAt: string | null;
   };
 }
 

@@ -15,6 +15,7 @@
     "hoursAgo": "{{count}}h ago",
     "yesterday": "Yesterday",
     "changePhoto": "Change photo",
+    "loadMoreFailed": "Couldn't load more. Tap to retry",
     "profilePhoto": "Profile Photo"
   },
   "navigation": {
@@ -241,6 +242,10 @@
     "seasonRecordLabel": "Season record: {{record}}",
     "streakLabel_one": "Last game: {{results}}",
     "streakLabel_other": "Last {{count}} games, most recent first: {{results}}"
+  },
+  "invite": {
+    "loadFailed": "We couldn't load this invitation. Check your connection and try again.",
+    "rateLimited": "Too many requests. Wait a few minutes and try again."
   },
   "guardians": {
     "resendA11y": "Resend invitation: {{email}}",

@@ -40,6 +40,7 @@ jest.mock('../../services/analytics', () => ({
 jest.mock('../../services/api-client', () => ({
   apiClient: { get: jest.fn(), post: jest.fn(), put: jest.fn(), patch: jest.fn(), delete: jest.fn() },
   getApiErrorMessage: jest.requireActual('../../services/api-client').getApiErrorMessage,
+  describeApiError: jest.requireActual('../../services/api-client').describeApiError,
 }));
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn(), captureMessage: jest.fn() }));
 jest.mock('../../hooks/useStats', () => ({
@@ -120,8 +121,10 @@ describe('Stats tab — load states', () => {
   });
 
   it('shows the spinner, not the same error, while the teams retry is in flight', () => {
-    mockTeamsQuery = { ...failed('Network Error'), isFetching: true };
+    mockTeamsQuery = failed('Network Error');
+    mockTeamsQuery.refetch.mockReturnValue(new Promise(() => {}));
     const view = render(<Stats />);
+    fireEvent.press(view.getByLabelText('Try Again'));
 
     expect(view.getByText('Loading...')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();
@@ -172,8 +175,10 @@ describe('Stats tab — load states', () => {
   });
 
   it('shows the spinner under the chips while the per-team retry is in flight', () => {
-    mockSeasonQuery = { ...failed('Season stats failed'), isFetching: true };
+    mockSeasonQuery = failed('Season stats failed');
+    mockSeasonQuery.refetch.mockReturnValue(new Promise(() => {}));
     const view = render(<Stats />);
+    fireEvent.press(view.getByLabelText('Try Again'));
 
     expect(view.getByText('Loading stats...')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();

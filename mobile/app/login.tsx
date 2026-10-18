@@ -3,7 +3,7 @@ import { AppState, View, Text, StyleSheet, TouchableOpacity, Alert, Modal, FlatL
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
-import { useAuthStore } from '../store/auth-store';
+import { useAuthStore, type DevLoginResponse } from '../store/auth-store';
 import { apiClient } from '../services/api-client';
 import { captureException } from '../services/sentry';
 import { log } from '../services/log';
@@ -111,10 +111,11 @@ export default function Login() {
       setIsLoading(true);
       setShowDevLogin(false);
 
-      const response = await apiClient.post('/auth/dev-login', { email });
+      const response = await apiClient.post<DevLoginResponse>('/auth/dev-login', { email });
       const { accessToken, user } = response.data;
 
       setAuthToken(accessToken);
+      // No outcome flags: a dev session is not an analytics datum (#790).
       setUser(user);
 
       router.replace(await postLoginRoute(user));

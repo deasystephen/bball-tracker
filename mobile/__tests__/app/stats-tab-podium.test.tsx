@@ -31,7 +31,7 @@ function row(playerId: string, playerName: string, perGame: { pts: number; reb: 
   return {
     playerId,
     playerName,
-    ...(playerDeletedAt !== undefined && { playerDeletedAt }),
+    playerDeletedAt: playerDeletedAt ?? null,
     points: perGame.pts * 2,
     rebounds: perGame.reb * 2,
     offensiveRebounds: 0,

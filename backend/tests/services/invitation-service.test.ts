@@ -8,6 +8,7 @@ import { GuardianService } from '../../src/services/guardian-service';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { hashRecipient, MailSendError } from '../../src/services/mailer/ses-mailer';
 
 jest.mock('../../src/services/mailer', () => ({
@@ -417,6 +418,7 @@ describe('InvitationService', () => {
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(stale);
       (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
       (mockPrisma.teamInvitation.create as jest.Mock).mockResolvedValue({
         ...fresh,
         team: { id: team.id, name: team.name, season: { id: season.id, name: season.name, league: { id: league.id, name: league.name } } },
@@ -434,6 +436,10 @@ describe('InvitationService', () => {
       expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
         where: { id: stale.id, status: 'PENDING' },
         data: { status: 'EXPIRED' },
+      });
+      expect(domainEvent(infoSpy, 'Invitation expired')).toEqual({
+        invitationId: stale.id,
+        teamId: team.id,
       });
       expect(mockPrisma.teamInvitation.create).toHaveBeenCalled();
     });
@@ -592,6 +598,8 @@ describe('InvitationService', () => {
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(expiredInvitation);
       (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
+      const infoSpy = spyOnInfo();
+
       await expect(
         InvitationService.acceptInvitation(invitation.id, player.id)
       ).rejects.toMatchObject({ statusCode: 400, message: 'This invitation has expired' });
@@ -599,6 +607,25 @@ describe('InvitationService', () => {
         where: { id: invitation.id, status: 'PENDING' },
         data: { status: 'EXPIRED' },
       });
+      expect(domainEvent(infoSpy, 'Invitation expired')).toEqual({
+        invitationId: invitation.id,
+        teamId: invitation.teamId,
+      });
+    });
+
+    it('logs no expiry event when a concurrent request already moved the invitation out of PENDING', async () => {
+      const { invitation, player } = createFullInvitation();
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue({
+        ...invitation,
+        expiresAt: new Date(Date.now() - 86400000),
+      });
+      (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      const infoSpy = spyOnInfo();
+
+      await expect(
+        InvitationService.acceptInvitation(invitation.id, player.id)
+      ).rejects.toMatchObject({ statusCode: 400, message: 'This invitation has expired' });
+      expect(infoSpy).not.toHaveBeenCalledWith('Invitation expired', expect.anything());
     });
 
     it('accepts when the player is already rostered (unified add, case 2) — membership untouched', async () => {
@@ -1564,16 +1591,20 @@ describe('InvitationService', () => {
       };
 
       (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(expired);
-      (mockPrisma.teamInvitation.update as jest.Mock).mockResolvedValue({
-        ...expired,
-        status: 'EXPIRED',
-      });
+      (mockPrisma.teamInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const infoSpy = spyOnInfo();
+      expect.assertions(5);
 
       try {
         await InvitationService.acceptInvitationByToken(invitation.token);
       } catch (error) {
         expectBadRequestError(error, 'This invitation has expired');
       }
+      // Unauthenticated path: the line carries requestId only, never a userId.
+      expect(domainEvent(infoSpy, 'Invitation expired')).toEqual({
+        invitationId: invitation.id,
+        teamId: invitation.teamId,
+      });
     });
 
     it('accepts by token when the player is already rostered (unified add, case 2)', async () => {
@@ -2494,51 +2525,47 @@ describe('InvitationService', () => {
         outerPending: lapsed,
         latest: latestRow({ status: 'PENDING' }),
       });
-      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
-      try {
-        const result = await InvitationService.createInvitation(
-          team.id,
-          { playerId: player.id, supersede: true },
-          coach.id
-        );
-        expect(result.emailSent).toBe(true);
+      const infoSpy = spyOnInfo();
+      const result = await InvitationService.createInvitation(
+        team.id,
+        { playerId: player.id, supersede: true },
+        coach.id
+      );
+      expect(result.emailSent).toBe(true);
 
-        // No lazy markExpired outside the transaction
-        expect(mockPrisma.teamInvitation.updateMany).not.toHaveBeenCalled();
-        // One read of the newest row for the pair, any status
-        expect(txFindFirst).toHaveBeenCalledWith({
-          where: { teamId: team.id, playerId: player.id },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            status: true,
-            createdAt: true,
-            recipientHash: true,
-            jerseyNumber: true,
-            position: true,
-            message: true,
-          },
-        });
-        expect(txExpire).toHaveBeenCalledWith({
-          where: { teamId: team.id, playerId: player.id, status: 'PENDING' },
-          data: { status: 'EXPIRED' },
-        });
-        expect(txCreate).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              jerseyNumber: 23,
-              position: 'Guard',
-              message: 'Welcome!',
-              recipientHash: hashRecipient(PLAYER_EMAIL),
-            }),
-          })
-        );
-        expect(infoSpy).toHaveBeenCalledWith(
-          'Invitation superseded',
-          expect.objectContaining({ teamId: team.id, playerId: player.id, supersededCount: 1 })
-        );
-      } finally {
-        infoSpy.mockRestore();
-      }
+      // No lazy markExpired outside the transaction
+      expect(mockPrisma.teamInvitation.updateMany).not.toHaveBeenCalled();
+      // One read of the newest row for the pair, any status
+      expect(txFindFirst).toHaveBeenCalledWith({
+        where: { teamId: team.id, playerId: player.id },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          status: true,
+          createdAt: true,
+          recipientHash: true,
+          jerseyNumber: true,
+          position: true,
+          message: true,
+        },
+      });
+      expect(txExpire).toHaveBeenCalledWith({
+        where: { teamId: team.id, playerId: player.id, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
+      expect(txCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            jerseyNumber: 23,
+            position: 'Guard',
+            message: 'Welcome!',
+            recipientHash: hashRecipient(PLAYER_EMAIL),
+          }),
+        })
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        'Invitation superseded',
+        expect.objectContaining({ teamId: team.id, playerId: player.id, supersededCount: 1 })
+      );
     });
 
     it('a bare resend after the player already flipped the row to EXPIRED still inherits (#678)', async () => {
@@ -2609,37 +2636,33 @@ describe('InvitationService', () => {
         outerPending: live,
         latest: latestRow({ createdAt: new Date(Date.now() - 30 * 1000) }),
       });
-      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
-      try {
-        const err = await InvitationService.createInvitation(
-          team.id,
-          { playerId: player.id, supersede: true },
-          coach.id
-        ).then(
-          () => {
-            throw new Error('expected a cooldown refusal');
-          },
-          (e: unknown) => e as ResendCooldownError
-        );
+      const infoSpy = spyOnInfo();
+      const err = await InvitationService.createInvitation(
+        team.id,
+        { playerId: player.id, supersede: true },
+        coach.id
+      ).then(
+        () => {
+          throw new Error('expected a cooldown refusal');
+        },
+        (e: unknown) => e as ResendCooldownError
+      );
 
-        expect(err).toBeInstanceOf(ResendCooldownError);
-        expect(err.statusCode).toBe(429);
-        const body = err.body();
-        expect(body.code).toBe('resend_cooldown');
-        expect(body.retryAfterSeconds).toBeGreaterThan(80);
-        expect(body.retryAfterSeconds).toBeLessThanOrEqual(90);
-        expect(txExpire).not.toHaveBeenCalled();
-        expect(txCreate).not.toHaveBeenCalled();
-        expect(mockedMailerSend).not.toHaveBeenCalled();
-        expect(infoSpy).toHaveBeenCalledWith('Invitation resend refused (cooldown)', {
-          teamId: team.id,
-          playerId: player.id,
-          invitedById: coach.id,
-          retryAfterSeconds: body.retryAfterSeconds,
-        });
-      } finally {
-        infoSpy.mockRestore();
-      }
+      expect(err).toBeInstanceOf(ResendCooldownError);
+      expect(err.statusCode).toBe(429);
+      const body = err.body();
+      expect(body.code).toBe('resend_cooldown');
+      expect(body.retryAfterSeconds).toBeGreaterThan(80);
+      expect(body.retryAfterSeconds).toBeLessThanOrEqual(90);
+      expect(txExpire).not.toHaveBeenCalled();
+      expect(txCreate).not.toHaveBeenCalled();
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith('Invitation resend refused (cooldown)', {
+        teamId: team.id,
+        playerId: player.id,
+        invitedById: coach.id,
+        retryAfterSeconds: body.retryAfterSeconds,
+      });
     });
 
     it('applies the cooldown to a pre-#715 row that has no recipient hash', async () => {

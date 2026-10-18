@@ -22,9 +22,11 @@ export interface GuardianInvitationDetails {
   id: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
   childName: string;
+  /** Tombstone signal for `childName` (#813); label from this, never from the name. */
+  childDeletedAt: string | null;
   teamName: string | null;
   inviterName: string;
-  /** Sender's tombstone signal; the backend half lands with PR #875. */
+  /** Sender's tombstone signal; label from this, never from `inviterName`. */
   inviterDeletedAt: string | null;
   relationship: 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';
   expiresAt: string;

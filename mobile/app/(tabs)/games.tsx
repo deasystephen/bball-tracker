@@ -21,10 +21,14 @@ import {
   EmptyState,
   LoadingSpinner,
   ErrorState,
+  Button,
 } from '../../components';
 import { GameCard } from '../../components/game';
 import { useInfiniteGames } from '../../hooks/useGames';
 import { useTeams, TEAMS_MAX_LIMIT } from '../../hooks/useTeams';
+import { useToast } from '../../components/Toast';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
+import { useTranslation } from '../../i18n';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useAuthUser } from '../../store/auth-store';
@@ -53,6 +57,8 @@ export default function Games() {
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const tabBarPadding = useTabBarPadding();
+  const { t } = useTranslation();
+  const toast = useToast();
   const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
 
   // Status filtering is server-side so a long backlog of scheduled games can't
@@ -66,9 +72,17 @@ export default function Games() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetchNextPageError,
   } = useInfiniteGames(activeFilter === 'ALL' ? undefined : { status: activeFilter });
 
   const filteredGames = useMemo(() => data?.games ?? [], [data]);
+
+  // A failed first load replaces the screen; a failed background refetch keeps the cached
+  // list (#888, hooks/useQueryErrorState.ts).
+  const errorState = useQueryErrorState(
+    { error, data: data?.games, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
+    'Failed to load games'
+  );
 
   // Creating a game needs `canManageTeam` on the chosen team (backend
   // `game-service.createGame`), so only show the entry point to users who can
@@ -78,10 +92,10 @@ export default function Games() {
   const canCreate = useMemo(() => canManageAnyTeam(teams, user), [teams, user]);
 
   const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       fetchNextPage();
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   const handleGamePress = useCallback(
     (game: Game) => {
@@ -251,19 +265,12 @@ export default function Games() {
     [handleGamePress, colors]
   );
 
-  if (isLoading) {
+  if (isLoading || errorState.retrying) {
     return <LoadingSpinner message="Loading games..." fullScreen />;
   }
 
-  if (error) {
-    return (
-      <ErrorState
-        message={
-          error instanceof Error ? error.message : 'Failed to load games'
-        }
-        onRetry={refetch}
-      />
-    );
+  if (errorState.failed) {
+    return <ErrorState message={errorState.message} onRetry={errorState.retry} />;
   }
 
   return (
@@ -332,12 +339,20 @@ export default function Games() {
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
-            isFetchingNextPage ? <LoadingSpinner message="Loading more..." /> : null
+            isFetchingNextPage ? (
+              <LoadingSpinner message="Loading more..." />
+            ) : isFetchNextPageError ? (
+              <Button
+                title={t('common.loadMoreFailed')}
+                variant="ghost"
+                onPress={() => fetchNextPage()}
+              />
+            ) : null
           }
           refreshControl={
             <RefreshControl
               refreshing={isRefetching && !isFetchingNextPage}
-              onRefresh={refetch}
+              onRefresh={errorState.refresh}
               tintColor={colors.primary}
             />
           }

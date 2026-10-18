@@ -79,7 +79,7 @@ const makeMember = (playerId: string, name: string, isManaged: boolean, email?: 
   playerId,
   jerseyNumber: null,
   position: null,
-  player: { id: playerId, name, isManaged, email: email ?? null },
+  player: { id: playerId, name, isManaged, email: email ?? null, deletedAt: null },
 });
 
 const baseTeam = (): Team => ({
@@ -93,7 +93,7 @@ const baseTeam = (): Team => ({
     {
       id: 'ts-coach',
       userId: 'coach-1',
-      user: { id: 'coach-1', name: 'Coach' },
+      user: { id: 'coach-1', name: 'Coach', isManaged: false, deletedAt: null },
       role: headRole,
     },
   ],
@@ -317,7 +317,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         playerId: 'p-outsider',
         status: 'PENDING',
         expiresAt: FUTURE,
-        player: { id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com' },
+        player: { id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com', isManaged: false, deletedAt: null },
       },
       // Same-team pending invite for a rostered member must NOT duplicate
       {
@@ -325,7 +325,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         playerId: 'p-invited',
         status: 'PENDING',
         expiresAt: FUTURE,
-        player: { id: 'p-invited', name: 'Cleo Invited', email: 'cleo@example.com' },
+        player: { id: 'p-invited', name: 'Cleo Invited', email: 'cleo@example.com', isManaged: false, deletedAt: null },
       },
       // Expired non-member invite must be filtered out
       {
@@ -333,7 +333,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         playerId: 'p-stale',
         status: 'PENDING',
         expiresAt: PAST,
-        player: { id: 'p-stale', name: 'Stan Stale', email: 'stan@example.com' },
+        player: { id: 'p-stale', name: 'Stan Stale', email: 'stan@example.com', isManaged: false, deletedAt: null },
       },
     ];
     const { getByText, getAllByText, queryByText } = render(<ManagePlayersScreen />);
@@ -353,7 +353,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         playerId: 'p-outsider',
         status: 'PENDING',
         expiresAt: FUTURE,
-        player: { id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com' },
+        player: { id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com', isManaged: false, deletedAt: null },
       },
     ];
     const { getByLabelText } = render(<ManagePlayersScreen />);
@@ -554,7 +554,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         playerId: 'p-pend',
         status: 'PENDING',
         expiresAt: FUTURE,
-        player: { id: 'p-pend', name: 'Pending Petra', email: 'petra@example.com' },
+        player: { id: 'p-pend', name: 'Pending Petra', email: 'petra@example.com', isManaged: false, deletedAt: null },
       },
     ];
     mockPlayersList = [

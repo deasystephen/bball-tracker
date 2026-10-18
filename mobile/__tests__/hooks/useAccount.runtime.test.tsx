@@ -76,7 +76,7 @@ describe('useAccount', () => {
 
   it('useDeleteChildRecord calls DELETE /players/:id/account then re-reads /auth/me into the store', async () => {
     useAuthStore.getState().updateUser({
-      guardianOf: [{ childId: 'kid', childName: 'Kid', relationship: 'MOTHER', isPrimary: true, isManaged: true }],
+      guardianOf: [{ childId: 'kid', childName: 'Kid', childDeletedAt: null, relationship: 'MOTHER', isPrimary: true, isManaged: true }],
     });
     mockedDelete.mockResolvedValue({ data: { success: true } });
     mockedGet.mockResolvedValue({ data: { success: true, user: { role: 'PARENT', guardianOf: [] } } });

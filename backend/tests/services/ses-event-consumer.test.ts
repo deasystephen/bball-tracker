@@ -15,6 +15,7 @@ import {
 } from '../../src/services/mailer/ses-event-consumer';
 import { handleSesEventMessage, SesEventParseError } from '../../src/services/mailer/ses-events';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { captureException } from '../../src/utils/sentry';
 
 jest.mock('../../src/services/mailer/ses-events', () => {
@@ -57,7 +58,6 @@ function deletedReceipts(send: jest.Mock): unknown[] {
 describe('SesEventConsumer', () => {
   let errorSpy: jest.SpyInstance;
   let warnSpy: jest.SpyInstance;
-  let infoSpy: jest.SpyInstance;
 
   beforeEach(() => {
     mockedHandle.mockReset();
@@ -65,13 +65,12 @@ describe('SesEventConsumer', () => {
     mockedCapture.mockReset();
     errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    spyOnInfo();
   });
 
   afterEach(() => {
     errorSpy.mockRestore();
     warnSpy.mockRestore();
-    infoSpy.mockRestore();
   });
 
   describe('pollOnce', () => {

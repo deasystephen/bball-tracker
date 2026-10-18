@@ -79,7 +79,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | --- | --- | --- | --- |
 | `app_opened` | `initAnalytics` has succeeded on launch | none | `app/_layout.tsx` |
 | `screen_viewed` | the route changes | `screen`, `params_kind` | `hooks/useScreenViews.ts` via `app/_layout.tsx` |
-| `user_logged_in` | the signed-in user is stored (`setUser`) | none | `store/auth-store.ts` |
+| `user_logged_in` | the signed-in user is stored (`setUser`) | `claimed_invite`, `was_managed` (from the `/auth/callback` response, #790; left out when the API does not send them, and always left out on a dev login, which is not a datum) | `store/auth-store.ts`, outcome passed by `app/auth/callback.tsx` |
 | `user_logged_out` | a session that was signed in ends | `reason`: `user`, `session_expired`, `account_deleted` | `store/auth-store.ts#clearSession` (reason passed by `logout`, `useDeleteAccount`, default for the api-client) |
 | `onboarding_step_completed` | a first-login prompt is saved (not the Profile edit paths) | `step`: `name` / `role`; `role` (on the role step) | `app/onboarding/name.tsx`, `app/onboarding/role.tsx` |
 | `profile_updated` | `PATCH /auth/me` succeeds | `name_changed`, `photo_changed`, `photo_cleared`, `reply_notifications_changed` | `hooks/useProfile.ts` |
@@ -162,6 +162,8 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `erased` | boolean | the account row was deleted outright rather than tombstoned (#529) |
 | `own` | boolean | the caller wrote the announcement reply they deleted (#34) |
 | `granted` | boolean | push permission outcome |
+| `claimed_invite` | boolean | the sign-in claimed **any** pre-provisioned account (a player a coach added by email, a `POST /players` account or an admin pre-create, whether or not a team invitation exists for it) rather than creating a new one or signing in to a linked one; the step after `invitation_accepted` in the invite funnel. Left out, never sent as `false`, when the API response does not carry it (#790) |
+| `was_managed` | boolean | the claimed account was any managed row (a coach-managed roster player or a guardian-managed child); `false` when nothing was claimed. Sent only alongside `claimed_invite` (#790) |
 | `target` | enum | what a tapped notification opened: `game`, `announcement`, `team`, `none` |
 | `endpoint_pattern` | string | `endpointPattern(url)`: redacted route with ids collapsed to `:id` (`/api/v1/teams/:id/players`) |
 | `code` | string | server error code (`upgrade_required`, `last_head_coach`), axios code (`ECONNABORTED`), `http_error`, an Error's name, or `unknown` |

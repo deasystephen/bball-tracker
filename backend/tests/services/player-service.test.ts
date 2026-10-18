@@ -19,7 +19,6 @@ import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
 import { emailEquals } from '../../src/utils/email-match';
-import { logger } from '../../src/utils/logger';
 import { BadRequestError, ConflictError, NotFoundError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
@@ -1105,7 +1104,7 @@ describe('PlayerService', () => {
 
     it('should delete player successfully', async () => {
       const player = createPlayer();
-      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+      const infoSpy = spyOnInfo();
 
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser) // admin check
@@ -1126,7 +1125,6 @@ describe('PlayerService', () => {
       });
       // One domain event, ids only.
       expect(infoSpy).toHaveBeenCalledWith('Player deleted', { playerId: player.id, userId: 'admin-id' });
-      infoSpy.mockRestore();
     });
 
     describe('avatar cleanup (#725)', () => {

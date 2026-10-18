@@ -46,7 +46,7 @@ const makeMember = (playerId: string, name: string, jerseyNumber: number | null)
   playerId,
   jerseyNumber,
   position: null,
-  player: { id: playerId, name, isManaged: false, email: null },
+  player: { id: playerId, name, isManaged: false, email: null, deletedAt: null },
 });
 
 const baseTeam = (): Team => ({
@@ -57,7 +57,7 @@ const baseTeam = (): Team => ({
   updatedAt: '2026-08-01T00:00:00Z',
   season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
   staff: [
-    { id: 'ts-coach', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach' }, role: headRole },
+    { id: 'ts-coach', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', isManaged: false, deletedAt: null }, role: headRole },
   ],
   members: [
     makeMember('p-null', 'Bob NoNumber', null),

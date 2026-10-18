@@ -30,6 +30,7 @@ jest.mock('@expo/vector-icons', () => ({
 const gameStats: PlayerGameStats = {
   playerId: 'p1',
   playerName: 'John Doe',
+  playerDeletedAt: null,
   jerseyNumber: 23,
   position: 'Guard',
   points: 24,

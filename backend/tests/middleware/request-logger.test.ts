@@ -6,7 +6,7 @@
 import express from 'express';
 import request from 'supertest';
 import { loggablePath, requestLogger } from '../../src/api/middleware/request-logger';
-import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 
 describe('loggablePath', () => {
   it('keeps query keys and masks sensitive values', () => {
@@ -42,10 +42,7 @@ describe('requestLogger middleware', () => {
   let infoSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
-  });
-  afterEach(() => {
-    infoSpy.mockRestore();
+    infoSpy = spyOnInfo();
   });
 
   function buildApp(): express.Express {

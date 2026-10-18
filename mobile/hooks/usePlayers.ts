@@ -14,7 +14,10 @@ export interface Player {
   role: 'PLAYER' | 'COACH' | 'PARENT' | 'ADMIN';
   profilePictureUrl?: string | null;
   emailVerified: boolean;
+  /** `GET /players/:id` only (`PLAYER_DETAIL_SELECT`), like `isManaged`; the list omits both. */
   isManaged?: boolean;
+  /** Set when the account was deleted; render via `displayName`. */
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   /** `GET /players/:id` only (backend `PLAYER_DETAIL_SELECT`). */

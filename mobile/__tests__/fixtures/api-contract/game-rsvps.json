@@ -1,0 +1,46 @@
+[
+  {
+    "id": "4154b481-f3c0-40c9-bfa6-200311046379",
+    "gameId": "30000000-0000-4000-a000-000000000002",
+    "userId": "54f38e66-b308-4327-b274-d572ea3a6b63",
+    "status": "YES",
+    "createdAt": "2026-10-18T04:08:53.984Z",
+    "updatedAt": "2026-10-18T04:08:53.984Z",
+    "user": {
+      "id": "54f38e66-b308-4327-b274-d572ea3a6b63",
+      "name": "Steph Curry",
+      "isManaged": false,
+      "deletedAt": null,
+      "email": "steph.curry@example.com"
+    }
+  },
+  {
+    "id": "65882d6a-c243-495f-a570-85b9b90ede8b",
+    "gameId": "30000000-0000-4000-a000-000000000002",
+    "userId": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+    "status": "MAYBE",
+    "createdAt": "2026-10-18T04:08:54.002Z",
+    "updatedAt": "2026-10-18T04:08:54.002Z",
+    "user": {
+      "id": "da2bd9d3-ebbf-49aa-bd1d-f870a729ba43",
+      "name": "Steve Kerr",
+      "isManaged": false,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "4154b481-f3c0-40c9-bfa6-200311046379",
+    "gameId": "30000000-0000-4000-a000-000000000002",
+    "userId": "54f38e66-b308-4327-b274-d572ea3a6b63",
+    "status": "YES",
+    "createdAt": "2026-10-18T04:08:53.984Z",
+    "updatedAt": "2026-10-18T04:08:53.984Z",
+    "user": {
+      "id": "54f38e66-b308-4327-b274-d572ea3a6b63",
+      "name": "Steph Curry",
+      "isManaged": false,
+      "deletedAt": null,
+      "email": null
+    }
+  }
+]

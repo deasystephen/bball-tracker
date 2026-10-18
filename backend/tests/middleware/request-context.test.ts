@@ -8,18 +8,20 @@ import express from 'express';
 import request from 'supertest';
 import { requestContext } from '../../src/api/middleware/request-context';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { getLogContext, setLogContextUser } from '../../src/utils/log-context';
 import { parseLogLines } from '../support/log-lines';
 
 describe('requestContext middleware', () => {
   let infoSpy: jest.SpyInstance;
+  let consoleSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
-    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    infoSpy = spyOnInfo();
+    consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
   });
   afterEach(() => {
-    jest.restoreAllMocks();
+    consoleSpy.mockRestore();
   });
 
   function buildApp(): express.Express {

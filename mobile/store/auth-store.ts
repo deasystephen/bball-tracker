@@ -34,6 +34,50 @@ export function userPropertiesFrom(user: User): Partial<AnalyticsUserProperties>
   };
 }
 
+/**
+ * What the sign-in response says about the account it signed in to (#790):
+ * `/auth/callback` carries `claimedInvite` and `wasManaged` next to the
+ * tokens. Optional because an API older than #790 sends neither.
+ */
+export interface LoginOutcome {
+  claimedInvite?: boolean;
+  wasManaged?: boolean;
+}
+
+/** `GET /auth/callback` body (`backend/src/api/auth/routes.ts`). */
+export interface AuthCallbackResponse extends LoginOutcome {
+  success: boolean;
+  user: User;
+  accessToken: string;
+  refreshToken?: string | null;
+}
+
+/**
+ * `POST /auth/dev-login` body. The backend also sends `claimedInvite` and
+ * `wasManaged` as a fixed `false`; they are deliberately not read, because a
+ * dev session is not a datum (#790).
+ */
+export interface DevLoginResponse {
+  success: boolean;
+  user: User;
+  accessToken: string;
+}
+
+/**
+ * `user_logged_in` properties from a login outcome. A flag the API did not
+ * send is left out, never reported as `false`; `was_managed` qualifies a
+ * claim, so it is sent only alongside `claimed_invite`.
+ */
+export function loginEventPropsFrom(
+  outcome: LoginOutcome = {}
+): AnalyticsEventProps['user_logged_in'] {
+  if (typeof outcome.claimedInvite !== 'boolean') return {};
+  return {
+    claimed_invite: outcome.claimedInvite,
+    was_managed: outcome.wasManaged === true,
+  };
+}
+
 interface AuthState {
   accessToken: string | null;
   /**
@@ -46,7 +90,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
-  setUser: (user: User) => void;
+  /** Sign-in only: store the user and fire `user_logged_in` with the response's outcome flags. */
+  setUser: (user: User, outcome?: LoginOutcome) => void;
   /** Merge fields into the current user without re-firing login analytics. */
   updateUser: (patch: Partial<User>) => void;
   /**
@@ -101,9 +146,9 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken: token, refreshToken, isAuthenticated: true });
       },
 
-      setUser: (user: User) => {
+      setUser: (user: User, outcome?: LoginOutcome) => {
         identifyUser(user.id, userPropertiesFrom(user));
-        trackEvent(AnalyticsEvents.USER_LOGGED_IN);
+        trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(outcome));
         set({ user, isAuthenticated: true, isLoading: false });
       },
 

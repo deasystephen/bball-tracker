@@ -332,7 +332,7 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     );
 
     // The identity cannot come back: a sign-in with the old WorkOS id / email creates a NEW row
-    const fresh = await WorkOSService.syncUser({
+    const { user: fresh } = await WorkOSService.syncUser({
       id: `workos-${RUN}`,
       email: `coach.${RUN}@example.test`,
       emailVerified: true,
@@ -452,7 +452,7 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
       expect(await prisma.gameRsvp.count({ where: { gameId } })).toBe(0); // only the coach's RSVP existed, purged earlier
       expect(await prisma.user.findUniqueOrThrow({ where: { id: ward } })).toMatchObject({ isManaged: true, managedById: null });
       // The identity cannot come back through the row either: a sign-in makes a new one
-      const fresh = await WorkOSService.syncUser({
+      const { user: fresh } = await WorkOSService.syncUser({
         id: `workos-looker-${RUN}`,
         email: `looker.${RUN}@example.test`,
         emailVerified: true,

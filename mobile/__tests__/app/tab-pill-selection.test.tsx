@@ -21,6 +21,7 @@ jest.mock('expo-router', () => ({
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 jest.mock('../../hooks/useTabBarPadding', () => ({ useTabBarPadding: () => 0 }));
 jest.mock('../../hooks/useGames', () => ({
   useInfiniteGames: (...args: unknown[]) => mockUseInfiniteGames(...args),

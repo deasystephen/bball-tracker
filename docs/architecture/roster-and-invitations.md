@@ -184,7 +184,7 @@ eng-review amendments recorded there).
   429, 5xx or failed lookup, and "Invitation Not Found" only for a 400 or 404; #720). It keeps a looser per-IP ceiling of its own, `invitationLookupIpRateLimit`
   (`INVITATION_LOOKUP_IP_MAX_PER_15_MIN` = 600 / 15 min), because the token key alone would let a
   loop of random tokens reach the database unbounded. The accept `POST` stays on the IP-keyed
-  `writeRateLimit` and `apiRateLimit` (the browser calls it directly).
+  `inviteAcceptRateLimit` and `apiRateLimit` (the browser calls it directly).
 - Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
   `isInvitationExpired`, timestamp compare — no `Math.ceil` → `-0` "Expires today" on a dead invite, #59).
 

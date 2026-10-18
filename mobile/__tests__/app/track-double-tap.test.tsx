@@ -69,18 +69,18 @@ const game: Game = {
         id: 'm1',
         playerId: 'p1',
         jerseyNumber: 7,
-        player: { id: 'p1', name: 'Jamie Lee', email: 'jamie@example.test' },
+        player: { id: 'p1', name: 'Jamie Lee', email: 'jamie@example.test', isManaged: false, deletedAt: null },
       },
       {
         id: 'm2',
         playerId: 'p2',
         jerseyNumber: 11,
-        player: { id: 'p2', name: 'Alex Smith', email: 'alex@example.test' },
+        player: { id: 'p2', name: 'Alex Smith', email: 'alex@example.test', isManaged: false, deletedAt: null },
       },
     ],
     season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
     staff: [
-      { id: 'ts1', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', email: 'c@x' }, role: trackerRole },
+      { id: 'ts1', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', email: 'c@x', isManaged: false, deletedAt: null }, role: trackerRole },
     ],
   },
 };

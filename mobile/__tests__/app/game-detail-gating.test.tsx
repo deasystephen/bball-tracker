@@ -61,7 +61,7 @@ const baseGame: Game = {
     name: 'Warriors',
     season: { id: 's1', name: '2026', isActive: true, league: { id: 'league-1', name: 'Bay' } },
     staff: [
-      { id: 'ts1', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', email: 'c@x' }, role: coachRole },
+      { id: 'ts1', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', email: 'c@x', isManaged: false, deletedAt: null }, role: coachRole },
     ],
   },
 };
@@ -145,7 +145,7 @@ describe('GameDetailScreen permission gating', () => {
             {
               id: 'ts2',
               userId: 'mgr-1',
-              user: { id: 'mgr-1', name: 'Mgr', email: 'm@x' },
+              user: { id: 'mgr-1', name: 'Mgr', email: 'm@x', isManaged: false, deletedAt: null },
               role: { ...coachRole, id: 'r-mgr', type: 'TEAM_MANAGER', canTrackStats: false },
             },
           ],

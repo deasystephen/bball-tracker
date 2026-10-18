@@ -30,7 +30,7 @@ jest.mock('../../hooks/useProfile', () => ({
 
 const signIn = (role: 'PLAYER' | 'COACH' | 'PARENT', guardianOf?: GuardianOfEntry[]) => {
   useAuthStore.setState({
-    user: { id: 'dell', role, email: 'dell.curry@example.com', name: 'Dell Curry', guardianOf } as never,
+    user: { id: 'dell', role, email: 'dell.curry@example.com', name: 'Dell Curry', guardianOf, isManaged: false, deletedAt: null } as never,
     isAuthenticated: true,
     accessToken: 't',
     refreshToken: null,
@@ -40,9 +40,9 @@ const signIn = (role: 'PLAYER' | 'COACH' | 'PARENT', guardianOf?: GuardianOfEntr
 
 const kids: GuardianOfEntry[] = [
   // Claimed account (has signed in): no "Delete record" for a guardian (#444 D5)
-  { childId: 'steph', childName: 'Steph Curry', relationship: 'FATHER', isPrimary: true, isManaged: false, teams: [{ id: 'w', name: 'Warriors' }] },
+  { childId: 'steph', childName: 'Steph Curry', childDeletedAt: null, relationship: 'FATHER', isPrimary: true, isManaged: false, teams: [{ id: 'w', name: 'Warriors' }] },
   // Managed, unclaimed record: the guardian may delete it
-  { childId: 'seth', childName: 'Seth Curry', relationship: 'FATHER', isPrimary: false, isManaged: true },
+  { childId: 'seth', childName: 'Seth Curry', childDeletedAt: null, relationship: 'FATHER', isPrimary: false, isManaged: true },
 ];
 
 describe('Profile "My kids"', () => {
@@ -127,7 +127,7 @@ describe('Profile "My kids"', () => {
   });
   it('names a deleted child with the localized label from childDeletedAt (#813)', async () => {
     signIn('PARENT', [
-      { childId: 'gone', childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z', relationship: 'MOTHER', isPrimary: true },
+      { childId: 'gone', childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z', relationship: 'MOTHER', isPrimary: true, isManaged: false },
     ]);
     await i18n.changeLanguage('es');
     try {

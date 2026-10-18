@@ -2,12 +2,12 @@
   "id": "30000000-0000-4000-a000-000000000002",
   "teamId": "20000000-0000-4000-a000-000000000001",
   "opponent": "Celtics",
-  "date": "2026-10-12T16:26:06.161Z",
+  "date": "2026-10-25T03:32:35.135Z",
   "status": "SCHEDULED",
   "homeScore": 0,
   "awayScore": 0,
   "createdAt": "2026-10-04T03:01:22.539Z",
-  "updatedAt": "2026-10-05T16:26:06.162Z",
+  "updatedAt": "2026-10-18T03:32:35.141Z",
   "team": {
     "id": "20000000-0000-4000-a000-000000000001",
     "name": "Warriors",
@@ -17,7 +17,7 @@
     "ageGroup": "U14",
     "gender": "BOYS",
     "createdAt": "2026-10-04T03:01:22.476Z",
-    "updatedAt": "2026-10-05T16:26:06.104Z",
+    "updatedAt": "2026-10-18T03:32:34.150Z",
     "season": {
       "id": "642eec66-0082-4581-96b5-f0a9c0214afe",
       "leagueId": "10000000-0000-4000-a000-000000000001",
@@ -45,9 +45,9 @@
         "user": {
           "id": "1b2cbc50-f420-48df-aff0-36d0369ae748",
           "name": "Mike Brown",
-          "email": "mike.brown@example.com",
           "isManaged": false,
-          "deletedAt": null
+          "deletedAt": null,
+          "email": "mike.brown@example.com"
         },
         "role": {
           "id": "2ce545e5-7a10-4130-83c9-c4009e019383",
@@ -77,9 +77,9 @@
         "player": {
           "id": "dd26d23e-073c-4fd6-a1e4-41e09b91fd47",
           "name": "Jordan Poole",
-          "email": "jordan.poole@example.com",
           "isManaged": false,
-          "deletedAt": null
+          "deletedAt": null,
+          "email": "jordan.poole@example.com"
         }
       },
       {
@@ -93,9 +93,9 @@
         "player": {
           "id": "40000000-0000-4000-a000-000000000005",
           "name": "Tommy Wilson",
-          "email": null,
           "isManaged": true,
-          "deletedAt": null
+          "deletedAt": null,
+          "email": null
         }
       },
       {

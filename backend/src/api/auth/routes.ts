@@ -53,7 +53,7 @@ const SESSION_USER_SELECT = {
 type SessionUserRow = Prisma.UserGetPayload<{ select: typeof SESSION_USER_SELECT }>;
 
 /**
- * Narrow a full `User` row (as `syncUser` returns) to the session columns.
+ * Narrow a full `User` row (as `syncUser` returns in `.user`) to the session columns.
  * The return type makes a column added to `SESSION_USER_SELECT` a compile
  * error here until it is copied.
  */
@@ -187,6 +187,10 @@ if (process.env.NODE_ENV === 'development') {
         success: true,
         user: await buildSessionUser(user),
         accessToken: `dev_${devToken}`,
+        // Same outcome flags as /auth/callback (#790) so the client sees one
+        // shape; a dev login never claims a row.
+        claimedInvite: false,
+        wasManaged: false,
       });
     } catch (error) {
       respondWithError(res, error, { log: 'Dev login error', fallback: 'Dev login failed' });
@@ -331,8 +335,9 @@ router.get('/callback', async (req, res) => {
     }
     const { user: workosUser, accessToken, refreshToken } = exchanged;
 
-    // Sync user to our database
-    const user = await WorkOSService.syncUser({
+    // Sync user to our database. The outcome flags feed the client's
+    // `user_logged_in` analytics (#790): booleans only, never PII.
+    const { user, claimedInvite, wasManaged } = await WorkOSService.syncUser({
       id: workosUser.id,
       email: workosUser.email,
       firstName: workosUser.firstName ?? undefined,
@@ -352,6 +357,11 @@ router.get('/callback', async (req, res) => {
       // Short-lived access token + rotating refresh token. Without the refresh
       // token the client is dead as soon as the access token expires (#349).
       refreshToken,
+      // Whether this sign-in claimed a pre-provisioned row (an invited or
+      // roster-added player) rather than creating a new account, and whether
+      // that row was coach-managed (#790).
+      claimedInvite,
+      wasManaged,
     });
   } catch (error) {
     if (error instanceof ConflictError) {

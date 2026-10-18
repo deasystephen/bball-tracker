@@ -48,8 +48,10 @@ const guardianInvite = {
   id: 'gi1',
   status: 'PENDING' as const,
   childName: 'Steph Curry',
+  childDeletedAt: null,
   teamName: 'Warriors',
   inviterName: 'Steve Kerr',
+  inviterDeletedAt: null,
   relationship: 'FATHER' as const,
   expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
 };
@@ -64,8 +66,8 @@ const teamInviteForChild: TeamInvitation = {
   createdAt: '',
   updatedAt: '',
   team: { id: 't2', name: 'Select Team', season: { id: 's', name: '2026', league: { id: 'l', name: 'AAU' } } },
-  player: { id: 'steph', name: 'Steph Curry', email: '' },
-  invitedBy: { id: 'coach-2', name: 'Coach Two', email: '' },
+  player: { id: 'steph', name: 'Steph Curry', email: '', isManaged: false, deletedAt: null },
+  invitedBy: { id: 'coach-2', name: 'Coach Two', email: '', isManaged: false, deletedAt: null },
 };
 
 describe('InvitationsScreen guardian invitations', () => {
@@ -143,7 +145,7 @@ describe('InvitationsScreen guardian invitations', () => {
       invitations: [
         {
           ...teamInviteForChild,
-          invitedBy: { id: 'coach-2', name: 'Deleted user', email: '', deletedAt: '2026-09-07T00:00:00Z' },
+          invitedBy: { id: 'coach-2', name: 'Deleted user', email: '', deletedAt: '2026-09-07T00:00:00Z', isManaged: false },
         },
       ],
       guardianInvitations: [],

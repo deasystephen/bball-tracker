@@ -1,0 +1,25 @@
+{
+  "guardians": [
+    {
+      "id": "da7b7c20-e2e5-42f0-af68-07c6d5388c90",
+      "userId": "9269c268-9a06-432d-a914-ae7b6509c78f",
+      "name": "Dell Curry",
+      "deletedAt": null,
+      "email": "dell.curry@example.com",
+      "relationship": "FATHER",
+      "isPrimary": true,
+      "createdAt": "2026-10-04T03:01:22.453Z"
+    },
+    {
+      "id": "e80072c8-995a-4a2a-87c5-402d2249ffa2",
+      "userId": "e7d593e0-55b2-47b3-9ed7-f55d5da09d06",
+      "name": "Sonya Curry",
+      "deletedAt": null,
+      "email": "sonya.curry@example.com",
+      "relationship": "MOTHER",
+      "isPrimary": false,
+      "createdAt": "2026-10-04T03:01:22.456Z"
+    }
+  ],
+  "pendingInvitations": []
+}

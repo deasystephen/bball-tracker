@@ -54,9 +54,9 @@ export interface Game {
         name: string;
         /** Present only for callers with `canManageRoster`; `null` when the user has no email. */
         email?: string | null;
-        isManaged?: boolean;
+        isManaged: boolean;
         /** Set when the account was deleted; render via `displayName`. */
-        deletedAt?: string | null;
+        deletedAt: string | null;
       };
     }[];
   };
@@ -78,17 +78,20 @@ export interface ReboundMetadata {
 export interface GameEvent {
   id: string;
   gameId: string;
-  playerId?: string;
+  /** `null` on the wire for an event without a player. */
+  playerId?: string | null;
   eventType: GameEventType;
   timestamp: string;
   metadata: ShotMetadata | Record<string, unknown>;
   createdAt: string;
-  player?: {
+  /** `null` for an event without a player (a timeout, a team event): `playerId` is optional. */
+  player: {
     id: string;
     name: string;
+    isManaged: boolean;
     /** Set when the account was deleted; render via `displayName`. */
-    deletedAt?: string | null;
-  };
+    deletedAt: string | null;
+  } | null;
 }
 
 export interface CreateGameInput {
@@ -142,7 +145,11 @@ export interface GameRsvp {
   user: {
     id: string;
     name: string;
-    email?: string;
+    /** Roster managers and the row's own user only; `null` for a user without an address. */
+    email?: string | null;
+    isManaged: boolean;
+    /** Set when the account was deleted; render via `displayName`. */
+    deletedAt: string | null;
   };
 }
 

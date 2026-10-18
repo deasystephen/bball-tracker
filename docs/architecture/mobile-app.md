@@ -47,6 +47,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and
   cold start) consumes it (30-minute TTL, in-app absolute paths only) after the role-onboarding check, so the
   user lands back on the deep link.
+  The by-token lookup separates a dead link from a failed one (#892): a 400/404 shows "Invitation Not Found",
+  while a network failure, 429 or 5xx (`services/api-client.ts#isTransientRequestError`; a local error or
+  `NoSessionError` is not transient) shows `ErrorState` with Try Again, a way back and `error_shown`
+  (a 429 gets its own copy), because a blip says nothing about the token (`__tests__/app/invite-load-errors.test.tsx`).
 - **Announcement threads** (#34): `/teams/[id]/announcements` lists announcements (each card opens
   its thread and shows the served `_count.replies`); `/teams/[id]/announcements/[announcementId]`
   (`hooks/useAnnouncement`, `hooks/useAnnouncementReplies.ts`) shows the announcement, the replies
@@ -135,14 +139,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/display-name.ts#displayName(user)` (localized `account.deletedUser` when `deletedAt`
   is set, stored name otherwise — never branch on the name) and derive roster chips ONLY via
   `getRosterStatus`, whose `'deleted'` branch comes first (a tombstone has `isManaged: false`,
-  which would read as Active). A deleted roster row's menu offers only Remove player. The mobile
-  types for invitation `player`/`invitedBy`, announcement `author` and `GameEvent.player` declare
-  `deletedAt?`; until the API sends it on a payload, `displayName` falls back to the stored name. The
+  which would read as Active). A deleted roster row's menu offers only Remove player. Every embedded
+  user summary (staff `user`, roster and invitation `player`, `invitedBy`, announcement and reply
+  `author`, `GameEvent.player`, RSVP `user`, league admin `user`, overall stats `player`) carries the
+  backend's `USER_SUMMARY_SELECT` (`isManaged`, `deletedAt`), and the mobile types declare both
+  required (#889; `Player.isManaged`/`deletedAt` stay optional because `GET /players` omits them,
+  `GameEvent.player` is `null` for a player-less event). The
   flattened payloads carry a name string beside its timestamp (#813): `inviterName`/`inviterDeletedAt`
   (team and guardian by-token payloads, `guardianInvitations`), `childName`/`childDeletedAt`
   (guardian payloads, `guardianOf`) and `playerName`/`playerDeletedAt` (stats rows). Render them with
-  `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file; the timestamp is
-  optional on the client so an app that out-runs the deploy falls back to the stored name. Readers: the
+  `inviterDisplayName`, `childDisplayName` and `playerDisplayName` from the same file. The timestamps
+  are required in the client types since #889 (the API has sent them since PR #875); the helpers still
+  accept `undefined`, so a session user rehydrated from storage before its `GET /auth/me` refresh
+  falls back to the stored name. `GuardianOfEntry.isManaged` stays optional for that persisted state
+  (Profile treats `undefined` as not deletable). Readers: the
   invite screen, the Invitations tab guardian card, Profile My Kids, account deletion, the game
   detail RSVP "Respond for" picker, `PlayerStatsCard`, `BoxScoreTable` and the Stats tab podium (a
   tombstone shows the whole label, never its first word). Guardian list rows (`GET
@@ -306,9 +316,16 @@ never inline a role check in a screen:
   Try Again for a failed teams or team-stats query and keeps the team chips above a per-team
   failure (#728; `__tests__/app/stats-tab-states.test.tsx`). `utils/query-state.ts#showQueryError`
   decides when the error wins: only when the query has no data, so a failed background refetch
-  keeps its cached data on screen. TanStack keeps `error` set while a retry is in flight, so the
-  tab shows the spinner while the failed query `isFetching`. The message comes from
-  `getApiErrorMessage` (which sends `error_shown`), memoised on the error so it fires once per failure.
+  keeps its cached data on screen. The message comes from `describeApiError`; `useQueryErrorState`
+  below owns the spinner during Try Again and the `error_shown` event.
+  `hooks/useQueryErrorState.ts` wraps `showQueryError` and is the rule for the Teams, Games, Invitations
+  and Stats tabs (#888; `__tests__/app/tab-query-error-states.test.tsx`): `failed`, `message`,
+  `retry`, and `retrying`, which is true only between a press on Try Again and the refetch settling,
+  so an automatic refetch never turns the error into a spinner. It sends `error_shown` from an effect
+  keyed on the error, once per failure (the Stats team panel runs one hook over its two queries, so one
+  panel is one event). A failed pull-to-refresh with cached data shows an error toast through `refresh`. Home still hand-rolls its decision and moves with its redesign
+  (#615). A failed next page of the Teams and Games lists keeps the rows and shows a "Couldn't load more"
+  retry in the footer.
   `__tests__/a11y/error-state-way-back.test.ts` reads the source of `app/` outside `(tabs)/`
   and fails on an `<ErrorState` without `onBack`, unless the file is on its `KEEPS_HEADER` list
   (today only `teams/[id]/announcements`, where the error replaces the list under a header that

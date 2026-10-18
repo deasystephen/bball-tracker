@@ -48,6 +48,12 @@ jest.mock('../../services/analytics', () => ({
   },
 }));
 
+/** The properties of the last `user_logged_in` call, exactly as passed. */
+const loggedInProps = (): unknown => {
+  const calls = (trackEvent as jest.Mock).mock.calls.filter(([event]) => event === 'user_logged_in');
+  return calls[calls.length - 1]?.[1];
+};
+
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'user-1',
   email: 'test@example.com',
@@ -101,7 +107,58 @@ describe('auth-store', () => {
       app_version: '1.5.0',
     });
     expect(JSON.stringify((identifyUser as jest.Mock).mock.calls)).not.toContain('test@example.com');
-    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN);
+    // No outcome passed: the flags are left out rather than reported as false (#790).
+    // toStrictEqual, because toHaveBeenCalledWith treats { claimed_invite: undefined } as {}.
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, expect.anything());
+    expect(loggedInProps()).toStrictEqual({});
+  });
+
+  describe('user_logged_in outcome flags (#790)', () => {
+    it('carries claimed_invite: true and was_managed for a sign-in that claimed a pre-provisioned row', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true, wasManaged: true });
+
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
+        claimed_invite: true,
+        was_managed: true,
+      });
+    });
+
+    it('carries claimed_invite: false for a brand-new or returning account', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: false, wasManaged: false });
+
+      expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.USER_LOGGED_IN, {
+        claimed_invite: false,
+        was_managed: false,
+      });
+    });
+
+    it('leaves out a flag the API did not send, or sent as a non-boolean', () => {
+      useAuthStore
+        .getState()
+        .setUser(makeUser(), { claimedInvite: undefined, wasManaged: 'yes' as unknown as boolean });
+
+      expect(loggedInProps()).toStrictEqual({});
+    });
+
+    it('sends was_managed only alongside claimed_invite', () => {
+      useAuthStore.getState().setUser(makeUser(), { wasManaged: true });
+
+      expect(loggedInProps()).toStrictEqual({});
+    });
+
+    it('reports was_managed: false when a claim arrives without the managed flag', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true });
+
+      expect(loggedInProps()).toStrictEqual({ claimed_invite: true, was_managed: false });
+    });
+
+    it('sends booleans only, never the user\'s email or name', () => {
+      useAuthStore.getState().setUser(makeUser(), { claimedInvite: true, wasManaged: false });
+
+      const props = (trackEvent as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
+      expect(Object.values(props).every((v) => typeof v === 'boolean')).toBe(true);
+      expect(JSON.stringify(props)).not.toContain('test@example.com');
+    });
   });
 
   it('logout clears token + user, resets auth flags, and notifies analytics', async () => {
@@ -458,7 +515,7 @@ describe('auth-store updateUser', () => {
     expect(setUserProperties).not.toHaveBeenCalled();
 
     useAuthStore.getState().updateUser({
-      guardianOf: [{ childId: 'c1', childName: 'Kid', relationship: 'MOTHER', isPrimary: true }],
+      guardianOf: [{ childId: 'c1', childName: 'Kid', childDeletedAt: null, relationship: 'MOTHER', isPrimary: true, isManaged: false }],
     });
     expect(setUserProperties).toHaveBeenCalledWith(expect.objectContaining({ role: UserRole.COACH, is_parent: true }));
     expect(JSON.stringify((setUserProperties as jest.Mock).mock.calls)).not.toContain('Kid');

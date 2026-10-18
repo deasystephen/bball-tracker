@@ -20,7 +20,7 @@ import { omitToken } from './serializers';
 import {
   invitationLookupIpRateLimit,
   invitationTokenRateLimit,
-  writeRateLimit,
+  inviteAcceptRateLimit,
 } from '../middleware/rate-limit';
 
 const router = Router();
@@ -60,7 +60,7 @@ async function resolveByKind<T, G>(
  * web invite page fetches this server-side from one egress IP, so it is
  * exempt from the global 100/min IP limit, but a loop of random tokens still
  * hits invitationLookupIpRateLimit. The accept route below stays on the
- * IP-keyed writeRateLimit because the browser calls it directly.
+ * IP-keyed inviteAcceptRateLimit because the browser calls it directly.
  */
 router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
@@ -94,7 +94,7 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
  * invited adult (guardian kind — creates the Guardian link).
  * Token acts as authentication (one-time secret, like a password-reset link).
  */
-router.post('/by-token/:token/accept', writeRateLimit, async (req, res) => {
+router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) => {
   const { token } = req.params;
 
   if (!validateToken(token as string)) {

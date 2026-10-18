@@ -40,6 +40,7 @@ const row: GuardianRow = {
   id: 'g1',
   userId: 'dell',
   name: 'Dell Curry',
+  deletedAt: null,
   email: 'dell.curry@example.com',
   relationship: 'FATHER',
   isPrimary: true,

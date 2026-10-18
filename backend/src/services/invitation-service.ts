@@ -669,7 +669,7 @@ export class InvitationService {
       if (!live && !options.supersede) {
         // Stale row on a plain create: lazy-expire it here (the old link is
         // already dead and a plain create inherits nothing from it).
-        await this.markExpired(existingInvitation.id);
+        await this.markExpired(existingInvitation);
       }
       // supersede (live or stale): left PENDING — createInvitationRowSuperseding
       // expires it in the same transaction as the replacement (red-team RT2),
@@ -837,7 +837,7 @@ export class InvitationService {
 
     // Check if invitation has expired
     if (new Date() > invitation.expiresAt) {
-      await this.markExpired(invitationId);
+      await this.markExpired(invitation);
       throw new BadRequestError('This invitation has expired');
     }
 
@@ -891,13 +891,17 @@ export class InvitationService {
 
   /**
    * Lazily mark a PENDING invitation EXPIRED. Status-guarded so a concurrent
-   * accept/reject/cancel is never overwritten.
+   * accept/reject/cancel is never overwritten. Logs `Invitation expired` once
+   * per invitation it actually flips (ids only); a lost race logs nothing.
    */
-  private static async markExpired(invitationId: string): Promise<void> {
-    await prisma.teamInvitation.updateMany({
-      where: { id: invitationId, status: 'PENDING' },
+  private static async markExpired(invitation: { id: string; teamId: string }): Promise<void> {
+    const { count } = await prisma.teamInvitation.updateMany({
+      where: { id: invitation.id, status: 'PENDING' },
       data: { status: 'EXPIRED' },
     });
+    if (count > 0) {
+      logger.info('Invitation expired', { invitationId: invitation.id, teamId: invitation.teamId });
+    }
   }
 
   /**
@@ -1524,7 +1528,7 @@ export class InvitationService {
     }
 
     if (new Date() > invitation.expiresAt) {
-      await this.markExpired(invitation.id);
+      await this.markExpired(invitation);
       throw new BadRequestError('This invitation has expired');
     }
 

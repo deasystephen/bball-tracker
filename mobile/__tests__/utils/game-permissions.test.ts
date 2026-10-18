@@ -22,7 +22,7 @@ const role = (flags: Partial<TeamStaff['role']>): TeamStaff['role'] => ({
 const staff = (userId: string, flags: Partial<TeamStaff['role']>): TeamStaff => ({
   id: `ts-${userId}`,
   userId,
-  user: { id: userId, name: userId, email: `${userId}@x` },
+  user: { id: userId, name: userId, email: `${userId}@x`, isManaged: false, deletedAt: null },
   role: role(flags),
 });
 

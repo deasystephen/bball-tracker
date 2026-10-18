@@ -125,11 +125,15 @@ describe('useInvitations', () => {
         id: 'player-1',
         name: 'John Doe',
         email: 'john@example.com',
+        isManaged: false,
+        deletedAt: null,
       },
       invitedBy: {
         id: 'coach-1',
         name: 'Coach Smith',
         email: 'coach@example.com',
+        isManaged: false,
+        deletedAt: null,
       },
     };
 

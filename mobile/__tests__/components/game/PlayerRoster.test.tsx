@@ -39,7 +39,7 @@ const player = (overrides: {
   id: overrides.id ?? `m-${overrides.playerId ?? overrides.name}`,
   playerId: overrides.playerId ?? overrides.name,
   jerseyNumber: overrides.jerseyNumber,
-  player: { id: overrides.playerId ?? overrides.name, name: overrides.name },
+  player: { id: overrides.playerId ?? overrides.name, name: overrides.name, isManaged: false, deletedAt: null },
 });
 
 describe('PlayerRoster', () => {

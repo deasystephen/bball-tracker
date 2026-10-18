@@ -18,8 +18,11 @@ import {
   LoadingSpinner,
   EmptyState,
   ErrorState,
+  Button,
 } from '../../components';
 import { useInfiniteTeams, type Team } from '../../hooks/useTeams';
+import { useToast } from '../../components/Toast';
+import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { useTranslation } from '../../i18n';
@@ -39,6 +42,7 @@ export default function TeamsScreen() {
   const tabBarPadding = useTabBarPadding();
   const user = useAuthUser();
   const canCreate = canCreateTeams(user);
+  const toast = useToast();
 
   const {
     data,
@@ -49,11 +53,12 @@ export default function TeamsScreen() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetchNextPageError,
   } = useInfiniteTeams();
   const teams = data?.teams;
 
   const handleEndReached = () => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
       fetchNextPage();
     }
   };
@@ -69,17 +74,19 @@ export default function TeamsScreen() {
   // `user` is null while the persisted session rehydrates; don't render the
   // player empty state (no Create button) for a coach who simply isn't
   // loaded yet.
-  if (isLoading || !user) {
+  // A failed first load replaces the screen; a failed background refetch keeps the
+  // cached list (#888, hooks/useQueryErrorState.ts).
+  const errorState = useQueryErrorState(
+    { error, data: teams, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
+    'Failed to load teams'
+  );
+
+  if (isLoading || !user || errorState.retrying) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
-  if (error) {
-    return (
-      <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load teams'}
-        onRetry={refetch}
-      />
-    );
+  if (errorState.failed) {
+    return <ErrorState message={errorState.message} onRetry={errorState.retry} />;
   }
 
   if (!teams || teams.length === 0) {
@@ -196,12 +203,20 @@ export default function TeamsScreen() {
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
-          isFetchingNextPage ? <LoadingSpinner message={t('common.loading')} /> : null
+          isFetchingNextPage ? (
+            <LoadingSpinner message={t('common.loading')} />
+          ) : isFetchNextPageError ? (
+            <Button
+              title={t('common.loadMoreFailed')}
+              variant="ghost"
+              onPress={() => fetchNextPage()}
+            />
+          ) : null
         }
         refreshControl={
           <RefreshControl
             refreshing={isRefetching && !isFetchingNextPage}
-            onRefresh={refetch}
+            onRefresh={errorState.refresh}
             tintColor={colors.primary}
           />
         }

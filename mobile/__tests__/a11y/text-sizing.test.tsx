@@ -222,6 +222,7 @@ const player: PlayerGameStats = {
   ...stats,
   playerId: 'p1',
   playerName: 'Maximiliana Featherstonehaugh',
+  playerDeletedAt: null,
   jerseyNumber: 0,
   position: 'Guard',
 };
