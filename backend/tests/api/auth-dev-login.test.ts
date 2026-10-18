@@ -88,6 +88,9 @@ describe('POST /api/v1/auth/dev-login', () => {
       })
     );
     expect(response.body.accessToken).toMatch(/^dev_/);
+    // Same shape as /auth/callback (#790); a dev login never claims a row
+    expect(response.body).toHaveProperty('claimedInvite', false);
+    expect(response.body).toHaveProperty('wasManaged', false);
   });
 
   it('returns 404 for an unknown or tombstoned email, looking up live rows only (#444)', async () => {

@@ -26,6 +26,25 @@ export interface VerifiedToken {
   expiresAt: number;
 }
 
+/** The WorkOS identity fields `syncUser` reads. */
+export interface SyncUserInput {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  emailVerified: boolean;
+  profilePictureUrl?: string;
+}
+
+/** `syncUserWithOutcome`'s result: the row plus which branch produced it (#790). */
+export interface SyncUserResult {
+  user: User;
+  /** This sign-in claimed a pre-provisioned row (invited or roster-added by email). */
+  claimedInvite: boolean;
+  /** The claimed row was a coach-managed player; always `false` when nothing was claimed. */
+  wasManaged: boolean;
+}
+
 export class WorkOSService {
   /**
    * Get authorization URL for user login
@@ -170,15 +189,24 @@ export class WorkOSService {
    * 4. Otherwise create.
    *
    * Unique-constraint races surface as `ConflictError` (409), not 500.
+   *
+   * Callers that need to know which branch ran (the `/auth/callback` route,
+   * for the `claimed_invite` analytics property, #790) use
+   * `syncUserWithOutcome`; this method returns the row alone.
    */
-  static async syncUser(workosUser: {
-    id: string;
-    email: string;
-    firstName?: string;
-    lastName?: string;
-    emailVerified: boolean;
-    profilePictureUrl?: string;
-  }): Promise<User> {
+  static async syncUser(workosUser: SyncUserInput): Promise<User> {
+    const { user } = await WorkOSService.syncUserWithOutcome(workosUser);
+    return user;
+  }
+
+  /**
+   * `syncUser`, plus whether this sign-in claimed a pre-provisioned row
+   * (branch 2) rather than refreshing a linked one or creating a new one
+   * (#790). `wasManaged` is the claimed row's `isManaged` before the claim
+   * (a coach-managed roster player); it is `false` whenever nothing was
+   * claimed.
+   */
+  static async syncUserWithOutcome(workosUser: SyncUserInput): Promise<SyncUserResult> {
     const fullName = [workosUser.firstName, workosUser.lastName]
       .filter(Boolean)
       .join(' ') || workosUser.email.split('@')[0];
@@ -209,7 +237,8 @@ export class WorkOSService {
         })
       );
       if (updated.count === 1) {
-        return prisma.user.findUniqueOrThrow({ where: { id: linked.id } });
+        const user = await prisma.user.findUniqueOrThrow({ where: { id: linked.id } });
+        return { user, claimedInvite: false, wasManaged: false };
       }
       logger.info('Linked user was deleted during sign-in; creating a fresh account', { userId: linked.id });
     }
@@ -248,7 +277,8 @@ export class WorkOSService {
         })
       );
       if (claimed.count === 1) {
-        return prisma.user.findUniqueOrThrow({ where: { id: byEmail.id } });
+        const user = await prisma.user.findUniqueOrThrow({ where: { id: byEmail.id } });
+        return { user, claimedInvite: true, wasManaged: byEmail.isManaged };
       }
       logger.info('Pre-provisioned user changed during sign-in; creating a fresh account', {
         userId: byEmail.id,
@@ -256,7 +286,7 @@ export class WorkOSService {
     }
 
     // 4. Brand-new user. Default role is PLAYER (self-selectable to COACH).
-    return WorkOSService.mapUniqueViolation(() =>
+    const created = await WorkOSService.mapUniqueViolation(() =>
       prisma.user.create({
         data: {
           workosUserId: workosUser.id,
@@ -268,6 +298,7 @@ export class WorkOSService {
         },
       })
     );
+    return { user: created, claimedInvite: false, wasManaged: false };
   }
 
   /** Turn a Prisma unique-constraint violation (P2002) into a 409 instead of a 500. */

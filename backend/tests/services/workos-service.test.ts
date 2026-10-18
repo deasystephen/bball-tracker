@@ -603,6 +603,87 @@ describe('WorkOSService', () => {
     });
   });
 
+  describe('syncUserWithOutcome (#790)', () => {
+    beforeEach(() => {
+      delete process.env.ADMIN_EMAIL;
+      delete process.env.ADMIN_EMAILS;
+    });
+
+    it('reports a brand-new account as not claimed', async () => {
+      const player = createPlayer({ email: 'fresh@example.com', workosUserId: 'workos_new' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue(player);
+
+      const result = await WorkOSService.syncUserWithOutcome({
+        id: 'workos_new',
+        email: 'fresh@example.com',
+        emailVerified: true,
+      });
+
+      expect(result).toEqual({ user: player, claimedInvite: false, wasManaged: false });
+    });
+
+    it('reports a returning linked user as not claimed', async () => {
+      const existingUser = createPlayer({ workosUserId: 'workos_123' });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
+
+      const result = await WorkOSService.syncUserWithOutcome({
+        id: 'workos_123',
+        email: existingUser.email,
+        emailVerified: true,
+      });
+
+      expect(result).toEqual({ user: existingUser, claimedInvite: false, wasManaged: false });
+    });
+
+    it.each([
+      { isManaged: true, label: 'a coach-managed player' },
+      { isManaged: false, label: 'an invited, unmanaged row' },
+    ])('reports a claimed pre-provisioned row ($label) with its prior managed flag', async ({ isManaged }) => {
+      const existingUser = {
+        ...createPlayer({ email: 'invited@example.com' }),
+        workosUserId: null,
+        isManaged,
+        managedById: isManaged ? 'coach-1' : null,
+      };
+      const claimedRow = { ...existingUser, workosUserId: 'workos_456', isManaged: false, managedById: null };
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null) // by workosUserId
+        .mockResolvedValueOnce(existingUser); // by email
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(claimedRow);
+
+      const result = await WorkOSService.syncUserWithOutcome({
+        id: 'workos_456',
+        email: 'invited@example.com',
+        emailVerified: true,
+      });
+
+      expect(result).toEqual({ user: claimedRow, claimedInvite: true, wasManaged: isManaged });
+    });
+
+    it('reports a lost claim race that fell through to a create as not claimed', async () => {
+      const existingUser = { ...createPlayer({ email: 'user@example.com' }), workosUserId: null, isManaged: true };
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
+
+      const result = await WorkOSService.syncUserWithOutcome({
+        id: 'workos_456',
+        email: 'user@example.com',
+        emailVerified: true,
+      });
+
+      expect(result.user).toHaveProperty('id', 'fresh-id');
+      expect(result.claimedInvite).toBe(false);
+      expect(result.wasManaged).toBe(false);
+    });
+  });
+
   describe('verifyToken', () => {
     let privateKey: KeyLike;
     let publicJwk: JWK;
