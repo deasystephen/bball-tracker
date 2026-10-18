@@ -268,22 +268,23 @@ jest.mock('../src/models', () => {
 });
 
 // Mock WorkOS client
+const mockWorkOSClient = {
+  userManagement: {
+    getAuthorizationUrl: jest.fn().mockResolvedValue('https://auth.workos.com/authorize'),
+    authenticateWithCode: jest.fn(),
+    deleteUser: jest.fn().mockResolvedValue(undefined),
+    getUser: jest.fn(),
+    listUsers: jest.fn(),
+  },
+};
 jest.mock('../src/utils/workos-client', () => ({
   WORKOS_JWT_ISSUER: 'https://api.workos.com',
   // Empty key set: any JWT-shaped token fails with JWKSNoMatchingKey (→ 401),
   // garbage fails with JWSInvalid (→ 401). Suites that need a passing token
   // mock WorkOSService.verifyToken directly or override this with a real key.
   getWorkOSJwks: (): unknown => jest.requireActual('jose').createLocalJWKSet({ keys: [] }),
-  workos: {
-    userManagement: {
-      getAuthorizationUrl: jest.fn().mockResolvedValue('https://auth.workos.com/authorize'),
-      authenticateWithCode: jest.fn(),
-      deleteUser: jest.fn().mockResolvedValue(undefined),
-      getUser: jest.fn(),
-      listUsers: jest.fn(),
-    },
-  },
-  WORKOS_CLIENT_ID: 'test-client-id',
+  getWorkOS: (): unknown => mockWorkOSClient,
+  getWorkOSClientId: (): string => 'test-client-id',
   WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
 }));
 

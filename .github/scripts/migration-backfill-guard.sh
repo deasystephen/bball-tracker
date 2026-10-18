@@ -124,12 +124,6 @@ PORT="$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')"
 # Exported, so it wins over backend/.env: prisma.config.ts loads dotenv, and
 # dotenv never overrides a variable that is already set.
 export DATABASE_URL="postgresql://postgres:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}?schema=public"
-# The base checkout has no backend/.env, and the seed's import chain (seed.ts ->
-# game-event-service -> websocket/emit -> workos-service -> utils/workos-client.ts)
-# throws at import when these are unset. The seed never calls WorkOS; placeholders
-# only let the module load.
-export WORKOS_API_KEY="${WORKOS_API_KEY:-sk_test_migration_guard_placeholder}"
-export WORKOS_CLIENT_ID="${WORKOS_CLIENT_ID:-client_migration_guard_placeholder}"
 unset NODE_ENV
 
 run_sql() {

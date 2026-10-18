@@ -8,25 +8,36 @@
 import { WorkOS } from '@workos-inc/node';
 import { createRemoteJWKSet } from 'jose';
 
-if (!process.env.WORKOS_API_KEY) {
-  throw new Error('WORKOS_API_KEY environment variable is required');
+let client: WorkOS | undefined;
+
+/**
+ * The WorkOS client, constructed on first use so that importing this module
+ * (the database seed does, through the websocket emitter) needs no WorkOS
+ * environment. The "required" error is raised at call time.
+ */
+export function getWorkOS(): WorkOS {
+  if (!client) {
+    const apiKey = process.env.WORKOS_API_KEY;
+    if (!apiKey) {
+      throw new Error('WORKOS_API_KEY environment variable is required');
+    }
+    client = new WorkOS(apiKey, {
+      apiHostname: 'api.workos.com', // Production and sandbox share the hostname
+    });
+  }
+  return client;
 }
 
-export const workos = new WorkOS(process.env.WORKOS_API_KEY, {
-  apiHostname: process.env.WORKOS_ENVIRONMENT === 'production' 
-    ? 'api.workos.com' 
-    : 'api.workos.com', // Sandbox uses same hostname
-});
-
-const WORKOS_CLIENT_ID_ENV = process.env.WORKOS_CLIENT_ID;
 export const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'http://localhost:3000/api/v1/auth/callback';
 
-if (!WORKOS_CLIENT_ID_ENV) {
-  throw new Error('WORKOS_CLIENT_ID environment variable is required');
+/** The AuthKit client id; read at call time, throws when unset. */
+export function getWorkOSClientId(): string {
+  const clientId = process.env.WORKOS_CLIENT_ID;
+  if (!clientId) {
+    throw new Error('WORKOS_CLIENT_ID environment variable is required');
+  }
+  return clientId;
 }
-
-// After the check, we know it's defined
-export const WORKOS_CLIENT_ID = WORKOS_CLIENT_ID_ENV!;
 
 /**
  * Issuer expected in WorkOS access tokens. Overridable in case WorkOS changes
@@ -43,7 +54,7 @@ let jwks: Jwks | undefined;
  * handled without a restart.
  */
 export function getWorkOSJwks(): Jwks {
-  jwks ??= createRemoteJWKSet(new URL(workos.userManagement.getJwksUrl(WORKOS_CLIENT_ID)), {
+  jwks ??= createRemoteJWKSet(new URL(getWorkOS().userManagement.getJwksUrl(getWorkOSClientId())), {
     cooldownDuration: 5 * 60 * 1000,
     cacheMaxAge: 10 * 60 * 1000,
   });

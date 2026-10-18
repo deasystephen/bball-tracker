@@ -2,21 +2,23 @@
  * Unit tests for WorkOSService
  */
 
+const mockWorkOSClient = {
+  userManagement: {
+    getAuthorizationUrl: jest.fn(),
+    authenticateWithCode: jest.fn(),
+    authenticateWithRefreshToken: jest.fn(),
+    revokeSession: jest.fn(),
+    deleteUser: jest.fn(),
+    getUser: jest.fn(),
+    listUsers: jest.fn(),
+  },
+};
+
 // Mock workos client - must declare mock functions separately to avoid hoisting issues
 jest.mock('../../src/utils/workos-client', () => {
   return {
-    workos: {
-      userManagement: {
-        getAuthorizationUrl: jest.fn(),
-        authenticateWithCode: jest.fn(),
-        authenticateWithRefreshToken: jest.fn(),
-        revokeSession: jest.fn(),
-        deleteUser: jest.fn(),
-        getUser: jest.fn(),
-        listUsers: jest.fn(),
-      },
-    },
-    WORKOS_CLIENT_ID: 'test-client-id',
+    getWorkOS: (): unknown => mockWorkOSClient,
+    getWorkOSClientId: (): string => 'test-client-id',
     WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
     WORKOS_JWT_ISSUER: 'https://api.workos.com',
     getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
@@ -34,7 +36,7 @@ import { mockPrisma } from '../setup';
 import { createPlayer, uniqueViolation } from '../factories';
 
 // Get reference to the mocked module
-import { workos } from '../../src/utils/workos-client';
+const workos = mockWorkOSClient;
 const mockWorkos = {
   userManagement: {
     getAuthorizationUrl: workos.userManagement.getAuthorizationUrl as jest.Mock,

@@ -8,8 +8,8 @@
 
 const mockGetWorkOSJwks = jest.fn();
 jest.mock('../../src/utils/workos-client', () => ({
-  workos: { userManagement: {} },
-  WORKOS_CLIENT_ID: 'test-client-id',
+  getWorkOS: (): unknown => ({ userManagement: {} }),
+  getWorkOSClientId: (): string => 'test-client-id',
   WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
   WORKOS_JWT_ISSUER: 'https://api.workos.com',
   getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
