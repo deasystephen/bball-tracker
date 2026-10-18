@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { GameStatus } from '@prisma/client';
 import { computeHomeScore } from '../../src/services/game-event-service';
-import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/invitation-service';
+import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { hashRecipient } from '../../src/utils/hash-recipient';
 import {
   BRYCE_JAMES_ID,

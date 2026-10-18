@@ -12,7 +12,8 @@
 import { GuardianRelationship, Prisma, UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
-import { BadRequestError, ForbiddenError, NotFoundError, ResendCooldownError } from '../utils/errors';
+import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
+import { assertResendCooldown, INVITATION_RESEND_COOLDOWN_MS } from '../utils/resend-cooldown';
 import { getGuardianChildIds, hasTeamPermission, isGuardianOf } from '../utils/permissions';
 import { mailer } from './mailer';
 import { guardianInvitationTemplate } from './mailer/templates';
@@ -26,16 +27,6 @@ import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/
 import { lockUsers } from '../utils/user-row-lock';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
-
-/**
- * Per-recipient resend cooldown (#420), the guardian twin of
- * `invitation-service.ts#INVITATION_RESEND_COOLDOWN_MS` (#715, same window):
- * a Resend whose newest invitation row for the child + address (any status)
- * is younger than this is refused with 429 before anything is expired or
- * mailed. Every row is one email, so this caps one address at one message
- * per window.
- */
-export const GUARDIAN_INVITATION_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** The partial unique index that allows one PENDING row per child + address. */
 const PENDING_GUARDIAN_INDEX = 'GuardianInvitation_pending_childId_invitedEmail_key';
@@ -345,18 +336,20 @@ export class GuardianService {
       }
     }
 
-    const alreadyLinked = await prisma.guardian.findUnique({
-      where: { parentId_childId: { parentId: parent.id, childId: playerId } },
-    });
-    if (alreadyLinked) {
-      throw new BadRequestError('This person is already a guardian of this player');
-    }
-
-    // Dedupe: one live PENDING invitation per child/email. An expired PENDING
-    // row is flipped to EXPIRED and does not block (same lazy expiry as
-    // TeamInvitation). Under `supersede` the PENDING row (live or lapsed) is
-    // left for the supersede transaction to expire.
+    // Under `supersede` both checks below move into the supersede transaction:
+    // the link is read there under the child/adult row locks (authoritative),
+    // and the PENDING row (live or lapsed) is expired there.
     if (!data.supersede) {
+      const alreadyLinked = await prisma.guardian.findUnique({
+        where: { parentId_childId: { parentId: parent.id, childId: playerId } },
+      });
+      if (alreadyLinked) {
+        throw new BadRequestError('This person is already a guardian of this player');
+      }
+
+      // Dedupe: one live PENDING invitation per child/email. An expired PENDING
+      // row is flipped to EXPIRED and does not block (same lazy expiry as
+      // TeamInvitation).
       const existing = await prisma.guardianInvitation.findFirst({
         where: { childId: playerId, invitedEmail: email, status: 'PENDING' },
       });
@@ -455,9 +448,11 @@ export class GuardianService {
    * `invitation-service.ts#createInvitationRowSuperseding`: expire the PENDING
    * row for the child + address (live or lapsed) and create its replacement in
    * ONE transaction, so a failed create never leaves the parent with a dead
-   * link and no invitation. A guardian link appearing in the window means the
-   * parent just accepted: refuse rather than send a second invitation. The
-   * resend cooldown runs first, so a refusal expires nothing and mails no one.
+   * link and no invitation. The child and adult rows are locked first, as
+   * accept locks them, so the link read is authoritative: a parent who just
+   * accepted is refused rather than sent a second invitation. The resend
+   * cooldown runs before any write, so a refusal expires nothing and mails no
+   * one. Only the caller's team's PENDING row is expired.
    *
    * Two concurrent resends can both expire the row and both insert; the loser
    * hits the partial PENDING index and answers the dedupe 400, never a 500. A
@@ -467,10 +462,14 @@ export class GuardianService {
     row: Prisma.GuardianInvitationUncheckedCreateInput,
     parentId: string
   ): Promise<GuardianInvitationSummary> {
-    const { childId, invitedEmail, invitedById } = row;
+    const { childId, invitedEmail, invitedById, teamId } = row;
     return createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
+          // Hold the child and the adult exactly as accept does (#664), so an
+          // accept cannot commit between this link check and the expire below
+          // and leave a linked parent holding a fresh PENDING invitation.
+          await lockUsers(tx, [childId, parentId]);
           const linked = await tx.guardian.findUnique({
             where: { parentId_childId: { parentId, childId } },
             select: { id: true },
@@ -484,21 +483,16 @@ export class GuardianService {
             orderBy: { createdAt: 'desc' },
             select: { createdAt: true },
           });
-          const sinceLatestMs = latest ? Date.now() - latest.createdAt.getTime() : Infinity;
-          if (sinceLatestMs < GUARDIAN_INVITATION_RESEND_COOLDOWN_MS) {
-            const retryAfterSeconds = Math.ceil(
-              (GUARDIAN_INVITATION_RESEND_COOLDOWN_MS - sinceLatestMs) / 1000
-            );
-            logger.info('Guardian invitation resend refused (cooldown)', {
-              childId,
-              invitedById,
-              retryAfterSeconds,
-            });
-            throw new ResendCooldownError(retryAfterSeconds, 'address');
-          }
+          // Per address, across teams: every row is one email to it.
+          assertResendCooldown(latest?.createdAt, INVITATION_RESEND_COOLDOWN_MS, 'address', (retryAfterSeconds) =>
+            logger.info('Guardian invitation resend refused (cooldown)', { childId, invitedById, retryAfterSeconds })
+          );
 
+          // Scoped to the caller's team: a coach on another team of the same
+          // child cannot expire this team's live invitation and re-issue it
+          // under theirs; their insert hits the partial index and gets the 400.
           const { count: supersededCount } = await tx.guardianInvitation.updateMany({
-            where: { childId, invitedEmail, status: 'PENDING' },
+            where: { childId, invitedEmail, teamId, status: 'PENDING' },
             data: { status: 'EXPIRED' },
           });
           if (supersededCount > 0) {

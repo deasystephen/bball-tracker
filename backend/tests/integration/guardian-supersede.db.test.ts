@@ -1,12 +1,14 @@
 /**
  * Guardian Resend (supersede, #420) against a REAL Postgres.
  *
- * The mocked service suite cannot prove the two things that matter here: that
- * the expire and the create commit together, and that a resend which loses a
- * race hits the partial index `GuardianInvitation_pending_childId_invitedEmail_key`
- * under the name `createOrConflict` matches (Prisma 7 reports it at
- * `meta.driverAdapterError.cause.constraint.index`), so the loser answers the
- * dedupe 400 instead of a 500.
+ * The mocked service suite cannot prove what matters here: that the expire and
+ * the create commit together; that the resend holds the child row as accept
+ * does, so an accept that commits first turns the resend into a 400; that two
+ * resends serialise on that lock (the second answers the cooldown 429); that
+ * the expire is scoped to the caller's team; and that an insert colliding on
+ * `GuardianInvitation_pending_childId_invitedEmail_key` is recognised under
+ * the name Prisma 7 reports (`meta.driverAdapterError.cause.constraint.index`),
+ * so it answers the dedupe 400 instead of a 500.
  *
  * Every row is namespaced by the fixture run id and removed in afterAll.
  */
@@ -14,14 +16,12 @@ jest.unmock('../../src/models');
 import { randomBytes } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import prisma from '../../src/models';
-import {
-  GuardianService,
-  GUARDIAN_INVITATION_RESEND_COOLDOWN_MS,
-} from '../../src/services/guardian-service';
+import { GuardianService } from '../../src/services/guardian-service';
+import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
 import { DbFixtures, type Org } from '../support/db-fixtures';
-import { pause } from '../support/db-locks';
+import { backendPid, pause, track, waitForBlockedBy } from '../support/db-locks';
 
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
@@ -45,10 +45,11 @@ async function emailOf(userId: string): Promise<string> {
 async function childWithPending(
   key: string,
   ageMs: number
-): Promise<{ childId: string; email: string; liveId: string }> {
+): Promise<{ childId: string; parentId: string; email: string; liveId: string }> {
   const childId = await fx.user(`${key}-child`, 'PLAYER');
   await fx.member(childId, org);
-  const email = await emailOf(await fx.user(`${key}-parent`, 'PLAYER'));
+  const parentId = await fx.user(`${key}-parent`, 'PLAYER');
+  const email = await emailOf(parentId);
   const live = await prisma.guardianInvitation.create({
     data: {
       token: randomBytes(32).toString('base64url'),
@@ -63,7 +64,7 @@ async function childWithPending(
     },
     select: { id: true },
   });
-  return { childId, email, liveId: live.id };
+  return { childId, parentId, email, liveId: live.id };
 }
 
 async function rowsFor(childId: string): Promise<{ id: string; status: string }[]> {
@@ -75,10 +76,8 @@ async function rowsFor(childId: string): Promise<{ id: string; status: string }[
 }
 
 /**
- * Waits until two backends of this database sit in a lock wait on a
- * `GuardianInvitation` statement and returns how many there are (fewer on
- * timeout). The second resend queues behind the first one's tuple lock, so it
- * is not always reported as blocked by the holder itself.
+ * Waits until a backend of this database sits in a lock wait on the
+ * `GuardianInvitation` expire and returns how many do (0 on timeout).
  */
 async function lockWaiters(tx: Prisma.TransactionClient, timeoutMs = 4000): Promise<number> {
   const deadline = Date.now() + timeoutMs;
@@ -91,14 +90,14 @@ async function lockWaiters(tx: Prisma.TransactionClient, timeoutMs = 4000): Prom
       WHERE datname = current_database()
         AND wait_event_type = 'Lock'
         AND query LIKE 'UPDATE "public"."GuardianInvitation"%'`;
-    if (n >= 2 || Date.now() > deadline) {
+    if (n >= 1 || Date.now() > deadline) {
       return n;
     }
     await pause(25);
   }
 }
 
-const PAST_COOLDOWN = GUARDIAN_INVITATION_RESEND_COOLDOWN_MS + 60_000;
+const PAST_COOLDOWN = INVITATION_RESEND_COOLDOWN_MS + 60_000;
 
 beforeAll(async () => {
   await fx.requireDatabase();
@@ -154,37 +153,131 @@ describe('guardian resend (supersede, #420)', () => {
     expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
   });
 
-  it('two resends racing past the cooldown: one wins, the loser hits the partial index and answers 400', async () => {
-    const { childId, email, liveId } = await childWithPending('race', PAST_COOLDOWN);
+  it('two concurrent resends queue on the child lock: one sends, the other answers the cooldown 429', async () => {
+    const { childId, email, liveId } = await childWithPending('double', PAST_COOLDOWN);
     const resend = (): Promise<unknown> =>
       GuardianService.inviteGuardian(org.teamId, childId, { email, relationship: 'MOTHER', supersede: true }, coachId);
 
-    // Hold the live row so both resends pass their reads (link check,
-    // cooldown) and then queue on the expire. When the holder commits, one
-    // expires and inserts; the other's expire then matches nothing and its
-    // insert collides on the partial PENDING index.
-    let calls: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    const settled = await Promise.allSettled([resend(), resend()]);
+
+    const rejected = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(settled.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ResendCooldownError);
+    const rows = await rowsFor(childId);
+    expect(rows.filter((r) => r.status === 'PENDING')).toHaveLength(1);
+    expect(rows.find((r) => r.id === liveId)?.status).toBe('EXPIRED');
+  });
+
+  it('a PENDING row committed under the resend answers the dedupe 400 from the partial index, never a 500', async () => {
+    const { childId, email, liveId } = await childWithPending('index', PAST_COOLDOWN);
+
+    // Hold the live invitation so the resend passes its reads and queues on
+    // the expire. Meanwhile the holder expires it and commits a new PENDING
+    // row for the same child + address (what a plain invite, which takes no
+    // row locks, can do). The resend's expire then matches nothing it can see
+    // and its insert collides on the partial index, under the index name
+    // `createOrConflict` must recognise (Prisma 7 driver-adapter meta).
+    let resend: ReturnType<typeof track<unknown>> | undefined;
+    let intruderId: string | undefined;
     await prisma.$transaction(
       async (holder) => {
         await holder.$queryRaw`SELECT "id" FROM "GuardianInvitation" WHERE "id" = ${liveId} FOR UPDATE`;
-        calls = Promise.allSettled([resend(), resend()]);
-        expect(await lockWaiters(holder)).toBe(2);
+        resend = track(
+          GuardianService.inviteGuardian(
+            org.teamId,
+            childId,
+            { email, relationship: 'MOTHER', supersede: true },
+            coachId
+          )
+        );
+        resend.promise.catch(() => undefined);
+        expect(await lockWaiters(holder)).toBeGreaterThanOrEqual(1);
+
+        await holder.guardianInvitation.update({ where: { id: liveId }, data: { status: 'EXPIRED' } });
+        const intruder = await holder.guardianInvitation.create({
+          data: {
+            token: randomBytes(32).toString('base64url'),
+            childId,
+            teamId: org.teamId,
+            invitedEmail: email,
+            relationship: 'MOTHER',
+            invitedById: coachId,
+            expiresAt: new Date(Date.now() + 7 * DAY_MS),
+            status: 'PENDING',
+          },
+          select: { id: true },
+        });
+        intruderId = intruder.id;
       },
       { timeout: 10_000 }
     );
 
-    const settled = await calls!;
-    const fulfilled = settled.filter((s) => s.status === 'fulfilled');
-    const rejected = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toBeInstanceOf(BadRequestError);
-    expect((rejected[0].reason as BadRequestError).message).toBe(
-      'A pending guardian invitation already exists for this email'
+    const err = await resend!.promise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestError);
+    expect((err as BadRequestError).message).toBe('A pending guardian invitation already exists for this email');
+    expect(await rowsFor(childId)).toEqual([
+      { id: liveId, status: 'EXPIRED' },
+      { id: intruderId, status: 'PENDING' },
+    ]);
+  });
+
+  it('waits on the child row lock, so an accept committing first makes the resend answer 400, not a second invitation', async () => {
+    const { childId, parentId, email, liveId } = await childWithPending('accept', PAST_COOLDOWN);
+
+    // The holder plays an accept: it holds the child row as accept's lockUsers
+    // does, and once the resend is queued behind it, links the parent and
+    // marks the invitation ACCEPTED, then commits.
+    let resend: ReturnType<typeof track<unknown>> | undefined;
+    await prisma.$transaction(
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${childId} FOR NO KEY UPDATE`;
+        resend = track(
+          GuardianService.inviteGuardian(
+            org.teamId,
+            childId,
+            { email, relationship: 'MOTHER', supersede: true },
+            coachId
+          )
+        );
+        resend.promise.catch(() => undefined);
+
+        // Without the lock the resend would read "not linked" now and go on.
+        const blocked = await waitForBlockedBy(holder, await backendPid(holder), { timeoutMs: 4000 });
+        expect(blocked).toHaveLength(1);
+        expect(resend.settled()).toBe(false);
+
+        await holder.guardianInvitation.update({
+          where: { id: liveId },
+          data: { status: 'ACCEPTED', acceptedAt: new Date() },
+        });
+        await holder.guardian.create({ data: { parentId, childId, relationship: 'MOTHER', isPrimary: true } });
+      },
+      { timeout: 10_000 }
     );
 
-    const rows = await rowsFor(childId);
-    expect(rows.filter((r) => r.status === 'PENDING')).toHaveLength(1);
-    expect(rows.find((r) => r.id === liveId)?.status).toBe('EXPIRED');
+    const err = await resend!.promise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestError);
+    expect((err as BadRequestError).message).toBe('This person is already a guardian of this player');
+    expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'ACCEPTED' }]);
+  });
+
+  it("a coach on another team cannot expire this team's live invitation; their resend answers the dedupe 400", async () => {
+    const { childId, email, liveId } = await childWithPending('crossteam', PAST_COOLDOWN);
+    const otherOrg = await fx.org('other');
+    const otherCoachId = await fx.user('other-coach', 'COACH');
+    await fx.staff(otherCoachId, otherOrg);
+    await fx.member(childId, otherOrg);
+
+    const err = await GuardianService.inviteGuardian(
+      otherOrg.teamId,
+      childId,
+      { email, relationship: 'MOTHER', supersede: true },
+      otherCoachId
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestError);
+    expect((err as BadRequestError).message).toBe('A pending guardian invitation already exists for this email');
+    expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
   });
 });

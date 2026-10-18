@@ -4,7 +4,8 @@
 
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../../src/utils/user-select';
 import { Prisma } from '@prisma/client';
-import { GuardianService, GUARDIAN_INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/guardian-service';
+import { GuardianService } from '../../src/services/guardian-service';
+import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { ResendCooldownError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { mockPrisma } from '../setup';
@@ -403,7 +404,7 @@ describe('GuardianService', () => {
 
     describe('supersede (Resend, #420)', () => {
       const resend = { ...input, supersede: true };
-      const OLDER_THAN_COOLDOWN = new Date(Date.now() - GUARDIAN_INVITATION_RESEND_COOLDOWN_MS - 60_000);
+      const OLDER_THAN_COOLDOWN = new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 60_000);
 
       /** Happy path plus a live PENDING row for the pair, created before the cooldown window. */
       function setLivePending(): void {
@@ -422,8 +423,9 @@ describe('GuardianService', () => {
 
         // A live row would 400 without supersede; here it is expired instead.
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        // Scoped to the caller's team: another team's live invitation is not expired.
         expect(mockPrisma.guardianInvitation.updateMany).toHaveBeenCalledWith({
-          where: { childId: CHILD_ID, invitedEmail: 'parent@test.com', status: 'PENDING' },
+          where: { childId: CHILD_ID, invitedEmail: 'parent@test.com', teamId: TEAM_ID, status: 'PENDING' },
           data: { status: 'EXPIRED' },
         });
         expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledWith(
@@ -486,10 +488,31 @@ describe('GuardianService', () => {
         expect(mockedMailerSend).not.toHaveBeenCalled();
       });
 
+      it('locks the child and the adult inside the transaction before reading the link, and skips the unlocked pre-check', async () => {
+        setLivePending();
+
+        await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id);
+
+        // The only link read is the locked one inside the transaction (#664 order, as accept).
+        expect(mockPrisma.guardian.findUnique).toHaveBeenCalledTimes(1);
+        const lockCall = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find((call: unknown[]) =>
+          String((call[0] as string[]).join('')).includes('FOR NO KEY UPDATE')
+        );
+        expect(lockCall).toBeDefined();
+        expect(lockedIds(lockCall as unknown[]).sort()).toEqual([CHILD_ID, 'parent-1'].sort());
+        const lockOrder = (mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[
+          (mockPrisma.$queryRaw as jest.Mock).mock.calls.indexOf(lockCall as unknown[])
+        ];
+        expect(lockOrder).toBeLessThan(mockPrisma.guardian.findUnique.mock.invocationCallOrder[0]);
+        expect(mockPrisma.guardian.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+          mockPrisma.guardianInvitation.updateMany.mock.invocationCallOrder[0]
+        );
+      });
+
       it('refuses when the parent accepted in the race window, without expiring or creating', async () => {
         setLivePending();
-        // Pre-check: not linked yet. Inside the transaction: the link exists.
-        (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'g-1' });
+        // The locked in-transaction read sees the link the accept just committed.
+        (mockPrisma.guardian.findUnique as jest.Mock).mockResolvedValueOnce({ id: 'g-1' });
 
         const err = await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, resend, coach.id).catch((e) => e);
 

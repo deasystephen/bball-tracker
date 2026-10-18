@@ -459,7 +459,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(
         // Points at the Resend action on the Guardians screen (#420)
-        'The parent invite email failed to send. Use Resend on the player’s Guardians screen to try again.',
+        'The parent invite email failed to send. Resend on the player’s Guardians screen becomes available in a couple of minutes.',
         'error'
       )
     );

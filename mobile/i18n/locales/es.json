@@ -245,9 +245,11 @@
   "guardians": {
     "resendA11y": "Reenviar invitación: {{email}}",
     "resent": "Invitación reenviada a {{email}}",
-    "resentEmailFailed": "Invitación renovada, pero el correo a {{email}} no se pudo enviar. Usa Reenviar para intentarlo de nuevo.",
+    "resentEmailFailed": "Invitación renovada, pero el correo a {{email}} no se pudo enviar. Podrás reenviarla de nuevo en un par de minutos.",
     "resendFailed": "No se pudo reenviar la invitación",
-    "inviteEmailFailed": "Invitación creada, pero el correo a {{email}} no se pudo enviar. Usa Reenviar en la invitación pendiente para intentarlo de nuevo.",
-    "addPlayerEmailFailed": "No se pudo enviar el correo de invitación al padre o tutor. Usa Reenviar en la pantalla de Tutores del jugador para intentarlo de nuevo."
+    "inviteEmailFailed": "Invitación creada, pero el correo a {{email}} no se pudo enviar. Podrás usar Reenviar en la invitación pendiente en un par de minutos.",
+    "addPlayerEmailFailed": "No se pudo enviar el correo de invitación al padre o tutor. Podrás usar Reenviar en la pantalla de Tutores del jugador en un par de minutos.",
+    "sent": "Invitación enviada a {{email}}",
+    "inviteFailed": "No se pudo enviar la invitación"
   }
 }

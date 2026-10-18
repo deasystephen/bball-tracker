@@ -115,7 +115,7 @@ describe('PlayerGuardiansScreen invite toast', () => {
 
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(
-        'Invitation created, but the email to sonya.curry@example.test failed to send. Use Resend on the pending invite to try again.',
+        'Invitation created, but the email to sonya.curry@example.test failed to send. Resend on the pending invite becomes available in a couple of minutes.',
         'error'
       )
     );
@@ -166,6 +166,25 @@ describe('PlayerGuardiansScreen Resend (#420)', () => {
     );
   });
 
+  it('shows a spinner on the row in flight and ignores repeat taps until the resend settles', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    mockInvite.mutateAsync.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const screen = render(<PlayerGuardiansScreen />);
+
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+
+    await waitFor(() => expect(screen.getByTestId('guardian-resending-gi1')).toBeTruthy());
+    expect(screen.getByTestId('guardian-resend-gi1').props.accessibilityState).toEqual(
+      expect.objectContaining({ busy: true, disabled: true })
+    );
+    fireEvent.press(screen.getByTestId('guardian-resend-gi1'));
+    expect(mockInvite.mutateAsync).toHaveBeenCalledTimes(1);
+
+    finish({ invitation: pending, emailSent: true });
+    await waitFor(() => expect(screen.queryByTestId('guardian-resending-gi1')).toBeNull());
+    expect(mockShowToast).toHaveBeenCalledWith('Invitation re-sent to sonya.curry@example.test', 'success');
+  });
+
   it('reports a failed resend email as an error, never as "re-sent"', async () => {
     mockInvite.mutateAsync.mockResolvedValueOnce({ invitation: pending, emailSent: false });
     const screen = render(<PlayerGuardiansScreen />);
@@ -174,7 +193,7 @@ describe('PlayerGuardiansScreen Resend (#420)', () => {
 
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith(
-        'Invitation refreshed, but the email to sonya.curry@example.test failed to send. Use Resend to try again.',
+        'Invitation refreshed, but the email to sonya.curry@example.test failed to send. You can resend it again in a couple of minutes.',
         'error'
       )
     );

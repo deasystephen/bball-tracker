@@ -2,7 +2,8 @@
  * Unit tests for InvitationService
  */
 
-import { InvitationService, INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/invitation-service';
+import { InvitationService } from '../../src/services/invitation-service';
+import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { GuardianService } from '../../src/services/guardian-service';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';

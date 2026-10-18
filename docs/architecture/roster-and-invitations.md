@@ -66,9 +66,10 @@ eng-review amendments recorded there).
   longer lazy-expires a lapsed row before the transaction, so the transaction expires it and logs
   `Invitation superseded`.
 - **Resend cooldown (#715):** both expire-and-recreate paths, Resend (supersede) and Add Player case 2
-  re-adding a removed player's address, run `assertResendCooldown` inside their transaction. When
+  re-adding a removed player's address, run `latestAfterCooldown` inside their transaction, which
+  applies the shared `utils/resend-cooldown.ts#assertResendCooldown`. When
   the newest invitation row for the pair (any status, so a Cancel between resends does not reset
-  it) is younger than `INVITATION_RESEND_COOLDOWN_MS` (2 minutes) **and went to the address the
+  it) is younger than `INVITATION_RESEND_COOLDOWN_MS` (2 minutes, in the same file) **and went to the address the
   player still has**, the request answers **429** `resend_cooldown` (`ResendCooldownError`, body
   `{ error, code, retryAfterSeconds }`) before anything is expired or mailed, and logs
   `Invitation resend refused (cooldown)` with ids only. Every invitation row is one email, so this
@@ -77,7 +78,7 @@ eng-review amendments recorded there).
   address skips the cooldown, so "Fix email address → Save & send invitation" goes out at once. A
   row from before the column existed has a null hash and counts as the same address; a player
   with no address gets no email, so no cooldown. Account deletion clears the hash on the deleted
-  user's invitation rows. Guardian invitations have the same Resend and the same 2-minute window
+  user's invitation rows. Guardian invitations have the same Resend and the same helper and window
   (#420, keyed on child + address; `docs/architecture/guardians.md`). On top of it the email-sending roster routes share the per-user
   `inviteRateLimit` (60 / hour; see `docs/architecture/backend-services.md`, Rate limits). With `supersede` an existing **member** is allowed (a rostered case-2 player);
   a claimed account that is already a member answers 400 `Player already has access to this team`.
