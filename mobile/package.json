@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@amplitude/analytics-react-native": "^1.10.2",
-    "@amplitude/analytics-types": "^2.11.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/oswald": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
@@ -63,11 +62,9 @@
     "react-native-svg": "15.15.5",
     "react-native-worklets": "0.10.1",
     "socket.io-client": "^4.8.4",
-    "zod": "^4.6.7",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
     "@resvg/resvg-js": "^2.6.2",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.5.12",
