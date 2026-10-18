@@ -83,6 +83,14 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Audit floor (no unaccepted high/critical advisory in production deps)
+        # #924: fails when the lockfile resolves a production dependency under a
+        # high or critical advisory not listed for this side in
+        # .github/scripts/accepted-advisories.json (the #919 regression shape).
+        # Calls the npm registry; an audit that cannot run fails the job.
+        working-directory: backend
+        run: node ../.github/scripts/check-audit-floor.mjs
+
       - name: Generate Prisma client
         working-directory: backend
         run: npx prisma generate
@@ -118,6 +126,14 @@ jobs:
         working-directory: mobile
         run: npm ci
 
+      - name: Audit floor (no unaccepted high/critical advisory in production deps)
+        # #924: fails when the lockfile resolves a production dependency under a
+        # high or critical advisory not listed for this side in
+        # .github/scripts/accepted-advisories.json (the #919 regression shape).
+        # Calls the npm registry; an audit that cannot run fails the job.
+        working-directory: mobile
+        run: node ../.github/scripts/check-audit-floor.mjs
+
       - name: Run tests (with coverage gate)
         working-directory: mobile
         run: npm test -- --coverage
@@ -147,6 +163,14 @@ jobs:
       - name: Install dependencies
         working-directory: web
         run: npm ci
+
+      - name: Audit floor (no unaccepted high/critical advisory in production deps)
+        # #924: fails when the lockfile resolves a production dependency under a
+        # high or critical advisory not listed for this side in
+        # .github/scripts/accepted-advisories.json (the #919 regression shape).
+        # Calls the npm registry; an audit that cannot run fails the job.
+        working-directory: web
+        run: node ../.github/scripts/check-audit-floor.mjs
 
       - name: Unit tests (Vitest)
         working-directory: web

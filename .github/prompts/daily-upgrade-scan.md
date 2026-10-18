@@ -185,6 +185,15 @@ For each side with ≥1 auto-fix item:
        mobile : npm run binary-manifest:check && npm run type-check && npm test && npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-export"
        web    : npm run lint && npm run build
      Plus for every side: `npm ci --dry-run` must succeed (lockfile in sync).
+     Plus for every side, from `<side>/`, the audit floor:
+       node ../.github/scripts/check-audit-floor.mjs
+     It must exit 0: no high or critical advisory in the production tree
+     (`npm audit --omit=dev`) unless `.github/scripts/accepted-advisories.json`
+     lists it for that side. A `FAIL GHSA-…` line means the branch resolves a
+     package under an advisory floor (an override you removed or changed was
+     still doing work, #919): abort. Exit 2 means the audit could not run:
+     abort too, never skip it. Never edit the allow-list from a scan run. Put
+     the output in the PR body.
      Plus for every package you added or changed an override for, from `<side>/`:
        node ../.github/scripts/check-override-ranges.mjs <pkg> [<pkg> ...]
      It must exit 0 (no consumer resolved into a different major from the
