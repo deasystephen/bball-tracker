@@ -507,8 +507,8 @@ async function main() {
   // Assign coaches to Warriors
   if (warriorsHeadCoachRole) {
     await prisma.teamStaff.upsert({
-      where: { teamId_userId_roleId: { teamId: warriors.id, userId: coachSteve.id, roleId: warriorsHeadCoachRole.id } },
-      update: {},
+      where: { teamId_userId: { teamId: warriors.id, userId: coachSteve.id } },
+      update: { roleId: warriorsHeadCoachRole.id },
       create: {
         teamId: warriors.id,
         userId: coachSteve.id,
@@ -520,8 +520,8 @@ async function main() {
 
   if (warriorsAssistantCoachRole) {
     await prisma.teamStaff.upsert({
-      where: { teamId_userId_roleId: { teamId: warriors.id, userId: assistantMike.id, roleId: warriorsAssistantCoachRole.id } },
-      update: {},
+      where: { teamId_userId: { teamId: warriors.id, userId: assistantMike.id } },
+      update: { roleId: warriorsAssistantCoachRole.id },
       create: {
         teamId: warriors.id,
         userId: assistantMike.id,
@@ -534,8 +534,8 @@ async function main() {
   // Assign Dell Curry as Team Manager (parent volunteer)
   if (warriorsTeamManagerRole) {
     await prisma.teamStaff.upsert({
-      where: { teamId_userId_roleId: { teamId: warriors.id, userId: parentDell.id, roleId: warriorsTeamManagerRole.id } },
-      update: {},
+      where: { teamId_userId: { teamId: warriors.id, userId: parentDell.id } },
+      update: { roleId: warriorsTeamManagerRole.id },
       create: {
         teamId: warriors.id,
         userId: parentDell.id,
@@ -596,8 +596,8 @@ async function main() {
 
   if (lakersHeadCoachRole) {
     await prisma.teamStaff.upsert({
-      where: { teamId_userId_roleId: { teamId: lakers.id, userId: coachFrank.id, roleId: lakersHeadCoachRole.id } },
-      update: {},
+      where: { teamId_userId: { teamId: lakers.id, userId: coachFrank.id } },
+      update: { roleId: lakersHeadCoachRole.id },
       create: {
         teamId: lakers.id,
         userId: coachFrank.id,

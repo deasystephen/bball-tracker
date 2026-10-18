@@ -218,7 +218,7 @@ function setPlainUser(): void {
     ...createTeam({ id: TEAM_ID }),
     season: { league: { admins: [] } },
   });
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
   (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
   (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 }
@@ -312,14 +312,80 @@ describe('permissions — guardian branches', () => {
 
     it('a guardian who is also staff gets the staff role permissions', async () => {
       setPlainUser();
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { role: { canManageTeam: false, canManageRoster: false, canTrackStats: true, canViewStats: true, canShareStats: true } },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+        role: { canManageTeam: false, canManageRoster: false, canTrackStats: true, canViewStats: true, canShareStats: true },
+      });
 
       const perms = await getTeamPermissions('parent-coach', TEAM_ID);
 
       expect(perms.canTrackStats).toBe(true);
       expect(mockPrisma.guardian.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  // One staff role per user per team (#463): `TeamStaff` is unique on
+  // [teamId, userId], so the permissions are exactly the one row's role flags.
+  describe('getTeamPermissions — one staff row per team (#463)', () => {
+    const TEAM_MANAGER_FLAGS = {
+      canManageTeam: false,
+      canManageRoster: false,
+      canTrackStats: true,
+      canViewStats: true,
+      canShareStats: true,
+    };
+
+    it('reads the single row by the [teamId, userId] key and returns its role flags as they are', async () => {
+      setPlainUser();
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ role: TEAM_MANAGER_FLAGS });
+
+      expect(await getTeamPermissions('manager-1', TEAM_ID)).toEqual(TEAM_MANAGER_FLAGS);
+      expect(mockPrisma.teamStaff.findUnique).toHaveBeenCalledWith({
+        where: { teamId_userId: { teamId: TEAM_ID, userId: 'manager-1' } },
+        select: {
+          role: {
+            select: {
+              canManageTeam: true,
+              canManageRoster: true,
+              canTrackStats: true,
+              canViewStats: true,
+              canShareStats: true,
+            },
+          },
+        },
+      });
+      // No aggregation across rows any more, and no member/guardian fallback for staff.
+      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamMember.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns a copy, so a caller mutating the result cannot touch the row', async () => {
+      setPlainUser();
+      const role = { ...TEAM_MANAGER_FLAGS };
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ role });
+
+      const perms = await getTeamPermissions('manager-1', TEAM_ID);
+      perms.canManageTeam = true;
+
+      expect(role.canManageTeam).toBe(false);
+    });
+
+    it('gives head and assistant coach the same flags; only the head coach may manage staff', async () => {
+      const ALL = { ...TEAM_MANAGER_FLAGS, canManageTeam: true, canManageRoster: true };
+      setPlainUser();
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ role: ALL });
+      const headFlags = await getTeamPermissions('head', TEAM_ID);
+      const assistantFlags = await getTeamPermissions('assistant', TEAM_ID);
+      expect(headFlags).toEqual(assistantFlags);
+
+      // Staff management keys off the role TYPE of the one row, not the flags.
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createCoach());
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ season: { leagueId: 'league-1' } });
+      (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(
+        (args: { where: { userId: string } }) => Promise.resolve(args.where.userId === 'head' ? { id: 'row' } : null)
+      );
+      await expect(canManageStaff('head', TEAM_ID)).resolves.toBe(true);
+      await expect(canManageStaff('assistant', TEAM_ID)).resolves.toBe(false);
     });
   });
 
@@ -460,6 +526,17 @@ describe('lastHeadCoachTeams (#444, shared by staff removal and account deletion
       },
       select: { teamId: true, userId: true, team: { select: { name: true } } },
     });
+  });
+
+  it('with one row per user per team, a sole head coach is the last one and a second head coach lifts it (#463)', async () => {
+    // Each (teamId, userId) appears at most once now; the holder set is the row set.
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows(['t1', me]));
+    expect(await lastHeadCoachTeams(me, mockPrisma as never, { teamIds: ['t1'] })).toEqual([
+      { id: 't1', name: 'Team t1' },
+    ]);
+
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows(['t1', me], ['t1', 'second-head']));
+    expect(await lastHeadCoachTeams(me, mockPrisma as never, { teamIds: ['t1'] })).toEqual([]);
   });
 
   it('returns [] when every team has another head coach', async () => {

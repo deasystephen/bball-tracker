@@ -1064,10 +1064,9 @@ export class TeamService {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // Add staff member; a lost race on @@unique([teamId, userId, roleId])
-    // answers the pre-check's 400 (#727). That index includes the role, so only
-    // a same-role duplicate is caught; two concurrent adds with different roles
-    // still leave two rows (one role per user is #463).
+    // Add staff member; a lost race on @@unique([teamId, userId]) answers the
+    // pre-check's 400 (#727). The index is one role per user per team (#463),
+    // so a concurrent add with a different role is refused too.
     const teamStaff = await createOrConflict(
       () =>
         prisma.teamStaff.create({
@@ -1079,7 +1078,7 @@ export class TeamService {
           include: TEAM_STAFF_INCLUDE,
         }),
       'User is already a staff member of this team',
-      'TeamStaff_teamId_userId_roleId_key'
+      'TeamStaff_teamId_userId_key'
     );
 
     logger.info('Staff added', {
@@ -1163,7 +1162,7 @@ export class TeamService {
   }
 
   /**
-   * Remove a staff member (all of their roles) from a team.
+   * Remove a staff member (their one staff row) from a team.
    * Head coaches / league admins / system admins may remove anyone; any staff
    * member may remove THEMSELVES. The last head coach can never be removed.
    */

@@ -165,19 +165,17 @@ describe('invitation transitions through the real InvitationService (#766)', () 
     mockCaller = { id: COACH_ID, role: 'COACH' };
     mockPrisma.user.findUnique.mockResolvedValue({ role: 'COACH' });
     mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM_ID, season: { league: { admins: [] } } });
-    mockPrisma.teamStaff.findMany.mockResolvedValue([
-      {
-        teamId: TEAM_ID,
-        userId: COACH_ID,
-        role: {
-          canManageTeam: true,
-          canManageRoster: true,
-          canTrackStats: true,
-          canViewStats: true,
-          canShareStats: true,
-        },
+    mockPrisma.teamStaff.findUnique.mockResolvedValue({
+      teamId: TEAM_ID,
+      userId: COACH_ID,
+      role: {
+        canManageTeam: true,
+        canManageRoster: true,
+        canTrackStats: true,
+        canViewStats: true,
+        canShareStats: true,
       },
-    ]);
+    });
     readBackAfter(() => ({ status: 'CANCELLED' }));
 
     const res = await request(app).delete(`/api/v1/invitations/${INVITATION_ID}`);

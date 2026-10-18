@@ -248,7 +248,7 @@ describe('RsvpService', () => {
       // unless a test says otherwise.
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
       return game;
     }
@@ -289,7 +289,7 @@ describe('RsvpService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
       // The guardian holds no staff row: view-only, no canManageRoster.
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.gameRsvp.upsert as jest.Mock).mockResolvedValue({
         id: 'r-1',
         gameId: game.id,
@@ -321,17 +321,15 @@ describe('RsvpService', () => {
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        {
-          role: {
-            canManageTeam: true,
-            canManageRoster: true,
-            canTrackStats: true,
-            canViewStats: true,
-            canShareStats: true,
-          },
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+        role: {
+          canManageTeam: true,
+          canManageRoster: true,
+          canTrackStats: true,
+          canViewStats: true,
+          canShareStats: true,
         },
-      ]);
+      });
       const row = {
         id: 'r-1',
         gameId: game.id,
@@ -344,8 +342,10 @@ describe('RsvpService', () => {
       const result = await RsvpService.upsertRsvp(game.id, 'coach-parent', 'YES', CHILD_ID);
 
       expect(result).toEqual(row);
-      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { teamId: game.teamId, userId: 'coach-parent' } })
+      expect(mockPrisma.teamStaff.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { teamId_userId: { teamId: game.teamId, userId: 'coach-parent' } },
+        })
       );
     });
 
@@ -466,7 +466,7 @@ describe('RsvpService', () => {
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ teamId: game.teamId, playerId: 'me' });
       // getTeamPermissions: no staff roles → view-only
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.gameRsvp.findMany as jest.Mock).mockResolvedValue([
         { id: 'r1', gameId: game.id, userId: 'me', status: 'YES', user: { id: 'me', name: 'Me', email: 'me@test.com' } },
         { id: 'r2', gameId: game.id, userId: 'u2', status: 'NO', user: { id: 'u2', name: 'Other', email: 'other@test.com' } },

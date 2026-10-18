@@ -117,8 +117,8 @@ function givenTeamStanding(standing: { coach?: string[]; member?: string[]; guar
 }
 
 /**
- * `teamStaff.findMany` answers two questions: the caller's own role rows
- * (getTeamPermissions, `where.userId` set) and the staff list (no userId).
+ * `teamStaff.findUnique` is the caller's own staff row (getTeamPermissions,
+ * keyed by `teamId_userId`); `teamStaff.findMany` is the staff list.
  */
 function givenStaffRows(coaches: string[]): void {
   const coachRow = {
@@ -130,13 +130,12 @@ function givenStaffRows(coaches: string[]): void {
     user: { ...COACH, isManaged: false, deletedAt: null, profilePictureUrl: null },
     role: { id: 'role-1', teamId: TEAM_ID, type: 'HEAD_COACH', name: 'Head Coach', ...ALL_FLAGS },
   };
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockImplementation(
-    (args: { where: { userId?: string }; include?: Spec }) => {
-      if (args.where.userId !== undefined) {
-        return Promise.resolve(coaches.includes(args.where.userId) ? [coachRow] : []);
-      }
-      return Promise.resolve([args.include ? include(coachRow, args.include) : coachRow]);
-    }
+  (mockPrisma.teamStaff.findUnique as jest.Mock).mockImplementation(
+    (args: { where: { teamId_userId: { userId: string } } }) =>
+      Promise.resolve(coaches.includes(args.where.teamId_userId.userId) ? coachRow : null)
+  );
+  (mockPrisma.teamStaff.findMany as jest.Mock).mockImplementation((args: { include?: Spec }) =>
+    Promise.resolve([args.include ? include(coachRow, args.include) : coachRow])
   );
 }
 

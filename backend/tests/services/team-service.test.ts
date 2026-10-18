@@ -66,7 +66,7 @@ describe('TeamService', () => {
       // with. `team.count > 0` is `isStaffInLeague` finding a staff row on some
       // team in that league. Before #442 any COACH could write into any league.
       (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
       (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
       (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -291,7 +291,7 @@ describe('TeamService', () => {
           name: 'Head Coach',
         });
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(user);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: 'league-personal' });
         (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
         (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: 'season-personal' });
@@ -413,7 +413,7 @@ describe('TeamService', () => {
           personalOwnerId: coach.id,
         });
         (mockPrisma.team.count as jest.Mock).mockResolvedValue(0);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
         (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -448,9 +448,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...coachStaff, role: headCoachRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -483,9 +481,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...coachStaff, role: headCoachRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -516,9 +512,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...coachStaff, role: headCoachRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -571,9 +565,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(manager);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(managerStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...managerStaff, role: managerRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...managerStaff, role: managerRole });
 
       const result = await TeamService.getTeamById(team.id, manager.id);
 
@@ -619,9 +611,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...coachStaff, role: headCoachRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
 
       await TeamService.getTeamById(team.id, coach.id);
 
@@ -657,9 +647,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { ...coachStaff, role: headCoachRole },
-      ]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -681,7 +669,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(members[0].member);
 
       const result = await TeamService.getTeamById(team.id, player.id);
@@ -702,7 +690,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(members[0].member);
 
       const result = await TeamService.getTeamById(team.id, player.id);
@@ -727,7 +715,7 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       // Guardian of a rostered child (Once: clearAllMocks keeps implementations,
       // and later "no access" tests rely on the default undefined)
@@ -964,10 +952,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         name: newName,
@@ -994,7 +982,7 @@ describe('TeamService', () => {
       const newName = 'Secret Team Name';
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         name: newName,
@@ -1048,10 +1036,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
@@ -1070,10 +1058,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
@@ -1098,10 +1086,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({
@@ -1164,7 +1152,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(assistant);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...assistantStaff, role: assistantRole }]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...assistantStaff, role: assistantRole });
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null); // no HEAD_COACH row
 
@@ -1183,7 +1171,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(assistant);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...assistantStaff, role: assistantRole }]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...assistantStaff, role: assistantRole });
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team, name: 'Renamed', season: { ...season, league }, staff: [], members: [],
       });
@@ -1199,10 +1187,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.team.update as jest.Mock).mockResolvedValue({
         ...team,
         season: { ...season, league },
@@ -1281,11 +1269,10 @@ describe('TeamService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      // The coach holds two roles on the team (head + assistant).
+      // One staff row per user per team (#463): the coach and the assistant.
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
         { userId: coach.id },
         { userId: assistantId },
-        { userId: coach.id },
       ]);
       (mockPrisma.team.delete as jest.Mock).mockResolvedValue(team);
 
@@ -1298,7 +1285,7 @@ describe('TeamService', () => {
       const order = (m: unknown): number => (m as jest.Mock).mock.invocationCallOrder[0];
       expect(order(mockPrisma.teamStaff.findMany)).toBeLessThan(order(mockPrisma.team.delete));
       expect(invalidateUsage).toHaveBeenCalledTimes(1);
-      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId, coach.id);
+      expect(invalidateUsage).toHaveBeenCalledWith(coach.id, coach.id, assistantId);
       expect(order(invalidateUsage)).toBeGreaterThan(order(mockPrisma.$transaction));
     });
 
@@ -1330,7 +1317,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
         ...team,
@@ -1355,10 +1342,10 @@ describe('TeamService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(coach)
         .mockResolvedValueOnce(player);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.create as jest.Mock).mockResolvedValue({
         ...member,
@@ -1392,7 +1379,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
         ...team,
@@ -1413,10 +1400,10 @@ describe('TeamService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(coach)
         .mockResolvedValueOnce(null);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
 
       try {
         await TeamService.addPlayer(team.id, { playerId: 'non-existent' }, coach.id);
@@ -1434,10 +1421,10 @@ describe('TeamService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(coach)
         .mockResolvedValueOnce(player);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(existingMember);
 
       try {
@@ -1455,7 +1442,7 @@ describe('TeamService', () => {
         (mockPrisma.user.findUnique as jest.Mock)
           .mockResolvedValueOnce(coach)
           .mockResolvedValueOnce(player);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
         (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
         return { teamId: team.id, playerId: player.id, coachId: coach.id };
       }
@@ -1489,10 +1476,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(member);
       (mockPrisma.teamMember.delete as jest.Mock).mockResolvedValue(member);
 
@@ -1518,7 +1505,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
         ...team,
@@ -1537,10 +1524,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 
       try {
@@ -1559,10 +1546,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(member);
       (mockPrisma.teamMember.update as jest.Mock).mockResolvedValue({
         ...member,
@@ -1599,7 +1586,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(otherUser);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
         ...team,
@@ -1618,10 +1605,10 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
         ...coachStaff,
         role: headCoachRole,
-      }]);
+      });
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 
       try {
@@ -1991,7 +1978,7 @@ describe('TeamService', () => {
       it('answers the already-staff 400 when a concurrent add wins the unique index (P2002)', async () => {
         const { teamId, targetId, adminId } = setAddStaffPath();
         (mockPrisma.teamStaff.create as jest.Mock).mockRejectedValue(
-          uniqueViolation('TeamStaff_teamId_userId_roleId_key')
+          uniqueViolation('TeamStaff_teamId_userId_key')
         );
 
         const error = await TeamService
@@ -2299,7 +2286,7 @@ describe('TeamService', () => {
 
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(nonStaff);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
       (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
 
       const error = await TeamService.createCustomRole(team.id, { name: 'X' }, nonStaff.id).catch((e) => e);
@@ -2403,7 +2390,7 @@ describe('TeamService', () => {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: 'lineage-new' });
         (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
         (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
@@ -2475,7 +2462,7 @@ describe('TeamService', () => {
         const { team, coach, season, league, headCoachRole, coachStaff } = full;
         (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
         (mockPrisma.team.update as jest.Mock).mockResolvedValue({
           ...team, season: { ...season, league }, staff: [], members: [],
         });
@@ -2509,7 +2496,7 @@ describe('TeamService', () => {
 
         (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
         (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
         (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });
@@ -2532,7 +2519,7 @@ describe('TeamService', () => {
 
         (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
-        (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
         (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
         (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(otherSeason);
         (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue({ leagueId: otherLeague.id, userId: coach.id });

@@ -168,6 +168,19 @@ tell them apart. Staff management is keyed off the `TeamRole.type` enum instead
 (HEAD_COACH-type staff row exists) and `canManageStaff(userId, teamId)` =
 system `ADMIN` **or** admin of the team's league **or** head coach.
 
+**One role per user per team (#463).** `TeamStaff` is `@@unique([teamId, userId])`
+(index `TeamStaff_teamId_userId_key`): a user holds at most one staff row, and so one
+role, on a team. `getTeamPermissions` reads that one row by the compound key and returns
+its role's five flags as they are; there is no aggregation across rows. A change of
+role is `PATCH /staff/:userId`, which updates the row in place. Migration
+`20261018120000_team_staff_single_role` replaced the old `[teamId, userId, roleId]`
+index; before creating the new one it deleted every extra row of a user holding several
+roles on one team, keeping the HEAD_COACH-type row if there was one, else the oldest
+(`createdAt`, then lowest `id`). Tests: `tests/schemas/team-staff-unique.test.ts` pins
+the schema, the migration and the service's conflict target to one index name;
+`tests/integration/team-staff-single-role.db.test.ts` proves the index, the survivor
+rule and the last-head-coach guard against Postgres.
+
 | Action | Head Coach | Assistant Coach | Team Manager | League admin / ADMIN |
 | --- | --- | --- | --- | --- |
 | Edit team name / chat link, roster, invitations | yes | yes | no | yes |
@@ -181,7 +194,7 @@ Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
 
 - `GET /staff` → `{ success, staff: [{ id, teamId, userId, roleId, createdAt, updatedAt, user: { id, name, email, isManaged, deletedAt }, role: TeamRole }] }`. Any team member/staff/admin may read; staff emails are returned to every reader (coach contact info, same as `GET /teams/:id` and `GET /games/:id`; #683).
 - `GET /roles` → `{ success, roles: [{ id, teamId, type, name, description, canManageTeam, canManageRoster, canTrackStats, canViewStats, canShareStats }] }` (definitions only, no holders).
-- `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 if the user is already staff (one role per user; use PATCH). The P2002 mapping (`createOrConflict`, see `docs/architecture/backend-services.md`) covers only a concurrent duplicate with the **same** role, which answers that 400 instead of 500. The unique index is `[teamId, userId, roleId]`, so two concurrent adds with different roles both pass the pre-check and leave two staff rows; one role per user is not enforced by the database (#463). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
+- `POST /staff { userId | email, roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER' }` → **201** `{ success, staff }`. Exactly one of `userId`/`email`; `email` looks up an **existing** user (case-insensitive) and 404s otherwise — never creates users. 400 `User is already a staff member of this team` if the user already holds any role on the team (one role per user; use PATCH). A concurrent add that loses the race on the `[teamId, userId]` unique index, with the same role or another, answers the same 400 through the P2002 mapping (`createOrConflict`, see `docs/architecture/backend-services.md`), never a 500 and never a second row (#463). Gate: `canManageStaff`. Added user gets a push notification (`type: 'team_staff_added'`).
 - `PATCH /staff/:userId { roleType }` → `{ success, staff }`. Same gate. 404 if not staff, 400 if already that role or if demoting the **last head coach**.
 - `DELETE /staff/:userId` → `{ success, message }`. Gate: `canManageStaff` **or** `:userId === caller` (self-removal). 400 when the target is the last head coach (even on self-removal).
 
@@ -190,8 +203,9 @@ POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is wh
 **Distinct-teams cap fix (B2.8):** the team count (and any cap on it — none since #445) uses DISTINCT `teamId`s via
 `countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
 `requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
-`usage-service.computeCounts` — a user holding two roles on one team is one
-team. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
+`usage-service.computeCounts`. Since #463 a user holds at most one row per
+team, so rows and teams are the same count; the `distinct` stays as the
+statement of intent. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 `teamStaff` rows was removed along with `requireRole` / `requireFeature`.)
 
 ## Announcements and threaded replies (#34)

@@ -41,6 +41,15 @@ const VIEW_ONLY_PERMISSIONS: TeamPermissions = {
   canShareStats: false,
 };
 
+/** The five permission flags of a staff row's role. */
+const STAFF_ROLE_FLAGS_SELECT = {
+  canManageTeam: true,
+  canManageRoster: true,
+  canTrackStats: true,
+  canViewStats: true,
+  canShareStats: true,
+} satisfies Prisma.TeamRoleSelect;
+
 /**
  * Is `userId` a guardian (PARENT role link) of `childId`?
  */
@@ -105,18 +114,14 @@ export async function getTeamPermissions(
     return ALL_PERMISSIONS;
   }
 
-  // Check team staff roles
-  const staffRoles = await prisma.teamStaff.findMany({
-    where: {
-      teamId,
-      userId,
-    },
-    include: {
-      role: true,
-    },
+  // Team staff: one row per user per team (`@@unique([teamId, userId])`, #463),
+  // so the user's permissions are exactly that row's role flags.
+  const staff = await prisma.teamStaff.findUnique({
+    where: { teamId_userId: { teamId, userId } },
+    select: { role: { select: STAFF_ROLE_FLAGS_SELECT } },
   });
 
-  if (staffRoles.length === 0) {
+  if (!staff) {
     // Check if user is a team member (player) - they get view permissions
     const isMember = await prisma.teamMember.findUnique({
       where: {
@@ -139,17 +144,7 @@ export async function getTeamPermissions(
     return NO_PERMISSIONS;
   }
 
-  // Aggregate permissions from all roles (user might have multiple roles)
-  const permissions: TeamPermissions = { ...NO_PERMISSIONS };
-  for (const staffRole of staffRoles) {
-    if (staffRole.role.canManageTeam) permissions.canManageTeam = true;
-    if (staffRole.role.canManageRoster) permissions.canManageRoster = true;
-    if (staffRole.role.canTrackStats) permissions.canTrackStats = true;
-    if (staffRole.role.canViewStats) permissions.canViewStats = true;
-    if (staffRole.role.canShareStats) permissions.canShareStats = true;
-  }
-
-  return permissions;
+  return { ...staff.role };
 }
 
 /**
@@ -505,10 +500,10 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
 /**
  * Number of DISTINCT teams the user is staff on.
  *
- * A user can hold several roles on one team (one `TeamStaff` row per role), so
- * `teamStaff.count` over-counts; a tier's team cap must count teams, not
- * rows (audit B2.8). Accepts a transaction client so the create-team
- * transaction can recount behind its row lock.
+ * Since #463 `TeamStaff` is unique on `[teamId, userId]`, so rows and teams
+ * are the same count; the `distinct` stays as the statement of intent (a
+ * tier's team cap counts teams, audit B2.8). Accepts a transaction client so
+ * the create-team transaction can recount behind its row lock.
  */
 export async function countDistinctStaffTeams(userId: string, db: Db = prisma): Promise<number> {
   const rows = await db.teamStaff.findMany({

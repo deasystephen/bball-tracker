@@ -350,7 +350,8 @@ model TeamStaff {
   user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role TeamRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-  @@unique([teamId, userId, roleId])
+  // One role per user per team (#463): re-role with PATCH, never a second row.
+  @@unique([teamId, userId])
   @@index([teamId])
   @@index([userId])
   @@index([roleId])
