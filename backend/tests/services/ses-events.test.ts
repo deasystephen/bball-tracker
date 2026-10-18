@@ -14,6 +14,7 @@ import {
 } from '../../src/services/mailer/ses-events';
 import { hashRecipient } from '../../src/services/mailer/ses-mailer';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { mockPrisma } from '../setup';
 
 const BOUNCED_AT = '2026-09-27T18:00:00.000Z';
@@ -129,12 +130,11 @@ describe('applySesEvent', () => {
     setHolders('kid@example.com');
     updateMany.mockResolvedValue({ count: 1 });
     warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    infoSpy = spyOnInfo();
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
-    infoSpy.mockRestore();
   });
 
   function apply(payload: Record<string, unknown>): ReturnType<typeof handleSesEventMessage> {

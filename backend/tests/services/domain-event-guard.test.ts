@@ -50,10 +50,6 @@ const ALLOWED: Record<string, string> = {
     'status-guarded PENDING exit inside accept/reject/cancel, which log `Invitation accepted` / `declined` / `cancelled`',
   'invitation-service.ts#stripUnclaimedEmail':
     'consent guard inside rejectInvitation, which logs `Invitation declined`',
-  // Lazy expiry: a status fix-up applied while reading an invitation that is
-  // already past `expiresAt`; the caller then refuses the request. No user
-  // action changed anything.
-  'invitation-service.ts#markExpired': 'lazy PENDING -> EXPIRED fix-up while reading a stale invitation',
   'invitation-service.ts#expireOldInvitations':
     'bulk expiry kept for a future maintenance job; nothing calls it today',
   // The SES event consumer (#449): background work driven by SES

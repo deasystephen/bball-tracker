@@ -21,6 +21,7 @@ import { AccountService } from '../../src/services/account-service';
 import { PlayerService } from '../../src/services/player-service';
 import { WorkOSService } from '../../src/services/workos-service';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 
 jest.setTimeout(30000);
 
@@ -85,8 +86,11 @@ function delivery(recipient: string, timestamp: string): string {
 }
 
 describe('email suppression against Postgres (#449)', () => {
+  beforeEach(() => {
+    spyOnInfo();
+  });
+
   beforeAll(() => {
-    jest.spyOn(logger, 'info').mockImplementation(() => undefined);
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   });
 

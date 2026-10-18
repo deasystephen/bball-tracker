@@ -19,6 +19,7 @@ import prisma from '../../src/models';
 import { InvitationService, INVITATION_RESEND_COOLDOWN_MS } from '../../src/services/invitation-service';
 import { ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
+import { spyOnInfo } from '../support/domain-events';
 import { hashRecipient } from '../../src/services/mailer/ses-mailer';
 
 jest.setTimeout(30000);
@@ -63,6 +64,10 @@ async function mkInvitation(
   return row.id;
 }
 
+beforeEach(() => {
+  spyOnInfo();
+});
+
 beforeAll(async () => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -74,7 +79,6 @@ beforeAll(async () => {
       { cause: err }
     );
   }
-  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
