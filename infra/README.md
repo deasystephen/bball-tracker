@@ -21,7 +21,7 @@ Terraform manages all AWS infrastructure.
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
-| `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose 5.x bumps. CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration (#866) |
+| `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose minor and patch bumps within the pinned major (6.x since PR #913). CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration: 5 → 6 was done in PR #913 (#866) with a "No changes." plan; open an issue for the next one |
 
 ---
 

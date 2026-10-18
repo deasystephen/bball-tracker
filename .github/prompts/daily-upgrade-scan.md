@@ -212,9 +212,10 @@ Docker images (human-owned)`** (report only; never edit anything under
     `infra/.terraform.lock.hcl`; `<latest>` is
     `curl -s https://registry.terraform.io/v1/providers/hashicorp/aws | jq -r .version`
     (write "registry unreachable" if the call fails). When the majors differ,
-    note that Dependabot ignores `hashicorp/aws` majors and the migration is
-    tracked in #866 (or the issue the ignore comment in `.github/dependabot.yml`
-    now names).
+    note that Dependabot ignores `hashicorp/aws` majors and that a provider
+    major is a human migration (5 → 6 was PR #913): cite the open issue for it
+    if one exists (search `gh issue list --search "hashicorp/aws"`), otherwise
+    say that none is filed yet.
   - every open Dependabot PR labelled `infra`
     (`gh pr list --author app/dependabot --label infra --state open`) as
     `#<n> <title>`: these wait for a human `terraform plan` or image review.

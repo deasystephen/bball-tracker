@@ -193,7 +193,7 @@ updates:
       include: "scope"
     ignore:
       # Provider majors have breaking changes and need a human `terraform plan`
-      # against live state (5 → 6 landed in #866 with a "No changes." plan);
+      # against live state (5 → 6 landed in PR #913, closing #866, with a "No changes." plan);
       # open an issue for the next major when it ships.
       - dependency-name: "hashicorp/aws"
         update-types: ["version-update:semver-major"]

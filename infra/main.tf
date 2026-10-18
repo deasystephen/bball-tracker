@@ -36,7 +36,6 @@ provider "aws" {
 
 # Fetch current AWS account ID and region for use in resource ARNs
 data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
 
 locals {
   name_prefix = "${var.app_name}-${var.environment}"
