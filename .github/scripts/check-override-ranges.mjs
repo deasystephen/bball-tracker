@@ -8,7 +8,9 @@
 //    declared range but inside its major is a security floor (e.g. eas-cli's exact minimatch 5.1.2
 //    raised to 5.1.9) and is listed, not failed. An `overrides` entry hides that mismatch from
 //    `npm ls` (it prints "overridden", never "invalid"), so a root override that drags a newer
-//    major down only shows up as a runtime TypeError later (#779). Run after `npm install`:
+//    major down only shows up as a runtime TypeError later (#779). Consumers are every lockfile
+//    entry's dependencies, optionalDependencies and peerDependencies (an optional peer that is not
+//    installed is skipped). Run after `npm install`:
 //      node ../.github/scripts/check-override-ranges.mjs minimatch brace-expansion
 //    A mismatch listed in accepted-overrides.json (same directory as this script, keyed by package
 //    directory) prints as `accepted` and does not fail the gate, so exit status alone is the gate.
@@ -60,7 +62,8 @@ function loadSemver() {
     process.exit(2);
   }
 }
-const acceptFile = join(dirname(fileURLToPath(import.meta.url)), 'accepted-overrides.json');
+const acceptFile =
+  process.env.ACCEPTED_OVERRIDES_FILE ?? join(dirname(fileURLToPath(import.meta.url)), 'accepted-overrides.json');
 const acceptedBySide = JSON.parse(readFileSync(acceptFile, 'utf8'));
 const sides = Object.keys(acceptedBySide).filter((k) => !k.startsWith('_'));
 const side = basename(process.cwd());
@@ -98,31 +101,42 @@ function nameOf(path) {
   return path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
 }
 
+// Every edge npm applies overrides to, keyed the way npm matches an override rule: by the
+// dependency key. An `npm:` alias (`"string-width-cjs": "npm:string-width@^4"`) therefore counts
+// for `string-width-cjs` with spec `^4`, never for `string-width`. Peer edges count (npm applies
+// overrides to them), the root's devDependencies are installed too, nobody else's are. Computed
+// once per lockfile entry.
+const declaredCache = new Map();
+function declared(path) {
+  if (declaredCache.has(path)) return declaredCache.get(path);
+  const entry = packages[path];
+  const raw = {
+    ...entry.peerDependencies,
+    ...entry.dependencies,
+    ...entry.optionalDependencies,
+    ...(path === '' ? entry.devDependencies : undefined),
+  };
+  const out = {};
+  for (const [dep, spec] of Object.entries(raw)) {
+    if (typeof spec !== 'string') continue;
+    out[dep] = spec.startsWith('npm:') ? (parseKey(spec.slice('npm:'.length)).range ?? '*') : spec;
+  }
+  declaredCache.set(path, out);
+  return out;
+}
+// A peer that is optional (peerDependenciesMeta) and not installed is no edge at all.
+function unresolvedOptionalPeer(path, name) {
+  const entry = packages[path];
+  return (
+    entry.peerDependencies?.[name] !== undefined &&
+    entry.dependencies?.[name] === undefined &&
+    entry.optionalDependencies?.[name] === undefined &&
+    entry.peerDependenciesMeta?.[name]?.optional === true
+  );
+}
+
 if (liveness) {
   const { overrides = {} } = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
-
-  // Every edge npm applies overrides to, keyed the way npm matches an override rule: by the
-  // dependency key. An `npm:` alias (`"string-width-cjs": "npm:string-width@^4"`) therefore counts
-  // for `string-width-cjs` with spec `^4`, never for `string-width`. The root's devDependencies
-  // are installed too; nobody else's are.
-  function declared(path, entry) {
-    const raw = {
-      ...entry.peerDependencies,
-      ...entry.dependencies,
-      ...entry.optionalDependencies,
-      ...(path === '' ? entry.devDependencies : undefined),
-    };
-    const out = {};
-    for (const [dep, spec] of Object.entries(raw)) {
-      if (typeof spec !== 'string') continue;
-      if (spec.startsWith('npm:')) {
-        out[dep] ??= parseKey(spec.slice('npm:'.length)).range ?? '*';
-      } else {
-        out[dep] ??= spec;
-      }
-    }
-    return out;
-  }
   // A declared spec keeps the key alive when it intersects the key's range. Non-semver specs
   // (git, url, dist-tag) cannot be compared and count as live: a wrong "live" keeps a pin, a wrong
   // "dead" drops a security floor.
@@ -134,7 +148,7 @@ if (liveness) {
   function declarers(scope, { name, range }) {
     const found = [];
     for (const path of scope) {
-      const spec = declared(path, packages[path])[name];
+      const spec = declared(path)[name];
       if (spec !== undefined && keeps(spec, range)) found.push(`${path || '(root)'} declares ${name}@${spec}`);
     }
     return found;
@@ -147,7 +161,7 @@ if (liveness) {
     const queue = [root];
     while (queue.length) {
       const path = queue.shift();
-      for (const dep of Object.keys(declared(path, packages[path]))) {
+      for (const dep of Object.keys(declared(path))) {
         const next = resolvePath(path, dep);
         if (next !== undefined && !seen.has(next)) {
           seen.add(next);
@@ -177,14 +191,19 @@ if (liveness) {
   let live = 0;
   let stale = 0;
   let dead = 0;
+  let unsupported = 0;
+  const visited = new Set();
+  // An accepted key stays live through its LISTED consumer only; any other declarer is reported
+  // but does not make the acceptance hold.
   function report(label, found, accept) {
     const shown = found.slice(0, 3).join('; ') + (found.length > 3 ? `; +${found.length - 3} more` : '');
-    if (accept && found.length) {
+    const viaConsumer = accept && found.some((line) => line.startsWith(`${accept.consumer} declares `));
+    if (accept && viaConsumer) {
       process.stdout.write(`live  ${label}  (accepted ${accept.ghsa}; ${shown})\n`);
       live += 1;
     } else if (accept) {
       process.stdout.write(
-        `STALE ${label}  (accepted ${accept.ghsa}, but nothing declares it any more: retire it by hand together with its accepted-overrides.json entry)\n`,
+        `STALE ${label}  (accepted ${accept.ghsa}, but ${accept.consumer} no longer declares it${found.length ? `; still declared by ${shown}` : ''}: retire it by hand together with its accepted-overrides.json entry)\n`,
       );
       stale += 1;
     } else if (found.length) {
@@ -198,13 +217,17 @@ if (liveness) {
   // `scope`: the lockfile entries whose declarations count for this key (everything at the root,
   // the parent copies' dependency graph inside a nested block).
   function walk(label, key, value, scope) {
+    // The accept list knows only top-level keys; a same-named key inside a nested block is its own.
+    const topLevel = scope === everyPath;
     if (typeof value === 'string') {
-      report(label, declarers(scope, parseKey(key)), accepted.find((a) => a.override === key));
+      const accept = topLevel ? accepted.find((a) => a.override === key) : undefined;
+      if (accept) visited.add(accept.override);
+      report(label, declarers(scope, parseKey(key)), accept);
       return;
     }
     if (value === null || typeof value !== 'object') {
       process.stdout.write(`??    ${label}  unsupported override value ${JSON.stringify(value)}\n`);
-      dead += 1;
+      unsupported += 1;
       return;
     }
     const parent = parseKey(key);
@@ -222,7 +245,17 @@ if (liveness) {
 
   const everyPath = Object.keys(packages).filter((p) => !packages[p].link);
   for (const [key, value] of Object.entries(overrides)) walk(`"${key}"`, key, value, everyPath);
-  process.stdout.write(`${live} live, ${stale} stale, ${dead} dead override key(s)\n`);
+  // An accept entry whose key is gone from package.json rots silently otherwise.
+  for (const a of accepted) {
+    if (visited.has(a.override)) continue;
+    process.stdout.write(
+      `ORPHAN "${a.override}"  (accepted ${a.ghsa}, but package.json#overrides has no such key: remove the accepted-overrides.json entry)\n`,
+    );
+    stale += 1;
+  }
+  process.stdout.write(
+    `${live} live, ${stale} stale, ${dead} dead override key(s)${unsupported ? `, ${unsupported} unsupported` : ''}\n`,
+  );
   process.exit(0);
 }
 
@@ -231,12 +264,12 @@ let acceptedCount = 0;
 let floors = 0;
 for (const [path, entry] of Object.entries(packages)) {
   if (entry.link) continue;
-  const declaredHere = { ...entry.dependencies, ...entry.optionalDependencies };
+  const declaredHere = declared(path);
   for (const name of names) {
     const range = declaredHere[name];
     if (!range || !semver.validRange(range)) continue;
     const resolved = resolve(path, name);
-    if (!resolved && entry.optionalDependencies?.[name]) continue;
+    if (!resolved && (entry.optionalDependencies?.[name] || unresolvedOptionalPeer(path, name))) continue;
     if (resolved && semver.satisfies(resolved.version, range)) continue;
     if (resolved && semver.intersects(range, `${semver.major(resolved.version)}.x`)) {
       floors += 1;
