@@ -117,10 +117,23 @@ packages such as sharp's `@img/*`, which would then look absent):
   - bare root key `"<pkg>"`:
       npm ls <pkg> --all --package-lock-only
     dead when it prints `(empty)`.
-  - version-keyed key `"<pkg>@<range>"` (root or nested):
-      npm ls "<pkg>@<range>" --all --package-lock-only
-    dead when it prints `(empty)` (copies of `<pkg>` in other majors do not
-    keep it alive).
+  - version-keyed key `"<pkg>@<range>"` (root or nested): the key matches what
+    consumers DECLARE, not what resolves, so probe the declared specs:
+      grep -n "\"<pkg>\": \"" package-lock.json
+    lists every `dependencies`/`optionalDependencies` spec for `<pkg>`. Dead
+    only when none of those specs intersects `<range>` (`npx semver -r
+    "<range>" <spec>` or by eye). Cross-check from the package directory after
+    `npm install`:
+      node ../.github/scripts/check-override-ranges.mjs <pkg>
+    A `MISMATCH … declares <pkg>@<spec> but gets <version>` line IS the
+    override working across majors, never a dead entry. **`npm ls
+    "<pkg>@<range>"` is not a valid probe for this key shape**: it matches
+    resolved versions, so a redirect out of `<range>` prints `(empty)`
+    precisely because the override works. That probe retired the backend's
+    `"deepmerge-ts@^7": "^8.0.2"` security override (PR #919, deployed
+    unattended on 2026-10-18) and reopened GHSA-ggr8-5vv4-36mx; it was restored
+    the same day. Entries listed under "Accepted cross-major overrides" in
+    `docs/automation/daily-upgrade-scan.md` are never retired by the scan.
   - nested key `"<parent>": { "<key>": … }`: run `npm ls <parent> --all
     --package-lock-only` and look at the subtree under each `<parent>` copy.
     Dead when `<parent>` is absent, or when no `<pkg>` (matching `<range>`

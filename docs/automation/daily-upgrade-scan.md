@@ -95,10 +95,16 @@ Step 2a and the Step 3 gate):
   makes the removal an auto-fix item with a refreshed lockfile (prompt, "Retire dead overrides").
   It probes the lockfile, never the installed tree, because `npm ci` on the Linux runner skips
   `os`/`cpu`-gated optional packages (sharp's `@img/*`) and would make a live override look dead:
-  `npm ls <pkg> --all --package-lock-only` for a bare key, `npm ls "<pkg>@<range>" --all
-  --package-lock-only` for a version-keyed one, and, for a nested `"<parent>": { … }` entry,
-  whether the target still appears under `<parent>` in that tree. #777 retired the backend's
-  `hono`, `@hono/node-server` and `fast-xml-builder` entries.
+  `npm ls <pkg> --all --package-lock-only` for a bare key, and, for a nested `"<parent>": { … }`
+  entry, whether the target still appears under `<parent>` in that tree. #777 retired the
+  backend's `hono`, `@hono/node-server` and `fast-xml-builder` entries. **A version-keyed key
+  (`"<pkg>@<range>"`) is probed on declared specs, never resolved versions**: the key matches
+  what consumers declare, so the entry is dead only when no `dependencies` spec for `<pkg>` in the
+  lockfile intersects `<range>` (`grep -n "\"<pkg>\": \"" package-lock.json`, cross-checked with
+  `check-override-ranges.mjs <pkg>`, whose `MISMATCH … declares <pkg>@<spec>` line is the override
+  working). `npm ls "<pkg>@<range>"` prints `(empty)` for a working cross-major redirect, which is
+  how the scan retired the accepted `deepmerge-ts@^7` entry below (PR #919, 2026-10-18, deployed
+  unattended; GHSA-ggr8-5vv4-36mx reopened for a few hours until the entry was restored).
 - **Gate:** after `npm install`, run `node ../.github/scripts/check-override-ranges.mjs <pkg> …`
   from the package directory. It exits non-zero when any consumer in `package-lock.json` resolves
   into a different major from the range it declares, the case `npm ls` hides. It lists, but
