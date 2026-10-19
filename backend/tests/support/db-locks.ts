@@ -46,12 +46,26 @@ export interface BlockedBackend {
  * A backend that waits before its first write holds none.
  *
  * Throws when nothing is blocked within `timeoutMs`, naming the likely causes,
- * so a slow run does not read like a lock that is missing.
+ * so a slow run does not read like a lock that is missing. Pass the call under
+ * test's `settled` (from `track`) and the wait also stops, with its own
+ * message, as soon as that call finishes without ever having blocked: that is
+ * a missing lock, not a slow run, and no deadline needs to pass to say so.
+ *
+ * The deadline bounds only how long the call under test may take to REACH its
+ * lock statement (CI runs Jest with coverage on a loaded runner, where that
+ * has taken over 2 s, #932); once it is blocked the caller proceeds at once.
+ * Keep `timeoutMs` plus the holder's remaining work under the holder
+ * transaction's `timeout`, and remember that the call under test's own
+ * `lock_timeout`, where it sets one, starts only when it begins waiting.
  */
 export async function waitForBlockedBy(
   tx: Prisma.TransactionClient,
   holderPid: number,
-  { tables = [], timeoutMs = 2000 }: { tables?: string[]; timeoutMs?: number } = {}
+  {
+    tables = [],
+    timeoutMs = 8000,
+    settled,
+  }: { tables?: string[]; timeoutMs?: number; settled?: () => boolean } = {}
 ): Promise<BlockedBackend[]> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -65,6 +79,12 @@ export async function waitForBlockedBy(
       WHERE ${holderPid}::int = ANY(pg_blocking_pids(a.pid))
     `;
     if (rows.length > 0) return rows;
+    if (settled?.()) {
+      throw new Error(
+        `The call under test settled without ever being blocked by pid ${holderPid}: it takes no ` +
+          'lock that conflicts with the holder.'
+      );
+    }
     if (Date.now() > deadline) {
       throw new Error(
         `No backend was blocked by pid ${holderPid} within ${timeoutMs} ms. Either the call under ` +
