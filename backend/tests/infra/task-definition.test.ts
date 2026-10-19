@@ -18,13 +18,34 @@ const MAIL_DOMAIN = `mail.${APEX}`;
 const RETIRED_DOMAIN = /capyhoops/i;
 
 interface TaskDefinition {
-  containerDefinitions: Array<{ environment?: Array<{ name: string; value: string }> }>;
+  containerDefinitions: Array<{
+    environment?: Array<{ name: string; value: string }>;
+    secrets?: Array<{ name: string; valueFrom: string }>;
+  }>;
 }
 
+const taskDefinition = JSON.parse(readFileSync(TASK_DEFINITION_PATH, 'utf8')) as TaskDefinition;
+
 function readEnv(): Map<string, string> {
-  const td = JSON.parse(readFileSync(TASK_DEFINITION_PATH, 'utf8')) as TaskDefinition;
-  return new Map(td.containerDefinitions.flatMap((c) => c.environment ?? []).map((e) => [e.name, e.value]));
+  return new Map(
+    taskDefinition.containerDefinitions.flatMap((c) => c.environment ?? []).map((e) => [e.name, e.value]),
+  );
 }
+
+/** The raw rows, not a Map: a duplicated name must fail the exact-list check, not collapse. */
+function readSecrets(): Array<{ name: string; valueFrom: string }> {
+  return taskDefinition.containerDefinitions.flatMap((c) => c.secrets ?? []);
+}
+
+/**
+ * Every `secrets[].valueFrom` is resolved by ECS at task start, so a secret that
+ * nothing reads is still a hard dependency of every launch: deleting it in
+ * Secrets Manager breaks the next deploy (and the circuit breaker's rollback
+ * revision) with `ResourceInitializationError`. `JWT_SECRET` sat here unread
+ * from the first infra commit until #641 (WorkOS signs the JWTs). Adding a name
+ * here means the backend reads it; remove it from `infra/ecs.tf` too when it goes.
+ */
+const ALLOWED_SECRETS = ['DATABASE_URL', 'WORKOS_API_KEY', 'WORKOS_CLIENT_ID', 'SENTRY_DSN'];
 
 function host(value: string): string {
   return new URL(value).host;
@@ -82,6 +103,29 @@ describe('infra/task-definition.json — production domain values', () => {
   it('no environment value names the retired domain', () => {
     for (const [name, value] of env) {
       expect({ name, value }).not.toMatchObject({ value: expect.stringMatching(RETIRED_DOMAIN) });
+    }
+  });
+});
+
+describe('infra/task-definition.json — Secrets Manager references', () => {
+  const secrets = readSecrets();
+  const env = readEnv();
+
+  it('secrets[] holds exactly the credentials the backend reads, each once', () => {
+    expect(secrets.map((s) => s.name).sort()).toEqual([...ALLOWED_SECRETS].sort());
+  });
+
+  it('every secret is a Secrets Manager ARN in the production account and region', () => {
+    for (const { name, valueFrom } of secrets) {
+      expect({ name, valueFrom }).toMatchObject({
+        valueFrom: expect.stringMatching(/^arn:aws:secretsmanager:us-east-1:\d{12}:secret:bball-tracker-production\//),
+      });
+    }
+  });
+
+  it('no secret name is also set as a plain environment value', () => {
+    for (const { name } of secrets) {
+      expect(env.has(name)).toBe(false);
     }
   });
 });

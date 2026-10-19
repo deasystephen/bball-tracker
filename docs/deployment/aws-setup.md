@@ -232,7 +232,14 @@ was last checked against it on 2026-10-03):
   `@socket.io/redis-adapter` is not installed, so the guard does not accept it as a reason to run
   more than one replica. It becomes meaningful when the Redis adapter lands (#452)
 
-Not used by the backend despite older docs: `JWT_SECRET` (WorkOS signs the JWTs) and `S3_BUCKET`.
+Not used by the backend despite older docs: `S3_BUCKET`. `JWT_SECRET` was in the same position (WorkOS
+signs the JWTs, nothing in `backend/` ever read it) but was still injected from Secrets Manager on every
+task start. #641 removes it in two steps so that no deployable revision ever depends on a secret
+scheduled for deletion: PR #938 dropped the reference from `infra/task-definition.json`; the
+Terraform side (the secret, `var.jwt_secret`, the `jwt_secret_arn` output) follows in a second PR
+after its `terraform apply`. Until that PR lands, `terraform apply` still asks for `jwt_secret`.
+`backend/tests/infra/task-definition.test.ts` now pins `secrets[]` to the four names above
+(`DATABASE_URL`, `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `SENTRY_DSN`).
 (Kafka was removed entirely — the config stub, `kafkajs` dependency, and local containers are gone.)
 
 ## Load Balancer Setup
