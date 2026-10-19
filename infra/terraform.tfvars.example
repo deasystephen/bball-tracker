@@ -9,8 +9,7 @@ db_username = "bball_admin"
 db_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"
 
 # Application secrets
-jwt_secret     = "CHANGE_ME_TO_A_RANDOM_SECRET"
-workos_api_key = ""
+workos_api_key   = ""
 workos_client_id = ""
 
 # Domains (zones, ACM certificates and SES identities are managed in dns.tf / ses.tf).

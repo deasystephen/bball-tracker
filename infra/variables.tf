@@ -106,13 +106,8 @@ variable "redis_node_type" {
   default     = "cache.t3.micro"
 }
 
-# Application secrets
-variable "jwt_secret" {
-  description = "JWT signing secret for authentication"
-  type        = string
-  sensitive   = true
-}
-
+# Application secrets (JWT_SECRET was removed in #641: WorkOS signs the JWTs,
+# the backend never read it)
 variable "workos_api_key" {
   description = "WorkOS API key for authentication"
   type        = string

@@ -187,6 +187,27 @@ updates:
       - dependency-name: "hashicorp/aws"
         update-types: ["version-update:semver-major"]
 
+  # infra/bootstrap/ (remote-state bucket + lock table, #641) is its own root
+  # module with its own lock file; keep it on the same provider version as
+  # infra/ (merge both bumps, then `terraform init` in both directories).
+  - package-ecosystem: "terraform"
+    directory: "/infra/bootstrap"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore(infra)"
+      include: "scope"
+    ignore:
+      - dependency-name: "hashicorp/aws"
+        update-types: ["version-update:semver-major"]
+
   # ----------------------------------------------------------------------
   # Docker base images — human-reviewed, never auto-merged (#786)
   # ----------------------------------------------------------------------

@@ -217,6 +217,17 @@ jobs:
         working-directory: infra
         run: terraform validate -no-color
 
+      # infra/bootstrap/ is a separate root module (the remote-state bucket and
+      # lock table, local state; infra/README.md "Remote state"). The parent's
+      # init/validate do not descend into it; fmt -recursive above does.
+      - name: terraform init (bootstrap, no backend)
+        working-directory: infra/bootstrap
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate (bootstrap)
+        working-directory: infra/bootstrap
+        run: terraform validate -no-color
+
   detect-changes:
     name: Detect backend changes
     runs-on: ubuntu-latest
