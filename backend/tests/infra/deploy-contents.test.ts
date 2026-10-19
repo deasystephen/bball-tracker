@@ -101,7 +101,7 @@ describe('the paths that count as a deploy', () => {
     const declared = SCRIPT_SOURCE.match(/^DEPLOY_PATHS=\((.*)\)$/m);
     const fromScript = [...(declared?.[1] ?? '').matchAll(/':\(exclude(?:,glob)?\)([^']+)'/g)].map((m) => m[1]).sort();
 
-    expect(fromFilter).toEqual(['**/*.md', 'infra/.terraform.lock.hcl']);
+    expect(fromFilter).toEqual(['**/*.md', 'infra/.terraform.lock.hcl', 'infra/bootstrap/.terraform.lock.hcl']);
     expect(fromScript).toEqual(fromFilter);
   });
 });

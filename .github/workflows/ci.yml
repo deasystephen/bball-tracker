@@ -255,6 +255,7 @@ jobs:
               - '{backend/**,infra/**,docker/**,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/.terraform.lock.hcl'
+              - '!infra/bootstrap/.terraform.lock.hcl'
 
       # A run started by hand always deploys: that is what it is for. The paths
       # above are repeated in .github/scripts/deploy-contents.sh, which lists

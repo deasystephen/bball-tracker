@@ -1,6 +1,7 @@
 # Terraform state files - contain sensitive data
 *.tfstate
 *.tfstate.backup
+.terraform.tfstate.lock.info
 .terraform/
 # .terraform.lock.hcl is COMMITTED: it pins the provider every apply uses, and
 # Dependabot's terraform ecosystem bumps it (#786). CI runs fmt/init/validate

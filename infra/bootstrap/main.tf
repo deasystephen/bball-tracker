@@ -5,8 +5,9 @@
 # state that declares the bucket, and a second remote backend would need a
 # third bucket. The local state file is gitignored (infra/.gitignore, *.tfstate)
 # and holds nothing sensitive: bucket and table attributes only. If it is lost,
-# the `import` blocks below bring every resource back in on the next apply
-# (an import block for a resource that is already in state is a no-op).
+# the `import` blocks below bring every resource but the bucket policy back
+# in on the next apply (an import block for a resource that is already in
+# state is a no-op; the policy is simply re-put).
 #
 # Both resources were created by hand on 2026-02-07/08 before any Terraform
 # existed and were imported here. The state object is the most sensitive
@@ -50,6 +51,11 @@ locals {
 # -----------------------------------------------------------------------------
 # Imports (idempotent; keep them so a lost local state re-adopts everything).
 # Terraform 1.5 requires literal ids here, hence no `local.` references.
+# The bucket policy has no import block on purpose: Terraform 1.5 fails the
+# plan when an import's remote object does not exist, and the policy did not
+# exist before the first apply. After a lost local state the plan therefore
+# shows "1 to add" for the policy; the apply is a PutBucketPolicy of the same
+# document, which is harmless.
 # -----------------------------------------------------------------------------
 
 import {
@@ -166,10 +172,6 @@ data "aws_iam_policy_document" "state_tls_only" {
 resource "aws_s3_bucket_policy" "state_tls_only" {
   bucket = aws_s3_bucket.state.id
   policy = data.aws_iam_policy_document.state_tls_only.json
-
-  # The public-access block must exist before a policy with Principal "*" is
-  # put, or S3 rejects it as a public policy.
-  depends_on = [aws_s3_bucket_public_access_block.state]
 }
 
 # -----------------------------------------------------------------------------
