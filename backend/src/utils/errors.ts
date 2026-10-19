@@ -138,6 +138,27 @@ export class ConflictError extends AppError {
 }
 
 
+/**
+ * 503 — a transaction was cancelled while it waited on a row lock (#908):
+ * Prisma's interactive-transaction timeout (P2028) or PostgreSQL's
+ * `lock_timeout` (55P03). Nothing was written, so the user can safely retry.
+ * The central error handler and `respondWithError` render it with
+ * `Retry-After`; `models/pool-config.ts#classifyDbError` makes one from the raw
+ * database error, which rides on `cause` with its timing.
+ */
+export class TransactionTimeoutError extends DetailedError<Record<string, unknown>> {
+  constructor(cause?: unknown) {
+    super(
+      'transaction_timeout',
+      {},
+      'Another request for this record is still being processed; please retry',
+      503
+    );
+    Object.setPrototypeOf(this, TransactionTimeoutError.prototype);
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
 export class ServiceUnavailableError extends AppError {
   constructor(message: string = 'Service unavailable') {
     super(message, 503);

@@ -51,7 +51,7 @@ jest.mock('../../services/sentry', () => {
 const mockedCrumb = addBreadcrumb as jest.Mock;
 const mockedCapture = captureException as jest.Mock;
 
-type Reply = { status: number; data?: unknown } | { throw: AxiosError };
+type Reply = { status: number; data?: unknown; headers?: Record<string, string> } | { throw: AxiosError };
 let reply: (config: InternalAxiosRequestConfig) => Reply;
 
 // A custom adapter settles nothing itself: a non-2xx has to be thrown as the
@@ -59,7 +59,7 @@ let reply: (config: InternalAxiosRequestConfig) => Reply;
 const adapter: AxiosAdapter = async (config) => {
   const r = reply(config);
   if ('throw' in r) throw r.throw;
-  const response = { status: r.status, statusText: '', data: r.data ?? {}, headers: {}, config };
+  const response = { status: r.status, statusText: '', data: r.data ?? {}, headers: r.headers ?? {}, config };
   if (r.status >= 400) {
     throw new AxiosError(
       `Request failed with status code ${r.status}`,
@@ -130,6 +130,19 @@ describe('api-client observability (#617)', () => {
     expect(error).toBeInstanceOf(AxiosError);
     expect(context).toEqual({ endpoint: '/api/v1/games/:id' });
     expect(tags).toEqual({ endpoint_pattern: '/api/v1/games/:id', status: 503 });
+  });
+
+  it('does not capture a retryable 503 (Retry-After), only a warning breadcrumb', async () => {
+    reply = () => ({
+      status: 503,
+      data: { error: 'Another request is still being processed', code: 'transaction_timeout' },
+      headers: { 'retry-after': '5' },
+    });
+
+    await expect(apiClient.post('/teams/12345/invitations', {})).rejects.toBeDefined();
+
+    expect(lastCrumb()).toMatchObject({ level: 'warning', data: { status_code: 503 } });
+    expect(mockedCapture).not.toHaveBeenCalled();
   });
 
   it('captures a network failure with status "network" and the axios code', async () => {

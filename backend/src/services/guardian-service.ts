@@ -25,6 +25,7 @@ import { emailEquals, isSameEmail } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT, type UserSummaryWithEmail } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation, orNotFound } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
+import { SUPERSEDE_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 
 const GUARDIAN_INVITE_EXPIRES_DAYS = 7;
 
@@ -607,6 +608,7 @@ export class GuardianService {
     const invitation = await createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
+          await setLocalLockTimeout(tx, SUPERSEDE_LOCK_TIMEOUT_MS);
           await lockUsers(tx, [childId, parentId]);
           const linked = await tx.guardian.findUnique({
             where: { parentId_childId: { parentId, childId } },

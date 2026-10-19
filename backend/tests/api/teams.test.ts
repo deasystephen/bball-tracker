@@ -3,6 +3,7 @@
  */
 
 import request from 'supertest';
+import { transactionClosed } from '../factories';
 import { app, httpServer } from '../../src/index';
 import { TeamService, type TeamList, type TeamListItem } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
@@ -774,6 +775,21 @@ describe('Teams API', () => {
 
       expect(response.status).toBe(201);
       expect(response.body.emailSent).toBe(false);
+    });
+
+    it('answers 503 + Retry-After + transaction_timeout when the supersede transaction expires on a lock wait (P2028, #908)', async () => {
+      mockInvitationService.createInvitation.mockRejectedValue(transactionClosed());
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ playerId: TEST_PLAYER_ID, supersede: true });
+
+      expect(response.status).toBe(503);
+      expect(response.headers['retry-after']).toBe('5');
+      expect(response.body).toEqual({
+        error: 'Another request for this record is still being processed; please retry',
+        code: 'transaction_timeout',
+      });
     });
 
     it('passes supersede through to the service (resend path)', async () => {

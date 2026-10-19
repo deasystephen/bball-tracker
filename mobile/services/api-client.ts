@@ -112,11 +112,15 @@ export const observeError = (error: unknown): Promise<never> => {
     const config = error.config as RetriableConfig | undefined;
     const pattern = configPattern(config);
     const status = error.response?.status;
+    // A 503 with `Retry-After` is the backend's retryable busy-database answer
+    // (pool timeout or lock-wait `transaction_timeout`, backend #908): the user
+    // sees a toast and the server already tracks it, so no mobile Sentry event.
+    const retryable = status === 503 && error.response?.headers?.['retry-after'] !== undefined;
     addBreadcrumb({
       category: 'http',
       type: 'http',
       // A 4xx and a cancellation are the caller's own outcome: warning crumbs, never errors.
-      level: (status !== undefined && status < 500) || isCancellation(error) ? 'warning' : 'error',
+      level: (status !== undefined && status < 500) || retryable || isCancellation(error) ? 'warning' : 'error',
       data: {
         method: configMethod(config),
         url: pattern,
@@ -131,7 +135,7 @@ export const observeError = (error: unknown): Promise<never> => {
         { endpoint: pattern, code: error.code },
         { endpoint_pattern: pattern, status: 'network' }
       );
-    } else if (status !== undefined && status >= 500) {
+    } else if (status !== undefined && status >= 500 && !retryable) {
       captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status });
     }
   }

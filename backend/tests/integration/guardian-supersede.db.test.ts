@@ -20,6 +20,8 @@ import { GuardianService } from '../../src/services/guardian-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
+import { classifyDbError } from '../../src/models/pool-config';
+import { dbBusyOutcome } from '../../src/utils/db-busy';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 import { backendPid, pause, track, waitForBlockedBy } from '../support/db-locks';
 
@@ -220,6 +222,35 @@ describe('guardian resend (supersede, #420)', () => {
       { id: liveId, status: 'EXPIRED' },
       { id: intruderId, status: 'PENDING' },
     ]);
+  });
+
+  it("a resend stuck behind a lock holder is cancelled by PostgreSQL's lock_timeout and answers the retryable 503 (#908)", async () => {
+    const { childId, email, liveId } = await childWithPending('lock-timeout', PAST_COOLDOWN);
+
+    let err: unknown;
+    let elapsedMs = 0;
+    await prisma.$transaction(
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${childId} FOR NO KEY UPDATE`;
+        const startedAt = Date.now();
+        // The holder stays open for the whole wait: the resend must give up on
+        // its own, before Prisma's 5 s transaction timeout.
+        err = await GuardianService.inviteGuardian(
+          org.teamId,
+          childId,
+          { email, relationship: 'MOTHER', supersede: true },
+          coachId
+        ).catch((e: unknown) => e);
+        elapsedMs = Date.now() - startedAt;
+      },
+      { timeout: 15_000 }
+    );
+
+    // The service lets the database error through; the error handlers map it.
+    expect(classifyDbError(err)).toBe('lock_wait');
+    expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
+    expect(elapsedMs).toBeGreaterThanOrEqual(3500);
+    expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
   });
 
   it('waits on the child row lock, so an accept committing first makes the resend answer 400, not a second invitation', async () => {

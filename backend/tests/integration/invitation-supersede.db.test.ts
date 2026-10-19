@@ -18,8 +18,11 @@ import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
-import { ResendCooldownError } from '../../src/utils/errors';
+import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
+import { backendPid, track, waitForBlockedBy } from '../support/db-locks';
 import { logger } from '../../src/utils/logger';
+import { classifyDbError } from '../../src/models/pool-config';
+import { dbBusyOutcome } from '../../src/utils/db-busy';
 import { spyOnInfo } from '../support/domain-events';
 import { hashRecipient } from '../../src/services/mailer/ses-mailer';
 
@@ -253,5 +256,94 @@ describe('resend cooldown (#715)', () => {
     expect((await rowsFor(playerId)).find((r) => r.id === invitation.id)).toEqual(
       expect.objectContaining({ jerseyNumber: null, position: null, message: null })
     );
+  });
+});
+
+describe('lost create race on the supersede path (#908 review)', () => {
+  it('a PENDING row committed under the resend answers the dedupe 400 from the partial index, never a 500', async () => {
+    const playerId = await mkInvitee('race');
+    const liveId = await mkInvitation(playerId, {
+      status: 'PENDING',
+      createdAt: new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 60_000),
+      expiresAt: new Date(Date.now() + 7 * DAY_MS),
+    });
+
+    // Hold the live row so the resend queues on its expire. The holder then
+    // expires it and commits a new PENDING row for the pair; the resend's
+    // expire matches nothing and its insert collides on the partial index,
+    // under the index name `createOrConflict` must recognise (Prisma 7
+    // driver-adapter meta shape, against the real Postgres).
+    let resend: ReturnType<typeof track<unknown>> | undefined;
+    let intruderId: string | undefined;
+    await prisma.$transaction(
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "TeamInvitation" WHERE "id" = ${liveId} FOR UPDATE`;
+        resend = track(InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId));
+        resend.promise.catch(() => undefined);
+        expect(await waitForBlockedBy(holder, await backendPid(holder))).not.toHaveLength(0);
+
+        await holder.teamInvitation.update({ where: { id: liveId }, data: { status: 'EXPIRED' } });
+        const intruder = await holder.teamInvitation.create({
+          data: {
+            teamId,
+            playerId,
+            invitedById: coachId,
+            token: randomBytes(32).toString('base64url'),
+            expiresAt: new Date(Date.now() + 7 * DAY_MS),
+            status: 'PENDING',
+          },
+          select: { id: true },
+        });
+        intruderId = intruder.id;
+      },
+      { timeout: 10_000 }
+    );
+
+    const err = await resend!.promise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestError);
+    expect((err as BadRequestError).message).toBe('A pending invitation already exists for this player');
+    const rows = await rowsFor(playerId);
+    expect(rows.map((r) => [r.id, r.status])).toEqual(
+      expect.arrayContaining([
+        [liveId, 'EXPIRED'],
+        [intruderId, 'PENDING'],
+      ])
+    );
+    expect(rows).toHaveLength(2);
+  });
+});
+
+describe('bounded lock wait on the supersede path (#908)', () => {
+  it("a resend stuck behind a lock holder is cancelled by PostgreSQL's lock_timeout and answers the retryable 503, freeing its connection", async () => {
+    const playerId = await mkInvitee('lock-wait');
+    const liveId = await mkInvitation(playerId, {
+      status: 'PENDING',
+      createdAt: new Date(Date.now() - INVITATION_RESEND_COOLDOWN_MS - 60_000),
+      expiresAt: new Date(Date.now() + 7 * DAY_MS),
+    });
+
+    let err: unknown;
+    let elapsedMs = 0;
+    await prisma.$transaction(
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "TeamInvitation" WHERE "id" = ${liveId} FOR UPDATE`;
+        const startedAt = Date.now();
+        // The holder stays open for the whole wait: the resend must give up
+        // on its own, not because the lock was released.
+        err = await InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId).catch(
+          (e: unknown) => e
+        );
+        elapsedMs = Date.now() - startedAt;
+      },
+      { timeout: 15_000 }
+    );
+
+    // The service lets the database error through; the error handlers map it.
+    expect(classifyDbError(err)).toBe('lock_wait');
+    expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
+    // Postgres cancels at the 4 s lock_timeout, before Prisma's own 5 s timeout.
+    expect(elapsedMs).toBeGreaterThanOrEqual(3500);
+    // Nothing was written: the live row is still the only PENDING one.
+    expect((await rowsFor(playerId)).map((r) => [r.id, r.status])).toEqual([[liveId, 'PENDING']]);
   });
 });

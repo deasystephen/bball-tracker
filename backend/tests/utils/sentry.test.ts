@@ -12,7 +12,8 @@ import {
   sentryErrorHandler,
   type TransactionEvent,
 } from '../../src/utils/sentry';
-import { AppError, NotFoundError, UnauthorizedError } from '../../src/utils/errors';
+import { AppError, NotFoundError, TransactionTimeoutError, UnauthorizedError } from '../../src/utils/errors';
+import { transactionClosed } from '../factories';
 import type { Event } from '@sentry/node';
 import type { Request, Response } from 'express';
 
@@ -218,6 +219,17 @@ describe('sentryErrorHandler', () => {
     expect(mockCapture).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(2);
     expect(next).toHaveBeenCalledWith(err);
+  });
+
+  it('captures a lock-wait 503 (TransactionTimeoutError) and a raw P2028 like any 5xx (#908)', () => {
+    const next = jest.fn();
+    const timeout = new TransactionTimeoutError(transactionClosed());
+    const raw = transactionClosed();
+    sentryErrorHandler(timeout, req, res, next);
+    sentryErrorHandler(raw, req, res, next);
+    expect(mockCapture).toHaveBeenCalledWith(timeout);
+    expect(mockCapture).toHaveBeenCalledWith(raw);
+    expect(isExpectedClientError(timeout)).toBe(false);
   });
 
   it('still captures plain errors, tagging a redacted route', () => {

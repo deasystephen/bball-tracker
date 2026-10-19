@@ -5,6 +5,7 @@
  */
 
 import request from 'supertest';
+import { transactionClosed } from '../factories';
 import { app } from '../../src/index';
 import { GuardianService } from '../../src/services/guardian-service';
 import { NotFoundError, ForbiddenError, BadRequestError, ResendCooldownError } from '../../src/utils/errors';
@@ -102,6 +103,21 @@ describe('Guardians API', () => {
           { email: 'parent@example.com', relationship: 'MOTHER', supersede: true },
           TEST_USER_ID
         );
+      });
+
+      it('answers 503 + Retry-After + transaction_timeout when the supersede transaction expires on a lock wait (P2028, #908)', async () => {
+        mockGuardianService.inviteGuardian.mockRejectedValue(transactionClosed());
+
+        const res = await request(app)
+          .post(base)
+          .send({ email: 'parent@example.com', relationship: 'MOTHER', supersede: true });
+
+        expect(res.status).toBe(503);
+        expect(res.headers['retry-after']).toBe('5');
+        expect(res.body).toEqual({
+          error: 'Another request for this record is still being processed; please retry',
+          code: 'transaction_timeout',
+        });
       });
 
       it('reports a failed resend email as emailSent: false (201, never thrown)', async () => {

@@ -694,3 +694,40 @@ export function uniqueViolation(target?: string): Prisma.PrismaClientKnownReques
           },
   });
 }
+
+/**
+ * Prisma's P2028 for an interactive transaction that outlived its timeout
+ * (the lock-wait loser, #908), worded as the client builds it. `message`
+ * overrides it for the other P2028 variants.
+ */
+export function transactionClosed(
+  message = 'Transaction API error: A commit cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5003 ms passed since the start of the transaction.'
+): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(message, { code: 'P2028', clientVersion: 'test' });
+}
+
+/**
+ * PostgreSQL's `lock_timeout` cancel (55P03) as Prisma 7 with the pg driver
+ * adapter surfaces it for an ORM query: P2039 with the SQLSTATE on
+ * `meta.driverAdapterError.cause` (a raw query is P2010, same meta; verified
+ * against Postgres 18, 2026-10-18).
+ */
+export function lockTimeout(code: 'P2039' | 'P2010' = 'P2039'): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Database error. Code: `55P03`. Message: `canceling statement due to lock timeout`', {
+    code,
+    clientVersion: 'test',
+    meta: {
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: {
+          originalCode: '55P03',
+          originalMessage: 'canceling statement due to lock timeout',
+          kind: 'postgres',
+          code: '55P03',
+          severity: 'ERROR',
+          message: 'canceling statement due to lock timeout',
+        },
+      },
+    },
+  });
+}

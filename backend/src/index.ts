@@ -17,6 +17,7 @@ import { requestLogger, loggablePath } from './api/middleware/request-logger';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
+import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 import { createShutdown } from './utils/shutdown';
 import { closeRedis } from './utils/redis';
@@ -79,7 +80,7 @@ app.use(requestLogger);
 import prisma from './models';
 import { captureException } from './utils/sentry';
 import { deployedCommit } from './utils/release';
-import { DB_BUSY_BODY, DB_BUSY_RETRY_AFTER_SECONDS, isPoolTimeoutError } from './models/pool-config';
+import { isPoolTimeoutError } from './models/pool-config';
 
 // `db` on a failed ping (#751): 'timeout' when pg's connectionTimeoutMillis
 // fired (pool saturated, or RDS not answering TCP), 'down' for anything else
@@ -113,6 +114,8 @@ setupWebSocketHandlers(io);
 
 // Error handling middleware
 import { AppError, DetailedError } from './utils/errors';
+import { dbBusyOutcome, sendDbBusy } from './utils/db-busy';
+import { redactUrlsInText } from './utils/redact';
 
 // Forward exceptions to Sentry before the app's own error handler renders a response.
 app.use(sentryErrorHandler);
@@ -122,20 +125,30 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   // warnings — reserving `error` for 5xx keeps the error stream meaningful.
   // pg's pool-wait/connect timeout (#751): the pool is saturated or the
   // database is not answering. Answer 503 with Retry-After, not a generic 500.
-  const poolTimeout = isPoolTimeoutError(err);
-  const status = poolTimeout ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
+  // A transaction cancelled waiting on a lock (Prisma P2028 or PostgreSQL
+  // lock_timeout, #908) is a 503 `transaction_timeout` whichever service opened
+  // it, like a pool timeout: logged at error and captured, because a lock
+  // holder that outlasts the wait is a slow-database signal.
+  const busy = dbBusyOutcome(err);
+  const status = busy ? 503 : err instanceof AppError ? err.statusCode : clientErrorStatus(err);
   const log = status !== undefined && status < 500 ? logger.warn : logger.error;
   log(err.message, {
     requestId: _req.requestId,
     method: _req.method,
     path: loggablePath(_req),
     status,
+    // Prisma's own message (configured timeout, elapsed ms) rides on `cause`.
+    cause: err.cause instanceof Error ? redactUrlsInText(err.cause.message) : undefined,
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 
   // If it's an AppError, use its status code. A DetailedError also carries a
   // machine-readable `code` and its structured payload (402 upgrade_required,
   // 400 last_head_coach); `body()` is the single serialization rule for those.
+  if (busy) {
+    sendDbBusy(res, busy);
+    return;
+  }
   if (err instanceof DetailedError) {
     res.status(err.statusCode).json(err.body());
     return;
@@ -157,14 +170,6 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     return;
   }
 
-  if (poolTimeout) {
-    res
-      .status(503)
-      .set('Retry-After', String(DB_BUSY_RETRY_AFTER_SECONDS))
-      .json(DB_BUSY_BODY);
-    return;
-  }
-
   // Otherwise, return generic 500 - never leak internal error details in production
   res.status(500).json({
     error: 'Internal server error',
@@ -182,6 +187,15 @@ if (require.main === module) {
   // Exits non-zero before the server listens when the replica ceiling would
   // split live games across tasks (#446). Must stay ahead of `listen`.
   enforceReplicaGuard();
+  // The WorkOS client is lazy (the seed imports it without credentials), so the
+  // server checks its config here: a task without it must fail its deploy.
+  try {
+    assertWorkOSConfig();
+  } catch (error) {
+    if (!(error instanceof WorkOSConfigError)) throw error;
+    logger.error('WorkOS config missing', { variable: error.variable });
+    process.exit(1);
+  }
   warnMissingUrlConfig();
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });

@@ -1134,9 +1134,9 @@ Cross-cuts E, I, J — but worth aggregating here.
 - **Notes:** ___________
 
 ### P.9 — Token expiry mid-session (Socket.io)
-- [ ] ⚠ Known issue per memory — verify graceful (or document)
-- **Steps:** Open spectator view. Force a JWT expiration (manipulate token TTL if possible, or wait the TTL).
-- **Expected (current):** An already-connected socket stays connected (handshake-only auth; #49 deferred). A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
+- [ ] Pass / Fail / Skipped
+- **Steps:** Open spectator view on an `IN_PROGRESS` game and leave it open past the access-token lifetime (minutes). Record an event from a second device before and after.
+- **Expected:** With the #49 OTA the client refreshes about a minute before the token expires and hands the new token to the open socket (`refresh-auth`): the view never shows `reconnecting` and events keep arriving with the right score. A client without the OTA is closed with `reauth_required` 35–55s after expiry, shows `reconnecting` briefly, refreshes, reconnects and rejoins with a fresh snapshot. A **re**connect with an expired token is rejected with `Unauthorized` → the client refreshes via `/auth/refresh` and reconnects (max 2 tries; audit #17b); backend JWKS outage → `Service unavailable` → exponential back-off, `useLiveGame` shows `reconnecting`.
 - **Notes:** ___________
 
 ### P.10 — VoiceOver Headings rotor finds screen titles and sections (#775)
@@ -1291,10 +1291,8 @@ These are documented gaps. Each should fail in the *documented* way. If they fai
 - **Issue:** Single-replica only (in-memory adapter); Redis adapter tracked in #452. Autoscaling `max_capacity` is pinned to 1 and the backend refuses to start in production when `MAX_REPLICAS` is above 1 or not a positive integer (#446).
 - **Expected fail mode:** 1 ECS task in steady state. A rolling deploy briefly runs 2 tasks and splits rooms for that window — don't test live games across a deploy.
 
-### S.8 — ⚠ Mid-session Socket.io JWT reauth
-- [ ] Verified-broken / Notes
-- **Issue:** #49 deferred.
-- **Expected fail mode:** Long sessions (>2hr typical JWT TTL) stay connected with stale auth.
+### S.8 — Mid-session Socket.io JWT reauth (resolved)
+- **Issue:** #49. The client refreshes ahead of expiry and sends the new token in-band (`refresh-auth`); the server closes a socket with no valid token by expiry (`reauth_required`) and the client reconnects. Verify through P.9.
 
 ### S.9 — ✓ Mobile ESLint
 - Resolved in #132 (ESLint + eslint-config-expo wired up in `mobile/eslint.config.mjs`, CI lints mobile) and #346 (all warnings burned down; `--max-warnings 0` enforced in both packages). Nothing to verify manually.

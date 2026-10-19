@@ -18,7 +18,7 @@ import {
   handleJoinGame,
   gameRoom,
   GAME_ROOM_PREFIX,
-  resolveSocketUser,
+  resolveSocketSession,
   type GameSocket,
 } from '../../src/websocket/game-events';
 import { WorkOSService } from '../../src/services/workos-service';
@@ -212,20 +212,56 @@ describe('websocket/game-events', () => {
     });
   });
 
-  describe('resolveSocketUser', () => {
+  describe('resolveSocketSession', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
     it('returns null when the token is missing', async () => {
-      expect(await resolveSocketUser(undefined)).toBeNull();
-      expect(await resolveSocketUser('')).toBeNull();
+      expect(await resolveSocketSession(undefined)).toBeNull();
+      expect(await resolveSocketSession('')).toBeNull();
     });
 
     it('returns null when a dev token is expired', async () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = 'development';
       try {
-        expect(await resolveSocketUser(devToken({ userId: 'u1', exp: Date.now() - 1000 }))).toBeNull();
+        expect(await resolveSocketSession(devToken({ userId: 'u1', exp: Date.now() - 1000 }))).toBeNull();
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
+    });
+
+    it('rejects a dev token whose exp is not a number (#49: no string coercion)', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      try {
+        const body = { userId: 'u1', exp: String(Date.now() + 60_000) };
+        const token = `dev_${Buffer.from(JSON.stringify(body)).toString('base64')}`;
+        expect(await resolveSocketSession(token)).toBeNull();
+        expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it('returns a WorkOS token expiry as epoch ms', async () => {
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000 });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'u1',
+        email: null,
+        name: 'Coach',
+        role: 'COACH',
+      });
+      const resolved = await resolveSocketSession('Bearer some.jwt.token');
+      expect(resolved?.expiresAt).toBe(1_800_000_000_000);
+      // No `iat` from the verifier: the lifetime is unknown.
+      expect(resolved?.lifetimeMs).toBeNull();
+
+      jest
+        .spyOn(WorkOSService, 'verifyToken')
+        .mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000, issuedAt: 1_799_999_700 });
+      expect((await resolveSocketSession('Bearer some.jwt.token'))?.lifetimeMs).toBe(300_000);
     });
 
     it('resolves a valid dev token to the corresponding user', async () => {
@@ -240,8 +276,11 @@ describe('websocket/game-events', () => {
           role: user.role,
         });
 
-        const resolved = await resolveSocketUser(`Bearer ${devToken({ userId: user.id })}`);
-        expect(resolved).toEqual({
+        const exp = Date.now() + 60_000;
+        const resolved = await resolveSocketSession(`Bearer ${devToken({ userId: user.id, exp })}`);
+        // Dev-token `exp` is already epoch ms.
+        expect(resolved?.expiresAt).toBe(exp);
+        expect(resolved?.user).toEqual({
           id: user.id,
           email: user.email,
           name: user.name,
@@ -254,7 +293,7 @@ describe('websocket/game-events', () => {
   });
 
   // #667: tombstoned accounts are refused at the handshake, as REST refuses them.
-  describe('resolveSocketUser and deleted accounts', () => {
+  describe('resolveSocketSession and deleted accounts', () => {
     const verifyToken = (): jest.SpyInstance => jest.spyOn(WorkOSService, 'verifyToken');
 
     afterEach(() => {
@@ -272,7 +311,7 @@ describe('websocket/game-events', () => {
           name: user.name,
           role: user.role,
         });
-        await resolveSocketUser(devToken({ userId: user.id }));
+        await resolveSocketSession(devToken({ userId: user.id }));
         expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
           expect.objectContaining({ where: { id: user.id, deletedAt: null } })
         );
@@ -285,7 +324,7 @@ describe('websocket/game-events', () => {
       verifyToken().mockResolvedValue({ id: 'user_x' } as never);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await resolveSocketUser('Bearer some.jwt.token');
+      await resolveSocketSession('Bearer some.jwt.token');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { workosUserId: 'user_x', deletedAt: null } })
       );
@@ -296,14 +335,14 @@ describe('websocket/game-events', () => {
       process.env.NODE_ENV = 'development';
       try {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-        expect(await resolveSocketUser(devToken({ userId: 'deleted-user' }))).toBeNull();
+        expect(await resolveSocketSession(devToken({ userId: 'deleted-user' }))).toBeNull();
       } finally {
         process.env.NODE_ENV = originalEnv;
       }
 
       verifyToken().mockResolvedValue({ id: 'user_deleted' } as never);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      expect(await resolveSocketUser('Bearer some.jwt.token')).toBeNull();
+      expect(await resolveSocketSession('Bearer some.jwt.token')).toBeNull();
     });
   });
 

@@ -16,6 +16,10 @@ import {
   expectNotFoundError,
 } from '../helpers';
 
+jest.mock('../../src/utils/lock-timeout', () => ({
+  ...jest.requireActual('../../src/utils/lock-timeout'),
+  setLocalLockTimeout: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
 }));

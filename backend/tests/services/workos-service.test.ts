@@ -2,30 +2,16 @@
  * Unit tests for WorkOSService
  */
 
-// Mock workos client - must declare mock functions separately to avoid hoisting issues
-jest.mock('../../src/utils/workos-client', () => {
-  return {
-    workos: {
-      userManagement: {
-        getAuthorizationUrl: jest.fn(),
-        authenticateWithCode: jest.fn(),
-        authenticateWithRefreshToken: jest.fn(),
-        revokeSession: jest.fn(),
-        deleteUser: jest.fn(),
-        getUser: jest.fn(),
-        listUsers: jest.fn(),
-      },
-    },
-    WORKOS_CLIENT_ID: 'test-client-id',
-    WORKOS_REDIRECT_URI: 'http://localhost:3000/auth/callback',
-    WORKOS_JWT_ISSUER: 'https://api.workos.com',
+jest.mock('../../src/utils/workos-client', () =>
+  jest.requireActual('../support/workos-mock').mockWorkOSClientModule({
+    assertWorkOSConfig: (): void => mockAssertWorkOSConfig(),
     getWorkOSJwks: (): unknown => mockGetWorkOSJwks(),
-  };
-});
+  }));
 
 import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet, errors as joseErrors, type JWK, type KeyLike } from 'jose';
 
 const mockGetWorkOSJwks = jest.fn();
+const mockAssertWorkOSConfig = jest.fn();
 
 import { Prisma } from '@prisma/client';
 import { WorkOSService } from '../../src/services/workos-service';
@@ -33,19 +19,7 @@ import { ConflictError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { createPlayer, uniqueViolation } from '../factories';
 
-// Get reference to the mocked module
-import { workos } from '../../src/utils/workos-client';
-const mockWorkos = {
-  userManagement: {
-    getAuthorizationUrl: workos.userManagement.getAuthorizationUrl as jest.Mock,
-    authenticateWithCode: workos.userManagement.authenticateWithCode as jest.Mock,
-    authenticateWithRefreshToken: workos.userManagement.authenticateWithRefreshToken as jest.Mock,
-    revokeSession: workos.userManagement.revokeSession as jest.Mock,
-    deleteUser: workos.userManagement.deleteUser as jest.Mock,
-    getUser: workos.userManagement.getUser as jest.Mock,
-    listUsers: workos.userManagement.listUsers as jest.Mock,
-  },
-};
+import { mockWorkOSClient } from '../support/workos-mock';
 
 describe('WorkOSService', () => {
   beforeEach(() => {
@@ -58,14 +32,14 @@ describe('WorkOSService', () => {
 
   describe('getAuthorizationUrl', () => {
     it('should return authorization URL with authkit provider by default', async () => {
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize?provider=authkit'
       );
 
       const result = await WorkOSService.getAuthorizationUrl();
 
       expect(result).toBe('https://auth.workos.com/authorize?provider=authkit');
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           clientId: 'test-client-id',
           redirectUri: 'http://localhost:3000/auth/callback',
@@ -75,14 +49,14 @@ describe('WorkOSService', () => {
     });
 
     it('should include state parameter if provided', async () => {
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize?state=test-state'
       );
 
       const result = await WorkOSService.getAuthorizationUrl('test-state');
 
       expect(result).toContain('state=test-state');
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           state: 'test-state',
         })
@@ -90,11 +64,11 @@ describe('WorkOSService', () => {
     });
 
     it('forwards a PKCE code challenge with the S256 method (audit #5)', async () => {
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
 
       await WorkOSService.getAuthorizationUrl('st', 'myapp://callback', 'challenge-abc');
 
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           state: 'st',
           redirectUri: 'myapp://callback',
@@ -105,23 +79,23 @@ describe('WorkOSService', () => {
     });
 
     it('omits the PKCE fields entirely when no challenge is given', async () => {
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue('https://auth.workos.com/authorize');
 
       await WorkOSService.getAuthorizationUrl();
 
-      const arg = mockWorkos.userManagement.getAuthorizationUrl.mock.calls[0][0];
+      const arg = mockWorkOSClient.userManagement.getAuthorizationUrl.mock.calls[0][0];
       expect(arg).not.toHaveProperty('codeChallenge');
       expect(arg).not.toHaveProperty('codeChallengeMethod');
     });
 
     it('should use custom redirect URI if provided', async () => {
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize'
       );
 
       await WorkOSService.getAuthorizationUrl(undefined, 'myapp://callback');
 
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           redirectUri: 'myapp://callback',
         })
@@ -130,13 +104,13 @@ describe('WorkOSService', () => {
 
     it('should use connection ID if provided in environment', async () => {
       process.env.WORKOS_CONNECTION_ID = 'conn_123';
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize'
       );
 
       await WorkOSService.getAuthorizationUrl();
 
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           connectionId: 'conn_123',
         })
@@ -145,13 +119,13 @@ describe('WorkOSService', () => {
 
     it('should use organization ID if connection ID not provided', async () => {
       process.env.WORKOS_ORGANIZATION_ID = 'org_123';
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize'
       );
 
       await WorkOSService.getAuthorizationUrl();
 
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           organizationId: 'org_123',
         })
@@ -160,13 +134,13 @@ describe('WorkOSService', () => {
 
     it('should use provider from environment if set', async () => {
       process.env.WORKOS_PROVIDER = 'GoogleOAuth';
-      mockWorkos.userManagement.getAuthorizationUrl.mockResolvedValue(
+      mockWorkOSClient.userManagement.getAuthorizationUrl.mockResolvedValue(
         'https://auth.workos.com/authorize'
       );
 
       await WorkOSService.getAuthorizationUrl();
 
-      expect(mockWorkos.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
+      expect(mockWorkOSClient.userManagement.getAuthorizationUrl).toHaveBeenCalledWith(
         expect.objectContaining({
           provider: 'GoogleOAuth',
         })
@@ -184,23 +158,23 @@ describe('WorkOSService', () => {
           email: 'test@example.com',
         },
       };
-      mockWorkos.userManagement.authenticateWithCode.mockResolvedValue(mockResponse);
+      mockWorkOSClient.userManagement.authenticateWithCode.mockResolvedValue(mockResponse);
 
       const result = await WorkOSService.exchangeCodeForToken('auth-code');
 
       expect(result).toEqual(mockResponse);
-      expect(mockWorkos.userManagement.authenticateWithCode).toHaveBeenCalledWith({
+      expect(mockWorkOSClient.userManagement.authenticateWithCode).toHaveBeenCalledWith({
         clientId: 'test-client-id',
         code: 'auth-code',
       });
     });
 
     it('passes the PKCE code verifier through to WorkOS when given', async () => {
-      mockWorkos.userManagement.authenticateWithCode.mockResolvedValue({ accessToken: 'a' });
+      mockWorkOSClient.userManagement.authenticateWithCode.mockResolvedValue({ accessToken: 'a' });
 
       await WorkOSService.exchangeCodeForToken('auth-code', 'verifier-xyz');
 
-      expect(mockWorkos.userManagement.authenticateWithCode).toHaveBeenCalledWith({
+      expect(mockWorkOSClient.userManagement.authenticateWithCode).toHaveBeenCalledWith({
         clientId: 'test-client-id',
         code: 'auth-code',
         codeVerifier: 'verifier-xyz',
@@ -215,34 +189,34 @@ describe('WorkOSService', () => {
         refreshToken: 'new-refresh-token',
         user: { id: 'user_123', email: 'test@example.com' },
       };
-      mockWorkos.userManagement.authenticateWithRefreshToken.mockResolvedValue(mockResponse);
+      mockWorkOSClient.userManagement.authenticateWithRefreshToken.mockResolvedValue(mockResponse);
 
       const result = await WorkOSService.refreshSession('old-refresh-token');
 
       expect(result).toEqual(mockResponse);
-      expect(mockWorkos.userManagement.authenticateWithRefreshToken).toHaveBeenCalledWith({
+      expect(mockWorkOSClient.userManagement.authenticateWithRefreshToken).toHaveBeenCalledWith({
         clientId: 'test-client-id',
         refreshToken: 'old-refresh-token',
       });
     });
 
     it('should propagate WorkOS errors so the route can map them to 401', async () => {
-      mockWorkos.userManagement.authenticateWithRefreshToken.mockRejectedValue(new Error('invalid_grant'));
+      mockWorkOSClient.userManagement.authenticateWithRefreshToken.mockRejectedValue(new Error('invalid_grant'));
       await expect(WorkOSService.refreshSession('bad')).rejects.toThrow('invalid_grant');
     });
   });
 
   describe('deleteUser (#444)', () => {
     it('deletes the WorkOS user by id (account deletion, after the local commit)', async () => {
-      mockWorkos.userManagement.deleteUser.mockResolvedValue(undefined);
+      mockWorkOSClient.userManagement.deleteUser.mockResolvedValue(undefined);
 
       await WorkOSService.deleteUser('user_123');
 
-      expect(mockWorkos.userManagement.deleteUser).toHaveBeenCalledWith('user_123');
+      expect(mockWorkOSClient.userManagement.deleteUser).toHaveBeenCalledWith('user_123');
     });
 
     it('propagates provider failures to the caller (AccountService reports identityDeleted:false)', async () => {
-      mockWorkos.userManagement.deleteUser.mockRejectedValue(new Error('workos down'));
+      mockWorkOSClient.userManagement.deleteUser.mockRejectedValue(new Error('workos down'));
 
       await expect(WorkOSService.deleteUser('user_123')).rejects.toThrow('workos down');
     });
@@ -250,15 +224,15 @@ describe('WorkOSService', () => {
 
   describe('revokeSession', () => {
     it('revokes the WorkOS session by id', async () => {
-      mockWorkos.userManagement.revokeSession.mockResolvedValue(undefined);
+      mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
 
       await WorkOSService.revokeSession('session_123');
 
-      expect(mockWorkos.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_123' });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_123' });
     });
 
     it('propagates WorkOS errors', async () => {
-      mockWorkos.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
+      mockWorkOSClient.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
 
       await expect(WorkOSService.revokeSession('session_123')).rejects.toThrow('WorkOS down');
     });
@@ -272,12 +246,12 @@ describe('WorkOSService', () => {
         firstName: 'Test',
         lastName: 'User',
       };
-      mockWorkos.userManagement.getUser.mockResolvedValue(mockUser);
+      mockWorkOSClient.userManagement.getUser.mockResolvedValue(mockUser);
 
       const result = await WorkOSService.getUser('user_123');
 
       expect(result).toEqual(mockUser);
-      expect(mockWorkos.userManagement.getUser).toHaveBeenCalledWith('user_123');
+      expect(mockWorkOSClient.userManagement.getUser).toHaveBeenCalledWith('user_123');
     });
   });
 
@@ -293,12 +267,12 @@ describe('WorkOSService', () => {
           before: null,
         },
       };
-      mockWorkos.userManagement.listUsers.mockResolvedValue(mockUsers);
+      mockWorkOSClient.userManagement.listUsers.mockResolvedValue(mockUsers);
 
       const result = await WorkOSService.listUsers();
 
       expect(result).toEqual(mockUsers);
-      expect(mockWorkos.userManagement.listUsers).toHaveBeenCalled();
+      expect(mockWorkOSClient.userManagement.listUsers).toHaveBeenCalled();
     });
 
     it('should pass options to list users', async () => {
@@ -306,11 +280,11 @@ describe('WorkOSService', () => {
         data: [{ id: 'user_1', email: 'specific@example.com' }],
         listMetadata: { after: null, before: null },
       };
-      mockWorkos.userManagement.listUsers.mockResolvedValue(mockUsers);
+      mockWorkOSClient.userManagement.listUsers.mockResolvedValue(mockUsers);
 
       await WorkOSService.listUsers({ email: 'specific@example.com', limit: 10 });
 
-      expect(mockWorkos.userManagement.listUsers).toHaveBeenCalledWith({
+      expect(mockWorkOSClient.userManagement.listUsers).toHaveBeenCalledWith({
         email: 'specific@example.com',
         limit: 10,
       });
@@ -713,8 +687,11 @@ describe('WorkOSService', () => {
 
       expect(result).toMatchObject({ id: 'user_123', sessionId: 'session_abc' });
       expect(typeof result?.expiresAt).toBe('number');
+      // `iat` is surfaced so the socket re-auth can bound an outage hold (#49).
+      expect(typeof result?.issuedAt).toBe('number');
+      expect(result!.expiresAt).toBeGreaterThan(result!.issuedAt as number);
       // Verification is purely local — no WorkOS API round-trip per request.
-      expect(mockWorkos.userManagement.getUser).not.toHaveBeenCalled();
+      expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
     });
 
     it('rejects an unsigned (alg: none) token that merely names a victim', async () => {
@@ -800,6 +777,18 @@ describe('WorkOSService', () => {
       const token = await sign({ sub: 'user_123' });
 
       await expect(WorkOSService.verifyToken(token)).rejects.toMatchObject({ statusCode: 503 });
+    });
+
+    it('lets a config error through unchanged instead of answering 503', async () => {
+      mockAssertWorkOSConfig.mockImplementationOnce(() => {
+        throw new Error('WORKOS_CLIENT_ID environment variable is required');
+      });
+      const token = await sign({ sub: 'user_123' });
+
+      const error = await WorkOSService.verifyToken(token).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { statusCode?: number }).statusCode).toBeUndefined();
+      expect((error as Error).message).toContain('WORKOS_CLIENT_ID');
     });
   });
 });

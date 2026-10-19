@@ -11,6 +11,10 @@ import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { hashRecipient, MailSendError } from '../../src/services/mailer/ses-mailer';
 
+jest.mock('../../src/utils/lock-timeout', () => ({
+  ...jest.requireActual('../../src/utils/lock-timeout'),
+  setLocalLockTimeout: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
 }));
@@ -2411,6 +2415,51 @@ describe('InvitationService', () => {
         statusCode: 400,
         message: 'A pending invitation already exists for this player',
       });
+    });
+
+    it('does not report a token-collision P2002 in the supersede transaction as the dedupe 400', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const player = createPlayer();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+      const clash = uniqueViolation('TeamInvitation_token_key');
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(clash);
+
+      await expect(
+        InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true, expiresInDays: 7 }, coach.id)
+      ).rejects.toBe(clash);
+    });
+
+    it('maps the partial-index P2002 from the supersede transaction to the dedupe 400', async () => {
+      const coach = createCoach();
+      const league = createLeague();
+      const season = createSeason({ leagueId: league.id });
+      const team = createTeam({ seasonId: season.id });
+      const headCoachRole = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      const coachStaff = createTeamStaff({ teamId: team.id, userId: coach.id, roleId: headCoachRole.id });
+      const player = createPlayer();
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([{ ...coachStaff, role: headCoachRole }]);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(
+        uniqueViolation('TeamInvitation_pending_teamId_playerId_key')
+      );
+
+      await expect(
+        InvitationService.createInvitation(team.id, { playerId: player.id, supersede: true, expiresInDays: 7 }, coach.id)
+      ).rejects.toMatchObject({ statusCode: 400, message: 'A pending invitation already exists for this player' });
     });
 
     it('refuses to supersede for a claimed account that is already a member (Active)', async () => {

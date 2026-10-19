@@ -36,7 +36,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.project }}
-        run: npm ci
+        # --no-audit: the audit-floor job is the one audit call per package.
+        run: npm ci --no-audit --no-fund
 
       - name: Generate Prisma client
         if: matrix.project == 'backend'
@@ -81,7 +82,8 @@ jobs:
       
       - name: Install dependencies
         working-directory: backend
-        run: npm ci
+        # --no-audit: the audit-floor job is the one audit call per package.
+        run: npm ci --no-audit --no-fund
 
       - name: Generate Prisma client
         working-directory: backend
@@ -116,7 +118,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: mobile
-        run: npm ci
+        # --no-audit: the audit-floor job is the one audit call per package.
+        run: npm ci --no-audit --no-fund
 
       - name: Run tests (with coverage gate)
         working-directory: mobile
@@ -146,7 +149,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        # --no-audit: the audit-floor job is the one audit call per package.
+        run: npm ci --no-audit --no-fund
 
       - name: Unit tests (Vitest)
         working-directory: web
@@ -159,6 +163,33 @@ jobs:
           NEXT_PUBLIC_API_URL: https://api.hooplings.com
           API_URL: https://api.hooplings.com
         run: npm run build
+
+  # #924: fails when a lockfile resolves a production dependency under a high or
+  # critical advisory not listed for that side in
+  # .github/scripts/accepted-advisories.json (the #919 regression shape). Its own
+  # job so a new advisory or a registry hiccup fails one attributable check, not
+  # the test jobs. npm audit reads the lockfile, so nothing is installed; semver
+  # comes from npm's bundled copy. The deploy needs it.
+  audit-floor:
+    name: Audit floor
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [backend, mobile, web]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: No unaccepted high/critical advisory in production deps
+        working-directory: ${{ matrix.project }}
+        run: node ../.github/scripts/check-audit-floor.mjs
 
   terraform-validate:
     name: Terraform fmt & validate
@@ -232,7 +263,7 @@ jobs:
   build-and-deploy:
     name: Build & Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test-backend, test-mobile, test-web, detect-changes]
+    needs: [lint-and-typecheck, test-backend, test-mobile, test-web, audit-floor, detect-changes]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.backend == 'true'
     # Serialize deploys to the shared ECS service. When the nightly upgrade scan
     # merges several PRs within minutes, concurrent deploy jobs would otherwise
@@ -316,7 +347,7 @@ jobs:
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT_BACKEND }}
           SENTRY_RELEASE: ${{ github.sha }}
         run: |
-          npm ci
+          npm ci --no-audit --no-fund
           npx prisma generate
           npm run build
           npx @sentry/cli releases new "$SENTRY_RELEASE"
