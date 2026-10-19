@@ -165,12 +165,18 @@ Check first: `dig +short CAA hooplings.com`.
 **DNSSEC.** One KMS key (`aws_kms_key.dnssec`, ECC_NIST_P256, created through the `aws.us_east_1`
 provider alias because Route 53 accepts DNSSEC keys from that region only), one key-signing key per
 zone and signing enabled, all with `prevent_destroy` and none of the in-place disable arguments set
-(`backend/tests/infra/prevent-destroy.test.ts` pins both). Terraform does **not** publish the DS record at the
-registrar; that is the owner's step, and until it is done a zone is an insecure delegation that
-resolvers treat exactly as before. The procedure, per zone, after the apply that enabled signing:
+(`backend/tests/infra/prevent-destroy.test.ts` pins both). Terraform does **not** publish the DS
+record at the registrar; that is the owner's step, and a signed zone without a DS at the parent is
+an insecure delegation that resolvers treat exactly as unsigned. **State:** both zones have been
+signed and their DS records published since 2026-10-19 (chain of trust validated at Cloudflare,
+Google and Quad9). The procedure below is for the next zone, or a key roll. Per zone, after the
+apply that enabled signing:
 
-1. **Wait at least 48 hours** (the apex NS TTL is 172800 s; AWS requires every cached unsigned
-   answer to expire before the DS exists). Confirm Route 53 is signing:
+1. **Wait for the zone's longest TTL to expire before publishing the DS**: the apex NS record is
+   172800 s, so 48 hours. This is AWS's guidance, so that no validating resolver holds a cached
+   unsigned answer when the chain of trust appears. On 2026-10-19 the owner published 17 minutes
+   after enabling signing, accepting that risk for a zone whose other records all have TTL
+   ≤ 3600 s; nothing broke, but the wait stays the documented default. Confirm Route 53 is signing:
    `aws route53 get-dnssec --hosted-zone-id <zone id> --query Status.ServeSignature` → `SIGNING`.
 2. **Publish the DS** at Route 53 Domains (both domains are registered there). The call wants the
    DNSKEY public key, not the DS digest; read all three attributes from
@@ -183,15 +189,24 @@ resolvers treat exactly as before. The procedure, per zone, after the apply that
      | jq -r --arg d "$DOMAIN" '.[$d] | "Algorithm=\(.algorithm),Flags=\(.flags),PublicKey=\(.public_key)"')
    aws route53domains associate-delegation-signer-to-domain --region us-east-1 \
      --domain-name "$DOMAIN" --signing-attributes "$ATTRS"
-   # prints an OperationId; poll until SUCCESSFUL (minutes for .com):
+   # prints an OperationId; poll until SUCCESSFUL (usually seconds, allow minutes):
    aws route53domains get-operation-detail --region us-east-1 --operation-id <id>
    ```
-3. **Verify** once the parent serves the DS (up to the .com DS TTL, normally under an hour):
+3. **Verify** once the parent serves the DS (seconds to an hour). Run it off any VPN or network
+   that intercepts port 53: an interceptor answers for `@1.1.1.1` without validating, so the `ad`
+   flag is missing (or copied) and the result means nothing. The block works for every zone in
+   `var.domains`, served or not, because it queries the apex:
    ```bash
-   dig @1.1.1.1 +short DS hooplings.com                      # one DS line, algorithm 13
-   dig @1.1.1.1 +dnssec A api.hooplings.com | grep -c RRSIG  # >= 1 (a home or VPN resolver may strip them)
-   delv @1.1.1.1 api.hooplings.com                           # "; fully validated"
-   curl -sS https://api.hooplings.com/health        # still 200
+   DOMAIN=hooplings.com
+   dig @1.1.1.1 +short DS "$DOMAIN"                        # one DS line, algorithm 13
+   dig @1.1.1.1 +dnssec +noall +answer SOA "$DOMAIN"       # the SOA is followed by an RRSIG line
+   for r in 1.1.1.1 8.8.8.8 9.9.9.9; do
+     printf '%s ' "$r"; dig @$r +dnssec SOA "$DOMAIN" | grep -o 'flags: [a-z ]*ad;' || echo 'NO ad'
+   done
+   # "ad" (authenticated data) from each validating resolver is the proof of the chain of trust.
+   # Apple's `delv` is built without crypto ("No trusted keys were loaded"); on Linux,
+   # `delv @1.1.1.1 "$DOMAIN" SOA` reports "; fully validated".
+   curl -sS https://api.hooplings.com/health        # served zones only: still 200
    aws acm describe-certificate --certificate-arn <arn> --query 'Certificate.RenewalEligibility'   # ELIGIBLE
    ```
 
