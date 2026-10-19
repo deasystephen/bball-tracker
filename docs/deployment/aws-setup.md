@@ -234,10 +234,10 @@ was last checked against it on 2026-10-03):
 
 Not used by the backend despite older docs: `S3_BUCKET`. `JWT_SECRET` was in the same position (WorkOS
 signs the JWTs, nothing in `backend/` ever read it) but was still injected from Secrets Manager on every
-task start. #641 removes it in two steps so that no deployable revision ever depends on a secret
-scheduled for deletion: PR #938 dropped the reference from `infra/task-definition.json`; the
-Terraform side (the secret, `var.jwt_secret`, the `jwt_secret_arn` output) follows in a second PR
-after its `terraform apply`. Until that PR lands, `terraform apply` still asks for `jwt_secret`.
+task start. #641 removed it in two steps so that no deployable revision ever depended on a secret
+scheduled for deletion: PR #938 dropped the reference from `infra/task-definition.json` and
+deployed; PR #939 then destroyed the secret and removed `var.jwt_secret` and the `jwt_secret_arn`
+output (`terraform apply` before the merge).
 `backend/tests/infra/task-definition.test.ts` now pins `secrets[]` to the four names above
 (`DATABASE_URL`, `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `SENTRY_DSN`).
 (Kafka was removed entirely — the config stub, `kafkajs` dependency, and local containers are gone.)
