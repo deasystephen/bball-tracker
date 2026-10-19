@@ -31,6 +31,8 @@ import { TeamService } from '../../src/services/team-service';
 import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
 import { DbFixtures, Org } from '../support/db-fixtures';
+import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(60000);
 
@@ -311,3 +313,40 @@ describe('concurrent head-coach removals behind the team row lock (#463)', () =>
   );
 });
 
+describe('bounded lock wait behind the team row lock (#934)', () => {
+  /** A fresh team with two head coaches and an ASSISTANT_COACH role to demote to. */
+  async function twoHeadCoaches(key: string): Promise<{ teamId: string; a: string; b: string }> {
+    const team = await fx.org(`lockwait-${key}`);
+    await addRole('ASSISTANT_COACH', { canManageTeam: true, canManageRoster: true }, 'ASSISTANT_COACH', team.teamId);
+    const a = await fx.user(`lockwait-a-${key}`, 'COACH');
+    const b = await fx.user(`lockwait-b-${key}`, 'COACH');
+    await fx.staff(a, team);
+    await fx.staff(b, team);
+    return { teamId: team.teamId, a, b };
+  }
+
+  /** The same lock the service takes, held for the whole call. */
+  const holdTeamRow = (teamId: string) => async (holder: Prisma.TransactionClient): Promise<void> => {
+    await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${teamId} FOR NO KEY UPDATE`;
+  };
+
+  it('removeStaffMember stuck behind the lock is cancelled at lock_timeout, answers the retryable 503 and removes nothing', async () => {
+    const { teamId, a } = await twoHeadCoaches('remove');
+
+    const outcome = await callBehindLock(prisma, holdTeamRow(teamId), () => TeamService.removeStaffMember(teamId, a, a));
+
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    expect(await prisma.teamStaff.count({ where: { teamId } })).toBe(2);
+  });
+
+  it('changeStaffRole stuck behind the lock is cancelled at lock_timeout, answers the retryable 503 and changes nothing', async () => {
+    const { teamId, b } = await twoHeadCoaches('change');
+
+    const outcome = await callBehindLock(prisma, holdTeamRow(teamId), () =>
+      TeamService.changeStaffRole(teamId, b, 'ASSISTANT_COACH', b)
+    );
+
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    expect(await prisma.teamStaff.count({ where: { teamId, role: { type: 'HEAD_COACH' } } })).toBe(2);
+  });
+});

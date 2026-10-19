@@ -198,6 +198,22 @@ cannot both pass the guard and leave a team with none:
 - `AccountService.deleteAccount` (self and operator modes), after its `User` row locks,
   locks every team where the user holds HEAD_COACH in one id-ordered statement
   (`lockTeamRows`) before its guard.
+- **Each lock wait is bounded (#934).** All three transactions run `SET LOCAL lock_timeout =
+  '4000ms'` as their first statement (`utils/lock-timeout.ts#setLocalLockTimeout`,
+  `TEAM_LOCK_TIMEOUT_MS`), the same bound the supersede-resend paths use
+  (`docs/architecture/roster-and-invitations.md`): a statement stuck behind a lock holder is
+  cancelled by PostgreSQL (55P03) at 4 s, which frees the pool connection, and the request
+  answers the retryable **503** `transaction_timeout` with `Retry-After` through
+  `classifyDbError`; nothing was written. The bound is per lock acquisition, not per
+  transaction: deletion waits on its `User` rows and then its `Team` rows, so two slow holders
+  in a row can still take it past Prisma's 5 s transaction timeout (the same 503, from P2028),
+  and even then the waiting statement is cancelled at its own 4 s.
+  `tests/integration/team-staff-single-role.db.test.ts` and
+  `tests/integration/account-deletion.db.test.ts` hold the team row on one connection and prove,
+  by SQLSTATE, that PostgreSQL's cancel (not Prisma's) ended each path
+  (`tests/support/db-locks.ts#callBehindLock` / `expectCancelledByLockTimeout`, shared with the
+  supersede suites). Other row-lock transactions (team creation, guardian accept and removal,
+  the game row lock) carry no bound yet; a pool-level default is proposed in #944.
 
 **Lock order is User before Team wherever both are taken**, and the staff writers take only
 Team, so no two of these transactions wait on each other in a cycle. `FOR NO KEY UPDATE`

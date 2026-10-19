@@ -38,6 +38,8 @@ import { lastHeadCoachTeams } from '../../src/utils/permissions';
 import { PlayerService } from '../../src/services/player-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { GuardianService } from '../../src/services/guardian-service';
+import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(30000);
 
@@ -395,6 +397,36 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
       AccountService.deleteAccount(claimed, { actorId: parent, mode: 'guardian' })
     ).rejects.toMatchObject({ statusCode: 403 });
     expect((await prisma.user.findUniqueOrThrow({ where: { id: claimed } })).deletedAt).toBeNull();
+  });
+
+  it('a delete stuck behind the team row lock answers the retryable 503 and writes nothing (#934)', async () => {
+    // One of two head coaches, so the guard would pass: the only thing in
+    // the way is the Team row lock held by another transaction for the whole
+    // call. PostgreSQL cancels the waiter at lock_timeout, before Prisma's 5 s
+    // transaction timeout would have left it blocked with its connection pinned.
+    const team = await mkLeagueSeasonTeam('LockWait', true);
+    const leaving = await mkUser('lockwait-leaving', 'COACH');
+    const staying = await mkUser('lockwait-staying', 'COACH');
+    await prisma.teamStaff.createMany({
+      data: [
+        { teamId: team.teamId, userId: leaving, roleId: team.headRoleId },
+        { teamId: team.teamId, userId: staying, roleId: team.headRoleId },
+      ],
+    });
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: leaving } });
+
+    const outcome = await callBehindLock(
+      prisma,
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${team.teamId} FOR NO KEY UPDATE`;
+      },
+      () => AccountService.deleteAccount(leaving, { actorId: leaving, mode: 'self' })
+    );
+
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    // Nothing was written: the account is untouched and both staff rows remain.
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: leaving } })).toEqual(before);
+    expect(await prisma.teamStaff.count({ where: { teamId: team.teamId } })).toBe(2);
   });
 
   it('serializes two concurrent deletes: one succeeds, the other gets 404', async () => {
