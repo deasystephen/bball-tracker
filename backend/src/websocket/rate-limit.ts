@@ -33,6 +33,9 @@ export const MAX_HANDSHAKES_PER_WINDOW = 60;
 export const MAX_CONCURRENT_PER_IP = 50;
 export const JOIN_WINDOW_MS = 60_000;
 export const MAX_JOINS_PER_WINDOW = 20;
+export const REFRESH_AUTH_WINDOW_MS = 60_000;
+/** `refresh-auth` (#49) runs a JWKS check and a user lookup; a client needs ~1 per token lifetime. */
+export const MAX_REFRESH_AUTHS_PER_WINDOW = 10;
 
 /** Lazily sweep expired handshake windows once the map grows past this. */
 const SWEEP_THRESHOLD = 10_000;
@@ -45,6 +48,7 @@ interface Window {
 const handshakeWindows = new Map<string, Window>();
 const concurrentByIp = new Map<string, number>();
 const joinWindows = new WeakMap<object, Window>();
+const refreshAuthWindows = new WeakMap<object, Window>();
 
 /**
  * The client IP for rate-limiting purposes. Behind the ALB the peer address is
@@ -125,6 +129,20 @@ export function checkJoinAllowed(socket: object, now: number = Date.now()): bool
   }
   window.count += 1;
   return window.count <= MAX_JOINS_PER_WINDOW;
+}
+
+/**
+ * Count a `refresh-auth` from this socket and report whether it is within the
+ * per-window budget (#49). Runs before the JWKS check and the user lookup.
+ */
+export function checkRefreshAuthAllowed(socket: object, now: number = Date.now()): boolean {
+  const window = refreshAuthWindows.get(socket);
+  if (!window || now - window.windowStart >= REFRESH_AUTH_WINDOW_MS) {
+    refreshAuthWindows.set(socket, { count: 1, windowStart: now });
+    return true;
+  }
+  window.count += 1;
+  return window.count <= MAX_REFRESH_AUTHS_PER_WINDOW;
 }
 
 /** Clear all limiter state. Test-only. */

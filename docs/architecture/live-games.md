@@ -50,20 +50,102 @@ first (#452), capacity second.
 | server → client | `game-event-removed` | `{ gameId, eventId, score }` (on delete/undo; post-delete score) |
 | server → client | `game-score-change`  | `{ gameId, score }` (on `PATCH /games/:id` score edits)        |
 | server → client | `game-status-change` | `{ gameId, previousStatus, status, score }` (on transition)    |
+| client → server | `refresh-auth`       | `{ token }` after each token refresh (ack `{ success, code? }`, #49) |
+| server → client | `reauth_required`    | `{}` (no valid token by expiry; the transport closes next, #49) |
 
 `score` is always `{ homeScore, awayScore }`. Every broadcast carries the
 current score so a client can drop events and still converge.
 
 - Handshake auth: bearer token via `socket.handshake.auth.token` (or
-  `Authorization` header). Checked once at connect; see `authenticateSocket`. A rejected or
+  `Authorization` header). Checked at connect by `authenticateSocket`, which also records the
+  token's expiry in `socket.data.tokenExpiresAt` (WorkOS `exp` in seconds and dev-token `exp` in
+  milliseconds are both stored as epoch ms), and re-checked mid-session (next bullet). A rejected or
   expired token is `connect_error: Unauthorized` and is log-only (an expected client outcome), as
   is a thrown 4xx `AppError` (filtered by `isExpectedClientError`). Every other throw (a
   JWKS/WorkOS outage, a database failover) is `connect_error: Service unavailable`, so the client
   backs off and retries rather than refreshing credentials, and is reported to Sentry with
   `captureException(error, { flow: 'socket-auth', socketId })`, because middleware rejections
   never reach the Express chain and `sentryErrorHandler` (#672). A deleted account (tombstone,
-  `deletedAt` set) is refused like REST refuses it: both lookups in `resolveSocketUser` filter on
+  `deletedAt` set) is refused like REST refuses it: both lookups in `resolveSocketSession` filter on
   `deletedAt: null`, so a still-valid dev token for a deleted user cannot join a game room (#667).
+- **Mid-session re-verification (#49).** A socket keeps its handshake for life, so the server
+  tracks the token it holds for each socket (`socket.data.authToken`, server memory only, never
+  logged) and its expiry. Two mechanisms, both in `websocket/game-events.ts`:
+  - **In-band refresh, the normal path.** The client emits `refresh-auth { token }` whenever it
+    holds a newer access token. `handleRefreshAuth` runs it through `resolveSocketSession`: a
+    valid token for the same user replaces the held token and expiry, re-checks room access and
+    reschedules the timer below, with no disconnect, handshake or snapshot (ack
+    `{ success: true }`). A rejected token is acked `unauthorized` and leaves the socket on its
+    current token and timer (info log `Socket refresh-auth rejected`); a token for another user
+    ends the connection like a failed re-check (`user_changed`); a verifier outage is acked
+    `unavailable` and reported to Sentry (`flow: 'socket-refresh-auth'`); a malformed payload is
+    `bad_request`. Each offer is recorded as `socket.data.latestOfferedToken` when it arrives,
+    and a verification that finishes after a newer offer is discarded and acked `superseded`, so
+    two offers completing out of order can never leave the socket on the older token. An offer
+    equal to the token the server already holds is acked `{ success: true }` at once, with no
+    verify and no room re-check. `refresh-auth` is limited to `MAX_REFRESH_AUTHS_PER_WINDOW`
+    (10) per minute per socket (`websocket/rate-limit.ts`, ack `rate_limited`), checked before
+    any verification but after the offer is recorded as the latest, so a rate-limited newer
+    offer still stops an older in-flight one from winning.
+  - **Re-check timer, the fallback.** `scheduleSocketReauth` keeps one timer per socket, due at
+    the held token's expiry plus `REAUTH_GRACE_MS` (35s: the verifier's 30s clock tolerance,
+    `JWT_CLOCK_TOLERANCE_SECONDS`, plus 5s, so the re-check really fails) plus a per-socket
+    jitter of 0–20s (`REAUTH_JITTER_MAX_MS`, fixed per socket, so expiries that cluster at
+    tip-off do not all close in the same second), and never more than `REAUTH_MAX_INTERVAL_MS`
+    (15 min) away; a token without `exp` is re-checked every 15 min. A valid token is never cut
+    off early. When it fires, `reverifySocket` first checks the held expiry: a token past its
+    expiry plus grace is known dead and is cut off (`reason: 'expired'`) with no JWKS check or
+    user lookup, with two exceptions (`handleExpiredToken`):
+    - a `refresh-auth` offer still being verified (`socket.data.offerPending`) defers the cut
+      once, by `REAUTH_PENDING_OFFER_WAIT_MS` (10s); if the offer lands meanwhile it replaces
+      the timer, otherwise the next check cuts;
+    - while the verifier is down (`isSocketVerifierDown()`: the most recent socket verification
+      anywhere in the process threw an outage rather than returning or throwing a 4xx; every
+      handshake, offer and re-check updates it), the client could not reconnect either (its
+      handshake would get `Service unavailable` and its back-off gives up after about a minute),
+      so the socket is kept: every `REAUTH_RETRY_MS` (60s) the expired token is probed through
+      `resolveSocketSession`, and the cut happens once a probe completes (the verifier is back)
+      or once the token is past its expiry by one more token lifetime (`exp - iat`, from
+      `VerifiedToken.issuedAt`; 15 min when unknown). Probes log a warning and are not sent to
+      Sentry per socket.
+
+    Only a token still inside its lifetime (no `exp`, or a long-lived token hitting
+    the 15-minute cap: deletion and role re-checks) is re-run through `resolveSocketSession`. The
+    token is captured before that await, and the result is discarded (`skipped`) if an accepted
+    `refresh-auth` replaced it meanwhile, so a stale rejection never closes a socket that just
+    re-authenticated and a stale success never overwrites the newer expiry:
+    - still valid → `socket.data` is refreshed, room access is re-checked and the next check is
+      scheduled;
+    - rejected (expired, revoked, account deleted, now a different user) or a thrown 4xx
+      `AppError` → the server emits `reauth_required` and closes the Engine.IO connection
+      (`socket.conn.close()`). It deliberately does **not** call `socket.disconnect()`: with or
+      without `true` that sends a namespace DISCONNECT, which socket.io-client reports as `io
+      server disconnect` and never auto-reconnects from. A transport close is `transport close`
+      on the client, which auto-reconnects, so a client that never sends `refresh-auth` (built
+      before #49) still recovers through the `Unauthorized` path below;
+    - any other throw (JWKS or database outage) → reported to Sentry
+      (`flow: 'socket-reauth'`) and retried after `REAUTH_RETRY_MS` (60s), so an outage never
+      cuts off a valid session; past expiry the outage hold above applies.
+  - **Logging.** The expected cycle is `debug` (`Socket auth refreshed`, `Socket reauth check
+    passed`, and `Socket reauth required` with `reason: 'expired'`). Anomalies are `info`:
+    `Socket reauth required` with `reason: 'rejected'` (the verifier refused an unexpired token,
+    or the account was deleted) or `'user_changed'`, `Socket refresh-auth rejected`, and `Socket
+    evicted from game room`. Ids only.
+  - **Room access (audit #72).** Every accepted `refresh-auth` and every passing re-check runs
+    `pruneGameRooms`, which resolves every `game:<id>` room at once with `viewableGameIds`: one
+    `game.findMany` with `id in` the rooms and `team` filtered by `readableTeamsWhere` (the
+    `teamAccessWhere` set form), skipped for a system ADMIN, the same rule `canViewGame` applies
+    with `canAccessTeam` to a single `join-game`. It leaves the set difference, so a removed coach stops receiving broadcasts within one token
+    lifetime even though the socket stays connected. A lookup failure keeps the rooms and is
+    reported to Sentry; the next refresh or re-check tries again. The client is not told it was
+    evicted; it simply stops receiving that game's broadcasts.
+
+  Timers are cleared on `disconnect` (`clearSocketReauth`) and `unref`'d, and live in process
+  memory like rooms (single replica). Tests: `tests/websocket/socket-reauth.test.ts` (fake
+  timers) and the "mid-session re-auth" block of `tests/websocket/game-events.integration.test.ts`
+  (real transport: timer cleared on disconnect, `refresh-auth` keeps the connection past the
+  handshake token's expiry, `reauth_required` then `transport close`, automatic reconnect with
+  a fresh token).
 - Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
   handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
   max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
@@ -84,6 +166,37 @@ current score so a client can drop events and still converge.
   (2s·2ⁿ, max `MAX_UNAVAILABLE_RETRIES` = 5). A successful `connect` resets
   both budgets; `resetSocket()` cancels any pending retry. `useLiveGame`
   reports `reconnecting` while `isSocketRecovering()` and `error` otherwise.
+- Mid-session re-auth, client side (mobile `services/socket.ts`, #49). The module remembers the
+  token the server holds for the open connection (the handshake token, then each token it
+  sent).
+  - **In-band:** an auth-store subscription calls `syncSocketToken` whenever the stored access
+    token changes (any `refreshAccessToken()`, REST-triggered or not) while connected, and
+    emits `refresh-auth`; `connect` does the same if a refresh landed during the handshake. The
+    held token moves only on a success ack, so a refused offer never makes the client believe
+    the server holds it. Only an offer refused as `unavailable` or `internal` is retried, once;
+    `unauthorized`, `bad_request`, `rate_limited` and `superseded` never are. A token already in
+    flight is not sent twice.
+  - **Proactive:** while connected, a timer refreshes `PROACTIVE_REFRESH_LEAD_MS` (60s) before
+    the held token expires (expiry read by `utils/token-expiry.ts`, unverified). The delay is
+    the largest of remaining lifetime minus the lead, half the remaining lifetime, and
+    `MIN_PROACTIVE_REFRESH_DELAY_MS` (30s). **Clock skew turns it off for the session** (until
+    `resetSocket()`): a token whose `iat` is more than `CLOCK_SKEW_TOLERANCE_MS` (60s) in the
+    device's future (clock behind), or a freshly accepted token whose remaining life minus the
+    lead is under the floor (clock ahead by about the token lifetime), would otherwise make the
+    timer loop `/auth/refresh` or fire late. The server fallback still recovers such a device.
+    `scheduleProactiveRefresh` is the timer's single owner, called on
+    `connect` and on each accepted `refresh-auth`. The refresh is needed because a
+    spectator who makes no REST calls would otherwise never refresh and the server would close
+    the socket every token lifetime. The resulting store change sends `refresh-auth`. The timer
+    is cleared on `disconnect` and by `resetSocket()`.
+  - **Fallback (`handleReauthRequired`):** on `reauth_required`, if the stored token is newer
+    than the held one and unexpired, nothing is refreshed: socket.io reconnects by itself and
+    the `auth` callback carries it. Otherwise it starts the single-flight
+    `refreshAccessToken()` (a refresh rotates the WorkOS refresh token, so it is never spent
+    for nothing). It never calls `connect()`. A reconnect that wins the race is refused
+    `Unauthorized` and `handleConnectError` awaits the same in-flight refresh. A `rejected`
+    refresh ends recovery (the next REST 401 logs out). `useLiveGame` rejoins its room on
+    `connect`, and the snapshot merge keeps events streamed meanwhile.
 
 ## Game score (server-derived, audit #6/#8/#38)
 

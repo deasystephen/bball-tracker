@@ -24,6 +24,8 @@ export interface VerifiedToken {
   id: string;
   sessionId?: string;
   expiresAt: number;
+  /** `iat`, epoch seconds, when the token carries one. */
+  issuedAt?: number;
 }
 
 /** The WorkOS identity fields `syncUser` reads. */
@@ -54,6 +56,13 @@ export interface SyncUserResult {
    */
   wasManaged: boolean;
 }
+
+/**
+ * Clock-skew tolerance, in seconds, applied to `exp` when verifying an access
+ * token. The socket re-auth timer (`websocket/game-events.ts`) waits past it so
+ * a token re-verified after expiry is really rejected (#49).
+ */
+export const JWT_CLOCK_TOLERANCE_SECONDS = 30;
 
 export class WorkOSService {
   /**
@@ -346,7 +355,7 @@ export class WorkOSService {
         issuer: WORKOS_JWT_ISSUER,
         requiredClaims: ['exp', 'sub'],
         // Small tolerance for clock skew between WorkOS and the API host.
-        clockTolerance: 30,
+        clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
       });
 
       if (typeof payload.sub !== 'string' || payload.sub.length === 0 || typeof payload.exp !== 'number') {
@@ -357,6 +366,7 @@ export class WorkOSService {
         id: payload.sub,
         sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
         expiresAt: payload.exp,
+        issuedAt: typeof payload.iat === 'number' ? payload.iat : undefined,
       };
     } catch (error) {
       if (error instanceof joseErrors.JOSEError && !(error instanceof joseErrors.JWKSTimeout)) {
