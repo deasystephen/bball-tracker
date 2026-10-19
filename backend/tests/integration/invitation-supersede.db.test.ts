@@ -19,10 +19,9 @@ import prisma from '../../src/models';
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
-import { backendPid, track, waitForBlockedBy } from '../support/db-locks';
+import { backendPid, callBehindLock, expectCancelledByLockTimeout, track, waitForBlockedBy } from '../support/db-locks';
+import { SUPERSEDE_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
 import { logger } from '../../src/utils/logger';
-import { classifyDbError } from '../../src/models/pool-config';
-import { dbBusyOutcome } from '../../src/utils/db-busy';
 import { spyOnInfo } from '../support/domain-events';
 import { hashRecipient } from '../../src/services/mailer/ses-mailer';
 
@@ -324,27 +323,15 @@ describe('bounded lock wait on the supersede path (#908)', () => {
       expiresAt: new Date(Date.now() + 7 * DAY_MS),
     });
 
-    let err: unknown;
-    let elapsedMs = 0;
-    await prisma.$transaction(
+    const outcome = await callBehindLock(
+      prisma,
       async (holder) => {
         await holder.$queryRaw`SELECT "id" FROM "TeamInvitation" WHERE "id" = ${liveId} FOR UPDATE`;
-        const startedAt = Date.now();
-        // The holder stays open for the whole wait: the resend must give up
-        // on its own, not because the lock was released.
-        err = await InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId).catch(
-          (e: unknown) => e
-        );
-        elapsedMs = Date.now() - startedAt;
       },
-      { timeout: 15_000 }
+      () => InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId)
     );
 
-    // The service lets the database error through; the error handlers map it.
-    expect(classifyDbError(err)).toBe('lock_wait');
-    expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
-    // Postgres cancels at the 4 s lock_timeout, before Prisma's own 5 s timeout.
-    expect(elapsedMs).toBeGreaterThanOrEqual(3500);
+    expectCancelledByLockTimeout(outcome, SUPERSEDE_LOCK_TIMEOUT_MS);
     // Nothing was written: the live row is still the only PENDING one.
     expect((await rowsFor(playerId)).map((r) => [r.id, r.status])).toEqual([[liveId, 'PENDING']]);
   });

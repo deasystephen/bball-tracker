@@ -31,10 +31,8 @@ import { TeamService } from '../../src/services/team-service';
 import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
 import { DbFixtures, Org } from '../support/db-fixtures';
-import { classifyDbError } from '../../src/models/pool-config';
-import { dbBusyOutcome } from '../../src/utils/db-busy';
 import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
-import { PRISMA_TRANSACTION_TIMEOUT_MS } from '../support/db-locks';
+import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(60000);
 
@@ -327,52 +325,28 @@ describe('bounded lock wait behind the team row lock (#934)', () => {
     return { teamId: team.teamId, a, b };
   }
 
-  /**
-   * Holds the same lock the service takes (`FOR NO KEY UPDATE` on the team
-   * row) for the whole call, so the call must give up on its own: PostgreSQL
-   * cancels it at `lock_timeout`, before Prisma's 5 s transaction timeout
-   * would have left the statement blocked and the connection pinned.
-   */
-  async function behindTheLock(teamId: string, call: () => Promise<unknown>): Promise<{ err: unknown; elapsedMs: number }> {
-    let err: unknown;
-    let elapsedMs = 0;
-    await prisma.$transaction(
-      async (holder) => {
-        await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${teamId} FOR NO KEY UPDATE`;
-        const startedAt = Date.now();
-        err = await call().catch((e: unknown) => e);
-        elapsedMs = Date.now() - startedAt;
-      },
-      { timeout: 15_000 }
-    );
-    return { err, elapsedMs };
-  }
+  /** The same lock the service takes, held for the whole call. */
+  const holdTeamRow = (teamId: string) => async (holder: Prisma.TransactionClient): Promise<void> => {
+    await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${teamId} FOR NO KEY UPDATE`;
+  };
 
-  function expectLockWait503(err: unknown, elapsedMs: number): void {
-    // The service lets the database error through; the error handlers map it.
-    expect(classifyDbError(err)).toBe('lock_wait');
-    expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
-    expect(elapsedMs).toBeGreaterThanOrEqual(TEAM_LOCK_TIMEOUT_MS - 500);
-    expect(elapsedMs).toBeLessThan(PRISMA_TRANSACTION_TIMEOUT_MS);
-  }
-
-  it('removeStaffMember stuck behind the lock answers the retryable 503 and removes nothing', async () => {
+  it('removeStaffMember stuck behind the lock is cancelled at lock_timeout, answers the retryable 503 and removes nothing', async () => {
     const { teamId, a } = await twoHeadCoaches('remove');
 
-    const { err, elapsedMs } = await behindTheLock(teamId, () => TeamService.removeStaffMember(teamId, a, a));
+    const outcome = await callBehindLock(prisma, holdTeamRow(teamId), () => TeamService.removeStaffMember(teamId, a, a));
 
-    expectLockWait503(err, elapsedMs);
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
     expect(await prisma.teamStaff.count({ where: { teamId } })).toBe(2);
   });
 
-  it('changeStaffRole stuck behind the lock answers the retryable 503 and changes nothing', async () => {
+  it('changeStaffRole stuck behind the lock is cancelled at lock_timeout, answers the retryable 503 and changes nothing', async () => {
     const { teamId, b } = await twoHeadCoaches('change');
 
-    const { err, elapsedMs } = await behindTheLock(teamId, () =>
+    const outcome = await callBehindLock(prisma, holdTeamRow(teamId), () =>
       TeamService.changeStaffRole(teamId, b, 'ASSISTANT_COACH', b)
     );
 
-    expectLockWait503(err, elapsedMs);
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
     expect(await prisma.teamStaff.count({ where: { teamId, role: { type: 'HEAD_COACH' } } })).toBe(2);
   });
 });

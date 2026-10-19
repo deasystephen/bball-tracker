@@ -106,6 +106,19 @@ function driverSqlState(candidate: unknown): unknown {
 }
 
 /**
+ * Whether PostgreSQL itself cancelled the statement at `lock_timeout` (55P03),
+ * anywhere in the cause chain. Narrower than `classifyDbError`, which answers
+ * `lock_wait` for Prisma's own P2028 expiry too: the real-database suites use
+ * this to prove the bound in `lock-timeout.ts` fired, not Prisma's 5 s.
+ */
+export function isLockTimeoutError(err: unknown): boolean {
+  for (const candidate of causeChain(err)) {
+    if (driverSqlState(candidate) === LOCK_TIMEOUT_SQLSTATE) return true;
+  }
+  return false;
+}
+
+/**
  * Classify a database error that should be answered 503 with `Retry-After`
  * (#908), walking the cause chain once:
  *

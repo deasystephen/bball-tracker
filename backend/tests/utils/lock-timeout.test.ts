@@ -1,4 +1,4 @@
-import { SUPERSEDE_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../../src/utils/lock-timeout';
+import { SUPERSEDE_LOCK_TIMEOUT_MS, TEAM_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../../src/utils/lock-timeout';
 import type { Prisma } from '@prisma/client';
 
 describe('setLocalLockTimeout (#908)', () => {
@@ -10,5 +10,10 @@ describe('setLocalLockTimeout (#908)', () => {
     const [strings, ...values] = queryRaw.mock.calls[0] as [string[], ...unknown[]];
     expect(strings.join('?')).toContain("set_config('lock_timeout', ?, true)");
     expect(values).toEqual(['4000ms']);
+  });
+
+  it('bounds the team-row-lock transactions the same way (#934): under 5 s, one value', () => {
+    expect(TEAM_LOCK_TIMEOUT_MS).toBeLessThan(5000);
+    expect(TEAM_LOCK_TIMEOUT_MS).toBe(SUPERSEDE_LOCK_TIMEOUT_MS);
   });
 });

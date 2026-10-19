@@ -38,10 +38,8 @@ import { lastHeadCoachTeams } from '../../src/utils/permissions';
 import { PlayerService } from '../../src/services/player-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { GuardianService } from '../../src/services/guardian-service';
-import { classifyDbError } from '../../src/models/pool-config';
-import { dbBusyOutcome } from '../../src/utils/db-busy';
 import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
-import { PRISMA_TRANSACTION_TIMEOUT_MS } from '../support/db-locks';
+import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(30000);
 
@@ -417,23 +415,15 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     });
     const before = await prisma.user.findUniqueOrThrow({ where: { id: leaving } });
 
-    let err: unknown;
-    let elapsedMs = 0;
-    await prisma.$transaction(
+    const outcome = await callBehindLock(
+      prisma,
       async (holder) => {
         await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${team.teamId} FOR NO KEY UPDATE`;
-        const startedAt = Date.now();
-        err = await AccountService.deleteAccount(leaving, { actorId: leaving, mode: 'self' }).catch((e: unknown) => e);
-        elapsedMs = Date.now() - startedAt;
       },
-      { timeout: 15_000 }
+      () => AccountService.deleteAccount(leaving, { actorId: leaving, mode: 'self' })
     );
 
-    // The service lets the database error through; the error handlers map it.
-    expect(classifyDbError(err)).toBe('lock_wait');
-    expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
-    expect(elapsedMs).toBeGreaterThanOrEqual(TEAM_LOCK_TIMEOUT_MS - 500);
-    expect(elapsedMs).toBeLessThan(PRISMA_TRANSACTION_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
     // Nothing was written: the account is untouched and both staff rows remain.
     expect(await prisma.user.findUniqueOrThrow({ where: { id: leaving } })).toEqual(before);
     expect(await prisma.teamStaff.count({ where: { teamId: team.teamId } })).toBe(2);

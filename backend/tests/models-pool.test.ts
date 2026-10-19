@@ -14,6 +14,7 @@ import {
   TRANSACTION_EXPIRED_MESSAGE,
   TRANSACTION_START_MESSAGE,
   classifyDbError,
+  isLockTimeoutError,
   isPoolTimeoutError,
 } from '../src/models/pool-config';
 import { lockTimeout, transactionClosed } from './factories';
@@ -117,6 +118,13 @@ describe('classifyDbError (#908)', () => {
   it("classifies PostgreSQL's lock_timeout (55P03) behind P2039 or P2010 as lock_wait", () => {
     expect(classifyDbError(lockTimeout('P2039'))).toBe('lock_wait');
     expect(classifyDbError(lockTimeout('P2010'))).toBe('lock_wait');
+  });
+
+  it('isLockTimeoutError tells the PostgreSQL cancel from a Prisma expiry, also behind a cause (#934)', () => {
+    expect(isLockTimeoutError(lockTimeout('P2039'))).toBe(true);
+    expect(isLockTimeoutError(new Error('wrapper', { cause: lockTimeout('P2010') }))).toBe(true);
+    expect(isLockTimeoutError(transactionClosed())).toBe(false);
+    expect(isLockTimeoutError(new Error('plain'))).toBe(false);
   });
 
   it('classifies maxWait exhaustion and pool timeouts as busy', () => {

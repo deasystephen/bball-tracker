@@ -168,10 +168,11 @@ export class AccountService {
     const { actorId, mode } = options;
 
     const committed = await prisma.$transaction(async (tx) => {
-      // 0. Bound every lock wait below (the User rows and the Team rows): a
-      // delete stuck behind a holder is cancelled by PostgreSQL at
-      // TEAM_LOCK_TIMEOUT_MS and answers the retryable 503 instead of pinning
-      // its pool connection for Prisma's full 5 s (#934).
+      // 0. Bound each lock wait below (the User rows, then the Team rows): a
+      // delete stuck behind a holder has that statement cancelled by
+      // PostgreSQL at TEAM_LOCK_TIMEOUT_MS and answers the retryable 503, so
+      // no pool connection stays pinned past the bound (#934). Two waits in a
+      // row can still reach Prisma's 5 s (same 503, P2028 flavour).
       await setLocalLockTimeout(tx, TEAM_LOCK_TIMEOUT_MS);
 
       // 1. Lock the row. Concurrent deletes, self-writes and sign-ins serialize here.

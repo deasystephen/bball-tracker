@@ -16,7 +16,9 @@
  * (and its `lock_timeout`, where it sets one) are running by then.
  */
 
-import type { Prisma } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { classifyDbError, isLockTimeoutError } from '../../src/models/pool-config';
+import { dbBusyOutcome } from '../../src/utils/db-busy';
 
 /** The default `timeout` of a Prisma interactive transaction, in ms. */
 export const PRISMA_TRANSACTION_TIMEOUT_MS = 5000;
@@ -119,4 +121,57 @@ export async function waitForBlockedBy(
     }
     await pause(25);
   }
+}
+
+export interface LockWaitOutcome {
+  /** What the call under test rejected with (or its fulfilled value). */
+  err: unknown;
+  /** From just before the call to its settling, while the holder kept the lock. */
+  elapsedMs: number;
+}
+
+/**
+ * Takes a lock from a holder transaction, runs `call` while the holder keeps
+ * it, and reports how the call ended and how long it took. The holder stays
+ * open for the whole call, so the call must give up on its own: this is the
+ * pattern that proves a `SET LOCAL lock_timeout` (`src/utils/lock-timeout.ts`)
+ * cancels a waiter, as opposed to the lock being released. `holdLock` runs
+ * inside the holder and takes the lock (a `SELECT … FOR UPDATE` /
+ * `FOR NO KEY UPDATE`). The holder's `timeout` must outlive the call's own
+ * limits (its `lock_timeout`, then Prisma's 5 s).
+ */
+export async function callBehindLock(
+  db: Pick<PrismaClient, '$transaction'>,
+  holdLock: (holder: Prisma.TransactionClient) => Promise<void>,
+  call: () => Promise<unknown>,
+  { holderTimeoutMs = 15_000 }: { holderTimeoutMs?: number } = {}
+): Promise<LockWaitOutcome> {
+  let err: unknown;
+  let elapsedMs = 0;
+  await db.$transaction(
+    async (holder) => {
+      await holdLock(holder);
+      const startedAt = Date.now();
+      err = await call().catch((e: unknown) => e);
+      elapsedMs = Date.now() - startedAt;
+    },
+    { timeout: holderTimeoutMs }
+  );
+  return { err, elapsedMs };
+}
+
+/**
+ * Asserts a `callBehindLock` outcome is PostgreSQL's `lock_timeout` cancel
+ * (55P03, not Prisma's own P2028 expiry, which classifies the same) after
+ * about `lockTimeoutMs`, mapped to the retryable 503 `transaction_timeout`.
+ * The service lets the database error through; the error handlers map it.
+ * No upper bound on the elapsed time: a loaded runner adds pool and statement
+ * time before the wait starts, and the SQLSTATE is what proves which timeout
+ * fired.
+ */
+export function expectCancelledByLockTimeout({ err, elapsedMs }: LockWaitOutcome, lockTimeoutMs: number): void {
+  expect(isLockTimeoutError(err)).toBe(true);
+  expect(classifyDbError(err)).toBe('lock_wait');
+  expect(dbBusyOutcome(err)?.body).toMatchObject({ code: 'transaction_timeout' });
+  expect(elapsedMs).toBeGreaterThanOrEqual(lockTimeoutMs - 500);
 }
