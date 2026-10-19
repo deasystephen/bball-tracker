@@ -162,6 +162,9 @@ issued by another CA (a web host outside AWS for #30, for example `letsencrypt.o
 added to `aws_route53_record.caa` in the same PR as the deploy, or the host's issuance fails on CAA.
 Check first: `dig +short CAA hooplings.com`.
 
+Done for both zones on 2026-10-19 (DS published and validating at Cloudflare, Google and Quad9
+within minutes; the registrar operation took seconds).
+
 **DNSSEC.** One KMS key (`aws_kms_key.dnssec`, ECC_NIST_P256, created through the `aws.us_east_1`
 provider alias because Route 53 accepts DNSSEC keys from that region only), one key-signing key per
 zone and signing enabled, all with `prevent_destroy` and none of the in-place disable arguments set
@@ -189,8 +192,11 @@ resolvers treat exactly as before. The procedure, per zone, after the apply that
 3. **Verify** once the parent serves the DS (up to the .com DS TTL, normally under an hour):
    ```bash
    dig @1.1.1.1 +short DS hooplings.com                      # one DS line, algorithm 13
-   dig @1.1.1.1 +dnssec A api.hooplings.com | grep -c RRSIG  # >= 1 (a home or VPN resolver may strip them)
-   delv @1.1.1.1 api.hooplings.com                           # "; fully validated"
+   dig @1.1.1.1 +dnssec +noall +answer A api.hooplings.com   # an RRSIG line follows the A records
+   for r in 1.1.1.1 8.8.8.8 9.9.9.9; do dig @$r +dnssec A api.hooplings.com | grep -o 'flags: [a-z ]*ad;'; done
+   # "ad" (authenticated data) from each validating resolver is the proof of the chain of trust.
+   # Apple's `delv` is built without crypto ("No trusted keys were loaded"); on Linux,
+   # `delv @1.1.1.1 api.hooplings.com` reports "; fully validated".
    curl -sS https://api.hooplings.com/health        # still 200
    aws acm describe-certificate --certificate-arn <arn> --query 'Certificate.RenewalEligibility'   # ELIGIBLE
    ```
