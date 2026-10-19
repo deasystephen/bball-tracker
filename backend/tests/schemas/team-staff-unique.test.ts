@@ -121,8 +121,8 @@ describe('TeamStaff: one role per user per team (#463)', () => {
     expect(ddl).not.toMatch(/CREATE UNIQUE INDEX (?!IF NOT EXISTS)/);
   });
 
-  it('TeamService.addStaffMember maps a P2002 on that same index to its 400', () => {
-    expect(TEAM_SERVICE).toContain(`'${INDEX}'`);
-    expect(TEAM_SERVICE).not.toContain(OLD_INDEX);
+  it('TeamService.addStaffMember maps a P2002 on that same index (and the retired one) to its 400', () => {
+    // The retired name stays accepted for a database the migration has not reached.
+    expect(TEAM_SERVICE).toContain(`{ anyOf: ['${INDEX}', '${OLD_INDEX}'] }`);
   });
 });

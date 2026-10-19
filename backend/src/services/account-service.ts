@@ -21,7 +21,8 @@
  *   │    ORDER BY id FOR UPDATE (one statement, global lock order) │
  *   │    already deleted ────────────────────────────────► 404     │
  *   │    mode guardian and (claimed or not managed) ─────► 403     │
- *   │ 2  mode self|operator: lastHeadCoachTeams(active seasons)    │
+ *   │ 2  mode self|operator: lock my HEAD_COACH teams (id order),  │
+ *   │    then lastHeadCoachTeams(active seasons)                   │
  *   │    non-empty ──────────────────► LastHeadCoachError 400      │
  *   │ 3  purge: pushToken, calendarFeedToken, teamStaff,           │
  *   │    leagueAdmin (log admin-less leagues), gameRsvp,           │
@@ -55,6 +56,7 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
+import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
@@ -193,6 +195,21 @@ export class AccountService {
       // 2. A head coach must hand over live teams first (D4). Managed
       // children hold no staff rows, so guardian mode skips the query.
       if (mode !== 'guardian') {
+        // Lock every team where this user is HEAD_COACH before the guard,
+        // the lock `TeamService.removeStaffMember`/`changeStaffRole` take, so
+        // deleting one head coach and removing the other cannot both pass
+        // (#463). User rows were locked above: User before Team, never the
+        // reverse. The set cannot grow meanwhile: a new TeamStaff row naming
+        // this user needs a key-share lock on the User row we hold.
+        const headCoachTeams = await tx.teamStaff.findMany({
+          where: { userId, role: { type: 'HEAD_COACH' } },
+          select: { teamId: true },
+        });
+        await lockTeamRows(
+          tx,
+          headCoachTeams.map((staff) => staff.teamId)
+        );
+
         const blocking = await lastHeadCoachTeams(userId, tx, { activeSeasonsOnly: true });
         if (blocking.length > 0) {
           throw new LastHeadCoachError(blocking);

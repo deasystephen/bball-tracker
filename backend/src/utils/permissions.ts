@@ -42,12 +42,17 @@ const VIEW_ONLY_PERMISSIONS: TeamPermissions = {
 };
 
 /**
- * Selects exactly the `TeamPermissions` flags of a staff row's role, derived
- * from `NO_PERMISSIONS` so the five keys are spelled out in one place.
+ * The five permission flags of a staff row's role. `getTeamPermissions`
+ * returns the selected role as `TeamPermissions`, so a key missing here (or
+ * added to the interface only) fails the type check.
  */
-const STAFF_ROLE_FLAGS_SELECT = Object.fromEntries(
-  Object.keys(NO_PERMISSIONS).map((key) => [key, true])
-) as Record<keyof TeamPermissions, true> satisfies Prisma.TeamRoleSelect;
+const STAFF_ROLE_FLAGS_SELECT = {
+  canManageTeam: true,
+  canManageRoster: true,
+  canTrackStats: true,
+  canViewStats: true,
+  canShareStats: true,
+} satisfies Prisma.TeamRoleSelect;
 
 /**
  * Is `userId` a guardian (PARENT role link) of `childId`?
@@ -499,18 +504,13 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
 /**
  * Number of DISTINCT teams the user is staff on.
  *
- * Since #463 `TeamStaff` is unique on `[teamId, userId]`, so rows and teams
- * are the same count; the `distinct` stays as the statement of intent (a
- * tier's team cap counts teams, audit B2.8). Accepts a transaction client so
- * the create-team transaction can recount behind its row lock.
+ * A tier's team cap counts teams, not staff rows (audit B2.8). Since #463
+ * `TeamStaff` is unique on `[teamId, userId]`, so one row is one team and a
+ * plain count is exact. Accepts a transaction client so the create-team
+ * transaction can recount behind its row lock.
  */
 export async function countDistinctStaffTeams(userId: string, db: Db = prisma): Promise<number> {
-  const rows = await db.teamStaff.findMany({
-    where: { userId },
-    distinct: ['teamId'],
-    select: { teamId: true },
-  });
-  return rows.length;
+  return db.teamStaff.count({ where: { userId } });
 }
 
 export interface LastHeadCoachOptions {

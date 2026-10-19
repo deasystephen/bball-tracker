@@ -93,6 +93,30 @@ describe('createOrConflict', () => {
     );
   });
 
+  describe('{ anyOf } targets (an index renamed by a migration, #463)', () => {
+    const targets = { anyOf: ['New_key', 'Old_key', ['teamId', 'userId']] };
+
+    it.each(['New_key', 'Old_key'])('maps a P2002 on %s', async (index) => {
+      const error = await createOrConflict(failWith(uniqueViolation(index)), 'Already exists', targets).catch(
+        (e) => e
+      );
+      expect(error).toBeInstanceOf(BadRequestError);
+      expect(error).toMatchObject({ statusCode: 400, message: 'Already exists' });
+    });
+
+    it('maps a P2002 whose column list matches a listed column list', async () => {
+      const err = knownError('P2002', { target: ['teamId', 'userId'] });
+      await expect(createOrConflict(failWith(err), 'Already exists', targets)).rejects.toBeInstanceOf(
+        BadRequestError
+      );
+    });
+
+    it('rethrows a P2002 on any other unique', async () => {
+      const other = uniqueViolation('Token_key');
+      await expect(createOrConflict(failWith(other), 'Already exists', targets)).rejects.toBe(other);
+    });
+  });
+
   it('maps any P2002 when no target is given', async () => {
     await expect(createOrConflict(failWith(uniqueViolation()), 'Already exists')).rejects.toBeInstanceOf(
       BadRequestError

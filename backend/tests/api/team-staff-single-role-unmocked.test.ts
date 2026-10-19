@@ -148,21 +148,23 @@ describe('DELETE /api/v1/teams/:teamId/staff/:userId through the real TeamServic
     }
   });
 
+  const ASSISTANT_ROW = {
+    id: 'assistant-row',
+    teamId: TEAM_ID,
+    userId: ASSISTANT_ID,
+    roleId: 'assistant-role',
+    role: { id: 'assistant-role', type: 'ASSISTANT_COACH' },
+  };
+
   /** The caller is the team's head coach removing the assistant, who is not a head coach. */
-  function givenHeadCoachRemovingAssistant(): void {
+  function givenHeadCoachRemovingAssistant(targetRow: typeof ASSISTANT_ROW | null): void {
     givenHeadCoachAddingAssistant();
-    // lastHeadCoachTeams: the assistant holds no HEAD_COACH row anywhere.
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+    givenTargetStaffRow(targetRow);
   }
 
   it('removes the staff member (200) and refreshes their usage', async () => {
-    givenHeadCoachRemovingAssistant();
-    (mockPrisma.teamStaff.delete as jest.Mock).mockResolvedValue({
-      id: 'assistant-row',
-      teamId: TEAM_ID,
-      userId: ASSISTANT_ID,
-      roleId: 'assistant-role',
-    });
+    givenHeadCoachRemovingAssistant(ASSISTANT_ROW);
+    (mockPrisma.teamStaff.delete as jest.Mock).mockResolvedValue(ASSISTANT_ROW);
 
     const response = await request(app).delete(`/api/v1/teams/${TEAM_ID}/staff/${ASSISTANT_ID}`);
 
@@ -171,8 +173,19 @@ describe('DELETE /api/v1/teams/:teamId/staff/:userId through the real TeamServic
     expect(invalidateUsage).toHaveBeenCalledWith(ASSISTANT_ID);
   });
 
-  it('answers 404 when the user holds no staff row (the delete matches nothing)', async () => {
-    givenHeadCoachRemovingAssistant();
+  it('answers 404 when the user holds no staff row on the team', async () => {
+    givenHeadCoachRemovingAssistant(null);
+
+    const response = await request(app).delete(`/api/v1/teams/${TEAM_ID}/staff/${ASSISTANT_ID}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('User is not a staff member of this team');
+    expect(mockPrisma.teamStaff.delete).not.toHaveBeenCalled();
+    expect(invalidateUsage).not.toHaveBeenCalled();
+  });
+
+  it('answers the same 404 when the row vanishes before the delete (P2025)', async () => {
+    givenHeadCoachRemovingAssistant(ASSISTANT_ROW);
     (mockPrisma.teamStaff.delete as jest.Mock).mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' })
     );

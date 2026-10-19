@@ -16,8 +16,9 @@
  *   shared database's index is never dropped;
  * - the last-head-coach guard holds on real rows: the sole head coach can be
  *   neither demoted nor removed until a second user holds HEAD_COACH, and two
- *   concurrent removals (or a removal and a demotion) of a team's two head
- *   coaches leave one, because both run behind the team row lock.
+ *   concurrent removals (or a removal and a demotion, or a removal and the
+ *   other head coach's account deletion) of a team's two head coaches leave
+ *   one, because every one of them runs behind the team row lock.
  */
 
 jest.unmock('../../src/models');
@@ -27,6 +28,7 @@ import path from 'path';
 import { Prisma, TeamRoleType } from '@prisma/client';
 import prisma from '../../src/models';
 import { TeamService } from '../../src/services/team-service';
+import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
 import { DbFixtures, Org } from '../support/db-fixtures';
 
@@ -289,4 +291,23 @@ describe('concurrent head-coach removals behind the team row lock (#463)', () =>
       expect(await headCoachCount(teamId)).toBe(1);
     }
   );
+
+  it.each(Array.from({ length: ROUNDS }, (_, i) => 2 * ROUNDS + i))(
+    'a removal racing the other head coach\'s account deletion leaves one head coach (round %i)',
+    async (round) => {
+      const { teamId, a, b } = await twoHeadCoaches(round);
+
+      const results = await Promise.allSettled([
+        TeamService.removeStaffMember(teamId, a, a),
+        AccountService.deleteAccount(b, { actorId: b, mode: 'self' }),
+      ]);
+
+      // Whichever goes second sees the other's commit and is refused.
+      expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+      const refused = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(refused?.reason).toMatchObject({ statusCode: 400 });
+      expect(await headCoachCount(teamId)).toBe(1);
+    }
+  );
 });
+

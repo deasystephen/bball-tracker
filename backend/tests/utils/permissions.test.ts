@@ -105,32 +105,26 @@ describe('permissions helpers', () => {
   });
 
   describe('countDistinctStaffTeams', () => {
-    it('queries distinct teamIds for the user and returns how many', async () => {
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { teamId: 'a' },
-        { teamId: 'b' },
-      ]);
+    // One staff row per user per team (#463), so a row count is a team count.
+    it('counts the user\'s staff rows, one per team', async () => {
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(2);
 
       await expect(countDistinctStaffTeams('u')).resolves.toBe(2);
-      expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
-        where: { userId: 'u' },
-        distinct: ['teamId'],
-        select: { teamId: true },
-      });
+      expect(mockPrisma.teamStaff.count).toHaveBeenCalledWith({ where: { userId: 'u' } });
     });
 
     it('uses the supplied transaction client', async () => {
-      const tx = { teamStaff: { findMany: jest.fn().mockResolvedValue([{ teamId: 'a' }]) } };
+      const tx = { teamStaff: { count: jest.fn().mockResolvedValue(1) } };
 
       await expect(
         countDistinctStaffTeams('u', tx as unknown as Parameters<typeof countDistinctStaffTeams>[1])
       ).resolves.toBe(1);
-      expect(tx.teamStaff.findMany).toHaveBeenCalled();
-      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(tx.teamStaff.count).toHaveBeenCalled();
+      expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
     });
 
     it('returns 0 for a user with no staff rows', async () => {
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
 
       await expect(countDistinctStaffTeams('u')).resolves.toBe(0);
     });

@@ -18,11 +18,6 @@ import { Feature } from '../../src/services/entitlements';
 import { mockPrisma } from '../setup';
 import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
-/** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
-function staffTeams(n: number): Array<{ teamId: string }> {
-  return Array.from({ length: n }, (_, i) => ({ teamId: `team-${i}` }));
-}
-
 type TestUser = {
   id: string;
   email: string | null;
@@ -165,13 +160,13 @@ describe('requireTeamCreateLimit', () => {
   it('lets a FREE user through without a count query: no tier is capped (#445)', async () => {
     req.user = buildUser({ subscriptionTier: 'FREE' });
     // Would be "at the cap" under the old limit of 3 — this is the 4th team.
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+    (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(3);
 
     await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
     expect(next).toHaveBeenCalledWith();
     expect(res.status).not.toHaveBeenCalled();
-    expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
   });
 
   it('lets an EXPIRED premium user (effective tier FREE) through as well', async () => {
@@ -191,7 +186,7 @@ describe('requireTeamCreateLimit', () => {
 
     it('allows a FREE user under the cap', async () => {
       req.user = buildUser({ subscriptionTier: 'FREE' });
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT - 1));
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT - 1);
 
       await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
@@ -201,7 +196,7 @@ describe('requireTeamCreateLimit', () => {
 
     it('blocks a FREE user AT the cap with 402 upgrade_required', async () => {
       req.user = buildUser({ subscriptionTier: 'FREE' });
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
 
       await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
@@ -221,7 +216,7 @@ describe('requireTeamCreateLimit', () => {
         subscriptionTier: 'PREMIUM',
         subscriptionExpiresAt: new Date('2020-01-01'),
       });
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
 
       await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
@@ -233,7 +228,7 @@ describe('requireTeamCreateLimit', () => {
       req.user = buildUser({ subscriptionTier: 'FREE' });
       // Already over the cap (e.g. downgraded). They keep existing teams; the
       // middleware only prevents creating another one.
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(7));
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(7);
 
       await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
@@ -249,7 +244,7 @@ describe('requireTeamCreateLimit', () => {
       await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
       expect(next).toHaveBeenCalledWith();
-      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
     });
   });
 
@@ -262,7 +257,7 @@ describe('requireTeamCreateLimit', () => {
     await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
     expect(next).toHaveBeenCalledWith();
-    expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
   });
 
   it('allows LEAGUE users without querying the team count', async () => {
@@ -274,7 +269,7 @@ describe('requireTeamCreateLimit', () => {
     await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
     expect(next).toHaveBeenCalledWith();
-    expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
   });
 
   it('bypasses the cap for system ADMIN users', async () => {
@@ -283,6 +278,6 @@ describe('requireTeamCreateLimit', () => {
     await requireTeamCreateLimit()(req as Request, res as Response, next as NextFunction);
 
     expect(next).toHaveBeenCalledWith();
-    expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
   });
 });
