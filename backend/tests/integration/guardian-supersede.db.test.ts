@@ -274,7 +274,10 @@ describe('guardian resend (supersede, #420)', () => {
         resend.promise.catch(() => undefined);
 
         // Without the lock the resend would read "not linked" now and go on.
-        const blocked = await waitForBlockedBy(holder, await backendPid(holder), { timeoutMs: 4000 });
+        const blocked = await waitForBlockedBy(holder, await backendPid(holder), {
+          timeoutMs: 4000,
+          settled: resend,
+        });
         expect(blocked).toHaveLength(1);
         expect(resend.settled()).toBe(false);
 

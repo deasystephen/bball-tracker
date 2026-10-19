@@ -8,8 +8,12 @@
  *
  * Timeouts. A Prisma interactive transaction defaults to a 5 s `timeout`
  * (2 s `maxWait` for a connection) and the services pass none, so a blocked
- * call dies with P2028 once it has been inside its transaction for 5 s. Keep
- * the holder's whole callback, including `waitForBlockedBy`, well under that.
+ * call dies with P2028 once it has been inside its transaction for 5 s. Two
+ * clocks therefore matter: the HOLDER transaction's `timeout` must exceed the
+ * `waitForBlockedBy` deadline plus the holder's remaining work (the default
+ * deadline needs an explicit holder `timeout`, e.g. 10 s), and the holder must
+ * release promptly once the call is seen waiting, because the call's own 5 s
+ * (and its `lock_timeout`, where it sets one) are running by then.
  */
 
 import type { Prisma } from '@prisma/client';
@@ -19,14 +23,23 @@ export const PRISMA_TRANSACTION_TIMEOUT_MS = 5000;
 
 export const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Records when a promise settles, so a test can assert it has not yet. */
-export function track<T>(promise: Promise<T>): { promise: Promise<T>; settled: () => boolean } {
-  let done = false;
+/**
+ * Records when and how a promise settles, so a test can assert it has not yet
+ * and `waitForBlockedBy` can say what happened when it did.
+ */
+export interface Tracked<T> {
+  promise: Promise<T>;
+  settled: () => boolean;
+  /** 'fulfilled', or 'rejected: <message>' once settled; undefined before. */
+  outcome: () => string | undefined;
+}
+export function track<T>(promise: Promise<T>): Tracked<T> {
+  let outcome: string | undefined;
   promise.then(
-    () => (done = true),
-    () => (done = true)
+    () => (outcome = 'fulfilled'),
+    (err: unknown) => (outcome = `rejected: ${err instanceof Error ? err.message : String(err)}`)
   );
-  return { promise, settled: () => done };
+  return { promise, settled: () => outcome !== undefined, outcome: () => outcome };
 }
 
 /** The Postgres backend pid of the connection a transaction runs on. */
@@ -46,15 +59,37 @@ export interface BlockedBackend {
  * A backend that waits before its first write holds none.
  *
  * Throws when nothing is blocked within `timeoutMs`, naming the likely causes,
- * so a slow run does not read like a lock that is missing.
+ * so a slow run does not read like a lock that is missing. Pass the call under
+ * test's `settled` (from `track`) and the wait also stops, with its own
+ * message, as soon as that call finishes without ever having blocked: that is
+ * a missing lock, not a slow run, and no deadline needs to pass to say so.
+ *
+ * The deadline bounds only how long the call under test may take to REACH its
+ * lock statement (CI runs Jest with coverage on a loaded runner); once it is
+ * blocked the caller proceeds at once. The #932 CI failures were not slowness
+ * but a stale pg_stat_activity snapshot hiding a freshly opened pool backend;
+ * every poll now clears the snapshot first.
+ * Keep `timeoutMs` plus the holder's remaining work under the holder
+ * transaction's `timeout`, and remember that the call under test's own
+ * `lock_timeout`, where it sets one, starts only when it begins waiting.
  */
 export async function waitForBlockedBy(
   tx: Prisma.TransactionClient,
   holderPid: number,
-  { tables = [], timeoutMs = 2000 }: { tables?: string[]; timeoutMs?: number } = {}
+  {
+    tables = [],
+    timeoutMs = 8000,
+    settled,
+  }: { tables?: string[]; timeoutMs?: number; settled?: Pick<Tracked<unknown>, 'settled' | 'outcome'> } = {}
 ): Promise<BlockedBackend[]> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    // pg_stat_activity is snapshotted once per transaction, and the holder
+    // polls from inside one: a backend the pool opened AFTER the first read
+    // (a cold pool on CI) is missing from the stale snapshot, so the waiter
+    // is never seen even while it sits on the lock (#932). Drop the snapshot
+    // before every read; pg_blocking_pids itself is live.
+    await tx.$executeRaw`SELECT pg_stat_clear_snapshot()`;
     const rows = await tx.$queryRaw<BlockedBackend[]>`
       SELECT array(
                SELECT DISTINCT c.relname::text FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
@@ -65,12 +100,21 @@ export async function waitForBlockedBy(
       WHERE ${holderPid}::int = ANY(pg_blocking_pids(a.pid))
     `;
     if (rows.length > 0) return rows;
+    if (settled?.settled()) {
+      throw new Error(
+        `The call under test settled (${settled.outcome()}) without ever being blocked by pid ` +
+          `${holderPid}. If it fulfilled, it takes no lock that conflicts with the holder; if it ` +
+          'rejected, read the reason before suspecting the lock (a loaded run can kill its own ' +
+          'transaction first).'
+      );
+    }
     if (Date.now() > deadline) {
       throw new Error(
         `No backend was blocked by pid ${holderPid} within ${timeoutMs} ms. Either the call under ` +
           'test takes no lock that conflicts with the holder, or it had not reached its lock ' +
-          'statement yet (a slow run: raise timeoutMs, keeping the holder under ' +
-          `${PRISMA_TRANSACTION_TIMEOUT_MS} ms).`
+          'statement yet (a slow run: raise timeoutMs and give the holder transaction a `timeout` ' +
+          'above it; pass the tracked call\'s `settled` so a call that finishes without blocking ' +
+          'fails at once).'
       );
     }
     await pause(25);
