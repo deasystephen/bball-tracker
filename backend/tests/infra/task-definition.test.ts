@@ -24,18 +24,17 @@ interface TaskDefinition {
   }>;
 }
 
-function readTaskDefinition(): TaskDefinition {
-  return JSON.parse(readFileSync(TASK_DEFINITION_PATH, 'utf8')) as TaskDefinition;
-}
+const taskDefinition = JSON.parse(readFileSync(TASK_DEFINITION_PATH, 'utf8')) as TaskDefinition;
 
 function readEnv(): Map<string, string> {
-  const td = readTaskDefinition();
-  return new Map(td.containerDefinitions.flatMap((c) => c.environment ?? []).map((e) => [e.name, e.value]));
+  return new Map(
+    taskDefinition.containerDefinitions.flatMap((c) => c.environment ?? []).map((e) => [e.name, e.value]),
+  );
 }
 
-function readSecrets(): Map<string, string> {
-  const td = readTaskDefinition();
-  return new Map(td.containerDefinitions.flatMap((c) => c.secrets ?? []).map((s) => [s.name, s.valueFrom]));
+/** The raw rows, not a Map: a duplicated name must fail the exact-list check, not collapse. */
+function readSecrets(): Array<{ name: string; valueFrom: string }> {
+  return taskDefinition.containerDefinitions.flatMap((c) => c.secrets ?? []);
 }
 
 /**
@@ -110,13 +109,14 @@ describe('infra/task-definition.json — production domain values', () => {
 
 describe('infra/task-definition.json — Secrets Manager references', () => {
   const secrets = readSecrets();
+  const env = readEnv();
 
-  it('secrets[] holds exactly the credentials the backend reads', () => {
-    expect([...secrets.keys()].sort()).toEqual([...ALLOWED_SECRETS].sort());
+  it('secrets[] holds exactly the credentials the backend reads, each once', () => {
+    expect(secrets.map((s) => s.name).sort()).toEqual([...ALLOWED_SECRETS].sort());
   });
 
   it('every secret is a Secrets Manager ARN in the production account and region', () => {
-    for (const [name, valueFrom] of secrets) {
+    for (const { name, valueFrom } of secrets) {
       expect({ name, valueFrom }).toMatchObject({
         valueFrom: expect.stringMatching(/^arn:aws:secretsmanager:us-east-1:\d{12}:secret:bball-tracker-production\//),
       });
@@ -124,8 +124,7 @@ describe('infra/task-definition.json — Secrets Manager references', () => {
   });
 
   it('no secret name is also set as a plain environment value', () => {
-    const env = readEnv();
-    for (const name of secrets.keys()) {
+    for (const { name } of secrets) {
       expect(env.has(name)).toBe(false);
     }
   });

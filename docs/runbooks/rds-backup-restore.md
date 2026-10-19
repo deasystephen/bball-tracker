@@ -330,30 +330,34 @@ growth, a reconnect after an idle timeout, a task replacement) fails with `28P01
 replaces the task. Keep steps 2 and 3 back to back; the window is normally under two minutes.
 Check for `IN_PROGRESS` games first: the redeploy in step 3 splits live games like any deploy.
 
-1. **Generate the new password.** The DSN in `infra/ecs.tf` is composed without URL-encoding and
-   the value is pasted into an HCL string, so stay with characters that are inert in a URL, in
-   HCL and in a shell; 40 of them is plenty:
-
-   ```bash
-   NEW_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9_~-' </dev/urandom | head -c 40); echo "$NEW_PASSWORD"
-   ```
-
-   Put it in `infra/terraform.tfvars` as `db_password = "…"`. Keep the old value to hand until step 5.
-
-2. **Apply.** One `terraform apply` changes the instance password and writes a new secret version
-   (the previous one becomes `AWSPREVIOUS`). RDS applies a master-password change asynchronously
-   and without waiting for the maintenance window, whatever `apply_immediately` says.
+1. **Generate the new password straight into `infra/terraform.tfvars`.** Never print it: the
+   runbooks are often driven from a Claude Code session and anything echoed lands in the transcript.
+   The DSN in `infra/ecs.tf` is composed without URL-encoding and the value sits in an HCL string,
+   so stay with characters that are inert in a URL, in HCL and in a shell; 40 of them is plenty.
+   The old value is not needed afterwards: the secret keeps it at `AWSPREVIOUS` (step 5).
 
    ```bash
    cd infra
-   terraform plan -input=false      # expect: aws_db_instance.main and
-                                    # aws_secretsmanager_secret_version.database_url in place, nothing else
-   terraform apply -input=false
-   aws rds wait db-instance-available --db-instance-identifier bball-tracker-production-postgres
+   NEW_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9_~-' </dev/urandom | head -c 40)
+   sed -i '' "s/^db_password *=.*/db_password = \"${NEW_PASSWORD}\"/" terraform.tfvars
+   unset NEW_PASSWORD
+   grep -c '^db_password = "' terraform.tfvars     # 1
    ```
 
-   If the plan shows anything beyond those two in-place updates, stop: something else drifted and
-   must be understood before the password changes.
+2. **Apply.** One `terraform apply` changes the instance password and writes the new DSN as a new
+   secret version; the one it replaces becomes `AWSPREVIOUS`. RDS applies a master-password change
+   asynchronously and outside the maintenance window whatever `apply_immediately` says, and the
+   provider waits for the instance to be `available` again before it returns.
+
+   ```bash
+   terraform plan -input=false
+   terraform apply -input=false
+   ```
+
+   The plan must be exactly: `aws_db_instance.main` **updated in-place** (`password`) and
+   `aws_secretsmanager_secret_version.database_url` **replaced** (`-/+`, a changed `secret_string`
+   always forces a new version). Anything else means something drifted; stop and understand it
+   before the password changes.
 
 3. **Force a new ECS deployment** so the task reads the new secret (Procedure A step 6):
 
@@ -369,15 +373,31 @@ Check for `IN_PROGRESS` games first: the redeploy in step 3 splits live games li
 
 4. **Verify** (Procedure A step 7): `curl -fsS https://api.hooplings.com/health` returns 200, the
    deployment is `PRIMARY` / `COMPLETED` with no circuit-breaker rollback, and Sentry shows no
-   `P1010` / `28P01` errors. A rollback that *did* fire means the new task could not connect:
-   the rolled-back revision reads the same secret, so it is in the same state; go to step 5.
+   `28P01` (PostgreSQL "password authentication failed", surfaced by Prisma as `P1000`). A
+   rollback that *did* fire means the new task could not connect; the rolled-back revision reads
+   the same secret, so it is in the same state: go to step 5. Confirm the two versions:
 
-5. **Rollback (if needed).** Put the old password back in `terraform.tfvars` and run steps 2–3
-   again; Terraform rewrites both copies. Do not use the `AWSPREVIOUS` trick from Procedure B on
+   ```bash
+   aws secretsmanager describe-secret --secret-id bball-tracker-production/database-url \
+     --query VersionIdsToStages      # new id → AWSCURRENT, old id → AWSPREVIOUS
+   ```
+
+5. **Rollback (if needed).** The old password is the one inside the `AWSPREVIOUS` DSN. Put it back
+   in `terraform.tfvars` without printing it and run steps 2–3 again, so Terraform rewrites the
+   instance **and** the secret together. Do not use the `AWSPREVIOUS` trick from Procedure B on
    its own here: it restores the secret but not the instance password, and the two must match.
 
-6. **Afterwards**: `terraform plan` must say `No changes`; delete the old password from wherever
-   it was kept; add a row to the drill log with the measured gap between steps 2 and 3.
+   ```bash
+   OLD_PASSWORD=$(aws secretsmanager get-secret-value \
+     --secret-id bball-tracker-production/database-url \
+     --version-stage AWSPREVIOUS --query SecretString --output text \
+     | sed -E 's|^postgresql://[^:]+:([^@]+)@.*|\1|')
+   sed -i '' "s/^db_password *=.*/db_password = \"${OLD_PASSWORD}\"/" terraform.tfvars
+   unset OLD_PASSWORD
+   ```
+
+6. **Afterwards**: `terraform plan` must say `No changes`; add a row to the drill log with the
+   measured gap between the end of step 2 and the new task's `RUNNING`.
 
 ## Major version upgrade
 
