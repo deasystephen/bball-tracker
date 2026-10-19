@@ -198,6 +198,15 @@ cannot both pass the guard and leave a team with none:
 - `AccountService.deleteAccount` (self and operator modes), after its `User` row locks,
   locks every team where the user holds HEAD_COACH in one id-ordered statement
   (`lockTeamRows`) before its guard.
+- **The lock wait is bounded (#934).** All three transactions run `SET LOCAL lock_timeout =
+  '4000ms'` as their first statement (`utils/lock-timeout.ts#setLocalLockTimeout`,
+  `TEAM_LOCK_TIMEOUT_MS`), the same bound the supersede-resend paths use
+  (`docs/architecture/roster-and-invitations.md`): a waiter stuck behind a holder is cancelled
+  by PostgreSQL (55P03) before Prisma's 5 s transaction timeout, frees its pool connection and
+  answers the retryable **503** `transaction_timeout` with `Retry-After` through
+  `classifyDbError`; nothing was written. `tests/integration/team-staff-single-role.db.test.ts`
+  and `tests/integration/account-deletion.db.test.ts` hold the team row on one connection and
+  prove the cancel for each path.
 
 **Lock order is User before Team wherever both are taken**, and the staff writers take only
 Team, so no two of these transactions wait on each other in a cycle. `FOR NO KEY UPDATE`

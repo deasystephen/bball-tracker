@@ -57,6 +57,7 @@ import { captureException } from '../utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
+import { TEAM_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
@@ -167,6 +168,12 @@ export class AccountService {
     const { actorId, mode } = options;
 
     const committed = await prisma.$transaction(async (tx) => {
+      // 0. Bound every lock wait below (the User rows and the Team rows): a
+      // delete stuck behind a holder is cancelled by PostgreSQL at
+      // TEAM_LOCK_TIMEOUT_MS and answers the retryable 503 instead of pinning
+      // its pool connection for Prisma's full 5 s (#934).
+      await setLocalLockTimeout(tx, TEAM_LOCK_TIMEOUT_MS);
+
       // 1. Lock the row. Concurrent deletes, self-writes and sign-ins serialize here.
       // The same statement locks every child this user guards (#664): the
       // purge below removes their links and promotes the next primary, which

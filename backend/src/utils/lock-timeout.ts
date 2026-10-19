@@ -22,6 +22,17 @@ import type { Prisma } from '@prisma/client';
 export const SUPERSEDE_LOCK_TIMEOUT_MS = 4000;
 
 /**
+ * The lock wait of the transactions that take the `Team` row lock
+ * (`utils/team-row-lock.ts`: `TeamService.removeStaffMember`,
+ * `TeamService.changeStaffRole`, `AccountService.deleteAccount`, #934). Same
+ * reasoning and value as the supersede paths: under Prisma's 5 s transaction
+ * timeout so PostgreSQL cancels the waiter first and frees its connection.
+ * Set as the transaction's first statement, so it also bounds the `User` row
+ * locks deletion takes before the team ones.
+ */
+export const TEAM_LOCK_TIMEOUT_MS = 4000;
+
+/**
  * `SET LOCAL lock_timeout` for the rest of the transaction, as `set_config(…,
  * true)` because `SET` cannot take a bind parameter. Run it as the
  * transaction's first statement.

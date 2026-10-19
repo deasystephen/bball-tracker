@@ -309,11 +309,14 @@ describe('league access against a real database (#443)', () => {
     it('hides personal leagues from an ADMIN by default and reveals them on request', async () => {
       const admin = { id: users.adminOnly, role: 'ADMIN' };
 
-      const hidden = await LeagueService.listLeagues({ limit: 200, offset: 0 }, admin);
+      // Search by the fixture's own name: an ADMIN sees every league in the
+      // database, and the other real-database suites run in parallel and add
+      // their own, so a page of the first 200 is not guaranteed to hold it.
+      const hidden = await LeagueService.listLeagues({ search: LEAGUE_P, limit: 200, offset: 0 }, admin);
       expect(hidden.leagues.map((l) => l.name)).not.toContain(LEAGUE_P);
 
       const shown = await LeagueService.listLeagues(
-        { includePersonal: true, limit: 200, offset: 0 },
+        { includePersonal: true, search: LEAGUE_P, limit: 200, offset: 0 },
         admin
       );
       const personal = shown.leagues.find((l) => l.name === LEAGUE_P);
