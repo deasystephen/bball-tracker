@@ -171,14 +171,19 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   - **Race by repetition:** `Promise.allSettled` of two calls, repeated over a few rounds with fresh
     rows, and assert the row counts per round.
   - **Hold the lock from the test** in a `prisma.$transaction`, start the call under test, then call
-    `tests/support/db-locks.ts#waitForBlockedBy(tx, await backendPid(tx), { tables })`. It polls
-    `pg_blocking_pids` until the call is waiting on the holder, returns the tables it already holds
-    locks on (none means it waits before its first write), and throws a descriptive error on timeout.
-    Never use a fixed sleep for this. Hold a `User` row with `FOR NO KEY UPDATE`, not `FOR UPDATE`: a
-    `FOR UPDATE` also blocks the `KEY SHARE` lock that every foreign-key insert takes on the referenced
-    row, so the call waits even with its own lock removed. The services pass no transaction options,
-    so a blocked call dies with P2028 after Prisma's default 5 s: keep the holder's `timeout` well
-    under that (`PRISMA_TRANSACTION_TIMEOUT_MS` in the same file).
+    `tests/support/db-locks.ts#waitForBlockedBy(tx, await backendPid(tx), { tables, settled })`. It
+    polls `pg_blocking_pids` until the call is waiting on the holder, returns the tables it already
+    holds locks on (none means it waits before its first write), and throws a descriptive error on
+    its deadline (default 8 s, the time the call may take to REACH its lock on a loaded CI runner,
+    #932). Pass the `track()`ed call as `settled` so a call that finishes without ever blocking fails
+    at once with its outcome in the message. Never use a fixed sleep for this. Hold a `User` row with
+    `FOR NO KEY UPDATE`, not `FOR UPDATE`: a `FOR UPDATE` also blocks the `KEY SHARE` lock that every
+    foreign-key insert takes on the referenced row, so the call waits even with its own lock removed.
+    Two clocks: the holder transaction's `timeout` must exceed the helper deadline plus the holder's
+    remaining work (give it `{ timeout: 10_000 }` with the default deadline), and the services pass
+    no transaction options, so a blocked call dies with P2028 after Prisma's default 5 s
+    (`PRISMA_TRANSACTION_TIMEOUT_MS` in the same file): release the holder promptly once the call is
+    seen waiting.
   - **Prove it bites:** remove the lock statement, then move it later, and watch a test fail each time.
     A race that a native `INSERT … ON CONFLICT` already absorbs will not fail; check the emitted SQL
     with a `query` log listener before relying on a race test as the lock's guard.

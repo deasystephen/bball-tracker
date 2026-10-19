@@ -67,18 +67,23 @@ async function expectWaitsOnChildLock(
   heldWhileWaiting: string[] = []
 ): Promise<void> {
   let started: ReturnType<typeof track<unknown>> | undefined;
-  await prisma.$transaction(async (holder) => {
-    await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${childId} FOR UPDATE`;
-    started = track(call());
-    started.promise.catch(() => undefined);
+  await prisma.$transaction(
+    async (holder) => {
+      await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${childId} FOR UPDATE`;
+      started = track(call());
+      started.promise.catch(() => undefined);
 
-    const blocked = await waitForBlockedBy(holder, await backendPid(holder), {
-      tables: ['GuardianInvitation', 'Guardian'],
-    });
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].relations).toEqual(heldWhileWaiting);
-    expect(started.settled()).toBe(false);
-  });
+      const blocked = await waitForBlockedBy(holder, await backendPid(holder), {
+        tables: ['GuardianInvitation', 'Guardian'],
+        settled: started,
+      });
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].relations).toEqual(heldWhileWaiting);
+      expect(started.settled()).toBe(false);
+    },
+    // Above the helper's default deadline plus the holder's own work (db-locks.ts).
+    { timeout: 10_000 }
+  );
   // The holder committed and released the lock: the call now completes.
   await started?.promise;
 }

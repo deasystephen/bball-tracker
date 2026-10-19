@@ -281,7 +281,7 @@ describe('lost create race on the supersede path (#908 review)', () => {
         resend = track(InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId));
         resend.promise.catch(() => undefined);
         expect(
-          await waitForBlockedBy(holder, await backendPid(holder), { settled: resend.settled })
+          await waitForBlockedBy(holder, await backendPid(holder), { settled: resend })
         ).not.toHaveLength(0);
 
         await holder.teamInvitation.update({ where: { id: liveId }, data: { status: 'EXPIRED' } });

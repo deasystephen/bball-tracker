@@ -193,7 +193,11 @@ describe('TeamService.createTeam against Postgres (#765)', () => {
         // before provisioning: the waiting backend holds no lock on any table
         // the create writes. With the FOR UPDATE removed it never waits; moved
         // below `resolvePersonalSeasonId`, it waits holding League and Season.
-        const waiting = await waitForBlockedBy(tx, pid, { tables: WRITTEN_TABLES, timeoutMs: 2000 });
+        const waiting = await waitForBlockedBy(tx, pid, {
+          tables: WRITTEN_TABLES,
+          timeoutMs: 2000,
+          settled: lockedCreate,
+        });
         expect(waiting).toEqual([{ relations: [] }]);
         expect(lockedCreate.settled()).toBe(false);
       },
