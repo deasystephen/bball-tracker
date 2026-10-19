@@ -313,6 +313,72 @@ Use this when the restore in Procedure A turned out to be the wrong snapshot
      --skip-final-snapshot
    ```
 
+## Rotate the master password
+
+The RDS master password is a Terraform variable (`db_password`, set in the gitignored
+`infra/terraform.tfvars`). Terraform writes it into the instance (`infra/rds.tf`) and into the
+composed DSN that is the `bball-tracker-production/database-url` secret (`infra/ecs.tf`), and both
+copies sit in plaintext in Terraform state. There is no automatic rotation (#641 chose a manual
+procedure over `manage_master_user_password`: the app wants one `DATABASE_URL` string and the
+restore procedures above parse credentials out of that secret). Rotate when an operator with
+state-bucket or tfvars access leaves, after any suspected exposure of the state bucket, or on a
+yearly cadence otherwise. Record each run in the drill log.
+
+**What to expect.** PostgreSQL keeps already-open sessions alive across a password change, so the
+running task's pooled connections survive step 2. Any **new** connection from that task (pool
+growth, a reconnect after an idle timeout, a task replacement) fails with `28P01` until step 3
+replaces the task. Keep steps 2 and 3 back to back; the window is normally under two minutes.
+Check for `IN_PROGRESS` games first: the redeploy in step 3 splits live games like any deploy.
+
+1. **Generate the new password.** The DSN in `infra/ecs.tf` is composed without URL-encoding and
+   the value is pasted into an HCL string, so stay with characters that are inert in a URL, in
+   HCL and in a shell; 40 of them is plenty:
+
+   ```bash
+   NEW_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9_~-' </dev/urandom | head -c 40); echo "$NEW_PASSWORD"
+   ```
+
+   Put it in `infra/terraform.tfvars` as `db_password = "…"`. Keep the old value to hand until step 5.
+
+2. **Apply.** One `terraform apply` changes the instance password and writes a new secret version
+   (the previous one becomes `AWSPREVIOUS`). RDS applies a master-password change asynchronously
+   and without waiting for the maintenance window, whatever `apply_immediately` says.
+
+   ```bash
+   cd infra
+   terraform plan -input=false      # expect: aws_db_instance.main and
+                                    # aws_secretsmanager_secret_version.database_url in place, nothing else
+   terraform apply -input=false
+   aws rds wait db-instance-available --db-instance-identifier bball-tracker-production-postgres
+   ```
+
+   If the plan shows anything beyond those two in-place updates, stop: something else drifted and
+   must be understood before the password changes.
+
+3. **Force a new ECS deployment** so the task reads the new secret (Procedure A step 6):
+
+   ```bash
+   aws ecs update-service \
+     --cluster bball-tracker-production-cluster \
+     --service bball-tracker-production-api \
+     --force-new-deployment
+   aws ecs wait services-stable \
+     --cluster bball-tracker-production-cluster \
+     --services bball-tracker-production-api
+   ```
+
+4. **Verify** (Procedure A step 7): `curl -fsS https://api.hooplings.com/health` returns 200, the
+   deployment is `PRIMARY` / `COMPLETED` with no circuit-breaker rollback, and Sentry shows no
+   `P1010` / `28P01` errors. A rollback that *did* fire means the new task could not connect:
+   the rolled-back revision reads the same secret, so it is in the same state; go to step 5.
+
+5. **Rollback (if needed).** Put the old password back in `terraform.tfvars` and run steps 2–3
+   again; Terraform rewrites both copies. Do not use the `AWSPREVIOUS` trick from Procedure B on
+   its own here: it restores the secret but not the instance password, and the two must match.
+
+6. **Afterwards**: `terraform plan` must say `No changes`; delete the old password from wherever
+   it was kept; add a row to the drill log with the measured gap between steps 2 and 3.
+
 ## Major version upgrade
 
 First run: PostgreSQL 15.17 → 18.6, #521, 2026-09. Reuse this section for every major; the

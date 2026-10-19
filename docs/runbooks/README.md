@@ -61,3 +61,7 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](../r
   `infra/rds.tf` catches up with `terraform plan` = No changes. `backend/tests/infra/postgres-version.test.ts`
   pins that major to the compose and CI images and fails CI six months before RDS ends standard
   support for it (a deliberate dated assertion — the fix is the next upgrade, not a wider window).
+  Its **"Rotate the master password"** section (#641) is the only rotation path for the RDS master
+  credential: tfvars edit → one `terraform apply` (instance + secret version together) → immediate
+  `--force-new-deployment`; rollback is the old password through the same two steps, never
+  `AWSPREVIOUS` alone.
