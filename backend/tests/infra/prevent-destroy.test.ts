@@ -24,20 +24,14 @@
  *     `var.environment`, so it would block tearing down a staging stack, and
  *     AWS already refuses to delete a non-empty bucket (`force_destroy = false`).
  */
-import { readFileSync } from 'fs';
 import path from 'path';
-import { extractBlock, hasPreventDestroy, stripComments } from './terraform';
+import { extractBlock, hasPreventDestroy, resourceBlock, stripComments } from './terraform';
 import { ROOT } from './workflows';
 
 const DNS_TF = path.join(ROOT, 'infra/dns.tf');
 const S3_TF = path.join(ROOT, 'infra/s3.tf');
 const RDS_TF = path.join(ROOT, 'infra/rds.tf');
 const BOOTSTRAP_TF = path.join(ROOT, 'infra/bootstrap/main.tf');
-
-function resourceBlock(file: string, type: string, name: string): string {
-  const label = `${path.relative(ROOT, file)} resource "${type}" "${name}"`;
-  return extractBlock(readFileSync(file, 'utf8'), 'resource', type, name, label);
-}
 
 describe('Terraform prevent_destroy guards', () => {
   it('refuses to destroy the Route53 hosted zones (aws_route53_zone.main)', () => {
@@ -71,21 +65,28 @@ describe('Terraform prevent_destroy guards', () => {
 
   // Once a DS record is published at the registrar, losing the KMS key, a
   // key-signing key or the signing itself makes validating resolvers SERVFAIL
-  // the whole zone (#758, infra/README.md "CAA and DNSSEC").
-  it('refuses to destroy the DNSSEC KMS key (aws_kms_key.dnssec) and keeps a long deletion window', () => {
-    const block = resourceBlock(DNS_TF, 'aws_kms_key', 'dnssec');
+  // the whole zone (#758, infra/README.md "CAA and DNSSEC"). `prevent_destroy`
+  // only blocks a destroy; the in-place disables are plain arguments, so the
+  // tests also require those arguments to be absent (their defaults are the
+  // safe values: enabled, ACTIVE, SIGNING).
+  it('refuses to destroy or disable the DNSSEC KMS key (aws_kms_key.dnssec), in us-east-1, with a long deletion window', () => {
+    const block = stripComments(resourceBlock(DNS_TF, 'aws_kms_key', 'dnssec'));
     expect(hasPreventDestroy(block, 'aws_kms_key.dnssec')).toBe(true);
     expect(block).toMatch(/^\s*deletion_window_in_days\s*=\s*30\b/m);
+    expect(block).toMatch(/^\s*provider\s*=\s*aws\.us_east_1\s*$/m);
+    expect(block).not.toMatch(/^\s*is_enabled\s*=/m);
   });
 
-  it('refuses to destroy the key-signing keys (aws_route53_key_signing_key.main)', () => {
-    const block = resourceBlock(DNS_TF, 'aws_route53_key_signing_key', 'main');
+  it('refuses to destroy or deactivate the key-signing keys (aws_route53_key_signing_key.main)', () => {
+    const block = stripComments(resourceBlock(DNS_TF, 'aws_route53_key_signing_key', 'main'));
     expect(hasPreventDestroy(block, 'aws_route53_key_signing_key.main')).toBe(true);
+    expect(block).not.toMatch(/^\s*status\s*=/m);
   });
 
-  it('refuses to disable signing (aws_route53_hosted_zone_dnssec.main)', () => {
-    const block = resourceBlock(DNS_TF, 'aws_route53_hosted_zone_dnssec', 'main');
+  it('refuses to destroy or stop signing (aws_route53_hosted_zone_dnssec.main)', () => {
+    const block = stripComments(resourceBlock(DNS_TF, 'aws_route53_hosted_zone_dnssec', 'main'));
     expect(hasPreventDestroy(block, 'aws_route53_hosted_zone_dnssec.main')).toBe(true);
+    expect(block).not.toMatch(/^\s*signing_status\s*=/m);
   });
 });
 

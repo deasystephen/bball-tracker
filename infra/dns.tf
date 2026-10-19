@@ -140,7 +140,9 @@ resource "aws_route53_record" "api" {
 # aws_acm_certificate.main requests *.<domain>. A certificate issued anywhere
 # else for one of these zones (the web deploy, #30, if it lands outside AWS)
 # needs that host's CA added here IN THE SAME PR, or its issuance fails on
-# CAA. Applies to every zone, served or not. Pinned by
+# CAA. Applies to every zone, served or not. No `iodef` entry on purpose: it
+# would publish an inbox in public DNS, and the only candidate is the alerts
+# address, which must not appear in a committed file (alerting.tf). Pinned by
 # backend/tests/infra/dns-caa.test.ts.
 resource "aws_route53_record" "caa" {
   for_each = var.domains
@@ -158,7 +160,6 @@ resource "aws_route53_record" "caa" {
     "0 issuewild \"amazontrust.com\"",
     "0 issuewild \"awstrust.com\"",
     "0 issuewild \"amazonaws.com\"",
-    "0 iodef \"mailto:${var.alert_email}\"",
   ]
 }
 
@@ -175,14 +176,19 @@ resource "aws_route53_record" "caa" {
 #      and AWS says to let every cached unsigned answer expire first). Steps
 #      and verification: infra/README.md "CAA and DNSSEC".
 #
-# Once a DS is published, DISABLING signing, DEACTIVATING a key-signing key or
-# DELETING / DISABLING the KMS key makes every validating resolver (Google,
-# Cloudflare, Quad9, most ISPs) answer SERVFAIL for the whole zone. Hence
-# prevent_destroy on all three (pinned by prevent-destroy.test.ts) and a 30-day
-# KMS deletion window. Retiring DNSSEC is the reverse order: remove the DS at
-# the registrar, wait 48 h, then lift the guards and disable signing.
+# Once a DS is published, DISABLING signing (`signing_status`), DEACTIVATING a
+# key-signing key (`status`) or DELETING / DISABLING the KMS key (`is_enabled`)
+# makes every validating resolver (Google, Cloudflare, Quad9, most ISPs) answer
+# SERVFAIL for the whole zone. Hence prevent_destroy on all three, none of
+# those three arguments set (their defaults are the safe values), and a 30-day
+# KMS deletion window; prevent-destroy.test.ts pins all of it. Retiring DNSSEC
+# is the reverse order: remove the DS at the registrar, wait 48 h, then lift
+# the guards and disable signing.
 
 resource "aws_kms_key" "dnssec" {
+  # Route 53 DNSSEC requires the key in us-east-1 (main.tf alias), not var.aws_region.
+  provider = aws.us_east_1
+
   description              = "${local.name_prefix} Route 53 DNSSEC key-signing key (every zone in var.domains)"
   customer_master_key_spec = "ECC_NIST_P256"
   key_usage                = "SIGN_VERIFY"

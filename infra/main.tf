@@ -37,6 +37,21 @@ provider "aws" {
   }
 }
 
+# Route 53 DNSSEC accepts a KMS key only from us-east-1, whatever `var.aws_region`
+# says. aws_kms_key.dnssec (dns.tf) uses this alias so the requirement is code.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = merge(var.tags, {
+      Project     = var.app_name
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    })
+  }
+}
+
 # Fetch current AWS account ID and region for use in resource ARNs
 data "aws_caller_identity" "current" {}
 

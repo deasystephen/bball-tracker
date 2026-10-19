@@ -10,6 +10,10 @@
  * the calling test red instead of letting it pass vacuously.
  */
 
+import { readFileSync } from 'fs';
+import path from 'path';
+import { ROOT } from './workflows';
+
 interface Scanned {
   /** The source with every comment blanked to spaces (newlines kept, so offsets line up). */
   code: string;
@@ -107,6 +111,12 @@ function braceBody(scanned: Scanned, openEnd: number, what: string): string {
  * Returns the body of `<kind> "<type>" "<name>" { … }` (comments blanked),
  * brace-matched. Throws when the header is missing or commented out.
  */
+/** Read `file` and extract `resource "<type>" "<name>"`, labelled by its repo-relative path. */
+export function resourceBlock(file: string, type: string, name: string): string {
+  const label = `${path.relative(ROOT, file)} resource "${type}" "${name}"`;
+  return extractBlock(readFileSync(file, 'utf8'), 'resource', type, name, label);
+}
+
 export function extractBlock(source: string, kind: string, type: string, name: string, label: string): string {
   const scanned = scan(source);
   const header = new RegExp(`^${kind}\\s+"${type}"\\s+"${name}"\\s*\\{`, 'm').exec(scanned.code);
