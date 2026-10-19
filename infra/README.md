@@ -150,6 +150,52 @@ primary_domain = "hooplings.com"
 
 ---
 
+### CAA and DNSSEC (#758)
+
+**CAA.** Every zone in `var.domains` carries a CAA record at its apex allowing only Amazon's four CA
+identities (`amazon.com`, `amazontrust.com`, `awstrust.com`, `amazonaws.com`, `issue` and
+`issuewild`) with `iodef` reports to `var.alert_email`. ACM checks CAA on every issuance and
+renewal, so this list is exactly what keeps `aws_acm_certificate.main` renewing;
+`backend/tests/infra/dns-caa.test.ts` pins it. **Rule:** a certificate for any `hooplings.com` name
+issued by another CA (a web host outside AWS for #30, for example `letsencrypt.org`) needs that CA
+added to `aws_route53_record.caa` in the same PR as the deploy, or the host's issuance fails on CAA.
+Check first: `dig +short CAA hooplings.com`.
+
+**DNSSEC.** One KMS key (`aws_kms_key.dnssec`, ECC_NIST_P256, us-east-1 as Route 53 requires), one
+key-signing key per zone and signing enabled, all with `prevent_destroy`
+(`backend/tests/infra/prevent-destroy.test.ts`). Terraform does **not** publish the DS record at the
+registrar; that is the owner's step, and until it is done a zone is an insecure delegation that
+resolvers treat exactly as before. The procedure, per zone, after the apply that enabled signing:
+
+1. **Wait at least 48 hours** (the apex NS TTL is 172800 s; AWS requires every cached unsigned
+   answer to expire before the DS exists). Confirm Route 53 is signing:
+   `aws route53 get-dnssec --hosted-zone-id <zone id> --query ServeSignature` → `SIGNING`.
+2. **Publish the DS** at Route 53 Domains (both domains are registered there). The call wants the
+   DNSKEY public key, not the DS digest; `terraform output -json dnssec_keys` has both:
+   ```bash
+   cd infra
+   DOMAIN=hooplings.com
+   KEY=$(terraform output -json dnssec_keys | jq -r --arg d "$DOMAIN" '.[$d].public_key')
+   aws route53domains associate-delegation-signer-to-domain --region us-east-1 \
+     --domain-name "$DOMAIN" --signing-attributes "Algorithm=13,Flags=257,PublicKey=$KEY"
+   # prints an OperationId; poll until SUCCESSFUL (minutes for .com):
+   aws route53domains get-operation-detail --region us-east-1 --operation-id <id>
+   ```
+3. **Verify** once the parent serves the DS (up to the .com DS TTL, normally under an hour):
+   ```bash
+   dig +short DS hooplings.com                      # one DS line, algorithm 13
+   dig +dnssec A api.hooplings.com | grep -c RRSIG  # >= 1
+   delv @1.1.1.1 api.hooplings.com                  # "; fully validated"
+   curl -sS https://api.hooplings.com/health        # still 200
+   aws acm describe-certificate --certificate-arn <arn> --query 'Certificate.RenewalEligibility'   # ELIGIBLE
+   ```
+
+**Never** disable signing, deactivate a key-signing key or disable/delete the KMS key while a DS is
+published: validating resolvers answer SERVFAIL for the whole zone. Retiring DNSSEC runs in reverse:
+`aws route53domains disassociate-delegation-signer-from-domain`, wait 48 hours, then lift the
+`prevent_destroy` guards and remove the resources. Moving a zone to another DNS host also starts
+with removing the DS.
+
 ## Email — SES, DKIM, MAIL FROM, and DMARC
 
 Transactional email is sent from `noreply@mail.<primary_domain>` via AWS SES v2. `ses.tf`

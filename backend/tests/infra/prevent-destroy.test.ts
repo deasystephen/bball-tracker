@@ -68,6 +68,25 @@ describe('Terraform prevent_destroy guards', () => {
     expect(hasPreventDestroy(block, 'aws_dynamodb_table.locks')).toBe(true);
     expect(block).toMatch(/^\s*deletion_protection_enabled\s*=\s*true/m);
   });
+
+  // Once a DS record is published at the registrar, losing the KMS key, a
+  // key-signing key or the signing itself makes validating resolvers SERVFAIL
+  // the whole zone (#758, infra/README.md "CAA and DNSSEC").
+  it('refuses to destroy the DNSSEC KMS key (aws_kms_key.dnssec) and keeps a long deletion window', () => {
+    const block = resourceBlock(DNS_TF, 'aws_kms_key', 'dnssec');
+    expect(hasPreventDestroy(block, 'aws_kms_key.dnssec')).toBe(true);
+    expect(block).toMatch(/^\s*deletion_window_in_days\s*=\s*30\b/m);
+  });
+
+  it('refuses to destroy the key-signing keys (aws_route53_key_signing_key.main)', () => {
+    const block = resourceBlock(DNS_TF, 'aws_route53_key_signing_key', 'main');
+    expect(hasPreventDestroy(block, 'aws_route53_key_signing_key.main')).toBe(true);
+  });
+
+  it('refuses to disable signing (aws_route53_hosted_zone_dnssec.main)', () => {
+    const block = resourceBlock(DNS_TF, 'aws_route53_hosted_zone_dnssec', 'main');
+    expect(hasPreventDestroy(block, 'aws_route53_hosted_zone_dnssec.main')).toBe(true);
+  });
 });
 
 describe('Terraform prevent_destroy guards — extraction self-test', () => {

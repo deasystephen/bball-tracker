@@ -47,6 +47,10 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](../r
   must be imported before Terraform can manage it (one-shot `import` block, deleted after the
   apply). The runbook's "Do not move" table lists the accounts that stay on an address outside
   the domain (AWS root, Workspace recovery, Apple ID, GitHub, Expo, the app's ADMIN login).
+  **Zone integrity (#758):** CAA restricts issuance to Amazon's CAs (a non-AWS web host's CA goes
+  into the record in the same PR as its deploy) and every zone is DNSSEC-signed; the DS publication
+  step, its 48-hour wait and the "never disable signing while a DS is published" rule are in
+  `infra/README.md`, "CAA and DNSSEC".
 - **[Data-subject requests](../runbooks/data-subject-requests.md)** — account deletion (self-serve,
   guardian, operator script) and data export: what is removed, what is retained and why, the
   7-day backup window, identity verification for emailed requests, the WorkOS fallback, and the
