@@ -12,14 +12,14 @@ Terraform manages all AWS infrastructure.
 | `rds.tf` | PostgreSQL RDS instance |
 | `elasticache.tf` | Redis ElastiCache |
 | `s3.tf` | S3 buckets (profile picture avatars) |
-| `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records |
+| `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records, CAA records, DNSSEC (KMS key, key-signing keys, signing) (#758) |
 | `ses.tf` | SES domain identities, DKIM, custom MAIL FROM (MX/SPF), DMARC, IAM policy for ECS task |
 | `workspace.tf` | Google Workspace mail at the apex of the primary domain: MX, SPF + domain verification, DKIM, apex DMARC, and the `google_*` variables (#555) |
 | `ses-events.tf` | SES account-level suppression list, configuration set, event destination, SNS topic → SQS queue + dead-letter queue, IAM policy for the API to read the queue (#449) |
 | `datadog.tf` | Datadog integration (log forwarder, metrics) |
 | `alerting.tf` | SNS alerts topic + email subscription, CloudWatch alarms (ALB, ECS, RDS, SES reputation, SES event queue), Route 53 uptime check, and the `alert_email` / `alarm_*` variables |
 | `variables.tf` | Input variable declarations |
-| `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
+| `outputs.tf` | Output values (ALB DNS, RDS endpoint, the Secrets Manager and IAM ARNs the task definition carries, `dnssec_keys` for the DS publication step) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
 | `bootstrap/` | The remote-state S3 bucket and DynamoDB lock table that `main.tf`'s backend block names, as a separate configuration with **local** state (see "Remote state"). Has its own `.terraform.lock.hcl`, kept identical to the parent's (`backend/tests/infra/terraform-lock-parity.test.ts`); excluded from the deploy filter like the parent's |
 | `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose minor and patch bumps within the pinned major (6.x since PR #913). CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration: 5 → 6 was done in PR #913 (#866) with a "No changes." plan; open an issue for the next one |
@@ -149,6 +149,57 @@ primary_domain = "hooplings.com"
   intend is a stop.**
 
 ---
+
+### CAA and DNSSEC (#758)
+
+**CAA.** Every zone in `var.domains` carries a CAA record at its apex allowing only Amazon's four CA
+identities (`amazon.com`, `amazontrust.com`, `awstrust.com`, `amazonaws.com`, `issue` and
+`issuewild`). There is no `iodef` entry: it would publish an inbox in public DNS, and the only
+candidate is the alerts address, which stays out of committed files. ACM checks CAA on every
+issuance and renewal, so this list is exactly what keeps `aws_acm_certificate.main` renewing;
+`backend/tests/infra/dns-caa.test.ts` pins it. **Rule:** a certificate for any `hooplings.com` name
+issued by another CA (a web host outside AWS for #30, for example `letsencrypt.org`) needs that CA
+added to `aws_route53_record.caa` in the same PR as the deploy, or the host's issuance fails on CAA.
+Check first: `dig +short CAA hooplings.com`.
+
+**DNSSEC.** One KMS key (`aws_kms_key.dnssec`, ECC_NIST_P256, created through the `aws.us_east_1`
+provider alias because Route 53 accepts DNSSEC keys from that region only), one key-signing key per
+zone and signing enabled, all with `prevent_destroy` and none of the in-place disable arguments set
+(`backend/tests/infra/prevent-destroy.test.ts` pins both). Terraform does **not** publish the DS record at the
+registrar; that is the owner's step, and until it is done a zone is an insecure delegation that
+resolvers treat exactly as before. The procedure, per zone, after the apply that enabled signing:
+
+1. **Wait at least 48 hours** (the apex NS TTL is 172800 s; AWS requires every cached unsigned
+   answer to expire before the DS exists). Confirm Route 53 is signing:
+   `aws route53 get-dnssec --hosted-zone-id <zone id> --query Status.ServeSignature` → `SIGNING`.
+2. **Publish the DS** at Route 53 Domains (both domains are registered there). The call wants the
+   DNSKEY public key, not the DS digest; read all three attributes from
+   `terraform output -json dnssec_keys` rather than typing them, so a future key with another
+   algorithm cannot be published with the wrong number:
+   ```bash
+   cd infra
+   DOMAIN=hooplings.com
+   ATTRS=$(terraform output -json dnssec_keys \
+     | jq -r --arg d "$DOMAIN" '.[$d] | "Algorithm=\(.algorithm),Flags=\(.flags),PublicKey=\(.public_key)"')
+   aws route53domains associate-delegation-signer-to-domain --region us-east-1 \
+     --domain-name "$DOMAIN" --signing-attributes "$ATTRS"
+   # prints an OperationId; poll until SUCCESSFUL (minutes for .com):
+   aws route53domains get-operation-detail --region us-east-1 --operation-id <id>
+   ```
+3. **Verify** once the parent serves the DS (up to the .com DS TTL, normally under an hour):
+   ```bash
+   dig @1.1.1.1 +short DS hooplings.com                      # one DS line, algorithm 13
+   dig @1.1.1.1 +dnssec A api.hooplings.com | grep -c RRSIG  # >= 1 (a home or VPN resolver may strip them)
+   delv @1.1.1.1 api.hooplings.com                           # "; fully validated"
+   curl -sS https://api.hooplings.com/health        # still 200
+   aws acm describe-certificate --certificate-arn <arn> --query 'Certificate.RenewalEligibility'   # ELIGIBLE
+   ```
+
+**Never** disable signing, deactivate a key-signing key or disable/delete the KMS key while a DS is
+published: validating resolvers answer SERVFAIL for the whole zone. Retiring DNSSEC runs in reverse:
+`aws route53domains disassociate-delegation-signer-from-domain`, wait 48 hours, then lift the
+`prevent_destroy` guards and remove the resources. Moving a zone to another DNS host also starts
+with removing the DS.
 
 ## Email — SES, DKIM, MAIL FROM, and DMARC
 

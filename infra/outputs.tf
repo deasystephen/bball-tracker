@@ -119,6 +119,18 @@ output "sentry_dsn_secret_arn" {
   value       = aws_secretsmanager_secret.sentry_dsn.arn
 }
 
+output "dnssec_keys" {
+  description = "Per zone: the key-signing key's DS record and the signing attributes Route 53 Domains needs to publish it (infra/README.md 'CAA and DNSSEC')"
+  value = {
+    for d, k in aws_route53_key_signing_key.main : d => {
+      ds_record  = k.ds_record
+      algorithm  = k.signing_algorithm_type
+      flags      = k.flag
+      public_key = k.public_key
+    }
+  }
+}
+
 # =============================================================================
 # Database
 # =============================================================================
