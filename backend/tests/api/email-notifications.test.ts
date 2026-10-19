@@ -95,9 +95,9 @@ describe('POST /api/v1/teams/:teamId/announcements — email', () => {
     const guardian = createPlayer({ email: 'parent@example.com' });
 
     (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-      { ...coachStaff, role: headCoachRole },
-    ]);
+    (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+    // The announcement audience lists the team's staff rows.
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([coachStaff]);
     (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([{ playerId: player.id }]);
     (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([{ parentId: guardian.id }]);
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
@@ -144,9 +144,9 @@ describe('POST /api/v1/teams/:teamId/announcements — email', () => {
     const { team, headCoachRole, coachStaff, coach } = setupCoachWithTeam();
 
     (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-      { ...coachStaff, role: headCoachRole },
-    ]);
+    (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+    // The announcement audience lists the team's staff rows.
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([coachStaff]);
     // A managed player with no email: in the audience, filtered by the query.
     (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([{ playerId: 'managed-1' }]);
     (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
@@ -181,9 +181,7 @@ describe('POST /api/v1/teams/:teamId/invitations — email', () => {
     const player = createPlayer({ id: 'd4e5f6a7-b8c9-4123-a567-890abcdef012', email: 'player@example.com' });
 
     (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-      { ...coachStaff, role: headCoachRole },
-    ]);
+    (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
     (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
     (mockPrisma.teamInvitation.findFirst as jest.Mock).mockResolvedValue(null);
@@ -236,7 +234,7 @@ describe('POST /api/v1/games/:gameId/rsvp — email', () => {
       date: new Date('2026-06-15'),
       team: { name: team.name },
     });
-    (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
     (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({
       teamId: team.id,
       playerId: player.id,

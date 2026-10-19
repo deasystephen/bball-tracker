@@ -7,9 +7,10 @@ import {
   createOrConflict,
   isRecordNotFound,
   isUniqueViolation,
+  orNotFound,
   violatedConstraint,
 } from '../../src/utils/prisma-errors';
-import { BadRequestError } from '../../src/utils/errors';
+import { BadRequestError, NotFoundError } from '../../src/utils/errors';
 import { uniqueViolation } from '../factories';
 
 function knownError(code: string, meta?: Record<string, unknown>): Prisma.PrismaClientKnownRequestError {
@@ -92,6 +93,30 @@ describe('createOrConflict', () => {
     );
   });
 
+  describe('{ anyOf } targets (an index renamed by a migration, #463)', () => {
+    const targets = { anyOf: ['New_key', 'Old_key', ['teamId', 'userId']] };
+
+    it.each(['New_key', 'Old_key'])('maps a P2002 on %s', async (index) => {
+      const error = await createOrConflict(failWith(uniqueViolation(index)), 'Already exists', targets).catch(
+        (e) => e
+      );
+      expect(error).toBeInstanceOf(BadRequestError);
+      expect(error).toMatchObject({ statusCode: 400, message: 'Already exists' });
+    });
+
+    it('maps a P2002 whose column list matches a listed column list', async () => {
+      const err = knownError('P2002', { target: ['teamId', 'userId'] });
+      await expect(createOrConflict(failWith(err), 'Already exists', targets)).rejects.toBeInstanceOf(
+        BadRequestError
+      );
+    });
+
+    it('rethrows a P2002 on any other unique', async () => {
+      const other = uniqueViolation('Token_key');
+      await expect(createOrConflict(failWith(other), 'Already exists', targets)).rejects.toBe(other);
+    });
+  });
+
   it('maps any P2002 when no target is given', async () => {
     await expect(createOrConflict(failWith(uniqueViolation()), 'Already exists')).rejects.toBeInstanceOf(
       BadRequestError
@@ -101,5 +126,24 @@ describe('createOrConflict', () => {
   it('rethrows any other error unchanged', async () => {
     const fkError = knownError('P2003');
     await expect(createOrConflict(failWith(fkError), 'Already exists', 'X_key')).rejects.toBe(fkError);
+  });
+});
+
+describe('orNotFound (#463)', () => {
+  const gone = new NotFoundError('User is not a staff member of this team');
+
+  it('returns the result when the write matches a row', async () => {
+    await expect(orNotFound(async () => 'row', gone)).resolves.toBe('row');
+  });
+
+  it('throws the given error for a P2025', async () => {
+    await expect(orNotFound(failWith(knownError('P2025')), gone)).rejects.toBe(gone);
+  });
+
+  it('propagates every other error unchanged', async () => {
+    const p2002 = knownError('P2002');
+    const boom = new Error('connection reset');
+    await expect(orNotFound(failWith(p2002), gone)).rejects.toBe(p2002);
+    await expect(orNotFound(failWith(boom), gone)).rejects.toBe(boom);
   });
 });

@@ -130,14 +130,14 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     withFiniteFreeTeamLimit();
 
     it('takes the User-row lock before the in-transaction cap re-check and before provisioning', async () => {
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
 
       const res = await request(app).post('/api/v1/teams').send({ name: 'Hornets' });
 
       expect(res.status).toBe(201);
       // Two team counts: the route middleware's pre-check, then the service's
       // authoritative re-check inside the transaction.
-      const counts = (mockPrisma.teamStaff.findMany as jest.Mock).mock.invocationCallOrder;
+      const counts = (mockPrisma.teamStaff.count as jest.Mock).mock.invocationCallOrder;
       expect(counts).toHaveLength(2);
       const lockOrder = expectUserRowLockFirst();
       expect(counts[0]).toBeLessThan(lockOrder);

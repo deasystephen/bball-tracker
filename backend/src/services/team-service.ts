@@ -46,7 +46,8 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict } from '../utils/prisma-errors';
+import { createOrConflict, orNotFound } from '../utils/prisma-errors';
+import { lockTeamRow } from '../utils/team-row-lock';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -1006,8 +1007,12 @@ export class TeamService {
   }
 
   /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
-  private static async findRoleByType(teamId: string, roleType: StaffRoleType): Promise<TeamRole> {
-    const role = await prisma.teamRole.findFirst({ where: { teamId, type: roleType } });
+  private static async findRoleByType(
+    teamId: string,
+    roleType: StaffRoleType,
+    db: Prisma.TransactionClient = prisma
+  ): Promise<TeamRole> {
+    const role = await db.teamRole.findFirst({ where: { teamId, type: roleType } });
     if (!role) {
       throw new NotFoundError(`Role "${roleType}" not found for this team`);
     }
@@ -1018,9 +1023,13 @@ export class TeamService {
    * Throw if `staffUserId` is the team's only head coach. Used before any
    * change that would remove their HEAD_COACH row.
    */
-  private static async assertNotLastHeadCoach(teamId: string, staffUserId: string): Promise<void> {
+  private static async assertNotLastHeadCoach(
+    teamId: string,
+    staffUserId: string,
+    db: Prisma.TransactionClient
+  ): Promise<void> {
     // Shared rule with account deletion (#444) — see utils/permissions.
-    const blocking = await lastHeadCoachTeams(staffUserId, prisma, { teamIds: [teamId] });
+    const blocking = await lastHeadCoachTeams(staffUserId, db, { teamIds: [teamId] });
     if (blocking.length > 0) {
       throw new BadRequestError('Cannot remove the last Head Coach. Assign another Head Coach first.');
     }
@@ -1056,18 +1065,20 @@ export class TeamService {
     const role = await TeamService.findRoleByType(teamId, data.roleType);
 
     // One role per user: existing staff must be re-roled via changeStaffRole
-    const existingStaff = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: user.id },
+    const existingStaff = await prisma.teamStaff.findUnique({
+      where: { teamId_userId: { teamId, userId: user.id } },
+      select: { id: true },
     });
 
     if (existingStaff) {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // Add staff member; a lost race on @@unique([teamId, userId, roleId])
-    // answers the pre-check's 400 (#727). That index includes the role, so only
-    // a same-role duplicate is caught; two concurrent adds with different roles
-    // still leave two rows (one role per user is #463).
+    // Add staff member; a lost race on @@unique([teamId, userId]) answers the
+    // pre-check's 400 (#727). The index is one role per user per team (#463),
+    // so a concurrent add with a different role is refused too. The retired
+    // [teamId, userId, roleId] name is accepted as well, for a database still
+    // carrying it (the #463 migration not yet applied, or applied part-way).
     const teamStaff = await createOrConflict(
       () =>
         prisma.teamStaff.create({
@@ -1079,7 +1090,7 @@ export class TeamService {
           include: TEAM_STAFF_INCLUDE,
         }),
       'User is already a staff member of this team',
-      'TeamStaff_teamId_userId_roleId_key'
+      { anyOf: ['TeamStaff_teamId_userId_key', 'TeamStaff_teamId_userId_roleId_key'] }
     );
 
     logger.info('Staff added', {
@@ -1117,45 +1128,58 @@ export class TeamService {
     roleType: StaffRoleType,
     requestingUserId: string
   ): Promise<TeamStaffWithRelations> {
-    const team = await prisma.team.findUnique({ where: { id: teamId } });
-    if (!team) {
-      throw new NotFoundError('Team not found');
-    }
+    // Everything runs behind the team row lock, so two concurrent demotions
+    // (or a demotion and a removal) of a team's two head coaches cannot both
+    // pass the last-head-coach guard (#463). Error precedence is unchanged:
+    // team 404, then 403, then not-staff 404, then role 404, then same-role 400.
+    const { current, updated } = await prisma.$transaction(async (tx) => {
+      if (!(await lockTeamRow(tx, teamId))) {
+        throw new NotFoundError('Team not found');
+      }
 
-    const canManage = await canManageStaff(requestingUserId, teamId);
-    if (!canManage) {
-      throw new ForbiddenError('You do not have permission to manage team staff');
-    }
+      const canManage = await canManageStaff(requestingUserId, teamId);
+      if (!canManage) {
+        throw new ForbiddenError('You do not have permission to manage team staff');
+      }
 
-    const current = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: staffUserId },
-      include: { role: true },
-    });
-    if (!current) {
-      throw new NotFoundError('User is not a staff member of this team');
-    }
+      const current = await tx.teamStaff.findUnique({
+        where: { teamId_userId: { teamId, userId: staffUserId } },
+        include: { role: true },
+      });
+      if (!current) {
+        throw new NotFoundError('User is not a staff member of this team');
+      }
 
-    const role = await TeamService.findRoleByType(teamId, roleType);
-    if (current.roleId === role.id) {
-      throw new BadRequestError('User already has this role on the team');
-    }
+      const role = await TeamService.findRoleByType(teamId, roleType, tx);
+      if (current.roleId === role.id) {
+        throw new BadRequestError('User already has this role on the team');
+      }
 
-    // Demoting the only head coach would leave the team unmanageable.
-    if (current.role.type === 'HEAD_COACH') {
-      await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
-    }
+      // Demoting the only head coach would leave the team unmanageable.
+      if (current.role.type === 'HEAD_COACH') {
+        await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+      }
 
-    const updated = await prisma.teamStaff.update({
-      where: { id: current.id },
-      data: { roleId: role.id },
-      include: TEAM_STAFF_INCLUDE,
+      // Account deletion removes a non-head-coach's staff rows without this
+      // lock (it locks only teams where the user is HEAD_COACH), so the row
+      // can still vanish under us: the same 404 as the read, not a P2025 500.
+      const updated = await orNotFound(
+        () =>
+          tx.teamStaff.update({
+            where: { id: current.id },
+            data: { roleId: role.id },
+            include: TEAM_STAFF_INCLUDE,
+          }),
+        new NotFoundError('User is not a staff member of this team')
+      );
+      return { current, updated };
     });
 
     logger.info('Staff role changed', {
       teamId,
       staffUserId,
       fromRoleType: current.role.type,
-      roleType: role.type,
+      roleType: updated.role.type,
       userId: requestingUserId,
     });
 
@@ -1163,7 +1187,7 @@ export class TeamService {
   }
 
   /**
-   * Remove a staff member (all of their roles) from a team.
+   * Remove a staff member (their one staff row) from a team.
    * Head coaches / league admins / system admins may remove anyone; any staff
    * member may remove THEMSELVES. The last head coach can never be removed.
    */
@@ -1172,41 +1196,49 @@ export class TeamService {
     staffUserId: string,
     requestingUserId: string
   ): Promise<{ success: true }> {
-    // Get team
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-    });
-
-    if (!team) {
-      throw new NotFoundError('Team not found');
-    }
-
-    // Check permission: self-removal is always allowed (subject to the guard)
     const isSelf = requestingUserId === staffUserId;
-    if (!isSelf) {
-      const canManage = await canManageStaff(requestingUserId, teamId);
-      if (!canManage) {
-        throw new ForbiddenError('You do not have permission to manage team staff');
+
+    // Everything runs behind the team row lock, so two concurrent removals
+    // (or a removal and a demotion) of a team's two head coaches cannot both
+    // pass the last-head-coach guard (#463). Error precedence is unchanged:
+    // team 404, then 403, then not-staff 404, then last-head-coach 400.
+    const removed = await prisma.$transaction(async (tx) => {
+      if (!(await lockTeamRow(tx, teamId))) {
+        throw new NotFoundError('Team not found');
       }
-    }
 
-    const existing = await prisma.teamStaff.findFirst({
-      where: { teamId, userId: staffUserId },
-    });
-    if (!existing) {
-      throw new NotFoundError('User is not a staff member of this team');
-    }
+      // Self-removal is always allowed (subject to the guard).
+      if (!isSelf) {
+        const canManage = await canManageStaff(requestingUserId, teamId);
+        if (!canManage) {
+          throw new ForbiddenError('You do not have permission to manage team staff');
+        }
+      }
 
-    await TeamService.assertNotLastHeadCoach(teamId, staffUserId);
+      const existing = await tx.teamStaff.findUnique({
+        where: { teamId_userId: { teamId, userId: staffUserId } },
+        include: { role: true },
+      });
+      if (!existing) {
+        throw new NotFoundError('User is not a staff member of this team');
+      }
 
-    await prisma.teamStaff.deleteMany({
-      where: { teamId, userId: staffUserId },
+      if (existing.role.type === 'HEAD_COACH') {
+        await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+      }
+
+      // Account deletion removes a non-head-coach's staff rows without this
+      // lock, so the row can still vanish under us: 404, not a P2025 500.
+      return orNotFound(
+        () => tx.teamStaff.delete({ where: { id: existing.id } }),
+        new NotFoundError('User is not a staff member of this team')
+      );
     });
 
     logger.info('Staff removed', {
       teamId,
       staffUserId,
-      roleId: existing.roleId,
+      roleId: removed.roleId,
       self: isSelf,
       userId: requestingUserId,
     });

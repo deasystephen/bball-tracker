@@ -62,8 +62,8 @@ function setStaffPermission(canManageRoster: boolean): void {
     ...createTeam({ id: TEAM_ID, lineageId: LINEAGE_ID }),
     season: { league: { admins: [] } },
   });
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(
-    canManageRoster ? [{ role: { canManageRoster: true, canViewStats: true } }] : []
+  (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(
+    canManageRoster ? { role: { canManageRoster: true, canViewStats: true } } : null
   );
   (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
   (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue(null);
@@ -785,7 +785,7 @@ describe('GuardianService', () => {
       ];
       expect(lockOrder).toBeLessThan((mockPrisma.guardian.findUnique as jest.Mock).mock.invocationCallOrder[0]);
       // No permission lookup needed for self-removal
-      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamStaff.findUnique).not.toHaveBeenCalled();
     });
 
     it('lets a roster manager remove the last guardian without touching the child', async () => {
@@ -1376,7 +1376,7 @@ describe('GuardianService', () => {
 
       await GuardianService.inviteGuardian(TEAM_ID, CHILD_ID, { email: 'parent@test.com', relationship: 'OTHER' }, admin.id);
 
-      expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamStaff.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.guardianInvitation.create).toHaveBeenCalledTimes(1);
     });
   });

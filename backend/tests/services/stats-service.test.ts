@@ -1160,7 +1160,7 @@ describe('StatsService', () => {
         return Promise.resolve([]);
       });
       (mockPrisma.team.findMany as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null); // no staff row
 
       try {
         await StatsService.getPlayerOverallStats(player.id, outsider.id);

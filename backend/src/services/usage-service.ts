@@ -97,8 +97,9 @@ function toMetric(count: number, limit: number): UsageMetric {
  * Exported for testing; prefer `getUsage` for normal use (it adds caching).
  */
 export async function computeCounts(userId: string): Promise<CachedCounts> {
-  // One query: every staff row with its team + season; distinct-ify in JS so a
-  // user with two roles on the same team counts that team (and season) once.
+  // One query: every staff row with its team + season. A user holds one row
+  // per team (#463), so rows are teams; seasons are distinct-ified in JS since
+  // several teams can share one. The team Set keeps the count honest anyway.
   const staffRows = await prisma.teamStaff.findMany({
     where: { userId },
     select: { teamId: true, team: { select: { seasonId: true } } },

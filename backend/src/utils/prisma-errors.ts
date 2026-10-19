@@ -47,13 +47,31 @@ export function violatedConstraint(err: Prisma.PrismaClientKnownRequestError): {
   return { index, fields };
 }
 
-/** True when the P2002 positively names `target`: an index name, or the exact column list. */
-function violates(err: Prisma.PrismaClientKnownRequestError, target: string | string[]): boolean {
+/** One unique a P2002 may name: an index name, or the exact column list. */
+export type ConflictTarget = string | string[];
+
+/**
+ * Which unique(s) `createOrConflict` maps: one target, or `{ anyOf }` when
+ * the same constraint can carry more than one name (a migration renaming the
+ * index while tasks on either side of it still serve, #463).
+ */
+export type ConflictTargets = ConflictTarget | { anyOf: ConflictTarget[] };
+
+/** True when the P2002 positively names `target`. */
+function violatesOne(err: Prisma.PrismaClientKnownRequestError, target: ConflictTarget): boolean {
   const { index, fields } = violatedConstraint(err);
   if (typeof target === 'string') {
     return index === target;
   }
   return fields !== undefined && fields.length === target.length && target.every((f, i) => fields[i] === f);
+}
+
+/** True when the P2002 positively names `target`, or any of `target.anyOf`. */
+function violates(err: Prisma.PrismaClientKnownRequestError, target: ConflictTargets): boolean {
+  if (typeof target === 'object' && !Array.isArray(target)) {
+    return target.anyOf.some((one) => violatesOne(err, one));
+  }
+  return violatesOne(err, target);
 }
 
 /**
@@ -63,20 +81,37 @@ function violates(err: Prisma.PrismaClientKnownRequestError, target: string | st
  * pre-check does, never a 500.
  *
  * `target` names the unique the pre-check stands in for (index name, or column
- * list). A P2002 on any other unique of the model (`token @unique` on the
+ * list, or `{ anyOf: [...] }` of several). A P2002 on any other unique of the model (`token @unique` on the
  * invitation tables) is not the race the message describes and propagates,
  * as does every other error. Without `target`, any P2002 maps.
  */
 export async function createOrConflict<T>(
   run: () => Promise<T>,
   message: string,
-  target?: string | string[]
+  target?: ConflictTargets
 ): Promise<T> {
   try {
     return await run();
   } catch (err) {
     if (isUniqueViolation(err) && (target === undefined || violates(err, target))) {
       throw new BadRequestError(message);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Run an `update`/`delete` whose target may vanish under a concurrent writer.
+ * A P2025 (the guarded `where` matched nothing) throws `error`, the answer the
+ * caller's own pre-check or lock gives for that state; every other error
+ * propagates.
+ */
+export async function orNotFound<T>(run: () => Promise<T>, error: Error): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isRecordNotFound(err)) {
+      throw error;
     }
     throw err;
   }

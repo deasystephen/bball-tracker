@@ -79,16 +79,17 @@ describe('usage-service', () => {
       });
     });
 
-    it('counts DISTINCT teams — two roles on one team is one team (audit B2.8)', async () => {
+    it('counts DISTINCT seasons: two teams in one season is one season (audit B2.8)', async () => {
+      // One staff row per user per team (#463), so each row is a distinct team.
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
         { teamId: 'team-a', team: { seasonId: 's1' } },
-        { teamId: 'team-a', team: { seasonId: 's1' } }, // second role row, same team
-        { teamId: 'team-b', team: { seasonId: 's2' } },
+        { teamId: 'team-b', team: { seasonId: 's1' } },
+        { teamId: 'team-c', team: { seasonId: 's2' } },
       ]);
 
       const counts = await computeCounts(USER_ID);
 
-      expect(counts).toEqual({ teams: 2, seasons: 2 });
+      expect(counts).toEqual({ teams: 3, seasons: 2 });
     });
 
     it('returns zero usage for a user with no teams', async () => {

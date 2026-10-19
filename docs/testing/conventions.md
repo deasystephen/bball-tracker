@@ -182,6 +182,13 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   - **Prove it bites:** remove the lock statement, then move it later, and watch a test fail each time.
     A race that a native `INSERT … ON CONFLICT` already absorbs will not fail; check the emitted SQL
     with a `query` log listener before relying on a race test as the lock's guard.
+- **Rehearse a migration's data statement on a shadow table** when the state it cleans up can no
+  longer be built because the migration's own constraint forbids it. Inside one interactive
+  `prisma.$transaction`, `CREATE TEMP TABLE "<Table>" (LIKE public."<Table>" INCLUDING DEFAULTS)
+  ON COMMIT DROP` shadows the real table for that connection only (`pg_temp` is searched first),
+  insert the rows, run the statement read from the migration file, read the survivors, then throw
+  a sentinel so the transaction rolls back. The shared database's indexes are never dropped.
+  Example: `team-staff-single-role.db.test.ts` (#463).
 - `tests/integration/test-leftovers.db.test.ts` plants leftovers next to look-alikes shaped like
   seeded fixtures and proves the look-alikes survive. When changing a pattern, loosen it on
   purpose once and confirm that suite fails.

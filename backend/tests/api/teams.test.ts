@@ -12,11 +12,6 @@ import { invalidateUsage } from '../../src/services/usage-service';
 import { prismaMock } from '../setup';
 import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
-/** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
-function staffTeams(n: number): Array<{ teamId: string }> {
-  return Array.from({ length: n }, (_, i) => ({ teamId: `team-${i}` }));
-}
-
 // Test UUIDs
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -171,7 +166,7 @@ describe('Teams API', () => {
     });
 
     it('lets a FREE user create a 4th team', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(3));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(3);
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -182,11 +177,11 @@ describe('Teams API', () => {
       expect(response.body.success).toBe(true);
       expect(mockTeamService.createTeam).toHaveBeenCalled();
       // Unlimited tiers never pay for the count query.
-      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
     });
 
     it('lets a FREE user with many teams keep creating', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(25));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(25);
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -199,7 +194,7 @@ describe('Teams API', () => {
     it('lets a lapsed PREMIUM user (effective tier FREE) create a team', async () => {
       mockAuthUser.subscriptionTier = 'PREMIUM';
       mockAuthUser.subscriptionExpiresAt = new Date('2020-01-01');
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(5));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(5);
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -222,7 +217,7 @@ describe('Teams API', () => {
     });
 
     it('allows a FREE user under the limit to create a team', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT - 1));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT - 1);
       mockTeamService.createTeam.mockResolvedValue(mockTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
       const response = await request(app)
@@ -236,7 +231,7 @@ describe('Teams API', () => {
     it('maps a PaymentRequiredError raised inside the create transaction to the same 402 body', async () => {
       // Middleware pre-check passes (count says 2) but a concurrent create
       // committed first; the service's locked recount wins (audit #49).
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(2));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(2);
       mockTeamService.createTeam.mockRejectedValue(
         new PaymentRequiredError({ feature: 'unlimited_teams', currentTier: 'FREE', requiredTier: 'PREMIUM' })
       );
@@ -256,7 +251,7 @@ describe('Teams API', () => {
     });
 
     it('blocks a FREE user at the limit with 402 upgrade_required', async () => {
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(TEST_TEAM_LIMIT));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -276,7 +271,7 @@ describe('Teams API', () => {
     it('GRANDFATHERS over-limit FREE users: existing teams remain, new create blocked', async () => {
       // A user already over the cap (e.g. downgraded from PREMIUM with 5 teams)
       // keeps those teams (no deletion happens here) but cannot create more.
-      (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue(staffTeams(5));
+      (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(5);
 
       const response = await request(app)
         .post('/api/v1/teams')
@@ -299,7 +294,7 @@ describe('Teams API', () => {
         .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
 
       expect(response.status).toBe(201);
-      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
     });
 
     it('allows a LEAGUE user unlimited team creation', async () => {
@@ -312,7 +307,7 @@ describe('Teams API', () => {
         .send({ name: 'Lakers', seasonId: TEST_SEASON_ID });
 
       expect(response.status).toBe(201);
-      expect(prismaMock.teamStaff.findMany).not.toHaveBeenCalled();
+      expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
     });
   });
 

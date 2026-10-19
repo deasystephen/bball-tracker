@@ -23,7 +23,7 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { emailEquals, isSameEmail } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT, type UserSummaryWithEmail } from '../utils/user-select';
-import { createOrConflict, isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors';
+import { createOrConflict, isUniqueViolation, orNotFound } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
 import { SUPERSEDE_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 
@@ -839,19 +839,15 @@ export class GuardianService {
     // (a non-unique filter on `update`): a row no longer PENDING matches
     // nothing (P2025) and the loser gets a 400 instead of overwriting ACCEPTED
     // with REJECTED under a live Guardian link.
-    let rejected: GuardianInvitationSummary;
-    try {
-      rejected = await prisma.guardianInvitation.update({
-        where: { id: invitation.id, status: 'PENDING' },
-        data: { status: 'REJECTED' },
-        select: GUARDIAN_INVITATION_SELECT,
-      });
-    } catch (err) {
-      if (isRecordNotFound(err)) {
-        throw new BadRequestError('Cannot reject invitation: it is no longer pending');
-      }
-      throw err;
-    }
+    const rejected: GuardianInvitationSummary = await orNotFound(
+      () =>
+        prisma.guardianInvitation.update({
+          where: { id: invitation.id, status: 'PENDING' },
+          data: { status: 'REJECTED' },
+          select: GUARDIAN_INVITATION_SELECT,
+        }),
+      new BadRequestError('Cannot reject invitation: it is no longer pending')
+    );
 
     logger.info('Guardian invitation declined', {
       invitationId: invitation.id,

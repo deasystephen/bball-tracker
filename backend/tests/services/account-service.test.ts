@@ -118,6 +118,46 @@ describe('AccountService.deleteAccount', () => {
     expect(sql).toContain('FOR UPDATE');
   });
 
+  it('locks the head-coach teams after the User rows and before the last-head-coach guard (#463)', async () => {
+    armHappyPath();
+    (mockPrisma.teamStaff.findMany as jest.Mock).mockImplementation(
+      (args: { where: { userId?: string; role?: { type?: string } } }) =>
+        Promise.resolve(
+          // The user's HEAD_COACH rows (what to lock); the guard's query has no userId.
+          args.where.userId === USER_ID && args.where.role?.type === 'HEAD_COACH'
+            ? [{ teamId: 'team-b' }, { teamId: 'team-a' }]
+            : []
+        )
+    );
+
+    await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+    const queryRaw = mockPrisma.$queryRaw as jest.Mock;
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const userLock = (queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    const teamLock = (queryRaw.mock.calls[1][0] as TemplateStringsArray).join('?');
+    expect(userLock).toContain('FROM "User"');
+    expect(teamLock).toContain('FROM "Team"');
+    expect(teamLock).toContain('ORDER BY "id"');
+    expect(teamLock).toContain('FOR NO KEY UPDATE');
+    expect(JSON.stringify(queryRaw.mock.calls[1].slice(1))).toContain('team-a');
+    expect(JSON.stringify(queryRaw.mock.calls[1].slice(1))).toContain('team-b');
+
+    // The guard (the second teamStaff.findMany) runs behind the team lock.
+    const findMany = mockPrisma.teamStaff.findMany as jest.Mock;
+    expect(findMany.mock.calls[1][0]).toMatchObject({ where: { role: { type: 'HEAD_COACH' } } });
+    expect(findMany.mock.calls[1][0].where.userId).toBeUndefined();
+    expect(findMany.mock.invocationCallOrder[1]).toBeGreaterThan(queryRaw.mock.invocationCallOrder[1]);
+  });
+
+  it('takes no team lock when the user is head coach nowhere', async () => {
+    armHappyPath();
+
+    await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('locks the row, purges, tombstones, then deletes the avatar and the WorkOS user', async () => {
     armHappyPath(lockedRow({ profilePictureUrl: 'https://bucket.s3.amazonaws.com/avatars/u/a.jpg' }));
 
