@@ -37,6 +37,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
+import { SUPERSEDE_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
@@ -90,6 +91,10 @@ const LATEST_INVITATION_SELECT = {
   message: true,
 } satisfies Prisma.TeamInvitationSelect;
 type LatestInvitation = Prisma.TeamInvitationGetPayload<{ select: typeof LATEST_INVITATION_SELECT }>;
+
+/** The partial unique index behind the one-live-invitation-per-player rule, and the 400 its loser answers. */
+const PENDING_INVITATION_INDEX = 'TeamInvitation_pending_teamId_playerId_key';
+const PENDING_INVITATION_CONFLICT = 'A pending invitation already exists for this player';
 
 /**
  * Thrown inside the case-2 transaction when the target account was claimed
@@ -446,8 +451,8 @@ export class InvitationService {
   ): Promise<InvitationWithRelations> {
     return createOrConflict(
       () => prisma.teamInvitation.create({ data, select: INVITATION_SELECT }),
-      'A pending invitation already exists for this player',
-      'TeamInvitation_pending_teamId_playerId_key'
+      PENDING_INVITATION_CONFLICT,
+      PENDING_INVITATION_INDEX
     );
   }
 
@@ -463,67 +468,66 @@ export class InvitationService {
     data: Prisma.TeamInvitationUncheckedCreateInput,
     recipientEmail: string | null
   ): Promise<InvitationWithRelations> {
-    try {
-      return await prisma.$transaction(async (tx) => {
-        const accepted = await tx.teamInvitation.findFirst({
-          where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
-          select: { id: true },
-        });
-        if (accepted) {
-          throw new BadRequestError('Player already has access to this team');
-        }
-
-        const latest = await this.latestAfterCooldown(
-          tx,
-          { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
-          recipientEmail
-        );
-
-        // A bare resend ({ playerId, supersede: true }) must not wipe the
-        // jersey/position/message the coach set at add time: for invite-only
-        // players (case 3) the roster row is born from the live invitation at
-        // accept, so a superseding row created without them would roster the
-        // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
-        // caller omits inherit from the row being superseded; explicitly
-        // provided values still win. The source is the newest row for the pair
-        // and only when it is PENDING (the row the updateMany below expires;
-        // at most one exists and nothing is created after it) or EXPIRED (a
-        // lapsed invitation the player's dead-link tap already flipped, #678).
-        // A newest row that is CANCELLED or REJECTED means the coach or the
-        // player ended it, so nothing older is revived.
-        const superseded =
-          latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
-
-        const { count: supersededCount } = await tx.teamInvitation.updateMany({
-          where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
-          data: { status: 'EXPIRED' },
-        });
-        if (supersededCount > 0) {
-          logger.info('Invitation superseded', {
-            teamId: data.teamId,
-            playerId: data.playerId,
-            invitedById: data.invitedById,
-            supersededCount,
+    return createOrConflict(
+      () =>
+        prisma.$transaction(async (tx) => {
+          await setLocalLockTimeout(tx, SUPERSEDE_LOCK_TIMEOUT_MS);
+          const accepted = await tx.teamInvitation.findFirst({
+            where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
+            select: { id: true },
           });
-        }
+          if (accepted) {
+            throw new BadRequestError('Player already has access to this team');
+          }
 
-        return tx.teamInvitation.create({
-          data: {
-            ...data,
-            jerseyNumber:
-              data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
-            position: data.position === undefined ? superseded?.position : data.position,
-            message: data.message === undefined ? superseded?.message : data.message,
-          },
-          select: INVITATION_SELECT,
-        });
-      });
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new BadRequestError('A pending invitation already exists for this player');
-      }
-      throw err;
-    }
+          const latest = await this.latestAfterCooldown(
+            tx,
+            { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
+            recipientEmail
+          );
+
+          // A bare resend ({ playerId, supersede: true }) must not wipe the
+          // jersey/position/message the coach set at add time: for invite-only
+          // players (case 3) the roster row is born from the live invitation at
+          // accept, so a superseding row created without them would roster the
+          // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
+          // caller omits inherit from the row being superseded; explicitly
+          // provided values still win. The source is the newest row for the pair
+          // and only when it is PENDING (the row the updateMany below expires;
+          // at most one exists and nothing is created after it) or EXPIRED (a
+          // lapsed invitation the player's dead-link tap already flipped, #678).
+          // A newest row that is CANCELLED or REJECTED means the coach or the
+          // player ended it, so nothing older is revived.
+          const superseded =
+            latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
+
+          const { count: supersededCount } = await tx.teamInvitation.updateMany({
+            where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
+            data: { status: 'EXPIRED' },
+          });
+          if (supersededCount > 0) {
+            logger.info('Invitation superseded', {
+              teamId: data.teamId,
+              playerId: data.playerId,
+              invitedById: data.invitedById,
+              supersededCount,
+            });
+          }
+
+          return tx.teamInvitation.create({
+            data: {
+              ...data,
+              jerseyNumber:
+                data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
+              position: data.position === undefined ? superseded?.position : data.position,
+              message: data.message === undefined ? superseded?.message : data.message,
+            },
+            select: INVITATION_SELECT,
+          });
+        }),
+      PENDING_INVITATION_CONFLICT,
+      PENDING_INVITATION_INDEX
+    );
   }
 
   /**
@@ -665,7 +669,7 @@ export class InvitationService {
     if (existingInvitation) {
       const live = existingInvitation.expiresAt.getTime() > Date.now();
       if (live && !options.supersede) {
-        throw new BadRequestError('A pending invitation already exists for this player');
+        throw new BadRequestError(PENDING_INVITATION_CONFLICT);
       }
       if (!live && !options.supersede) {
         // Stale row on a plain create: lazy-expire it here (the old link is

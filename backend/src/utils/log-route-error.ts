@@ -23,6 +23,7 @@
 
 import type { Response } from 'express';
 import { logger } from './logger';
+import { redactUrlsInText } from './redact';
 
 export function logRouteError(
   res: Pick<Response, 'statusCode'>,
@@ -36,5 +37,9 @@ export function logRouteError(
     ...context,
     status,
     error: error instanceof Error ? error.message : String(error),
+    // Prisma's own message (timeout, elapsed ms) rides on a wrapped error's cause.
+    ...(error instanceof Error && error.cause instanceof Error
+      ? { cause: redactUrlsInText(error.cause.message) }
+      : {}),
   });
 }

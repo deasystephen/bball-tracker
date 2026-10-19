@@ -6,7 +6,9 @@ import {
   LastHeadCoachError,
   NotFoundError,
   ServiceUnavailableError,
+  TransactionTimeoutError,
 } from '../../src/utils/errors';
+import { lockTimeout, transactionClosed } from '../factories';
 import { logger } from '../../src/utils/logger';
 import { captureRequestException } from '../../src/utils/sentry';
 
@@ -158,8 +160,58 @@ describe('respondWithError (#831)', () => {
     expect(res.statusCode).toBe(503);
     expect(res.headers['Retry-After']).toBe('5');
     expect(res.body).toEqual({ error: 'Service temporarily unavailable, please retry' });
-    expect(error).toHaveBeenCalledWith('Error getting team', { status: 503, error: 'query failed' });
+    expect(error).toHaveBeenCalledWith('Error getting team', {
+      status: 503,
+      error: 'query failed',
+      cause: 'timeout exceeded when trying to connect',
+    });
     expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
+  });
+
+  it.each([
+    ['a P2028 lock-wait expiry', () => transactionClosed()],
+    ["PostgreSQL's lock_timeout (55P03, P2039)", () => lockTimeout('P2039')],
+    ['a raw-query lock_timeout (P2010)', () => lockTimeout('P2010')],
+    ['a TransactionTimeoutError', () => new TransactionTimeoutError(transactionClosed())],
+  ])('answers %s as 503 transaction_timeout with Retry-After, logged at error and captured (#908)', (_name, make) => {
+    const res = fakeRes();
+    const err = make();
+    respondWithError(res, err, { log: 'Error inviting', fallback: 'Failed', sentryFlow: 'x' });
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['Retry-After']).toBe('5');
+    expect(res.body).toEqual({
+      error: 'Another request for this record is still being processed; please retry',
+      code: 'transaction_timeout',
+    });
+    expect(error).toHaveBeenCalledWith('Error inviting', expect.objectContaining({ status: 503 }));
+    expect(mockCapture).toHaveBeenCalledWith(err, REQ, { flow: 'x' });
+  });
+
+  it('redacts URLs in the logged cause', () => {
+    const res = fakeRes();
+    const err = new Error('outer', { cause: new Error('timeout exceeded when trying to connect https://x.test/?token=abc') });
+    respondWithError(res, err, { log: 'Error', fallback: 'Failed' });
+    expect(JSON.stringify(error.mock.calls)).not.toContain('token=abc');
+  });
+
+  it('leaves a 5xx AppError alone, even with a pool timeout in its cause, and sends no Retry-After for it', () => {
+    const res = fakeRes();
+    const err = new ServiceUnavailableError('Database unavailable');
+    err.cause = new Error('timeout exceeded when trying to connect');
+    respondWithError(res, err, { log: 'Error', fallback: 'Failed' });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ error: 'Failed' });
+    expect(res.headers['Retry-After']).toBeUndefined();
+  });
+
+  it('answers maxWait exhaustion (P2028) with the pool-busy 503 body', () => {
+    const res = fakeRes();
+    respondWithError(res, transactionClosed('Transaction API error: Unable to start a transaction in the given time.'), {
+      log: 'Error inviting',
+      fallback: 'Failed',
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ error: 'Service temporarily unavailable, please retry' });
   });
 
   it('ends a response a stream already started and logs it as a 500', () => {
