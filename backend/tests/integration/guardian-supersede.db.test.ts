@@ -14,14 +14,13 @@
  */
 jest.unmock('../../src/models');
 import { randomBytes } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
 import prisma from '../../src/models';
 import { GuardianService } from '../../src/services/guardian-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
 import { DbFixtures, type Org } from '../support/db-fixtures';
-import { backendPid, callBehindLock, expectCancelledByLockTimeout, pause, track, waitForBlockedBy } from '../support/db-locks';
+import { backendPid, callBehindLock, expectCancelledByLockTimeout, track, waitForBlockedBy } from '../support/db-locks';
 import { SUPERSEDE_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
 
 jest.mock('../../src/services/mailer', () => ({
@@ -74,28 +73,6 @@ async function rowsFor(childId: string): Promise<{ id: string; status: string }[
     orderBy: { createdAt: 'asc' },
     select: { id: true, status: true },
   });
-}
-
-/**
- * Waits until a backend of this database sits in a lock wait on the
- * `GuardianInvitation` expire and returns how many do (0 on timeout).
- */
-async function lockWaiters(tx: Prisma.TransactionClient, timeoutMs = 4000): Promise<number> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    // pg_stat_activity is snapshotted once per transaction; the holder polls
-    // from inside one, so drop the snapshot before every read.
-    await tx.$executeRaw`SELECT pg_stat_clear_snapshot()`;
-    const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM pg_stat_activity
-      WHERE datname = current_database()
-        AND wait_event_type = 'Lock'
-        AND query LIKE 'UPDATE "public"."GuardianInvitation"%'`;
-    if (n >= 1 || Date.now() > deadline) {
-      return n;
-    }
-    await pause(25);
-  }
 }
 
 const PAST_COOLDOWN = INVITATION_RESEND_COOLDOWN_MS + 60_000;
@@ -193,7 +170,13 @@ describe('guardian resend (supersede, #420)', () => {
           )
         );
         resend.promise.catch(() => undefined);
-        expect(await lockWaiters(holder)).toBeGreaterThanOrEqual(1);
+        // The shared helper (tests/support/db-locks.ts) throws with its own
+        // message when nothing blocks, naming a missing lock or a settled
+        // call, where the suite's old private poll returned 0 and read as a
+        // wrong count (#932).
+        expect(
+          await waitForBlockedBy(holder, await backendPid(holder), { settled: resend })
+        ).not.toHaveLength(0);
 
         await holder.guardianInvitation.update({ where: { id: liveId }, data: { status: 'EXPIRED' } });
         const intruder = await holder.guardianInvitation.create({
