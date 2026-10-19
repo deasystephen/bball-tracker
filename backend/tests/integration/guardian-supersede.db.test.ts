@@ -161,6 +161,7 @@ describe('guardian resend (supersede, #420)', () => {
     await prisma.$transaction(
       async (holder) => {
         await holder.$queryRaw`SELECT "id" FROM "GuardianInvitation" WHERE "id" = ${liveId} FOR UPDATE`;
+        const pid = await backendPid(holder);
         resend = track(
           GuardianService.inviteGuardian(
             org.teamId,
@@ -170,13 +171,11 @@ describe('guardian resend (supersede, #420)', () => {
           )
         );
         resend.promise.catch(() => undefined);
-        // The shared helper (tests/support/db-locks.ts) throws with its own
-        // message when nothing blocks, naming a missing lock or a settled
-        // call, where the suite's old private poll returned 0 and read as a
-        // wrong count (#932).
-        expect(
-          await waitForBlockedBy(holder, await backendPid(holder), { settled: resend })
-        ).not.toHaveLength(0);
+        // Queued on the expire, past its reads: it already holds the child's
+        // User row (lockUsers). 4 s: its own transaction lives 5 s.
+        const blocked = await waitForBlockedBy(holder, pid, { tables: ['User'], timeoutMs: 4000, settled: resend });
+        expect(blocked).toEqual([{ relations: ['User'] }]);
+        expect(resend.settled()).toBe(false);
 
         await holder.guardianInvitation.update({ where: { id: liveId }, data: { status: 'EXPIRED' } });
         const intruder = await holder.guardianInvitation.create({
