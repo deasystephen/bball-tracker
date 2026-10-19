@@ -65,8 +65,10 @@ export interface BlockedBackend {
  * a missing lock, not a slow run, and no deadline needs to pass to say so.
  *
  * The deadline bounds only how long the call under test may take to REACH its
- * lock statement (CI runs Jest with coverage on a loaded runner, where that
- * has taken over 2 s, #932); once it is blocked the caller proceeds at once.
+ * lock statement (CI runs Jest with coverage on a loaded runner); once it is
+ * blocked the caller proceeds at once. The #932 CI failures were not slowness
+ * but a stale pg_stat_activity snapshot hiding a freshly opened pool backend;
+ * every poll now clears the snapshot first.
  * Keep `timeoutMs` plus the holder's remaining work under the holder
  * transaction's `timeout`, and remember that the call under test's own
  * `lock_timeout`, where it sets one, starts only when it begins waiting.
@@ -82,6 +84,12 @@ export async function waitForBlockedBy(
 ): Promise<BlockedBackend[]> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    // pg_stat_activity is snapshotted once per transaction, and the holder
+    // polls from inside one: a backend the pool opened AFTER the first read
+    // (a cold pool on CI) is missing from the stale snapshot, so the waiter
+    // is never seen even while it sits on the lock (#932). Drop the snapshot
+    // before every read; pg_blocking_pids itself is live.
+    await tx.$executeRaw`SELECT pg_stat_clear_snapshot()`;
     const rows = await tx.$queryRaw<BlockedBackend[]>`
       SELECT array(
                SELECT DISTINCT c.relname::text FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
