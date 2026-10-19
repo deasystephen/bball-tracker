@@ -13,6 +13,9 @@ terraform {
     }
   }
 
+  # The bucket and lock table are declared in bootstrap/ (local state,
+  # imported from the hand-made originals in #641); see infra/README.md,
+  # "Remote state".
   backend "s3" {
     bucket         = "bball-tracker-terraform-state"
     key            = "infra/terraform.tfstate"

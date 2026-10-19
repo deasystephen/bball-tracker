@@ -24,7 +24,7 @@ set -uo pipefail
 
 # The paths that make up the deployed image and its task definition. Keep in
 # step with the `backend` filter of the detect-changes job in ci.yml.
-DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md' ':(exclude)infra/.terraform.lock.hcl')
+DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md' ':(exclude)infra/.terraform.lock.hcl' ':(exclude)infra/bootstrap/.terraform.lock.hcl')
 
 DEPLOYED="${1:-}"
 NEW="${2:-}"

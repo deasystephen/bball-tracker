@@ -72,7 +72,6 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
       ]
       Resource = [
         aws_secretsmanager_secret.database_url.arn,
-        aws_secretsmanager_secret.jwt_secret.arn,
         aws_secretsmanager_secret.workos_api_key.arn,
         aws_secretsmanager_secret.workos_client_id.arn,
         aws_secretsmanager_secret.sentry_dsn.arn,
@@ -93,16 +92,6 @@ resource "aws_secretsmanager_secret" "database_url" {
 resource "aws_secretsmanager_secret_version" "database_url" {
   secret_id     = aws_secretsmanager_secret.database_url.id
   secret_string = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.main.endpoint}/${var.db_name}"
-}
-
-resource "aws_secretsmanager_secret" "jwt_secret" {
-  name = "${local.name_prefix}/jwt-secret"
-  tags = { Name = "${local.name_prefix}-jwt-secret" }
-}
-
-resource "aws_secretsmanager_secret_version" "jwt_secret" {
-  secret_id     = aws_secretsmanager_secret.jwt_secret.id
-  secret_string = var.jwt_secret
 }
 
 resource "aws_secretsmanager_secret" "workos_api_key" {

@@ -21,6 +21,7 @@ Terraform manages all AWS infrastructure.
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, etc.) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
+| `bootstrap/` | The remote-state S3 bucket and DynamoDB lock table that `main.tf`'s backend block names, as a separate configuration with **local** state (see "Remote state"). Has its own `.terraform.lock.hcl`, kept identical to the parent's (`backend/tests/infra/terraform-lock-parity.test.ts`); excluded from the deploy filter like the parent's |
 | `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose minor and patch bumps within the pinned major (6.x since PR #913). CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration: 5 → 6 was done in PR #913 (#866) with a "No changes." plan; open an issue for the next one |
 
 ---
@@ -55,7 +56,7 @@ update the file:
 # so a missing name stops the loop instead of printing an empty value.
 for name in redis_url s3_avatars_bucket_name \
             ecs_execution_role_arn ecs_task_role_arn \
-            database_url_secret_arn jwt_secret_arn workos_api_key_secret_arn \
+            database_url_secret_arn workos_api_key_secret_arn \
             workos_client_id_secret_arn sentry_dsn_secret_arn; do
   value=$(terraform output -raw "$name") || exit 1
   printf '%s=%s\n' "$name" "$value"
@@ -64,6 +65,42 @@ done
 
 That is the accepted cost of having one source of truth; a stale literal fails loudly at task
 start, whereas the previous split silently deployed neither copy.
+
+---
+
+## Remote state
+
+`main.tf` keeps state in S3 bucket `bball-tracker-terraform-state` (key `infra/terraform.tfstate`,
+SSE enforced by the backend's `encrypt = true`) and locks through DynamoDB table `terraform-locks`.
+Both were created by hand on 2026-02-07/08, before any Terraform existed, and are now declared in
+`bootstrap/` and imported (#641). That configuration deliberately uses **local state**: the bucket
+cannot hold the state that declares it. The local file is gitignored and holds nothing sensitive;
+if it is lost, the `import` blocks in `bootstrap/main.tf` re-adopt both resources on the next apply.
+
+**The state object is the most sensitive object in the account.** It holds the RDS master password,
+the WorkOS API key, the Datadog API key and the Sentry DSN in plaintext (Terraform's `sensitive`
+flag only redacts CLI output). Read access to that one object is possession of every production
+credential, so the bucket is held to: versioning on, all four public-access-block flags on, default
+SSE-S3 with the bucket key and SSE-C blocked, `BucketOwnerEnforced` ownership, a bucket policy that
+denies any request with `aws:SecureTransport = false`, and `prevent_destroy` on the bucket and the
+table (deletion protection on the table too). Nothing in `bootstrap/` may ever plan a destroy.
+
+Re-check the live posture (what the bootstrap configuration enforces) with:
+
+```bash
+aws s3api get-bucket-versioning     --bucket bball-tracker-terraform-state   # Status: Enabled
+aws s3api get-public-access-block   --bucket bball-tracker-terraform-state   # four × true
+aws s3api get-bucket-encryption     --bucket bball-tracker-terraform-state   # AES256, BucketKeyEnabled
+aws s3api get-bucket-policy         --bucket bball-tracker-terraform-state   # DenyInsecureTransport
+cd infra/bootstrap && terraform plan                                         # No changes.
+```
+
+Terraform is pinned to 1.5.x (`ci.yml`), so S3-native locking (`use_lockfile`, Terraform ≥ 1.10)
+is not an option yet and the lock table stays. CI runs `fmt -recursive`, `init -backend=false` and
+`validate` on `bootstrap/` like the parent; `plan` and `apply` there are manual, from a developer
+machine with production credentials, and rare (the configuration changes only when the bucket's
+posture does). The RDS master password that sits in that state has its own rotation procedure in
+`docs/runbooks/rds-backup-restore.md`, "Rotate the master password".
 
 ---
 

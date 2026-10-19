@@ -32,6 +32,7 @@ import { ROOT } from './workflows';
 const DNS_TF = path.join(ROOT, 'infra/dns.tf');
 const S3_TF = path.join(ROOT, 'infra/s3.tf');
 const RDS_TF = path.join(ROOT, 'infra/rds.tf');
+const BOOTSTRAP_TF = path.join(ROOT, 'infra/bootstrap/main.tf');
 
 function resourceBlock(file: string, type: string, name: string): string {
   const label = `${path.relative(ROOT, file)} resource "${type}" "${name}"`;
@@ -53,6 +54,19 @@ describe('Terraform prevent_destroy guards', () => {
   it('leaves the avatars bucket destroyable when empty, so a staging stack can be torn down', () => {
     const block = resourceBlock(S3_TF, 'aws_s3_bucket', 'avatars');
     expect(hasPreventDestroy(block, 'aws_s3_bucket.avatars')).toBe(false);
+  });
+
+  // The remote-state bucket holds every production credential in plaintext and
+  // the lock table serializes every apply (#641, infra/README.md "Remote state").
+  it('refuses to destroy the Terraform state bucket (aws_s3_bucket.state)', () => {
+    const block = resourceBlock(BOOTSTRAP_TF, 'aws_s3_bucket', 'state');
+    expect(hasPreventDestroy(block, 'aws_s3_bucket.state')).toBe(true);
+  });
+
+  it('refuses to destroy the Terraform lock table (aws_dynamodb_table.locks)', () => {
+    const block = resourceBlock(BOOTSTRAP_TF, 'aws_dynamodb_table', 'locks');
+    expect(hasPreventDestroy(block, 'aws_dynamodb_table.locks')).toBe(true);
+    expect(block).toMatch(/^\s*deletion_protection_enabled\s*=\s*true/m);
   });
 });
 

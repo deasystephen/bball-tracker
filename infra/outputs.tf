@@ -104,11 +104,6 @@ output "database_url_secret_arn" {
   value       = aws_secretsmanager_secret.database_url.arn
 }
 
-output "jwt_secret_arn" {
-  description = "Full ARN of the JWT_SECRET secret (used in infra/task-definition.json)"
-  value       = aws_secretsmanager_secret.jwt_secret.arn
-}
-
 output "workos_api_key_secret_arn" {
   description = "Full ARN of the WORKOS_API_KEY secret (used in infra/task-definition.json)"
   value       = aws_secretsmanager_secret.workos_api_key.arn
@@ -136,12 +131,6 @@ output "rds_endpoint" {
 output "rds_hostname" {
   description = "RDS PostgreSQL hostname"
   value       = aws_db_instance.main.address
-}
-
-output "database_url" {
-  description = "Full DATABASE_URL for the backend application"
-  value       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.main.endpoint}/${var.db_name}"
-  sensitive   = true
 }
 
 # =============================================================================

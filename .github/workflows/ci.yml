@@ -217,6 +217,17 @@ jobs:
         working-directory: infra
         run: terraform validate -no-color
 
+      # infra/bootstrap/ is a separate root module (the remote-state bucket and
+      # lock table, local state; infra/README.md "Remote state"). The parent's
+      # init/validate do not descend into it; fmt -recursive above does.
+      - name: terraform init (bootstrap, no backend)
+        working-directory: infra/bootstrap
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate (bootstrap)
+        working-directory: infra/bootstrap
+        run: terraform validate -no-color
+
   detect-changes:
     name: Detect backend changes
     runs-on: ubuntu-latest
@@ -244,6 +255,7 @@ jobs:
               - '{backend/**,infra/**,docker/**,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/.terraform.lock.hcl'
+              - '!infra/bootstrap/.terraform.lock.hcl'
 
       # A run started by hand always deploys: that is what it is for. The paths
       # above are repeated in .github/scripts/deploy-contents.sh, which lists
