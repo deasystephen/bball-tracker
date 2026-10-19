@@ -83,7 +83,6 @@ Open `backend/.env` and update these values:
 ```env
 WORKOS_API_KEY="sk_test_YOUR_API_KEY_HERE"
 WORKOS_CLIENT_ID="client_YOUR_CLIENT_ID_HERE"
-WORKOS_ENVIRONMENT="sandbox"
 WORKOS_REDIRECT_URI="http://localhost:3000/api/v1/auth/callback"
 WORKOS_PROVIDER="authkit"
 # Leave these empty (not needed for basic email/password):
@@ -104,7 +103,6 @@ If you created a Connection in Step 6 (Option 2):
 ```env
 WORKOS_API_KEY="sk_test_YOUR_API_KEY_HERE"
 WORKOS_CLIENT_ID="client_YOUR_CLIENT_ID_HERE"
-WORKOS_ENVIRONMENT="sandbox"
 WORKOS_REDIRECT_URI="http://localhost:3000/api/v1/auth/callback"
 WORKOS_CONNECTION_ID="conn_YOUR_CONNECTION_ID_HERE"
 # Leave these empty:

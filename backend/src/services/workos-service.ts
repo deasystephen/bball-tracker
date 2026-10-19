@@ -3,7 +3,7 @@
  */
 
 import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
-import { workos, WORKOS_CLIENT_ID, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
+import { assertWorkOSConfig, getWorkOS, getWorkOSClientId, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
 import { Prisma, User } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
@@ -11,7 +11,7 @@ import { isAdminEmail } from '../utils/admin-emails';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { ConflictError, ServiceUnavailableError } from '../utils/errors';
 
-type UserManagement = typeof workos.userManagement;
+type UserManagement = ReturnType<typeof getWorkOS>['userManagement'];
 export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
 export type WorkOSUser = Awaited<ReturnType<UserManagement['getUser']>>;
 export type WorkOSUserList = Awaited<ReturnType<UserManagement['listUsers']>>;
@@ -86,7 +86,7 @@ export class WorkOSService {
       organizationId?: string;
       provider?: string;
     } = {
-      clientId: WORKOS_CLIENT_ID,
+      clientId: getWorkOSClientId(),
       redirectUri,
       state: state || undefined,
     };
@@ -107,13 +107,13 @@ export class WorkOSService {
     }
 
     if (codeChallenge) {
-      return workos.userManagement.getAuthorizationUrl({
+      return getWorkOS().userManagement.getAuthorizationUrl({
         ...params,
         codeChallenge,
         codeChallengeMethod: 'S256',
       });
     }
-    return workos.userManagement.getAuthorizationUrl(params);
+    return getWorkOS().userManagement.getAuthorizationUrl(params);
   }
 
   /**
@@ -122,8 +122,8 @@ export class WorkOSService {
    *   authorization request. Required by WorkOS when the code was issued with one.
    */
   static async exchangeCodeForToken(code: string, codeVerifier?: string): Promise<WorkOSAuthentication> {
-    return workos.userManagement.authenticateWithCode({
-      clientId: WORKOS_CLIENT_ID,
+    return getWorkOS().userManagement.authenticateWithCode({
+      clientId: getWorkOSClientId(),
       code,
       ...(codeVerifier ? { codeVerifier } : {}),
     });
@@ -136,8 +136,8 @@ export class WorkOSService {
    * rotates the refresh token on every use, so callers must persist the new one.
    */
   static async refreshSession(refreshToken: string): Promise<WorkOSAuthentication> {
-    return workos.userManagement.authenticateWithRefreshToken({
-      clientId: WORKOS_CLIENT_ID,
+    return getWorkOS().userManagement.authenticateWithRefreshToken({
+      clientId: getWorkOSClientId(),
       refreshToken,
     });
   }
@@ -150,7 +150,7 @@ export class WorkOSService {
    * logs out. The `sessionId` is the `sid` claim of a verified access token.
    */
   static async revokeSession(sessionId: string): Promise<void> {
-    await workos.userManagement.revokeSession({ sessionId });
+    await getWorkOS().userManagement.revokeSession({ sessionId });
   }
 
   /**
@@ -160,14 +160,14 @@ export class WorkOSService {
    * transaction has committed; the caller handles failure.
    */
   static async deleteUser(workosUserId: string): Promise<void> {
-    await workos.userManagement.deleteUser(workosUserId);
+    await getWorkOS().userManagement.deleteUser(workosUserId);
   }
 
   /**
    * Get user information from WorkOS
    */
   static async getUser(userId: string): Promise<WorkOSUser> {
-    return workos.userManagement.getUser(userId);
+    return getWorkOS().userManagement.getUser(userId);
   }
 
   /**
@@ -178,7 +178,7 @@ export class WorkOSService {
     limit?: number;
     cursor?: string;
   }): Promise<WorkOSUserList> {
-    return workos.userManagement.listUsers(options);
+    return getWorkOS().userManagement.listUsers(options);
   }
 
   /**
@@ -338,6 +338,8 @@ export class WorkOSService {
       return null;
     }
 
+    // Outside the try: a missing WorkOS config is a 500, not a JWKS outage.
+    assertWorkOSConfig();
     try {
       const { payload } = await jwtVerify(accessToken, getWorkOSJwks(), {
         algorithms: ALLOWED_JWT_ALGS,

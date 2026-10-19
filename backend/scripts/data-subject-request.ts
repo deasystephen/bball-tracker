@@ -19,11 +19,12 @@
  * the script exits non-zero before exporting or deleting anything.
  */
 
-// Loads backend/.env locally (WORKOS_API_KEY is required at import time by the
-// WorkOS client; DATABASE_URL by Prisma). In production run with the task's env.
+// Loads backend/.env locally (DATABASE_URL for Prisma, WORKOS_* for `delete`,
+// which is checked up front). In production run with the task's env.
 import 'dotenv/config';
 import prisma from '../src/models';
 import { AccountService } from '../src/services/account-service';
+import { assertWorkOSConfig } from '../src/utils/workos-client';
 import { findActiveUserIdByEmail } from './data-subject-lookup';
 
 async function main(argv: string[]): Promise<void> {
@@ -40,6 +41,14 @@ async function main(argv: string[]): Promise<void> {
     const data = await AccountService.exportUserData(userId);
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;
+  }
+
+  // Before anything is erased: a delete without WorkOS credentials would
+  // anonymise the row and leave the identity-provider user behind. A row with
+  // no workosUserId never reaches WorkOS, so it needs no credentials.
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: { workosUserId: true } });
+  if (target?.workosUserId) {
+    assertWorkOSConfig();
   }
 
   const result = await AccountService.deleteAccount(userId, { actorId: 'operator', mode: 'operator' });

@@ -210,6 +210,7 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - **The base checkout does the seeding, on purpose.** The seed imports the generated Prisma
   client, and a client generated from the new schema cannot write to a database that is still
   on the previous one. Do not "simplify" it to one checkout.
+- The guard seeds the **base** checkout. A base older than #926 (lazy WorkOS client) still throws at import without WORKOS env, so for such a base export `WORKOS_API_KEY` and `WORKOS_CLIENT_ID` in the shell; the script no longer sets placeholders.
 - It also fails when a migration that is already on `main` is edited or removed: that migration
   has run in production.
 - **Seed coverage is the limit.** A backfill on a table the seed leaves empty passes without

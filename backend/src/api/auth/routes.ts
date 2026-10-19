@@ -132,7 +132,6 @@ if (process.env.NODE_ENV === 'development') {
       hasApiKey: !!process.env.WORKOS_API_KEY,
       hasClientId: !!process.env.WORKOS_CLIENT_ID,
       hasRedirectUri: !!process.env.WORKOS_REDIRECT_URI,
-      environment: process.env.WORKOS_ENVIRONMENT || 'NOT SET',
       hasConnectionId: !!process.env.WORKOS_CONNECTION_ID,
       hasOrganizationId: !!process.env.WORKOS_ORGANIZATION_ID,
       hasProvider: !!process.env.WORKOS_PROVIDER,
