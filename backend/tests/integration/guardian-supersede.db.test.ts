@@ -21,7 +21,7 @@ import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { logger } from '../../src/utils/logger';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 import { backendPid, callBehindLock, expectCancelledByLockTimeout, track, waitForBlockedBy } from '../support/db-locks';
-import { SUPERSEDE_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { DB_LOCK_TIMEOUT_MS } from '../../src/models/pool-config';
 
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
@@ -216,7 +216,7 @@ describe('guardian resend (supersede, #420)', () => {
       () => GuardianService.inviteGuardian(org.teamId, childId, { email, relationship: 'MOTHER', supersede: true }, coachId)
     );
 
-    expectCancelledByLockTimeout(outcome, SUPERSEDE_LOCK_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
     expect(await rowsFor(childId)).toEqual([{ id: liveId, status: 'PENDING' }]);
   });
 

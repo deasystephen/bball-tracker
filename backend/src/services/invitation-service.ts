@@ -37,7 +37,6 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { SUPERSEDE_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
 
 /**
@@ -470,8 +469,9 @@ export class InvitationService {
   ): Promise<InvitationWithRelations> {
     return createOrConflict(
       () =>
+        // Every lock wait below is bounded by the pool-wide lock_timeout
+        // (models/pool-config.ts#DB_LOCK_TIMEOUT_MS, #908 → #944).
         prisma.$transaction(async (tx) => {
-          await setLocalLockTimeout(tx, SUPERSEDE_LOCK_TIMEOUT_MS);
           const accepted = await tx.teamInvitation.findFirst({
             where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
             select: { id: true },

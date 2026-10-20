@@ -134,8 +134,9 @@ export interface LockWaitOutcome {
  * Takes a lock from a holder transaction, runs `call` while the holder keeps
  * it, and reports how the call ended and how long it took. The holder stays
  * open for the whole call, so the call must give up on its own: this is the
- * pattern that proves a `SET LOCAL lock_timeout` (`src/utils/lock-timeout.ts`)
- * cancels a waiter, as opposed to the lock being released. `holdLock` runs
+ * pattern that proves the pool-wide `lock_timeout`
+ * (`src/models/pool-config.ts#DB_LOCK_TIMEOUT_MS`) cancels a waiter, as
+ * opposed to the lock being released. `holdLock` runs
  * inside the holder and takes the lock (a `SELECT … FOR UPDATE` /
  * `FOR NO KEY UPDATE`). The holder's `timeout` must outlive the call's own
  * limits (its `lock_timeout`, then Prisma's 5 s).

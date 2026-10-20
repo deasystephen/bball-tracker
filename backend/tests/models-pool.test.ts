@@ -8,6 +8,7 @@ import path from 'path';
 import {
   DB_CONNECTION_TIMEOUT_MS,
   DB_IDLE_TIMEOUT_MS,
+  DB_LOCK_TIMEOUT_MS,
   DB_POOL_MAX,
   DB_POOL_OPTIONS,
   POOL_TIMEOUT_MESSAGES,
@@ -43,7 +44,13 @@ describe('pg pool bounds', () => {
       max: DB_POOL_MAX,
       connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
       idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
+      options: `-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`,
     });
+  });
+
+  it('bounds every lock wait pool-wide, under Prisma\'s 5 s transaction timeout (#944)', () => {
+    expect(DB_LOCK_TIMEOUT_MS).toBeLessThan(5000);
+    expect(DB_POOL_OPTIONS.options).toBe(`-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`);
   });
 
   it('hands the bounds to PrismaPg', () => {

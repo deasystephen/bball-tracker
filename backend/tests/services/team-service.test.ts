@@ -2027,8 +2027,8 @@ describe('TeamService', () => {
     });
 
     it('throws NotFoundError when the team does not exist', async () => {
-      // SET LOCAL lock_timeout first (#934), then the team row lock finds no row.
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ set_config: '4000ms' }]).mockResolvedValueOnce([]);
+      // The team row lock finds no row.
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       const error = await TeamService.changeStaffRole('t', 'u', 'TEAM_MANAGER', 'r').catch((e) => e);
 
@@ -2168,8 +2168,7 @@ describe('TeamService', () => {
     });
 
     it('throws NotFoundError when the team does not exist (the lock finds no row)', async () => {
-      // SET LOCAL lock_timeout first (#934), then the team row lock finds no row.
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ set_config: '4000ms' }]).mockResolvedValueOnce([]);
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       const error = await TeamService.removeStaffMember('t', 'u', 'r').catch((e) => e);
 
@@ -2278,14 +2277,11 @@ describe('TeamService', () => {
   describe('head-coach changes run behind the team row lock (#463)', () => {
     const order = (m: unknown, call = 0): number => (m as jest.Mock).mock.invocationCallOrder[call];
 
-    /** The transaction's first statement bounds the lock wait (#934); the lock is the second. */
+    /** The lock is the transaction's first and only raw statement (the lock wait is bounded pool-wide, #944). */
     function expectTeamLock(teamId: string): void {
       const queryRaw = mockPrisma.$queryRaw as jest.Mock;
-      expect(queryRaw).toHaveBeenCalledTimes(2);
-      const [timeoutStrings, ...timeoutValues] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(timeoutStrings.join('?')).toContain("set_config('lock_timeout', ?, true)");
-      expect(timeoutValues).toEqual(['4000ms']);
-      const [strings, ...values] = queryRaw.mock.calls[1] as [TemplateStringsArray, ...unknown[]];
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      const [strings, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
       const sql = strings.join('?');
       expect(sql).toContain('FROM "Team"');
       expect(sql).toContain('FOR NO KEY UPDATE');
@@ -2308,7 +2304,7 @@ describe('TeamService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expectTeamLock(team.id);
       expect(order(mockPrisma.$queryRaw)).toBeGreaterThan(order(mockPrisma.$transaction));
-      expect(order(mockPrisma.teamStaff.findUnique)).toBeGreaterThan(order(mockPrisma.$queryRaw, 1));
+      expect(order(mockPrisma.teamStaff.findUnique)).toBeGreaterThan(order(mockPrisma.$queryRaw));
       expect(order(mockPrisma.teamStaff.findMany)).toBeGreaterThan(order(mockPrisma.teamStaff.findUnique));
       expect(order(mockPrisma.teamStaff.delete)).toBeGreaterThan(order(mockPrisma.teamStaff.findMany));
     });
@@ -2332,7 +2328,7 @@ describe('TeamService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expectTeamLock(team.id);
       expect(order(mockPrisma.$queryRaw)).toBeGreaterThan(order(mockPrisma.$transaction));
-      expect(order(mockPrisma.teamStaff.findUnique)).toBeGreaterThan(order(mockPrisma.$queryRaw, 1));
+      expect(order(mockPrisma.teamStaff.findUnique)).toBeGreaterThan(order(mockPrisma.$queryRaw));
       expect(order(mockPrisma.teamStaff.findMany)).toBeGreaterThan(order(mockPrisma.teamStaff.findUnique));
       expect(order(mockPrisma.teamStaff.update)).toBeGreaterThan(order(mockPrisma.teamStaff.findMany));
     });

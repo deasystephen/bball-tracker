@@ -29,7 +29,8 @@ import prisma from '../../src/models';
 import { GameEventService } from '../../src/services/game-event-service';
 import { GameService } from '../../src/services/game-service';
 import { DbFixtures, Org } from '../support/db-fixtures';
-import { backendPid, track, waitForBlockedBy } from '../support/db-locks';
+import { backendPid, callBehindLock, expectCancelledByLockTimeout, track, waitForBlockedBy } from '../support/db-locks';
+import { DB_LOCK_TIMEOUT_MS } from '../../src/models/pool-config';
 
 jest.setTimeout(60000);
 
@@ -147,5 +148,25 @@ describe('finalizeGameStats under overlapping writes (#724)', () => {
       select: { homeScore: true, awayScore: true },
     });
     expect(game).toEqual({ homeScore: 2, awayScore: 20 });
+  });
+});
+
+describe('bounded lock wait on the game row (#944)', () => {
+  it('a SHOT write stuck behind the game row lock is cancelled at lock_timeout, answers the retryable 503 and writes nothing', async () => {
+    const gameId = await fx.game(org, { status: 'IN_PROGRESS' });
+
+    // The pool-wide lock_timeout, with no SET LOCAL in GameEventService:
+    // the holder keeps the row for the whole call, so the write must give
+    // up on its own.
+    const outcome = await callBehindLock(
+      prisma,
+      async (holder) => {
+        await holder.$queryRaw`SELECT "id" FROM "Game" WHERE "id" = ${gameId} FOR UPDATE`;
+      },
+      () => GameEventService.createEvent(gameId, shot(shooterA, 2), coachId)
+    );
+
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
+    expect(await prisma.gameEvent.count({ where: { gameId } })).toBe(0);
   });
 });

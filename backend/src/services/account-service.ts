@@ -57,7 +57,6 @@ import { captureException } from '../utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
-import { TEAM_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
@@ -167,14 +166,13 @@ export class AccountService {
   static async deleteAccount(userId: string, options: DeleteAccountOptions): Promise<DeleteAccountResult> {
     const { actorId, mode } = options;
 
+    // Each lock wait below (the User rows, then the Team rows) is bounded by
+    // the pool-wide lock_timeout (models/pool-config.ts#DB_LOCK_TIMEOUT_MS,
+    // #934 → #944): a delete stuck behind a holder has that statement
+    // cancelled by PostgreSQL and answers the retryable 503, so no pool
+    // connection stays pinned past the bound. Two waits in a row can still
+    // reach Prisma's 5 s (same 503, P2028 flavour).
     const committed = await prisma.$transaction(async (tx) => {
-      // 0. Bound each lock wait below (the User rows, then the Team rows): a
-      // delete stuck behind a holder has that statement cancelled by
-      // PostgreSQL at TEAM_LOCK_TIMEOUT_MS and answers the retryable 503, so
-      // no pool connection stays pinned past the bound (#934). Two waits in a
-      // row can still reach Prisma's 5 s (same 503, P2028 flavour).
-      await setLocalLockTimeout(tx, TEAM_LOCK_TIMEOUT_MS);
-
       // 1. Lock the row. Concurrent deletes, self-writes and sign-ins serialize here.
       // The same statement locks every child this user guards (#664): the
       // purge below removes their links and promotes the next primary, which

@@ -31,7 +31,7 @@ import { TeamService } from '../../src/services/team-service';
 import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
 import { DbFixtures, Org } from '../support/db-fixtures';
-import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { DB_LOCK_TIMEOUT_MS } from '../../src/models/pool-config';
 import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(60000);
@@ -335,7 +335,7 @@ describe('bounded lock wait behind the team row lock (#934)', () => {
 
     const outcome = await callBehindLock(prisma, holdTeamRow(teamId), () => TeamService.removeStaffMember(teamId, a, a));
 
-    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
     expect(await prisma.teamStaff.count({ where: { teamId } })).toBe(2);
   });
 
@@ -346,7 +346,7 @@ describe('bounded lock wait behind the team row lock (#934)', () => {
       TeamService.changeStaffRole(teamId, b, 'ASSISTANT_COACH', b)
     );
 
-    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
     expect(await prisma.teamStaff.count({ where: { teamId, role: { type: 'HEAD_COACH' } } })).toBe(2);
   });
 });
