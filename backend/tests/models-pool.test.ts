@@ -50,7 +50,11 @@ describe('pg pool bounds', () => {
 
   it('bounds every lock wait pool-wide, under Prisma\'s 5 s transaction timeout (#944)', () => {
     expect(DB_LOCK_TIMEOUT_MS).toBeLessThan(5000);
-    expect(DB_POOL_OPTIONS.options).toBe(`-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`);
+    // Parsed, not rebuilt: pg hands `options` to the server verbatim, so the
+    // flag shape is what matters.
+    const flag = DB_POOL_OPTIONS.options.match(/^-c lock_timeout=(\d+)$/);
+    expect(flag).not.toBeNull();
+    expect(Number(flag?.[1])).toBe(DB_LOCK_TIMEOUT_MS);
   });
 
   it('hands the bounds to PrismaPg', () => {

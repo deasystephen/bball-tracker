@@ -59,8 +59,12 @@ export const DB_IDLE_TIMEOUT_MS = 30_000;
  * 5 s (the same 503, from P2028), and even then the waiting statement is
  * cancelled at its own 4 s. A genuine race resolves in milliseconds, so
  * reaching it means the holder is stuck, a slow-database signal worth seeing.
- * `prisma migrate deploy` (the entrypoint) and `prisma db seed` open their
- * own connections and are unaffected.
+ * `prisma migrate deploy` (the entrypoint) opens its own connection and is
+ * unaffected; `prisma db seed` has its own client for its rows but finalizes
+ * stats through `StatsService`, so those two calls run with this bound.
+ * One transaction raises it for itself with `SET LOCAL`:
+ * `StatsService.finalizeGameStats` (`FINALIZE_LOCK_TIMEOUT_MS`), whose wait
+ * for the game row is meant to outlast a burst of event writes.
  */
 export const DB_LOCK_TIMEOUT_MS = 4_000;
 

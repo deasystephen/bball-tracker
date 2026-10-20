@@ -17,21 +17,23 @@ beforeAll(async () => {
 });
 
 describe('pool-wide lock_timeout (#944)', () => {
-  const expected = `${DB_LOCK_TIMEOUT_MS / 1000}s`;
+  // pg_settings.setting is the raw value in the GUC's base unit (ms here), so
+  // the comparison does not depend on how PostgreSQL pretty-prints it.
+  const expected = String(DB_LOCK_TIMEOUT_MS);
 
   it('is set on a pooled connection', async () => {
-    const [{ lock_timeout }] = await prisma.$queryRaw<
-      { lock_timeout: string }[]
-    >`SELECT current_setting('lock_timeout') AS lock_timeout`;
-    expect(lock_timeout).toBe(expected);
+    const [{ setting }] = await prisma.$queryRaw<
+      { setting: string }[]
+    >`SELECT setting FROM pg_settings WHERE name = 'lock_timeout'`;
+    expect(setting).toBe(expected);
   });
 
   it('is set inside an interactive transaction without any SET LOCAL', async () => {
     const value = await prisma.$transaction(async (tx) => {
-      const [{ lock_timeout }] = await tx.$queryRaw<
-        { lock_timeout: string }[]
-      >`SELECT current_setting('lock_timeout') AS lock_timeout`;
-      return lock_timeout;
+      const [{ setting }] = await tx.$queryRaw<
+        { setting: string }[]
+      >`SELECT setting FROM pg_settings WHERE name = 'lock_timeout'`;
+      return setting;
     });
     expect(value).toBe(expected);
   });

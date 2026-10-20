@@ -215,6 +215,15 @@ function derivePlayerAverages(totals: AveragedTotals, gamesPlayed: number): Deri
  */
 export const FINALIZE_TRANSACTION_TIMEOUT_MS = 15_000;
 
+/**
+ * The pool-wide `lock_timeout` (`models/pool-config.ts#DB_LOCK_TIMEOUT_MS`,
+ * 4 s, #944) would cut that wait short with the same swallowed outcome, so the
+ * finalize transaction raises its own bound with `SET LOCAL` as its first
+ * statement: one second under the transaction clock, so PostgreSQL still
+ * cancels first and frees the connection.
+ */
+export const FINALIZE_LOCK_TIMEOUT_MS = FINALIZE_TRANSACTION_TIMEOUT_MS - 1_000;
+
 export class StatsService {
   /**
    * Calculate player stats from game events for a specific game.
@@ -450,6 +459,8 @@ export class StatsService {
     // overlapping finalizations serialize and the last one to commit has read
     // every committed event (#724).
     const { teamId, players } = await prisma.$transaction(async (tx) => {
+      // `set_config(…, true)` is SET LOCAL with a bind parameter (SET takes none).
+      await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${FINALIZE_LOCK_TIMEOUT_MS}ms`}, true)`;
       await lockGameRow(tx, gameId);
 
       const game = await tx.game.findUnique({

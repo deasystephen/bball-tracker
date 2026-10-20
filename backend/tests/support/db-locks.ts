@@ -13,7 +13,8 @@
  * `waitForBlockedBy` deadline plus the holder's remaining work (the default
  * deadline needs an explicit holder `timeout`, e.g. 10 s), and the holder must
  * release promptly once the call is seen waiting, because the call's own 5 s
- * (and its `lock_timeout`, where it sets one) are running by then.
+ * and the pool-wide 4 s `lock_timeout` (`src/models/pool-config.ts`) are
+ * running by then.
  */
 
 import type { Prisma, PrismaClient } from '@prisma/client';
@@ -72,8 +73,8 @@ export interface BlockedBackend {
  * but a stale pg_stat_activity snapshot hiding a freshly opened pool backend;
  * every poll now clears the snapshot first.
  * Keep `timeoutMs` plus the holder's remaining work under the holder
- * transaction's `timeout`, and remember that the call under test's own
- * `lock_timeout`, where it sets one, starts only when it begins waiting.
+ * transaction's `timeout`, and remember that the pool-wide `lock_timeout`
+ * starts only when the call under test begins waiting.
  */
 export async function waitForBlockedBy(
   tx: Prisma.TransactionClient,
