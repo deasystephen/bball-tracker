@@ -111,15 +111,8 @@ describe('AccountService.deleteAccount', () => {
     const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
     expect(result.success).toBe(true);
-    // SET LOCAL lock_timeout is the first statement (#934); the User lock is the second.
-    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
-    const [timeoutStrings, ...timeoutValues] = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0] as [
-      TemplateStringsArray,
-      ...unknown[],
-    ];
-    expect(timeoutStrings.join('?')).toContain("set_config('lock_timeout', ?, true)");
-    expect(timeoutValues).toEqual(['4000ms']);
-    const sql = ((mockPrisma.$queryRaw as jest.Mock).mock.calls[1][0] as TemplateStringsArray).join('?');
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const sql = ((mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toContain('"id" IN (SELECT "childId" FROM "Guardian" WHERE "parentId" = ?)');
     expect(sql).toContain('ORDER BY "id"');
     expect(sql).toContain('FOR UPDATE');
@@ -140,22 +133,22 @@ describe('AccountService.deleteAccount', () => {
     await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
     const queryRaw = mockPrisma.$queryRaw as jest.Mock;
-    // lock_timeout (#934), User lock, Team lock.
-    expect(queryRaw).toHaveBeenCalledTimes(3);
-    const userLock = (queryRaw.mock.calls[1][0] as TemplateStringsArray).join('?');
-    const teamLock = (queryRaw.mock.calls[2][0] as TemplateStringsArray).join('?');
+    // User lock, then Team lock (the lock wait is bounded pool-wide, #944).
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const userLock = (queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    const teamLock = (queryRaw.mock.calls[1][0] as TemplateStringsArray).join('?');
     expect(userLock).toContain('FROM "User"');
     expect(teamLock).toContain('FROM "Team"');
     expect(teamLock).toContain('ORDER BY "id"');
     expect(teamLock).toContain('FOR NO KEY UPDATE');
-    expect(JSON.stringify(queryRaw.mock.calls[2].slice(1))).toContain('team-a');
-    expect(JSON.stringify(queryRaw.mock.calls[2].slice(1))).toContain('team-b');
+    expect(JSON.stringify(queryRaw.mock.calls[1].slice(1))).toContain('team-a');
+    expect(JSON.stringify(queryRaw.mock.calls[1].slice(1))).toContain('team-b');
 
     // The guard (the second teamStaff.findMany) runs behind the team lock.
     const findMany = mockPrisma.teamStaff.findMany as jest.Mock;
     expect(findMany.mock.calls[1][0]).toMatchObject({ where: { role: { type: 'HEAD_COACH' } } });
     expect(findMany.mock.calls[1][0].where.userId).toBeUndefined();
-    expect(findMany.mock.invocationCallOrder[1]).toBeGreaterThan(queryRaw.mock.invocationCallOrder[2]);
+    expect(findMany.mock.invocationCallOrder[1]).toBeGreaterThan(queryRaw.mock.invocationCallOrder[1]);
   });
 
   it('takes no team lock when the user is head coach nowhere', async () => {
@@ -163,8 +156,7 @@ describe('AccountService.deleteAccount', () => {
 
     await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
-    // lock_timeout (#934) and the User lock only: no Team lock.
-    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('locks the row, purges, tombstones, then deletes the avatar and the WorkOS user', async () => {
@@ -173,8 +165,8 @@ describe('AccountService.deleteAccount', () => {
     const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
     expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
-    // lock_timeout (#934), then the lock, nothing else raw
-    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    // Lock first
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     // Purge
     for (const model of ['pushToken', 'calendarFeedToken', 'teamStaff', 'gameRsvp', 'leagueAdmin'] as const) {
       expect(mockPrisma[model].deleteMany).toHaveBeenCalledWith({ where: { userId: USER_ID } });
@@ -296,15 +288,12 @@ describe('AccountService.deleteAccount', () => {
   });
 
   it('answers 404 for an unknown or already-deleted account and writes nothing', async () => {
-    // Each attempt: SET LOCAL lock_timeout (#934), then the User lock.
-    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ set_config: '4000ms' }]).mockResolvedValueOnce([]);
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
     await expect(AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' })).rejects.toBeInstanceOf(
       NotFoundError
     );
 
-    (mockPrisma.$queryRaw as jest.Mock)
-      .mockResolvedValueOnce([{ set_config: '4000ms' }])
-      .mockResolvedValueOnce([lockedRow({ deletedAt: new Date() })]);
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([lockedRow({ deletedAt: new Date() })]);
     await expect(AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' })).rejects.toBeInstanceOf(
       NotFoundError
     );

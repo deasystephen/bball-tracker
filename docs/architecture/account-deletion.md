@@ -6,7 +6,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
 - **Anonymize in place; erase outright only when nothing references the row.**
   `AccountService.deleteAccount(userId, { actorId, mode })` (`services/account-service.ts`) runs
-  ONE `$transaction`: `SET LOCAL lock_timeout = '4000ms'` first (#934: each of the lock waits below is cancelled by PostgreSQL at 4 s and the delete answers the retryable 503 `transaction_timeout`, writing nothing; two slow holders in a row can still reach Prisma's 5 s, same 503; `utils/lock-timeout.ts`) → `SELECT … FOR UPDATE` on the user row and every child it guards, in one
+  ONE `$transaction` (each lock wait below is bounded at 4 s by the pool-wide `lock_timeout`, `models/pool-config.ts`, #934/#944: a delete stuck behind a holder is cancelled by PostgreSQL and answers the retryable 503 `transaction_timeout`, writing nothing; two slow holders in a row can still reach Prisma's 5 s, same 503): `SELECT … FOR UPDATE` on the user row and every child it guards, in one
   id-ordered statement (#664, the guardian primacy lock; `docs/architecture/guardians.md`) → `SELECT … FOR NO KEY UPDATE` on every team where the user is HEAD_COACH, in one id-ordered statement (#463, the lock staff removal and demotion take; User before Team, `docs/architecture/authorization.md`) → last-head-coach check → purge rows
   that only serve the person → scrub personal data elsewhere → **count what still points at the
   row** → tombstone it (`workosUserId`/`email`/`profilePictureUrl` null, `name =

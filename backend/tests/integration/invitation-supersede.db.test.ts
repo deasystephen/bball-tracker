@@ -20,7 +20,7 @@ import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
 import { backendPid, callBehindLock, expectCancelledByLockTimeout, track, waitForBlockedBy } from '../support/db-locks';
-import { SUPERSEDE_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { DB_LOCK_TIMEOUT_MS } from '../../src/models/pool-config';
 import { logger } from '../../src/utils/logger';
 import { spyOnInfo } from '../support/domain-events';
 import { hashRecipient } from '../../src/services/mailer/ses-mailer';
@@ -331,7 +331,7 @@ describe('bounded lock wait on the supersede path (#908)', () => {
       () => InvitationService.createInvitation(teamId, { playerId, supersede: true }, coachId)
     );
 
-    expectCancelledByLockTimeout(outcome, SUPERSEDE_LOCK_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
     // Nothing was written: the live row is still the only PENDING one.
     expect((await rowsFor(playerId)).map((r) => [r.id, r.status])).toEqual([[liveId, 'PENDING']]);
   });

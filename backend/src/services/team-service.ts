@@ -48,7 +48,6 @@ import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamRow } from '../utils/team-row-lock';
-import { TEAM_LOCK_TIMEOUT_MS, setLocalLockTimeout } from '../utils/lock-timeout';
 
 const TEAM_SUMMARY_SELECT = {
   id: true,
@@ -1133,11 +1132,10 @@ export class TeamService {
     // (or a demotion and a removal) of a team's two head coaches cannot both
     // pass the last-head-coach guard (#463). Error precedence is unchanged:
     // team 404, then 403, then not-staff 404, then role 404, then same-role 400.
-    // A waiter stuck behind the lock is cancelled by PostgreSQL at
-    // TEAM_LOCK_TIMEOUT_MS and answers the retryable 503, freeing its
-    // connection (#934).
+    // A waiter stuck behind the lock is cancelled by PostgreSQL at the
+    // pool-wide lock_timeout (models/pool-config.ts, #934 → #944) and answers
+    // the retryable 503, freeing its connection.
     const { current, updated } = await prisma.$transaction(async (tx) => {
-      await setLocalLockTimeout(tx, TEAM_LOCK_TIMEOUT_MS);
       if (!(await lockTeamRow(tx, teamId))) {
         throw new NotFoundError('Team not found');
       }
@@ -1207,11 +1205,10 @@ export class TeamService {
     // (or a removal and a demotion) of a team's two head coaches cannot both
     // pass the last-head-coach guard (#463). Error precedence is unchanged:
     // team 404, then 403, then not-staff 404, then last-head-coach 400.
-    // A waiter stuck behind the lock is cancelled by PostgreSQL at
-    // TEAM_LOCK_TIMEOUT_MS and answers the retryable 503, freeing its
-    // connection (#934).
+    // A waiter stuck behind the lock is cancelled by PostgreSQL at the
+    // pool-wide lock_timeout (models/pool-config.ts, #934 → #944) and answers
+    // the retryable 503, freeing its connection.
     const removed = await prisma.$transaction(async (tx) => {
-      await setLocalLockTimeout(tx, TEAM_LOCK_TIMEOUT_MS);
       if (!(await lockTeamRow(tx, teamId))) {
         throw new NotFoundError('Team not found');
       }

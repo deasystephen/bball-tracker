@@ -45,10 +45,35 @@ export const DB_BUSY_BODY = { error: 'Service temporarily unavailable, please re
 /** How long an idle client stays open before the pool closes it. */
 export const DB_IDLE_TIMEOUT_MS = 30_000;
 
+/**
+ * How long any statement may wait for a row or table lock before PostgreSQL
+ * cancels it (SQLSTATE 55P03, `classifyDbError` → the retryable 503
+ * `transaction_timeout`). Set once, for every pooled connection, as the
+ * `lock_timeout` startup option below (#944; #908 and #934 had set it per
+ * transaction with `SET LOCAL`). Under Prisma's 5 s interactive-transaction
+ * timeout so PostgreSQL gives up first and the connection is freed: Prisma's
+ * timeout alone only stops Prisma waiting while the statement stays blocked
+ * inside PostgreSQL, pinning the connection until the holder commits, and
+ * every retry adds a waiter. The bound is per lock acquisition, not per
+ * transaction: two slow holders in a row can still take a transaction past
+ * 5 s (the same 503, from P2028), and even then the waiting statement is
+ * cancelled at its own 4 s. A genuine race resolves in milliseconds, so
+ * reaching it means the holder is stuck, a slow-database signal worth seeing.
+ * `prisma migrate deploy` (the entrypoint) opens its own connection and is
+ * unaffected; `prisma db seed` has its own client for its rows but finalizes
+ * stats through `StatsService`, so those two calls run with this bound.
+ * One transaction raises it for itself with `SET LOCAL`:
+ * `StatsService.finalizeGameStats` (`FINALIZE_LOCK_TIMEOUT_MS`), whose wait
+ * for the game row is meant to outlast a burst of event writes.
+ */
+export const DB_LOCK_TIMEOUT_MS = 4_000;
+
 export const DB_POOL_OPTIONS = {
   max: DB_POOL_MAX,
   connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
   idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
+  /** pg passes this to the server as the connection's startup `options`. */
+  options: `-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`,
 } as const;
 
 /**
@@ -109,7 +134,7 @@ function driverSqlState(candidate: unknown): unknown {
  * Whether PostgreSQL itself cancelled the statement at `lock_timeout` (55P03),
  * anywhere in the cause chain. Narrower than `classifyDbError`, which answers
  * `lock_wait` for Prisma's own P2028 expiry too: the real-database suites use
- * this to prove the bound in `lock-timeout.ts` fired, not Prisma's 5 s.
+ * this to prove the pool-wide `DB_LOCK_TIMEOUT_MS` fired, not Prisma's 5 s.
  */
 export function isLockTimeoutError(err: unknown): boolean {
   for (const candidate of causeChain(err)) {
@@ -125,7 +150,7 @@ export function isLockTimeoutError(err: unknown): boolean {
  * - `lock_wait`: the transaction was cancelled waiting on a lock held by
  *   another request. Either Prisma `P2028` for an interactive transaction that
  *   outlived its timeout, or PostgreSQL's `lock_timeout` (55P03,
- *   `lock-timeout.ts`), which Prisma wraps as P2010 or P2039 with the SQLSTATE
+ *   `DB_LOCK_TIMEOUT_MS`), which Prisma wraps as P2010 or P2039 with the SQLSTATE
  *   on `meta.driverAdapterError.cause.code`.
  * - `busy`: a pg pool wait/connect timeout, or P2028 for `maxWait`
  *   exhaustion. Answered with `DB_BUSY_BODY`.

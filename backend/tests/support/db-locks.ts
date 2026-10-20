@@ -13,7 +13,8 @@
  * `waitForBlockedBy` deadline plus the holder's remaining work (the default
  * deadline needs an explicit holder `timeout`, e.g. 10 s), and the holder must
  * release promptly once the call is seen waiting, because the call's own 5 s
- * (and its `lock_timeout`, where it sets one) are running by then.
+ * and the pool-wide 4 s `lock_timeout` (`src/models/pool-config.ts`) are
+ * running by then.
  */
 
 import type { Prisma, PrismaClient } from '@prisma/client';
@@ -72,8 +73,8 @@ export interface BlockedBackend {
  * but a stale pg_stat_activity snapshot hiding a freshly opened pool backend;
  * every poll now clears the snapshot first.
  * Keep `timeoutMs` plus the holder's remaining work under the holder
- * transaction's `timeout`, and remember that the call under test's own
- * `lock_timeout`, where it sets one, starts only when it begins waiting.
+ * transaction's `timeout`, and remember that the pool-wide `lock_timeout`
+ * starts only when the call under test begins waiting.
  */
 export async function waitForBlockedBy(
   tx: Prisma.TransactionClient,
@@ -134,8 +135,9 @@ export interface LockWaitOutcome {
  * Takes a lock from a holder transaction, runs `call` while the holder keeps
  * it, and reports how the call ended and how long it took. The holder stays
  * open for the whole call, so the call must give up on its own: this is the
- * pattern that proves a `SET LOCAL lock_timeout` (`src/utils/lock-timeout.ts`)
- * cancels a waiter, as opposed to the lock being released. `holdLock` runs
+ * pattern that proves the pool-wide `lock_timeout`
+ * (`src/models/pool-config.ts#DB_LOCK_TIMEOUT_MS`) cancels a waiter, as
+ * opposed to the lock being released. `holdLock` runs
  * inside the holder and takes the lock (a `SELECT … FOR UPDATE` /
  * `FOR NO KEY UPDATE`). The holder's `timeout` must outlive the call's own
  * limits (its `lock_timeout`, then Prisma's 5 s).

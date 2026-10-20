@@ -2,7 +2,7 @@
  * Unit tests for StatsService
  */
 
-import { FINALIZE_TRANSACTION_TIMEOUT_MS, StatsService } from '../../src/services/stats-service';
+import { FINALIZE_LOCK_TIMEOUT_MS, FINALIZE_TRANSACTION_TIMEOUT_MS, StatsService } from '../../src/services/stats-service';
 import { mockPrisma } from '../setup';
 import {
   createAdmin,
@@ -370,8 +370,13 @@ describe('StatsService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(typeof (mockPrisma.$transaction as jest.Mock).mock.calls[0][0]).toBe('function');
       const queryRaw = mockPrisma.$queryRaw as jest.Mock;
-      expect(queryRaw.mock.calls[0][0].join('?')).toContain('FOR UPDATE');
-      const lockOrder = queryRaw.mock.invocationCallOrder[0];
+      // The pool-wide 4 s lock_timeout would cut the wait for the game row
+      // short (#944): the transaction raises it first, under its own clock.
+      expect(queryRaw.mock.calls[0][0].join('?')).toContain("set_config('lock_timeout', ?, true)");
+      expect(queryRaw.mock.calls[0].slice(1)).toEqual([`${FINALIZE_LOCK_TIMEOUT_MS}ms`]);
+      expect(FINALIZE_LOCK_TIMEOUT_MS).toBeLessThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
+      expect(queryRaw.mock.calls[1][0].join('?')).toContain('FOR UPDATE');
+      const lockOrder = queryRaw.mock.invocationCallOrder[1];
       expect(lockOrder).toBeLessThan((mockPrisma.gameEvent.findMany as jest.Mock).mock.invocationCallOrder[0]);
       expect(lockOrder).toBeLessThan((mockPrisma.teamStats.upsert as jest.Mock).mock.invocationCallOrder[0]);
       // A clock long enough for a slow database, not Prisma's 5 s default (#724 review)

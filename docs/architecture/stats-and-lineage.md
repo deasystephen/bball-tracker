@@ -21,7 +21,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `FINISHED` and re-finalizes, or the PATCH's own finalization runs after the write and reads it.
   `tests/integration/stats-finalize.db.test.ts` runs both races against Postgres. The transaction has an
   explicit `FINALIZE_TRANSACTION_TIMEOUT_MS` (15 s) clock instead of Prisma's 5 s default, because a timeout
-  is swallowed by the callers and leaves a FINISHED game without a box score; `PlayerStats` rows are
+  is swallowed by the callers and leaves a FINISHED game without a box score, and raises the pool-wide 4 s
+  `lock_timeout` to `FINALIZE_LOCK_TIMEOUT_MS` (14 s) with `SET LOCAL` as its first statement for the same
+  reason (#944; `docs/architecture/backend-services.md`, pool section); `PlayerStats` rows are
   replaced with one `deleteMany` and one `createMany` to keep the time under the lock short.
 - **Legacy SHOT rows change value on the next re-finalize (#723).** Since the shared point rule in
   `backend/src/utils/shot-points.ts`, a stored SHOT whose `points` is not 1, 2, 3, missing or `null` counts

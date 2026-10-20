@@ -38,7 +38,7 @@ import { lastHeadCoachTeams } from '../../src/utils/permissions';
 import { PlayerService } from '../../src/services/player-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { GuardianService } from '../../src/services/guardian-service';
-import { TEAM_LOCK_TIMEOUT_MS } from '../../src/utils/lock-timeout';
+import { DB_LOCK_TIMEOUT_MS } from '../../src/models/pool-config';
 import { callBehindLock, expectCancelledByLockTimeout } from '../support/db-locks';
 
 jest.setTimeout(30000);
@@ -423,7 +423,7 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
       () => AccountService.deleteAccount(leaving, { actorId: leaving, mode: 'self' })
     );
 
-    expectCancelledByLockTimeout(outcome, TEAM_LOCK_TIMEOUT_MS);
+    expectCancelledByLockTimeout(outcome, DB_LOCK_TIMEOUT_MS);
     // Nothing was written: the account is untouched and both staff rows remain.
     expect(await prisma.user.findUniqueOrThrow({ where: { id: leaving } })).toEqual(before);
     expect(await prisma.teamStaff.count({ where: { teamId: team.teamId } })).toBe(2);
