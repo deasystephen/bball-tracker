@@ -61,6 +61,14 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
+
+// Request context and logging, ahead of CORS and the body parsers (#963): a
+// preflight, a malformed JSON body (400) or an oversized one (413) is answered
+// before any router, and it still gets an X-Request-Id, a log context and an
+// `HTTP request` line.
+app.use(requestContext);
+app.use(requestLogger);
+
 // The browser (the web invite page's accept, #964) may send only these
 // request headers; X-Request-Id and X-Hooplings-Client are the correlation
 // headers of #963 (api/middleware/request-headers.ts). X-Request-Id is exposed
@@ -73,10 +81,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Request context and logging
-app.use(requestContext);
-app.use(requestLogger);
 
 // Health check endpoint.
 // This backs the ECS container health check, so it pings the database: a

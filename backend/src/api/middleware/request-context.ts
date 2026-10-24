@@ -10,7 +10,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { runWithLogContext, type LogContextStore } from '../../utils/log-context';
+import { runWithLogContext } from '../../utils/log-context';
 import { REQUEST_ID_HEADER, parseClientHeader, parseRequestIdHeader } from './request-headers';
 
 declare global {
@@ -30,6 +30,5 @@ export function requestContext(req: Request, res: Response, next: NextFunction):
   req.requestId = requestId;
   req.hooplingsClient = client;
   res.setHeader(REQUEST_ID_HEADER, requestId);
-  const store: LogContextStore = client ? { requestId, client } : { requestId };
-  runWithLogContext(store, next);
+  runWithLogContext({ requestId, client }, next);
 }

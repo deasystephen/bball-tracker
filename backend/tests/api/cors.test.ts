@@ -118,6 +118,8 @@ describe('CORS allowlist (#447)', () => {
         expect(res.headers['access-control-allow-origin']).toBe(origin);
         const allowed = String(res.headers['access-control-allow-headers']).toLowerCase().split(',');
         expect(allowed).toEqual(expect.arrayContaining(['content-type', 'x-hooplings-client', 'x-request-id']));
+        // The preflight itself carries a request id (requestContext runs before cors).
+        expect(res.headers['x-request-id']).toEqual(expect.any(String));
       }
     );
 

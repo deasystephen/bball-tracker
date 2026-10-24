@@ -74,12 +74,12 @@ describe('createShutdown', () => {
     expect(logger.warn).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalledWith('Shutdown: connection did not quit cleanly', {
       signal: 'SIGTERM',
-      client: 'prisma',
+      connection: 'prisma',
       error: 'pg gone',
     });
     expect(logger.warn).toHaveBeenCalledWith('Shutdown: connection did not quit cleanly', {
       signal: 'SIGTERM',
-      client: 'redis',
+      connection: 'redis',
       error: 'redis gone',
     });
   });

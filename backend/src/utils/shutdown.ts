@@ -66,7 +66,8 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
         if (result.status === 'rejected') {
           logger.warn('Shutdown: connection did not quit cleanly', {
             signal,
-            client: names[i],
+            // Not `client`: that key is the app build on request lines (#963).
+            connection: names[i],
             error: result.reason instanceof Error ? result.reason.message : String(result.reason),
           });
         }

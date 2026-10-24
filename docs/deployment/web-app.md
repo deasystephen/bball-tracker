@@ -37,8 +37,9 @@ outside a deploy) come after the context, so no context key overrides them. Invi
 **bearer tokens in the path**, so the logger runs the message and every string value through
 `redactText` (the segment after `/invite/`, `/by-token/` or `/calendar/`, and secret-looking query
 values such as `token=`, `code=`, `state=`, become `[redacted]`; a bracketed route pattern such as
-`/invite/[token]` is kept) and masks a context key that names a secret (`token`, `authorization`,
-…) whole. Context is typed as flat ids, enums and numbers: an `Error` cannot be passed, so log its
+`/invite/[token]` is kept) and masks a context key that names a secret (`token`, `authorization`, `code`, `state`, any
+`…key`, …) whole. `timestamp`, `level`, `message`, `service` and `commit` are written after the
+context, so a context key cannot overwrite them. Context is typed as flat ids, enums and numbers: an `Error` cannot be passed, so log its
 `name`, never its message (undici's "Failed to parse URL from …" quotes the URL).
 `web/__tests__/log.test.ts` proves a token in a message or a context value never reaches the output.
 

@@ -103,6 +103,22 @@ describe('correlation headers (#963)', () => {
       expect(health.headers['x-request-id']).toMatch(UUID);
     });
 
+    it('echoes the id and logs the request when the body parser refuses the body (400)', async () => {
+      // requestContext and requestLogger run before express.json (#963 review).
+      const res = await request(app)
+        .post('/api/v1/teams')
+        .set('Content-Type', 'application/json')
+        .set('X-Request-Id', CLIENT_REQUEST_ID)
+        .set('X-Hooplings-Client', 'web')
+        .send('{bad json');
+
+      expect(res.status).toBe(400);
+      expect(res.headers['x-request-id']).toBe(CLIENT_REQUEST_ID);
+      expect(requestLine(consoleSpy)).toEqual(
+        expect.objectContaining({ method: 'POST', statusCode: 400, requestId: CLIENT_REQUEST_ID, client: 'web' })
+      );
+    });
+
     it('gives two requests without the header two different ids', async () => {
       const first = await request(app).get('/api/v1/teams');
       const second = await request(app).get('/api/v1/teams');

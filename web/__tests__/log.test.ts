@@ -46,6 +46,13 @@ describe('lib/log (#966)', () => {
     );
   });
 
+  it('never lets a context key overwrite level, message or timestamp, and keeps them first', () => {
+    const entry = buildEntry('error', 'real', { level: 'info', message: 'spoofed', timestamp: 'spoofed' });
+    expect(entry).toEqual(expect.objectContaining({ level: 'error', message: 'real' }));
+    expect(entry.timestamp).not.toBe('spoofed');
+    expect(Object.keys(entry).slice(0, 3)).toEqual(['timestamp', 'level', 'message']);
+  });
+
   it('writes commit null when GIT_COMMIT is unset or still the placeholder', () => {
     expect(deployedCommit({})).toBeNull();
     expect(deployedCommit({ GIT_COMMIT: 'GIT_COMMIT_PLACEHOLDER' })).toBeNull();
@@ -71,11 +78,32 @@ describe('lib/log (#966)', () => {
     });
 
     it('masks a context key that names a secret, whatever its value', () => {
-      log.info('m', { token: TOKEN, inviteToken: 'short', authorization: `Bearer ${TOKEN}` });
+      log.info('m', {
+        token: TOKEN,
+        inviteToken: 'short',
+        authorization: `Bearer ${TOKEN}`,
+        code: TOKEN,
+        state: TOKEN,
+        apiKey: TOKEN,
+      });
       const entry = JSON.parse(printed(out)[0]);
 
       expect(printed(out)[0]).not.toContain(TOKEN);
-      expect(entry).toEqual(expect.objectContaining({ token: REDACTED, inviteToken: REDACTED, authorization: REDACTED }));
+      expect(entry).toEqual(
+        expect.objectContaining({
+          token: REDACTED,
+          inviteToken: REDACTED,
+          authorization: REDACTED,
+          code: REDACTED,
+          state: REDACTED,
+          apiKey: REDACTED,
+        })
+      );
+    });
+
+    it('keeps the ordinary fields the site logs', () => {
+      log.warn('Invitation lookup unavailable', { reason: 'status', status: 503 });
+      expect(JSON.parse(printed(out)[0])).toEqual(expect.objectContaining({ reason: 'status', status: 503 }));
     });
   });
 

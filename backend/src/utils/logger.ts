@@ -71,15 +71,15 @@ function log(level: LogLevel, message: string, context?: LogContext): void {
     return;
   }
 
-  const entry = {
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-    ...getLogContext(),
-    ...context,
+  // The fixed fields are written first (so they lead the JSON line) and again
+  // last, so no context key can overwrite `level`, `message`, `service` or
+  // `commit` (#966): a context `level: 'info'` on an error line would hide it
+  // from every `status:error` query.
+  const fixed = { timestamp: new Date().toISOString(), level, message };
+  const entry = Object.assign({ ...fixed }, getLogContext(), context, fixed, {
     service: LOG_SERVICE,
     commit: deployedCommit(),
-  };
+  });
 
   if (level === 'error') {
     console.error(JSON.stringify(entry));

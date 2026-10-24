@@ -49,8 +49,11 @@ const SECRET_SEGMENT = /(\/(?:invite|by-token|calendar)\/)(?!\[[^\]/]*\](?:[/?#\
 /** Query keys whose value is masked: any key containing one of these words. */
 const SECRET_QUERY = /([?&][^=&#\s'"]*(?:token|secret|password|code|state|jwt|key)[^=&#\s'"]*=)[^&#\s'"<>()]*/gi;
 
-/** Context keys that are masked whole, whatever the value. */
-const SECRET_KEY = /token|secret|password|authorization|cookie|jwt/i;
+/**
+ * Context keys that are masked whole, whatever the value: anything naming a
+ * token, secret, password, credential or key, and the OAuth `code` / `state`.
+ */
+const SECRET_KEY = /token|secret|password|passwd|authorization|cookie|jwt|credential|key|^code$|^state$/i;
 
 /** Mask invitation and calendar tokens and secret query values inside any text. */
 export function redactText(text: string): string {
@@ -72,15 +75,13 @@ function redactContext(context: LogContext | undefined): LogContext {
 
 /** Build the entry a line prints. Exported for tests; production code calls `log.*`. */
 export function buildEntry(level: LogLevel, message: string, context?: LogContext): Record<string, LogValue> {
-  return {
-    timestamp: new Date().toISOString(),
-    level,
-    message: redactText(message),
-    ...redactContext(context),
-    // After the context, so no context key can overwrite them.
+  // The fixed fields lead the line and are written again after the context, so
+  // no context key can overwrite them (a context `level` would hide an error).
+  const fixed = { timestamp: new Date().toISOString(), level, message: redactText(message) };
+  return Object.assign({ ...fixed }, redactContext(context), fixed, {
     service: LOG_SERVICE,
     commit: deployedCommit(),
-  };
+  });
 }
 
 function write(level: LogLevel, message: string, context?: LogContext): void {

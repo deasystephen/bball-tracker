@@ -51,7 +51,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       statusCode: res.statusCode,
       duration,
       requestId: req.requestId,
-      ...(req.hooplingsClient ? { client: req.hooplingsClient } : {}),
+      client: req.hooplingsClient,
       ...(req.user ? { userId: req.user.id } : {}),
     });
   });

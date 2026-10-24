@@ -128,6 +128,14 @@ describe('utils/logger', () => {
       logger.info('i', { service: 'spoofed', commit: 'spoofed' });
       expect(parseLogLines(out)[0]).toEqual(expect.objectContaining({ service: 'bball-tracker-api', commit: COMMIT }));
     });
+
+    it('never lets a context key overwrite level, message or timestamp, and keeps them first', () => {
+      logger.error('real', { level: 'info', message: 'spoofed', timestamp: 'spoofed' });
+      const [line] = parseLogLines(err);
+      expect(line).toEqual(expect.objectContaining({ level: 'error', message: 'real' }));
+      expect(line.timestamp).not.toBe('spoofed');
+      expect(Object.keys(line).slice(0, 3)).toEqual(['timestamp', 'level', 'message']);
+    });
   });
 
   describe('request client (#963)', () => {
