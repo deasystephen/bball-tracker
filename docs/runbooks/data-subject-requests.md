@@ -80,7 +80,11 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   - Backend reports carry the internal user id of the caller (`scope.setUser({ id })` in
     `backend/src/utils/sentry.ts`).
   - Mobile reports carry **no** user id: `setSentryUser` in `mobile/services/sentry.ts` is never
-    called. They hold device model, OS version, app release and redacted breadcrumbs.
+    called. They hold device model, OS version, app release and redacted breadcrumbs. API
+    request breadcrumbs and captured network/5xx events carry a `request_id`: a random
+    per-request UUID, not a user or device identifier, so it does not link a report to a person
+    by itself. Anyone with Datadog access can join it to that request's API log line, which does
+    carry the user id; the join stays inside our own systems (#963).
 - **Usage analytics (Amplitude)** are kept for the window of the Amplitude plan. Every event
   (the catalogue in `docs/architecture/analytics.md`: screens viewed as route patterns, and the
   teams, rosters, invitations, games and game events the person created, changed or deleted)

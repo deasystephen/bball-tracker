@@ -72,7 +72,10 @@ flow.
 1. **Sentry is not linked to the user in the mobile app.** `services/sentry.ts` exports
    `setSentryUser`, but nothing calls it, and `Sentry.init` sets `sendDefaultPii: false`. Mobile
    events therefore carry no account id. If a later change starts calling `setSentryUser`, the
-   three Diagnostics rows become **linked**. Note that `docs/runbooks/data-subject-requests.md`
+   three Diagnostics rows become **linked**. Since #963 a mobile request breadcrumb or captured
+   network/5xx event carries the random `request_id` the app sent; the backend request log line
+   for that request (in Datadog) carries the user id, so a report can be joined to an account
+   inside our own systems, not by Sentry alone. Note that `docs/runbooks/data-subject-requests.md`
    ("Retention") describes error reports as keyed on the internal user id; that holds for the
    backend, and the privacy policy (#25) should not claim more than the code does.
 2. **What Sentry redacts before sending** (`beforeSend` and `beforeSendTransaction` in

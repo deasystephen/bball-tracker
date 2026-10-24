@@ -4,6 +4,7 @@ import { getApiUrl } from '../config/env';
 import { NO_SESSION_CODE, NoSessionError, isNoSessionError } from './no-session-error';
 import { addBreadcrumb, captureException, endpointPattern } from './sentry';
 import { trackEvent, AnalyticsEvents } from './analytics';
+import { CLIENT_HEADER, REQUEST_ID_HEADER, clientHeaderValue, newRequestId } from './app-build';
 
 /**
  * API client configuration. The base URL is decided in one place,
@@ -41,7 +42,12 @@ const isPublicPath = (url?: string): boolean =>
 
 export { NO_SESSION_CODE, NoSessionError, isNoSessionError };
 
-type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _startedAt?: number };
+type RetriableConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+  _startedAt?: number;
+  /** The `X-Request-Id` this send carried (#963); a refresh replay is a new send with a new id. */
+  _requestId?: string;
+};
 
 /** Route pattern for a request config: base URL + url, redacted and id-collapsed. */
 const configPattern = (config?: Pick<InternalAxiosRequestConfig, 'baseURL' | 'url'>): string => {
@@ -55,6 +61,24 @@ const configMethod = (config?: Pick<InternalAxiosRequestConfig, 'method'>): stri
 
 const elapsed = (config?: RetriableConfig): number | undefined =>
   config?._startedAt === undefined ? undefined : Date.now() - config._startedAt;
+
+/** `{ request_id }` for a breadcrumb or tag set, or nothing when the request was never sent. */
+const requestIdField = (config?: RetriableConfig): { request_id?: string } =>
+  config?._requestId ? { request_id: config._requestId } : {};
+
+/**
+ * Stamp a request that is about to go out (#963): a fresh `X-Request-Id`
+ * (the API logs it as `requestId`, so a Sentry event tagged with it leads to
+ * the API's line in Datadog) and `X-Hooplings-Client` (app version and OTA,
+ * `services/app-build.ts`). A request refused on the device is never stamped.
+ */
+const stampRequest = (config: RetriableConfig): void => {
+  const id = newRequestId();
+  config._requestId = id;
+  config.headers[REQUEST_ID_HEADER] = id;
+  const client = clientHeaderValue();
+  if (client) config.headers[CLIENT_HEADER] = client;
+};
 
 /** Axios' own cancellation (`ERR_CANCELED`) is the caller's doing, never an incident. */
 const isCancellation = (error: AxiosError): boolean => error.code === 'ERR_CANCELED';
@@ -77,7 +101,8 @@ const reportNoSession = (error: NoSessionError, pattern: string): void => {
 
 /**
  * Observability interceptor (#617): a breadcrumb for every request (method,
- * redacted route pattern, status, duration) and a captured exception for
+ * redacted route pattern, status, duration, and the `request_id` it was sent
+ * with, #963) and a captured exception (also tagged `request_id`) for
  * what the user cannot act on — a network failure or a 5xx. 4xx answers are
  * the user's own outcome (403, 404, validation) and are breadcrumbs only.
  * Everything passes through `endpointPattern`, so no token, OAuth code or
@@ -93,6 +118,7 @@ export const observeResponse = (response: AxiosResponse): AxiosResponse => {
       url: configPattern(config),
       status_code: response.status,
       duration: elapsed(config),
+      ...requestIdField(config),
     },
   });
   return response;
@@ -127,16 +153,17 @@ export const observeError = (error: unknown): Promise<never> => {
         status_code: status,
         duration: elapsed(config),
         ...(status === undefined ? { reason: error.code ?? 'network' } : {}),
+        ...requestIdField(config),
       },
     });
     if (status === undefined && !isCancellation(error)) {
       captureException(
         error,
         { endpoint: pattern, code: error.code },
-        { endpoint_pattern: pattern, status: 'network' }
+        { endpoint_pattern: pattern, status: 'network', ...requestIdField(config) }
       );
     } else if (status !== undefined && status >= 500 && !retryable) {
-      captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status });
+      captureException(error, { endpoint: pattern }, { endpoint_pattern: pattern, status, ...requestIdField(config) });
     }
   }
   return Promise.reject(error);
@@ -375,12 +402,14 @@ const createApiClient = (): AxiosInstance => {
       const token = useAuthStore.getState().accessToken;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        stampRequest(config);
         return config;
       }
       // No session: a request that needs one is never sent (#582).
       if (!isPublicPath(config.url)) {
         return Promise.reject(new NoSessionError(config));
       }
+      stampRequest(config);
       return config;
     },
     (error) => {

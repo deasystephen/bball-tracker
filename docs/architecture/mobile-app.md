@@ -573,6 +573,38 @@ never inline a role check in a screen:
   never captured. A `NoSessionError` (#582) is captured **once per endpoint
   pattern per session end** (keyed on `getLogoutEpoch()`), so a screen that retries after sign-out
   reports one event, not a storm; every refusal still leaves a breadcrumb.
+- **Every request the app sends carries `X-Request-Id` and `X-Hooplings-Client`** (#963,
+  `services/app-build.ts`, stamped by the api-client's request interceptor once the request is
+  certain to go out; a `NoSessionError` refusal is never stamped). `X-Request-Id` is a fresh UUID
+  v4 per send (expo-modules-core's native generator, the one `utils/pkce.ts` uses, with a
+  `Math.random` fallback; a refresh and the replay of a 401 each get their own). The API uses a
+  valid id verbatim as `requestId` on its log lines and echoes it on the response, and the app tags
+  the `http` breadcrumb (`data.request_id`) and any captured network failure or 5xx (tag
+  `request_id`) with the id it sent, so **a mobile Sentry event leads to the exact API line in
+  Datadog** (`@requestId:<id>`). `X-Hooplings-Client` is `ios/<version>+<update id>` (or
+  `android/…`), `+embedded` when the binary's bundled JS runs; `<version>` is
+  `expoConfig.version`. The header is left out when the value would not match the API's contract
+  (`docs/architecture/backend-services.md`, logging), e.g. on a platform other than iOS or
+  Android. The update id and runtime come from `requireOptionalNativeModule('ExpoUpdates')`, not
+  the `expo-updates` wrapper (which throws at import without its native module), so the
+  api-client can never crash an older binary. JavaScript only: ships by OTA.
+- **Failures with no user-facing error still log a warning** (#963), so the breadcrumb trail
+  explains them: push registration (`hooks/useNotifications.ts`, `Push token registration
+  failed` with `step`: `permission` / `token` / `register`, and for `register` the route pattern,
+  HTTP status or `network`, and axios code; never the push token), Amplitude init
+  (`services/analytics.ts`), auth-storage rehydration that starts the user signed out
+  (`store/auth-store.ts`), the root screen's initial navigation (`app/index.tsx`), and a refused
+  sign-in callback (`app/auth/callback.tsx` via `utils/sign-in-failure.ts#reportSignInFailure`,
+  `Sign-in failed` with `stage`: `oauth_error` (plus `oauth_error`: an allow-listed OAuth code or
+  `other`, never the raw param, which any app can set), `missing_code` or `state_mismatch`).
+  `log.warn` is a breadcrumb only, so these reach Sentry with the next captured event; Sentry
+  Logs (`enableLogs`, which would send each warning on its own) is an open owner decision on #963.
+- **Sentry is the mobile source of truth for errors and diagnostics; Datadog's React Native SDK
+  is not used** (decision 2026-10-24, #963). `@datadog/mobile-react-native` ships native iOS and
+  Android SDKs (a new binary and runtime, the OTA drift guard), adds a processor and new rows to
+  the App Privacy label and the privacy policy, and duplicates what Sentry (errors, sessions,
+  performance) and Amplitude (behaviour) already collect. The join to the API's Datadog logs is
+  the `request_id` above.
 - **`endpointPattern(url)`** (`services/sentry.ts`) is the only shape a URL takes in a tag or
   breadcrumb: `redactUrl` first, then scheme, host and query dropped, then every UUID, cuid or
   numeric segment collapsed to `:id` (`/api/v1/teams/:id/games/:id`), so one tag value groups a

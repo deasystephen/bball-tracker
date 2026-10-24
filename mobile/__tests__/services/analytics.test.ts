@@ -82,6 +82,19 @@ describe('analytics service', () => {
     warnSpy.mockRestore();
   });
 
+  // #963: a failed init leaves analytics dead on that install; it must say so.
+  it('logs a warning when amplitude.init rejects', async () => {
+    mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+    mockAmplitude.init.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) });
+    const { initAnalytics } = load();
+    const { log } = jest.requireActual<typeof import('../../services/log')>('../../services/log');
+    const logWarn = jest.spyOn(log, 'warn');
+
+    await initAnalytics();
+
+    expect(logWarn).toHaveBeenCalledWith('[Analytics] Failed to initialize Amplitude', { error: expect.any(Error) });
+  });
+
   it('initAnalytics is a no-op when no API key is configured', async () => {
     const { initAnalytics, trackEvent, AnalyticsEvents } = load();
     await initAnalytics();

@@ -28,6 +28,12 @@ import { spacing } from '../../theme';
 import { postLoginRoute } from '../../utils/role-onboarding';
 import { consumePendingLogin } from '../../utils/pkce';
 import { useTranslation } from '../../i18n';
+import {
+  callbackParamFailure,
+  isOAuthErrorCode,
+  reportSignInFailure,
+  type OAuthErrorCode,
+} from '../../utils/sign-in-failure';
 
 /**
  * Errors that are knowable from the deep link itself (WorkOS returned an error,
@@ -39,7 +45,7 @@ import { useTranslation } from '../../i18n';
  * known OAuth codes map to our own copy and everything else gets a generic
  * message (audit #74). Each maps to an i18n key under `authCallback`.
  */
-const OAUTH_ERROR_KEYS: Record<string, string> = {
+const OAUTH_ERROR_KEYS: Record<OAuthErrorCode, string> = {
   access_denied: 'authCallback.accessDenied',
   invalid_request: 'authCallback.invalidRequest',
   server_error: 'authCallback.serverError',
@@ -49,7 +55,7 @@ const OAUTH_ERROR_KEYS: Record<string, string> = {
 /** The i18n key of the error the deep link itself carries, or null. */
 function getParamErrorKey(oauthError?: string, code?: string): string | null {
   if (oauthError) {
-    return OAUTH_ERROR_KEYS[oauthError] ?? 'authCallback.incomplete';
+    return isOAuthErrorCode(oauthError) ? OAUTH_ERROR_KEYS[oauthError] : 'authCallback.incomplete';
   }
   if (!code) return 'authCallback.noCode';
   return null;
@@ -72,6 +78,15 @@ export default function AuthCallbackScreen() {
   // Guard so the code is only exchanged once, even if the effect re-runs.
   const exchangedRef = useRef(false);
 
+  // A refused callback is never silent (#963): once per mount, enums only.
+  const paramFailure = callbackParamFailure(oauthError, code);
+  const paramFailureReportedRef = useRef(false);
+  useEffect(() => {
+    if (!paramFailure || paramFailureReportedRef.current) return;
+    paramFailureReportedRef.current = true;
+    reportSignInFailure(paramFailure);
+  }, [paramFailure]);
+
   useEffect(() => {
     if (paramError || !code) return;
     if (exchangedRef.current) return;
@@ -81,6 +96,7 @@ export default function AuthCallbackScreen() {
       try {
         const pending = await consumePendingLogin(state);
         if (!pending) {
+          reportSignInFailure({ stage: 'state_mismatch' });
           setExchangeErrorKey('authCallback.foreignState');
           return;
         }
