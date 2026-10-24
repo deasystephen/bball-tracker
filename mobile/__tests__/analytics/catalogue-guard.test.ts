@@ -316,7 +316,7 @@ describe('analytics catalogue guard', () => {
       `;
       expect(findSilentMutations('hooks/wrong.ts', wrongPlace).map((f) => f.hook)).toEqual(['useC']);
     });
-  
+
     it('finds direct apiClient writes and ignores reads, other clients and hooks', () => {
       const text = `
         export default function Screen() {
@@ -336,5 +336,5 @@ describe('analytics catalogue guard', () => {
         { file: 'app/screen.tsx', line: 10, method: 'patch' },
       ]);
     });
-});
+  });
 });

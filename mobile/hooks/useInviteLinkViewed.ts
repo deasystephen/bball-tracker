@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { trackEvent, AnalyticsEvents, type InviteLinkState } from '../services/analytics';
-import type { InvitationByToken } from './useInvitationByToken';
+import { isGuardianInvitation, type InvitationByToken } from './useInvitationByToken';
 
 /**
  * `invite_link_viewed` for the `/invite/[token]` deep link (#967): what the
@@ -14,6 +14,12 @@ export interface InviteLinkViewInput {
   /** The `src` query param: `web` from the web invite page's Open in App button (`?src=web`, #964). */
   src: string | undefined;
   isLoading: boolean;
+  /**
+   * The query is fetching. A remount can find a cached result with `isLoading`
+   * false (TanStack v5) while it refetches; nothing is reported until that
+   * settles, so a stale cached error or status is never the one sent.
+   */
+  isFetching?: boolean;
   /** `useQueryErrorState(...).failed` for a transient failure (network, 429, 5xx). */
   failed: boolean;
   /** `useQueryErrorState(...).retrying`: Try Again is in flight. */
@@ -33,13 +39,13 @@ export function inviteLinkSource(src: string | undefined): 'web' | 'link' {
  * null while there is nothing to report yet (loading, or Try Again in flight).
  */
 export function inviteLinkState(
-  { isLoading, failed, retrying, error, invitation }: Pick<
+  { isLoading, isFetching, failed, retrying, error, invitation }: Pick<
     InviteLinkViewInput,
-    'isLoading' | 'failed' | 'retrying' | 'error' | 'invitation'
+    'isLoading' | 'isFetching' | 'failed' | 'retrying' | 'error' | 'invitation'
   >,
   now: Date = new Date()
 ): InviteLinkState | null {
-  if (isLoading || retrying) return null;
+  if (isLoading || isFetching || retrying) return null;
   if (failed) return 'unavailable';
   if (error || !invitation) return 'not_found';
   if (invitation.status === 'ACCEPTED') return 'accepted';
@@ -53,18 +59,23 @@ export function inviteLinkState(
 
 /**
  * Send `invite_link_viewed` once per token per mount, as soon as the screen
- * has an outcome to show. A signed-out invitee who taps Log In comes back to
- * a fresh mount after sign-in, which reports again with `authenticated: true`.
+ * has a settled outcome to show. The one exception: after `unavailable` (a
+ * transient failure), the outcome a successful Try Again shows is reported
+ * too, so the funnel sees what the invitee ended up with. A signed-out
+ * invitee who taps Log In comes back to a fresh mount after sign-in, which
+ * reports again with `authenticated: true`.
  */
 export function useInviteLinkViewed(input: InviteLinkViewInput): void {
-  const reportedTokenRef = useRef<string | null>(null);
+  const reportedRef = useRef<{ token: string; state: InviteLinkState } | null>(null);
   const state = inviteLinkState(input);
   const { token, src, invitation, isAuthenticated } = input;
-  const kind = invitation ? (invitation.kind === 'guardian' ? 'guardian' : 'team') : undefined;
+  const kind = invitation ? (isGuardianInvitation(invitation) ? 'guardian' : 'team') : undefined;
 
   useEffect(() => {
-    if (!state || token === undefined || reportedTokenRef.current === token) return;
-    reportedTokenRef.current = token;
+    if (!state || token === undefined) return;
+    const previous = reportedRef.current;
+    if (previous?.token === token && (previous.state !== 'unavailable' || state === 'unavailable')) return;
+    reportedRef.current = { token, state };
     trackEvent(AnalyticsEvents.INVITE_LINK_VIEWED, {
       state,
       ...(kind ? { kind } : {}),

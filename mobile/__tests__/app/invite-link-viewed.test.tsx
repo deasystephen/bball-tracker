@@ -20,7 +20,13 @@ import { inviteLinkState } from '../../hooks/useInviteLinkViewed';
 import type { InvitationByToken } from '../../hooks/useInvitationByToken';
 
 let mockParams: { token: string; src?: string } = { token: 'tok-1' };
-let mockQuery: { data?: InvitationByToken; isLoading: boolean; error: unknown; refetch: jest.Mock };
+let mockQuery: {
+  data?: InvitationByToken;
+  isLoading: boolean;
+  isFetching?: boolean;
+  error: unknown;
+  refetch: jest.Mock;
+};
 const mockShowToast = jest.fn();
 const mockMutateAsync = jest.fn();
 
@@ -137,6 +143,31 @@ describe('invite_link_viewed (#967)', () => {
     expect(viewed()).toEqual([]);
   });
 
+  it('waits for a refetch of cached data to settle (a remount after sign-in)', () => {
+    mockQuery = { data: teamInvitation(), isLoading: false, isFetching: true, error: null, refetch: jest.fn() };
+    const { rerender } = render(<InviteDeepLinkScreen />);
+    expect(viewed()).toEqual([]);
+
+    mockQuery = { ...mockQuery, data: teamInvitation({ status: 'ACCEPTED' }), isFetching: false };
+    rerender(<InviteDeepLinkScreen />);
+    expect(viewed()).toStrictEqual([{ state: 'accepted', kind: 'team', authenticated: false, source: 'link' }]);
+  });
+
+  it('after unavailable, also reports what a successful Try Again shows, then nothing more', () => {
+    showing(undefined, httpError(503));
+    const { rerender } = render(<InviteDeepLinkScreen />);
+    rerender(<InviteDeepLinkScreen />);
+
+    showing(teamInvitation());
+    rerender(<InviteDeepLinkScreen />);
+    rerender(<InviteDeepLinkScreen />);
+
+    expect(viewed()).toStrictEqual([
+      { state: 'unavailable', authenticated: false, source: 'link' },
+      { state: 'pending', kind: 'team', authenticated: false, source: 'link' },
+    ]);
+  });
+
   it('reports a guardian invitation, a signed-in invitee and the web source', () => {
     mockParams = { token: 'tok-1', src: 'web' };
     useAuthStore.setState({ isAuthenticated: true });
@@ -227,8 +258,9 @@ describe('invite accept failure (#967)', () => {
 describe('inviteLinkState', () => {
   const base = { isLoading: false, failed: false, retrying: false, error: null, invitation: teamInvitation() };
 
-  it('is null while loading or while Try Again is in flight', () => {
+  it('is null while loading, refetching or while Try Again is in flight', () => {
     expect(inviteLinkState({ ...base, isLoading: true })).toBeNull();
+    expect(inviteLinkState({ ...base, isFetching: true })).toBeNull();
     expect(inviteLinkState({ ...base, failed: true, retrying: true })).toBeNull();
   });
 

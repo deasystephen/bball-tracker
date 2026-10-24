@@ -160,6 +160,32 @@ describe('Login screen', () => {
       errorSpy.mockRestore();
     });
 
+    it('counts the start even when the PKCE sign-in cannot begin', async () => {
+      const { beginPkceLogin } = jest.requireMock('../../utils/pkce') as { beginPkceLogin: jest.Mock };
+      beginPkceLogin.mockRejectedValueOnce(new Error('keychain unavailable'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { getByLabelText } = render(<Login />);
+
+      fireEvent.press(getByLabelText('Sign in'));
+
+      await waitFor(() => expect(signInEvents()).toHaveLength(2));
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'initiate' }]]);
+      errorSpy.mockRestore();
+    });
+
+    it('does not take a link that is not this sign-in\'s callback for one', async () => {
+      await startSignIn();
+      jest.useFakeTimers();
+
+      act(() => {
+        appStateHandler?.('active');
+        mockLinkingState.urlHandler?.({ url: 'hooplings://invite/auth/callback-lookalike' });
+        jest.advanceTimersByTime(BROWSER_DISMISS_GRACE_MS);
+      });
+
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'browser_dismissed' }]]);
+    });
+
     it('fires sign_in_failed { stage: initiate } without a status when the browser cannot open', async () => {
       (Linking.canOpenURL as jest.Mock).mockResolvedValueOnce(false);
       const { getByLabelText } = render(<Login />);

@@ -20,7 +20,7 @@ separate decision, documented in `mobile-app.md` under "Analytics tracking optio
   that uses the hook is covered. The only screen-level emitters are the onboarding steps and the
   sign-in screens (`app/login.tsx`, `app/auth/callback.tsx`, through
   `utils/sign-in-failure.ts#reportSignInFailure`), which have no hook of their own, and the root
-  layout's `app_opened` and screen-view tracker. A screen or component never writes through
+  layout's `app_opened` (`services/app-opened.ts`) and screen-view tracker. A screen or component never writes through
   `apiClient` directly unless the guard's allow-list says why (guard (d), "Enforcement").
 - **Every call goes through `trackEvent`**, which swallows every SDK error: analytics can never
   crash the app. Events tracked before `initAnalytics` has resolved are held in a bounded buffer
@@ -57,7 +57,7 @@ source changes. `undefined` values are skipped, so a partial refresh never clear
 | `is_parent` | boolean | role `PARENT`, or any guardian link (a coach can also be a parent) | same |
 | `is_player` | boolean | role `PLAYER` | same |
 | `app_version` | string | `expoConfig.version` (the binary's version; an OTA keeps it) | same |
-| `update_id` | string | the running OTA's id, or `embedded` when the binary's bundled JS runs (`services/app-build.ts#getRunningBuild`, #967); with `app_version` it says exactly which JavaScript a user has | same |
+| `update_id` | string | the running OTA's id, or `embedded` when the binary's bundled JS runs (`services/app-build.ts#getRunningBuild`, #967); with `app_version` it says exactly which JavaScript a user has | same, and on every launch with `app_version` (`services/app-opened.ts#trackAppOpened`), since a rehydrated session never runs `setUser` |
 | `is_head_coach` | boolean | a `HEAD_COACH` staff row of the caller's on any team | an unfiltered first page of `GET /teams` that holds every team (`teams.length >= total`, e.g. the `TEAMS_MAX_LIMIT` picker fetch), via `hooks/useTeams.ts#reportTeamUserProperties`; a partial page reports only the count, so the flag never flaps between page sizes |
 | `is_assistant_coach` | boolean | an `ASSISTANT_COACH` staff row, same source | same |
 | `team_count` | number | `total` of the unfiltered `GET /teams` | every unfiltered first page |
@@ -81,10 +81,10 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 
 | Event | Fires when | Properties | Emitted from |
 | --- | --- | --- | --- |
-| `app_opened` | `initAnalytics` has succeeded on launch | `launch`, `update_id`, `runtime_version` (#967) | `app/_layout.tsx` |
+| `app_opened` | `initAnalytics` has succeeded on launch | `launch`, `update_id`, `runtime_version` (#967) | `services/app-opened.ts#trackAppOpened` via `app/_layout.tsx` |
 | `screen_viewed` | the route changes | `screen`, `params_kind` | `hooks/useScreenViews.ts` via `app/_layout.tsx` |
-| `sign_in_started` | the Sign In tap has begun the PKCE sign-in (`beginPkceLogin` resolved), just before `GET /auth/login` and the browser hand-off (#967) | none | `app/login.tsx` |
-| `sign_in_failed` | a WorkOS sign-in did not complete: the authorization URL could not be fetched or the browser could not open (`initiate`); the app came back from the browser with no callback deep link within `BROWSER_DISMISS_GRACE_MS` (2 s) and the screen still mounted (`browser_dismissed`); the callback carried an OAuth `error` (`oauth_error`), no `code` (`missing_code`), or a `state` this device did not start (`state_mismatch`); or the code exchange failed (`exchange`) (#967) | `stage`; `oauth_error` (on `oauth_error` only); `status` (when an API call answered) | `utils/sign-in-failure.ts#reportSignInFailure`, called by `app/login.tsx` and `app/auth/callback.tsx` (each callback failure once per distinct failure) |
+| `sign_in_started` | the Sign In button is tapped, before `beginPkceLogin`, so every `sign_in_failed { stage: initiate }` has a start (#967) | none | `app/login.tsx` |
+| `sign_in_failed` | a WorkOS sign-in did not complete: the authorization URL could not be fetched or the browser could not open (`initiate`); the app came back from the browser and, within `BROWSER_DISMISS_GRACE_MS` (5 s), no deep link starting with this sign-in's redirect URI arrived and the screen did not unmount (`browser_dismissed`; a heuristic, so a callback slower than that is miscounted); the callback carried an OAuth `error` (`oauth_error`), no `code` (`missing_code`), or a `state` this device did not start (`state_mismatch`); or the code exchange failed (`exchange`) (#967) | `stage`; `oauth_error` (on `oauth_error` only); `status` (when an API call answered) | `utils/sign-in-failure.ts#reportSignInFailure`, called by `app/login.tsx` and `app/auth/callback.tsx` (each callback failure once per distinct failure) |
 | `user_logged_in` | the signed-in user is stored (`setUser`) | `claimed_invite`, `was_managed` (from the `/auth/callback` response, #790; left out when the API does not send them, and always left out on a dev login, which is not a datum) | `store/auth-store.ts`, outcome passed by `app/auth/callback.tsx` |
 | `user_logged_out` | a session that was signed in ends | `reason`: `user`, `session_expired`, `account_deleted` | `store/auth-store.ts#clearSession` (reason passed by `logout`, `useDeleteAccount`, default for the api-client) |
 | `onboarding_step_completed` | a first-login prompt is saved (not the Profile edit paths) | `step`: `name` / `role`; `role` (on the role step) | `app/onboarding/name.tsx`, `app/onboarding/role.tsx` |
@@ -102,7 +102,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_role_updated` | a staff member's role changes | `team_id`, `role_type` | `hooks/useTeamStaff.ts` |
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
 | `invitation_sent` | an invitation is created or re-sent | `team_id`, `invitation_id`, `resend`, `email_sent` (null when the player has no email) | `hooks/useInvitations.ts` |
-| `invite_link_viewed` | the `/invite/[token]` screen has an outcome to show, once per token per mount (not while loading or while Try Again is in flight); a signed-out invitee who signs in comes back to a new mount, which reports again with `authenticated: true` (#967) | `state`, `kind` (when the invitation loaded), `authenticated`, `source` | `hooks/useInviteLinkViewed.ts` via `app/invite/[token].tsx` |
+| `invite_link_viewed` | the `/invite/[token]` screen has a settled outcome to show, once per token per mount (not while loading or refetching, so a remount never reports a stale cached result, nor while Try Again is in flight); after `unavailable`, the outcome a successful Try Again shows is reported too; a signed-out invitee who signs in comes back to a new mount, which reports again with `authenticated: true` (#967) | `state`, `kind` (when the invitation loaded), `authenticated`, `source` | `hooks/useInviteLinkViewed.ts` via `app/invite/[token].tsx` |
 | `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
 | `invitation_declined` | the invitee rejects | `invitation_id` | `hooks/useInvitations.ts` |
 | `invitation_cancelled` | a coach cancels a pending invitation | `team_id`, `invitation_id` | `hooks/useInvitations.ts` |

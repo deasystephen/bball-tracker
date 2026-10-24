@@ -23,7 +23,7 @@ import { failureStatus, reportSignInFailure } from '../utils/sign-in-failure';
  * callback deep link close behind. Wait this long for that link before
  * counting the return as a dismissed browser (#967).
  */
-export const BROWSER_DISMISS_GRACE_MS = 2000;
+export const BROWSER_DISMISS_GRACE_MS = 5000;
 
 interface DevUser {
   id: string;
@@ -51,6 +51,8 @@ export default function Login() {
   // Set when the `/auth/callback` deep link arrives, so a return from the
   // browser that completed sign-in is not counted as a dismissal (#967).
   const callbackArrivedRef = useRef(false);
+  // The redirect URI this sign-in sent; the callback link starts with it.
+  const redirectUriRef = useRef<string | null>(null);
 
   useEffect(() => {
     let dismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,7 +68,8 @@ export default function Login() {
       }
     });
     const urlSubscription = Linking.addEventListener('url', ({ url }) => {
-      if (url.includes('auth/callback')) callbackArrivedRef.current = true;
+      const redirectUri = redirectUriRef.current;
+      if (redirectUri && url.startsWith(redirectUri)) callbackArrivedRef.current = true;
     });
     return () => {
       subscription.remove();
@@ -82,16 +85,18 @@ export default function Login() {
   const handleLogin = async () => {
     try {
       setIsLoading(true);
+      // Every attempt counts as started, so a failure below always has a start (#967).
+      callbackArrivedRef.current = false;
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
       // Get authorization URL from backend (request JSON format for mobile)
       // Use mobile redirect URI that deep links back to app. The scheme is
       // passed explicitly (#504): without it expo-linking picks the first
       // manifest scheme, and the manifest is the OTA payload, not the binary.
       const mobileRedirectUri = Linking.createURL('auth/callback', { scheme: APP_URL_SCHEME });
+      redirectUriRef.current = mobileRedirectUri;
       // PKCE + state (audit #5): the verifier/state pair is persisted on the
       // device and checked by app/auth/callback.tsx before the code exchange.
       const { state, codeChallenge } = await beginPkceLogin();
-      callbackArrivedRef.current = false;
-      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
       const response = await apiClient.get('/auth/login', {
         params: {
           format: 'json',

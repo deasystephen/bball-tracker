@@ -41,7 +41,7 @@ export default function InviteDeepLinkScreen() {
   const goBack = useGoBack('/');
   const { isAuthenticated, updateUser } = useAuthStore();
 
-  const { data: invitation, isLoading, error, refetch } = useInvitationByToken(token);
+  const { data: invitation, isLoading, isFetching, error, refetch } = useInvitationByToken(token);
   // Only a transient failure is a retryable error state (and an `error_shown` event); a
   // 400/404 stays the not-found screen below (#892).
   const transientError = error && isTransientRequestError(error) ? error : null;
@@ -54,6 +54,7 @@ export default function InviteDeepLinkScreen() {
     token,
     src,
     isLoading,
+    isFetching,
     failed: loadState.failed,
     retrying: loadState.retrying,
     error,
