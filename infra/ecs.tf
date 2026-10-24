@@ -204,6 +204,28 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
+  # Hardening (#764). Strip header fields whose names are not valid RFC 7230
+  # tokens at the edge instead of forwarding them to Express.
+  drop_invalid_header_fields = true
+
+  # `api.<domain>` aliases this ALB; a console delete or a stray targeted
+  # destroy would take the API and every live game down. Production only, like
+  # RDS, so a staging stack can still be destroyed. Replacing the ALB means
+  # turning this off in an apply first (infra/README.md, "Edge: ALB and WAF").
+  enable_deletion_protection = var.environment == "production"
+
+  # The web ACL (waf.tf) only counts today. If AWS WAF cannot be reached, the
+  # ALB default is to reject the request (403); a counting-only ACL must never
+  # cost availability, so requests pass uninspected instead.
+  enable_waf_fail_open = true
+
+  # No `access_logs` block, deliberately: ALB access logs record every full
+  # request URL, and this API carries bearer secrets in URLs (calendar feed
+  # tokens on every calendar-app poll, invitation tokens, the OAuth `code` and
+  # `state`) that utils/redact.ts masks everywhere the application logs. The
+  # ALB cannot redact. Decision and the conditions for revisiting it:
+  # infra/README.md, "Edge: ALB and WAF".
+
   tags = {
     Name = "${local.name_prefix}-alb"
   }
