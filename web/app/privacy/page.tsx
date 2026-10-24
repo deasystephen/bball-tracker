@@ -232,7 +232,7 @@ export default function PrivacyPolicyPage() {
             <tr>
               <td>Datadog</td>
               <td>Server log search and alerting</td>
-              <td>A copy of the API’s server logs (see section 6)</td>
+              <td>A copy of the API’s and the website’s server logs (see section 6)</td>
             </tr>
             <tr>
               <td>Expo, and Apple’s and Google’s push notification services</td>
@@ -297,7 +297,10 @@ export default function PrivacyPolicyPage() {
             <strong>Error reports (Sentry)</strong> are kept for Sentry’s retention period (90 days by default). No
             name, email address or photo is sent. Reports from our servers carry the internal user id of the signed-in
             person whose request they describe. Reports from the app carry no user id; they hold the device model, the
-            operating system version, the app version and a redacted record of recent navigation and requests. The
+            operating system version, the app version and a redacted record of recent navigation and requests. Each
+            request the app sends carries a random request id that our server logs also record, so we can match an
+            app error report to our own record of that request, including its internal user id when it was signed
+            in. The
             same applies to the session-health and performance data described in{' '}
             <a href="#information-we-collect">section 2</a>.{' '}
             <Placeholder>OWNER DECISION: confirm in the Sentry project whether it stores the sending device’s IP address, and say so here</Placeholder>
@@ -314,7 +317,7 @@ export default function PrivacyPolicyPage() {
             <strong>city, region and country</strong>. Event details are internal ids, categories, counts and yes/no
             flags: which fields changed, never their values; an error’s code, never its message. Amplitude also holds a
             few facts about the account: its role, whether the person is a head coach, assistant coach, parent or
-            player, how many teams they can see, their plan and the app version. No name, email address, jersey number,
+            player, how many teams they can see, their plan, the app version and the app update it is running. No name, email address, jersey number,
             message or photo is sent, and no advertising identifier is ever sent.{' '}
             <Placeholder>OWNER DECISION: confirm in the Amplitude project whether the raw IP address is kept after the location lookup, and say which</Placeholder>
           </li>
@@ -326,7 +329,10 @@ export default function PrivacyPolicyPage() {
             reveal the address). Log lines written before a logging fix was deployed may still contain a
             recipient’s email address from a failed email send until they age out. Logs are kept for{' '}
             <strong>30 days</strong> in Amazon CloudWatch and, as a copy, for <strong>15 days</strong> in Datadog.{' '}
-            <Placeholder>OWNER CHECK: re-confirm the Datadog log index retention before publishing</Placeholder>
+            <Placeholder>OWNER CHECK: re-confirm the Datadog log index retention before publishing</Placeholder> The
+            website’s server keeps a separate log of failed invitation lookups and page errors, with no user id, no IP
+            address and no invitation link, for <strong>30 days</strong> in Amazon CloudWatch and, as a copy, 15 days
+            in Datadog.
           </li>
           <li>
             After deletion nothing in our application links the internal id back to a person, but the analytics, server
