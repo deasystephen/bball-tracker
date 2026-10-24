@@ -11,7 +11,11 @@ without its data statements ever touching a row. They run on rows for the first 
 production, at container start (`docker/entrypoint.sh` runs `prisma migrate deploy`). A
 migration that fails there leaves the new task unable to start; the ECS circuit breaker rolls
 the service back, and the failed migration stays recorded in `_prisma_migrations` and blocks
-every later deploy until it is resolved by hand.
+every later deploy until it is resolved by hand. A migration that merely **outlives the ECS
+service's health-check grace period** (`health_check_grace_period_seconds = 300` in
+`infra/ecs.tf`, #752) reaches the same pinned state: ECS stops the task mid-migration, the row
+keeps `finished_at` NULL and every later launch fails with P3009. The budget and how it was
+measured: `docs/deployment/ecs-deploys.md` ("Migrations run in the entrypoint").
 
 The guard runs the new migrations the way production meets them: on a database that is on the
 previous schema and already holds rows.
@@ -79,7 +83,13 @@ The fix is in the migration: add the column as nullable, backfill it, then `SET 
   `RefreshToken`. A backfill on one of those passes the guard without running on a row.
 - **It checks that the migration applies, not that the result is right.** A backfill that fills
   a column with the wrong value passes.
-- **It says nothing about duration or locking.** The seed is a few hundred rows.
+- **It says nothing about duration or locking.** The seed is a few hundred rows. In production
+  every pending migration together must finish inside the grace period, with the server's own
+  start-up and two passing ALB checks: about 200 s of the 300 s
+  (`docs/deployment/ecs-deploys.md`). Time a backfill on a table that matters with the snapshot
+  rehearsal below. When it does not fit with a wide margin,
+  split it into batches shipped in separate deploys (migrations merged together all run in the
+  same container start) or move the data step out of the entrypoint.
 
 For a backfill on a table that matters, the guard is the first check and not the last one:
 rehearse the migration on a restored snapshot as well, following "Variant — rehearse a schema
