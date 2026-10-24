@@ -9,10 +9,10 @@
  * blocks; the accept list as the single exemption.
  *
  * Fixtures run in a temp directory named `backend` with their own accept list (through
- * `ACCEPTED_OVERRIDES_FILE`), so they do not move when the real list changes. One test does read
- * the real list and the real backend lockfile; it is expected to go red when a Prisma release
- * declares deepmerge-ts 8.x (see docs/automation/daily-upgrade-scan.md, "Accepted cross-major
- * overrides"). `semver` is linked from this package's node_modules.
+ * `ACCEPTED_OVERRIDES_FILE`), so they do not move when the real list changes. The real-list tests
+ * read the real list and the real backend and mobile lockfiles; they are expected to go red when a
+ * Prisma release declares deepmerge-ts 8.x, or expo's @expo/cli declares zod 4 (see
+ * docs/automation/daily-upgrade-scan.md, "Accepted cross-major overrides"). `semver` is linked from this package's node_modules.
  */
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
@@ -102,6 +102,15 @@ function fixture(
   return { dir, acceptFile, root };
 }
 
+// Plain x.y.z comparison (lockfile versions here carry no prerelease tag).
+function versionBelow(version: string, floor: [number, number, number]): boolean {
+  const parts = version.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < 3; i += 1) {
+    if ((parts[i] ?? 0) !== floor[i]) return (parts[i] ?? 0) < floor[i];
+  }
+  return false;
+}
+
 describe('accepted-overrides.json (the real list)', () => {
   it('is keyed by the three package directories and every entry names its fields', () => {
     const sides = Object.keys(realAcceptList).filter((key) => !key.startsWith('_'));
@@ -128,6 +137,31 @@ describe('accepted-overrides.json (the real list)', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('accepted node_modules/@prisma/config declares deepmerge-ts@');
     expect(result.stdout).toMatch(/0 cross-major mismatch\(es\), 1 accepted/);
+  });
+
+  // GHSA-mrhx-c7xc-m3w5: red here means the `zod@^3` override stopped working (a regenerated
+  // lockfile brought a zod 3.x copy back). Restore the override; never retire it for this.
+  it("mobile's zod@^3 override still lifts every zod in the real lockfile to >=4.6.6 (security floor, not a retire signal)", () => {
+    const lock = JSON.parse(readFileSync(path.join(ROOT, 'mobile/package-lock.json'), 'utf8')) as {
+      packages: Record<string, LockEntry>;
+    };
+    const below = Object.entries(lock.packages)
+      .filter(([p, e]) => /(^|\/)node_modules\/zod$/.test(p) && versionBelow(e.version ?? '0.0.0', [4, 6, 6]))
+      .map(([p, e]) => `${p}@${e.version}`);
+    expect(below).toEqual([]);
+  });
+
+  // Red with "gets" still >=4.6.6 means one of two things: expo's @expo/cli now declares zod 4
+  // (retire the override, its accepted-overrides.json entry and this test, see the docs), or npm
+  // hoisted @expo/cli to another path (update the entry's `consumer`), or a new package declares
+  // zod 3 and is being forced across the major (the mismatch line names it; scope or rethink).
+  it("mobile's zod@^3 override is accepted for @expo/cli and forces no other consumer across a major", () => {
+    const entry = (realAcceptList.mobile as AcceptEntry[]).find((e) => e.override === 'zod@^3');
+    expect(entry).toBeDefined();
+    const result = run(path.join(ROOT, 'mobile'), ['zod']);
+    expect(result.stdout).toContain(`accepted ${entry?.consumer} declares zod@^3`);
+    expect(result.stdout).toMatch(/0 cross-major mismatch\(es\), 1 accepted/);
+    expect(result.status).toBe(0);
   });
 });
 
