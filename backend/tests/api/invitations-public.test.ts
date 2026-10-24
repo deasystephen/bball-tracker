@@ -169,7 +169,7 @@ describe('Public Invitation Token API', () => {
       expect(logged).not.toContain('Join our team!');
     });
 
-    it('tells the app from the web site by client, and logs null when the header is absent or invalid', async () => {
+    it('tells the app from the web site by client, and logs unknown when the header is absent or invalid', async () => {
       mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
       const info = spyOnInfo();
 
@@ -180,13 +180,13 @@ describe('Public Invitation Token API', () => {
 
       info.mockClear();
       await request(app).get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-none`);
-      expect(domainEvent(info, 'Invitation viewed by token').client).toBeNull();
+      expect(domainEvent(info, 'Invitation viewed by token').client).toBe('unknown');
 
       info.mockClear();
       await request(app)
         .get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-bad`)
         .set('X-Hooplings-Client', 'Mozilla/5.0');
-      expect(domainEvent(info, 'Invitation viewed by token').client).toBeNull();
+      expect(domainEvent(info, 'Invitation viewed by token').client).toBe('unknown');
     });
 
     it('logs kind guardian and the state the recipient saw', async () => {

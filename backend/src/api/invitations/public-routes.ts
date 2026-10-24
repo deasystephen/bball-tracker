@@ -12,6 +12,7 @@
  */
 
 import { Router } from 'express';
+import type { InvitationStatus } from '@prisma/client';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { NotFoundError } from '../../utils/errors';
@@ -44,13 +45,27 @@ export type InvitationViewState = 'pending' | 'expired' | 'accepted' | 'rejected
  * on an accept attempt or a list read).
  */
 export function invitationViewState(
-  invitation: { status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED'; expiresAt: string },
+  invitation: { status: InvitationStatus; expiresAt: string },
   now: Date = new Date()
 ): InvitationViewState {
-  if (invitation.status === 'PENDING') {
-    return new Date(invitation.expiresAt) < now ? 'expired' : 'pending';
+  // Exhaustive: a new InvitationStatus value fails to compile here instead of
+  // logging a state the funnel's queries do not know.
+  switch (invitation.status) {
+    case 'PENDING':
+      return new Date(invitation.expiresAt) < now ? 'expired' : 'pending';
+    case 'EXPIRED':
+      return 'expired';
+    case 'ACCEPTED':
+      return 'accepted';
+    case 'REJECTED':
+      return 'rejected';
+    case 'CANCELLED':
+      return 'cancelled';
+    default: {
+      const unknownStatus: never = invitation.status;
+      return unknownStatus;
+    }
   }
-  return invitation.status.toLowerCase() as InvitationViewState;
 }
 
 /**
@@ -84,8 +99,9 @@ async function resolveByKind<T, G>(
  * A successful lookup logs `Invitation viewed by token` (#964, the invite
  * funnel): the invitation id, its kind, the state the recipient saw and the
  * caller's `client` (`X-Hooplings-Client`: `web` for the hooplings.com page,
- * `ios/…` for the app). Never the token. 400/404/429/5xx are on the
- * `HTTP request` line already.
+ * `ios/…` for the app once it sends the header, #963; `unknown` without a
+ * valid one, a searchable value where a null would not be). Never the token.
+ * 400/404/429/5xx are on the `HTTP request` line already.
  */
 router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
@@ -107,7 +123,7 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
       invitationId: invitation.id,
       kind: invitation.kind,
       state: invitationViewState(invitation),
-      client: req.hooplingsClient ?? null,
+      client: req.hooplingsClient ?? 'unknown',
     });
     res.json({ success: true, invitation: omitToken(invitation) });
   } catch (error) {
