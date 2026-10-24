@@ -8,7 +8,9 @@
  */
 
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { act, render, fireEvent } from '@testing-library/react-native';
+
+import { i18n } from '../../i18n';
 
 import Stats from '../../app/(tabs)/stats';
 import { trackEvent, AnalyticsEvents } from '../../services/analytics';
@@ -198,6 +200,21 @@ describe('Stats tab — load states', () => {
 
     expect(view.getByText('No Statistics Yet')).toBeTruthy();
     expect(view.queryByText('Something went wrong')).toBeNull();
+  });
+
+  it('reads Spanish on a Spanish device: heading and empty state (#671)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const view = render(<Stats />);
+
+      expect(view.getByText('Estadísticas')).toBeTruthy();
+      expect(view.getByText('Aún no hay estadísticas')).toBeTruthy();
+      expect(view.queryByText(/Statistics/)).toBeNull();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+    }
   });
 
   it('keeps the cached teams on screen when only a background refetch failed', () => {

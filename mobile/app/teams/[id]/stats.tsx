@@ -27,7 +27,8 @@ import { useTeam } from '../../../hooks/useTeams';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
-import { getResultColor } from '../../../utils/game-result';
+import { getResultColor, resultLetter } from '../../../utils/game-result';
+import { useTranslation } from '../../../i18n';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { BackButton } from '../../../components/BackButton';
 import { formatNumericDate } from '../../../utils/format-date';
@@ -39,6 +40,7 @@ export default function TeamStatsScreen() {
   const goBack = useGoBack('/(tabs)/teams');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -75,13 +77,13 @@ export default function TeamStatsScreen() {
   };
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading team stats..." fullScreen />;
+    return <LoadingSpinner message={t('stats.loadingTeamStats')} fullScreen />;
   }
 
   if (error) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load stats'}
+        message={error instanceof Error ? error.message : t('stats.loadFailed')}
         onRetry={handleRefresh}
         onBack={goBack}
       />
@@ -89,10 +91,10 @@ export default function TeamStatsScreen() {
   }
 
   const sortOptions: { key: SortKey; label: string }[] = [
-    { key: 'ppg', label: 'PPG' },
-    { key: 'rpg', label: 'RPG' },
-    { key: 'apg', label: 'APG' },
-    { key: 'efficiency', label: 'EFF' },
+    { key: 'ppg', label: t('stats.abbr.ppg') },
+    { key: 'rpg', label: t('stats.abbr.rpg') },
+    { key: 'apg', label: t('stats.abbr.apg') },
+    { key: 'efficiency', label: t('stats.abbr.eff') },
   ];
 
   return (
@@ -113,10 +115,10 @@ export default function TeamStatsScreen() {
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading numberOfLines={1}>
-            {team?.name || 'Team'} Stats
+            {t('stats.teamStatsTitle', { team: team?.name || t('stats.teamFallback') })}
           </ThemedText>
         </View>
-        {isWeb && <PrintButton title="Print" />}
+        {isWeb && <PrintButton />}
       </View>
 
       <ScrollView
@@ -130,7 +132,7 @@ export default function TeamStatsScreen() {
         {seasonStats && (
           <Card variant="elevated" style={styles.recordCard}>
             <View style={styles.recordHeader}>
-              <ThemedText variant="h3" heading>Season Record</ThemedText>
+              <ThemedText variant="h3" heading>{t('stats.seasonRecord')}</ThemedText>
               <SeasonRecord
                 wins={seasonStats.wins}
                 losses={seasonStats.losses}
@@ -140,7 +142,7 @@ export default function TeamStatsScreen() {
               />
             </View>
             <ThemedText variant="caption" color="textSecondary" style={styles.gamesPlayed}>
-              {seasonStats.gamesPlayed} games played
+              {t('stats.gamesPlayed', { count: seasonStats.gamesPlayed })}
             </ThemedText>
           </Card>
         )}
@@ -154,26 +156,26 @@ export default function TeamStatsScreen() {
         {seasonStats && (
           <Card variant="default" style={styles.shootingCard}>
             <ThemedText variant="h3" heading style={styles.sectionTitle}>
-              Shooting Percentages
+              {t('stats.shootingPercentages')}
             </ThemedText>
             <View style={styles.shootingRow}>
               <View style={styles.shootingItem}>
                 <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.fieldGoalPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">FG%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.fgPct')}</ThemedText>
               </View>
               <View style={styles.shootingItem}>
                 <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.threePointPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">3P%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.threePct')}</ThemedText>
               </View>
               <View style={styles.shootingItem}>
                 <ThemedText variant="h2" heading={false} /* shooting percentage, a value */>
                   {seasonStats.freeThrowPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">FT%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.ftPct')}</ThemedText>
               </View>
             </View>
           </Card>
@@ -183,7 +185,7 @@ export default function TeamStatsScreen() {
         {seasonStats && seasonStats.recentGames.length > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h3" heading style={styles.sectionTitle}>
-              Recent Games
+              {t('stats.recentGames')}
             </ThemedText>
             <Card variant="default">
               {seasonStats.recentGames.slice(0, 5).map((game) => (
@@ -198,7 +200,7 @@ export default function TeamStatsScreen() {
                         variant="bodyBold"
                         style={{ color: getResultColor(game.result, colors) }}
                       >
-                        {game.result}
+                        {resultLetter(t, game.result)}
                       </ThemedText>
                       <ThemedText variant="caption" color="textSecondary">
                         {game.homeScore}-{game.awayScore}
@@ -215,7 +217,7 @@ export default function TeamStatsScreen() {
         {sortedRoster.length > 0 && (
           <View style={styles.section}>
             <View style={styles.rosterHeader}>
-              <ThemedText variant="h3" heading>Roster Stats</ThemedText>
+              <ThemedText variant="h3" heading>{t('stats.rosterStats')}</ThemedText>
               <SortPills options={sortOptions} selected={sortBy} onSelect={setSortBy} />
             </View>
 
@@ -236,7 +238,7 @@ export default function TeamStatsScreen() {
           <Card variant="default" style={styles.emptyCard}>
             <Ionicons name="stats-chart-outline" size={48} color={colors.textTertiary} />
             <ThemedText variant="body" color="textSecondary" style={styles.emptyText}>
-              No games played yet. Statistics will appear here once games are completed.
+              {t('stats.noGamesYet')}
             </ThemedText>
           </Card>
         )}

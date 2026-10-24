@@ -36,11 +36,13 @@ import { getHorizontalPadding } from '../../utils/responsive';
 import { useGoBack } from '../../hooks/useGoBack';
 import { BackButton } from '../../components/BackButton';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { useTranslation } from '../../i18n';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const goBack = useGoBack('/(tabs)/profile');
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -59,7 +61,7 @@ export default function AdminDashboard() {
   const allowed = useAccessGuard(
     !!user,
     canAccessAdmin(user),
-    'League admin access required',
+    t('leagues.adminRequired'),
     { fallback: '/(tabs)/profile' }
   );
   const canCreate = canCreateLeagues(user);
@@ -88,7 +90,7 @@ export default function AdminDashboard() {
           <View style={styles.leagueInfo}>
             <ThemedText variant="h4">{item.name}</ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              {seasonCount} {seasonCount === 1 ? 'season' : 'seasons'}
+              {t('leagues.seasonCount', { count: seasonCount })}
             </ThemedText>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
@@ -119,7 +121,7 @@ export default function AdminDashboard() {
             ))}
             {item.seasons.length > 2 && (
               <ThemedText variant="caption" color="textTertiary">
-                +{item.seasons.length - 2} more
+                {t('leagues.moreSeasons', { count: item.seasons.length - 2 })}
               </ThemedText>
             )}
           </View>
@@ -129,13 +131,13 @@ export default function AdminDashboard() {
   };
 
   if (isLoading || !allowed) {
-    return <LoadingSpinner message="Loading leagues..." fullScreen />;
+    return <LoadingSpinner message={t('leagues.loadingList')} fullScreen />;
   }
 
   if (error) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load leagues'}
+        message={error instanceof Error ? error.message : t('leagues.loadFailed')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -156,9 +158,9 @@ export default function AdminDashboard() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" heading>League Management</ThemedText>
+          <ThemedText variant="h2" heading>{t('leagues.management')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            Create and manage leagues and seasons
+            {t('leagues.managementSubtitle')}
           </ThemedText>
         </View>
         {canCreate && (
@@ -166,7 +168,7 @@ export default function AdminDashboard() {
             onPress={handleCreateLeague}
             style={[styles.addButton, { backgroundColor: colors.primary }]}
             accessibilityRole="button"
-            accessibilityLabel="Create league"
+            accessibilityLabel={t('leagues.createA11y')}
           >
             <Ionicons name="add" size={24} color={colors.textInverse} />
           </TouchableOpacity>
@@ -176,13 +178,9 @@ export default function AdminDashboard() {
       {!leagues || leagues.length === 0 ? (
         <EmptyState
           icon="trophy-outline"
-          title="No Leagues"
-          message={
-            canCreate
-              ? 'Create your first league to get started'
-              : 'You are not an admin of any league yet'
-          }
-          actionLabel={canCreate ? 'Create League' : undefined}
+          title={t('leagues.emptyTitle')}
+          message={canCreate ? t('leagues.emptyCanCreate') : t('leagues.emptyNotAdmin')}
+          actionLabel={canCreate ? t('leagues.create') : undefined}
           onAction={canCreate ? handleCreateLeague : undefined}
         />
       ) : (

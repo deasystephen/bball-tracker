@@ -27,19 +27,30 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `useAccessGuard` messages, validation errors. Counts use i18next plurals (`key_one`/`key_other` with
   `{ count }`), never `n === 1 ? '' : 's'`. A class component or a plain helper (utils, hooks, services)
   calls `i18n.t(...)` from `i18n/index.ts`; it reads the current language on every call. Server error
-  text from `getApiErrorMessage` stays English (out of scope by decision); every fallback passed to it is
-  translated.
+  text from `getApiErrorMessage` and socket transport errors stay English (out of scope by decision);
+  every fallback passed to them is translated. An error whose English `message` goes to Sentry carries an
+  i18n key for the screen instead (`utils/upload-error.ts#AvatarUploadError.userMessageKey`, shown via
+  `uploadAwareErrorMessage`), so one failure groups as one Sentry issue in every language. This changed
+  English too: a rejected S3 upload used to show its diagnostic ("Avatar upload failed (403 …)") and now
+  shows "Failed to upload photo"; the detail stays in Sentry. The About screen's Share / support-mail
+  diagnostics stay English on purpose (support reads them); the screen itself is translated.
 - **Shared components resolve their own defaults through `t()`**: `ErrorState` (title, Try Again, Go
   back, the `Error: {title}. {message}` region label), `ActionMenu` (Close, Close menu),
   `DateTimePickerSheet` (Cancel, Done, Close picker), `SortPills` (`common.sortBy`, "Sort by {label}",
   unless a `labelPrefix` is passed), `BackButton` (`common.goBack`), `Button` (`common.loadingA11y`),
   `UsageMeter`, `PrintButton`, `AvatarPicker`, and `ErrorBoundary` (class, `i18n.t`). Derived labels in
   utils are localized at the source: `rosterStatusLabel`, `emailDeliveryIssueLabel`/`Explanation`,
-  `formatInvitationExpiry`, `scoreAccessibilityLabel`. The guard does not read `return` or `throw`
-  literals, so each such helper has a Spanish unit test.
+  `formatInvitationExpiry`, `relationshipLabel` (`guardians.relationship.*`) and `relationshipNoun` (the
+  in-sentence form, `guardians.relationshipInSentence.*`, never a lower-cased label), `scoreAccessibilityLabel`,
+  `formatShotDescription`, `resultLetter` (W/L/T, V/D/E) and `formatSeasonRange` (now in
+  `utils/format-date.ts`, shared by the league and season screens). The guard does not read `return` or
+  `throw` literals, so each such helper has a Spanish unit test.
 - **English values are pinned.** Jest pins the locale to `en` and the Maestro flows select by English
   text and labels, so converting a literal keeps its `en.json` value byte-identical; changing English
-  copy is a flow change. Namespaces: `common`, `tabs`, `avatar`, `usage`, `roster`, `invitations`,
+  copy is a flow change. A few English strings changed on purpose and no test or flow matched them:
+  hand-pluralised counts that read "1 players" / "1 games" are i18next plurals now. Namespaces:
+  `common`, `tabs`, `avatar`, `usage`, `roster`, `invitations`, `invite`, `guardians`, `home`,
+  `profile`, `about`, `login`, `authCallback`, `onboarding`, `nameOnboarding`, `leagues`, `seasons`,
   `games` (screens, `games.rsvp.*`, `games.live.*`), `tracker` (the tracker components, shot and play
   labels, milestones), `stats` (`stats.abbr.*` box-score abbreviations, `stats.resultLetter.*` W/L/T),
   plus the older per-feature ones. Spanish basketball terms follow one glossary (PR #961): partido,
@@ -48,12 +59,15 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   namespace was removed.
 - **Guard:** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`, `components/`, `hooks/`, `services/` and `utils/`
   and fails on a user-facing literal (scanner: `__tests__/helpers/hardcoded-copy.ts`; it decides by
-  position, so `status === 'LIVE'` and `t('games.title')` pass). Allowed: literals with no letter, the
-  product name, and `__DEV__`-only code. `PENDING_FILES` lists the screens not converted yet and only
-  shrinks (a listed file with no findings fails). `locale-parity.test.ts` keeps the key sets equal.
+  position, so `status === 'LIVE'` and `t('games.title')` pass). Allowed: literals with no letter, URLs,
+  the product name, HTML entities, and `__DEV__`-only code. `PENDING_FILES` (the screens not yet
+  converted while #671 ran in three PRs) is empty; an entry with no findings fails, so it cannot grow
+  stale. `locale-parity.test.ts` keeps the key sets equal.
   Spanish renders: `__tests__/i18n/spanish-shared.test.tsx` (shared components, tab bar, derived labels),
   `__tests__/i18n/spanish-games.test.tsx` (tracker components, box score), and the Spanish cases in
-  `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP).
+  `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP),
+  `{league-detail-delete,team-detail-roster-sort,stats-tab-states,player-stats-states,players-roster-status,invitations-guardian,players-email-issue}.test.tsx`
+  (league seasons, team detail, Stats tab, player stats, roster and Add Player form, invitations).
 - **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
   yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
   the app and localizes system UI around it.
@@ -140,8 +154,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   season row only showed a "coming soon" alert. Validation on edit mirrors `updateSeasonSchema` (name 1–100)
   plus the service's start ≤ end check. The season forms share `components/SeasonDateFields` (date rows +
   picker sheet, clear button as a sibling of the date button). Strings live under `seasons.*` and
-  `leagues.delete*` in `i18n/locales`; the older admin screens (league list/create, season create) are still
-  inline English. Tests: `__tests__/app/{season-detail,season-edit,league-detail-delete}.test.tsx`; both
+  `leagues.*` in `i18n/locales`; every admin screen is translated since #671 (league list/create and season
+  create were inline English before). Tests: `__tests__/app/{season-detail,season-edit,league-detail-delete}.test.tsx`; both
   season screens are in the way-back list in `__tests__/app/error-state-way-back.test.tsx`. Maestro:
   `.maestro/admin-season-manage.yaml` (dev-login as the seeded ADMIN; creates and deletes "E2E Season";
   the seed removes a leftover).

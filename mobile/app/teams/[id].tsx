@@ -42,9 +42,10 @@ const HERO_ICON_SIZE = 22;
 /** The edit and delete icons draw at 30pt (22 + padding); the slop makes them 44pt targets. */
 const HERO_ICON_HIT_SLOP = touchTargetHitSlop(HERO_ICON_SIZE + 2 * spacing.xs);
 
-const ROSTER_SORT_OPTIONS: { key: RosterSortKey; label: string }[] = [
-  { key: 'jersey', label: 'Jersey #' },
-  { key: 'name', label: 'Name' },
+/** Sort pills; labels are i18n keys, resolved in the component. */
+const ROSTER_SORT_KEYS: { key: RosterSortKey; labelKey: string }[] = [
+  { key: 'jersey', labelKey: 'teams.sortJersey' },
+  { key: 'name', labelKey: 'teams.sortName' },
 ];
 
 export default function TeamDetailsScreen() {
@@ -59,6 +60,10 @@ export default function TeamDetailsScreen() {
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const deleteTeam = useDeleteTeam();
+  const rosterSortOptions = useMemo(
+    () => ROSTER_SORT_KEYS.map(({ key, labelKey }) => ({ key, label: t(labelKey) })),
+    [t]
+  );
   const [rosterSort, setRosterSort] = useRosterSortPreference(user?.id);
   // The backend already returns jersey order; sorting client-side too keeps
   // cached/pre-deploy data consistent and drives the Name option.
@@ -76,23 +81,23 @@ export default function TeamDetailsScreen() {
 
   const handleDelete = () => {
     Alert.alert(
-      'Delete Team',
-      'Are you sure you want to delete this team? This action cannot be undone.',
+      t('teams.deleteTitle'),
+      t('teams.deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteTeam.mutateAsync(id);
-              Alert.alert('Success', 'Team deleted successfully', [
-                { text: 'OK', onPress: () => router.replace('/(tabs)/teams') },
+              Alert.alert(t('common.success'), t('teams.deleteSuccess'), [
+                { text: t('common.ok'), onPress: () => router.replace('/(tabs)/teams') },
               ]);
             } catch (err) {
               Alert.alert(
-                'Error',
-                err instanceof Error ? err.message : 'Failed to delete team'
+                t('common.error'),
+                err instanceof Error ? err.message : t('teams.deleteFailed')
               );
             }
           },
@@ -108,7 +113,7 @@ export default function TeamDetailsScreen() {
   if (error || !team) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Team not found'}
+        message={error instanceof Error ? error.message : t('teams.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -132,7 +137,7 @@ export default function TeamDetailsScreen() {
                 style={styles.heroIconButton}
                 hitSlop={HERO_ICON_HIT_SLOP}
                 accessibilityRole="button"
-                accessibilityLabel="Edit team"
+                accessibilityLabel={t('teams.editTeamA11y')}
               >
                 <Ionicons name="create-outline" size={HERO_ICON_SIZE} color="#FFFFFF" />
               </TouchableOpacity>
@@ -141,7 +146,7 @@ export default function TeamDetailsScreen() {
                 style={styles.heroIconButton}
                 hitSlop={HERO_ICON_HIT_SLOP}
                 accessibilityRole="button"
-                accessibilityLabel="Delete team"
+                accessibilityLabel={t('teams.deleteTeamA11y')}
               >
                 <Ionicons name="trash-outline" size={HERO_ICON_SIZE} color="#FFFFFF" />
               </TouchableOpacity>
@@ -175,20 +180,20 @@ export default function TeamDetailsScreen() {
             accessibilityRole="button"
           >
             <ThemedText variant="h3">{memberCount}</ThemedText>
-            <ThemedText variant="footnote" color="textSecondary">Players</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">{t('teams.players')}</ThemedText>
           </TouchableOpacity>
           <View style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}>
             <ThemedText variant="h3" color="primary">--</ThemedText>
-            <ThemedText variant="footnote" color="textSecondary">PPG</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">{t('stats.abbr.ppg')}</ThemedText>
           </View>
           <View style={[styles.quickStatCard, { backgroundColor: colors.backgroundSecondary }]}>
             <ThemedText variant="h3" color="primary">--</ThemedText>
-            <ThemedText variant="footnote" color="textSecondary">RPG</ThemedText>
+            <ThemedText variant="footnote" color="textSecondary">{t('stats.abbr.rpg')}</ThemedText>
           </View>
         </View>
 
         <Button
-          title="View Team Stats"
+          title={t('teams.viewStats')}
           onPress={() => router.push(`/teams/${id}/stats`)}
           variant="outline"
           style={styles.statsButton}
@@ -197,7 +202,7 @@ export default function TeamDetailsScreen() {
         {/* Team Chat Link */}
         {team.chatLink && (
           <Button
-            title="Team Chat"
+            title={t('teams.chat')}
             onPress={() => Linking.openURL(team.chatLink!)}
             variant="outline"
             style={styles.statsButton}
@@ -206,7 +211,7 @@ export default function TeamDetailsScreen() {
 
         {/* Announcements */}
         <Button
-          title="Announcements"
+          title={t('announcements.listTitle')}
           onPress={() => router.push(`/teams/${id}/announcements`)}
           variant="outline"
           style={styles.statsButton}
@@ -219,13 +224,13 @@ export default function TeamDetailsScreen() {
               <Ionicons name="trophy-outline" size={20} color={colors.primary} />
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  League & Season
+                  {t('teams.leagueAndSeason')}
                 </ThemedText>
                 <ThemedText variant="bodyBold">{team.season.league.name}</ThemedText>
                 <ThemedText variant="caption" color="textTertiary">
                   {team.season.name}
                   {team.season.isActive && (
-                    <ThemedText variant="caption" color="success"> (Active)</ThemedText>
+                    <ThemedText variant="caption" color="success">{` (${t('seasons.active')})`}</ThemedText>
                   )}
                 </ThemedText>
               </View>
@@ -276,7 +281,7 @@ export default function TeamDetailsScreen() {
           <View style={styles.sectionHeader}>
             <ThemedText variant="h3" heading>{t('teams.players')}</ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              {memberCount} {memberCount === 1 ? 'player' : 'players'}
+              {t('teams.playerCount', { count: memberCount })}
             </ThemedText>
           </View>
 
@@ -291,7 +296,7 @@ export default function TeamDetailsScreen() {
 
           {memberCount > 1 && (
             <SortPills
-              options={ROSTER_SORT_OPTIONS}
+              options={rosterSortOptions}
               selected={rosterSort}
               onSelect={setRosterSort}
               style={styles.sortPills}
@@ -323,7 +328,7 @@ export default function TeamDetailsScreen() {
                   )}
                   {member.player.isManaged ? (
                     <ThemedText variant="footnote" color="textTertiary">
-                      Roster player
+                      {t('teams.rosterPlayer')}
                     </ThemedText>
                   ) : null}
                 </TouchableOpacity>
@@ -332,7 +337,7 @@ export default function TeamDetailsScreen() {
           ) : (
             <Card variant="default" style={styles.emptyCard}>
               <ThemedText variant="body" color="textTertiary" style={styles.emptyText}>
-                No players added yet
+                {t('teams.noPlayersYet')}
               </ThemedText>
               {canManageRoster && (
                 <Button

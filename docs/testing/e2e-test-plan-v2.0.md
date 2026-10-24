@@ -191,12 +191,18 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Theme flips immediately across all screens. Persists across cold start.
 - **Notes:** ___________
 
-### B.4 — Language picker (i18n)
+### B.4 — Spanish device (i18n, #671)
 - [ ] Pass / Fail / Skipped
-- **Role:** any logged-in user
-- **Steps:** Profile → language picker → select non-English option (if available).
-- **Expected:** UI strings update. Persists across cold start.
-- **Notes:** Verify which languages are bundled (`mobile/i18n/`).
+- **Role:** coach (dev-login), then a player
+- **Steps:** Settings → General → Language & Region → Español; relaunch the app. Walk Home, Teams (list,
+  create, detail, trash icon, edit, Roster → Add Player and a row's options menu, Parents & guardians,
+  Announcements), Track (list, Create Game, date picker, tracker: shots, stats, undo, End), Stats (tab,
+  team, player, box score), Profile (usage rows, a row menu, Leagues & Seasons → league → Add Season),
+  Invitations, and a team while offline. Repeat the tracker and a back button with VoiceOver on.
+- **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
+  team/player names and server error text stay as they are. There is no in-app language picker; the app
+  follows the device language. Back to English: every screen and label English again.
+- **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`.
 
 ### B.5 — About screen (version / OTA diagnostics)
 - [ ] Pass / Fail / Skipped

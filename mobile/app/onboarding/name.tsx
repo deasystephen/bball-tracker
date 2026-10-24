@@ -23,9 +23,11 @@ import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import { isGuardian } from '../../utils/guardian';
 import { markNameAsked, hasPlaceholderName, postLoginRoute, HOME_ROUTE } from '../../utils/role-onboarding';
 import { spacing } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 export default function NamePromptScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { from } = useLocalSearchParams<{ from?: string }>();
   const insets = useSafeAreaInsets();
   const user = useAuthUser();
@@ -61,7 +63,7 @@ export default function NamePromptScreen() {
   const handleSave = async () => {
     const trimmed = name.trim();
     if (trimmed.length < 2) {
-      setError('Please enter your name');
+      setError(t('nameOnboarding.required'));
       return;
     }
     setError(undefined);
@@ -72,21 +74,21 @@ export default function NamePromptScreen() {
       await finish();
     } catch (err) {
       captureException(err, { flow: 'name-onboarding' });
-      Alert.alert('Could not save', 'Please try again.');
+      Alert.alert(t('nameOnboarding.saveFailedTitle'), t('nameOnboarding.saveFailedBody'));
     }
   };
 
   const subtitle = fromProfile
-    ? 'This is the name your teammates, coaches and leagues see.'
+    ? t('nameOnboarding.subtitleEdit')
     : isGuardian(user)
-      ? "Your coach set up this account for you. Pick the name your child's team will see."
-      : 'Your account does not have a display name yet. Add the one your teams should see.';
+      ? t('nameOnboarding.subtitleGuardian')
+      : t('nameOnboarding.subtitleNew');
 
   return (
     <ThemedView variant="background" style={[styles.container, { paddingTop: insets.top + spacing.xl }]}>
       <View style={styles.header}>
         <ThemedText variant="h1" heading style={styles.title}>
-          {fromProfile ? 'Edit your name' : 'What should we call you?'}
+          {fromProfile ? t('nameOnboarding.titleEdit') : t('nameOnboarding.titleNew')}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
           {subtitle}
@@ -94,8 +96,8 @@ export default function NamePromptScreen() {
       </View>
 
       <Input
-        label="Your name"
-        placeholder="e.g. Dell Curry"
+        label={t('nameOnboarding.label')}
+        placeholder={t('nameOnboarding.placeholder')}
         value={name}
         onChangeText={(text) => {
           setName(text);
@@ -109,7 +111,7 @@ export default function NamePromptScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Button
-          title={fromProfile ? 'Save' : 'Continue'}
+          title={fromProfile ? t('common.save') : t('roleOnboarding.continue')}
           onPress={handleSave}
           loading={updateProfile.isPending}
           disabled={updateProfile.isPending}
@@ -117,9 +119,9 @@ export default function NamePromptScreen() {
           size="large"
         />
         {fromProfile ? (
-          <Button title="Cancel" variant="outline" onPress={close} fullWidth style={styles.skip} />
+          <Button title={t('common.cancel')} variant="outline" onPress={close} fullWidth style={styles.skip} />
         ) : (
-          <Button title="Skip for now" variant="outline" onPress={finish} fullWidth style={styles.skip} />
+          <Button title={t('nameOnboarding.skip')} variant="outline" onPress={finish} fullWidth style={styles.skip} />
         )}
       </View>
     </ThemedView>

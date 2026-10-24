@@ -65,8 +65,12 @@ export const COPY_CALLS: ReadonlyMap<string, readonly number[]> = new Map([
   ['alert', [0, 1]],
   ['announce', [0]],
   ['announceForAccessibility', [0]],
+  // The fallback message shown when an error carries none of its own.
+  ['describeApiError', [1]],
+  ['getApiErrorMessage', [1]],
   ['showToast', [0]],
   ['useAccessGuard', [2]],
+  ['useQueryErrorState', [1]],
 ]);
 
 /** A `set…Error` / `set…Errors` state setter: its argument is shown under a field. */
@@ -87,10 +91,12 @@ export interface CopyFinding {
 }
 
 const HAS_LETTER = /\p{L}/u;
+/** A URL (a link placeholder such as `https://chat.whatsapp.com/...`) reads the same in every language. */
+const URL_LITERAL = /^https?:\/\/\S+$/;
 
 function isCopy(text: string): boolean {
   const trimmed = text.trim();
-  return HAS_LETTER.test(trimmed) && !ALLOWED_LITERALS.has(trimmed);
+  return HAS_LETTER.test(trimmed) && !ALLOWED_LITERALS.has(trimmed) && !URL_LITERAL.test(trimmed);
 }
 
 /** The literal nodes an expression can render, following only the branches that reach the screen. */
@@ -190,7 +196,8 @@ export function findHardcodedCopy(fileName: string, text: string): CopyFinding[]
   const visit = (node: ts.Node): void => {
     if (isDevOnly(node)) return;
     if (ts.isJsxText(node)) {
-      if (isCopy(node.text)) nodes.push(node);
+      // HTML entities (`&ldquo;`, `&apos;`) are punctuation, not words.
+      if (isCopy(node.text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, ' '))) nodes.push(node);
     } else if (ts.isJsxExpression(node) && node.parent && (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))) {
       nodes.push(...renderedLiterals(node.expression));
     } else if (ts.isJsxAttribute(node)) {

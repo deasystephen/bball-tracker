@@ -107,9 +107,9 @@ export default function Home() {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return t('home.goodMorning');
+    if (hour < 17) return t('home.goodAfternoon');
+    return t('home.goodEvening');
   };
 
   const liveGame = liveGames?.[0];
@@ -117,7 +117,7 @@ export default function Home() {
   const upcomingCount = upcomingPage?.total ?? 0;
 
   if (isLoading) {
-    return <LoadingSpinner fullScreen message="Loading dashboard..." />;
+    return <LoadingSpinner fullScreen message={t('home.loading')} />;
   }
 
   if (
@@ -127,8 +127,8 @@ export default function Home() {
   ) {
     return (
       <ErrorState
-        title="Something went wrong"
-        message="We couldn't load your dashboard. Please check your connection and try again."
+        title={t('common.somethingWentWrong')}
+        message={t('home.loadFailed')}
         onRetry={handleRefresh}
       />
     );
@@ -158,7 +158,7 @@ export default function Home() {
               {getGreeting()}
             </ThemedText>
             <ThemedText variant="h3">
-              {user?.name?.split(' ')[0] || 'Coach'}
+              {user?.name?.split(' ')[0] || t('teams.coach')}
             </ThemedText>
           </View>
           <View style={styles.greetingRight}>
@@ -168,7 +168,7 @@ export default function Home() {
                 style={styles.bellButton}
                 hitSlop={BELL_HIT_SLOP}
                 accessibilityRole="button"
-                accessibilityLabel={`${pendingInvitations.length} pending invitations`}
+                accessibilityLabel={t('home.pendingInvitationsA11y', { count: pendingInvitations.length })}
               >
                 <Ionicons name="notifications" size={BELL_ICON_SIZE} color={colors.text} />
                 <View
@@ -184,7 +184,7 @@ export default function Home() {
               onPress={() => router.push('/profile')}
               style={styles.avatarButton}
               accessibilityRole="button"
-              accessibilityLabel="Profile"
+              accessibilityLabel={t('tabs.profile')}
               testID="home-profile-avatar"
             >
               <Avatar uri={user?.profilePictureUrl} name={user?.name || ''} size="small" />
@@ -214,7 +214,7 @@ export default function Home() {
                   variant="captionBold"
                   style={{ color: colors.live }}
                 >
-                  LIVE
+                  {t('games.liveBadge')}
                 </ThemedText>
               </View>
               <View style={styles.liveScoreRow}>
@@ -224,7 +224,7 @@ export default function Home() {
                     style={styles.liveTeamName}
                     numberOfLines={1}
                   >
-                    {liveGame.team?.name || 'Home'}
+                    {liveGame.team?.name || t('games.homeFallback')}
                   </ThemedText>
                   <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScore}>
                     {liveGame.homeScore}
@@ -250,7 +250,7 @@ export default function Home() {
                 style={[styles.liveCTA, { backgroundColor: colors.accent }]}
               >
                 <ThemedText variant="captionBold" style={styles.liveCTAText}>
-                  Continue Tracking
+                  {t('games.continueTracking')}
                 </ThemedText>
               </View>
             </View>
@@ -269,7 +269,7 @@ export default function Home() {
               {recentGames.filter((g: Game) => getGameResult(g.homeScore, g.awayScore) === 'W').length}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
-              Wins (last 5)
+              {t('home.winsLast5')}
             </ThemedText>
           </View>
           <View
@@ -282,7 +282,7 @@ export default function Home() {
               {teamsTotal}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
-              Teams
+              {t('teams.title')}
             </ThemedText>
           </View>
           <View
@@ -295,7 +295,7 @@ export default function Home() {
               {upcomingCount}
             </ThemedText>
             <ThemedText variant="footnote" color="textSecondary">
-              Upcoming
+              {t('games.filter.upcoming')}
             </ThemedText>
           </View>
         </View>
@@ -304,10 +304,10 @@ export default function Home() {
         {teams && teams.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <ThemedText variant="h4" heading>Your Teams</ThemedText>
+              <ThemedText variant="h4" heading>{t('home.yourTeams')}</ThemedText>
               <TouchableOpacity onPress={() => router.push('/teams')} accessibilityRole="button">
                 <ThemedText variant="caption" color="primary">
-                  See All
+                  {t('home.seeAll')}
                 </ThemedText>
               </TouchableOpacity>
             </View>
@@ -366,7 +366,7 @@ export default function Home() {
         {/* Recent Activity Feed */}
         <View style={styles.section}>
           <ThemedText variant="h4" heading style={styles.sectionTitle}>
-            Recent Activity
+            {t('home.recentActivity')}
           </ThemedText>
 
           {recentGames.length === 0 && pendingInvitations.length === 0 && (
@@ -382,7 +382,7 @@ export default function Home() {
                   color="textSecondary"
                   style={styles.emptyText}
                 >
-                  No recent activity yet
+                  {t('home.noActivity')}
                 </ThemedText>
               </View>
             </Card>
@@ -414,7 +414,7 @@ export default function Home() {
                   {invitation.team.name}
                 </ThemedText>
                 <ThemedText variant="footnote" color="textSecondary">
-                  Invitation from {displayName(invitation.invitedBy)}
+                  {t('home.invitationFrom', { name: displayName(invitation.invitedBy) })}
                 </ThemedText>
               </View>
               <Ionicons
@@ -456,7 +456,7 @@ export default function Home() {
                 </View>
                 <View style={styles.activityInfo}>
                   <ThemedText variant="bodyBold" numberOfLines={1}>
-                    vs {game.opponent}
+                    {t('games.vsOpponent', { opponent: game.opponent })}
                   </ThemedText>
                   <ThemedText variant="footnote" color="textSecondary">
                     {game.homeScore} - {game.awayScore}
@@ -485,9 +485,7 @@ export default function Home() {
                   color="textSecondary"
                   style={styles.emptyText}
                 >
-                  {canCreateTeams(user)
-                    ? 'No teams yet'
-                    : 'No teams yet. Your coach will add you to a team.'}
+                  {canCreateTeams(user) ? t('seasons.noTeams') : t('home.noTeamsPlayer')}
                 </ThemedText>
                 {canCreateTeams(user) && (
                   <TouchableOpacity
@@ -502,7 +500,7 @@ export default function Home() {
                       variant="captionBold"
                       style={{ color: colors.textInverse }}
                     >
-                      Create Team
+                      {t('teams.create')}
                     </ThemedText>
                   </TouchableOpacity>
                 )}

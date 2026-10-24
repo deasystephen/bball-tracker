@@ -14,6 +14,7 @@ import { typography } from '../theme/typography';
 import { postLoginRoute } from '../utils/role-onboarding';
 import { beginPkceLogin } from '../utils/pkce';
 import { APP_URL_SCHEME } from '../config/env';
+import { useTranslation } from '../i18n';
 
 interface DevUser {
   id: string;
@@ -27,6 +28,7 @@ interface DevUser {
  */
 export default function Login() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { setAuthToken, setUser } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [showDevLogin, setShowDevLogin] = useState(false);
@@ -79,14 +81,14 @@ export default function Login() {
         awaitingBrowserRef.current = true;
         await Linking.openURL(url);
       } else {
-        Alert.alert('Error', 'Cannot open browser. Please check your device settings.');
+        Alert.alert(t('common.error'), t('login.cannotOpenBrowser'));
         setIsLoading(false);
       }
     } catch (error) {
       awaitingBrowserRef.current = false;
       captureException(error, { flow: 'login-initiate' });
       log.error('Login error', { error });
-      Alert.alert('Error', 'Failed to initiate login. Please try again.');
+      Alert.alert(t('common.error'), t('login.initiateFailed'));
       setIsLoading(false);
     }
   };
@@ -100,7 +102,7 @@ export default function Login() {
       setShowDevLogin(true);
     } catch (error) {
       log.error('Error fetching dev users', { error });
-      Alert.alert('Error', 'Failed to load test users. Is the backend running?');
+      Alert.alert(t('common.error'), t('login.devUsersFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -121,7 +123,7 @@ export default function Login() {
       router.replace(await postLoginRoute(user));
     } catch (error) {
       log.error('Dev login error', { error });
-      Alert.alert('Error', 'Dev login failed. Please try again.');
+      Alert.alert(t('common.error'), t('login.devLoginFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -147,7 +149,7 @@ export default function Login() {
       style={styles.container}
     >
       <Text style={styles.title} accessibilityRole="header">Hooplings</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
+      <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
 
       {isLoading ? (
         <ActivityIndicator color="#FFFFFF" size="large" style={styles.loader} />
@@ -158,7 +160,7 @@ export default function Login() {
             disabled={isLoading}
             activeOpacity={0.8}
             accessibilityRole="button"
-            accessibilityLabel="Sign in"
+            accessibilityLabel={t('login.signInA11y')}
             accessibilityState={{ disabled: isLoading }}
             style={styles.signInTouchable}
           >
@@ -168,7 +170,7 @@ export default function Login() {
               end={{ x: 1, y: 1 }}
               style={styles.signInButton}
             >
-              <Text style={styles.signInButtonText}>Sign In</Text>
+              <Text style={styles.signInButtonText}>{t('login.signIn')}</Text>
             </LinearGradient>
           </TouchableOpacity>
 
@@ -180,9 +182,9 @@ export default function Login() {
               disabled={isLoading}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel="Developer login with test users"
+              accessibilityLabel={t('login.devLoginA11y')}
             >
-              <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
+              <Text style={styles.devButtonText}>{t('login.devLogin')}</Text>
             </TouchableOpacity>
           )}
         </>
@@ -197,13 +199,13 @@ export default function Login() {
       >
         <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Select Test User</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">{t('login.selectTestUser')}</Text>
             <TouchableOpacity
               onPress={() => setShowDevLogin(false)}
               accessibilityRole="button"
-              accessibilityLabel="Cancel"
+              accessibilityLabel={t('common.cancel')}
             >
-              <Text style={[styles.modalClose, { color: colors.primary }]}>Cancel</Text>
+              <Text style={[styles.modalClose, { color: colors.primary }]}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
           <FlatList

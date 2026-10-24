@@ -24,7 +24,7 @@ import {
   ActionMenu,
 } from '../../../components';
 import { useToast } from '../../../components/Toast';
-import { useSeason, useDeleteSeason, Season } from '../../../hooks/useSeasons';
+import { useSeason, useDeleteSeason } from '../../../hooks/useSeasons';
 import { useTheme } from '../../../hooks/useTheme';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useGoBack } from '../../../hooks/useGoBack';
@@ -36,18 +36,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
-import { formatNumericDate } from '../../../utils/format-date';
-
-/** "Mar 1, 2024 - Jun 30, 2024", with a placeholder for a missing end. */
-export function formatSeasonRange(
-  season: Pick<Season, 'startDate' | 'endDate'>,
-  labels: { noStart: string; noEnd: string }
-): string | null {
-  if (!season.startDate && !season.endDate) return null;
-  const start = season.startDate ? formatNumericDate(season.startDate) : labels.noStart;
-  const end = season.endDate ? formatNumericDate(season.endDate) : labels.noEnd;
-  return `${start} - ${end}`;
-}
+import { formatSeasonRange } from '../../../utils/format-date';
 
 export default function SeasonDetailScreen() {
   const router = useRouter();

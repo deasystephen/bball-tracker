@@ -72,6 +72,21 @@ export function formatNumericDate(value: Date | string): string {
   return toDate(value).toLocaleDateString(deviceLocale());
 }
 
+/**
+ * A season's date range, "3/1/2024 - 6/30/2024", with the caller's localized
+ * placeholder for a missing end; `null` when the season has no dates at all.
+ * Shared by the league screen's season rows and the season detail (#671).
+ */
+export function formatSeasonRange(
+  season: { startDate?: string | null; endDate?: string | null },
+  labels: { noStart: string; noEnd: string }
+): string | null {
+  if (!season.startDate && !season.endDate) return null;
+  const start = season.startDate ? formatNumericDate(season.startDate) : labels.noStart;
+  const end = season.endDate ? formatNumericDate(season.endDate) : labels.noEnd;
+  return `${start} - ${end}`;
+}
+
 /** Numeric date and time, e.g. "10/3/2026, 7:30:45 PM" (About screen). */
 export function formatDateTime(value: Date | string): string {
   return toDate(value).toLocaleString(deviceLocale());
