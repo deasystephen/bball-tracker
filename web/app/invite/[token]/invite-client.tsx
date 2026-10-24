@@ -5,7 +5,8 @@ import { childDisplayName, inviterDisplayName } from '../../../lib/display-name'
 import { acceptInvitationByTokenUrl } from '../../../lib/api-urls';
 import { formatExpiry } from '../../../lib/format-date';
 import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
-import { APP_STORE_URL, PLAY_STORE_URL, openInApp } from '../../../lib/open-in-app';
+import { APP_STORE_RELEASED, openInApp } from '../../../lib/open-in-app';
+import { AppStoreLink } from '../../store-links';
 
 
 interface Props {
@@ -79,14 +80,16 @@ export function InviteClient({ invitation, token }: Props) {
               ? `You are now ${childRole}!`
               : `You've joined ${invitation.teamName}!`}
           </p>
-          <p>
-            {guardian
-              ? "Download the app to see your child's schedule, RSVP for games, and view stats."
-              : 'Download the app to see your team, track games, and view stats.'}
-          </p>
+          {/* No "download the app" before the release: there is nothing to download yet. */}
+          {APP_STORE_RELEASED && (
+            <p>
+              {guardian
+                ? "Download the app to see your child's schedule, RSVP for games, and view stats."
+                : 'Download the app to see your team, track games, and view stats.'}
+            </p>
+          )}
           <div className="actions" style={{ marginTop: 24 }}>
-            <a href={APP_STORE_URL} className="btn btn-primary">Download on the App Store</a>
-            <a href={PLAY_STORE_URL} className="btn btn-outline">Get it on Google Play</a>
+            <AppStoreLink />
           </div>
         </div>
       </main>
@@ -247,12 +250,7 @@ export function InviteClient({ invitation, token }: Props) {
 
         <div className="store-links">
           <p className="footer">Don&apos;t have the app?</p>
-          <a href={APP_STORE_URL} className="btn btn-outline" style={{ fontSize: 14, padding: '10px 16px' }}>
-            App Store
-          </a>
-          <a href={PLAY_STORE_URL} className="btn btn-outline" style={{ fontSize: 14, padding: '10px 16px' }}>
-            Google Play
-          </a>
+          <AppStoreLink compact />
         </div>
       </div>
     </main>

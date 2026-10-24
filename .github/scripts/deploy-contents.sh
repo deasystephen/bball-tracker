@@ -23,8 +23,9 @@
 set -uo pipefail
 
 # The paths that make up the deployed image and its task definition. Keep in
-# step with the `backend` filter of the detect-changes job in ci.yml.
-DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md' ':(exclude)infra/.terraform.lock.hcl' ':(exclude)infra/bootstrap/.terraform.lock.hcl')
+# step with the `backend` filter of the detect-changes job in ci.yml. The web
+# app's files are excluded: they ship in build-and-deploy-web (#30).
+DEPLOY_PATHS=(backend infra docker .github/workflows/ci.yml ':(exclude,glob)**/*.md' ':(exclude)infra/.terraform.lock.hcl' ':(exclude)infra/bootstrap/.terraform.lock.hcl' ':(exclude)infra/web.tf' ':(exclude)infra/web-task-definition.json')
 
 DEPLOYED="${1:-}"
 NEW="${2:-}"

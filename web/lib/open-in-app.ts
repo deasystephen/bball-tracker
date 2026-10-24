@@ -1,8 +1,11 @@
 // App Store Connect app id (mobile/eas.json submit.production.ios.ascAppId). Apple
 // resolves the id-only form; it shows "not available" until the app is released.
 export const APP_STORE_URL = 'https://apps.apple.com/app/id6758903514';
-// Placeholder until an Android listing exists (#30).
-export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.bballtracker.mobile';
+// Until the App Store release (#451) the store page says "not available", so no
+// page links to it and the open-in-app fallback stays put. Flip this in a PR on
+// release day; the merge redeploys the site. There is no Android listing yet
+// (#30, #139), so no page links to Google Play.
+export const APP_STORE_RELEASED = false;
 
 /** How long the page waits for the app to take over before it falls back to the store. */
 export const STORE_FALLBACK_DELAY_MS = 1500;
@@ -33,14 +36,17 @@ export function inviteDeepLink(token: string): string {
 
 /**
  * Try the custom-scheme link; if the page never hides within the delay (the app
- * did not open), send a phone to its store. Desktop browsers never redirect.
+ * did not open), send an iPhone or iPad to the App Store, once it is released.
+ * Android and desktop browsers never redirect: there is no Play listing.
  */
-export function openInApp(token: string, env: OpenInAppEnv = browserEnv()): void {
-  const isAndroid = /android/i.test(env.userAgent);
+export function openInApp(
+  token: string,
+  env: OpenInAppEnv = browserEnv(),
+  appStoreReleased: boolean = APP_STORE_RELEASED,
+): void {
   // iPadOS 13+ Safari sends a Macintosh desktop UA; only touch support tells it apart.
   const isIos =
     /iphone|ipad|ipod/i.test(env.userAgent) || (/macintosh/i.test(env.userAgent) && env.maxTouchPoints > 1);
-  const storeUrl = isAndroid ? PLAY_STORE_URL : APP_STORE_URL;
 
   let appOpened = false;
   const onHide = () => {
@@ -52,8 +58,8 @@ export function openInApp(token: string, env: OpenInAppEnv = browserEnv()): void
 
   setTimeout(() => {
     env.document.removeEventListener('visibilitychange', onHide);
-    if (!appOpened && (isAndroid || isIos)) {
-      env.navigate(storeUrl);
+    if (!appOpened && isIos && appStoreReleased) {
+      env.navigate(APP_STORE_URL);
     }
   }, STORE_FALLBACK_DELAY_MS);
 }

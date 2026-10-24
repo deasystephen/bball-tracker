@@ -134,11 +134,14 @@ The service's `desired_count` is 1 on purpose: the API is single-replica (see [S
 ### Deploy window: avoid scheduled game times
 
 Production deploys are rolling, with `deployment_maximum_percent = 200` (`infra/ecs.tf`), so **every
-deploy briefly runs two tasks** — the old one draining and the new one taking connections. Socket.io
-rooms live in process memory, so for that window a live game is split: a coach tracking on one task
-and the spectators on the other stop seeing each other's events, and nobody gets an error. Clients
-converge again once the old task stops and they reconnect (every broadcast and the join snapshot
-carry the current score), but the gap is visible to anyone watching a game.
+deploy runs two tasks for under a minute** — the old one draining and the new one taking connections.
+Socket.io rooms live in process memory, so for that window a live game is split: a coach tracking on
+one task and the spectators on the other stop seeing each other's events, and nobody gets an error.
+The window is the target group's `deregistration_delay` (30 s, #748; the AWS default of 300 s made it
+about five minutes) plus the few seconds the clients take to reconnect. Clients converge again once
+the old task stops and they reconnect (every broadcast and the join snapshot carry the current
+score), but the gap is visible to anyone watching a game. Detail:
+`docs/deployment/ecs-deploys.md` ("ECS deploy safety").
 
 - **Do not deploy during scheduled game windows** (weekday evenings and weekends, in practice).
   Check for `IN_PROGRESS` games before merging anything that deploys.

@@ -129,10 +129,10 @@ jobs:
         working-directory: mobile
         run: npx expo export --platform ios
 
-  # The web app (hooplings.com/invite/<token>) is not deployed from CI (#30),
-  # but Dependabot auto-merges its patch and minor bumps once CI passes, so a
-  # broken build must fail here (#690). web/ is not a deploy path: this job
-  # gates the deploy job like the other test jobs, it never starts one.
+  # The web app (https://hooplings.com) deploys from build-and-deploy-web
+  # below (#30). Dependabot auto-merges its patch and minor bumps once CI
+  # passes, so a broken build must fail here (#690), and the image is built on
+  # every run so a broken web/Dockerfile fails the PR, not the deploy.
   test-web:
     name: Test Web
     runs-on: ubuntu-latest
@@ -163,6 +163,11 @@ jobs:
           NEXT_PUBLIC_API_URL: https://api.hooplings.com
           API_URL: https://api.hooplings.com
         run: npm run build
+
+      # Pull requests only: on main, build-and-deploy-web builds the image.
+      - name: Build the deploy image
+        if: github.event_name == 'pull_request'
+        run: docker build -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://api.hooplings.com web
 
   # #924: fails when a lockfile resolves a production dependency under a high or
   # critical advisory not listed for that side in
@@ -234,6 +239,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
+      web: ${{ steps.decide.outputs.web }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -256,6 +262,13 @@ jobs:
               - '!**/*.md'
               - '!infra/.terraform.lock.hcl'
               - '!infra/bootstrap/.terraform.lock.hcl'
+              - '!infra/web.tf'
+              - '!infra/web-task-definition.json'
+            # The web app (#30): its own image, task definition and service.
+            # Its Terraform (infra/web.tf) is applied by hand like the rest.
+            web:
+              - '{web/**,infra/web-task-definition.json}'
+              - '!**/*.md'
 
       # A run started by hand always deploys: that is what it is for. The paths
       # above are repeated in .github/scripts/deploy-contents.sh, which lists
@@ -265,12 +278,119 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FILTER_BACKEND: ${{ steps.filter.outputs.backend }}
+          FILTER_WEB: ${{ steps.filter.outputs.web }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
           else
             echo "backend=${FILTER_BACKEND:-false}" >> "$GITHUB_OUTPUT"
+            echo "web=${FILTER_WEB:-false}" >> "$GITHUB_OUTPUT"
           fi
+
+  # The web app (https://hooplings.com, #30): web.tf, infra/README.md "Web
+  # app". Builds web/Dockerfile, registers a revision of
+  # infra/web-task-definition.json and rolls the service onto it. Until the
+  # second apply (local.web_enabled in infra/web.tf) creates the service, it only registers:
+  # ECS needs a revision in the family before the service can exist.
+  build-and-deploy-web:
+    name: Build & Deploy Web to ECS
+    runs-on: ubuntu-latest
+    # test-backend runs the suites that pin infra/web-task-definition.json and
+    # web/Dockerfile (backend/tests/infra/).
+    needs: [lint-and-typecheck, test-backend, test-web, audit-floor, detect-changes]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.web == 'true'
+    # Its own group: a web deploy never waits on, or splits, the API's.
+    concurrency:
+      group: ecs-deploy-web-production
+      cancel-in-progress: false
+
+    env:
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER_NAME || 'bball-tracker-production-cluster' }}
+      ECS_WEB_SERVICE: ${{ vars.ECS_WEB_SERVICE_NAME || 'bball-tracker-production-web' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # Tags are immutable (web.tf): only the commit tag, never `latest`. A
+      # re-run, or a run by hand on a commit that already shipped, reuses the
+      # image the tag names; pushing a rebuild of it would be refused.
+      - name: Build and push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: bball-tracker-web
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "Image $IMAGE_TAG is already in $ECR_REPOSITORY: reusing it." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -f web/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.hooplings.com web
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Inject GIT_COMMIT into task definition
+        run: |
+          sed -i "s/GIT_COMMIT_PLACEHOLDER/${{ github.sha }}/g" infra/web-task-definition.json
+
+      - name: Render ECS task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7 # v1.9.1
+        with:
+          task-definition: infra/web-task-definition.json
+          container-name: web
+          image: ${{ steps.build-image.outputs.image }}
+
+      # A service that does not exist comes back as a `failures` entry with exit
+      # 0 (status "None"); any other AWS error fails the step, so a throttle or a
+      # missing permission can never pass for "no service yet" and skip a deploy.
+      - name: Find the web service
+        id: service
+        run: |
+          status="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" \
+            --query 'services[0].status' --output text)"
+          if [ "$status" = "ACTIVE" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No ACTIVE $ECS_WEB_SERVICE service yet: registering the revision only (local.web_enabled is false in infra/web.tf)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Deploy to Amazon ECS
+        if: steps.service.outputs.exists == 'true'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b # v2.6.4
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_WEB_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+
+      - name: Register the task definition only
+        if: steps.service.outputs.exists != 'true'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b # v2.6.4
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+
+      - name: Read the commit the site reports
+        if: steps.service.outputs.exists == 'true'
+        continue-on-error: true
+        env:
+          HEALTH_URL: ${{ vars.WEB_HEALTH_URL || 'https://hooplings.com/health' }}
+        run: .github/scripts/report-deployed-commit.sh "$HEALTH_URL" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
 
   build-and-deploy:
     name: Build & Deploy to ECS

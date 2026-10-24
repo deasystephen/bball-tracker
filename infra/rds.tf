@@ -17,11 +17,111 @@ resource "aws_db_subnet_group" "main" {
 }
 
 # =============================================================================
+# DB Parameter Group - owns the settings the backend and the exported log depend on
+# =============================================================================
+#
+# Until #757 the instance ran the AWS-managed `default.postgres18` group, so the
+# one setting the backend's connection depends on (`rds.force_ssl = 1`, see
+# backend/src/models/index.ts and the 2026-06-21 TLS outage) was inherited, not
+# declared. Every parameter below is dynamic, but RDS applies a NEWLY
+# ASSOCIATED group only after a manual reboot: attaching it leaves the instance
+# `pending-reboot` (no outage) until someone reboots it. The first rollout
+# attaches and reboots BEFORE the log export is enabled, so the export never
+# carries the default group's DETAIL lines (docs/runbooks/rds-backup-restore.md,
+# "Parameter group and server log").
+#
+# The logging parameters keep personal data out of the PostgreSQL log, which
+# `enabled_cloudwatch_logs_exports` below ships to CloudWatch. Prisma sends
+# every value as a bind parameter, so statement text carries placeholders
+# only; the leaks would be the DETAIL line of a constraint error ("Key
+# (email)=(...) already exists", "Failing row contains (...)") and bind values
+# printed on error. backend/tests/infra/rds-parameters.test.ts pins all five,
+# and the retention section of docs/runbooks/data-subject-requests.md (which
+# the privacy policy must match) relies on them.
+#
+# `family` follows the engine major (postgres-version.test.ts fails when they
+# differ); a major upgrade switches groups as part of the runbook procedure.
+#
+# `name`, `family` and `description` all force a replacement, and an attached
+# group can be neither deleted nor recreated under the same name, so a plan
+# showing `-/+` on this resource is a stop. No `create_before_destroy` for the
+# same reason (it would collide on the fixed name). `description` is left at
+# the provider default ("Managed by Terraform"), which the major-upgrade
+# runbook's CLI-created group matches, so the import there plans clean.
+resource "aws_db_parameter_group" "postgres" {
+  name   = "${local.name_prefix}-postgres18"
+  family = "postgres18"
+
+  # Reject every connection that does not negotiate TLS (28000 "no encryption").
+  # RDS reports this one with apply_method "pending-reboot" (its value equals
+  # the engine default), so declaring "immediate" would show a diff on every
+  # plan without changing anything.
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
+
+  # ERROR / FATAL lines without DETAIL, HINT, QUERY or CONTEXT: the primary
+  # message keeps the cause (a 28000 rejection, a lock timeout, the violated
+  # constraint's name), the row values stay out.
+  parameter {
+    name  = "log_error_verbosity"
+    value = "terse"
+  }
+
+  # Engine defaults, restated so that changing one is a reviewed diff: no
+  # statement logging, no duration logging, no bind values on error.
+  parameter {
+    name  = "log_statement"
+    value = "none"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "-1"
+  }
+
+  parameter {
+    name  = "log_parameter_max_length_on_error"
+    value = "0"
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-postgres18"
+  }
+}
+
+# =============================================================================
+# PostgreSQL server log in CloudWatch
+# =============================================================================
+#
+# Declared ahead of the export so RDS writes into a group with bounded
+# retention (RDS would otherwise create it with never-expire). Not subscribed
+# to the Datadog forwarder (datadog.tf forwards the API log group only), so the
+# log stays in this account. The retention is listed in
+# docs/runbooks/data-subject-requests.md; change both together. The name
+# follows the instance identifier through the shared local, so renaming the
+# instance moves both (RDS exports to /aws/rds/instance/<identifier>/postgresql).
+locals {
+  db_instance_identifier = "${local.name_prefix}-postgres"
+}
+
+resource "aws_cloudwatch_log_group" "rds_postgresql" {
+  name              = "/aws/rds/instance/${local.db_instance_identifier}/postgresql"
+  retention_in_days = 30
+
+  tags = {
+    Name = "${local.name_prefix}-postgres-log"
+  }
+}
+
+# =============================================================================
 # RDS PostgreSQL Instance
 # =============================================================================
 
 resource "aws_db_instance" "main" {
-  identifier = "${local.name_prefix}-postgres"
+  identifier = local.db_instance_identifier
 
   # Engine configuration
   engine = "postgres"
@@ -63,6 +163,9 @@ resource "aws_db_instance" "main" {
   username = var.db_username
   password = var.db_password
 
+  # TLS enforcement and log privacy (aws_db_parameter_group.postgres above).
+  parameter_group_name = aws_db_parameter_group.postgres.name
+
   # Networking - private subnets only, no public access
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -83,6 +186,16 @@ resource "aws_db_instance" "main" {
 
   # Performance Insights for monitoring (free tier for db.t3.micro)
   performance_insights_enabled = true
+
+  # The server log (28000 rejections, failed logins, lock timeouts) in
+  # CloudWatch, instead of only on the instance for three days
+  # (rds.log_retention_period). Takes effect without a reboot.
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  # Automated snapshots and the final snapshot carry Project / Environment.
+  copy_tags_to_snapshot = true
+
+  depends_on = [aws_cloudwatch_log_group.rds_postgresql]
 
   tags = {
     Name = "${local.name_prefix}-postgres"
