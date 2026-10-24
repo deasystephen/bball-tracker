@@ -29,6 +29,12 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   (network, 5xx) are captured by the api-client, 4xx are not. Detail: `docs/architecture/mobile-app.md`.
 - Screen tests render the real i18n instance; the brand guard fails on retired names anywhere in
   mobile source, locales or `.maestro/`, comments included.
+- **No translation regressions.** All user-facing copy goes through `t()`; a new or changed English
+  string gets a real translation in every file in `i18n/locales/` in the same PR (Spanish today).
+  Guards: `hardcoded-copy.test.ts`, `locale-parity.test.ts` (keys, placeholders, no copied English
+  outside `IDENTICAL_TO_ENGLISH`), `locale-registry.test.ts`. Never silence a guard with an allowlist
+  entry to save translating; flag uncertain translations in the PR. Adding a language:
+  `docs/architecture/mobile-app.md` (one locale file plus one `LOCALES` entry in `i18n/config.ts`).
 - Analytics: every user-facing mutation hook fires a catalogued event from `onSuccess`
   (`trackEvent(AnalyticsEvents.X, props)`); names are `snake_case` `<object>_<past-tense verb>`
   and live only in `services/analytics.ts#AnalyticsEvents` with typed props. **No property may

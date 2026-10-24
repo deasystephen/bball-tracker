@@ -68,6 +68,19 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP),
   `{league-detail-delete,team-detail-roster-sort,stats-tab-states,player-stats-states,players-roster-status,invitations-guardian,players-email-issue}.test.tsx`
   (league seasons, team detail, Stats tab, player stats, roster and Add Player form, invitations).
+- **Every change keeps every language current.** A PR that adds or changes user-facing copy adds the
+  key to `en.json` **and** a real translation to every other file in `i18n/locales/` in the same PR.
+  CI enforces it with four guards: `hardcoded-copy.test.ts` (no literal copy in source),
+  `locale-parity.test.ts` (same keys and placeholders in every locale, and no value copied from English
+  unless it is listed in `IDENTICAL_TO_ENGLISH` with the reason the word really is the same, e.g. "Final",
+  PTS), `locale-registry.test.ts` (every locale file is registered and every registered language loads),
+  and the Spanish render tests above. Changing an English value means changing the translation too: the
+  copied-English check cannot see a stale translation, so say in the PR when only English moved.
+  Machine or agent translations are drafts; flag uncertain ones in the PR for a native speaker.
+- **Adding a language** is one file and one entry: add `i18n/locales/<code>.json` with every key of
+  `en.json` translated, add `<code>` to `LOCALES` in `i18n/config.ts`, then let the guards list what is
+  missing. Also add the code to `CFBundleLocalizations` (native, next binary), a render test in that
+  language, and a row in the E2E test plan's locale case (B.4).
 - **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
   yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
   the app and localizes system UI around it.
