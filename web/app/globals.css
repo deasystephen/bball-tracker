@@ -225,3 +225,43 @@ body {
   font-size: 13px;
   color: var(--color-text-secondary);
 }
+
+.store-pending {
+  font-size: 14px;
+}
+
+.site-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 24px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.site-footer a {
+  color: var(--color-text-secondary);
+}
+
+.text-page {
+  text-align: left;
+}
+
+.text-page h2 {
+  margin-top: 24px;
+}
+
+.text-page h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.text-page p + p {
+  margin-top: 12px;
+}
+
+.text-page a {
+  color: var(--color-primary-light);
+}

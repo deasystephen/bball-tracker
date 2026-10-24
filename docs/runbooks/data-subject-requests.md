@@ -115,6 +115,24 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line; re-check it
   there before the privacy policy repeats the number. Supersedes D8 of
   `docs/plans/account-deletion.md` on this point, which named only the hashing.
+- **Database server log (PostgreSQL, #757)** is kept **30 days** in CloudWatch Logs
+  (`/aws/rds/instance/bball-tracker-production-postgres/postgresql`, `retention_in_days` on
+  `aws_cloudwatch_log_group.rds_postgresql` in `infra/rds.tf`) and **3 days** on the database
+  instance itself (`rds.log_retention_period`). It stays in the AWS account (not forwarded to
+  Datadog). It records server events (start-up, checkpoints, autovacuum, rejected connections
+  with the client's private network address and the database role) and, for each failed
+  statement, the error message and the statement text. It is configured to hold no personal data: no statement or duration logging, no bind
+  values, and no DETAIL line, which is where a failed write would quote the row or the key value,
+  an email address for instance (`aws_db_parameter_group.postgres`, pinned by
+  `backend/tests/infra/rds-parameters.test.ts`). The application sends every value as a bind
+  parameter, so a failed statement's text carries placeholders, not values. A failed statement's
+  error message can still quote a malformed input value (PostgreSQL's "invalid input syntax"
+  errors do); inputs are validated before they reach the database, so this is not expected.
+- **The load balancer and its firewall keep no per-request records** (#764): the ALB has no
+  access or connection logs, and the AWS WAF web ACL in front of it keeps per-rule counts only (no
+  logging configuration, sampled requests off). `backend/tests/infra/edge-hardening.test.ts` pins
+  both; turning either on adds client IP addresses and full URLs to what is held, and needs an
+  entry here first.
 - After deletion nothing in the application maps the internal id back to a person, but the
   analytics, backend error and log records above remain at the vendors (Amplitude, Sentry,
   Datadog) and in CloudWatch, keyed on that id, until their windows expire. To remove them sooner,

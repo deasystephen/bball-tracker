@@ -204,6 +204,30 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
+  # Hardening (#764). The ALB removes every header whose name does not match
+  # [-A-Za-z0-9]+ instead of forwarding it to Express. That is stricter than
+  # RFC 7230: a name with an underscore (`x_api_key`) is dropped silently too,
+  # so any header the API reads must use hyphens.
+  drop_invalid_header_fields = true
+
+  # `api.<domain>` aliases this ALB; a console delete or a stray targeted
+  # destroy would take the API and every live game down. Production only, like
+  # RDS, so a staging stack can still be destroyed. Replacing the ALB means
+  # turning this off in an apply first (infra/README.md, "Edge: ALB and WAF").
+  enable_deletion_protection = var.environment == "production"
+
+  # The web ACL (waf.tf) only counts today. If AWS WAF cannot be reached, the
+  # ALB default is to reject the request (403); a counting-only ACL must never
+  # cost availability, so requests pass uninspected instead.
+  enable_waf_fail_open = true
+
+  # No `access_logs` block, deliberately: ALB access logs record every full
+  # request URL, and this API carries bearer secrets in URLs (calendar feed
+  # tokens on every calendar-app poll, invitation tokens, the OAuth `code` and
+  # `state`) that utils/redact.ts masks everywhere the application logs. The
+  # ALB cannot redact. Decision and the conditions for revisiting it:
+  # infra/README.md, "Edge: ALB and WAF".
+
   tags = {
     Name = "${local.name_prefix}-alb"
   }
@@ -217,6 +241,16 @@ resource "aws_lb_target_group" "app" {
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
+  # How long a deregistered (old) task keeps its connections during a deploy.
+  # The AWS default is 300 s, and the ALB holds a draining target's WebSockets
+  # open for all of it: Socket.io rooms are per process, so every spectator on
+  # the old task misses every broadcast until the drain ends. 30 s still covers
+  # the slowest bounded request, finishing a game (about 21 s: pool wait, then
+  # finalizeGameStats' 15 s transaction). See docs/deployment/ecs-deploys.md (#748).
+  deregistration_delay = 30
+
+  # A new task refuses connections while the entrypoint runs migrations; the
+  # service's health_check_grace_period_seconds covers that (#752).
   health_check {
     enabled             = true
     healthy_threshold   = 2
@@ -305,6 +339,13 @@ resource "aws_ecs_service" "app" {
   # Allow ECS to manage task placement during deployments
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 50
+
+  # The entrypoint runs `prisma migrate deploy` before the server listens, so the
+  # ALB sees refused connections until the migrations finish. Without a grace
+  # period ECS stops the task after unhealthy_threshold * interval (~90 s) and a
+  # migration killed mid-flight pins every later deploy on P3009. The budget a
+  # migration must fit in is this value; see docs/deployment/ecs-deploys.md (#752).
+  health_check_grace_period_seconds = 300
 
   # Auto-roll-back a rollout that never reaches a steady state. The CI deploy job
   # (aws-actions/amazon-ecs-deploy-task-definition) calls UpdateService, so this

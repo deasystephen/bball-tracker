@@ -8,8 +8,9 @@ Terraform manages all AWS infrastructure.
 | File | Purpose |
 |------|---------|
 | `main.tf` | Provider config, locals, backend |
-| `ecs.tf` | Fargate cluster, service, IAM roles, ALB, auto-scaling (**not** the task definition) |
-| `rds.tf` | PostgreSQL RDS instance |
+| `ecs.tf` | Fargate cluster, service, IAM roles, ALB (header hardening, production deletion protection, no access logs; see "Edge: ALB and WAF"), auto-scaling (**not** the task definition) |
+| `waf.tf` | AWS WAF web ACL on the ALB, count mode: per-IP rate rule + two AWS managed rule groups (#764) |
+| `rds.tf` | PostgreSQL RDS instance, its parameter group (`rds.force_ssl`, log privacy) and the CloudWatch log group for the exported server log (#757); procedures in `docs/runbooks/rds-backup-restore.md`, "Parameter group and server log" |
 | `elasticache.tf` | Redis ElastiCache |
 | `s3.tf` | S3 buckets (profile picture avatars) |
 | `dns.tf` | Route53 hosted zones (one per registered domain), ACM certificates + validation, `api.` records, CAA records, DNSSEC (KMS key, key-signing keys, signing) (#758) |
@@ -21,6 +22,8 @@ Terraform manages all AWS infrastructure.
 | `variables.tf` | Input variable declarations |
 | `outputs.tf` | Output values (ALB DNS, RDS endpoint, the Secrets Manager and IAM ARNs the task definition carries, `dnssec_keys` for the DS publication step) |
 | `task-definition.json` | **The** ECS task definition - owned by CI, not Terraform (see below) |
+| `web.tf` | The web app at the apex (#30): ECR repository, log group, security group, target group, and behind `local.web_enabled` the ECS service, listener rules (apex → web, `www` → apex), apex/`www` records and uptime alarm. Bring-up takes two applies; see `docs/deployment/web-app.md` |
+| `web-task-definition.json` | The web app's ECS task definition, owned by CI like the API's (`build-and-deploy-web` in `ci.yml`) |
 | `bootstrap/` | The remote-state S3 bucket and DynamoDB lock table that `main.tf`'s backend block names, as a separate configuration with **local** state (see "Remote state"). Has its own `.terraform.lock.hcl`, kept identical to the parent's (`backend/tests/infra/terraform-lock-parity.test.ts`); excluded from the deploy filter like the parent's |
 | `.terraform.lock.hcl` | Provider lock (`hashicorp/aws`), **committed** since #786 with hashes for `darwin_arm64` and `linux_amd64`, so every apply uses the same provider and Dependabot can propose minor and patch bumps within the pinned major (6.x since PR #913). CI runs `fmt`/`init`/`validate` on it (so a bumped lock is installable and validated) but never `plan` or `apply`: review a bump with `terraform init` + `terraform plan` ("No changes.") before merging. A local `init` may add hashes for another platform; do not commit that from a review. Changing only this file does not deploy. Majors are a human migration: 5 → 6 was done in PR #913 (#866) with a "No changes." plan; open an issue for the next one |
 
@@ -215,6 +218,56 @@ published: validating resolvers answer SERVFAIL for the whole zone. Retiring DNS
 `aws route53domains disassociate-delegation-signer-from-domain`, wait 48 hours, then lift the
 `prevent_destroy` guards and remove the resources. Moving a zone to another DNS host also starts
 with removing the DS.
+
+## Edge: ALB and WAF (#764)
+
+`aws_lb.main` (`ecs.tf`) is the only public entry point, and the API behind it is single-replica
+with in-process rate limits only.
+
+- **`drop_invalid_header_fields = true`**: every header whose name does not match
+  `[-A-Za-z0-9]+` is removed at the ALB instead of reaching Express. That is stricter than
+  RFC 7230: a name with an underscore is dropped silently too, so a header the API reads (or a
+  vendor's tracing header) must use hyphens.
+- **`enable_deletion_protection`** is on in production (environment-conditional, like RDS).
+  Anything that must delete or replace the production ALB (a destroy, or a change that forces
+  replacement) first needs an apply with the attribute off; AWS refuses the delete otherwise. A plan that shows `aws_lb.main` as `-/+` is a stop: the
+  `api.` alias and every live game go with it.
+- **`enable_waf_fail_open = true`**: if AWS WAF cannot be reached, requests pass uninspected
+  instead of the ALB default of a 403 for everything. Revisit only when a rule blocks.
+- **No access logs, by decision (2026-10).** ALB access logs record every full request URL, and
+  this API carries bearer secrets in URLs: the calendar feed token (`?token=` / `/calendar/<token>`,
+  sent again on every calendar-app poll and valid until regenerated), invitation tokens
+  (`/api/v1/invitations/by-token/<token>`, and `/invite/<token>` once the web app shares this
+  ALB) and the OAuth `code`/`state` on the sign-in callback. `backend/src/utils/redact.ts` masks
+  all of these everywhere the application logs; the ALB cannot redact, and the log would also
+  add client IP addresses and user agents to what the privacy policy must disclose
+  (`docs/runbooks/data-subject-requests.md`, "Retention"). The cost is that an abuse
+  investigation has no per-request record (source IP, path, status); the WAF metrics below give
+  volumes per rule, not who. Revisit when those bearer secrets leave the URL (calendar apps can
+  only poll a URL, so the feed would need a different token design first), or when an incident
+  needs per-request evidence: then enable
+  `access_logs` into a dedicated private, SSE-S3 bucket with the ELB log-delivery policy and a
+  7-day expiry, add the retention entry first, and change
+  `backend/tests/infra/edge-hardening.test.ts` in the same PR. ALB *connection* logs (client IP
+  and TLS details, no URL) are the lighter option if only source IPs are needed; they too need
+  the retention entry.
+- **WAF, count mode** (`waf.tf`): `aws_wafv2_web_acl.alb` associated with the ALB, with a
+  per-IP rate-based rule (2,000 requests per 5 minutes, `local.waf_rate_limit_per_5_minutes`)
+  and the `AWSManagedRulesCommonRuleSet` and `AWSManagedRulesKnownBadInputsRuleSet` groups.
+  Every rule **counts and blocks nothing**. Cost is about USD 8 a month (USD 5 for the ACL, USD 1
+  per rule, USD 0.60 per million requests, about 0.5 million a month in 2026-10). It keeps no
+  request-level data: no logging configuration, `sampled_requests_enabled = false` on every
+  visibility config (sampled requests would hold full URLs and headers, tokens included, for
+  three hours). Read what each rule would block in CloudWatch, namespace `AWS/WAFV2`, metric
+  `CountedRequests`, dimensions `WebACL=bball-tracker-production-alb`, `Region=us-east-1`,
+  `Rule=<metric name>` (`bball-tracker-production-rate-limit-per-ip`,
+  `…-aws-common-rule-set`, `…-aws-known-bad-inputs`).
+  **Promoting a rule to block** is an edit here plus an apply: the rate rule's `action { count {} }`
+  becomes `block {}`, a managed group's `override_action { count {} }` becomes `none {}`. Before
+  blocking, read a few weeks of `CountedRequests`, including a busy game day: phones on one gym
+  Wi-Fi or carrier NAT share an IP, and the common rule set's `SizeRestrictions_BODY` (8 KB) and
+  `NoUserAgent_HEADER` rules can match legitimate API calls. In an L7 flood, switching the rate
+  rule to `block` is the first lever; do not scale the service out (single replica, #452).
 
 ## Email — SES, DKIM, MAIL FROM, and DMARC
 

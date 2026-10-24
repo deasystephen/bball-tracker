@@ -19,7 +19,9 @@ instance. Required reading before any data-loss incident response.
 | Daily snapshot window | 03:00–04:00 UTC |
 | Maintenance window | Sun 04:00–05:00 UTC |
 | Deletion protection | Enabled |
-| Final snapshot on delete | `bball-tracker-production-final-snapshot` |
+| Final snapshot on delete | `bball-tracker-production-final-snapshot` (tags copied to every snapshot) |
+| Parameter group | `bball-tracker-production-postgres18` (`aws_db_parameter_group.postgres`, #757) |
+| Server log | CloudWatch `/aws/rds/instance/bball-tracker-production-postgres/postgresql`, 30 days |
 | Connection string source | Secrets Manager: `bball-tracker-production/database-url` |
 | ECS cluster / service | `bball-tracker-production-cluster` / `bball-tracker-production-api` |
 | Public DNS | App reaches RDS via the **endpoint string baked into the secret**, not via Route53. The `api.hooplings.com` Route53 record points at the ALB, not the database. |
@@ -29,7 +31,9 @@ Do not hand-edit the instance in the AWS console.
 
 ## TLS / CA bundle
 
-RDS requires TLS (`rds.force_ssl = 1`, the default parameter-group value since Postgres 15). The backend
+RDS requires TLS (`rds.force_ssl = 1`, declared in `infra/rds.tf`'s `aws_db_parameter_group.postgres`
+and pinned by `backend/tests/infra/rds-parameters.test.ts`; before #757 it was only the default
+parameter-group value). The backend
 connects via the `@prisma/adapter-pg` (node-postgres) driver, which only
 negotiates TLS when explicitly configured — see `backend/src/models/index.ts`.
 The server certificate is verified against the **pinned Amazon RDS global CA
@@ -47,6 +51,69 @@ image by `docker/Dockerfile`, overridable at runtime via `RDS_CA_BUNDLE_PATH`).
 > so a bad CA update is caught at deploy time rather than silently. History: a
 > non-TLS adapter connection caused the 2026-06-21 sign-in outage (surfaced as a
 > misleading Prisma "P1010 denied access"); CA pinning landed in #216.
+
+## Parameter group and server log
+
+`aws_db_parameter_group.postgres` (`bball-tracker-production-postgres18`, family `postgres18`)
+declares five values: `rds.force_ssl = 1`, and four logging settings that keep personal data out
+of the server log — `log_error_verbosity = terse` (no DETAIL line, which is where "Key
+(email)=(…) already exists" and "Failing row contains (…)" would appear), `log_statement = none`,
+`log_min_duration_statement = -1` and `log_parameter_max_length_on_error = 0` (the last three
+restate engine defaults so a change is a reviewed diff). `backend/tests/infra/rds-parameters.test.ts`
+pins all five; the retention section of [data-subject requests](data-subject-requests.md) relies
+on them. Every one is a dynamic parameter: **editing a value in a group that is already attached
+and in sync applies without a reboot.**
+
+**Attaching a group needs a reboot.** RDS associates a new group immediately, with no outage,
+but runs the old values until the instance is rebooted; until then `describe-db-instances` shows
+`ParameterApplyStatus: pending-reboot`. RDS does not reboot for this on its own; only a manual
+reboot (or maintenance that happens to reboot) applies it. This happens once for #757 (from
+`default.postgres18`) and again at every major upgrade (where the upgrade's own reboot covers it).
+A reboot of the Multi-AZ instance makes
+the database unavailable for about a minute, during which the API answers 503 and live game
+events fail, so check for `IN_PROGRESS` games first (Datadog `service:bball-tracker-api
+("Game created" OR "Game event created")` over the last few hours shows whether anyone is
+tracking; see `docs/deployment/ecs-deploys.md`), then:
+
+```bash
+aws rds reboot-db-instance --db-instance-identifier bball-tracker-production-postgres
+aws rds wait db-instance-available --db-instance-identifier bball-tracker-production-postgres
+aws rds describe-db-instances --db-instance-identifier bball-tracker-production-postgres \
+  --query 'DBInstances[0].{pg:DBParameterGroups,logs:EnabledCloudwatchLogsExports,tags:CopyTagsToSnapshot}'
+# expect bball-tracker-production-postgres18 / in-sync
+# (and ["postgresql"], true once the export and snapshot tags are applied)
+curl -fsS https://api.hooplings.com/health   # db: ok
+```
+
+**The server log** is exported to CloudWatch (`enabled_cloudwatch_logs_exports = ["postgresql"]`,
+no reboot needed) into `/aws/rds/instance/bball-tracker-production-postgres/postgresql`, which
+Terraform owns with 30-day retention (`aws_cloudwatch_log_group.rds_postgresql`); RDS keeps its own
+copy on the instance for 3 days (`rds.log_retention_period`). It is not forwarded to Datadog.
+Read it with:
+
+```bash
+aws logs tail /aws/rds/instance/bball-tracker-production-postgres/postgresql --since 1h
+aws logs tail /aws/rds/instance/bball-tracker-production-postgres/postgresql --since 1d \
+  --filter-pattern '"no encryption"'      # or "password authentication failed", "lock timeout"
+```
+
+**First rollout (#757): attach and reboot before the export exists.** Until the reboot the
+instance runs `default.postgres18`, whose default verbosity writes DETAIL lines (a failed write's
+key or row values), and exporting those would put personal data in a 30-day log. So the export is
+never enabled while the group is pending:
+
+```bash
+cd infra
+terraform apply -target=aws_db_parameter_group.postgres     # creates the group only
+aws rds modify-db-instance --db-instance-identifier bball-tracker-production-postgres \
+  --db-parameter-group-name bball-tracker-production-postgres18 --apply-immediately
+# then the reboot block above; continue only once ParameterApplyStatus is in-sync
+terraform apply     # log group, export, snapshot tags (plus whatever else is pending)
+```
+
+The full apply then shows no `parameter_group_name` change on `aws_db_instance.main`. The same
+rule holds whenever a group is attached later: never enable or keep an export while the attached
+group is `pending-reboot` with different logging values.
 
 ## Verifying backups (do this monthly)
 
@@ -116,8 +183,27 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
      --multi-az \
      --storage-type gp3 \
      --copy-tags-to-snapshot \
-     --deletion-protection
+     --deletion-protection \
+     --db-parameter-group-name bball-tracker-production-postgres18 \
+     --enable-cloudwatch-logs-exports postgresql
    ```
+
+   The parameter group carries `rds.force_ssl` and the log-privacy settings (see
+   [Parameter group and server log](#parameter-group-and-server-log)); omitted, the
+   restore gets `default.postgres18`. The export writes to
+   `/aws/rds/instance/$NEW_INSTANCE_ID/postgresql`, which RDS would create with
+   **never-expire** retention, so create it with the 30 days the privacy runbook promises
+   **before** running the restore above:
+   ```bash
+   aws logs create-log-group --log-group-name "/aws/rds/instance/$NEW_INSTANCE_ID/postgresql"
+   aws logs put-retention-policy --log-group-name "/aws/rds/instance/$NEW_INSTANCE_ID/postgresql" \
+     --retention-in-days 30
+   ```
+   Once the instance carries the original identifier again (step 8's rename, possible only
+   after the old instance is gone in step 9), its log goes to the Terraform-owned group; the
+   temporary group can be deleted once its lines are no longer needed. If step 8 instead points
+   `local.db_instance_identifier` in `rds.tf` at the new ID, the Terraform-owned log group follows
+   it (import the group you just created).
 
    **Match the size class to whatever production is running.** If you're not
    sure, read it off the live instance:
@@ -434,7 +520,8 @@ this in-place procedure.
 
 Bump `docker-compose.yml` (image **and** mount: the `postgres:18` image moved `PGDATA` to
 `/var/lib/postgresql/18/docker` and its `VOLUME` to `/var/lib/postgresql`), `ci.yml`, and
-`infra/rds.tf`; add the new major's end-of-support date to the parity test. Open the PR: its CI
+`infra/rds.tf` (`engine_version` **and** the parameter group's `family` and `name`, which the
+parity test requires to agree); add the new major's end-of-support date to the parity test. Open the PR: its CI
 run is the whole backend suite on the new major, including the real-database
 `league-access.db.test.ts`. **Merge only after production is upgraded** — merging first makes
 CI validate migrations against an engine production does not run (the daily scan's backend
@@ -497,7 +584,30 @@ up, health check fails against the unavailable DB) or passes green while running
    then `aws rds apply-pending-maintenance-action --resource-identifier <arn> --apply-action
    system-update --opt-in-type immediate` (and `db-upgrade`); `aws rds wait db-instance-available`.
 4. **Upgrade**: the same `modify-db-instance … --engine-version 18.6
-   --allow-major-version-upgrade --apply-immediately` as the rehearsal; poll. If the precheck
+   --allow-major-version-upgrade --apply-immediately` as the rehearsal, plus
+   `--db-parameter-group-name bball-tracker-production-postgres<NEW>`: a group of the old family
+   cannot stay attached, and the new major's *default* group (what you get when no custom group
+   is named) lacks the log-privacy settings (see [Parameter group and server log](#parameter-group-and-server-log)).
+   Create that group **before the window** from the CLI, matching what Terraform will import
+   (the description is the provider default, and the tags are `default_tags` plus `Name`), with
+   the same five parameters as `aws_db_parameter_group.postgres`:
+   ```bash
+   NEW=19   # the new major
+   aws rds create-db-parameter-group --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --db-parameter-group-family "postgres$NEW" --description "Managed by Terraform" \
+     --tags Key=Name,Value="bball-tracker-production-postgres$NEW" Key=Project,Value=bball-tracker \
+            Key=Environment,Value=production Key=ManagedBy,Value=terraform
+   aws rds modify-db-parameter-group --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --parameters "ParameterName=rds.force_ssl,ParameterValue=1,ApplyMethod=immediate" \
+                  "ParameterName=log_error_verbosity,ParameterValue=terse,ApplyMethod=immediate" \
+                  "ParameterName=log_statement,ParameterValue=none,ApplyMethod=immediate" \
+                  "ParameterName=log_min_duration_statement,ParameterValue=-1,ApplyMethod=immediate" \
+                  "ParameterName=log_parameter_max_length_on_error,ParameterValue=0,ApplyMethod=immediate"
+   aws rds describe-db-parameters --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --source user --query 'Parameters[].[ParameterName,ParameterValue]'
+   ```
+   (Check the list against `rds.tf` first; it is the source of truth.) Use the same flag on the rehearsal copy. The upgrade
+   reboots the instance, so the new group is in sync when it finishes. If the precheck
    fails the instance stays on the old version — read `pg_upgrade_precheck.log` via
    `aws rds describe-db-log-files` / `download-db-log-file-portion`.
 5. **Checks + ANALYZE** from the one-off task: `pg-upgrade-checks.mjs --compare before.json`,
@@ -505,8 +615,9 @@ up, health check fails against the unavailable DB) or passes green while running
 6. **Scale back**: `--desired-count 1`, then `--min-capacity 1`. The single task start on the
    new engine is the smoke result: `runningCount` 1, `curl -fsS https://api.hooplings.com/health`
    reports `db: ok`, then sign in on a device and load Teams / Games / Stats.
-7. `aws rds describe-db-instances … --query 'DBInstances[0].EngineVersion'` → `18.6`; the
-   parameter group is now `default.postgres18`.
+7. `aws rds describe-db-instances … --query 'DBInstances[0].[EngineVersion,DBParameterGroups]'`
+   → `18.6` and `bball-tracker-production-postgres<NEW>` / `in-sync`. (The 2026-09-07 run
+   predates #757 and ended on `default.postgres18`.)
 8. **Patch the Terraform state, then prove the pin.** The provider keeps the configured
    major-only value in state only while `"<stored>."` is a prefix of the live version
    (`compareActualEngineVersion` in the AWS provider). The first refresh after a major upgrade
@@ -523,6 +634,16 @@ up, health check fails against the unavailable DB) or passes green while running
    (`terraform import` does not help — an import reads with an empty stored value and stores
    the full version too.) Verified 2026-09-07: plan showed the `"18.6" -> "18"` diff until the
    patch, No changes after it.
+
+   **Adopt the new parameter group** in the same sitting, before that final plan: the PR names
+   `-postgres<NEW>`, which the CLI created, and state still holds the old group. Run
+   `terraform state rm aws_db_parameter_group.postgres`, add
+   `import { to = aws_db_parameter_group.postgres id = "bball-tracker-production-postgres<NEW>" }`
+   to `rds.tf` (delete the block after the apply), and `terraform apply`: the plan must show
+   one import and nothing else. A `-/+` on `aws_db_parameter_group.postgres` (a name, family or
+   description that differs; a differing parameter is only an in-place update) is a stop: the group is attached and cannot be replaced in place;
+   fix the live group to match the config instead. Then delete the old, now unattached group:
+   `aws rds delete-db-parameter-group --db-parameter-group-name bball-tracker-production-postgres<OLD>`.
 9. **Merge the PR**; close the issue with the measured timings.
 
 **Rollback:** restore the pre-upgrade snapshot per Procedure A (including step 8's Terraform
