@@ -554,9 +554,8 @@ describe('WorkOSService', () => {
       });
 
       it('refuses (403 email_not_verified) to claim a pre-provisioned row and writes nothing', async () => {
-        (mockPrisma.user.findUnique as jest.Mock)
-          .mockResolvedValueOnce(null)           // by workosUserId
-          .mockResolvedValueOnce(managedRow());  // by email
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]); // by email
 
         const attempt = WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false });
 
@@ -569,9 +568,8 @@ describe('WorkOSService', () => {
 
       it('does not let an allowlisted admin email bypass the check', async () => {
         process.env.ADMIN_EMAILS = 'kid@example.com';
-        (mockPrisma.user.findUnique as jest.Mock)
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce(managedRow());
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]);
 
         await expect(
           WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
@@ -580,9 +578,10 @@ describe('WorkOSService', () => {
       });
 
       it('still answers 409 when the email is linked to a different identity', async () => {
-        (mockPrisma.user.findUnique as jest.Mock)
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce(createPlayer({ email: 'kid@example.com', workosUserId: 'workos_other' }));
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([
+          createPlayer({ email: 'kid@example.com', workosUserId: 'workos_other' }),
+        ]);
 
         await expect(
           WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
@@ -606,6 +605,7 @@ describe('WorkOSService', () => {
 
       it('still creates a brand-new account (no row to claim)', async () => {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
         const created = createPlayer({ email: 'new@example.com', workosUserId: 'workos_new' });
         (mockPrisma.user.create as jest.Mock).mockResolvedValue(created);
 
