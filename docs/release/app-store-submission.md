@@ -161,8 +161,10 @@ Facts behind the notes, for whoever maintains them:
 | No purchases, no paid features | The mobile app has no entitlement UI or purchase flow (`docs/architecture/entitlements-and-usage.md`, "Entitlements / Feature Gating"); the free-tier team cap was lifted in #445, so no limit is enforced on any tier |
 
 The demo account must exist in the identity-provider environment the submission build talks to
-(#24 covers the production-key cutover) and needs seeded data in the production database; both
-are tracked on #451.
+(#24 covers the production-key cutover; the production AuthKit environment must enable Email +
+Password, and the demo account is created in the "Verify" step of
+`docs/runbooks/workos-production-cutover.md`) and needs seeded data in the production database;
+both are tracked on #451.
 
 ## 4. Open decisions for the maintainer
 

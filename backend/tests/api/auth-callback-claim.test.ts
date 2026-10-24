@@ -80,9 +80,11 @@ describe('GET /api/v1/auth/callback claiming a pre-provisioned row (#907)', () =
   beforeEach(() => {
     authRateLimit.resetKey('::ffff:127.0.0.1');
     authRateLimit.resetKey('127.0.0.1');
-    (mockPrisma.user.findUnique as jest.Mock).mockImplementation(
-      ({ where }: { where: { workosUserId?: string; email?: string } }) =>
-        Promise.resolve(where.email === EMAIL ? preProvisionedRow() : null)
+    // No row is linked to the signing-in identity; the email lookup (#955:
+    // case-insensitive `findMany` through `emailEquals`) finds the pre-provisioned row.
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+    (mockPrisma.user.findMany as jest.Mock).mockImplementation(({ where }: { where: { email?: unknown } }) =>
+      Promise.resolve(where.email ? [preProvisionedRow()] : [])
     );
     (mockPrisma.leagueAdmin.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);

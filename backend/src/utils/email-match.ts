@@ -48,8 +48,13 @@ export function emailEquals(address: string): EmailEqualsFilter {
   return { equals: escapeLikePattern(address), mode: 'insensitive' };
 }
 
+/** The form a new account stores: trimmed and lower-cased. */
+export function normaliseEmail(address: string): string {
+  return address.trim().toLowerCase();
+}
+
 /** True when two addresses are the same address, ignoring case and outer whitespace. */
 export function isSameEmail(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return normaliseEmail(a) === normaliseEmail(b);
 }

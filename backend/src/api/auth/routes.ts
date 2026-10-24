@@ -364,11 +364,12 @@ router.get('/callback', async (req, res) => {
     });
   } catch (error) {
     if (error instanceof ConflictError) {
-      // Email already bound to a different WorkOS user. Never a normal client
-      // outcome: it is the signature of the WorkOS key cutover (#24), where every
-      // production row still carries a staging WorkOS id and every sign-in would
-      // land here. Kept at `error` (the alarms key on @level:error) and in Sentry,
-      // unlike the 4xx rule logRouteError applies (#656).
+      // Email already bound to a different WorkOS user that still exists, an
+      // unverified email, or two rows differing only by case. Never a normal
+      // client outcome: a row whose WorkOS id the environment does not know
+      // (every row after the #24 key cutover) is relinked by syncUser instead.
+      // Kept at `error` and in Sentry so it is seen, unlike the 4xx rule
+      // logRouteError applies (#656).
       res.status(409).json({ error: error.message });
       captureException(error, { flow: 'auth-callback-conflict' });
       logger.error('Auth callback email linked to a different WorkOS user', {
