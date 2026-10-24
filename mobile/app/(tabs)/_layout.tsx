@@ -13,22 +13,24 @@ import Animated, {
 import { useTheme } from '../../hooks/useTheme';
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { borderRadius, MAX_FONT_SCALE } from '../../theme';
+import { useTranslation } from '../../i18n';
 // expo-router carries its own fork of the tab navigator since SDK 56; the
 // `@react-navigation/bottom-tabs` package is no longer installed.
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 const TAB_CONFIGS = [
-  { name: 'home', icon: 'home', label: 'Home' },
-  { name: 'teams', icon: 'people', label: 'Teams' },
-  { name: 'games', icon: 'basketball', label: 'Track' },
-  { name: 'stats', icon: 'stats-chart', label: 'Stats' },
-  { name: 'profile', icon: 'person', label: 'Profile' },
+  { name: 'home', icon: 'home', labelKey: 'tabs.home' },
+  { name: 'teams', icon: 'people', labelKey: 'tabs.teams' },
+  { name: 'games', icon: 'basketball', labelKey: 'tabs.track' },
+  { name: 'stats', icon: 'stats-chart', labelKey: 'tabs.stats' },
+  { name: 'profile', icon: 'person', labelKey: 'tabs.profile' },
 ] as const;
 
 const TRACK_INDEX = 2;
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { colors, colorScheme } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const tabWidth = screenWidth / TAB_CONFIGS.length;
@@ -129,6 +131,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           {TAB_CONFIGS.map((tab, index) => {
             const isFocused = activeVisualIndex === index;
             const isTrackTab = index === TRACK_INDEX;
+            const label = t(tab.labelKey);
 
             const routeIndex = state.routes.findIndex(
               (r) => r.name === tab.name
@@ -144,9 +147,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                 accessibilityRole="button"
                 accessibilityState={{ selected: isFocused }}
                 accessibilityLabel={
-                  tab.label === 'Track'
-                    ? 'Track game tab'
-                    : `${tab.label} tab`
+                  isTrackTab ? t('tabs.trackA11y') : t('tabs.tabA11y', { label })
                 }
               >
                 {isTrackTab ? (
@@ -188,8 +189,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
                   <Animated.Text
                     style={[styles.tabLabel, { color: colors.primary }]}
                     maxFontSizeMultiplier={MAX_FONT_SCALE.fixedControl}
+                    // "Estadísticas" is wider than a 64pt tab on a 320pt screen.
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
                   >
-                    {tab.label}
+                    {label}
                   </Animated.Text>
                 )}
               </TouchableOpacity>
@@ -203,6 +208,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <Tabs
@@ -213,18 +219,18 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: colors.tabBarInactive,
       }}
     >
-      <Tabs.Screen name="home" options={{ title: 'Home' }} />
-      <Tabs.Screen name="teams" options={{ title: 'Teams' }} />
-      <Tabs.Screen name="games" options={{ title: 'Track' }} />
-      <Tabs.Screen name="stats" options={{ title: 'Stats' }} />
+      <Tabs.Screen name="home" options={{ title: t('tabs.home') }} />
+      <Tabs.Screen name="teams" options={{ title: t('tabs.teams') }} />
+      <Tabs.Screen name="games" options={{ title: t('tabs.track') }} />
+      <Tabs.Screen name="stats" options={{ title: t('tabs.stats') }} />
       <Tabs.Screen
         name="invitations"
         options={{
           href: null,
-          title: 'Invitations',
+          title: t('tabs.invitations'),
         }}
       />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="profile" options={{ title: t('tabs.profile') }} />
     </Tabs>
   );
 }

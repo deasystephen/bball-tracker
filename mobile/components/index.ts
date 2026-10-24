@@ -15,7 +15,6 @@ export * from './ErrorBoundary';
 export * from './Toast';
 export * from './SkeletonLoader';
 export * from './AvatarPicker';
-export * from './BadgeGrid';
 export * from './UsageMeter';
 export * from './RelationshipChips';
 export * from './ActionMenu';

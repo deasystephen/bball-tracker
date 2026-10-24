@@ -18,6 +18,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import type { Game, GameStatus } from '../../types/game';
 import { formatClockTime, formatShortDate } from '../../utils/format-date';
+import { i18n, useTranslation } from '../../i18n';
 
 interface GameCardProps {
   game: Game;
@@ -46,13 +47,13 @@ const getStatusColor = (
 const getStatusLabel = (status: GameStatus): string => {
   switch (status) {
     case 'SCHEDULED':
-      return 'Scheduled';
+      return i18n.t('games.scheduled');
     case 'IN_PROGRESS':
-      return 'Live';
+      return i18n.t('games.statusLive');
     case 'FINISHED':
-      return 'Final';
+      return i18n.t('games.statusFinal');
     case 'CANCELLED':
-      return 'Cancelled';
+      return i18n.t('games.cancelled');
     default:
       return status;
   }
@@ -60,6 +61,7 @@ const getStatusLabel = (status: GameStatus): string => {
 
 const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const statusColor = getStatusColor(game.status, colors);
   const isLive = game.status === 'IN_PROGRESS';
 
@@ -149,7 +151,7 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
                 <View style={styles.matchup}>
                   <View style={styles.teamSection}>
                     <ThemedText variant="bodyBold" numberOfLines={1}>
-                      {game.team?.name || 'Your Team'}
+                      {game.team?.name || t('games.yourTeam')}
                     </ThemedText>
                     {(game.status === 'IN_PROGRESS' || game.status === 'FINISHED') && (
                       <ThemedText variant="h2" style={styles.score}>
@@ -160,7 +162,7 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
 
                   <View style={styles.vsContainer}>
                     <ThemedText variant="caption" color="textTertiary">
-                      vs
+                      {t('games.vs')}
                     </ThemedText>
                   </View>
 

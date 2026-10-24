@@ -155,8 +155,8 @@ describe('InvitationsScreen guardian invitations', () => {
     try {
       const { getByText, queryByText } = render(<InvitationsScreen />);
 
-      expect(getByText('Invited by Usuario eliminado')).toBeTruthy();
-      expect(queryByText('Invited by Deleted user')).toBeNull();
+      expect(getByText('Invitación de Usuario eliminado')).toBeTruthy();
+      expect(queryByText(/Deleted user/)).toBeNull();
     } finally {
       await i18n.changeLanguage('en');
     }
@@ -180,10 +180,13 @@ describe('InvitationsScreen guardian invitations', () => {
     try {
       const { getByText, queryByText } = render(<InvitationsScreen />);
 
-      expect(getByText('Become father of Usuario eliminado on Warriors')).toBeTruthy();
-      expect(getByText('Invited by Usuario eliminado')).toBeTruthy();
-      expect(getByText('Accept for Usuario eliminado')).toBeTruthy();
+      // The whole card is Spanish (#671), not only the tombstone.
+      expect(getByText('Ser padre de Usuario eliminado en Warriors')).toBeTruthy();
+      expect(getByText('Invitación de Usuario eliminado')).toBeTruthy();
+      expect(getByText('Aceptar por Usuario eliminado')).toBeTruthy();
+      expect(getByText('Declinar')).toBeTruthy();
       expect(queryByText(/Deleted user/)).toBeNull();
+      expect(queryByText(/Become|Invited by|Accept for/)).toBeNull();
     } finally {
       await i18n.changeLanguage('en');
     }

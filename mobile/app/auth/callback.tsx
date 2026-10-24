@@ -27,6 +27,14 @@ import { log } from '../../services/log';
 import { spacing } from '../../theme';
 import { postLoginRoute } from '../../utils/role-onboarding';
 import { consumePendingLogin } from '../../utils/pkce';
+import { useTranslation } from '../../i18n';
+import {
+  callbackParamFailure,
+  failureStatus,
+  reportSignInFailure,
+  type OAuthErrorCode,
+  type SignInFailure,
+} from '../../utils/sign-in-failure';
 
 /**
  * Errors that are knowable from the deep link itself (WorkOS returned an error,
@@ -36,26 +44,28 @@ import { consumePendingLogin } from '../../utils/pkce';
  * The `error` query param is attacker-controllable (anyone can open
  * hooplings://auth/callback?error=…), so it is never rendered verbatim —
  * known OAuth codes map to our own copy and everything else gets a generic
- * message (audit #74).
+ * message (audit #74). Each maps to an i18n key under `authCallback`.
  */
-const OAUTH_ERROR_COPY: Record<string, string> = {
-  access_denied: 'Sign-in was cancelled. You can try again whenever you like.',
-  invalid_request: 'The sign-in link was invalid. Please try signing in again.',
-  server_error: 'The sign-in service hit a problem. Please try again in a moment.',
-  temporarily_unavailable: 'The sign-in service is temporarily unavailable. Please try again in a moment.',
+const OAUTH_ERROR_KEYS: Record<OAuthErrorCode, string> = {
+  access_denied: 'authCallback.accessDenied',
+  invalid_request: 'authCallback.invalidRequest',
+  server_error: 'authCallback.serverError',
+  temporarily_unavailable: 'authCallback.temporarilyUnavailable',
 };
 
-function getParamError(oauthError?: string, code?: string): string | null {
-  if (oauthError) {
-    return OAUTH_ERROR_COPY[oauthError] ?? 'Sign-in did not complete. Please try signing in again.';
-  }
-  if (!code) return 'No authorization code was returned. Please try signing in again.';
-  return null;
+/** The i18n key for a failure the params already show (`callbackParamFailure`), or null. */
+function getParamErrorKey(failure: SignInFailure | null): string | null {
+  if (!failure) return null;
+  if (failure.stage === 'missing_code') return 'authCallback.noCode';
+  return failure.oauth_error && failure.oauth_error !== 'other'
+    ? OAUTH_ERROR_KEYS[failure.oauth_error]
+    : 'authCallback.incomplete';
 }
 
 export default function AuthCallbackScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { setAuthToken, setUser } = useAuthActions();
   const { code, state, error: oauthError } = useLocalSearchParams<{
     code?: string;
@@ -63,10 +73,26 @@ export default function AuthCallbackScreen() {
     error?: string;
   }>();
 
-  const paramError = getParamError(oauthError, code);
-  const [exchangeError, setExchangeError] = useState<string | null>(null);
+  const paramFailure = callbackParamFailure(oauthError, code);
+  const paramError = getParamErrorKey(paramFailure);
+  /** i18n key of the token-exchange failure. */
+  const [exchangeErrorKey, setExchangeErrorKey] = useState<string | null>(null);
   // Guard so the code is only exchanged once, even if the effect re-runs.
   const exchangedRef = useRef(false);
+
+  // A refused callback is never silent: a warning (#963) and `sign_in_failed`
+  // (#967), once per distinct failure, enums only, so a re-render repeats nothing and a second refused
+  // deep link into the same mounted screen is still reported.
+  const failureStage = paramFailure?.stage;
+  const failureCode = paramFailure?.oauth_error;
+  const reportedFailureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!failureStage) return;
+    const key = `${failureStage}:${failureCode ?? ''}`;
+    if (reportedFailureRef.current === key) return;
+    reportedFailureRef.current = key;
+    reportSignInFailure(failureCode ? { stage: failureStage, oauth_error: failureCode } : { stage: failureStage });
+  }, [failureStage, failureCode]);
 
   useEffect(() => {
     if (paramError || !code) return;
@@ -77,9 +103,8 @@ export default function AuthCallbackScreen() {
       try {
         const pending = await consumePendingLogin(state);
         if (!pending) {
-          setExchangeError(
-            'This sign-in link did not come from a sign-in started on this device, or it has expired. Please try again.'
-          );
+          reportSignInFailure({ stage: 'state_mismatch' });
+          setExchangeErrorKey('authCallback.foreignState');
           return;
         }
         const response = await apiClient.get<AuthCallbackResponse>('/auth/callback', {
@@ -94,31 +119,32 @@ export default function AuthCallbackScreen() {
       } catch (err) {
         captureException(err, { flow: 'auth-callback' });
         log.error('Token exchange error', { error: err });
-        setExchangeError('Failed to complete sign in. Please try again.');
+        reportSignInFailure({ stage: 'exchange', status: failureStatus(err) });
+        setExchangeErrorKey('authCallback.exchangeFailed');
       }
     })();
   }, [code, state, paramError, router, setAuthToken, setUser]);
 
-  const errorMessage = paramError ?? exchangeError;
+  const errorKey = paramError ?? exchangeErrorKey;
 
-  if (errorMessage) {
+  if (errorKey) {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
           <ThemedText variant="h2" heading style={styles.title}>
-            Sign In Failed
+            {t('authCallback.title')}
           </ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            {errorMessage}
+            {t(errorKey)}
           </ThemedText>
-          <Button title="Back to Sign In" onPress={() => router.replace('/login')} style={styles.btn} />
+          <Button title={t('authCallback.back')} onPress={() => router.replace('/login')} style={styles.btn} />
         </View>
       </ThemedView>
     );
   }
 
-  return <LoadingSpinner message="Signing you in…" fullScreen />;
+  return <LoadingSpinner message={t('authCallback.signingIn')} fullScreen />;
 }
 
 const styles = StyleSheet.create({

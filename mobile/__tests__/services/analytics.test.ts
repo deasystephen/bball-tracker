@@ -82,13 +82,26 @@ describe('analytics service', () => {
     warnSpy.mockRestore();
   });
 
+  // #963: a failed init leaves analytics dead on that install; it must say so.
+  it('logs a warning when amplitude.init rejects', async () => {
+    mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
+    mockAmplitude.init.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) });
+    const { initAnalytics } = load();
+    const { log } = jest.requireActual<typeof import('../../services/log')>('../../services/log');
+    const logWarn = jest.spyOn(log, 'warn');
+
+    await initAnalytics();
+
+    expect(logWarn).toHaveBeenCalledWith('[Analytics] Failed to initialize Amplitude', { error: expect.any(Error) });
+  });
+
   it('initAnalytics is a no-op when no API key is configured', async () => {
     const { initAnalytics, trackEvent, AnalyticsEvents } = load();
     await initAnalytics();
     expect(mockAmplitude.init).not.toHaveBeenCalled();
 
     // trackEvent is still safe (no-op) since we never initialized.
-    trackEvent(AnalyticsEvents.APP_OPENED);
+    trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
     expect(mockAmplitude.track).not.toHaveBeenCalled();
   });
 
@@ -107,8 +120,18 @@ describe('analytics service', () => {
   describe('typed event catalogue (#616)', () => {
     it('sends an event without properties with `undefined` properties', async () => {
       const { trackEvent, AnalyticsEvents } = await loadInitialized();
-      trackEvent(AnalyticsEvents.APP_OPENED);
-      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined, IDENTITY);
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
+      expect(mockAmplitude.track).toHaveBeenCalledWith('sign_in_started', undefined, IDENTITY);
+    });
+
+    it('sends app_opened with the running build (#967)', async () => {
+      const { trackEvent, AnalyticsEvents } = await loadInitialized();
+      trackEvent(AnalyticsEvents.APP_OPENED, { launch: 'update', update_id: 'u-1', runtime_version: '1.6.0' });
+      trackEvent(AnalyticsEvents.APP_OPENED, { launch: 'embedded', update_id: null, runtime_version: '1.6.0' });
+      expect(mockAmplitude.track.mock.calls.map((call) => call[1])).toEqual([
+        { launch: 'update', update_id: 'u-1', runtime_version: '1.6.0' },
+        { launch: 'embedded', update_id: null, runtime_version: '1.6.0' },
+      ]);
     });
 
     it('passes the typed properties through untouched', async () => {
@@ -132,11 +155,17 @@ describe('analytics service', () => {
       trackEvent('ad_hoc_event');
       // @ts-expect-error — team_deleted requires team_id.
       trackEvent(AnalyticsEvents.TEAM_DELETED);
-      // @ts-expect-error — app_opened takes no properties.
-      trackEvent(AnalyticsEvents.APP_OPENED, { foo: 1 });
+      // @ts-expect-error — sign_in_started takes no properties.
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED, { foo: 1 });
       // @ts-expect-error — an unknown property is a glossary change, not a typo.
       trackEvent(AnalyticsEvents.TEAM_DELETED, { team_id: 't1', player_name: 'x' });
-      expect(mockAmplitude.track).toHaveBeenCalledTimes(4);
+      // @ts-expect-error — app_opened says which build is running (#967).
+      trackEvent(AnalyticsEvents.APP_OPENED);
+      // @ts-expect-error — sign_in_failed's stage is an enum, never free text.
+      trackEvent(AnalyticsEvents.SIGN_IN_FAILED, { stage: 'the user typed this' });
+      // @ts-expect-error — invite_link_viewed's state is an enum.
+      trackEvent(AnalyticsEvents.INVITE_LINK_VIEWED, { state: 'weird', authenticated: true, source: 'link' });
+      expect(mockAmplitude.track).toHaveBeenCalledTimes(7);
     });
 
     it('every catalogued name is snake_case', () => {
@@ -160,16 +189,16 @@ describe('analytics service', () => {
       resetUser();
 
       expect(mockAmplitude.track).toHaveBeenCalledWith('user_logged_out', { reason: 'user' }, IDENTITY);
-      trackEvent(AnalyticsEvents.APP_OPENED);
-      expect(mockAmplitude.track).toHaveBeenLastCalledWith('app_opened', undefined, { device_id: 'fresh-device' });
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
+      expect(mockAmplitude.track).toHaveBeenLastCalledWith('sign_in_started', undefined, { device_id: 'fresh-device' });
     });
 
     it('sends no identity fields when the SDK has none yet', async () => {
       const { trackEvent, AnalyticsEvents } = await loadInitialized();
       mockAmplitude.getUserId.mockReturnValue(undefined);
       mockAmplitude.getDeviceId.mockReturnValue(undefined);
-      trackEvent(AnalyticsEvents.APP_OPENED);
-      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined, {});
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
+      expect(mockAmplitude.track).toHaveBeenCalledWith('sign_in_started', undefined, {});
     });
   });
 
@@ -193,18 +222,18 @@ describe('analytics service', () => {
 
     it('are dropped when there is no key, and when init fails', async () => {
       const first = load();
-      first.trackEvent(first.AnalyticsEvents.APP_OPENED);
+      first.trackEvent(first.AnalyticsEvents.SIGN_IN_STARTED);
       await first.initAnalytics();
       expect(mockAmplitude.track).not.toHaveBeenCalled();
       // After the decision nothing is buffered either.
-      first.trackEvent(first.AnalyticsEvents.APP_OPENED);
+      first.trackEvent(first.AnalyticsEvents.SIGN_IN_STARTED);
       expect(mockAmplitude.track).not.toHaveBeenCalled();
 
       jest.resetModules();
       mockExpoConstants.expoConfig.extra = { amplitudeApiKey: 'test-key' };
       mockAmplitude.init.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) });
       const second = load();
-      second.trackEvent(second.AnalyticsEvents.APP_OPENED);
+      second.trackEvent(second.AnalyticsEvents.SIGN_IN_STARTED);
       await second.initAnalytics();
       expect(mockAmplitude.track).not.toHaveBeenCalled();
     });
@@ -339,7 +368,7 @@ describe('analytics service', () => {
 
       identifyUser('user-1', { role: 'COACH' });
       resetUser();
-      trackEvent(AnalyticsEvents.APP_OPENED);
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
       await initAnalytics();
 
       expect(mockAmplitude.reset).toHaveBeenCalledTimes(1);
@@ -347,7 +376,7 @@ describe('analytics service', () => {
         mockAmplitude.reset.mock.invocationCallOrder[0],
       );
       // The event after the reset is anonymous.
-      expect(mockAmplitude.track).toHaveBeenCalledWith('app_opened', undefined, { device_id: 'd1' });
+      expect(mockAmplitude.track).toHaveBeenCalledWith('sign_in_started', undefined, { device_id: 'd1' });
     });
 
     it('a logout alone in the init window still resets the SDK (expired session on a cold start)', async () => {
@@ -499,7 +528,7 @@ describe('analytics service', () => {
     await expect(initAnalytics()).resolves.toBeUndefined();
 
     // Since init failed, tracking should remain a no-op.
-    trackEvent(AnalyticsEvents.APP_OPENED);
+    trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
     expect(mockAmplitude.track).not.toHaveBeenCalled();
   });
 
@@ -574,7 +603,7 @@ describe('analytics service', () => {
       throw new Error('reset-fail');
     });
 
-    expect(() => trackEvent(AnalyticsEvents.APP_OPENED)).not.toThrow();
+    expect(() => trackEvent(AnalyticsEvents.SIGN_IN_STARTED)).not.toThrow();
     expect(() => identifyUser('u')).not.toThrow();
     expect(() => setUserProperties({ tier: 'FREE' })).not.toThrow();
     expect(() => resetUser()).not.toThrow();

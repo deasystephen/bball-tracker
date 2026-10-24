@@ -35,8 +35,9 @@ import { formatClockTime, formatLongDate } from '../../../utils/format-date';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
-import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
+import { i18n, useTranslation } from '../../../i18n';
 
 const getStatusColor = (
   status: GameStatus,
@@ -59,13 +60,13 @@ const getStatusColor = (
 const getStatusLabel = (status: GameStatus): string => {
   switch (status) {
     case 'SCHEDULED':
-      return 'Scheduled';
+      return i18n.t('games.scheduled');
     case 'IN_PROGRESS':
-      return 'In Progress';
+      return i18n.t('games.inProgress');
     case 'FINISHED':
-      return 'Finished';
+      return i18n.t('games.finished');
     case 'CANCELLED':
-      return 'Cancelled';
+      return i18n.t('games.cancelled');
     default:
       return status;
   }
@@ -76,6 +77,7 @@ export default function GameDetailScreen() {
   const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors, colorScheme } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -110,10 +112,10 @@ export default function GameDetailScreen() {
   const selfRostered = isRosteredOn(user, game?.team);
   const respondents = useMemo(() => {
     const list: { id: string | null; name: string }[] = [];
-    if (selfRostered || childrenOnTeam.length === 0) list.push({ id: null, name: 'Me' });
+    if (selfRostered || childrenOnTeam.length === 0) list.push({ id: null, name: t('games.rsvp.me') });
     for (const child of childrenOnTeam) list.push({ id: child.childId, name: childDisplayName(child) });
     return list;
-  }, [selfRostered, childrenOnTeam]);
+  }, [selfRostered, childrenOnTeam, t]);
   // `undefined` = nothing picked yet → derive the default (self, or the first
   // child when the guardian is not rostered themself). Derived rather than
   // synced in an effect so a roster change can't leave a stale pick.
@@ -135,8 +137,8 @@ export default function GameDetailScreen() {
       }
     } catch (err) {
       Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'Failed to start game'
+        t('common.error'),
+        err instanceof Error ? err.message : t('games.startFailed')
       );
     }
   };
@@ -146,10 +148,10 @@ export default function GameDetailScreen() {
   };
 
   const handleEndGame = async () => {
-    Alert.alert('End Game', 'Are you sure you want to end this game?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('games.endGame'), t('games.endGameConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'End Game',
+        text: t('games.endGame'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -159,8 +161,8 @@ export default function GameDetailScreen() {
             });
           } catch (err) {
             Alert.alert(
-              'Error',
-              err instanceof Error ? err.message : 'Failed to end game'
+              t('common.error'),
+              err instanceof Error ? err.message : t('games.endFailed')
             );
           }
         },
@@ -170,14 +172,12 @@ export default function GameDetailScreen() {
 
   const handleDelete = () => {
     Alert.alert(
-      'Delete Game',
-      game?.status === 'FINISHED'
-        ? 'This permanently deletes the game and removes all of its recorded stats from player and team season totals. This action cannot be undone.'
-        : 'Are you sure you want to delete this game? This action cannot be undone.',
+      t('games.deleteTitle'),
+      game?.status === 'FINISHED' ? t('games.deleteFinishedConfirm') : t('games.deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -185,8 +185,8 @@ export default function GameDetailScreen() {
               router.replace('/(tabs)/games');
             } catch (err) {
               Alert.alert(
-                'Error',
-                err instanceof Error ? err.message : 'Failed to delete game'
+                t('common.error'),
+                err instanceof Error ? err.message : t('games.deleteFailed')
               );
             }
           },
@@ -196,13 +196,13 @@ export default function GameDetailScreen() {
   };
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading game..." fullScreen />;
+    return <LoadingSpinner message={t('games.loadingGame')} fullScreen />;
   }
 
   if (error || !game) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Game not found'}
+        message={error instanceof Error ? error.message : t('games.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -225,7 +225,7 @@ export default function GameDetailScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
+          <BackButton onPress={goBack} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
           {/* Scheduled or finished only — deleting mid-tracking is more likely a
               mis-tap than intent (end the game first). Finished-game deletion
@@ -234,19 +234,13 @@ export default function GameDetailScreen() {
             <TouchableOpacity
               onPress={handleDelete}
               style={styles.iconButton}
+              hitSlop={HEADER_ICON_HIT_SLOP}
               accessibilityRole="button"
-              accessibilityLabel="Delete game"
+              accessibilityLabel={t('games.deleteA11y')}
             >
               <Ionicons name="trash-outline" size={24} color="#FFFFFF80" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Share game"
-          >
-            <Ionicons name="share-outline" size={24} color="#FFFFFF80" />
-          </TouchableOpacity>
         </View>
 
         {/* Status */}
@@ -270,7 +264,7 @@ export default function GameDetailScreen() {
         <View style={styles.scoreContainer}>
           <View style={styles.teamScore}>
             <ThemedText variant="caption" style={styles.headerTeamName}>
-              {game.team?.name || 'Your Team'}
+              {game.team?.name || t('games.yourTeam')}
             </ThemedText>
             <ThemedText variant="body" style={styles.headerScore}>
               {game.homeScore}
@@ -307,7 +301,7 @@ export default function GameDetailScreen() {
             />
             <View style={styles.infoContent}>
               <ThemedText variant="caption" color="textSecondary">
-                Date
+                {t('games.date')}
               </ThemedText>
               <ThemedText variant="body">{formatLongDate(game.date)}</ThemedText>
             </View>
@@ -319,7 +313,7 @@ export default function GameDetailScreen() {
             <Ionicons name="time-outline" size={20} color={colors.primary} />
             <View style={styles.infoContent}>
               <ThemedText variant="caption" color="textSecondary">
-                Time
+                {t('games.time')}
               </ThemedText>
               <ThemedText variant="body">{formatClockTime(game.date)}</ThemedText>
             </View>
@@ -338,10 +332,10 @@ export default function GameDetailScreen() {
                 />
                 <View style={styles.infoContent}>
                   <ThemedText variant="caption" color="textSecondary">
-                    Roster
+                    {t('teams.roster')}
                   </ThemedText>
                   <ThemedText variant="body">
-                    {game.team.members.length} players
+                    {t('teams.playerCount', { count: game.team.members.length })}
                   </ThemedText>
                 </View>
               </View>
@@ -352,13 +346,13 @@ export default function GameDetailScreen() {
         {/* RSVP Section - only for scheduled/upcoming games */}
         {(isScheduled || isInProgress) && (
           <Card variant="default" style={styles.rsvpCard}>
-            <ThemedText variant="h3" heading style={styles.rsvpTitle}>RSVP</ThemedText>
+            <ThemedText variant="h3" heading style={styles.rsvpTitle}>{t('games.rsvp.title')}</ThemedText>
 
             {/* Responding for: self + each child on this team (guardians) */}
             {childrenOnTeam.length > 0 && (
               <View style={styles.respondingFor} testID="rsvp-responding-for">
                 <ThemedText variant="caption" color="textSecondary" style={styles.respondingForLabel}>
-                  Responding for
+                  {t('games.rsvp.respondingFor')}
                 </ThemedText>
                 <View style={styles.respondingForChips}>
                   {respondents.map((respondent) => {
@@ -369,7 +363,7 @@ export default function GameDetailScreen() {
                         onPress={() => setRespondingFor(respondent.id)}
                         accessibilityRole="radio"
                         accessibilityState={{ selected }}
-                        accessibilityLabel={`Respond for ${respondent.name}`}
+                        accessibilityLabel={t('games.rsvp.respondForA11y', { name: respondent.name })}
                         style={[
                           styles.respondingForChip,
                           { borderColor: colors.border },
@@ -394,7 +388,12 @@ export default function GameDetailScreen() {
               {(['YES', 'NO', 'MAYBE'] as RsvpStatus[]).map((status) => {
                 const myRsvp = rsvpData?.rsvps?.find(r => r.userId === rsvpUserId);
                 const isSelected = myRsvp?.status === status;
-                const label = status === 'YES' ? 'Going' : status === 'NO' ? 'Not Going' : 'Maybe';
+                const label =
+                  status === 'YES'
+                    ? t('games.rsvp.going')
+                    : status === 'NO'
+                      ? t('games.rsvp.notGoing')
+                      : t('games.rsvp.maybe');
                 return (
                   <TouchableOpacity
                     key={status}
@@ -424,9 +423,15 @@ export default function GameDetailScreen() {
             {rsvpData?.summary && (
               <View style={styles.rsvpSummary}>
                 <ThemedText variant="caption" color="textSecondary">
-                  {rsvpData.summary.yes} going
-                  {rsvpData.summary.maybe > 0 && ` \u00B7 ${rsvpData.summary.maybe} maybe`}
-                  {rsvpData.summary.no > 0 && ` \u00B7 ${rsvpData.summary.no} not going`}
+                  {[
+                    t('games.rsvp.goingCount', { count: rsvpData.summary.yes }),
+                    ...(rsvpData.summary.maybe > 0
+                      ? [t('games.rsvp.maybeCount', { count: rsvpData.summary.maybe })]
+                      : []),
+                    ...(rsvpData.summary.no > 0
+                      ? [t('games.rsvp.notGoingCount', { count: rsvpData.summary.no })]
+                      : []),
+                  ].join(' \u00B7 ')}
                 </ThemedText>
               </View>
             )}
@@ -437,7 +442,7 @@ export default function GameDetailScreen() {
         <View style={styles.actionButtons}>
           {isScheduled && permissions.canChangeStatus && (
             <Button
-              title="Start Game"
+              title={t('games.start')}
               onPress={handleStartGame}
               loading={updateGame.isPending}
               fullWidth
@@ -448,7 +453,7 @@ export default function GameDetailScreen() {
           {isInProgress && (
             <>
               <Button
-                title="Watch Live"
+                title={t('games.watchLive')}
                 variant="secondary"
                 onPress={() => router.push(`/games/${id}/live`)}
                 fullWidth
@@ -456,7 +461,7 @@ export default function GameDetailScreen() {
               />
               {permissions.canTrack && (
                 <Button
-                  title="Continue Tracking"
+                  title={t('games.continueTracking')}
                   onPress={handleContinueTracking}
                   fullWidth
                   size="large"
@@ -465,7 +470,7 @@ export default function GameDetailScreen() {
               )}
               {permissions.canChangeStatus && (
                 <Button
-                  title="End Game"
+                  title={t('games.endGame')}
                   variant="danger"
                   onPress={handleEndGame}
                   loading={updateGame.isPending}
@@ -491,21 +496,21 @@ export default function GameDetailScreen() {
                   color={colors.success}
                 />
                 <ThemedText variant="body" style={styles.finishedText}>
-                  Game completed
+                  {t('games.completed')}
                 </ThemedText>
               </Card>
 
               {/* Box Score Section */}
               <View style={styles.boxScoreSection}>
                 <View style={styles.sectionHeader}>
-                  <ThemedText variant="h3" heading>Box Score</ThemedText>
+                  <ThemedText variant="h3" heading>{t('games.boxScore')}</ThemedText>
                   <TouchableOpacity
                     onPress={() => router.push(`/games/${id}/stats`)}
                     style={styles.viewAllButton}
                     accessibilityRole="button"
                   >
                     <ThemedText variant="caption" color="primary">
-                      View Full Stats
+                      {t('games.viewFullStats')}
                     </ThemedText>
                     <Ionicons
                       name="chevron-forward"
@@ -516,7 +521,7 @@ export default function GameDetailScreen() {
                 </View>
 
                 {boxScoreLoading ? (
-                  <LoadingSpinner message="Loading stats..." />
+                  <LoadingSpinner message={t('games.loadingStats')} />
                 ) : boxScore ? (
                   <BoxScoreTable
                     players={boxScore.team.players}
@@ -526,7 +531,7 @@ export default function GameDetailScreen() {
                 ) : (
                   <Card variant="default">
                     <ThemedText variant="body" color="textSecondary">
-                      No statistics recorded for this game.
+                      {t('games.noStats')}
                     </ThemedText>
                   </Card>
                 )}
@@ -559,14 +564,10 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
-  // Delete and share sit side by side with no gap, so they grow to 44pt
-  // rather than take hitSlop (overlapping slop would hand one the other's taps).
+  // Drawn like BackButton (24pt icon, spacing.sm padding = 40pt) so both
+  // header icons share one size; HEADER_ICON_HIT_SLOP makes it a 44pt target.
   iconButton: {
     padding: spacing.sm,
-    minWidth: MIN_TOUCH_TARGET,
-    minHeight: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   statusContainer: {
     alignItems: 'center',

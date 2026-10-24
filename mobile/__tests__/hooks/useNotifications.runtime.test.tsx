@@ -9,7 +9,7 @@
  *     shown (#645): a first ask, or a stored denial that became granted;
  *     never when already granted or on a repeat denial
  *   - registers the push token with the backend on success
- *   - swallows backend errors silently
+ *   - swallows backend errors, logging the failed step (#963)
  *   - subscribes to tap responses and routes by data payload
  *   - cleans up the subscription on unmount
  *
@@ -25,6 +25,7 @@ import * as Notifications from 'expo-notifications';
 import { apiClient } from '../../services/api-client';
 import { trackEvent } from '../../services/analytics';
 import { useAuthStore } from '../../store/auth-store';
+import { log } from '../../services/log';
 import {
   useNotificationSetup,
   unregisterPushToken,
@@ -169,6 +170,86 @@ describe('useNotificationSetup runtime', () => {
     process.off('unhandledRejection', unhandled);
     expect(unhandled).not.toHaveBeenCalled();
     expect(mockedPost).not.toHaveBeenCalled();
+  });
+
+  describe('a failed registration is logged with its step (#963)', () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => {
+      warn = jest.spyOn(log, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => warn.mockRestore());
+
+    it('names the permission step', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockRejectedValueOnce(new Error('permissions API unavailable'));
+
+      renderHook(() => useNotificationSetup());
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('Push token registration failed', {
+          step: 'permission',
+          error: expect.any(Error),
+        })
+      );
+    });
+
+    it('names the Expo token step, where the API never sees a request', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+      mockedGetToken.mockRejectedValueOnce(new Error('E_REGISTRATION_FAILED'));
+
+      renderHook(() => useNotificationSetup());
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('Push token registration failed', {
+          step: 'token',
+          error: expect.any(Error),
+        })
+      );
+      expect(mockedPost).not.toHaveBeenCalled();
+    });
+
+    it('names the register step with the route pattern and status, never the token', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+      mockedGetToken.mockResolvedValueOnce({ data: 'ExponentPushToken[secret]' });
+      mockedPost.mockRejectedValueOnce({
+        isAxiosError: true,
+        code: 'ERR_BAD_REQUEST',
+        response: { status: 400 },
+        config: { baseURL: 'https://api.example.test/api/v1', url: '/auth/push-token' },
+      });
+
+      renderHook(() => useNotificationSetup());
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('Push token registration failed', {
+          step: 'register',
+          endpoint_pattern: '/api/v1/auth/push-token',
+          status: 400,
+          code: 'ERR_BAD_REQUEST',
+        })
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('ExponentPushToken');
+    });
+
+    it('reports a network failure on the register step as status "network"', async () => {
+      setAuthenticated('jwt-token');
+      mockedGetPermissions.mockResolvedValueOnce({ status: 'granted' });
+      mockedGetToken.mockResolvedValueOnce({ data: 'tok' });
+      mockedPost.mockRejectedValueOnce({ isAxiosError: true, code: 'ERR_NETWORK', config: { url: '/auth/push-token' } });
+
+      renderHook(() => useNotificationSetup());
+
+      await waitFor(() =>
+        expect(warn).toHaveBeenCalledWith('Push token registration failed', {
+          step: 'register',
+          endpoint_pattern: '/auth/push-token',
+          status: 'network',
+          code: 'ERR_NETWORK',
+        })
+      );
+    });
   });
 
   describe('unregisterPushToken (audit #18)', () => {

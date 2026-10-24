@@ -11,6 +11,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 export interface SortPillOption<K extends string> {
   key: K;
@@ -24,8 +25,8 @@ interface SortPillsProps<K extends string> {
   onSelect: (key: K) => void;
   style?: StyleProp<ViewStyle>;
   /**
-   * Accessibility-label prefix. Defaults to the sort wording Maestro asserts
-   * ("Sort by <label>"); other single-choice rows (team gender) pass their own.
+   * Accessibility-label prefix. Defaults to `common.sortBy` ("Sort by <label>",
+   * the wording Maestro asserts); other single-choice rows (team gender) pass their own.
    */
   labelPrefix?: string;
 }
@@ -35,9 +36,10 @@ export function SortPills<K extends string>({
   selected,
   onSelect,
   style,
-  labelPrefix = 'Sort by ',
+  labelPrefix,
 }: SortPillsProps<K>) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <View style={[styles.row, style]}>
@@ -55,7 +57,11 @@ export function SortPills<K extends string>({
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`${labelPrefix}${option.label}`}
+            accessibilityLabel={
+              labelPrefix === undefined
+                ? t('common.sortBy', { label: option.label })
+                : `${labelPrefix}${option.label}`
+            }
             accessibilityState={{ selected: isSelected }}
           >
             <ThemedText variant="caption" color={isSelected ? 'primary' : 'textSecondary'}>

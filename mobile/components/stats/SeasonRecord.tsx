@@ -16,7 +16,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
 import { spacing } from '../../theme';
-import { describeRecord, getRecordParts, getResultColor } from '../../utils/game-result';
+import { describeRecord, getRecordParts, getResultColor, resultLetter } from '../../utils/game-result';
 
 export interface SeasonRecordProps {
   wins: number;
@@ -65,7 +65,7 @@ export function SeasonRecord({
               {count}
             </ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              {result}
+              {resultLetter(t, result)}
             </ThemedText>
           </View>
         </React.Fragment>

@@ -12,21 +12,28 @@ import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useGoBack } from '../../hooks/useGoBack';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
-import { apiClient, isRateLimitedError, isTransientRequestError } from '../../services/api-client';
+import {
+  apiClient,
+  getApiErrorMessage,
+  isRateLimitedError,
+  isTransientRequestError,
+} from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
-import { relationshipLabel } from '../../utils/guardian';
+import { relationshipLabel, relationshipNoun } from '../../utils/guardian';
 import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
 import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
+import { useInviteLinkViewed } from '../../hooks/useInviteLinkViewed';
 import { setPendingReturnPath } from '../../utils/return-path';
 import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
-import { AxiosError } from 'axios';
 import { formatCalendarDate } from '../../utils/format-date';
 
 export default function InviteDeepLinkScreen() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  // `src=web` marks the web invite page's Open in App button (#964, #967); it is a
+  // query param, never part of the token.
+  const { token, src } = useLocalSearchParams<{ token: string; src?: string }>();
   const router = useRouter();
   const { colors } = useTheme();
   const toast = useToast();
@@ -34,15 +41,26 @@ export default function InviteDeepLinkScreen() {
   const goBack = useGoBack('/');
   const { isAuthenticated, updateUser } = useAuthStore();
 
-  const { data: invitation, isLoading, error, refetch } = useInvitationByToken(token);
+  const { data: invitation, isLoading, isFetching, error, refetch } = useInvitationByToken(token);
   // Only a transient failure is a retryable error state (and an `error_shown` event); a
   // 400/404 stays the not-found screen below (#892).
   const transientError = error && isTransientRequestError(error) ? error : null;
   const loadState = useQueryErrorState(
     { error: transientError, data: invitation, refetch },
-    'Failed to load invitation'
+    t('invite.loadFailedShort')
   );
   const acceptById = useAcceptInvitation({ source: 'link' });
+  useInviteLinkViewed({
+    token,
+    src,
+    isLoading,
+    isFetching,
+    failed: loadState.failed,
+    retrying: loadState.retrying,
+    error,
+    invitation,
+    isAuthenticated,
+  });
 
   /**
    * Logged-out users must sign in first: accepting needs an identity, and the
@@ -50,7 +68,8 @@ export default function InviteDeepLinkScreen() {
    * `postLoginRoute` brings them straight back here after sign-in.
    */
   async function goToLogin() {
-    if (token) await setPendingReturnPath(`/invite/${token}`);
+    // Keep `src` so the post-sign-in view still says where the link came from.
+    if (token) await setPendingReturnPath(`/invite/${token}${src === 'web' ? '?src=web' : ''}`);
     router.push('/login');
   }
 
@@ -95,41 +114,47 @@ export default function InviteDeepLinkScreen() {
           } catch {
             // useSessionRefresh catches up on the next foreground.
           }
-          toast.showToast(`You are now ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}`, 'success');
+          toast.showToast(
+            t('invitations.guardianAccepted', {
+              child: childDisplayName(guardian),
+              relationship: relationshipNoun(guardian.relationship),
+            }),
+            'success'
+          );
           router.replace('/(tabs)/profile');
           return;
         }
-        toast.showToast(`You've joined ${invitation.teamName}!`, 'success');
+        toast.showToast(t('invite.joined', { team: invitation.teamName }), 'success');
         router.replace('/(tabs)/invitations');
       } catch (err) {
-        const msg =
-          err instanceof AxiosError
-            ? (err.response?.data as { error?: string })?.error ?? err.message
-            : 'Failed to accept invitation';
-        toast.showToast(msg, 'error');
+        // Through getApiErrorMessage like every other screen, so `error_shown` fires (#967).
+        toast.showToast(getApiErrorMessage(err, t('invitations.acceptFailed')), 'error');
       }
     };
 
     Alert.alert(
-      'Accept Invitation',
+      t('invite.acceptTitle'),
       guardian
-        ? `Become ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}?`
-        : `Join ${invitation.teamName}?`,
+        ? t('invite.acceptGuardianBody', {
+            child: childDisplayName(guardian),
+            relationship: relationshipNoun(guardian.relationship),
+          })
+        : t('invite.acceptTeamBody', { team: invitation.teamName }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Accept', onPress: doAccept },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('invitations.accept'), onPress: doAccept },
       ]
     );
   }
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading invitation…" fullScreen />;
+    return <LoadingSpinner message={t('invite.loading')} fullScreen />;
   }
 
   // A network failure, 429 or 5xx says nothing about the token (#892): offer a retry
   // rather than a dead-link screen.
   if (loadState.retrying) {
-    return <LoadingSpinner message="Loading invitation…" fullScreen />;
+    return <LoadingSpinner message={t('invite.loading')} fullScreen />;
   }
 
   if (loadState.failed) {
@@ -147,11 +172,11 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
-          <ThemedText variant="h2" heading style={styles.title}>Invitation Not Found</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>{t('invite.notFoundTitle')}</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation link is invalid or has been removed.
+            {t('invite.notFoundBody')}
           </ThemedText>
-          <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
+          <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
       </ThemedView>
     );
@@ -162,12 +187,14 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="checkmark-circle-outline" size={64} color={colors.success} />
-          <ThemedText variant="h2" heading style={styles.title}>Already Accepted</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>{t('invite.alreadyAcceptedTitle')}</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            You&apos;ve already accepted the invitation{guardian ? ' for' : ' to'} {subject}.
+            {guardian
+              ? t('invite.alreadyAcceptedGuardian', { subject })
+              : t('invite.alreadyAcceptedTeam', { subject })}
           </ThemedText>
           <Button
-            title="View Invitations"
+            title={t('invite.viewInvitations')}
             onPress={() => router.replace('/(tabs)/invitations')}
             style={styles.btn}
           />
@@ -181,11 +208,11 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="close-circle-outline" size={64} color={colors.error} />
-          <ThemedText variant="h2" heading style={styles.title}>Invitation Declined</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>{t('invite.declinedTitle')}</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation{guardian ? ' for' : ' to'} {subject} was declined.
+            {guardian ? t('invite.declinedGuardian', { subject }) : t('invite.declinedTeam', { subject })}
           </ThemedText>
-          <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
+          <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
       </ThemedView>
     );
@@ -196,11 +223,11 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="ban-outline" size={64} color={colors.textTertiary} />
-          <ThemedText variant="h2" heading style={styles.title}>Invitation Cancelled</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>{t('invite.cancelledTitle')}</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation{guardian ? ' for' : ' to'} {subject} has been cancelled.
+            {guardian ? t('invite.cancelledGuardian', { subject }) : t('invite.cancelledTeam', { subject })}
           </ThemedText>
-          <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
+          <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
       </ThemedView>
     );
@@ -211,15 +238,16 @@ export default function InviteDeepLinkScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={styles.content}>
           <Ionicons name="time-outline" size={64} color={colors.warning} />
-          <ThemedText variant="h2" heading style={styles.title}>Invitation Expired</ThemedText>
+          <ThemedText variant="h2" heading style={styles.title}>{t('invite.expiredTitle')}</ThemedText>
           <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
-            This invitation{guardian ? ' for' : ' to'} {subject} expired on{' '}
-            {formatExpiry(invitation.expiresAt)}.
+            {guardian
+              ? t('invite.expiredGuardian', { subject, date: formatExpiry(invitation.expiresAt) })
+              : t('invite.expiredTeam', { subject, date: formatExpiry(invitation.expiresAt) })}
           </ThemedText>
           <ThemedText variant="caption" color="textTertiary" style={styles.hint}>
-            Ask the team coach to send a new invitation.
+            {t('invite.askCoach')}
           </ThemedText>
-          <Button title="Go Home" onPress={() => router.replace('/')} style={styles.btn} />
+          <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
       </ThemedView>
     );
@@ -230,32 +258,35 @@ export default function InviteDeepLinkScreen() {
       <View style={styles.content}>
         <Ionicons name={guardian ? 'people-outline' : 'mail-open-outline'} size={64} color={colors.primary} />
         <ThemedText variant="h1" heading style={styles.title}>
-          {guardian ? 'Parent Invitation' : 'Team Invitation'}
+          {guardian ? t('invite.parentTitle') : t('invite.teamTitle')}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
           {guardian
-            ? `You've been invited to be ${childDisplayName(guardian)}'s ${relationshipLabel(guardian.relationship).toLowerCase()}.`
-            : "You've been invited to join a team!"}
+            ? t('invite.invitedGuardian', {
+                child: childDisplayName(guardian),
+                relationship: relationshipNoun(guardian.relationship),
+              })
+            : t('invite.invitedTeam')}
         </ThemedText>
 
         <Card variant="elevated" style={styles.detailCard}>
           {guardian ? (
             <>
-              <DetailRow label="Child" value={childDisplayName(guardian)} />
-              <DetailRow label="Relationship" value={relationshipLabel(guardian.relationship)} />
-              {guardian.teamName != null && <DetailRow label="Team" value={guardian.teamName} />}
+              <DetailRow label={t('invite.child')} value={childDisplayName(guardian)} />
+              <DetailRow label={t('guardians.relationshipLabel')} value={relationshipLabel(guardian.relationship)} />
+              {guardian.teamName != null && <DetailRow label={t('invite.team')} value={guardian.teamName} />}
             </>
           ) : (
-            <DetailRow label="Team" value={teamInvite?.teamName ?? ''} />
+            <DetailRow label={t('invite.team')} value={teamInvite?.teamName ?? ''} />
           )}
-          <DetailRow label="From" value={inviter} />
+          <DetailRow label={t('invite.from')} value={inviter} />
           {teamInvite?.position != null && (
-            <DetailRow label="Position" value={teamInvite.position} />
+            <DetailRow label={t('players.position')} value={teamInvite.position} />
           )}
           {teamInvite?.jerseyNumber != null && (
-            <DetailRow label="Jersey" value={`#${teamInvite.jerseyNumber}`} />
+            <DetailRow label={t('invite.jersey')} value={`#${teamInvite.jerseyNumber}`} />
           )}
-          <DetailRow label="Expires" value={formatExpiry(invitation.expiresAt)} />
+          <DetailRow label={t('invite.expires')} value={formatExpiry(invitation.expiresAt)} />
         </Card>
 
         {teamInvite?.message != null && (
@@ -268,18 +299,16 @@ export default function InviteDeepLinkScreen() {
           <>
             {!isAuthenticated && (
               <ThemedText variant="caption" color="textSecondary" style={styles.hint}>
-                {guardian
-                  ? 'Log in to accept this invitation.'
-                  : 'Log in to accept this invitation and join the team.'}
+                {guardian ? t('invite.loginHintGuardian') : t('invite.loginHintTeam')}
               </ThemedText>
             )}
             <Button
               title={
                 isAuthenticated
                   ? guardian
-                    ? `Accept for ${childDisplayName(guardian)}`
-                    : 'Accept Invitation'
-                  : 'Log In to Accept'
+                    ? t('invitations.acceptFor', { name: childDisplayName(guardian) })
+                    : t('invite.acceptTitle')
+                  : t('invite.loginToAccept')
               }
               onPress={handleAccept}
               loading={acceptById.isPending}

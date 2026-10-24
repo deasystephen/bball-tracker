@@ -8,6 +8,7 @@ import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { captureException } from '../services/sentry';
 import { log } from '../services/log';
+import { i18n } from '../i18n';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -47,15 +48,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <View style={styles.container}>
           <Ionicons name="warning-outline" size={48} color="#FF3B30" />
-          <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.message}>
-            An unexpected error occurred. Please try again.
-          </Text>
+          <Text style={styles.title}>{i18n.t('common.somethingWentWrong')}</Text>
+          <Text style={styles.message}>{i18n.t('common.unexpectedError')}</Text>
           {__DEV__ && this.state.error && (
             <Text style={styles.errorDetail}>{this.state.error.message}</Text>
           )}
           <TouchableOpacity style={styles.button} onPress={this.handleReset} accessibilityRole="button">
-            <Text style={styles.buttonText}>Try Again</Text>
+            <Text style={styles.buttonText}>{i18n.t('common.tryAgain')}</Text>
           </TouchableOpacity>
         </View>
       );

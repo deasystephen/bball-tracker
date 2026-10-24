@@ -6,7 +6,7 @@
  * Delete / Continue Tracking.
  */
 
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 
 import GameDetailScreen from '../../app/games/[id]/index';
 import { useAuthStore } from '../../store/auth-store';
@@ -161,6 +161,37 @@ describe('GameDetailScreen permission gating', () => {
       signIn({ id: 'coach-1', role: 'COACH' });
       const { queryByLabelText } = render(<GameDetailScreen />);
       expect(queryByLabelText('Delete game')).toBeNull();
+    });
+  });
+
+  // #731: the header carried an inert share icon (a button with no onPress).
+  // It was removed; no viewer on any status may see it.
+  describe('no share control in the header', () => {
+    const viewers = [
+      { label: 'head coach', user: { id: 'coach-1', role: 'COACH' as const } },
+      { label: 'player', user: { id: 'player-1', role: 'PLAYER' as const } },
+      { label: 'non-member viewer', user: { id: 'stranger-1', role: 'PLAYER' as const } },
+    ];
+    const cases = (['SCHEDULED', 'IN_PROGRESS', 'FINISHED'] as const).flatMap((status) =>
+      viewers.map((viewer) => [status, viewer.label, viewer.user] as const),
+    );
+
+    it.each(cases)('%s game, %s: back control only, no "Share game"', (status, _label, user) => {
+      mockGame = { ...baseGame, status };
+      signIn(user);
+      const { getByLabelText, queryByLabelText } = render(<GameDetailScreen />);
+      expect(getByLabelText('Go back')).toBeTruthy();
+      expect(queryByLabelText('Share game')).toBeNull();
+    });
+
+    it('header back falls back to the Games tab when there is nothing to pop', () => {
+      mockGame = { ...baseGame, status: 'SCHEDULED' };
+      mockRouter.canGoBack.mockReturnValueOnce(false);
+      signIn({ id: 'player-1', role: 'PLAYER' });
+      const { getByLabelText } = render(<GameDetailScreen />);
+      fireEvent.press(getByLabelText('Go back'));
+      expect(mockRouter.back).not.toHaveBeenCalled();
+      expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/games');
     });
   });
 

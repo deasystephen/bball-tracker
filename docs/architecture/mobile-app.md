@@ -16,6 +16,83 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   they ship with the next `eas build`, not an OTA. Brand navy `#1C2742` is also the splash and
   adaptive-icon background in `app.config.js`.
 
+### Internationalization: English and Spanish (#671)
+- **Spanish is a supported locale** (owner decision 2026-10-24, GA blocker). `i18n/config.ts` picks the
+  device language (`es` → `es.json`, anything else falls back to `en.json`); there is no in-app picker.
+  A device set to Español must show no English anywhere, VoiceOver labels included; the product name
+  "Hooplings" is the only literal that stays as is. Agent-written Spanish is a draft: a native speaker
+  reviews `es.json` before App Store submission.
+- **Every user-facing string goes through `t()`**: JSX text, `title`/`label`/`placeholder`/`message`/
+  `accessibilityLabel` props, `ActionMenu` items, `Alert.alert` titles, messages and buttons, toasts,
+  `useAccessGuard` messages, validation errors. Counts use i18next plurals (`key_one`/`key_other` with
+  `{ count }`), never `n === 1 ? '' : 's'`. A class component or a plain helper (utils, hooks, services)
+  calls `i18n.t(...)` from `i18n/index.ts`; it reads the current language on every call. Server error
+  text from `getApiErrorMessage` and socket transport errors stay English (out of scope by decision);
+  every fallback passed to them is translated. An error whose English `message` goes to Sentry carries an
+  i18n key for the screen instead (`utils/upload-error.ts#AvatarUploadError.userMessageKey`, shown via
+  `uploadAwareErrorMessage`), so one failure groups as one Sentry issue in every language. This changed
+  English too: a rejected S3 upload used to show its diagnostic ("Avatar upload failed (403 …)") and now
+  shows "Failed to upload photo"; the detail stays in Sentry. The About screen's Share / support-mail
+  diagnostics stay English on purpose (support reads them); the screen itself is translated.
+- **Shared components resolve their own defaults through `t()`**: `ErrorState` (title, Try Again, Go
+  back, the `Error: {title}. {message}` region label), `ActionMenu` (Close, Close menu),
+  `DateTimePickerSheet` (Cancel, Done, Close picker), `SortPills` (`common.sortBy`, "Sort by {label}",
+  unless a `labelPrefix` is passed), `BackButton` (`common.goBack`), `Button` (`common.loadingA11y`),
+  `UsageMeter`, `PrintButton`, `AvatarPicker`, and `ErrorBoundary` (class, `i18n.t`). Derived labels in
+  utils are localized at the source: `rosterStatusLabel`, `emailDeliveryIssueLabel`/`Explanation`,
+  `formatInvitationExpiry`, `relationshipLabel` (`guardians.relationship.*`) and `relationshipNoun` (the
+  in-sentence form, `guardians.relationshipInSentence.*`, never a lower-cased label), `scoreAccessibilityLabel`,
+  `formatShotDescription`, `resultLetter` (W/L/T, V/D/E) and `formatSeasonRange` (now in
+  `utils/format-date.ts`, shared by the league and season screens). The guard does not read `return` or
+  `throw` literals, so each such helper has a Spanish unit test.
+- **English values are pinned.** Jest pins the locale to `en` and the Maestro flows select by English
+  text and labels, so converting a literal keeps its `en.json` value byte-identical; changing English
+  copy is a flow change. A few English strings changed on purpose and no test or flow matched them:
+  hand-pluralised counts that read "1 players" / "1 games" are i18next plurals now. Namespaces:
+  `common`, `tabs`, `avatar`, `usage`, `roster`, `invitations`, `invite`, `guardians`, `home`,
+  `profile`, `about`, `login`, `authCallback`, `onboarding`, `nameOnboarding`, `leagues`, `seasons`,
+  `games` (screens, `games.rsvp.*`, `games.live.*`), `tracker` (the tracker components, shot and play
+  labels, milestones), `stats` (`stats.abbr.*` box-score abbreviations, `stats.resultLetter.*` W/L/T),
+  plus the older per-feature ones. Spanish basketball terms follow one glossary (PR #961): partido,
+  rebote ofensivo/defensivo, asistencia, robo, tapón, pérdida, falta, tiro libre; abbreviations
+  TL/T2/T3, TC%, ROB, TAP, PÉR, FP, PPP; results V/D/E. The tab bar reads `tabs.*`; the unused `navigation.*`
+  namespace was removed.
+- **Guard:** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`, `components/`, `hooks/`, `services/` and `utils/`
+  and fails on a user-facing literal (scanner: `__tests__/helpers/hardcoded-copy.ts`; it decides by
+  position, so `status === 'LIVE'` and `t('games.title')` pass). Allowed: literals with no letter, URLs,
+  the product name, HTML entities, and `__DEV__`-only code. `PENDING_FILES` (the screens not yet
+  converted while #671 ran in three PRs) is empty; an entry with no findings fails, so it cannot grow
+  stale. `locale-parity.test.ts` keeps the key sets equal.
+  Spanish renders: `__tests__/i18n/spanish-shared.test.tsx` (shared components, tab bar, derived labels),
+  `__tests__/i18n/spanish-games.test.tsx` (tracker components, box score), and the Spanish cases in
+  `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP),
+  `{league-detail-delete,team-detail-roster-sort,stats-tab-states,player-stats-states,players-roster-status,invitations-guardian,players-email-issue}.test.tsx`
+  (league seasons, team detail, Stats tab, player stats, roster and Add Player form, invitations).
+- **Every change keeps every language current.** A PR that adds or changes user-facing copy changes
+  `en.json` **and** every other file in `i18n/locales/` in the same PR, then marks the translated keys
+  with `npm run i18n:mark -- <code> <key>…`. CI enforces it with three guards:
+  `hardcoded-copy.test.ts` (no literal copy in source); `locale-parity.test.ts` (every locale has the
+  same keys and placeholders as `en.json`; no value copied from English, in any letter case, unless it
+  is in `IDENTICAL_TO_ENGLISH` with the reason the word really is the same, e.g. "Final", PTS; and no
+  stale translation: `i18n/translated-from.json` holds a hash of the English each translation was
+  written from, so editing an English value fails until the translation is updated and re-marked);
+  and `locale-registry.test.ts` (every locale file is registered in `i18n/config.ts#LOCALES`, every
+  registered language loads, and an unshipped device language resolves to English). The Spanish
+  render tests above sit beside them. No guard can see a value that is only partly translated, and
+  marking is a claim a reviewer checks in the diff: agent or machine translations are drafts, so flag
+  uncertain ones in the PR for a native speaker. Text that must not be translated (the word typed to
+  confirm a deletion, `DELETE_CONFIRMATION`) comes from code through a `{{placeholder}}`, never from
+  a locale value.
+- **Adding a language:** add `i18n/locales/<code>.json` with every key of `en.json` translated, add
+  `<code>` to `LOCALES` in `i18n/config.ts`, run `npm run i18n:mark -- <code> --all`, and add an
+  `IDENTICAL_TO_ENGLISH.<code>` block in `locale-parity.test.ts` only for words that really are the
+  same; the guards list whatever is missing. Add a render test in that language and a row in the E2E
+  test plan's locale case (B.4). Telling iOS about the language (`CFBundleLocalizations`, below) is
+  native config: it goes in the next native build's PR, never in a JavaScript-only PR.
+- **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
+  yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
+  the app and localizes system UI around it.
+
 ### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
   (`useInfiniteGames`, `useInfiniteTeams`, `useInfiniteAnnouncements`) wired to `FlatList.onEndReached`; the
@@ -98,8 +175,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   season row only showed a "coming soon" alert. Validation on edit mirrors `updateSeasonSchema` (name 1–100)
   plus the service's start ≤ end check. The season forms share `components/SeasonDateFields` (date rows +
   picker sheet, clear button as a sibling of the date button). Strings live under `seasons.*` and
-  `leagues.delete*` in `i18n/locales`; the older admin screens (league list/create, season create) are still
-  inline English. Tests: `__tests__/app/{season-detail,season-edit,league-detail-delete}.test.tsx`; both
+  `leagues.*` in `i18n/locales`; every admin screen is translated since #671 (league list/create and season
+  create were inline English before). Tests: `__tests__/app/{season-detail,season-edit,league-detail-delete}.test.tsx`; both
   season screens are in the way-back list in `__tests__/app/error-state-way-back.test.tsx`. Maestro:
   `.maestro/admin-season-manage.yaml` (dev-login as the seeded ADMIN; creates and deletes "E2E Season";
   the seed removes a leftover).
@@ -381,7 +458,7 @@ never inline a role check in a screen:
   An icon button keeps its drawn size and gets `hitSlop={touchTargetHitSlop(<icon> + 2 * <padding>)}`
   (`HEADER_ICON_HIT_SLOP` for the usual 24pt header icon with `padding: spacing.sm`), so neither the
   glyph nor the header around it moves; two icon buttons side by side with little or
-  no gap (season edit/delete, game delete/share, the staff and guardian row actions) grow to 44pt
+  no gap (season edit/delete, the staff and guardian row actions) grow to 44pt
   with `minWidth`/`minHeight` instead, because overlapping slop hands the later sibling the earlier
   one's taps. A wide text pill that is too short takes height-only slop,
   `touchTargetHitSlop(MIN_TOUCH_TARGET, <height>)` ("Add Season" on league detail). Hoist every slop to
@@ -496,6 +573,41 @@ never inline a role check in a screen:
   never captured. A `NoSessionError` (#582) is captured **once per endpoint
   pattern per session end** (keyed on `getLogoutEpoch()`), so a screen that retries after sign-out
   reports one event, not a storm; every refusal still leaves a breadcrumb.
+- **Every api-client request carries `X-Request-Id` and `X-Hooplings-Client`** (#963,
+  `services/app-build.ts`, stamped by the api-client's request interceptor once the request is
+  certain to go out; a `NoSessionError` refusal is never stamped). `X-Request-Id` is a fresh UUID
+  v4 per send (expo-modules-core's native generator, the one `utils/pkce.ts` uses, with a
+  `Math.random` fallback; a refresh and the replay of a 401 each get their own). The API uses a
+  valid id verbatim as `requestId` on its log lines and echoes it on the response, and the app tags
+  the `http` breadcrumb (`data.request_id`) and any captured network failure or 5xx (tag
+  `request_id`) with the id it sent, so **a mobile Sentry event leads to the exact API line in
+  Datadog** (`@requestId:<id>`). `X-Hooplings-Client` is `ios/<version>+<update id>` (or
+  `android/…`), `+embedded` when the binary's bundled JS runs; `<version>` is
+  `expoConfig.version`. The header is left out when the value would not match the API's contract
+  (`docs/architecture/backend-services.md`, logging), e.g. on a platform other than iOS or
+  Android; it is computed once per process (an OTA applies only on the next launch). The update
+  id and runtime come from `requireOptionalNativeModule('ExpoUpdates')`, not the `expo-updates`
+  wrapper (which throws at import without its native module), so the api-client can never crash
+  an older binary. The Socket.io handshake (`services/socket.ts`) and the presigned S3 upload
+  are not api-client requests and carry neither header. JavaScript only: ships by OTA.
+- **Failures with no user-facing error still log a warning** (#963), so the breadcrumb trail
+  explains them: push registration (`hooks/useNotifications.ts`, `Push token registration
+  failed` with `step`: `permission` / `token` / `register`, and for `register` the route pattern,
+  HTTP status or `network`, and axios code; never the push token), Amplitude init
+  (`services/analytics.ts`), auth-storage rehydration that starts the user signed out
+  (`store/auth-store.ts`), the root screen's initial navigation (`app/index.tsx`), and a refused
+  sign-in callback (`app/auth/callback.tsx` via `utils/sign-in-failure.ts#reportSignInFailure`,
+  `Sign-in failed` with `stage`: `oauth_error` (plus `oauth_error`: an allow-listed OAuth code or
+  `other`, never the raw param, which any app can set), `missing_code`, `state_mismatch`, or
+  `exchange` with the HTTP `status` when the API answered).
+  `log.warn` is a breadcrumb only, so these reach Sentry with the next captured event; Sentry
+  Logs (`enableLogs`, which would send each warning on its own) is an open owner decision on #963.
+- **Sentry is the mobile source of truth for errors and diagnostics; Datadog's React Native SDK
+  is not used** (decision 2026-10-24, #963). `@datadog/mobile-react-native` ships native iOS and
+  Android SDKs (a new binary and runtime, the OTA drift guard), adds a processor and new rows to
+  the App Privacy label and the privacy policy, and duplicates what Sentry (errors, sessions,
+  performance) and Amplitude (behaviour) already collect. The join to the API's Datadog logs is
+  the `request_id` above.
 - **`endpointPattern(url)`** (`services/sentry.ts`) is the only shape a URL takes in a tag or
   breadcrumb: `redactUrl` first, then scheme, host and query dropped, then every UUID, cuid or
   numeric segment collapsed to `:id` (`/api/v1/teams/:id/games/:id`), so one tag value groups a

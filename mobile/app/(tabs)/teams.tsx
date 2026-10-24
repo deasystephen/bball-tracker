@@ -78,7 +78,7 @@ export default function TeamsScreen() {
   // cached list (#888, hooks/useQueryErrorState.ts).
   const errorState = useQueryErrorState(
     { error, data: teams, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
-    'Failed to load teams'
+    t('teams.loadFailed')
   );
 
   if (isLoading || !user || errorState.retrying) {
@@ -104,7 +104,7 @@ export default function TeamsScreen() {
           <EmptyState
             icon="people-outline"
             title={t('teams.noTeams')}
-            message="Create your first team to get started"
+            message={t('teams.firstTeamHint')}
             actionLabel={t('teams.createNew')}
             onAction={handleCreateTeam}
           />
@@ -131,12 +131,12 @@ export default function TeamsScreen() {
           onPress={handleCreateTeam}
           style={[styles.teamCard, styles.createCard, { borderColor: colors.border }]}
           accessibilityRole="button"
-          accessibilityLabel="Create new team"
+          accessibilityLabel={t('teams.createNewA11y')}
         >
           <View style={styles.createCardContent}>
             <Ionicons name="add-circle-outline" size={36} color={colors.textTertiary} />
             <ThemedText variant="captionBold" color="textSecondary">
-              Create Team
+              {t('teams.create')}
             </ThemedText>
           </View>
         </TouchableOpacity>
@@ -145,7 +145,7 @@ export default function TeamsScreen() {
 
     const teamColor = getTeamColor(item.name);
     const memberCount = item._count?.members ?? item.members?.length ?? 0;
-    const leagueName = item.season?.league?.name || 'No League';
+    const leagueName = item.season?.league?.name || t('teams.noLeague');
 
     return (
       <TouchableOpacity
@@ -170,7 +170,7 @@ export default function TeamsScreen() {
           <View style={styles.playerCountRow}>
             <Ionicons name="people-outline" size={12} color={colors.textTertiary} />
             <ThemedText variant="footnote" color="textTertiary">
-              {memberCount} {memberCount === 1 ? 'player' : 'players'}
+              {t('teams.playerCount', { count: memberCount })}
             </ThemedText>
           </View>
         </View>

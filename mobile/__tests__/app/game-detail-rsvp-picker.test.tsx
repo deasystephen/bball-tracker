@@ -110,9 +110,14 @@ describe('GameDetailScreen RSVP picker (guardians)', () => {
     signIn('dell', [{ ...stephLink, childName: 'Deleted user', childDeletedAt: '2026-09-01T00:00:00.000Z' }]);
     await i18n.changeLanguage('es');
     try {
-      const { getByLabelText, queryByLabelText } = render(<GameDetailScreen />);
-      expect(getByLabelText('Respond for Usuario eliminado')).toBeTruthy();
-      expect(queryByLabelText('Respond for Deleted user')).toBeNull();
+      const { getByLabelText, getByText, queryByLabelText, queryByText } = render(<GameDetailScreen />);
+      expect(getByLabelText('Responder por Usuario eliminado')).toBeTruthy();
+      expect(queryByLabelText(/Deleted user/)).toBeNull();
+      // The whole RSVP card is Spanish (#671), not only the tombstone.
+      expect(getByText('Asistencia')).toBeTruthy();
+      expect(getByText('Respondes por')).toBeTruthy();
+      expect(getByText('Tal vez')).toBeTruthy();
+      expect(queryByText('Going')).toBeNull();
     } finally {
       await i18n.changeLanguage('en');
     }

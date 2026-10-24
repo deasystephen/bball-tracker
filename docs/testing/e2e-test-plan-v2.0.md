@@ -191,12 +191,18 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Theme flips immediately across all screens. Persists across cold start.
 - **Notes:** ___________
 
-### B.4 — Language picker (i18n)
+### B.4 — Spanish device (i18n, #671)
 - [ ] Pass / Fail / Skipped
-- **Role:** any logged-in user
-- **Steps:** Profile → language picker → select non-English option (if available).
-- **Expected:** UI strings update. Persists across cold start.
-- **Notes:** Verify which languages are bundled (`mobile/i18n/`).
+- **Role:** coach (dev-login), then a player
+- **Steps:** Settings → General → Language & Region → Español; relaunch the app. Walk Home, Teams (list,
+  create, detail, trash icon, edit, Roster → Add Player and a row's options menu, Parents & guardians,
+  Announcements), Track (list, Create Game, date picker, tracker: shots, stats, undo, End), Stats (tab,
+  team, player, box score), Profile (usage rows, a row menu, Leagues & Seasons → league → Add Season),
+  Invitations, and a team while offline. Repeat the tracker and a back button with VoiceOver on.
+- **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
+  team/player names and server error text stay as they are. There is no in-app language picker; the app
+  follows the device language. Back to English: every screen and label English again.
+- **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`.
 
 ### B.5 — About screen (version / OTA diagnostics)
 - [ ] Pass / Fail / Skipped
@@ -681,6 +687,13 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canManageTeam`
 - **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game, then repeat with a throwaway FINISHED game that has tracked stats). Rendered only with `canManage` (`canManageTeam`), on SCHEDULED and FINISHED games — never while IN_PROGRESS.
 - **Expected:** Removed from list. For the finished game the confirm warns that recorded stats are removed from player and team season totals; after delete the Stats tab reflects the removal without a manual refresh.
+- **Notes:** ___________
+
+### F.6 — Game detail header controls
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageTeam`, then a PLAYER on the same team
+- **Steps:** Open a SCHEDULED, an IN_PROGRESS and a FINISHED game as each role; with VoiceOver on, swipe through the dark header. Then open a game from a push notification (no screen behind it) and tap the back arrow.
+- **Expected:** The header holds only the back arrow ("Go back") and, for the coach on SCHEDULED and FINISHED games, the trash icon ("Delete game"); there is no share icon and VoiceOver announces no "Share game" button (#731). Both icons are drawn the same size. With nothing to pop, the back arrow lands on the Games tab. Jest: `__tests__/app/game-detail-gating.test.tsx`.
 - **Notes:** ___________
 
 ---

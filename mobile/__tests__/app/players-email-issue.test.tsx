@@ -338,7 +338,7 @@ describe('ManagePlayersScreen — email delivery issues (#449)', () => {
       const screen = render(<ManagePlayersScreen />);
       const before = screen.getAllByText('Usuario eliminado').length;
 
-      fireEvent.press(screen.getByLabelText('Player options: Usuario eliminado'));
+      fireEvent.press(screen.getByLabelText('Opciones del jugador: Usuario eliminado'));
 
       // The sheet title is one more "Usuario eliminado"; the English literal never shows.
       expect(screen.getAllByText('Usuario eliminado')).toHaveLength(before + 1);

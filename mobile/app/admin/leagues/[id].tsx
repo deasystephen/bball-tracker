@@ -36,7 +36,7 @@ import { getApiErrorMessage } from '../../../services/api-client';
 import { useTranslation } from '../../../i18n';
 import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
-import { formatNumericDate } from '../../../utils/format-date';
+import { formatSeasonRange } from '../../../utils/format-date';
 
 const DELETE_ICON_SIZE = 22;
 const ADD_ICON_SIZE = 20;
@@ -78,7 +78,7 @@ export default function LeagueDetailScreen() {
   const allowed = useAccessGuard(
     !!user,
     canManageLeague(user, id),
-    'Only admins of this league can manage it',
+    t('seasons.manageNotAllowed'),
     { fallback: '/admin' }
   );
   const canDelete = canCreateLeagues(user);
@@ -120,9 +120,7 @@ export default function LeagueDetailScreen() {
 
   const renderSeason = ({ item }: { item: Season }) => {
     const teamCount = item._count?.teams || item.teams?.length || 0;
-    const dateRange = item.startDate || item.endDate
-      ? `${item.startDate ? formatNumericDate(item.startDate) : 'No start'} - ${item.endDate ? formatNumericDate(item.endDate) : 'No end'}`
-      : null;
+    const dateRange = formatSeasonRange(item, { noStart: t('seasons.noStart'), noEnd: t('seasons.noEnd') });
 
     return (
       <Card
@@ -139,13 +137,13 @@ export default function LeagueDetailScreen() {
               {item.isActive && (
                 <View style={[styles.activeBadge, { backgroundColor: colors.success + '20' }]}>
                   <ThemedText variant="caption" style={{ color: colors.success }}>
-                    Active
+                    {t('seasons.active')}
                   </ThemedText>
                 </View>
               )}
             </View>
             <ThemedText variant="caption" color="textSecondary">
-              {teamCount} {teamCount === 1 ? 'team' : 'teams'}
+              {t('seasons.teamCount', { count: teamCount })}
             </ThemedText>
             {dateRange && (
               <ThemedText variant="caption" color="textTertiary">
@@ -160,13 +158,13 @@ export default function LeagueDetailScreen() {
   };
 
   if (leagueLoading || seasonsLoading || !allowed) {
-    return <LoadingSpinner message="Loading league..." fullScreen />;
+    return <LoadingSpinner message={t('leagues.loading')} fullScreen />;
   }
 
   if (leagueError || !league) {
     return (
       <ErrorState
-        message={leagueError instanceof Error ? leagueError.message : 'League not found'}
+        message={leagueError instanceof Error ? leagueError.message : t('leagues.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -190,7 +188,7 @@ export default function LeagueDetailScreen() {
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading numberOfLines={1}>{league.name}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            {seasons.length} {seasons.length === 1 ? 'season' : 'seasons'}
+            {t('leagues.seasonCount', { count: seasons.length })}
           </ThemedText>
         </View>
         {canDelete && (
@@ -209,18 +207,18 @@ export default function LeagueDetailScreen() {
 
       {/* Seasons List */}
       <View style={[styles.sectionHeader, { paddingHorizontal: padding }]}>
-        <ThemedText variant="h3" heading>Seasons</ThemedText>
+        <ThemedText variant="h3" heading>{t('usage.seasons')}</ThemedText>
         <TouchableOpacity
           onPress={handleCreateSeason}
           style={[styles.addSeasonButton, { backgroundColor: colors.primary }]}
           hitSlop={ADD_SEASON_HIT_SLOP}
           accessibilityRole="button"
-          accessibilityLabel="Add Season"
+          accessibilityLabel={t('leagues.addSeason')}
           testID="league-add-season-button"
         >
           <Ionicons name="add" size={ADD_ICON_SIZE} color={colors.textInverse} />
           <ThemedText variant="captionBold" style={{ color: colors.textInverse }}>
-            Add Season
+            {t('leagues.addSeason')}
           </ThemedText>
         </TouchableOpacity>
       </View>
@@ -229,9 +227,9 @@ export default function LeagueDetailScreen() {
         <View style={styles.emptyContainer}>
           <EmptyState
             icon="calendar-outline"
-            title="No Seasons"
-            message="Create a season to start adding teams"
-            actionLabel="Create Season"
+            title={t('leagues.noSeasons')}
+            message={t('leagues.noSeasonsMessage')}
+            actionLabel={t('seasons.createTitle')}
             onAction={handleCreateSeason}
           />
         </View>
