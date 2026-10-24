@@ -15,6 +15,7 @@ import {
   expectForbiddenError,
   expectNotFoundError,
 } from '../helpers';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/services/mailer', () => ({
   mailer: { send: jest.fn().mockResolvedValue({ messageId: 'fake' }) },
@@ -990,8 +991,20 @@ describe('GuardianService', () => {
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: 'parent-1', role: 'PLAYER' });
       const tx = setTx();
 
+      const info = spyOnInfo();
       const result = await GuardianService.acceptInvitationByToken('tok');
 
+      // Ids and enums only; `via: 'token'` tells a link accept from an app one (#964).
+      expect(domainEvent(info, 'Guardian linked')).toEqual({
+        invitationId: 'inv-1',
+        teamId: TEAM_ID,
+        guardianId: 'g-new',
+        parentId: 'parent-1',
+        childId: CHILD_ID,
+        isPrimary: true,
+        linkExisted: false,
+        via: 'token',
+      });
       expect(result.kind).toBe('guardian');
       expect(result.invitation.status).toBe('ACCEPTED');
       expect(result.invitation).not.toHaveProperty('token');
@@ -1259,8 +1272,12 @@ describe('GuardianService', () => {
       };
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
+      const info = spyOnInfo();
       const result = await GuardianService.acceptInvitation('inv-1', 'parent-1');
 
+      expect(domainEvent(info, 'Guardian linked')).toEqual(
+        expect.objectContaining({ invitationId: 'inv-1', guardianId: 'g', parentId: 'parent-1', via: 'app' })
+      );
       expect(result.guardian.id).toBe('g');
       expect(result.guardian.parentId).toBe('parent-1');
       expect(tx.guardian.create).toHaveBeenCalledWith(

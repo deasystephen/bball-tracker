@@ -131,6 +131,8 @@ describe('invite page lookup states (#720)', () => {
     await getInvitation('a/b');
     expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/api/v1/invitations/by-token/a%2Fb', {
       cache: 'no-store',
+      // The API logs it as `client` (#964).
+      headers: { 'X-Hooplings-Client': 'web' },
     });
   });
 

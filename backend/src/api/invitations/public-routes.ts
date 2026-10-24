@@ -16,6 +16,7 @@ import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { NotFoundError } from '../../utils/errors';
 import { respondWithError } from '../../utils/respond-with-error';
+import { logger } from '../../utils/logger';
 import { omitToken } from './serializers';
 import {
   invitationLookupIpRateLimit,
@@ -32,6 +33,24 @@ const TOKEN_RE = /^[A-Za-z0-9\-_]+$/;
 
 function validateToken(token: string): boolean {
   return TOKEN_RE.test(token) && token.length >= 8 && token.length <= 128;
+}
+
+/** What the recipient saw on a by-token lookup (#964): the stored status, or `expired` once past `expiresAt`. */
+export type InvitationViewState = 'pending' | 'expired' | 'accepted' | 'rejected' | 'cancelled';
+
+/**
+ * A PENDING row past its `expiresAt` reads as expired: the web page and the
+ * app both render it as "Invitation Expired" (the stored status flips lazily,
+ * on an accept attempt or a list read).
+ */
+export function invitationViewState(
+  invitation: { status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED'; expiresAt: string },
+  now: Date = new Date()
+): InvitationViewState {
+  if (invitation.status === 'PENDING') {
+    return new Date(invitation.expiresAt) < now ? 'expired' : 'pending';
+  }
+  return invitation.status.toLowerCase() as InvitationViewState;
 }
 
 /**
@@ -61,6 +80,12 @@ async function resolveByKind<T, G>(
  * exempt from the global 100/min IP limit, but a loop of random tokens still
  * hits invitationLookupIpRateLimit. The accept route below stays on the
  * IP-keyed inviteAcceptRateLimit because the browser calls it directly.
+ *
+ * A successful lookup logs `Invitation viewed by token` (#964, the invite
+ * funnel): the invitation id, its kind, the state the recipient saw and the
+ * caller's `client` (`X-Hooplings-Client`: `web` for the hooplings.com page,
+ * `ios/…` for the app). Never the token. 400/404/429/5xx are on the
+ * `HTTP request` line already.
  */
 router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
@@ -78,6 +103,12 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
       }),
       () => GuardianService.getInvitationByToken(token as string)
     );
+    logger.info('Invitation viewed by token', {
+      invitationId: invitation.id,
+      kind: invitation.kind,
+      state: invitationViewState(invitation),
+      client: req.hooplingsClient ?? null,
+    });
     res.json({ success: true, invitation: omitToken(invitation) });
   } catch (error) {
     respondWithError(res, error, {

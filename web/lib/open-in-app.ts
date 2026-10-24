@@ -30,8 +30,15 @@ function browserEnv(): OpenInAppEnv {
   };
 }
 
+/**
+ * `?src=web` marks the arrival as coming from this page (#964): the app's
+ * invite screen reports it as the source of `invite_link_viewed` (#967), so
+ * "Open in App" is measured where it lands and the page stays free of
+ * analytics. Expo Router hands it to the screen as a separate `src` param; the
+ * `token` param is unchanged.
+ */
 export function inviteDeepLink(token: string): string {
-  return `hooplings://invite/${token}`;
+  return `hooplings://invite/${token}?src=web`;
 }
 
 /**

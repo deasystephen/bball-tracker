@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { childDisplayName, inviterDisplayName } from '../../../lib/display-name';
-import { acceptInvitationByTokenUrl } from '../../../lib/api-urls';
+import { CLIENT_HEADERS, acceptInvitationByTokenUrl } from '../../../lib/api-urls';
 import { formatExpiry } from '../../../lib/format-date';
 import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
 import { APP_STORE_RELEASED, openInApp } from '../../../lib/open-in-app';
@@ -55,7 +55,7 @@ export function InviteClient({ invitation, token }: Props) {
     try {
       const res = await fetch(acceptInvitationByTokenUrl(API_URL, token), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CLIENT_HEADERS },
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) {

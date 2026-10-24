@@ -1060,6 +1060,9 @@ export class GuardianService {
         childId: guardian.childId,
         isPrimary: guardian.isPrimary,
         linkExisted: !!existingLink,
+        // How the adult accepted, as on `Invitation accepted` (#964): a
+        // verified caller is the app, no caller is the public by-token link.
+        via: verifiedParentId ? 'app' : 'token',
       });
 
       return {

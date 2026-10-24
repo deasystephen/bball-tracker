@@ -9,6 +9,8 @@ import { GuardianService } from '../../src/services/guardian-service';
 import { NotFoundError, BadRequestError } from '../../src/utils/errors';
 import { invitationTokenKey } from '../../src/api/middleware/rate-limit';
 import type { Request } from 'express';
+import { invitationViewState } from '../../src/api/invitations/public-routes';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/services/invitation-service');
 jest.mock('../../src/services/guardian-service');
@@ -30,6 +32,10 @@ const mockGuardianInvitationDetails = {
 };
 
 const VALID_TOKEN = 'abc123defghijklmnop';
+
+function future(): string {
+  return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+}
 
 const mockInvitationDetails = {
   id: 'b2c3d4e5-f6a7-4901-a345-67890abcdef0',
@@ -133,6 +139,104 @@ describe('Public Invitation Token API', () => {
         .unset('Authorization');
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe('Invitation viewed by token (#964, the invite funnel)', () => {
+    // Distinct tokens per test: the per-token limiter (30) is shared across the file.
+    const VIEW_TOKEN = 'funnel-view-token-abcdefgh';
+    const past = new Date(Date.now() - 60_000).toISOString();
+
+    it('logs one line with id, kind, state and the web client, and never the token', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+      const info = spyOnInfo();
+
+      const res = await request(app)
+        .get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-web`)
+        .set('X-Hooplings-Client', 'web');
+
+      expect(res.status).toBe(200);
+      expect(domainEvent(info, 'Invitation viewed by token')).toEqual({
+        invitationId: mockInvitationDetails.id,
+        kind: 'team',
+        state: 'pending',
+        client: 'web',
+      });
+      // Nothing logged during the request carries the token, the team name or the message.
+      const logged = JSON.stringify(info.mock.calls);
+      expect(logged).not.toContain(`${VIEW_TOKEN}-web`);
+      expect(logged).not.toContain('Lakers');
+      expect(logged).not.toContain('Join our team!');
+    });
+
+    it('tells the app from the web site by client, and logs null when the header is absent or invalid', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue(mockInvitationDetails);
+      const info = spyOnInfo();
+
+      await request(app)
+        .get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-app`)
+        .set('X-Hooplings-Client', 'ios/1.6.0+embedded');
+      expect(domainEvent(info, 'Invitation viewed by token').client).toBe('ios/1.6.0+embedded');
+
+      info.mockClear();
+      await request(app).get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-none`);
+      expect(domainEvent(info, 'Invitation viewed by token').client).toBeNull();
+
+      info.mockClear();
+      await request(app)
+        .get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-bad`)
+        .set('X-Hooplings-Client', 'Mozilla/5.0');
+      expect(domainEvent(info, 'Invitation viewed by token').client).toBeNull();
+    });
+
+    it('logs kind guardian and the state the recipient saw', async () => {
+      mockInvitationService.getInvitationByToken.mockRejectedValue(new NotFoundError('Invitation not found'));
+      mockGuardianService.getInvitationByToken.mockResolvedValue({
+        ...mockGuardianInvitationDetails,
+        status: 'ACCEPTED',
+      });
+      const info = spyOnInfo();
+
+      await request(app).get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-guardian`).set('X-Hooplings-Client', 'web');
+
+      expect(domainEvent(info, 'Invitation viewed by token')).toEqual({
+        invitationId: mockGuardianInvitationDetails.id,
+        kind: 'guardian',
+        state: 'accepted',
+        client: 'web',
+      });
+      expect(JSON.stringify(info.mock.calls)).not.toContain('Kid Smith');
+    });
+
+    it('reads a PENDING row past its expiry as expired', async () => {
+      mockInvitationService.getInvitationByToken.mockResolvedValue({ ...mockInvitationDetails, expiresAt: past });
+      const info = spyOnInfo();
+
+      await request(app).get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-expired`);
+
+      expect(domainEvent(info, 'Invitation viewed by token').state).toBe('expired');
+    });
+
+    it('logs no view for a 404 or a malformed token (the HTTP request line covers those)', async () => {
+      mockInvitationService.getInvitationByToken.mockRejectedValue(new NotFoundError('Invitation not found'));
+      mockGuardianService.getInvitationByToken.mockRejectedValue(new NotFoundError('Invitation not found'));
+      const info = spyOnInfo();
+
+      expect((await request(app).get(`/api/v1/invitations/by-token/${VIEW_TOKEN}-missing`)).status).toBe(404);
+      expect((await request(app).get('/api/v1/invitations/by-token/!!bad!!')).status).toBe(400);
+
+      expect(info.mock.calls.filter(([msg]) => msg === 'Invitation viewed by token')).toHaveLength(0);
+    });
+
+    it.each([
+      ['PENDING', future(), 'pending'],
+      ['PENDING', new Date(Date.now() - 1).toISOString(), 'expired'],
+      ['EXPIRED', future(), 'expired'],
+      ['ACCEPTED', past, 'accepted'],
+      ['REJECTED', future(), 'rejected'],
+      ['CANCELLED', future(), 'cancelled'],
+    ] as const)('maps status %s (expires %s) to state %s', (status, expiresAt, state) => {
+      expect(invitationViewState({ status, expiresAt })).toBe(state);
     });
   });
 
