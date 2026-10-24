@@ -204,8 +204,10 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
-  # Hardening (#764). Strip header fields whose names are not valid RFC 7230
-  # tokens at the edge instead of forwarding them to Express.
+  # Hardening (#764). The ALB removes every header whose name does not match
+  # [-A-Za-z0-9]+ instead of forwarding it to Express. That is stricter than
+  # RFC 7230: a name with an underscore (`x_api_key`) is dropped silently too,
+  # so any header the API reads must use hyphens.
   drop_invalid_header_fields = true
 
   # `api.<domain>` aliases this ALB; a console delete or a stray targeted

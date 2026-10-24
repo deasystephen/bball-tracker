@@ -29,14 +29,18 @@ const DATADOG_TF = path.join(ROOT, 'infra/datadog.tf');
 export function parameters(block: string): Map<string, string> {
   const found = new Map<string, string>();
   const pattern = /\bparameter\s*\{\s*name\s*=\s*"([^"]+)"\s*value\s*=\s*"([^"]*)"\s*(?:apply_method\s*=\s*"[^"]*"\s*)?\}/g;
+  let matched = 0;
   for (const match of block.matchAll(pattern)) {
     if (found.has(match[1])) throw new Error(`parameter "${match[1]}" is declared twice.`);
     found.set(match[1], match[2]);
+    matched += 1;
   }
-  if (found.size === 0) {
+  const opened = [...block.matchAll(/\bparameter\s*\{/g)].length;
+  if (matched === 0 || matched !== opened) {
     throw new Error(
-      'No `parameter { name = … value = … }` block found. If the file changed shape, update ' +
-        'backend/tests/infra/rds-parameters.test.ts; do not let it pass vacuously.',
+      `Read ${matched} of ${opened} \`parameter { … }\` blocks. Each must be written as name, value, ` +
+        'then optionally apply_method. If the file changed shape, update ' +
+        'backend/tests/infra/rds-parameters.test.ts; do not let a block go unchecked.',
     );
   }
   return found;
@@ -55,6 +59,11 @@ export const REQUIRED_PARAMETERS: Readonly<Record<string, string>> = {
 export const FORBIDDEN_PARAMETERS = [
   'log_duration',
   'log_parameter_max_length',
+  // Sampled statement logging: logs statements with their bind values
+  // (log_parameter_max_length defaults to unlimited).
+  'log_min_duration_sample',
+  'log_statement_sample_rate',
+  'log_transaction_sample_rate',
   'pgaudit.log',
   'auto_explain.log_min_duration',
   'shared_preload_libraries',
@@ -91,9 +100,10 @@ describe('PostgreSQL log export', () => {
   });
 
   it('owns the log group RDS writes to, with the 30-day retention the privacy runbook states', () => {
-    const name = /^\s*name\s*=\s*"\/aws\/rds\/instance\/\$\{local\.name_prefix\}-postgres\/postgresql"\s*$/m;
+    // Both names come from one local, so renaming the instance moves the log group with it.
+    const name = /^\s*name\s*=\s*"\/aws\/rds\/instance\/\$\{local\.db_instance_identifier\}\/postgresql"\s*$/m;
     expect(logGroup).toMatch(name);
-    expect(instance).toMatch(/^\s*identifier\s*=\s*"\$\{local\.name_prefix\}-postgres"\s*$/m);
+    expect(instance).toMatch(/^\s*identifier\s*=\s*local\.db_instance_identifier\s*$/m);
     expect(logGroup).toMatch(/^\s*retention_in_days\s*=\s*30\s*$/m);
     expect(instance).toMatch(/^\s*depends_on\s*=\s*\[[^\]]*aws_cloudwatch_log_group\.rds_postgresql[^\]]*\]/m);
   });
@@ -126,13 +136,18 @@ describe('RDS parameter group — extraction self-test', () => {
   });
 
   it('fails loudly when there is no parameter block, and on a duplicate', () => {
-    expect(() => parameters('resource "x" "y" {}')).toThrow(/No `parameter/);
+    expect(() => parameters('resource "x" "y" {}')).toThrow(/Read 0 of 0/);
     const twice = sample.replace('"log_statement"', '"rds.force_ssl"');
     expect(() => parameters(twice)).toThrow(/declared twice/);
   });
 
-  it('does not see a commented-out parameter once comments are stripped', () => {
+  it('refuses a block it cannot read (another attribute order), instead of skipping it', () => {
+    const reordered = sample.replace(
+      '  }\n}',
+      '  }\n  parameter {\n    value = "1"\n    name  = "log_duration"\n  }\n}',
+    );
+    expect(() => parameters(reordered)).toThrow(/Read 2 of 3/);
     const commented = sample.replace('    value = "1"', '    # value = "1"');
-    expect(parameters(stripComments(commented)).has('rds.force_ssl')).toBe(false);
+    expect(() => parameters(stripComments(commented))).toThrow(/Read 1 of 2/);
   });
 });

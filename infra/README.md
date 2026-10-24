@@ -222,8 +222,10 @@ with removing the DS.
 `aws_lb.main` (`ecs.tf`) is the only public entry point, and the API behind it is single-replica
 with in-process rate limits only.
 
-- **`drop_invalid_header_fields = true`**: header fields whose names are not valid HTTP tokens are
-  removed at the ALB instead of reaching Express.
+- **`drop_invalid_header_fields = true`**: every header whose name does not match
+  `[-A-Za-z0-9]+` is removed at the ALB instead of reaching Express. That is stricter than
+  RFC 7230: a name with an underscore is dropped silently too, so a header the API reads (or a
+  vendor's tracing header) must use hyphens.
 - **`enable_deletion_protection`** is on in production (environment-conditional, like RDS).
   Anything that must delete or replace the production ALB (a destroy, or a change that forces
   replacement) first needs an apply with the attribute off; AWS refuses the delete otherwise. A plan that shows `aws_lb.main` as `-/+` is a stop: the

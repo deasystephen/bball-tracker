@@ -68,7 +68,8 @@ and in sync applies without a reboot.**
 but runs the old values until the instance is rebooted; until then `describe-db-instances` shows
 `ParameterApplyStatus: pending-reboot`. RDS does not reboot for this on its own; only a manual
 reboot (or maintenance that happens to reboot) applies it. This happens once for #757 (from
-`default.postgres18`) and again at every major upgrade. A reboot of the Multi-AZ instance makes
+`default.postgres18`) and again at every major upgrade (where the upgrade's own reboot covers it).
+A reboot of the Multi-AZ instance makes
 the database unavailable for about a minute, during which the API answers 503 and live game
 events fail, so check for `IN_PROGRESS` games first (Datadog `service:bball-tracker-api
 ("Game created" OR "Game event created")` over the last few hours shows whether anyone is
@@ -79,7 +80,8 @@ aws rds reboot-db-instance --db-instance-identifier bball-tracker-production-pos
 aws rds wait db-instance-available --db-instance-identifier bball-tracker-production-postgres
 aws rds describe-db-instances --db-instance-identifier bball-tracker-production-postgres \
   --query 'DBInstances[0].{pg:DBParameterGroups,logs:EnabledCloudwatchLogsExports,tags:CopyTagsToSnapshot}'
-# expect bball-tracker-production-postgres18 / in-sync, ["postgresql"], true
+# expect bball-tracker-production-postgres18 / in-sync
+# (and ["postgresql"], true once the export and snapshot tags are applied)
 curl -fsS https://api.hooplings.com/health   # db: ok
 ```
 
@@ -95,9 +97,23 @@ aws logs tail /aws/rds/instance/bball-tracker-production-postgres/postgresql --s
   --filter-pattern '"no encryption"'      # or "password authentication failed", "lock timeout"
 ```
 
-Until the first reboot after the #757 apply, the instance still runs `default.postgres18`, whose
-default verbosity writes DETAIL lines; reboot soon after enabling the export so that window is
-minutes, not days.
+**First rollout (#757): attach and reboot before the export exists.** Until the reboot the
+instance runs `default.postgres18`, whose default verbosity writes DETAIL lines (a failed write's
+key or row values), and exporting those would put personal data in a 30-day log. So the export is
+never enabled while the group is pending:
+
+```bash
+cd infra
+terraform apply -target=aws_db_parameter_group.postgres     # creates the group only
+aws rds modify-db-instance --db-instance-identifier bball-tracker-production-postgres \
+  --db-parameter-group-name bball-tracker-production-postgres18 --apply-immediately
+# then the reboot block above; continue only once ParameterApplyStatus is in-sync
+terraform apply     # log group, export, snapshot tags (plus whatever else is pending)
+```
+
+The full apply then shows no `parameter_group_name` change on `aws_db_instance.main`. The same
+rule holds whenever a group is attached later: never enable or keep an export while the attached
+group is `pending-reboot` with different logging values.
 
 ## Verifying backups (do this monthly)
 
@@ -174,11 +190,20 @@ secret/ECS flip. Fill in the actual time on each run in the [Drill log](#drill-l
 
    The parameter group carries `rds.force_ssl` and the log-privacy settings (see
    [Parameter group and server log](#parameter-group-and-server-log)); omitted, the
-   restore gets `default.postgres18`. RDS creates the restored instance's log group
-   (`/aws/rds/instance/$NEW_INSTANCE_ID/postgresql`) with **never-expire** retention, so
-   bound it as soon as it exists (the privacy runbook promises 30 days):
-   `aws logs put-retention-policy --log-group-name "/aws/rds/instance/$NEW_INSTANCE_ID/postgresql" --retention-in-days 30`.
-   After step 8 renames the instance back, its log returns to the Terraform-owned group.
+   restore gets `default.postgres18`. The export writes to
+   `/aws/rds/instance/$NEW_INSTANCE_ID/postgresql`, which RDS would create with
+   **never-expire** retention, so create it with the 30 days the privacy runbook promises
+   **before** running the restore above:
+   ```bash
+   aws logs create-log-group --log-group-name "/aws/rds/instance/$NEW_INSTANCE_ID/postgresql"
+   aws logs put-retention-policy --log-group-name "/aws/rds/instance/$NEW_INSTANCE_ID/postgresql" \
+     --retention-in-days 30
+   ```
+   Once the instance carries the original identifier again (step 8's rename, possible only
+   after the old instance is gone in step 9), its log goes to the Terraform-owned group; the
+   temporary group can be deleted once its lines are no longer needed. If step 8 instead points
+   `local.db_instance_identifier` in `rds.tf` at the new ID, the Terraform-owned log group follows
+   it (import the group you just created).
 
    **Match the size class to whatever production is running.** If you're not
    sure, read it off the live instance:
@@ -563,11 +588,25 @@ up, health check fails against the unavailable DB) or passes green while running
    `--db-parameter-group-name bball-tracker-production-postgres<NEW>`: a group of the old family
    cannot stay attached, and the new major's *default* group (what you get when no custom group
    is named) lacks the log-privacy settings (see [Parameter group and server log](#parameter-group-and-server-log)).
-   Create that group **before the window** with the same five parameters as
-   `aws_db_parameter_group.postgres`, from the CLI (`aws rds create-db-parameter-group
-   --db-parameter-group-family postgres<NEW> …`, then `modify-db-parameter-group --parameters
-   "ParameterName=…,ParameterValue=…,ApplyMethod=immediate"` for each), and check it with
-   `describe-db-parameters --source user`. Use the same flag on the rehearsal copy. The upgrade
+   Create that group **before the window** from the CLI, matching what Terraform will import
+   (the description is the provider default, and the tags are `default_tags` plus `Name`), with
+   the same five parameters as `aws_db_parameter_group.postgres`:
+   ```bash
+   NEW=19   # the new major
+   aws rds create-db-parameter-group --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --db-parameter-group-family "postgres$NEW" --description "Managed by Terraform" \
+     --tags Key=Name,Value="bball-tracker-production-postgres$NEW" Key=Project,Value=bball-tracker \
+            Key=Environment,Value=production Key=ManagedBy,Value=terraform
+   aws rds modify-db-parameter-group --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --parameters "ParameterName=rds.force_ssl,ParameterValue=1,ApplyMethod=immediate" \
+                  "ParameterName=log_error_verbosity,ParameterValue=terse,ApplyMethod=immediate" \
+                  "ParameterName=log_statement,ParameterValue=none,ApplyMethod=immediate" \
+                  "ParameterName=log_min_duration_statement,ParameterValue=-1,ApplyMethod=immediate" \
+                  "ParameterName=log_parameter_max_length_on_error,ParameterValue=0,ApplyMethod=immediate"
+   aws rds describe-db-parameters --db-parameter-group-name "bball-tracker-production-postgres$NEW" \
+     --source user --query 'Parameters[].[ParameterName,ParameterValue]'
+   ```
+   (Check the list against `rds.tf` first; it is the source of truth.) Use the same flag on the rehearsal copy. The upgrade
    reboots the instance, so the new group is in sync when it finishes. If the precheck
    fails the instance stays on the old version — read `pg_upgrade_precheck.log` via
    `aws rds describe-db-log-files` / `download-db-log-file-portion`.
@@ -601,7 +640,9 @@ up, health check fails against the unavailable DB) or passes green while running
    `terraform state rm aws_db_parameter_group.postgres`, add
    `import { to = aws_db_parameter_group.postgres id = "bball-tracker-production-postgres<NEW>" }`
    to `rds.tf` (delete the block after the apply), and `terraform apply`: the plan must show
-   one import and nothing else. Then delete the old, now unattached group:
+   one import and nothing else. A `-/+` on `aws_db_parameter_group.postgres` (a name, family or
+   description that differs; a differing parameter is only an in-place update) is a stop: the group is attached and cannot be replaced in place;
+   fix the live group to match the config instead. Then delete the old, now unattached group:
    `aws rds delete-db-parameter-group --db-parameter-group-name bball-tracker-production-postgres<OLD>`.
 9. **Merge the PR**; close the issue with the measured timings.
 
