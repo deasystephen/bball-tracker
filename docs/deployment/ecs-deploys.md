@@ -11,6 +11,9 @@ to ECS** job renders it with the new image tag, registers a revision and updates
 **Terraform does not manage the task definition.** `infra/ecs.tf` owns the cluster, service, IAM
 roles, log group, ALB and auto-scaling, and deliberately declares no `aws_ecs_task_definition` —
 the two copies had drifted by 20 revisions and 7 environment variables before this was fixed.
+The ALB's AWS WAF web ACL (count mode) is in `infra/waf.tf`; the ALB writes no access logs, by
+decision (#764, `infra/README.md`, "Edge: ALB and WAF"). None of it is in the task definition, and
+none of it ships with a deploy: apply it from `infra/` like any other Terraform.
 
 So: **to add or change an env var or secret reference, edit `infra/task-definition.json` and merge
 it.** Writing the value into `infra/ecs.tf` or a `.tfvars` file changes nothing and fails silently —
