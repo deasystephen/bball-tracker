@@ -1,6 +1,7 @@
 import * as amplitude from '@amplitude/analytics-react-native';
 import Constants from 'expo-constants';
 import { log } from './log';
+import type { SignInFailure } from '../utils/sign-in-failure';
 
 /**
  * The Amplitude event catalogue (#616).
@@ -20,6 +21,8 @@ import { log } from './log';
 export const AnalyticsEvents = {
   APP_OPENED: 'app_opened',
   SCREEN_VIEWED: 'screen_viewed',
+  SIGN_IN_STARTED: 'sign_in_started',
+  SIGN_IN_FAILED: 'sign_in_failed',
   USER_LOGGED_IN: 'user_logged_in',
   USER_LOGGED_OUT: 'user_logged_out',
   ONBOARDING_STEP_COMPLETED: 'onboarding_step_completed',
@@ -37,6 +40,7 @@ export const AnalyticsEvents = {
   STAFF_ROLE_UPDATED: 'staff_role_updated',
   STAFF_REMOVED: 'staff_removed',
   INVITATION_SENT: 'invitation_sent',
+  INVITE_LINK_VIEWED: 'invite_link_viewed',
   INVITATION_ACCEPTED: 'invitation_accepted',
   INVITATION_DECLINED: 'invitation_declined',
   INVITATION_CANCELLED: 'invitation_cancelled',
@@ -76,7 +80,22 @@ export type AnalyticsValue = string | number | boolean;
  * `docs/architecture/analytics.md` in step: a new property name is a new row.
  */
 export interface AnalyticsEventProps {
-  app_opened: undefined;
+  /**
+   * Which JavaScript is running (#967): `launch` is `update` when an OTA is,
+   * `embedded` for the binary's bundled JS; `update_id` is that OTA's id
+   * (null when embedded); `runtime_version` the binary's runtime. From
+   * `services/app-build.ts#getRunningBuild`.
+   */
+  app_opened: { launch: 'embedded' | 'update'; update_id: string | null; runtime_version: string };
+  /** The Sign In tap reached the browser hand-off (after `beginPkceLogin`, #967). */
+  sign_in_started: undefined;
+  /**
+   * A WorkOS sign-in did not complete (#967), from `utils/sign-in-failure.ts`.
+   * `oauth_error` only on `stage: 'oauth_error'`, an allow-listed code or
+   * `other`, never the raw (attacker-controllable) param; `status` only when
+   * an API call answered.
+   */
+  sign_in_failed: SignInFailure;
   screen_viewed: { screen: string; params_kind: string };
   /**
    * `claimed_invite`: this sign-in claimed any pre-provisioned account (a
@@ -118,6 +137,19 @@ export interface AnalyticsEventProps {
   staff_role_updated: { team_id: string; role_type: string };
   staff_removed: { team_id: string };
   invitation_sent: { team_id: string; invitation_id: string; resend: boolean; email_sent: boolean | null };
+  /**
+   * What the invitee saw on `/invite/[token]` (#967), once per token per
+   * mount: the invitation's state (`unavailable` for a network failure, 429 or
+   * 5xx; `not_found` for a dead token), its `kind` when it loaded, whether
+   * they were signed in, and where the link came from (`web` for the web
+   * invite page's Open in App button, `?src=web`; `link` otherwise).
+   */
+  invite_link_viewed: {
+    state: InviteLinkState;
+    kind?: 'team' | 'guardian';
+    authenticated: boolean;
+    source: 'web' | 'link';
+  };
   invitation_accepted: { kind: 'team' | 'guardian'; source: 'in_app' | 'link' };
   invitation_declined: { invitation_id: string };
   invitation_cancelled: { team_id: string; invitation_id: string };
@@ -146,6 +178,15 @@ export interface AnalyticsEventProps {
   error_shown: { code: string; status: number | null; endpoint_pattern: string };
 }
 
+export type InviteLinkState =
+  | 'pending'
+  | 'expired'
+  | 'accepted'
+  | 'rejected'
+  | 'cancelled'
+  | 'not_found'
+  | 'unavailable';
+
 /** Events whose props entry is `undefined` take no second argument. */
 type PropsArgs<E extends AnalyticsEvent> = AnalyticsEventProps[E] extends undefined
   ? []
@@ -165,6 +206,8 @@ export interface AnalyticsUserProperties {
   team_count: number;
   tier: string;
   app_version: string;
+  /** The running OTA's id, or `embedded` for the binary's bundled JS (#967). */
+  update_id: string;
 }
 
 /**

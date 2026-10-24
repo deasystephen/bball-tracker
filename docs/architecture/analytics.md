@@ -17,8 +17,11 @@ separate decision, documented in `mobile-app.md` under "Analytics tracking optio
   booleans only. An update event says *which fields* changed (`fields: "name,status"`), never the
   values. Errors send their `code`, `status` and route pattern, never the message.
 - **Emit from the hook or store that performs the mutation**, never from a screen, so every screen
-  that uses the hook is covered. The only screen-level emitters are the onboarding steps, which
-  have no hook of their own, and the root layout's screen-view tracker.
+  that uses the hook is covered. The only screen-level emitters are the onboarding steps and the
+  sign-in screens (`app/login.tsx`, `app/auth/callback.tsx`, through
+  `utils/sign-in-failure.ts#reportSignInFailure`), which have no hook of their own, and the root
+  layout's `app_opened` and screen-view tracker. A screen or component never writes through
+  `apiClient` directly unless the guard's allow-list says why (guard (d), "Enforcement").
 - **Every call goes through `trackEvent`**, which swallows every SDK error: analytics can never
   crash the app. Events tracked before `initAnalytics` has resolved are held in a bounded buffer
   (`PRE_INIT_BUFFER_LIMIT`, 50) and sent in order once init succeeds, so the launch route's
@@ -54,6 +57,7 @@ source changes. `undefined` values are skipped, so a partial refresh never clear
 | `is_parent` | boolean | role `PARENT`, or any guardian link (a coach can also be a parent) | same |
 | `is_player` | boolean | role `PLAYER` | same |
 | `app_version` | string | `expoConfig.version` (the binary's version; an OTA keeps it) | same |
+| `update_id` | string | the running OTA's id, or `embedded` when the binary's bundled JS runs (`services/app-build.ts#getRunningBuild`, #967); with `app_version` it says exactly which JavaScript a user has | same |
 | `is_head_coach` | boolean | a `HEAD_COACH` staff row of the caller's on any team | an unfiltered first page of `GET /teams` that holds every team (`teams.length >= total`, e.g. the `TEAMS_MAX_LIMIT` picker fetch), via `hooks/useTeams.ts#reportTeamUserProperties`; a partial page reports only the count, so the flag never flaps between page sizes |
 | `is_assistant_coach` | boolean | an `ASSISTANT_COACH` staff row, same source | same |
 | `team_count` | number | `total` of the unfiltered `GET /teams` | every unfiltered first page |
@@ -77,8 +81,10 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 
 | Event | Fires when | Properties | Emitted from |
 | --- | --- | --- | --- |
-| `app_opened` | `initAnalytics` has succeeded on launch | none | `app/_layout.tsx` |
+| `app_opened` | `initAnalytics` has succeeded on launch | `launch`, `update_id`, `runtime_version` (#967) | `app/_layout.tsx` |
 | `screen_viewed` | the route changes | `screen`, `params_kind` | `hooks/useScreenViews.ts` via `app/_layout.tsx` |
+| `sign_in_started` | the Sign In tap has begun the PKCE sign-in (`beginPkceLogin` resolved), just before `GET /auth/login` and the browser hand-off (#967) | none | `app/login.tsx` |
+| `sign_in_failed` | a WorkOS sign-in did not complete: the authorization URL could not be fetched or the browser could not open (`initiate`); the app came back from the browser with no callback deep link within `BROWSER_DISMISS_GRACE_MS` (2 s) and the screen still mounted (`browser_dismissed`); the callback carried an OAuth `error` (`oauth_error`), no `code` (`missing_code`), or a `state` this device did not start (`state_mismatch`); or the code exchange failed (`exchange`) (#967) | `stage`; `oauth_error` (on `oauth_error` only); `status` (when an API call answered) | `utils/sign-in-failure.ts#reportSignInFailure`, called by `app/login.tsx` and `app/auth/callback.tsx` (each callback failure once per distinct failure) |
 | `user_logged_in` | the signed-in user is stored (`setUser`) | `claimed_invite`, `was_managed` (from the `/auth/callback` response, #790; left out when the API does not send them, and always left out on a dev login, which is not a datum) | `store/auth-store.ts`, outcome passed by `app/auth/callback.tsx` |
 | `user_logged_out` | a session that was signed in ends | `reason`: `user`, `session_expired`, `account_deleted` | `store/auth-store.ts#clearSession` (reason passed by `logout`, `useDeleteAccount`, default for the api-client) |
 | `onboarding_step_completed` | a first-login prompt is saved (not the Profile edit paths) | `step`: `name` / `role`; `role` (on the role step) | `app/onboarding/name.tsx`, `app/onboarding/role.tsx` |
@@ -96,6 +102,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_role_updated` | a staff member's role changes | `team_id`, `role_type` | `hooks/useTeamStaff.ts` |
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
 | `invitation_sent` | an invitation is created or re-sent | `team_id`, `invitation_id`, `resend`, `email_sent` (null when the player has no email) | `hooks/useInvitations.ts` |
+| `invite_link_viewed` | the `/invite/[token]` screen has an outcome to show, once per token per mount (not while loading or while Try Again is in flight); a signed-out invitee who signs in comes back to a new mount, which reports again with `authenticated: true` (#967) | `state`, `kind` (when the invitation loaded), `authenticated`, `source` | `hooks/useInviteLinkViewed.ts` via `app/invite/[token].tsx` |
 | `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
 | `invitation_declined` | the invitee rejects | `invitation_id` | `hooks/useInvitations.ts` |
 | `invitation_cancelled` | a coach cancels a pending invitation | `team_id`, `invitation_id` | `hooks/useInvitations.ts` |
@@ -121,7 +128,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `push_permission_answered` | the OS push prompt was certainly shown and answered: the stored status was `undetermined`, or a stored `denied` became `granted` (Android's second ask). Not when already granted, and not on a repeat `denied`, which resolves with no prompt on iOS after a refusal and on Android after two refusals or with notifications off in system settings | `granted` | `hooks/useNotifications.ts` |
 | `notification_opened` | the user taps a push notification | `target`: `game` / `announcement` / `team` / `none` | `hooks/useNotifications.ts` |
 | `entitlement_denied` | the API answers 402 `upgrade_required` | `endpoint_pattern`, `feature`, `current_tier`, `required_tier` | `services/api-client.ts#normalizeApiError` |
-| `error_shown` | a screen asks for an error's message to show it (`getApiErrorMessage`) | `code`, `status` (null for a network failure), `endpoint_pattern` | `services/api-client.ts#getApiErrorMessage` |
+| `error_shown` | a screen asks for an error's message to show it (`getApiErrorMessage`; since #967 also the invite link's accept failure) | `code`, `status` (null for a network failure), `endpoint_pattern` | `services/api-client.ts#getApiErrorMessage` |
 
 ### Not events (and why)
 
@@ -132,7 +139,9 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 - **Team rollover**: no mobile control yet (#461 lineage work); add `team_rolled_over` with it.
 - **Profile photo**: part of `profile_updated` (`photo_changed`, `photo_cleared`); the roster
   photo is `has_photo` on `roster_player_added`. Picking the image is not an event, only saving it.
-- **Sign-in started / dev login**: the only outcome that matters is `user_logged_in`.
+- **Dev login**: a development session is not a datum (#790); it fires neither `sign_in_*` nor the
+  outcome flags. (Sign-in started and failed became events in #967: the funnel `sign_in_started`
+  → `user_logged_in` shows the drop, and `sign_in_failed.stage` says why.)
 
 ## Properties glossary
 
@@ -146,11 +155,18 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `step` | enum | onboarding step: `name`, `role` |
 | `role`, `role_type` | enum | global role (`COACH`, …); staff role type (`HEAD_COACH`, `ASSISTANT_COACH`, `TEAM_MANAGER`) |
 | `league_scope` | enum | `personal` (caller's auto-provisioned league) or `league` (an explicit season) |
-| `kind` | enum | invitation model: `team` or `guardian` |
-| `source` | enum | where an invitation was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`, which passes `useAcceptInvitation({ source: 'link' })`) |
+| `kind` | enum | invitation model: `team` or `guardian` (left out of `invite_link_viewed` when the invitation did not load) |
+| `source` | enum | on `invitation_accepted`, where it was accepted: `in_app` (Invitations tab) or `link` (`/invite/[token]`, which passes `useAcceptInvitation({ source: 'link' })`). On `invite_link_viewed`, where the link came from: `web` (the web invite page's Open in App button, `hooplings://invite/<token>?src=web`, #964) or `link` (the email's Universal Link, or any other `src`) |
+| `state` | enum | what the invite screen showed: `pending`, `expired`, `accepted`, `rejected`, `cancelled`, `not_found` (a 400/404 token), `unavailable` (network failure, 429 or 5xx, #892) |
+| `authenticated` | boolean | the invitee was signed in when the invite screen reported |
+| `stage` | enum | where a sign-in stopped: `initiate`, `browser_dismissed`, `oauth_error`, `missing_code`, `state_mismatch`, `exchange` |
+| `oauth_error` | enum | the callback's OAuth `error` if it is one the screen has copy for (`access_denied`, `invalid_request`, `server_error`, `temporarily_unavailable`), else `other`; never the raw param, which any app or page can set |
+| `launch` | enum | `update` when an OTA's JavaScript is running, `embedded` for the binary's bundled JS (also a dev client, where updates are off) |
+| `update_id` | string (uuid) or null | the running OTA's id (EAS update id, as on the About screen); null when `launch` is `embedded`. The user property of the same name says `embedded` instead of null |
+| `runtime_version` | string | the binary's runtime version (policy `appVersion`, so it equals the binary's `version`) |
 | `by` | enum | how a staff member was identified: `user_id` (picker) or `email` |
 | `relationship` | enum | `MOTHER`, `FATHER`, `GUARDIAN`, `OTHER` |
-| `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted`; HTTP status on `error_shown` |
+| `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted`; HTTP status on `error_shown` and on `sign_in_failed` (left out when nothing answered) |
 | `event_type` | enum | game event type (`SHOT`, `REBOUND`, …) |
 | `shot_made`, `shot_points` | boolean, 1/2/3 | shot outcome; only on `event_type: SHOT` |
 | `on_behalf_of_child` | boolean | a guardian answered for a child |
@@ -173,11 +189,17 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 
 - `mobile/__tests__/analytics/catalogue-guard.test.ts` reads the source and fails when (a) an
   `AnalyticsEvents` entry has no row in the table above or a row names no entry, (b) an entry is
-  never referenced as `AnalyticsEvents.KEY` anywhere in `mobile/` source, or (c) a `useMutation`
-  in `mobile/hooks/` has no `trackEvent(` inside its `onSuccess` or `onSettled`. A hook may be
-  exempt only through `MUTATIONS_WITHOUT_EVENTS` in that test, with a reason; the list fails when
-  an entry no longer matches a silent hook. Today: `useCreatePlayer` and `useDeletePlayer`, which
-  no screen calls.
+  never referenced as `AnalyticsEvents.KEY` anywhere in `mobile/` source (`app/`, `components/`,
+  `hooks/`, `store/`, `services/`, `utils/`), or (c) a `useMutation` in `mobile/hooks/` has no
+  `trackEvent(` inside its `onSuccess` or `onSettled`. A hook may be exempt only through
+  `MUTATIONS_WITHOUT_EVENTS` in that test, with a reason; the list fails when an entry no longer
+  matches a silent hook. Today: `useCreatePlayer` and `useDeletePlayer`, which no screen calls.
+  (d) (#967) fails on any `apiClient.post/patch/put/delete(` in `mobile/app/` or
+  `mobile/components/`, which (c) cannot see, unless `DIRECT_WRITES_ALLOWED` names that
+  `<file> <method>` with a reason; it too fails on a stale entry. Today: `app/onboarding/role.tsx
+  patch` (fires `onboarding_step_completed` itself) and `app/login.tsx post` (the dev login).
+  Writes from `services/` are outside it: `upload-service.ts` is part of `profile_updated` and
+  `session-logout.ts` follows `user_logged_out`.
 - `mobile/__tests__/services/analytics.test.ts` pins the typed props map (`@ts-expect-error` on
   an ad-hoc name, a missing property, an extra property), the user-property helpers and the
   screen-view builder. `__tests__/hooks/useScreenViews.test.tsx` proves a path with a team id or
@@ -192,4 +214,9 @@ On a dev build with `AMPLITUDE_API_KEY` set, sign in, create a team, add a playe
 invitation, create a game, record a shot and finish the game; Amplitude's live stream should show
 `user_logged_in` with the user properties, then `team_created`, `roster_player_added`,
 `invitation_sent`, `game_created`, `game_started`, `game_event_recorded { event_type: SHOT }` and
-`game_finished`, each with ids only, plus a `screen_viewed` per route pattern.
+`game_finished`, each with ids only, plus a `screen_viewed` per route pattern. For #967: the
+launch's `app_opened` carries `launch`, `update_id` and `runtime_version` (after a production OTA,
+`launch: update` and the group's iOS update id, which About shows); Sign In then backing out of
+the browser sends `sign_in_started` then `sign_in_failed { stage: browser_dismissed }`; opening an
+invitation link sends `invite_link_viewed` with its state (and `source: web` from the web page's
+Open in App button once #964 ships).

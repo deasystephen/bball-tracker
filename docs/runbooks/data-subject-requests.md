@@ -93,7 +93,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   region and country**. Event properties are internal ids, enums, counts and flags (which fields
   changed, never their values; an error's code, never its message). The user record at Amplitude
   also holds **user properties**: global role, head-coach / assistant-coach / parent / player
-  flags, team count, subscription tier and app version. That set is fixed in code
+  flags, team count, subscription tier, app version and the running OTA's update id (or
+  `embedded`, #967). That set is fixed in code
   (`AMPLITUDE_TRACKING_OPTIONS`, `AnalyticsEventProps`, `AnalyticsUserProperties` in
   `mobile/services/analytics.ts`) and pinned by tests. No name, email, jersey number, message or
   photo is sent, and the advertising id is never sent. Whether Amplitude keeps the raw IP address

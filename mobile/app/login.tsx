@@ -15,6 +15,15 @@ import { postLoginRoute } from '../utils/role-onboarding';
 import { beginPkceLogin } from '../utils/pkce';
 import { APP_URL_SCHEME } from '../config/env';
 import { useTranslation } from '../i18n';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
+import { failureStatus, reportSignInFailure } from '../utils/sign-in-failure';
+
+/**
+ * A completed sign-in also brings the app back to the foreground, with the
+ * callback deep link close behind. Wait this long for that link before
+ * counting the return as a dismissed browser (#967).
+ */
+export const BROWSER_DISMISS_GRACE_MS = 2000;
 
 interface DevUser {
   id: string;
@@ -39,15 +48,31 @@ export default function Login() {
   // foreground (audit #33). A successful sign-in lands on /auth/callback and
   // unmounts this screen, so resetting here is harmless in that case.
   const awaitingBrowserRef = useRef(false);
+  // Set when the `/auth/callback` deep link arrives, so a return from the
+  // browser that completed sign-in is not counted as a dismissal (#967).
+  const callbackArrivedRef = useRef(false);
 
   useEffect(() => {
+    let dismissTimer: ReturnType<typeof setTimeout> | null = null;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active' && awaitingBrowserRef.current) {
         awaitingBrowserRef.current = false;
         setIsLoading(false);
+        if (dismissTimer) clearTimeout(dismissTimer);
+        dismissTimer = setTimeout(() => {
+          dismissTimer = null;
+          if (!callbackArrivedRef.current) reportSignInFailure({ stage: 'browser_dismissed' });
+        }, BROWSER_DISMISS_GRACE_MS);
       }
     });
-    return () => subscription.remove();
+    const urlSubscription = Linking.addEventListener('url', ({ url }) => {
+      if (url.includes('auth/callback')) callbackArrivedRef.current = true;
+    });
+    return () => {
+      subscription.remove();
+      urlSubscription.remove();
+      if (dismissTimer) clearTimeout(dismissTimer);
+    };
   }, []);
 
   // The OAuth redirect (hooplings://auth/callback?code=…) is handled by the
@@ -65,6 +90,8 @@ export default function Login() {
       // PKCE + state (audit #5): the verifier/state pair is persisted on the
       // device and checked by app/auth/callback.tsx before the code exchange.
       const { state, codeChallenge } = await beginPkceLogin();
+      callbackArrivedRef.current = false;
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
       const response = await apiClient.get('/auth/login', {
         params: {
           format: 'json',
@@ -81,6 +108,7 @@ export default function Login() {
         awaitingBrowserRef.current = true;
         await Linking.openURL(url);
       } else {
+        reportSignInFailure({ stage: 'initiate' });
         Alert.alert(t('common.error'), t('login.cannotOpenBrowser'));
         setIsLoading(false);
       }
@@ -88,6 +116,7 @@ export default function Login() {
       awaitingBrowserRef.current = false;
       captureException(error, { flow: 'login-initiate' });
       log.error('Login error', { error });
+      reportSignInFailure({ stage: 'initiate', status: failureStatus(error) });
       Alert.alert(t('common.error'), t('login.initiateFailed'));
       setIsLoading(false);
     }

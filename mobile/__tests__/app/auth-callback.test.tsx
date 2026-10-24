@@ -39,7 +39,11 @@ jest.mock('../../services/analytics', () => ({
   resetUser: jest.fn(),
   setUserProperties: jest.fn(),
   appVersion: () => '1.5.0',
-  AnalyticsEvents: { USER_LOGGED_IN: 'user_logged_in', USER_LOGGED_OUT: 'user_logged_out' },
+  AnalyticsEvents: {
+    USER_LOGGED_IN: 'user_logged_in',
+    USER_LOGGED_OUT: 'user_logged_out',
+    SIGN_IN_FAILED: 'sign_in_failed',
+  },
 }));
 
 const mockedGet = apiClient.get as jest.Mock;
@@ -256,6 +260,58 @@ describe('AuthCallbackScreen', () => {
       render(<AuthCallbackScreen />);
       await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
       expect(signInWarnings()).toEqual([]);
+    });
+  });
+
+  describe('sign_in_failed (#967)', () => {
+    const failedEvents = () =>
+      (trackEvent as jest.Mock).mock.calls.filter(([event]) => event === 'sign_in_failed').map(([, props]) => props);
+
+    beforeEach(() => {
+      jest.spyOn(log, 'warn').mockImplementation(() => undefined);
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([
+      ['a known OAuth error', { error: 'access_denied' }, { stage: 'oauth_error', oauth_error: 'access_denied' }],
+      ['an unknown OAuth error', { error: '<script>steal()</script>' }, { stage: 'oauth_error', oauth_error: 'other' }],
+      ['a callback with no code', {}, { stage: 'missing_code' }],
+    ])('fires the right stage for %s, never the raw param', async (_label, params, expected) => {
+      Object.assign(mockParams, params);
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(failedEvents()).toStrictEqual([expected]);
+      expect(JSON.stringify((trackEvent as jest.Mock).mock.calls)).not.toContain('steal');
+    });
+
+    it('fires state_mismatch for a foreign state', async () => {
+      mockParams.code = 'attacker-code';
+      mockParams.state = 'foreign-state';
+      mockedConsume.mockResolvedValue(null);
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(failedEvents()).toStrictEqual([{ stage: 'state_mismatch' }]);
+    });
+
+    it('fires exchange with the status when the API refuses the code', async () => {
+      mockParams.code = 'code-1';
+      mockParams.state = 'state-1';
+      mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+      mockedGet.mockRejectedValue({ isAxiosError: true, response: { status: 500 }, message: 'boom' });
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(failedEvents()).toStrictEqual([{ stage: 'exchange', status: 500 }]);
+    });
+
+    it('fires nothing on a successful sign-in', async () => {
+      mockParams.code = 'code-1';
+      mockParams.state = 'state-1';
+      mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+      mockedGet.mockResolvedValue({ data: { accessToken: 'at', refreshToken: 'rt', user } });
+      render(<AuthCallbackScreen />);
+      await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+      expect(failedEvents()).toEqual([]);
     });
   });
 });
