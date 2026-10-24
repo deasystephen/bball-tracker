@@ -21,7 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemedView, ThemedText, LoadingSpinner, Button } from '../../components';
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthActions, type AuthCallbackResponse } from '../../store/auth-store';
-import { apiClient } from '../../services/api-client';
+import { isAxiosError } from 'axios';
+import { apiClient, type NormalizedApiError } from '../../services/api-client';
 import { captureException } from '../../services/sentry';
 import { log } from '../../services/log';
 import { spacing } from '../../theme';
@@ -52,6 +53,18 @@ const OAUTH_ERROR_KEYS: Record<OAuthErrorCode, string> = {
   server_error: 'authCallback.serverError',
   temporarily_unavailable: 'authCallback.temporarilyUnavailable',
 };
+
+/**
+ * 403 `email_not_verified` (#907): the address matches a player a coach added,
+ * and only a verified address may claim that account. Retrying changes nothing
+ * until the address is verified, so this gets its own copy, not "try again",
+ * and is not reported to Sentry (an expected refusal, like every 4xx).
+ */
+export const EMAIL_NOT_VERIFIED_CODE = 'email_not_verified';
+
+function isEmailNotVerified(err: unknown): boolean {
+  return isAxiosError(err) && (err as NormalizedApiError).apiError?.code === EMAIL_NOT_VERIFIED_CODE;
+}
 
 /** The i18n key for a failure the params already show (`callbackParamFailure`), or null. */
 function getParamErrorKey(failure: SignInFailure | null): string | null {
@@ -117,6 +130,11 @@ export default function AuthCallbackScreen() {
 
         router.replace(await postLoginRoute(user));
       } catch (err) {
+        if (isEmailNotVerified(err)) {
+          reportSignInFailure({ stage: 'exchange', status: failureStatus(err) });
+          setExchangeErrorKey('authCallback.emailNotVerified');
+          return;
+        }
         captureException(err, { flow: 'auth-callback' });
         log.error('Token exchange error', { error: err });
         reportSignInFailure({ stage: 'exchange', status: failureStatus(err) });

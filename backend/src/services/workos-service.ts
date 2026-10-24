@@ -9,7 +9,7 @@ import prisma from '../models';
 import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
-import { ConflictError, ServiceUnavailableError } from '../utils/errors';
+import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError } from '../utils/errors';
 
 type UserManagement = ReturnType<typeof getWorkOS>['userManagement'];
 export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
@@ -203,6 +203,9 @@ export class WorkOSService {
    *    `workosUserId`, drop `isManaged`/`managedById` so the creating coach
    *    loses control of what is now a real account, and re-evaluate the admin
    *    allowlist (a pre-seeded row must not suppress ADMIN bootstrap).
+   *    Only when WorkOS reports the email verified (#907); an unverified
+   *    sign-in is refused with `EmailNotVerifiedError` (403) and the row is
+   *    left untouched.
    * 3. `email` match on a row linked to a *different* WorkOS identity —
    *    refuse with 409 rather than silently merging accounts.
    * 4. Otherwise create.
@@ -256,6 +259,17 @@ export class WorkOSService {
           userId: byEmail.id,
         });
         throw new ConflictError('An account with this email is already linked to a different login');
+      }
+
+      // Only a verified address may claim a pre-provisioned row (#907):
+      // claiming hands over its team memberships and ends the coach's control.
+      // `email` is unique, so there is no separate row to create instead.
+      if (!emailVerified) {
+        // info, not warn: the route's respondWithError already logs the 403 at warn.
+        logger.info('Refused to link an unverified WorkOS email to a pre-provisioned user', {
+          userId: byEmail.id,
+        });
+        throw new EmailNotVerifiedError();
       }
 
       const promoteToAdmin = byEmail.role !== 'ADMIN' && isAdminEmail(workosUser.email);

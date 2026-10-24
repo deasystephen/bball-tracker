@@ -808,6 +808,7 @@
     "noCode": "No authorization code was returned. Please try signing in again.",
     "foreignState": "This sign-in link did not come from a sign-in started on this device, or it has expired. Please try again.",
     "exchangeFailed": "Failed to complete sign in. Please try again.",
+    "emailNotVerified": "Your email address is not verified yet. A team has already added this address, so verify it first, then sign in again.",
     "title": "Sign In Failed",
     "back": "Back to Sign In",
     "signingIn": "Signing you in…"

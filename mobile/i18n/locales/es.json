@@ -808,6 +808,7 @@
     "noCode": "No se recibió un código de autorización. Vuelve a iniciar sesión.",
     "foreignState": "Este enlace no viene de un inicio de sesión hecho en este dispositivo, o ya venció. Inténtalo de nuevo.",
     "exchangeFailed": "No se pudo completar el inicio de sesión. Inténtalo de nuevo.",
+    "emailNotVerified": "Tu correo electrónico aún no está verificado. Un equipo ya agregó esta dirección, así que verifícala primero y luego vuelve a iniciar sesión.",
     "title": "No se pudo iniciar sesión",
     "back": "Volver a iniciar sesión",
     "signingIn": "Iniciando sesión…"
