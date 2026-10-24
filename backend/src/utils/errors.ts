@@ -146,7 +146,7 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
     super(
       'email_not_verified',
       {},
-      'Verify your email address with your sign-in provider, then sign in again to join the team that added you.',
+      'Your email address is not verified. Verify it, then sign in again to join the team that added you.',
       403
     );
     Object.setPrototypeOf(this, EmailNotVerifiedError.prototype);

@@ -7,9 +7,11 @@
  */
 
 import { render, waitFor } from '@testing-library/react-native';
+import { AxiosError, AxiosHeaders } from 'axios';
 
 import AuthCallbackScreen from '../../app/auth/callback';
-import { apiClient } from '../../services/api-client';
+import { apiClient, type NormalizedApiError } from '../../services/api-client';
+import { captureException } from '../../services/sentry';
 import { consumePendingLogin } from '../../utils/pkce';
 import { useAuthStore } from '../../store/auth-store';
 import { trackEvent, AnalyticsEvents } from '../../services/analytics';
@@ -313,5 +315,31 @@ describe('AuthCallbackScreen', () => {
       await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
       expect(failedEvents()).toEqual([]);
     });
+  });
+
+  it('explains a 403 email_not_verified refusal instead of asking for a retry, without a Sentry report (#907)', async () => {
+    mockParams.code = 'code-1';
+    mockParams.state = 'state-1';
+    mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+    const body = { error: 'Verify your email address, then sign in again.', code: 'email_not_verified' };
+    const refusal: NormalizedApiError = new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 403,
+      statusText: 'Forbidden',
+      headers: {},
+      config: { headers: new AxiosHeaders() },
+      data: body,
+    });
+    // api-client is mocked globally (jest.setup.js), so apply what its response
+    // interceptor (normalizeApiError) does to every failed request.
+    refusal.apiError = { ...body, status: 403 };
+    mockedGet.mockRejectedValue(refusal);
+
+    const { findByText, queryByText } = render(<AuthCallbackScreen />);
+
+    expect(await findByText(/Your email address is not verified yet/)).toBeTruthy();
+    expect(queryByText('Failed to complete sign in. Please try again.')).toBeNull();
+    expect(captureException).not.toHaveBeenCalled();
+    expect(trackEvent).toHaveBeenCalledWith(AnalyticsEvents.SIGN_IN_FAILED, { stage: 'exchange', status: 403 });
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });

@@ -123,7 +123,7 @@ describe('GET /api/v1/auth/callback claiming a pre-provisioned row (#907)', () =
     expect(response.status).toBe(403);
     expect(response.body).toEqual({
       code: 'email_not_verified',
-      error: expect.stringContaining('Verify your email'),
+      error: expect.stringContaining('not verified'),
     });
     // No session is handed out for the unverified identity
     expect(response.body).not.toHaveProperty('accessToken');

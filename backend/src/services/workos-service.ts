@@ -264,8 +264,9 @@ export class WorkOSService {
       // Only a verified address may claim a pre-provisioned row (#907):
       // claiming hands over its team memberships and ends the coach's control.
       // `email` is unique, so there is no separate row to create instead.
-      if (workosUser.emailVerified !== true) {
-        logger.warn('Refusing to link an unverified WorkOS email to a pre-provisioned user', {
+      if (!emailVerified) {
+        // info, not warn: the route's respondWithError already logs the 403 at warn.
+        logger.info('Refused to link an unverified WorkOS email to a pre-provisioned user', {
           userId: byEmail.id,
         });
         throw new EmailNotVerifiedError();
