@@ -1,4 +1,4 @@
-import { invitationByTokenUrl } from './api-urls';
+import { CLIENT_HEADERS, invitationByTokenUrl } from './api-urls';
 import type { InvitationDetails } from './invitation-types';
 import { log } from './log';
 
@@ -29,6 +29,7 @@ export async function getInvitation(token: string): Promise<LookupResult> {
   try {
     res = await fetch(invitationByTokenUrl(apiUrl, token), {
       cache: 'no-store',
+      headers: CLIENT_HEADERS,
     });
   } catch {
     return unavailable('network');

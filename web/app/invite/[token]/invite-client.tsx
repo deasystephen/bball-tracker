@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { childDisplayName, inviterDisplayName } from '../../../lib/display-name';
-import { acceptInvitationByTokenUrl } from '../../../lib/api-urls';
+import { acceptInvitation } from '../../../lib/invitation-accept';
 import { formatExpiry } from '../../../lib/format-date';
 import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
 import { APP_STORE_RELEASED, openInApp } from '../../../lib/open-in-app';
@@ -52,22 +52,13 @@ export function InviteClient({ invitation, token }: Props) {
   async function acceptWithoutApp() {
     setAcceptState('loading');
     setErrorMessage('');
-    try {
-      const res = await fetch(acceptInvitationByTokenUrl(API_URL, token), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) {
-        setErrorMessage(data.error ?? 'Something went wrong. Please try again.');
-        setAcceptState('error');
-        return;
-      }
-      setAcceptState('done');
-    } catch {
-      setErrorMessage('Network error. Please check your connection and try again.');
+    const result = await acceptInvitation(API_URL, token);
+    if (!result.ok) {
+      setErrorMessage(result.message);
       setAcceptState('error');
+      return;
     }
+    setAcceptState('done');
   }
 
   if (acceptState === 'done') {

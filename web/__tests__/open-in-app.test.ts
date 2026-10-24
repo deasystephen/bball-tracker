@@ -43,15 +43,19 @@ describe('openInApp (#510)', () => {
     vi.useRealTimers();
   });
 
-  it('builds hooplings://invite/<token>', () => {
-    expect(inviteDeepLink(TOKEN)).toBe(`hooplings://invite/${TOKEN}`);
+  it('builds hooplings://invite/<token>?src=web, the token path unchanged (#964)', () => {
+    expect(inviteDeepLink(TOKEN)).toBe(`hooplings://invite/${TOKEN}?src=web`);
+    const url = new URL(inviteDeepLink(TOKEN));
+    expect(url.pathname).toBe(`/${TOKEN}`);
+    expect(url.host).toBe('invite');
+    expect(url.searchParams.get('src')).toBe('web');
   });
 
   it('navigates to the deep link immediately', () => {
     const { env, navigate } = makeEnv(IOS_UA);
     openInApp(TOKEN, env);
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(`hooplings://invite/${TOKEN}`);
+    expect(navigate).toHaveBeenCalledWith(`hooplings://invite/${TOKEN}?src=web`);
   });
 
   it.each([
@@ -113,7 +117,7 @@ describe('openInApp (#510)', () => {
     openInApp(TOKEN, env, true);
     vi.runAllTimers();
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(`hooplings://invite/${TOKEN}`);
+    expect(navigate).toHaveBeenCalledWith(`hooplings://invite/${TOKEN}?src=web`);
   });
 
   it('removes its visibilitychange listener after the fallback window', () => {

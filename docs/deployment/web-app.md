@@ -68,6 +68,12 @@ The browser has no logger and no error reporting (no web Sentry for launch, #966
 "Accept without app" shows its message to the visitor and is seen as the API's `HTTP request`
 line for `/api/v1/invitations/by-token/[redacted]/accept`.
 
+**No analytics on the site (#964, Option A).** The page loads no analytics SDK and sets no cookie.
+The invite funnel is measured server-side instead: the site sends `X-Hooplings-Client: web`
+(`lib/api-urls.ts#CLIENT_HEADERS`) on the lookup and the accept, so the API's lines say `client:
+web`, and "Open in App" opens `hooplings://invite/<token>?src=web`, which the app reports on
+arrival. Queries: `docs/architecture/web-funnel.md`.
+
 ### Web error monitor (created by hand)
 
 Datadog is not managed from this repository (no Datadog Terraform provider), so this monitor is

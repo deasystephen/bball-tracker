@@ -21,7 +21,7 @@ Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Pr
 | Socket.io broadcast, server-derived score, tracker undo | `docs/architecture/live-games.md` |
 | Stats finalization, ties, team lineage | `docs/architecture/stats-and-lineage.md` |
 | Account deletion (as built) | `docs/architecture/account-deletion.md` |
-| Email: SES events, bounces, complaints, audiences | `docs/architecture/email.md` |
+| Email: SES events, bounces, complaints, audiences (invite funnel: `docs/architecture/web-funnel.md`) | `docs/architecture/email.md` |
 | Mobile app: routing, guards, permission gating, errors, pickers, analytics | `docs/architecture/mobile-app.md` |
 | Mobile analytics: Amplitude event catalogue, user properties, screen views, guard test | `docs/architecture/analytics.md` |
 | Mobile builds, runtime versions, OTA drift guard, URL scheme, eas-cli | `docs/deployment/mobile-builds-and-ota.md` |
