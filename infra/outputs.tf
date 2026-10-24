@@ -96,7 +96,7 @@ output "web_task_definition_family" {
 }
 
 output "web_service_name" {
-  description = "Web app ECS service name; null until web_enabled = true"
+  description = "Web app ECS service name; null until local.web_enabled (web.tf) is true"
   value       = one(aws_ecs_service.web[*].name)
 }
 

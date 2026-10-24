@@ -164,7 +164,9 @@ jobs:
           API_URL: https://api.hooplings.com
         run: npm run build
 
+      # Pull requests only: on main, build-and-deploy-web builds the image.
       - name: Build the deploy image
+        if: github.event_name == 'pull_request'
         run: docker build -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://api.hooplings.com web
 
   # #924: fails when a lockfile resolves a production dependency under a high or
@@ -289,12 +291,14 @@ jobs:
   # The web app (https://hooplings.com, #30): web.tf, infra/README.md "Web
   # app". Builds web/Dockerfile, registers a revision of
   # infra/web-task-definition.json and rolls the service onto it. Until the
-  # second apply (web_enabled = true) creates the service, it only registers:
+  # second apply (local.web_enabled in infra/web.tf) creates the service, it only registers:
   # ECS needs a revision in the family before the service can exist.
   build-and-deploy-web:
     name: Build & Deploy Web to ECS
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test-web, audit-floor, detect-changes]
+    # test-backend runs the suites that pin infra/web-task-definition.json and
+    # web/Dockerfile (backend/tests/infra/).
+    needs: [lint-and-typecheck, test-backend, test-web, audit-floor, detect-changes]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.web == 'true'
     # Its own group: a web deploy never waits on, or splits, the API's.
     concurrency:
@@ -319,7 +323,9 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      # Tags are immutable (web.tf): only the commit tag, never `latest`.
+      # Tags are immutable (web.tf): only the commit tag, never `latest`. A
+      # re-run, or a run by hand on a commit that already shipped, reuses the
+      # image the tag names; pushing a rebuild of it would be refused.
       - name: Build and push Docker image
         id: build-image
         env:
@@ -327,10 +333,14 @@ jobs:
           ECR_REPOSITORY: bball-tracker-web
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "Image $IMAGE_TAG is already in $ECR_REPOSITORY: reusing it." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -f web/Dockerfile \
             --build-arg NEXT_PUBLIC_API_URL=https://api.hooplings.com web
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Inject GIT_COMMIT into task definition
         run: |
@@ -344,16 +354,19 @@ jobs:
           container-name: web
           image: ${{ steps.build-image.outputs.image }}
 
+      # A service that does not exist comes back as a `failures` entry with exit
+      # 0 (status "None"); any other AWS error fails the step, so a throttle or a
+      # missing permission can never pass for "no service yet" and skip a deploy.
       - name: Find the web service
         id: service
         run: |
           status="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" \
-            --query 'services[0].status' --output text 2>/dev/null || true)"
+            --query 'services[0].status' --output text)"
           if [ "$status" = "ACTIVE" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No ACTIVE $ECS_WEB_SERVICE service yet: registering the revision only (web_enabled = false)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No ACTIVE $ECS_WEB_SERVICE service yet: registering the revision only (local.web_enabled is false in infra/web.tf)." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Deploy to Amazon ECS

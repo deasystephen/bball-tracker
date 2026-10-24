@@ -52,6 +52,12 @@ describe('infra/web-task-definition.json (#30)', () => {
     expect(WEB_TF).toContain('web_port       = 3000');
   });
 
+  it('keeps idle connections open longer than the ALB (60 s), as the API does (#749)', () => {
+    // Below the ALB's idle timeout, the server closes a connection the ALB is
+    // about to reuse, and the request becomes an ELB 502 the app never sees.
+    expect(Number(env.get('KEEP_ALIVE_TIMEOUT'))).toBeGreaterThan(60_000);
+  });
+
   it('looks invitations up on the production API', () => {
     expect(env.get('API_URL')).toBe('https://api.hooplings.com');
     expect(CI_WORKFLOW).toContain('--build-arg NEXT_PUBLIC_API_URL=https://api.hooplings.com web');

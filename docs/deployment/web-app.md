@@ -43,6 +43,19 @@ revision and waits for the service to be stable (circuit breaker with rollback; 
 
 Confirm what is live: `curl -s https://hooplings.com/health`.
 
+**Rolling back.** The circuit breaker rolls back a revision that never becomes healthy. To go back
+from one that is healthy but wrong, point the service at the previous revision; a run by hand
+rebuilds the current `main`, which is the broken commit:
+
+```bash
+aws ecs list-task-definitions --family-prefix bball-tracker-production-web --sort DESC --max-items 3
+aws ecs update-service --cluster bball-tracker-production-cluster --service bball-tracker-production-web \
+  --task-definition bball-tracker-production-web:<previous revision>
+```
+
+Then revert the commit on `main`; its merge deploys the fix. A re-run, or a run by hand on a commit
+that already shipped, reuses the image its tag names (tags are immutable).
+
 ## Store links before the App Store release
 
 `APP_STORE_RELEASED` in `web/lib/open-in-app.ts` is `false` until the app is on the App Store
@@ -54,16 +67,19 @@ links to Google Play (#139).
 ## Bring-up (two applies)
 
 ECS cannot create a service until its family has a registered revision, and the first revision
-comes from the first CI run. So `web_enabled` (`infra/variables.tf`, default `false`) gates the
-service, the listener rules, the DNS records and the uptime alarm:
+comes from the first CI run. So `local.web_enabled` (top of `infra/web.tf`) gates the service, the
+listener rules, the DNS records and the uptime alarm. It is a local in `web.tf`, not a variable, because
+that file is outside the API's deploy filter: the PR that flips it does not roll the API or split
+live games.
 
-1. **Apply 1** (`web_enabled = false`): from `infra/`, `terraform plan` then `terraform apply`
+1. **Apply 1** (`local.web_enabled = false`): from `infra/`, `terraform plan` then `terraform apply`
    creates the ECR repository and lifecycle policy, the log group, the security group and the
    target group. Nothing is routed to them.
 2. **Merge** the PR that carries `web.tf`. `build-and-deploy-web` builds, pushes and, finding no
    service, registers the first revision only ("registering the revision only" in the job summary).
-3. **Apply 2**: a PR that sets the `web_enabled` default to `true`; apply from that branch, then
-   merge it. The apply creates the service, the listener rules, the apex and `www` records and the
+3. **Apply 2**: first merge the privacy and terms pages (#25): the footer on every page links
+   them. Then a PR that sets `web_enabled = true` in `infra/web.tf` and nothing else; apply from
+   that branch, then merge it. The apply creates the service, the listener rules, the apex and `www` records and the
    uptime check. Then verify:
    ```bash
    curl -s https://hooplings.com/health                       # status ok, the commit

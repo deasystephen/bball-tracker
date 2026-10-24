@@ -12,15 +12,20 @@
 # the service at them (the `build-and-deploy-web` job in ci.yml).
 #
 # Bring-up is two applies, because ECS cannot create a service before the
-# family has a revision (infra/README.md "Web app"):
-#   1. web_enabled = false (the default): apply creates the repository, target
-#      group, security group and log group; the merge then builds the first
-#      image and registers the first revision (the CI job finds no service and
-#      stops after registering).
-#   2. web_enabled = true: apply creates the service, the listener rules and
-#      the apex and www records; every later merge under web/ deploys.
+# family has a revision (docs/deployment/web-app.md "Bring-up"):
+#   1. web_enabled = false: apply creates the repository, target group,
+#      security group and log group; the merge then builds the first image and
+#      registers the first revision (the CI job finds no service and stops
+#      after registering).
+#   2. web_enabled = true, in a PR that changes only this line: apply creates
+#      the service, the listener rules, the apex and www records and the uptime
+#      alarm; every later merge under web/ deploys.
 
 locals {
+  # A local in this file, not a variable: this file is outside the API's deploy
+  # filter, so the PR that flips it does not roll the API (or split live games).
+  web_enabled = false
+
   web_family     = "${local.name_prefix}-web"
   web_port       = 3000
   web_www_domain = "www.${var.primary_domain}"
@@ -145,7 +150,7 @@ resource "aws_lb_target_group" "web" {
 }
 
 resource "aws_lb_listener_rule" "web_www_redirect" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   listener_arn = aws_lb_listener.https.arn
   priority     = 10
@@ -167,7 +172,7 @@ resource "aws_lb_listener_rule" "web_www_redirect" {
 }
 
 resource "aws_lb_listener_rule" "web" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   listener_arn = aws_lb_listener.https.arn
   priority     = 20
@@ -189,7 +194,7 @@ resource "aws_lb_listener_rule" "web" {
 # =============================================================================
 
 resource "aws_ecs_service" "web" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   name            = local.web_family
   cluster         = aws_ecs_cluster.main.id
@@ -236,7 +241,7 @@ resource "aws_ecs_service" "web" {
 # =============================================================================
 
 resource "aws_route53_record" "web_apex" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   zone_id = aws_route53_zone.main[var.primary_domain].zone_id
   name    = var.primary_domain
@@ -250,7 +255,7 @@ resource "aws_route53_record" "web_apex" {
 }
 
 resource "aws_route53_record" "web_www" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   zone_id = aws_route53_zone.main[var.primary_domain].zone_id
   name    = local.web_www_domain
@@ -271,7 +276,7 @@ resource "aws_route53_record" "web_www" {
 # down", never "the API is down" (the API has its own). The invitation links
 # in every email land here.
 resource "aws_route53_health_check" "web" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   type              = "HTTPS"
   fqdn              = var.primary_domain
@@ -287,7 +292,7 @@ resource "aws_route53_health_check" "web" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "web_uptime" {
-  count = var.web_enabled ? 1 : 0
+  count = local.web_enabled ? 1 : 0
 
   alarm_name        = "${local.name_prefix}-web-uptime"
   alarm_description = "https://${var.primary_domain}/health is failing from outside AWS: invitation links and the support, privacy and terms pages are down. Runbook: docs/runbooks/on-call.md#web-site-is-down"

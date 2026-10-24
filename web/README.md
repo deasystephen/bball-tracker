@@ -29,7 +29,7 @@ npm run build       # production build only: it skips lint and type errors, run 
 |---|---|
 | `/` | Marketing landing (minimal placeholder) |
 | `/support` | Support page, the App Store Support URL (#450). The address is `lib/site.ts#SUPPORT_EMAIL`, pinned equal to the backend's and the app's |
-| `/privacy`, `/terms` | Privacy policy and terms of service (#25); linked from the footer on every page |
+| `/privacy`, `/terms` | Privacy policy and terms of service, added by the #25 pages PR; the footer on every page links them, so that PR merges before the site goes live (`docs/deployment/web-app.md`, Bring-up) |
 | `/health` | `{"status":"ok","commit":…}` for the ALB, container and uptime checks; never calls the API |
 | `/invite/<token>` | Public invitation accept page. Fetches token state from the backend, deep-links to the mobile app via Universal Links, falls back to web accept if the app isn't installed. |
 | `/.well-known/apple-app-site-association` | iOS Universal Link assoc. **Team ID `2JV3V89598`** wired in #138. |
