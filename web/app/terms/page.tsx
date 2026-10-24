@@ -98,8 +98,9 @@ export default function TermsOfServicePage() {
           announcements and replies. You keep ownership of it. You give us a worldwide, non-exclusive, royalty-free
           licence to host, store, copy, process, display and transmit your content only as needed to operate, provide
           and improve the Service, including showing it to the people on your teams. The licence ends when your content
-          is deleted, except that game events and statistics stay with the team without your name, and backup copies
-          last for a short time, as the Privacy Policy describes.
+          is deleted, except for what the Privacy Policy says is kept after an account is deleted: game events,
+          statistics, announcements, replies and sent invitations stay with the team without your name, and backup
+          copies last for the periods it states.
         </p>
         <p>
           You confirm that you have the rights and permissions needed for the content you add, including any photo of

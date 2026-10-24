@@ -80,9 +80,9 @@ export default function PrivacyPolicyPage() {
           <li>
             <strong>Information you enter about other people:</strong> a coach or other team staff member with roster
             permission can add a player with a name and, optionally, an email address, a profile photo, a jersey
-            number and a position. They can invite a player or a parent or guardian by email, with an optional
-            personal message of up to 500 characters, and record the guardian’s relationship to the player (mother,
-            father, guardian or other).
+            number and a position. They can invite a player to the team by email, with an optional personal message of
+            up to 500 characters, and invite a parent or guardian by email, recording the guardian’s relationship to
+            the player (mother, father, guardian or other).
           </li>
         </ul>
 
@@ -94,12 +94,14 @@ export default function PrivacyPolicyPage() {
           </li>
           <li>
             <strong>Usage analytics:</strong> what you do in the app, such as screens viewed and the teams, rosters,
-            invitations, games and game events you create, change or delete, sent to our analytics provider. Details
-            are in <a href="#analytics">section 6</a>.
+            invitations, announcements, games, game events and RSVPs you create, change or delete, sent to our
+            analytics provider. Details are in <a href="#analytics">section 6</a>.
           </li>
           <li>
-            <strong>Error reports:</strong> when something goes wrong, a report with technical details is sent to our
-            error-monitoring provider. Details are in <a href="#retention">section 6</a>.
+            <strong>Error and performance reports:</strong> when something goes wrong, a report with technical
+            details is sent to our error-monitoring provider. During normal use the app also reports app-session health
+            (whether a session ended in a crash), and both the app and the API send performance timings for a sample
+            of about one in ten screens and requests. Details are in <a href="#retention">section 6</a>.
           </li>
           <li>
             <strong>Server logs:</strong> our API writes one log line per request (the method, a redacted path, the
@@ -109,8 +111,9 @@ export default function PrivacyPolicyPage() {
             <strong>Network address:</strong> like any internet service, our servers see the IP address of each
             request. The API uses it in memory to limit how many requests one address can make. It writes the
             address to its logs only when it refuses a live-game connection for going over that limit. Our analytics
-            provider receives it and derives an approximate city, region and country from
-            it (see <a href="#analytics">section 6</a>).
+            provider receives it and derives an approximate city, region and country from it (see{' '}
+            <a href="#analytics">section 6</a>). The providers your device contacts directly (our sign-in page, error
+            reporting and app updates) also see it, as any website does.
           </li>
         </ul>
 
@@ -175,7 +178,8 @@ export default function PrivacyPolicyPage() {
             shown to everyone on the team.
           </li>
           <li>
-            Profile photos are stored at a web address that includes a random identifier. Anyone who has that address
+            Profile photos are stored at a web address made of the uploader’s internal account id and a random
+            identifier. Anyone who has that address
             can open the photo.
           </li>
           <li>
@@ -271,7 +275,7 @@ export default function PrivacyPolicyPage() {
         <ul>
           <li>
             An account with no history (never on a roster, no game events or statistics, no invitations sent or
-            received, no announcements) is <strong>erased</strong>: the record is deleted and nothing about it remains
+            received, no announcements or replies) is <strong>erased</strong>: the record is deleted and nothing about it remains
             in our application database. Outside the database, the server log lines and the provider records described
             below still carry the internal id until their retention periods end.
           </li>
@@ -285,22 +289,28 @@ export default function PrivacyPolicyPage() {
           </li>
           <li>
             Automated database backups keep the information as it was before the deletion for up to{' '}
-            <strong>7 days</strong>. Backups are not edited.
+            <strong>7 days</strong>. Backups are not edited. Snapshots of the database taken by hand before major
+            maintenance are kept until we delete them.{' '}
+            <Placeholder>OWNER DECISION: set and state a maximum age for manual database snapshots</Placeholder>
           </li>
           <li>
             <strong>Error reports (Sentry)</strong> are kept for Sentry’s retention period (90 days by default). No
-            name, email address or photo is sent. Reports from our servers carry the internal user id of the person
-            whose request failed. Reports from the app carry no user id; they hold the device model, the operating
-            system version, the app version and a redacted record of recent navigation and requests.{' '}
+            name, email address or photo is sent. Reports from our servers carry the internal user id of the signed-in
+            person whose request they describe. Reports from the app carry no user id; they hold the device model, the
+            operating system version, the app version and a redacted record of recent navigation and requests. The
+            same applies to the session-health and performance data described in{' '}
+            <a href="#information-we-collect">section 2</a>.{' '}
             <Placeholder>OWNER DECISION: confirm in the Sentry project whether it stores the sending device’s IP address, and say so here</Placeholder>
           </li>
           <li id="analytics">
             <strong>Usage analytics (Amplitude)</strong> are kept for the retention period of our Amplitude plan{' '}
             <Placeholder>OWNER DECISION: state the Amplitude plan’s retention period</Placeholder>. Every analytics
-            event (screens viewed, recorded as the kind of screen and never the specific team or player, and the teams,
-            rosters, invitations, games and game events the person created, changed or deleted) carries the internal
-            user id, a device id, the device’s vendor identifier, device and operating system details, language,
-            mobile carrier, and the IP address of the request, from which Amplitude derives an approximate{' '}
+            event (app opens, screens viewed, recorded as the kind of screen and never the specific team or player,
+            sign-in and sign-out, onboarding steps, notification permission answers and taps, errors shown, and every
+            team, roster, staff, invitation, guardian, announcement, league, season, game, game event and RSVP the
+            person created, changed or deleted) carries the internal user id, a device id, the device’s vendor
+            identifier on iOS or app set id on Android, the device manufacturer and model, operating system details,
+            language, mobile carrier, and the IP address of the request, from which Amplitude derives an approximate{' '}
             <strong>city, region and country</strong>. Event details are internal ids, categories, counts and yes/no
             flags: which fields changed, never their values; an error’s code, never its message. Amplitude also holds a
             few facts about the account: its role, whether the person is a head coach, assistant coach, parent or
@@ -311,10 +321,12 @@ export default function PrivacyPolicyPage() {
           <li>
             <strong>Server logs</strong> (one line per API request with the method, a redacted path, the result and
             the duration, plus records of events such as an account being deleted) carry the internal user id whenever
-            the request was signed in. They contain no names and no secret links, and email addresses appear only in a
-            scrambled (hashed) form. Log lines written before a logging fix was deployed may still contain a
+            the request was signed in. They contain no names and no secret links, and email addresses appear only as a
+            short one-way hash (someone who already knows an address can compute the same hash, but the hash does not
+            reveal the address). Log lines written before a logging fix was deployed may still contain a
             recipient’s email address from a failed email send until they age out. Logs are kept for{' '}
-            <strong>30 days</strong> in Amazon CloudWatch and, as a copy, for <strong>15 days</strong> in Datadog.
+            <strong>30 days</strong> in Amazon CloudWatch and, as a copy, for <strong>15 days</strong> in Datadog.{' '}
+            <Placeholder>OWNER CHECK: re-confirm the Datadog log index retention before publishing</Placeholder>
           </li>
           <li>
             After deletion nothing in our application links the internal id back to a person, but the analytics, server
@@ -323,7 +335,13 @@ export default function PrivacyPolicyPage() {
             <Email address={PRIVACY_EMAIL} /> and we will use each provider’s own deletion process for that id (Amazon
             CloudWatch offers none short of deleting the whole log).
           </li>
-          <li>Email delivery records at Amazon SES keep only a hashed form of the recipient’s address.</li>
+          <li>
+            Email delivery records at Amazon SES keep only a hashed form of the recipient’s address. Two exceptions:
+            if an address bounces permanently or its owner marks our email as spam, Amazon SES adds the address itself
+            to a suppression list that stops further delivery and keeps it there until we remove it; and the
+            bounce or complaint notice, which names the address, waits in a message queue until our API processes it,
+            for at most <strong>14 days</strong>.
+          </li>
         </ul>
       </Section>
 
@@ -335,7 +353,7 @@ export default function PrivacyPolicyPage() {
         </p>
         <p>Deleting an account removes:</p>
         <ul>
-          <li>your sign-in, email address, name and photo (the photo file is deleted from storage);</li>
+          <li>your sign-in, email address, name and current photo (we also try to delete the photo file);</li>
           <li>your push notification tokens and calendar subscription links;</li>
           <li>your staff roles and league administrator roles, and your RSVPs;</li>
           <li>your guardian links, in both directions;</li>
@@ -346,7 +364,8 @@ export default function PrivacyPolicyPage() {
         </ul>
         <p>
           It keeps, without your name: your places on team rosters (shown as “Deleted user” until a coach removes them),
-          the game events and statistics recorded for you, announcements you posted and team invitations you sent. If
+          the game events and statistics recorded for you, announcements and replies you posted, and team invitations
+          you sent, with any message you wrote in them. If
           none of these exist, the account is erased entirely (see <a href="#retention">section 6</a>). Your account
           with our sign-in provider, WorkOS, is deleted at the same time.
         </p>
