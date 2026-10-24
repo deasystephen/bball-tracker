@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build on OTA runtime 1.6.0 (v1.6.0, Expo SDK 57; the build recorded under 1.6.0 in `mobile/binary-manifest.json` or newer, #716 / #780), with the latest production OTA applied — #33 (runtime 1.5.0, cut 2026-09-29 from `b408645` / #576) and older are binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build on OTA runtime 1.7.0 (v1.7.0, Expo SDK 57; the build recorded under 1.7.0 in `mobile/binary-manifest.json` or newer, #644 / #671), with the latest production OTA applied — #34 (runtime 1.6.0, cut 2026-10-18 from `eca342a`, #716 / #780) and older are binaries that OTAs no longer reach once 1.7.0 merges (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
 **Checkboxes:** count all with `grep -c '^- \[[ x]\]' docs/testing/e2e-test-plan-v2.0.md` and the passed ones with `grep -c '^- \[x\]'`; a ticked box keeps the `Pass / Fail / Skipped` selector and records the date, who ran it, the device and the OTA or build on its Notes line. This line states no total on purpose, so a PR that adds a section does not need to touch it.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
@@ -202,6 +202,9 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
   team/player names and server error text stay as they are. There is no in-app language picker; the app
   follows the device language. Back to English: every screen and label English again.
+- **Per-app language (runtime 1.7.0 on, `CFBundleLocalizations`):** with the device in English,
+  Settings → Apps → Hooplings shows a Language row offering English and Español; choosing Español
+  relaunches the app in Spanish with the rest of the device still English. A 1.6.0 build has no such row.
 - **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`. Maestro:
   `.maestro/spanish-locale.yaml` covers the coach slice without changing the device language (it
   launches the app with `-AppleLanguages (es) -AppleLocale es_ES`): sign-in, the tab bar labels, Home,
@@ -1144,8 +1147,12 @@ Cross-cuts E, I, J — but worth aggregating here.
 
 ### P.5 — Mobile Sentry crash captures
 - [ ] Pass / Fail / Skipped
-- **Steps:** (Synthetic) In dev/preview, trigger an intentional mobile crash. Or wait for a real one.
-- **Expected:** Event appears in Sentry-mobile. Release matches.
+- **Steps:** (Synthetic) On a TestFlight build, trigger a caught error, for example a profile photo
+  upload with the network off. Repeat once the device runs a production OTA. Or wait for a real one.
+- **Expected:** Event appears in `bball-tracker-mobile` with release `com.bballtracker.mobile@<version>+<build>`
+  and dist `<build>` (the build on the device), and its frames resolve to `mobile/` source files, not
+  `app:///main.jsbundle:<line>:<col>`, for the embedded bundle and for the OTA bundle (runtime 1.7.0 on,
+  #644). The release lists the build's commits.
 - **Notes:** ___________
 
 ### P.6 — Rate limit on auth endpoints
@@ -1413,3 +1420,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-10-05: audit batch #655 #772 #773. P.12 (VoiceOver roles, labels and selected state), P.13 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.
 - 2026-10-05: first ticked boxes. K.3a and P.10–P.13 recorded as passed on a device by the owner after OTA f08483ab-0387-4b03-8148-5d949d7970fa (main at `78eebfb`); the record for each is on its Notes line, and the matching issues (#655 #772 #773 #775 #776 #778) carry the same note. G.3c (#773, opponent score buttons) is not yet recorded.
 - 2026-10-24: Maestro for the day's mobile work. New E.7a (the web page's `?src=web` invite link, signed out, return path kept; #972, #973) with `.maestro/invite-deep-link.yaml`, which also covers E.9; B.4 gained `.maestro/spanish-locale.yaml` (#671), F.6 the "Share game" absence checks (#731). The flow list in appendix B lists both new flows, and announcements came off its "Not covered" line (`announcement-reply.yaml`). None of the new flows has been run yet. Nothing marked passed.
+- 2026-10-24: runtime 1.7.0 binary branch (#644, #671). Target build moved to 1.7.0. B.4 gained the per-app Language check (`CFBundleLocalizations`), P.5 now expects symbolicated frames for the embedded and the OTA bundle under the native release name. Nothing marked passed.

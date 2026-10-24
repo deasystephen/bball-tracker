@@ -75,7 +75,7 @@ npm run lint && npm run type-check && npm run build   # lint is ESLint --max-war
 ```bash
 eas build --platform ios --profile preview          # TestFlight-style build
 eas build --platform all --profile production       # Store builds
-cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (runs the drift guard first)
+cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (needs SENTRY_AUTH_TOKEN; drift guard first, Sentry source map upload after)
 ```
 - **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code and native config in `app.config.js` (hashed by the drift guard) move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand; it lists every runtime recorded since the guard was built (1.4.0 onward) and which build it is.
 - `eas update` evaluates `app.config.js` on your machine: always pass `--environment production` and check that the CLI lists `APP_ENV` among the loaded variables, or the update ships `apiUrl: http://127.0.0.1:3000`. An update runs on the **second** launch after download.
