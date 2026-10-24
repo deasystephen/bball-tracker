@@ -24,7 +24,7 @@ locals {
 
 resource "aws_wafv2_web_acl" "alb" {
   name        = "${local.name_prefix}-alb"
-  description = "ALB edge rules, count mode (#764)"
+  description = "ALB edge rules, count mode, #764"
   scope       = "REGIONAL"
 
   default_action {
