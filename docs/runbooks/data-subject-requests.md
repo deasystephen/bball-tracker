@@ -2,7 +2,8 @@
 
 How a person's data leaves Hooplings, and how an operator handles a request that arrives by
 email instead of through the app. Backend design: `docs/plans/account-deletion.md` (#444).
-The privacy policy (#25) must describe **exactly** what "Retention" below says.
+The privacy policy (#25) must describe **exactly** what "Retention" below says. The draft lives in `web/app/privacy/page.tsx`; `web/__tests__/legal-pages.test.tsx` fails when a
+retention window the page states disappears from this section, so change both in one PR.
 
 ## At a glance
 
