@@ -7,12 +7,13 @@
  * filtered to unexpired rows.
  */
 
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import ManagePlayersScreen from '../../app/teams/[id]/players';
 import { useAuthStore } from '../../store/auth-store';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
+import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockShowToast = jest.fn();
@@ -168,6 +169,39 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     expect(getByText('Invite expired')).toBeTruthy();
     // Eve (no email) and Fay (email, never invited) are both Not invited
     expect(getAllByText('Not invited')).toHaveLength(2);
+  });
+
+  it('shows the roster and the Add Player form in Spanish on a Spanish device (#671)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const screen = render(<ManagePlayersScreen />);
+
+      expect(screen.getAllByText('Activo')).toHaveLength(2);
+      expect(screen.getAllByText('Sin invitar')).toHaveLength(2);
+      expect(screen.getByText('Invitar jugador')).toBeTruthy();
+      expect(screen.getByText('Buscar jugadores')).toBeTruthy();
+
+      fireEvent.press(screen.getByTestId('add-player-button'));
+
+      for (const text of [
+        'Agregar jugador',
+        'Nombre del jugador',
+        'Correo del jugador (opcional)',
+        'Número de camiseta',
+        'Posición',
+        'Correo del padre o tutor (opcional)',
+        'Cancelar',
+      ]) {
+        expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+      }
+      expect(screen.getByPlaceholderText('Escribe el nombre del jugador')).toBeTruthy();
+      expect(screen.queryByText(/Player Name|Parent\/Guardian|optional\)/)).toBeNull();
+      expect(screen.queryByPlaceholderText(/e\.g\.|Enter player name/)).toBeNull();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+    }
   });
 
   it('menu contents are contextual to the chip status', () => {

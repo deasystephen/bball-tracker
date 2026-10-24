@@ -8,8 +8,10 @@ import {
   guardianChildrenOnTeam,
   isRosteredOn,
   relationshipLabel,
+  relationshipNoun,
   GUARDIAN_RELATIONSHIPS,
 } from '../../utils/guardian';
+import { i18n } from '../../i18n';
 
 const steph = { childId: 'steph', childName: 'Steph Curry', childDeletedAt: null, relationship: 'FATHER' as const, isPrimary: true, isManaged: false };
 const seth = { childId: 'seth', childName: 'Seth Curry', childDeletedAt: null, relationship: 'FATHER' as const, isPrimary: true, isManaged: false };
@@ -47,5 +49,22 @@ describe('utils/guardian', () => {
     expect(relationshipLabel('FATHER')).toBe('Father');
     expect(relationshipLabel('OTHER')).toBe('Other');
     expect(relationshipLabel('???')).toBe('Guardian');
+  });
+
+  it('relationshipNoun gives the in-sentence form, from its own keys', () => {
+    expect(relationshipNoun('FATHER')).toBe('father');
+    expect(relationshipNoun('???')).toBe('guardian');
+  });
+
+  it('localizes both forms on a Spanish device (#671)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      expect(relationshipLabel('MOTHER')).toBe('Madre');
+      expect(relationshipLabel('???')).toBe('Tutor');
+      expect(relationshipNoun('MOTHER')).toBe('madre');
+      expect(relationshipNoun('OTHER')).toBe('otro');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

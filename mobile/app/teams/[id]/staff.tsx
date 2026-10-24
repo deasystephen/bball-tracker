@@ -166,7 +166,7 @@ export default function TeamStaffScreen() {
   if (error || !team || !staff) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Team not found'}
+        message={error instanceof Error ? error.message : t('teams.notFound')}
         onRetry={() => {
           refetchTeam();
           refetchStaff();

@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing } from '../../theme/spacing';
+import { useTranslation } from '../../i18n';
 import { typography } from '../../theme/typography';
 import { colors as themeColors } from '../../theme/colors';
 import { borderRadius } from '../../theme/border-radius';
@@ -25,29 +26,15 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface OnboardingSlide {
   icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
+  /** i18n keys under `onboarding`. */
+  titleKey: string;
+  descriptionKey: string;
 }
 
 const SCREENS: OnboardingSlide[] = [
-  {
-    icon: 'basketball-outline',
-    title: 'Track Every Play',
-    description:
-      'Record shots, assists, rebounds, and more in real time. Never miss a stat again with our intuitive game tracking.',
-  },
-  {
-    icon: 'stats-chart-outline',
-    title: 'Know Your Numbers',
-    description:
-      'Automatic stat aggregation gives you shooting percentages, averages, and trends. See how you improve over time.',
-  },
-  {
-    icon: 'people-outline',
-    title: 'Build Your Team',
-    description:
-      'Create teams, invite players, manage rosters and schedules. Everything you need to run your league in one place.',
-  },
+  { icon: 'basketball-outline', titleKey: 'onboarding.trackTitle', descriptionKey: 'onboarding.trackBody' },
+  { icon: 'stats-chart-outline', titleKey: 'onboarding.numbersTitle', descriptionKey: 'onboarding.numbersBody' },
+  { icon: 'people-outline', titleKey: 'onboarding.teamTitle', descriptionKey: 'onboarding.teamBody' },
 ];
 
 const ONBOARDED_KEY = 'hasOnboarded';
@@ -60,6 +47,7 @@ const SKIP_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -99,7 +87,7 @@ export default function OnboardingScreen() {
             hitSlop={SKIP_HIT_SLOP}
             accessibilityRole="button"
           >
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={styles.skipText}>{t('onboarding.skip')}</Text>
           </TouchableOpacity>
         )}
 
@@ -118,8 +106,8 @@ export default function OnboardingScreen() {
               <View style={styles.iconContainer}>
                 <Ionicons name={screen.icon} size={96} color="#FFFFFF" />
               </View>
-              <Text style={styles.title} accessibilityRole="header">{screen.title}</Text>
-              <Text style={styles.description}>{screen.description}</Text>
+              <Text style={styles.title} accessibilityRole="header">{t(screen.titleKey)}</Text>
+              <Text style={styles.description}>{t(screen.descriptionKey)}</Text>
             </View>
           ))}
         </ScrollView>
@@ -147,7 +135,7 @@ export default function OnboardingScreen() {
               activeOpacity={0.8}
               accessibilityRole="button"
             >
-              <Text style={styles.getStartedText}>Get Started</Text>
+              <Text style={styles.getStartedText}>{t('onboarding.getStarted')}</Text>
             </TouchableOpacity>
           )}
         </View>

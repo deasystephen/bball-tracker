@@ -84,8 +84,8 @@ export default function AnnouncementsScreen() {
       setShowCompose(false);
     } catch (err) {
       Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'Failed to create announcement'
+        t('common.error'),
+        err instanceof Error ? err.message : t('announcements.createFailed')
       );
     }
   };
@@ -137,7 +137,7 @@ export default function AnnouncementsScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <ThemedText variant="h2" heading style={styles.headerTitle}>
-          Announcements
+          {t('announcements.listTitle')}
         </ThemedText>
         {canPost && (
           <TouchableOpacity
@@ -145,7 +145,7 @@ export default function AnnouncementsScreen() {
             style={styles.composeButton}
             hitSlop={HEADER_ICON_HIT_SLOP}
             accessibilityRole="button"
-            accessibilityLabel="New announcement"
+            accessibilityLabel={t('announcements.composeA11y')}
           >
             <Ionicons name={showCompose ? 'close' : 'add'} size={24} color={colors.primary} />
           </TouchableOpacity>
@@ -160,8 +160,8 @@ export default function AnnouncementsScreen() {
         {showCompose && (
           <View style={[styles.composeForm, { paddingHorizontal: padding }]}>
             <Input
-              label="Title"
-              placeholder="Announcement title"
+              label={t('announcements.titleLabel')}
+              placeholder={t('announcements.titlePlaceholder')}
               value={title}
               onChangeText={setTitle}
               testID="announcement-title-input"
@@ -169,8 +169,8 @@ export default function AnnouncementsScreen() {
             {/* testID: an empty multiline input is absent from the iOS
                 accessibility tree, so Maestro cannot find it by placeholder. */}
             <Input
-              label="Message"
-              placeholder="Write your announcement..."
+              label={t('announcements.messageLabel')}
+              placeholder={t('announcements.messagePlaceholder')}
               value={body}
               onChangeText={setBody}
               multiline
@@ -178,7 +178,7 @@ export default function AnnouncementsScreen() {
               testID="announcement-body-input"
             />
             <Button
-              title="Post Announcement"
+              title={t('announcements.post')}
               onPress={handleSubmit}
               loading={createAnnouncement.isPending}
               disabled={!title.trim() || !body.trim()}
@@ -188,16 +188,16 @@ export default function AnnouncementsScreen() {
 
         {/* Announcements List */}
         {isLoading ? (
-          <LoadingSpinner message="Loading announcements..." fullScreen />
+          <LoadingSpinner message={t('announcements.loading')} fullScreen />
         ) : error ? (
           <ErrorState
-            message={error instanceof Error ? error.message : 'Failed to load announcements'}
+            message={error instanceof Error ? error.message : t('announcements.loadFailed')}
             onRetry={refetch}
           />
         ) : !data?.announcements?.length ? (
           <EmptyState
-            title="No Announcements"
-            message="No announcements have been posted yet."
+            title={t('announcements.emptyTitle')}
+            message={t('announcements.emptyMessage')}
           />
         ) : (
           <FlatList
@@ -207,7 +207,7 @@ export default function AnnouncementsScreen() {
             onEndReached={handleEndReached}
             onEndReachedThreshold={0.5}
             ListFooterComponent={
-              isFetchingNextPage ? <LoadingSpinner message="Loading more..." /> : null
+              isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : null
             }
             contentContainerStyle={{
               padding,

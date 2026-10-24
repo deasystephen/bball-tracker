@@ -73,7 +73,7 @@ export default function Stats() {
   // A failed request is not an empty result (#728); see hooks/useQueryErrorState.ts.
   const teamsState = useQueryErrorState(
     { error: teamsError, data: teams, refetch: refetchTeams },
-    'Failed to load teams'
+    t('teams.loadFailed')
   );
   // The two per-team queries share one panel, so they share one error decision and one
   // `error_shown` event: the season-stats failure wins when both fail.
@@ -87,7 +87,7 @@ export default function Stats() {
       refetch: () =>
         Promise.all([statsFailed ? refetchStats() : null, rosterFailed ? refetchRoster() : null]),
     },
-    'Failed to load stats'
+    t('stats.loadFailed')
   );
   const teamStatsFailed = teamStatsState.failed;
   const teamStatsMessage = teamStatsState.message;
@@ -108,7 +108,7 @@ export default function Stats() {
   const topAssister = sortedByAssists[0];
 
   if (teamsLoading || teamsState.retrying) {
-    return <LoadingSpinner message="Loading..." fullScreen />;
+    return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
   if (teamsState.failed) {
@@ -120,7 +120,7 @@ export default function Stats() {
             { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
           ]}
         >
-          <ThemedText variant="h1" heading>Statistics</ThemedText>
+          <ThemedText variant="h1" heading>{t('stats.title')}</ThemedText>
         </View>
         <ErrorState message={teamsState.message} onRetry={teamsState.retry} />
       </ThemedView>
@@ -136,12 +136,12 @@ export default function Stats() {
             { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
           ]}
         >
-          <ThemedText variant="h1" heading>Statistics</ThemedText>
+          <ThemedText variant="h1" heading>{t('stats.title')}</ThemedText>
         </View>
         <EmptyState
           icon="stats-chart-outline"
-          title="No Teams Yet"
-          message="Join or create a team to start tracking statistics."
+          title={t('stats.noTeamsTitle')}
+          message={t('stats.noTeamsMessage')}
         />
       </ThemedView>
     );
@@ -158,7 +158,7 @@ export default function Stats() {
           { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
         ]}
       >
-        <ThemedText variant="h1" heading>Statistics</ThemedText>
+        <ThemedText variant="h1" heading>{t('stats.title')}</ThemedText>
       </View>
 
       <ScrollView
@@ -212,11 +212,11 @@ export default function Stats() {
         )}
 
         {retryingTeamStats ? (
-          <LoadingSpinner message="Loading stats..." />
+          <LoadingSpinner message={t('games.loadingStats')} />
         ) : teamStatsFailed ? (
           <ErrorState message={teamStatsMessage} onRetry={retryTeamStats} />
         ) : isLoading ? (
-          <LoadingSpinner message="Loading stats..." />
+          <LoadingSpinner message={t('games.loadingStats')} />
         ) : (
           <>
             {/* Win/Loss Record with Streak */}
@@ -279,13 +279,13 @@ export default function Stats() {
             {rosterStats && rosterStats.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <ThemedText variant="h3" heading>Team Leaders</ThemedText>
+                  <ThemedText variant="h3" heading>{t('stats.teamLeaders')}</ThemedText>
                   <TouchableOpacity
                     onPress={() => router.push(`/teams/${selectedTeamId}/stats`)}
                     accessibilityRole="button"
                   >
                     <ThemedText variant="caption" color="primary">
-                      View All
+                      {t('stats.viewAll')}
                     </ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -327,7 +327,7 @@ export default function Stats() {
                         {topRebounder.reboundsPerGame.toFixed(1)}
                       </ThemedText>
                       <ThemedText variant="footnote" color="textSecondary">
-                        RPG
+                        {t('stats.abbr.rpg')}
                       </ThemedText>
                     </TouchableOpacity>
                   )}
@@ -368,7 +368,7 @@ export default function Stats() {
                         {topScorer.pointsPerGame.toFixed(1)}
                       </ThemedText>
                       <ThemedText variant="footnote" color="textSecondary">
-                        PPG
+                        {t('stats.abbr.ppg')}
                       </ThemedText>
                     </TouchableOpacity>
                   )}
@@ -409,7 +409,7 @@ export default function Stats() {
                         {topAssister.assistsPerGame.toFixed(1)}
                       </ThemedText>
                       <ThemedText variant="footnote" color="textSecondary">
-                        APG
+                        {t('stats.abbr.apg')}
                       </ThemedText>
                     </TouchableOpacity>
                   )}
@@ -421,8 +421,8 @@ export default function Stats() {
             {(!seasonStats || seasonStats.gamesPlayed === 0) && (
               <EmptyState
                 icon="stats-chart-outline"
-                title="No Statistics Yet"
-                message="Complete some games to see team and player statistics here."
+                title={t('stats.noStatsTitle')}
+                message={t('stats.noStatsMessage')}
               />
             )}
           </>

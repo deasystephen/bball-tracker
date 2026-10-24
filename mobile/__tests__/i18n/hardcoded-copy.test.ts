@@ -15,14 +15,14 @@
  * access-guard message, or a validation error. What counts is decided by
  * position, never by spelling: `__tests__/helpers/hardcoded-copy.ts`.
  *
- * Allowed: literals with no letter (numbers, `·`, `—`, `%`), the product name
+ * Allowed: literals with no letter (numbers, `·`, `—`, `%`), URLs, the product name
  * (`ALLOWED_LITERALS`), and code that only runs in a development build
  * (`__DEV__ && …`). Everything else goes into `i18n/locales/en.json` and
  * `es.json`; `locale-parity.test.ts` keeps the two in step.
  *
- * `PENDING_FILES` lists the screens not converted yet. It only shrinks: an
- * entry with no findings left fails, so it is removed in the PR that converts
- * the file, and the list is empty once the conversion is done.
+ * `PENDING_FILES` listed the screens not converted yet while the conversion ran
+ * in three PRs; it only shrank (an entry with no findings left failed) and has
+ * been empty since the last one.
  */
 
 import path from 'path';
@@ -36,34 +36,11 @@ const SCANNED_DIRS = ['app', 'components', 'hooks', 'services', 'utils'] as cons
 /** Fewer files than this means the scan went wrong, not that the app shrank. */
 const MIN_SCANNED_FILES = 100;
 
-/** Files still carrying English literals, converted by the next #671 PRs. */
-const PENDING_FILES: readonly string[] = [
-  'app/(tabs)/home.tsx',
-  'app/(tabs)/invitations.tsx',
-  'app/(tabs)/profile.tsx',
-  'app/(tabs)/stats.tsx',
-  'app/(tabs)/teams.tsx',
-  'app/about.tsx',
-  'app/account/delete.tsx',
-  'app/admin/index.tsx',
-  'app/admin/leagues/[id].tsx',
-  'app/admin/leagues/create.tsx',
-  'app/admin/seasons/create.tsx',
-  'app/auth/callback.tsx',
-  'app/invite/[token].tsx',
-  'app/login.tsx',
-  'app/onboarding/index.tsx',
-  'app/onboarding/name.tsx',
-  'app/players/[id]/stats.tsx',
-  'app/teams/[id].tsx',
-  'app/teams/[id]/announcements.tsx',
-  'app/teams/[id]/edit.tsx',
-  'app/teams/[id]/players.tsx',
-  'app/teams/[id]/players/[playerId]/guardians.tsx',
-  'app/teams/[id]/staff.tsx',
-  'app/teams/[id]/stats.tsx',
-  'app/teams/create.tsx',
-];
+/**
+ * Files still carrying English literals. Empty since #671 finished the conversion; a
+ * future exception needs a reason here and a follow-up issue, never a silent entry.
+ */
+const PENDING_FILES: readonly string[] = [];
 
 function scannedFiles(): string[] {
   const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.ts', '.tsx']))
@@ -133,6 +110,7 @@ describe('hard-coded copy (#671)', () => {
           toast.showToast('Team deleted', 'success');
           useAccessGuard(ready, allowed, 'Coaches only', { mode: 'replace' });
           setNameError('Name is required');
+          toast.showToast(getApiErrorMessage(error, 'Failed to save'), 'error');
           errors.name = 'Team name is required';
           <Tabs.Screen options={{ title: 'Home' }} />;
         `)
@@ -145,6 +123,7 @@ describe('hard-coded copy (#671)', () => {
         "'Team deleted'",
         "'Coaches only'",
         "'Name is required'",
+        "'Failed to save'",
         "'Team name is required'",
         "'Home'",
       ]);
@@ -158,7 +137,9 @@ describe('hard-coded copy (#671)', () => {
               {status === 'LIVE' && <Badge />}
               <ThemedText>{t('games.title')}</ThemedText>
               <ThemedText>{count} · {total}</ThemedText>
+              <ThemedText>&ldquo;{quote}&rdquo;</ThemedText>
               <ThemedText>Hooplings</ThemedText>
+              <Input placeholder="https://chat.whatsapp.com/..." />
               <Button title={t('common.save')} variant="primary" onPress={() => router.push('/teams')} />
               {__DEV__ && <ThemedText>Debug</ThemedText>}
             </View>
