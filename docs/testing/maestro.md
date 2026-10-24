@@ -6,6 +6,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Any major new mobile functionality must include a Maestro E2E test** in `.maestro/`
 - Flows test full user journeys: login → navigate → perform action → assert result
 - All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
+- **Flows select by English copy on an en-US simulator.** Every string and label they match is an
+  `en.json` value (`tabs.tabA11y` gives "Teams tab", `common.goBack` "Go back"), so changing English copy
+  in `en.json` is a flow change; run the flows that match it. Spanish is covered by Jest
+  (`__tests__/i18n/`), not by Maestro.
 - Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
 - When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
 - **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**

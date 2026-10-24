@@ -16,14 +16,18 @@
     "yesterday": "Yesterday",
     "changePhoto": "Change photo",
     "loadMoreFailed": "Couldn't load more. Tap to retry",
-    "profilePhoto": "Profile Photo"
-  },
-  "navigation": {
-    "home": "Home",
-    "games": "Games",
-    "stats": "Stats",
-    "profile": "Profile",
-    "manage": "Manage"
+    "profilePhoto": "Profile Photo",
+    "goBack": "Go back",
+    "done": "Done",
+    "closeMenu": "Close menu",
+    "closePicker": "Close picker",
+    "somethingWentWrong": "Something went wrong",
+    "tryAgain": "Try Again",
+    "errorA11y": "Error: {{title}}. {{message}}",
+    "unexpectedError": "An unexpected error occurred. Please try again.",
+    "print": "Print",
+    "sortBy": "Sort by {{label}}",
+    "loadingA11y": "{{title}}, loading"
   },
   "leagues": {
     "title": "Leagues",
@@ -152,13 +156,17 @@
     "scheduled": "Scheduled",
     "inProgress": "In Progress",
     "finished": "Finished",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "scoreA11y": "Score: {{home}} {{homeScore}}, {{away}} {{awayScore}}",
+    "joinFailed": "Failed to join game"
   },
   "usage": {
     "title": "Plan Usage",
     "teams": "Teams",
     "seasons": "Seasons",
-    "upgradeForUnlimited": "Upgrade for unlimited"
+    "upgradeForUnlimited": "Upgrade for unlimited",
+    "unlimited": "{{used}} · Unlimited",
+    "ofLimit": "{{used}} of {{limit}}"
   },
   "roleOnboarding": {
     "title": "How will you use Hooplings?",
@@ -256,5 +264,45 @@
     "addPlayerEmailFailed": "The parent invite email failed to send. Resend on the player’s Guardians screen becomes available in a couple of minutes.",
     "sent": "Invitation sent to {{email}}",
     "inviteFailed": "Failed to send invitation"
+  },
+  "avatar": {
+    "permissionTitle": "Permission Required",
+    "permissionCamera": "Please allow access to your camera in Settings.",
+    "permissionLibrary": "Please allow access to your photo library in Settings.",
+    "takePhoto": "Take Photo",
+    "chooseFromLibrary": "Choose from Library",
+    "removePhoto": "Remove Photo"
+  },
+  "tabs": {
+    "home": "Home",
+    "teams": "Teams",
+    "track": "Track",
+    "stats": "Stats",
+    "profile": "Profile",
+    "invitations": "Invitations",
+    "tabA11y": "{{label}} tab",
+    "trackA11y": "Track game tab"
+  },
+  "roster": {
+    "status": {
+      "deleted": "Deleted",
+      "active": "Active",
+      "invited": "Invited",
+      "inviteExpired": "Invite expired",
+      "notInvited": "Not invited"
+    },
+    "emailIssue": {
+      "bounced": "Email bounced",
+      "complaint": "Email blocked",
+      "bouncedExplanation": "Mail to this address bounced, so invitations are not reaching it. Check it for typos.",
+      "complaintExplanation": "The owner of this address reported our mail as spam, so nothing more is delivered to it. Check that it belongs to this player."
+    }
+  },
+  "invitations": {
+    "expired": "Expired",
+    "expiresToday": "Expires today",
+    "expiresTomorrow": "Expires tomorrow",
+    "expiresInDays_one": "Expires in {{count}} day",
+    "expiresInDays_other": "Expires in {{count}} days"
   }
 }

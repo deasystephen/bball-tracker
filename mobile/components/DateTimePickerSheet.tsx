@@ -18,6 +18,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 export type DateTimePickerSheetMode = 'date' | 'time';
 
@@ -37,6 +38,7 @@ type SheetProps = Omit<DateTimePickerSheetProps, 'visible'>;
 
 function IosSheet({ mode, value, title, onConfirm, onCancel }: SheetProps) {
   const { colors, colorScheme } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   // Mounted only while the sheet is open, so every opening starts from `value`.
   const [draft, setDraft] = useState(value);
@@ -49,7 +51,7 @@ function IosSheet({ mode, value, title, onConfirm, onCancel }: SheetProps) {
           style={styles.backdrop}
           onPress={onCancel}
           accessibilityRole="button"
-          accessibilityLabel="Close picker"
+          accessibilityLabel={t('common.closePicker')}
         />
         <View
           style={[
@@ -61,12 +63,12 @@ function IosSheet({ mode, value, title, onConfirm, onCancel }: SheetProps) {
             <TouchableOpacity
               onPress={onCancel}
               accessibilityRole="button"
-              accessibilityLabel="Cancel"
+              accessibilityLabel={t('common.cancel')}
               testID="date-time-picker-cancel"
               style={styles.toolbarButton}
             >
               <ThemedText variant="body" color="textSecondary">
-                Cancel
+                {t('common.cancel')}
               </ThemedText>
             </TouchableOpacity>
             <ThemedText variant="bodyBold" accessibilityRole="header">
@@ -75,12 +77,12 @@ function IosSheet({ mode, value, title, onConfirm, onCancel }: SheetProps) {
             <TouchableOpacity
               onPress={() => onConfirm(draft)}
               accessibilityRole="button"
-              accessibilityLabel="Done"
+              accessibilityLabel={t('common.done')}
               testID="date-time-picker-done"
               style={[styles.toolbarButton, styles.toolbarButtonEnd]}
             >
               <ThemedText variant="bodyBold" color="primary">
-                Done
+                {t('common.done')}
               </ThemedText>
             </TouchableOpacity>
           </View>

@@ -16,6 +16,42 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   they ship with the next `eas build`, not an OTA. Brand navy `#1C2742` is also the splash and
   adaptive-icon background in `app.config.js`.
 
+### Internationalization: English and Spanish (#671)
+- **Spanish is a supported locale** (owner decision 2026-10-24, GA blocker). `i18n/config.ts` picks the
+  device language (`es` → `es.json`, anything else falls back to `en.json`); there is no in-app picker.
+  A device set to Español must show no English anywhere, VoiceOver labels included; the product name
+  "Hooplings" is the only literal that stays as is. Agent-written Spanish is a draft: a native speaker
+  reviews `es.json` before App Store submission.
+- **Every user-facing string goes through `t()`**: JSX text, `title`/`label`/`placeholder`/`message`/
+  `accessibilityLabel` props, `ActionMenu` items, `Alert.alert` titles, messages and buttons, toasts,
+  `useAccessGuard` messages, validation errors. Counts use i18next plurals (`key_one`/`key_other` with
+  `{ count }`), never `n === 1 ? '' : 's'`. A class component or a plain helper (utils, hooks, services)
+  calls `i18n.t(...)` from `i18n/index.ts`; it reads the current language on every call. Server error
+  text from `getApiErrorMessage` stays English (out of scope by decision); every fallback passed to it is
+  translated.
+- **Shared components resolve their own defaults through `t()`**: `ErrorState` (title, Try Again, Go
+  back, the `Error: {title}. {message}` region label), `ActionMenu` (Close, Close menu),
+  `DateTimePickerSheet` (Cancel, Done, Close picker), `SortPills` (`common.sortBy`, "Sort by {label}",
+  unless a `labelPrefix` is passed), `BackButton` (`common.goBack`), `Button` (`common.loadingA11y`),
+  `UsageMeter`, `PrintButton`, `AvatarPicker`, and `ErrorBoundary` (class, `i18n.t`). Derived labels in
+  utils are localized at the source: `rosterStatusLabel`, `emailDeliveryIssueLabel`/`Explanation`,
+  `formatInvitationExpiry`, `scoreAccessibilityLabel`. The guard does not read `return` or `throw`
+  literals, so each such helper has a Spanish unit test.
+- **English values are pinned.** Jest pins the locale to `en` and the Maestro flows select by English
+  text and labels, so converting a literal keeps its `en.json` value byte-identical; changing English
+  copy is a flow change. Namespaces: `common`, `tabs`, `avatar`, `usage`, `roster`, `invitations`,
+  `games`, plus the older per-feature ones. The tab bar reads `tabs.*`; the unused `navigation.*`
+  namespace was removed.
+- **Guard:** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`, `components/`, `hooks/`, `services/` and `utils/`
+  and fails on a user-facing literal (scanner: `__tests__/helpers/hardcoded-copy.ts`; it decides by
+  position, so `status === 'LIVE'` and `t('games.title')` pass). Allowed: literals with no letter, the
+  product name, and `__DEV__`-only code. `PENDING_FILES` lists the screens not converted yet and only
+  shrinks (a listed file with no findings fails). `locale-parity.test.ts` keeps the key sets equal.
+  Spanish renders: `__tests__/i18n/spanish-shared.test.tsx` (shared components, tab bar, derived labels).
+- **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
+  yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
+  the app and localizes system UI around it.
+
 ### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
   (`useInfiniteGames`, `useInfiniteTeams`, `useInfiniteAnnouncements`) wired to `FlatList.onEndReached`; the
