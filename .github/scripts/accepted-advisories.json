@@ -4,14 +4,6 @@
   "web": [],
   "mobile": [
     {
-      "ghsa": "GHSA-vfj7-8cjw-p6xm",
-      "package": "braces",
-      "range": "<=3.0.3",
-      "severity": "high",
-      "why": "Stack-exhaustion DoS through deeply nested brace patterns. Every published braces (<= 3.0.3, the latest) is affected and the advisory lists no patched version, so no override can lift it. In the production tree it arrives through micromatch on two paths, both build or test tooling and never in the app bundle: Metro (metro-file-map under @sentry/react-native, expo and react-native's CLI plugin) and react-native's optional peer @react-native/jest-preset (babel-jest, @jest/transform; why npm suggests jest 30.5.2). It only parses patterns from our own config. The GitHub alert was dismissed by the owner on 2026-10-18 (#924).",
-      "revisit": "When braces publishes a release the advisory names as patched: add an override (or take the upstream bump) and remove this entry in the same PR."
-    },
-    {
       "ghsa": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
       "range": "<=1.4.0",

@@ -10,5 +10,13 @@
     }
   ],
   "web": [],
-  "mobile": []
+  "mobile": [
+    {
+      "override": "zod@^3",
+      "consumer": "node_modules/expo/node_modules/@expo/cli",
+      "gets": "^4.6.6",
+      "ghsa": "GHSA-mrhx-c7xc-m3w5",
+      "why": "Every zod below 4.6.6 is vulnerable (memory exhaustion validating oversized constrained collections) and no patched 3.x exists. @expo/cli 57.0.31 (inside expo, which moves only with a native build) declares ^3.25.76, and every SDK 57 @expo/cli through 57.0.32 still does. Its only zod use is two dev-server schema files (DevToolsPlugin.schema.js, createMCPDevToolsExtensionSchema.js) built from z.object/string/enum/array/union/literal/url/strict and read through safeParse, error.issues and error.message, all present in zod 4; they were exercised against 4.6.7 when this entry was added. One path is untested: with the optional expo-mcp package (not installed here, nor @modelcontextprotocol/sdk), the MCP extension schema is handed to that package's registerTool, which then sees a zod 4 schema. Nothing in the app bundle imports zod. Retire when expo is bumped to a release whose @expo/cli declares zod 4: that bump turns backend/tests/infra/check-override-ranges.test.ts red (the real-lockfile test expects this accepted line), and the fix is to remove the override, this entry and that expectation in the same PR."
+    }
+  ]
 }
