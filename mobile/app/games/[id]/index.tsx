@@ -240,13 +240,6 @@ export default function GameDetailScreen() {
               <Ionicons name="trash-outline" size={24} color="#FFFFFF80" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Share game"
-          >
-            <Ionicons name="share-outline" size={24} color="#FFFFFF80" />
-          </TouchableOpacity>
         </View>
 
         {/* Status */}
@@ -548,9 +541,12 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
   },
+  // The delete icon renders only for managers on scheduled or finished games;
+  // the row keeps its 44pt height without it so the header never shifts.
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: MIN_TOUCH_TARGET,
     marginBottom: spacing.sm,
   },
   backButton: {
@@ -559,8 +555,8 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
-  // Delete and share sit side by side with no gap, so they grow to 44pt
-  // rather than take hitSlop (overlapping slop would hand one the other's taps).
+  // The delete icon grows to 44pt with minWidth/minHeight rather than take
+  // hitSlop, matching the header row's 44pt height.
   iconButton: {
     padding: spacing.sm,
     minWidth: MIN_TOUCH_TARGET,

@@ -381,7 +381,7 @@ never inline a role check in a screen:
   An icon button keeps its drawn size and gets `hitSlop={touchTargetHitSlop(<icon> + 2 * <padding>)}`
   (`HEADER_ICON_HIT_SLOP` for the usual 24pt header icon with `padding: spacing.sm`), so neither the
   glyph nor the header around it moves; two icon buttons side by side with little or
-  no gap (season edit/delete, game delete/share, the staff and guardian row actions) grow to 44pt
+  no gap (season edit/delete, the staff and guardian row actions) grow to 44pt
   with `minWidth`/`minHeight` instead, because overlapping slop hands the later sibling the earlier
   one's taps. A wide text pill that is too short takes height-only slop,
   `touchTargetHitSlop(MIN_TOUCH_TARGET, <height>)` ("Add Season" on league detail). Hoist every slop to

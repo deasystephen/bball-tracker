@@ -164,6 +164,27 @@ describe('GameDetailScreen permission gating', () => {
     });
   });
 
+  // #731: the header carried an inert share icon (a button with no onPress).
+  // It was removed; no role on any status may see it.
+  describe('no share control in the header', () => {
+    it.each(['SCHEDULED', 'IN_PROGRESS', 'FINISHED'] as const)(
+      '%s game: neither coach nor player sees a "Share game" button',
+      (status) => {
+        mockGame = { ...baseGame, status };
+        for (const user of [
+          { id: 'coach-1', role: 'COACH' as const },
+          { id: 'player-1', role: 'PLAYER' as const },
+        ]) {
+          signIn(user);
+          const { queryByLabelText, unmount } = render(<GameDetailScreen />);
+          expect(queryByLabelText('Go back')).toBeTruthy();
+          expect(queryByLabelText('Share game')).toBeNull();
+          unmount();
+        }
+      },
+    );
+  });
+
   describe('FINISHED game', () => {
     beforeEach(() => {
       mockGame = { ...baseGame, status: 'FINISHED', homeScore: 50, awayScore: 40 };

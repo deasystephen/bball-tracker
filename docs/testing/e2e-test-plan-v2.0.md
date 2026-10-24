@@ -681,6 +681,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canManageTeam`
 - **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game, then repeat with a throwaway FINISHED game that has tracked stats). Rendered only with `canManage` (`canManageTeam`), on SCHEDULED and FINISHED games — never while IN_PROGRESS.
 - **Expected:** Removed from list. For the finished game the confirm warns that recorded stats are removed from player and team season totals; after delete the Stats tab reflects the removal without a manual refresh.
+- **Header controls (#731):** the dark game detail header holds only the back arrow ("Go back") and, when rendered, the trash icon; there is no share icon. As a player on any game, or a coach on an IN_PROGRESS one, the header shows the back arrow alone, at the same height, and VoiceOver announces no "Share game" button. Jest: `__tests__/app/game-detail-gating.test.tsx`.
 - **Notes:** ___________
 
 ---
