@@ -16,14 +16,18 @@
     "yesterday": "Ayer",
     "changePhoto": "Cambiar foto",
     "loadMoreFailed": "No se pudo cargar más. Toca para reintentar",
-    "profilePhoto": "Foto de perfil"
-  },
-  "navigation": {
-    "home": "Inicio",
-    "games": "Juegos",
-    "stats": "Estadísticas",
-    "profile": "Perfil",
-    "manage": "Administrar"
+    "profilePhoto": "Foto de perfil",
+    "goBack": "Volver",
+    "done": "Listo",
+    "closeMenu": "Cerrar menú",
+    "closePicker": "Cerrar selector",
+    "somethingWentWrong": "Algo salió mal",
+    "tryAgain": "Reintentar",
+    "errorA11y": "Error: {{title}}. {{message}}",
+    "unexpectedError": "Ocurrió un error inesperado. Inténtalo de nuevo.",
+    "print": "Imprimir",
+    "sortBy": "Ordenar por {{label}}",
+    "loadingA11y": "{{title}}, cargando"
   },
   "leagues": {
     "title": "Ligas",
@@ -152,13 +156,17 @@
     "scheduled": "Programado",
     "inProgress": "En Progreso",
     "finished": "Finalizado",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelado",
+    "scoreA11y": "Marcador: {{home}} {{homeScore}}, {{away}} {{awayScore}}",
+    "joinFailed": "No se pudo conectar al partido"
   },
   "usage": {
     "title": "Uso del Plan",
     "teams": "Equipos",
     "seasons": "Temporadas",
-    "upgradeForUnlimited": "Mejora para uso ilimitado"
+    "upgradeForUnlimited": "Mejora para uso ilimitado",
+    "unlimited": "{{used}} · Ilimitado",
+    "ofLimit": "{{used}} de {{limit}}"
   },
   "roleOnboarding": {
     "title": "¿Cómo usarás Hooplings?",
@@ -256,5 +264,45 @@
     "addPlayerEmailFailed": "No se pudo enviar el correo de invitación al padre o tutor. Podrás usar Reenviar en la pantalla de Tutores del jugador en un par de minutos.",
     "sent": "Invitación enviada a {{email}}",
     "inviteFailed": "No se pudo enviar la invitación"
+  },
+  "avatar": {
+    "permissionTitle": "Permiso necesario",
+    "permissionCamera": "Permite el acceso a tu cámara en Ajustes.",
+    "permissionLibrary": "Permite el acceso a tus fotos en Ajustes.",
+    "takePhoto": "Tomar foto",
+    "chooseFromLibrary": "Elegir de la galería",
+    "removePhoto": "Quitar foto"
+  },
+  "tabs": {
+    "home": "Inicio",
+    "teams": "Equipos",
+    "track": "Partidos",
+    "stats": "Estadísticas",
+    "profile": "Perfil",
+    "invitations": "Invitaciones",
+    "tabA11y": "Pestaña {{label}}",
+    "trackA11y": "Pestaña Registrar partido"
+  },
+  "roster": {
+    "status": {
+      "deleted": "Eliminado",
+      "active": "Activo",
+      "invited": "Invitado",
+      "inviteExpired": "Invitación vencida",
+      "notInvited": "Sin invitar"
+    },
+    "emailIssue": {
+      "bounced": "Correo rebotado",
+      "complaint": "Correo bloqueado",
+      "bouncedExplanation": "Los correos a esta dirección rebotaron, así que las invitaciones no le llegan. Revisa que esté bien escrita.",
+      "complaintExplanation": "El titular de esta dirección marcó nuestros correos como spam, así que ya no se le entrega nada. Comprueba que pertenezca a este jugador."
+    }
+  },
+  "invitations": {
+    "expired": "Vencida",
+    "expiresToday": "Vence hoy",
+    "expiresTomorrow": "Vence mañana",
+    "expiresInDays_one": "Vence en {{count}} día",
+    "expiresInDays_other": "Vence en {{count}} días"
   }
 }

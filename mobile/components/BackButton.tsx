@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { HEADER_ICON_HIT_SLOP } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 const BACK_ICON_SIZE = 24;
 
@@ -32,6 +33,7 @@ export interface BackButtonProps {
 
 export function BackButton({ onPress, style, color, icon = 'arrow-back' }: BackButtonProps) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <View style={style}>
@@ -40,7 +42,7 @@ export function BackButton({ onPress, style, color, icon = 'arrow-back' }: BackB
         style={styles.button}
         hitSlop={HEADER_ICON_HIT_SLOP}
         accessibilityRole="button"
-        accessibilityLabel="Go back"
+        accessibilityLabel={t('common.goBack')}
       >
         <Ionicons name={icon} size={BACK_ICON_SIZE} color={color ?? colors.text} />
       </TouchableOpacity>

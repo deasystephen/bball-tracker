@@ -128,6 +128,13 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   names differ from `en.json` (i18next format syntax counts by name: `{{count, number}}` is
   `count`), naming each offender. Add a new key to both files in the same change; a new locale file is
   picked up automatically.
+- **No user-facing literal in source (#671).** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`,
+  `components/`, `hooks/`, `services/` and `utils/` and fails on JSX text, a copy prop (`title`, `label`,
+  `placeholder`, `accessibilityLabel`, …), an `Alert.alert` / toast / `useAccessGuard` message or a
+  validation error written as a literal. Use `t()` (or `i18n.t()` outside a component). A Spanish
+  render test switches the real instance with `await i18n.changeLanguage('es')` and restores `en` in an
+  `afterEach` wrapped in `act` (mounted components re-render on the switch); see
+  `__tests__/i18n/spanish-shared.test.tsx`.
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)
 - They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,
