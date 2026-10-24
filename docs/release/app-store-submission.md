@@ -170,7 +170,7 @@ issue named.
 | --- | --- | --- |
 | Age rating | Depends on the intended audience; drives the "data collected from children" answers | #451 |
 | Whether the app is declared child-directed (Kids category, "Made for Kids") | Interacts with the COPPA read in the privacy policy work and must not be answered independently of it | #25, #451 |
-| Privacy Policy URL | Required field; the document is not published. The labels in section 2 must match it, including the retention statement in `docs/runbooks/data-subject-requests.md` | #25 |
+| Privacy Policy URL | Required field; the document is drafted (`web/app/privacy/page.tsx`, to be served at `https://hooplings.com/privacy`) but not reviewed or published, and the web app is not deployed (#30). The labels in section 2 must match it, including the retention statement in `docs/runbooks/data-subject-requests.md` | #25 |
 | Support URL | Required field. The inbox exists (`support@hooplings.com`, #555) and the app and every email name it (#450); the **page** does not, and it needs the web deploy | #450, #30 |
 | Screenshots for the required device sizes | Not producible from code | #451 |
 | Demo account credentials and seeded data | Placeholders in section 3 | #451 |

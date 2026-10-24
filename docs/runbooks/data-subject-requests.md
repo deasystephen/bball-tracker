@@ -2,7 +2,8 @@
 
 How a person's data leaves Hooplings, and how an operator handles a request that arrives by
 email instead of through the app. Backend design: `docs/plans/account-deletion.md` (#444).
-The privacy policy (#25) must describe **exactly** what "Retention" below says.
+The privacy policy (#25) must describe **exactly** what "Retention" below says. The draft lives in `web/app/privacy/page.tsx`; `web/__tests__/legal-pages.test.tsx` fails when a
+retention window the page states disappears from this section, so change both in one PR.
 
 ## At a glance
 
@@ -43,8 +44,8 @@ tombstoned as described next and the response says `erased: false`. In ONE trans
   deleted outright if it is empty. Roster players they had created stay managed but lose their
   `managedById`.
 - **Kept, without the name:** `TeamMember` rows (the roster shows "Deleted user" until a coach
-  removes it — Remove-from-roster is stats-safe), `GameEvent`, `PlayerStats`, announcements they
-  authored, and team invitations they **sent**. Any of these is what keeps the tombstone; with
+  removes it — Remove-from-roster is stats-safe), `GameEvent`, `PlayerStats`, announcements and
+  announcement replies they authored, and team invitations they **sent**. Any of these is what keeps the tombstone; with
   none of them the row is erased.
 - **After the transaction commits (best-effort):** the WorkOS user is deleted, which also kills
   every session and refresh token. If that call fails the response says `identityDeleted: false`
@@ -66,7 +67,7 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 ## Retention (this is what the privacy policy must say)
 
 - An account with no history — never on a roster, no game events or statistics, no invitations
-  sent or received, no announcements — is **erased**: the record is deleted and nothing about it
+  sent or received, no announcements or announcement replies — is **erased**: the record is deleted and nothing about it
   remains in the application database. Outside the database, the request-log lines and the
   vendor records described below still carry the internal id until their windows expire.
 - Otherwise the tombstone keeps only the internal id, the role, the creation date and the
@@ -74,7 +75,11 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
 - RDS automated backups retain the pre-deletion data for up to **7 days**
-  (`backup_retention_period` in `infra/rds.tf`); they are not edited.
+  (`backup_retention_period` in `infra/rds.tf`); they are not edited. **Manual snapshots**
+  (taken before risky migrations and major upgrades, `docs/runbooks/rds-backup-restore.md`) have
+  no expiry and keep the pre-deletion data until an operator deletes them; one exists today
+  (`bball-tracker-production-pre-pg18-202609072218`, 2026-09-07). The privacy policy (#25) leaves
+  their maximum age as an owner decision.
 - **Error reports (Sentry)** are kept for Sentry's retention window (90 days by default). No name,
   email or photo is sent (`sendDefaultPii: false` on both sides).
   - Backend reports carry the internal user id of the caller (`scope.setUser({ id })` in
@@ -100,7 +105,9 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   and `requestId` whenever the request was authenticated (`setLogContextUser` from
   `backend/src/utils/log-context.ts`, called by `backend/src/api/auth/middleware.ts`;
   `backend/src/api/middleware/request-logger.ts`). The
-  `Account deleted` event logs the deleted user's id, the actor's id and the mode. At the
+  `Account deleted` event logs the deleted user's id, the actor's id and the mode. No line carries
+  a client IP address except `Socket handshake rate limited` (`backend/src/websocket/game-events.ts`,
+  a `warn` when a live-game connection is refused by the per-IP limiter). At the
   production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name
   and no secret URL (paths and query strings go through `utils/redact.ts`), and email addresses
   are hashed with `hashRecipient()` at every level, `debug` included. A failed send is logged by
@@ -120,7 +127,12 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   Datadog) and in CloudWatch, keyed on that id, until their windows expire. To remove them sooner,
   use each vendor's own deletion request for that id (CloudWatch has none short of deleting the
   log stream).
-- Email delivery logs at SES keep hashed recipients only.
+- Email delivery logs at SES keep hashed recipients only, with two exceptions that hold the
+  address itself: the SES **account-level suppression list** (`suppressed_reasons = ["BOUNCE",
+  "COMPLAINT"]` in `infra/ses-events.tf`) keeps a permanently bounced or complaining address until
+  it is removed, and the raw SES event (which names the recipient) sits on the `ses-events` SQS
+  queue until the consumer deletes it, or on its dead-letter queue, for at most **14 days**
+  (`message_retention_seconds = 1209600`).
 
 ## Operator procedure (request by email)
 
