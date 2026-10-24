@@ -121,9 +121,9 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - Every email template ends with the shared footer and is listed in `renders` in `tests/services/mailer.test.ts`. Never format a date in a template with a bare `toLocaleDateString()`; use `utils/format-date.ts` (ECS runs in UTC).
 - Every email flag returned to a client is per send (`emails.player`, `emailSent`); a failed SES send is reported, never thrown and never silent.
 - Nothing in the app blocks a send to a bounced address; SES's suppression list is the gate and the next delivery clears the roster flag. Don't add an app-level skip.
-- **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address.
+- **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address. The web server logs only through `web/lib/log.ts` (route patterns, never a request path; `docs/deployment/web-app.md#logs-and-errors`).
 - `LOG_LEVEL` is the log threshold (default `info`, set in `infra/task-definition.json`). A service method that mutates data logs one info-level domain event, ids only; `requestId`/`userId` come from the request context. No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
-- `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array.
+- `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array. CORS `allowedHeaders` is an explicit list: a new header a browser sends goes there. `X-Request-Id` / `X-Hooplings-Client` contract: `docs/architecture/backend-services.md#logging`.
 
 ### Mobile
 - The API host is decided in one place, `config/env.ts#getApiUrl()`; the sign-in redirect scheme is `APP_URL_SCHEME` passed explicitly (never read the scheme off the OTA manifest).

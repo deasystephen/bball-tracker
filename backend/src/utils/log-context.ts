@@ -2,7 +2,8 @@
  * Per-request log context carried on an AsyncLocalStorage store.
  *
  * `requestContext` (api/middleware/request-context.ts) opens a store for every
- * HTTP request with its `requestId`; `authenticate` adds the `userId` once the
+ * HTTP request with its `requestId` (and `client`, when the request sent a
+ * valid `X-Hooplings-Client`, #963); `authenticate` adds the `userId` once the
  * bearer token resolves. `utils/logger.ts` merges the store into every log
  * entry written while the request is being handled, so a service method can
  * log a domain event with ids only and the line still carries the request it
@@ -17,6 +18,8 @@ import { AsyncLocalStorage } from 'async_hooks';
 export interface LogContextStore {
   requestId?: string;
   userId?: string;
+  /** The validated `X-Hooplings-Client` value (#963), when the request sent one. */
+  client?: string;
 }
 
 const storage = new AsyncLocalStorage<LogContextStore>();

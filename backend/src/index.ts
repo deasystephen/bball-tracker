@@ -14,6 +14,7 @@ import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
+import { CLIENT_HEADER, REQUEST_ID_HEADER } from './api/middleware/request-headers';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
@@ -60,16 +61,26 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
+
+// Request context and logging, ahead of CORS and the body parsers (#963): a
+// preflight, a malformed JSON body (400) or an oversized one (413) is answered
+// before any router, and it still gets an X-Request-Id, a log context and an
+// `HTTP request` line.
+app.use(requestContext);
+app.use(requestLogger);
+
+// The browser (the web invite page's accept, #964) may send only these
+// request headers; X-Request-Id and X-Hooplings-Client are the correlation
+// headers of #963 (api/middleware/request-headers.ts). X-Request-Id is exposed
+// so a browser script can read the id the API logged the request under.
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', REQUEST_ID_HEADER, CLIENT_HEADER],
+  exposedHeaders: [REQUEST_ID_HEADER],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Request context and logging
-app.use(requestContext);
-app.use(requestLogger);
 
 // Health check endpoint.
 // This backs the ECS container health check, so it pings the database: a

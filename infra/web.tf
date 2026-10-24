@@ -73,9 +73,10 @@ resource "aws_ecr_lifecycle_policy" "web" {
 # Logs - its own group, so the web site's lines never mix with the API's
 # =============================================================================
 
-# Not subscribed to Datadog (datadog.tf forwards the API group only). Next.js
-# logs no request URLs in production; the one app log line is
-# `Invitation lookup unavailable` (reason and status, never the token).
+# Subscribed to Datadog with a filter (datadog.tf, #966): only the JSON lines
+# web/lib/log.ts writes (`service: bball-tracker-web`) are forwarded, and that
+# logger masks invitation tokens in every value. Next.js's own free-text output
+# (startup lines, its error dumps) stays here in CloudWatch only.
 resource "aws_cloudwatch_log_group" "web" {
   name              = "/ecs/${local.web_family}"
   retention_in_days = 30
