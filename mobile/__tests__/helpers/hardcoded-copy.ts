@@ -50,6 +50,7 @@ export const COPY_NAMES: ReadonlySet<string> = new Set([
   'message',
   'placeholder',
   'retryLabel',
+  'shortLabel',
   'subtitle',
   'tabBarAccessibilityLabel',
   'tabBarLabel',

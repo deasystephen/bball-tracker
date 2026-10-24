@@ -8,6 +8,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { useTranslation } from '../../i18n';
 
 /** The fill deepens with the points: a light tint, a stronger tint, solid. */
 const ADD_BUTTONS = [
@@ -28,11 +29,12 @@ export const OpponentScoreButtons: React.FC<OpponentScoreButtonsProps> = ({
   disabled = false,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <View style={styles.container}>
       <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-        Opponent Score
+        {t('tracker.opponentScore')}
       </ThemedText>
       <View style={styles.buttonRow}>
         <TouchableOpacity
@@ -46,7 +48,7 @@ export const OpponentScoreButtons: React.FC<OpponentScoreButtonsProps> = ({
           activeOpacity={0.7}
           // `disabled` already sets accessibilityState.disabled (#773).
           accessibilityRole="button"
-          accessibilityLabel="Subtract 1 from opponent score"
+          accessibilityLabel={t('tracker.opponentSubtractA11y')}
         >
           <ThemedText variant="bodyBold" color="textSecondary">
             -1
@@ -69,7 +71,7 @@ export const OpponentScoreButtons: React.FC<OpponentScoreButtonsProps> = ({
               disabled={disabled}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`Add ${points} to opponent score`}
+              accessibilityLabel={t('tracker.opponentAddA11y', { points })}
             >
               <ThemedText variant="bodyBold" style={{ color: solid ? '#FFFFFF' : colors.warning }}>
                 {`+${points}`}

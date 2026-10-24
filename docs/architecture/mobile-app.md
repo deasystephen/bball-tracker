@@ -40,14 +40,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **English values are pinned.** Jest pins the locale to `en` and the Maestro flows select by English
   text and labels, so converting a literal keeps its `en.json` value byte-identical; changing English
   copy is a flow change. Namespaces: `common`, `tabs`, `avatar`, `usage`, `roster`, `invitations`,
-  `games`, plus the older per-feature ones. The tab bar reads `tabs.*`; the unused `navigation.*`
+  `games` (screens, `games.rsvp.*`, `games.live.*`), `tracker` (the tracker components, shot and play
+  labels, milestones), `stats` (`stats.abbr.*` box-score abbreviations, `stats.resultLetter.*` W/L/T),
+  plus the older per-feature ones. Spanish basketball terms follow one glossary (PR #961): partido,
+  rebote ofensivo/defensivo, asistencia, robo, tapón, pérdida, falta, tiro libre; abbreviations
+  TL/T2/T3, TC%, ROB, TAP, PÉR, FP, PPP; results V/D/E. The tab bar reads `tabs.*`; the unused `navigation.*`
   namespace was removed.
 - **Guard:** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`, `components/`, `hooks/`, `services/` and `utils/`
   and fails on a user-facing literal (scanner: `__tests__/helpers/hardcoded-copy.ts`; it decides by
   position, so `status === 'LIVE'` and `t('games.title')` pass). Allowed: literals with no letter, the
   product name, and `__DEV__`-only code. `PENDING_FILES` lists the screens not converted yet and only
   shrinks (a listed file with no findings fails). `locale-parity.test.ts` keeps the key sets equal.
-  Spanish renders: `__tests__/i18n/spanish-shared.test.tsx` (shared components, tab bar, derived labels).
+  Spanish renders: `__tests__/i18n/spanish-shared.test.tsx` (shared components, tab bar, derived labels),
+  `__tests__/i18n/spanish-games.test.tsx` (tracker components, box score), and the Spanish cases in
+  `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP).
 - **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
   yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
   the app and localizes system UI around it.

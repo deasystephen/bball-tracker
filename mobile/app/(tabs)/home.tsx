@@ -29,7 +29,7 @@ import {
 } from '../../components';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { getGameResult, getResultColor } from '../../utils/game-result';
+import { getGameResult, getResultColor, resultLetter } from '../../utils/game-result';
 import { getTeamColor } from '../../utils/team-colors';
 import { canCreateTeams } from '../../utils/team-permissions';
 import type { Game } from '../../types/game';
@@ -451,7 +451,7 @@ export default function Home() {
                     variant="captionBold"
                     style={{ color: resultColor }}
                   >
-                    {result}
+                    {resultLetter(t, result)}
                   </ThemedText>
                 </View>
                 <View style={styles.activityInfo}>

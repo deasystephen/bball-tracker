@@ -23,10 +23,11 @@ import { useBoxScore } from '../../../hooks/useStats';
 import { useTheme } from '../../../hooks/useTheme';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
-import { getGameResult, getResultColor } from '../../../utils/game-result';
+import { getGameResult, getResultColor, resultLetter } from '../../../utils/game-result';
 import { formatLongDate } from '../../../utils/format-date';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { BackButton } from '../../../components/BackButton';
+import { useTranslation } from '../../../i18n';
 
 interface ComparisonBarProps {
   label: string;
@@ -129,19 +130,20 @@ export default function GameStatsScreen() {
   const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
   const { data: boxScore, isLoading, error, refetch } = useBoxScore(id);
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading box score..." fullScreen />;
+    return <LoadingSpinner message={t('stats.loadingBoxScore')} fullScreen />;
   }
 
   if (error || !boxScore) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load stats'}
+        message={error instanceof Error ? error.message : t('stats.loadFailed')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -169,10 +171,10 @@ export default function GameStatsScreen() {
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading numberOfLines={1}>
-            Box Score
+            {t('games.boxScore')}
           </ThemedText>
         </View>
-        {isWeb && <PrintButton title="Print" />}
+        {isWeb && <PrintButton />}
       </View>
 
       <ScrollView
@@ -201,10 +203,10 @@ export default function GameStatsScreen() {
                 variant="h3"
                 style={[styles.resultBadge, { color: resultColor }]}
               >
-                {resultText}
+                {resultLetter(t, resultText)}
               </ThemedText>
               <ThemedText variant="caption" color="textTertiary">
-                FINAL
+                {t('games.finalBadge')}
               </ThemedText>
             </View>
             <View style={[styles.teamSection, styles.awaySection]}>
@@ -227,7 +229,7 @@ export default function GameStatsScreen() {
         {/* Team Comparison Bars */}
         <View style={styles.section}>
           <ThemedText variant="h3" heading style={styles.sectionTitle}>
-            Team Comparison
+            {t('stats.teamComparison')}
           </ThemedText>
           <Card variant="default" style={styles.comparisonCard}>
             <View style={styles.comparisonLegend}>
@@ -245,32 +247,32 @@ export default function GameStatsScreen() {
               </View>
             </View>
             <ComparisonBar
-              label="PTS"
+              label={t('stats.abbr.pts')}
               homeValue={boxScore.team.stats.points}
               awayValue={boxScore.game.awayScore}
               colors={colors}
             />
             <ComparisonBar
-              label="REB"
+              label={t('stats.abbr.reb')}
               homeValue={boxScore.team.stats.rebounds}
               awayValue={0}
               colors={colors}
             />
             <ComparisonBar
-              label="AST"
+              label={t('stats.abbr.ast')}
               homeValue={boxScore.team.stats.assists}
               awayValue={0}
               colors={colors}
             />
             <ComparisonBar
-              label="FG%"
+              label={t('stats.abbr.fgPct')}
               homeValue={boxScore.team.stats.fieldGoalPercentage}
               awayValue={0}
               colors={colors}
               isPercentage
             />
             <ComparisonBar
-              label="3P%"
+              label={t('stats.abbr.threePct')}
               homeValue={boxScore.team.stats.threePointPercentage}
               awayValue={0}
               colors={colors}
@@ -282,21 +284,21 @@ export default function GameStatsScreen() {
         {/* Team Stats Summary */}
         <View style={styles.section}>
           <ThemedText variant="h3" heading style={styles.sectionTitle}>
-            Team Statistics
+            {t('stats.teamStatistics')}
           </ThemedText>
           <Card variant="default" style={styles.teamStatsCard}>
             <View style={styles.teamStatsRow}>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.points}</ThemedText>
-                <ThemedText variant="caption" color="textSecondary">Points</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.points')}</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.rebounds}</ThemedText>
-                <ThemedText variant="caption" color="textSecondary">Rebounds</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.rebounds')}</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="h2" heading={false} /* team total, a value */>{boxScore.team.stats.assists}</ThemedText>
-                <ThemedText variant="caption" color="textSecondary">Assists</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.assists')}</ThemedText>
               </View>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
@@ -305,19 +307,19 @@ export default function GameStatsScreen() {
                 <ThemedText variant="bodyBold">
                   {boxScore.team.stats.fieldGoalPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">FG%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.fgPct')}</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="bodyBold">
                   {boxScore.team.stats.threePointPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">3P%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.threePct')}</ThemedText>
               </View>
               <View style={styles.teamStatItem}>
                 <ThemedText variant="bodyBold">
                   {boxScore.team.stats.freeThrowPercentage.toFixed(1)}%
                 </ThemedText>
-                <ThemedText variant="caption" color="textSecondary">FT%</ThemedText>
+                <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.ftPct')}</ThemedText>
               </View>
             </View>
           </Card>
@@ -326,7 +328,7 @@ export default function GameStatsScreen() {
         {/* Full Box Score Table */}
         <View style={styles.section}>
           <ThemedText variant="h3" heading style={styles.sectionTitle}>
-            Player Statistics
+            {t('stats.playerStatistics')}
           </ThemedText>
           {boxScore.team.players.length > 0 ? (
             <BoxScoreTable
@@ -337,7 +339,7 @@ export default function GameStatsScreen() {
           ) : (
             <Card variant="default">
               <ThemedText variant="body" color="textSecondary">
-                No player statistics recorded for this game.
+                {t('stats.noPlayerStats')}
               </ThemedText>
             </Card>
           )}
@@ -347,7 +349,7 @@ export default function GameStatsScreen() {
         {!isWeb && boxScore.team.players.length > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h3" heading style={styles.sectionTitle}>
-              Individual Performance
+              {t('stats.individualPerformance')}
             </ThemedText>
             {boxScore.team.players.map((player) => (
               <PlayerStatsCard
