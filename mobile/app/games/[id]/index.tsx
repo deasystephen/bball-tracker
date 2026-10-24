@@ -35,7 +35,7 @@ import { formatClockTime, formatLongDate } from '../../../utils/format-date';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
-import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
 
 const getStatusColor = (
@@ -225,7 +225,7 @@ export default function GameDetailScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
+          <BackButton onPress={goBack} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
           {/* Scheduled or finished only — deleting mid-tracking is more likely a
               mis-tap than intent (end the game first). Finished-game deletion
@@ -234,6 +234,7 @@ export default function GameDetailScreen() {
             <TouchableOpacity
               onPress={handleDelete}
               style={styles.iconButton}
+              hitSlop={HEADER_ICON_HIT_SLOP}
               accessibilityRole="button"
               accessibilityLabel="Delete game"
             >
@@ -541,12 +542,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
   },
-  // The delete icon renders only for managers on scheduled or finished games;
-  // the row keeps its 44pt height without it so the header never shifts.
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: MIN_TOUCH_TARGET,
     marginBottom: spacing.sm,
   },
   backButton: {
@@ -555,14 +553,10 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
-  // The delete icon grows to 44pt with minWidth/minHeight rather than take
-  // hitSlop, matching the header row's 44pt height.
+  // Drawn like BackButton (24pt icon, spacing.sm padding = 40pt) so both
+  // header icons share one size; HEADER_ICON_HIT_SLOP makes it a 44pt target.
   iconButton: {
     padding: spacing.sm,
-    minWidth: MIN_TOUCH_TARGET,
-    minHeight: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   statusContainer: {
     alignItems: 'center',
