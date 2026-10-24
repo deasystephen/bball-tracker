@@ -21,8 +21,10 @@
  * (no Android binary is shipped yet; its release name would need the Gradle
  * values).
  *
- * Env on the EAS builder: SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT (the
- * EAS production environment).
+ * Env on the EAS builder: SENTRY_AUTH_TOKEN (the EAS production environment).
+ * The org and project come from the ios/sentry.properties the plugin wrote, so
+ * the commits land on the project the maps went to, whatever SENTRY_ORG and
+ * SENTRY_PROJECT the environment exports.
  */
 
 'use strict';
@@ -50,29 +52,56 @@ function isLiteral(value) {
  */
 function readIosReleaseParts(iosDir, readPlist) {
   if (!fs.existsSync(iosDir)) return null;
-  const xcodeproj = fs.readdirSync(iosDir).find((entry) => entry.endsWith('.xcodeproj'));
-  if (!xcodeproj) return null;
-  const target = xcodeproj.replace(/\.xcodeproj$/, '');
-  const plistPath = path.join(iosDir, target, 'Info.plist');
-  const pbxprojPath = path.join(iosDir, xcodeproj, 'project.pbxproj');
-  if (!fs.existsSync(plistPath) || !fs.existsSync(pbxprojPath)) return null;
+  // The app project is the one with `<name>/Info.plist` next to it; a stray
+  // project left in a local ios/ has none. More than one candidate: refuse.
+  const candidates = fs
+    .readdirSync(iosDir)
+    .filter((entry) => entry.endsWith('.xcodeproj'))
+    .map((xcodeproj) => ({
+      plistPath: path.join(iosDir, xcodeproj.replace(/\.xcodeproj$/, ''), 'Info.plist'),
+      pbxprojPath: path.join(iosDir, xcodeproj, 'project.pbxproj'),
+    }))
+    .filter(({ plistPath, pbxprojPath }) => fs.existsSync(plistPath) && fs.existsSync(pbxprojPath));
+  if (candidates.length !== 1) return null;
+  const [{ plistPath, pbxprojPath }] = candidates;
 
   const plist = readPlist(plistPath);
   let bundleId = plist.CFBundleIdentifier;
   if (!isLiteral(bundleId)) {
     // Expo's template writes $(PRODUCT_BUNDLE_IDENTIFIER); the value is in the
-    // build settings, identical for Debug and Release.
-    const ids = new Set(
-      [...fs.readFileSync(pbxprojPath, 'utf8').matchAll(/PRODUCT_BUNDLE_IDENTIFIER = "?([^";]+)"?;/g)].map(
-        (match) => match[1]
-      )
-    );
-    bundleId = ids.size === 1 ? [...ids][0] : undefined;
+    // build settings. An app extension target adds `<app id>.<suffix>`, so the
+    // app's id is the one every other id extends.
+    const ids = [
+      ...new Set(
+        [...fs.readFileSync(pbxprojPath, 'utf8').matchAll(/PRODUCT_BUNDLE_IDENTIFIER = "?([^";]+)"?;/g)].map(
+          (match) => match[1]
+        )
+      ),
+    ].sort((a, b) => a.length - b.length);
+    const [shortest] = ids;
+    bundleId =
+      shortest && ids.every((id) => id === shortest || id.startsWith(`${shortest}.`)) ? shortest : undefined;
   }
   const version = plist.CFBundleShortVersionString;
   const build = plist.CFBundleVersion;
   if (![bundleId, version, build].every(isLiteral)) return null;
   return { bundleId, version, build };
+}
+
+/**
+ * Org and project from the `ios/sentry.properties` the Expo plugin writes at
+ * prebuild (`defaults.org`, `defaults.project`), the same file the Xcode
+ * upload phase reads. Null when either is missing.
+ */
+function readSentryProperties(iosDir) {
+  const file = path.join(iosDir, 'sentry.properties');
+  if (!fs.existsSync(file)) return null;
+  const values = {};
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const match = /^\s*defaults\.(org|project)\s*=\s*(\S+)\s*$/.exec(line);
+    if (match) values[match[1]] = match[2];
+  }
+  return values.org && values.project ? { org: values.org, project: values.project } : null;
 }
 
 /** plutil ships with macOS, which every EAS iOS builder runs. */
@@ -106,11 +135,23 @@ function main() {
     return;
   }
 
+  const iosDir = path.resolve(process.cwd(), 'ios');
+
+  // Pin the org and project to what the plugin wrote, whatever the builder's
+  // environment exports (postota:production pins them the same way).
+  const target = readSentryProperties(iosDir);
+  if (!target) {
+    console.warn('[sentry] non-fatal: no org/project in ios/sentry.properties; skipping commit association.');
+    return;
+  }
+  process.env.SENTRY_ORG = target.org;
+  process.env.SENTRY_PROJECT = target.project;
+
   let release = process.env.SENTRY_RELEASE;
   if (!release) {
     let parts = null;
     try {
-      parts = readIosReleaseParts(path.resolve(process.cwd(), 'ios'), readPlistWithPlutil);
+      parts = readIosReleaseParts(iosDir, readPlistWithPlutil);
     } catch (error) {
       console.warn(`[sentry] non-fatal: could not read the iOS project: ${error.message}`);
     }
@@ -121,7 +162,7 @@ function main() {
     release = sentryReleaseName(parts);
   }
 
-  console.log(`[sentry] Associating commits with release ${release}`);
+  console.log(`[sentry] Associating commits with release ${release} in ${target.org}/${target.project}`);
   // `releases new` is idempotent: the Xcode upload phase normally created it.
   if (!runSoft(['releases', 'new', release])) return;
   // --auto resolves the repo and commit range through the Sentry GitHub
@@ -130,6 +171,6 @@ function main() {
   runSoft(['releases', 'finalize', release]);
 }
 
-module.exports = { sentryReleaseName, readIosReleaseParts };
+module.exports = { sentryReleaseName, readIosReleaseParts, readSentryProperties };
 
 if (require.main === module) main();

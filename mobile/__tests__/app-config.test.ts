@@ -208,7 +208,6 @@ describe('app.config.js', () => {
     it('lists every shipped language for iOS through expo-localization', async () => {
       const options = pluginOptions(await loadConfig({ APP_ENV: 'production' }), 'expo-localization');
       expect(options).toEqual({ supportedLocales: { ios: shipped } });
-      expect(shipped).toEqual(['en', 'es']);
     });
 
     it('evaluates to an Info.plist with CFBundleLocalizations', async () => {

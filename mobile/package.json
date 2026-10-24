@@ -16,7 +16,7 @@
     "binary-manifest:check": "jest __tests__/binary-manifest.test.ts",
     "binary-manifest:record": "RECORD_BINARY_MANIFEST=1 jest __tests__/binary-manifest.test.ts",
     "ota:production": "node scripts/require-sentry-auth-token.js && npm run binary-manifest:check && eas update --branch production --environment production --platform ios --non-interactive",
-    "postota:production": "SENTRY_ORG=satsun-ventures SENTRY_PROJECT=bball-tracker-mobile sentry-expo-upload-sourcemaps dist",
+    "postota:production": "node node_modules/@sentry/react-native/scripts/has-sourcemap-debugid.js dist/_expo/static/js/ios/*.map && SENTRY_ORG=satsun-ventures SENTRY_PROJECT=bball-tracker-mobile sentry-expo-upload-sourcemaps dist",
     "eas-build-on-success": "node scripts/sentry-set-commits.js"
   },
   "dependencies": {

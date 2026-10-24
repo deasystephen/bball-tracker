@@ -5,7 +5,8 @@
  * from `SENTRY_DSN` in the EAS build env). Dev builds without a DSN no-op so
  * local dev doesn't ship events.
  *
- * Release and dist (#644): left unset unless `SENTRY_RELEASE` overrides them,
+ * Release and dist (#644): left unset unless `extra.sentryRelease` (from
+ * `SENTRY_RELEASE` where app.config.js is evaluated) overrides the release,
  * so the SDK reports the native defaults, `<bundle id>@<version>+<build>` and
  * dist `<build>` (e.g. `com.bballtracker.mobile@1.7.0+35`, `35`). That is the
  * release the Xcode upload phase of the `@sentry/react-native/expo` plugin
@@ -240,10 +241,11 @@ export function initSentry(): void {
     (extra?.appEnv as string | undefined) ||
     (__DEV__ ? 'development' : 'production');
 
-  // An explicit override only; otherwise undefined, so the SDK fills release
-  // and dist from the native build (header comment).
-  const release =
-    (extra?.sentryRelease as string | undefined) || process.env.SENTRY_RELEASE || undefined;
+  // An explicit override only (app.config.js copies SENTRY_RELEASE into
+  // extra.sentryRelease where the config is evaluated; Metro inlines no other
+  // process.env value into the bundle). Otherwise undefined, so the SDK fills
+  // release and dist from the native build (header comment).
+  const release = (extra?.sentryRelease as string | undefined) || undefined;
 
   try {
     Sentry.init({

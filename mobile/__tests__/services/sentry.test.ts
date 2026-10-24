@@ -110,14 +110,6 @@ describe('services/sentry', () => {
       expect(sentryInit.mock.calls[0][0].release).toBe('my-release-1');
     });
 
-    it('uses SENTRY_RELEASE when no extras override is set', () => {
-      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
-      process.env.SENTRY_RELEASE = 'env-release-2';
-      const { initSentry } = loadSentryModule();
-      initSentry();
-      expect(sentryInit.mock.calls[0][0].release).toBe('env-release-2');
-    });
-
     // #644: the app once reported the bare `version` ("1.5.0") while the
     // build hook uploaded maps under the git SHA, so no event ever matched.
     // With no override, release and dist stay unset and the SDK fills the

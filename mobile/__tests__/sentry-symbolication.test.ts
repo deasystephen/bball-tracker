@@ -29,7 +29,15 @@ type ReleaseParts = { bundleId: string; version: string; build: string };
 const hook = jest.requireActual<{
   sentryReleaseName: (parts: ReleaseParts) => string;
   readIosReleaseParts: (iosDir: string, readPlist: (file: string) => Record<string, unknown>) => ReleaseParts | null;
+  readSentryProperties: (iosDir: string) => { org: string; project: string } | null;
 }>('../scripts/sentry-set-commits.js');
+
+// The native bridge the SDK's release integration asks for the build's
+// bundle id, version and build number.
+const mockFetchNativeRelease = jest.fn();
+jest.mock('@sentry/react-native/dist/js/wrapper', () => ({
+  NATIVE: { fetchNativeRelease: () => mockFetchNativeRelease() },
+}));
 
 const MOBILE_ROOT = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(MOBILE_ROOT, 'package.json'), 'utf8')) as {
@@ -69,7 +77,13 @@ describe('Sentry symbolication (#644)', () => {
     });
 
     it('uploads the exported bundle and source maps after eas update (npm runs post<script>)', () => {
-      expect(pkg.scripts['postota:production']).toMatch(/\bsentry-expo-upload-sourcemaps dist$/);
+      const steps = pkg.scripts['postota:production'].split('&&').map((step) => step.trim());
+      // The uploader exits 0 when it finds no map ("Uploaded 0 of N"), so a
+      // missing map or Debug ID must fail first.
+      expect(steps[0]).toBe(
+        'node node_modules/@sentry/react-native/scripts/has-sourcemap-debugid.js dist/_expo/static/js/ios/*.map'
+      );
+      expect(steps[steps.length - 1]).toMatch(/\bsentry-expo-upload-sourcemaps dist$/);
     });
 
     it('uploads to the org and project the Expo plugin names, whatever the shell exports', async () => {
@@ -94,6 +108,26 @@ describe('Sentry symbolication (#644)', () => {
     });
   });
 
+  describe('eas.json', () => {
+    const eas = JSON.parse(fs.readFileSync(path.join(MOBILE_ROOT, 'eas.json'), 'utf8')) as {
+      build: Record<string, { env?: Record<string, string> }>;
+    };
+
+    // The Xcode and Gradle phases fail a Release build whose upload fails,
+    // and the EAS preview environment has no token.
+    it('turns the build-time upload off for preview builds only', () => {
+      expect(eas.build.preview.env?.SENTRY_DISABLE_AUTO_UPLOAD).toBe('true');
+      expect(eas.build.production.env?.SENTRY_DISABLE_AUTO_UPLOAD).toBeUndefined();
+      expect(eas.build.production.env?.SENTRY_ALLOW_FAILURE).toBeUndefined();
+    });
+
+    // A SENTRY_RELEASE here would reach extra.sentryRelease and override the
+    // native release name every event must carry (services/sentry.ts).
+    it('sets no SENTRY_RELEASE in any profile', () => {
+      for (const profile of Object.values(eas.build)) expect(profile.env?.SENTRY_RELEASE).toBeUndefined();
+    });
+  });
+
   describe('EAS build hook (commit association)', () => {
     it('is the set-commits script, not a source map upload', () => {
       expect(pkg.scripts['eas-build-on-success']).toBe('node scripts/sentry-set-commits.js');
@@ -102,17 +136,37 @@ describe('Sentry symbolication (#644)', () => {
       expect(source).not.toMatch(/'sourcemaps'/);
     });
 
-    it('names the release the way the native SDK reports it', () => {
-      expect(hook.sentryReleaseName({ bundleId: 'com.bballtracker.mobile', version: '1.7.0', build: '35' })).toBe(
-        'com.bballtracker.mobile@1.7.0+35'
-      );
-      // The SDK's release integration fills an unset release from the native
-      // build in this shape; a change there must change sentryReleaseName too.
-      const integration = fs.readFileSync(
-        require.resolve('@sentry/react-native/dist/js/integrations/release.js'),
-        'utf8'
-      );
-      expect(integration).toContain('`${nativeRelease.id}@${nativeRelease.version}+${nativeRelease.build}`');
+    it('names the release the way the native SDK reports it', async () => {
+      const parts = { bundleId: 'com.bballtracker.mobile', version: '1.7.0', build: '35' };
+      expect(hook.sentryReleaseName(parts)).toBe('com.bballtracker.mobile@1.7.0+35');
+
+      // What the installed SDK's release integration puts on an event when
+      // Sentry.init got no release (services/sentry.ts), fed the same native
+      // values: a change in the SDK's naming must change sentryReleaseName too.
+      const { nativeReleaseIntegration } = jest.requireActual<{
+        nativeReleaseIntegration: () => {
+          processEvent: (event: Record<string, unknown>, hint: unknown, client: unknown) => Promise<Record<string, unknown>>;
+        };
+      }>('@sentry/react-native/dist/js/integrations/release.js');
+      mockFetchNativeRelease.mockResolvedValue({ id: parts.bundleId, version: parts.version, build: parts.build });
+      const event = await nativeReleaseIntegration().processEvent({}, {}, { getOptions: () => ({ release: undefined }) });
+      expect(event.release).toBe(hook.sentryReleaseName(parts));
+      expect(event.dist).toBe(parts.build);
+    });
+
+    it('takes the org and project from the ios/sentry.properties the plugin writes', async () => {
+      const iosDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sentry-props-'));
+      try {
+        expect(hook.readSentryProperties(iosDir)).toBeNull();
+        const options = await sentryPluginOptions();
+        fs.writeFileSync(
+          path.join(iosDir, 'sentry.properties'),
+          `defaults.url=https://sentry.io/\ndefaults.org=${String(options?.organization)}\ndefaults.project=${String(options?.project)}\n# Using SENTRY_AUTH_TOKEN environment variable`
+        );
+        expect(hook.readSentryProperties(iosDir)).toEqual({ org: options?.organization, project: options?.project });
+      } finally {
+        fs.rmSync(iosDir, { recursive: true, force: true });
+      }
     });
 
     describe('reads the parts from the prebuilt iOS project', () => {
@@ -152,6 +206,31 @@ describe('Sentry symbolication (#644)', () => {
         };
         expect(hook.readIosReleaseParts(iosDir, () => plist)).toBeNull();
         expect(hook.readIosReleaseParts(path.join(iosDir, 'missing'), () => plist)).toBeNull();
+      });
+
+      const literalPlist = {
+        CFBundleIdentifier: '$(PRODUCT_BUNDLE_IDENTIFIER)',
+        CFBundleShortVersionString: '1.7.0',
+        CFBundleVersion: '35',
+      };
+
+      it('ignores a stray project that has no Info.plist next to it', () => {
+        fs.mkdirSync(path.join(iosDir, 'Fake.xcodeproj'));
+        fs.writeFileSync(path.join(iosDir, 'Fake.xcodeproj', 'project.pbxproj'), '');
+        expect(hook.readIosReleaseParts(iosDir, () => literalPlist)?.bundleId).toBe('com.bballtracker.mobile');
+      });
+
+      it("picks the app's id when an extension target adds `<app id>.<suffix>`", () => {
+        fs.appendFileSync(
+          path.join(iosDir, 'Hooplings.xcodeproj', 'project.pbxproj'),
+          'PRODUCT_BUNDLE_IDENTIFIER = "com.bballtracker.mobile.NotificationService";\n'
+        );
+        expect(hook.readIosReleaseParts(iosDir, () => literalPlist)?.bundleId).toBe('com.bballtracker.mobile');
+        fs.appendFileSync(
+          path.join(iosDir, 'Hooplings.xcodeproj', 'project.pbxproj'),
+          'PRODUCT_BUNDLE_IDENTIFIER = com.example.other;\n'
+        );
+        expect(hook.readIosReleaseParts(iosDir, () => literalPlist)).toBeNull();
       });
     });
   });
