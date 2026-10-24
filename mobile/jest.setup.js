@@ -46,6 +46,7 @@ jest.mock('expo-linking', () => ({
   createURL: jest.fn((path) => `myapp://${path}`),
   parse: jest.fn(),
   openURL: jest.fn(),
+  addEventListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
 // Mock expo-localization

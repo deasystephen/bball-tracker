@@ -9,7 +9,10 @@
  *       event nobody sends is dead taxonomy);
  *   (c) every `useMutation(...)` in `hooks/` fires `trackEvent` from its
  *       `onSuccess` or `onSettled`, unless the hook is allow-listed below with
- *       a reason.
+ *       a reason;
+ *   (d) no screen or component writes through `apiClient.post/patch/put/delete`
+ *       directly (which (c) cannot see), unless the call is allow-listed below
+ *       with a reason (#967).
  *
  * To fix a finding: add the row to the doc, emit the event from the hook or
  * store that performs the mutation (never from a screen), or explain here
@@ -23,8 +26,9 @@ import ts from 'typescript';
 const MOBILE_ROOT = path.resolve(__dirname, '..', '..');
 const ANALYTICS_SOURCE = path.join(MOBILE_ROOT, 'services', 'analytics.ts');
 const CATALOGUE_DOC = path.resolve(MOBILE_ROOT, '..', 'docs', 'architecture', 'analytics.md');
-const EMITTER_DIRS = ['app', 'components', 'hooks', 'store', 'services'];
+const EMITTER_DIRS = ['app', 'components', 'hooks', 'store', 'services', 'utils'];
 const HOOKS_DIR = path.join(MOBILE_ROOT, 'hooks');
+const DIRECT_WRITE_DIRS = ['app', 'components'];
 
 /**
  * Mutation hooks that fire no event, and why. An entry here is a decision,
@@ -35,6 +39,18 @@ const MUTATIONS_WITHOUT_EVENTS: Record<string, string> = {
     'No screen calls it: the unified Add Player (`useAddRosterPlayer`, #418) replaced it. Instrument or remove when a screen uses it.',
   useDeletePlayer:
     'No screen calls it: roster removal is `useRemovePlayerFromTeam`, account deletion is `useDeleteAccount`. Instrument or remove when a screen uses it.',
+};
+
+/**
+ * Direct `apiClient` writes in `app/` and `components/`, keyed `<file> <method>`,
+ * and why each one is accounted for. Every other write belongs in a mutation
+ * hook, where (c) checks it fires an event.
+ */
+const DIRECT_WRITES_ALLOWED: Record<string, string> = {
+  'app/onboarding/role.tsx patch':
+    '`PATCH /auth/me/role` fires `onboarding_step_completed` from the screen: the onboarding steps have no hook (analytics.md, "Rules").',
+  'app/login.tsx post':
+    '`POST /auth/dev-login`, development only: a dev session is not an analytics datum (#790), so it fires nothing on purpose.',
 };
 
 function sourceFiles(dir: string, extensions: string[]): string[] {
@@ -144,6 +160,39 @@ export function findSilentMutations(fileName: string, text: string): MutationFin
   return findings;
 }
 
+interface DirectWriteFinding {
+  file: string;
+  line: number;
+  method: string;
+}
+
+const WRITE_METHODS = new Set(['post', 'patch', 'put', 'delete']);
+
+/** `apiClient.post/patch/put/delete(...)` calls in a source text. */
+export function findDirectWrites(fileName: string, text: string): DirectWriteFinding[] {
+  const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
+  const findings: DirectWriteFinding[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === 'apiClient' &&
+      WRITE_METHODS.has(node.expression.name.text)
+    ) {
+      findings.push({
+        file: fileName,
+        line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+        method: node.expression.name.text,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return findings;
+}
+
 describe('analytics catalogue guard', () => {
   const catalogue = cataloguedEvents(fs.readFileSync(ANALYTICS_SOURCE, 'utf8'));
   const documented = documentedEvents(fs.readFileSync(CATALOGUE_DOC, 'utf8'));
@@ -185,6 +234,23 @@ describe('analytics catalogue guard', () => {
     // The allow-list must not outlive the hooks it names.
     const silentHooks = new Set(findings.map((f) => f.hook));
     const stale = Object.keys(MUTATIONS_WITHOUT_EVENTS).filter((hook) => !silentHooks.has(hook));
+    expect(stale).toEqual([]);
+  });
+
+  it('(d) no screen or component writes through apiClient directly, unless allow-listed with a reason', () => {
+    const files = DIRECT_WRITE_DIRS.flatMap((dir) => sourceFiles(path.join(MOBILE_ROOT, dir), ['.ts', '.tsx']));
+    expect(files.length).toBeGreaterThan(30);
+    const findings = files.flatMap((file) =>
+      findDirectWrites(path.relative(MOBILE_ROOT, file).split(path.sep).join('/'), fs.readFileSync(file, 'utf8'))
+    );
+    const unexplained = findings.filter((f) => !DIRECT_WRITES_ALLOWED[`${f.file} ${f.method}`]);
+    expect(
+      unexplained.map((f) => `${f.file}:${f.line} apiClient.${f.method} outside a hook: move it into a mutation hook that fires an event, or allow-list it with a reason`)
+    ).toEqual([]);
+
+    // The allow-list must not outlive the calls it names.
+    const seen = new Set(findings.map((f) => `${f.file} ${f.method}`));
+    const stale = Object.keys(DIRECT_WRITES_ALLOWED).filter((key) => !seen.has(key));
     expect(stale).toEqual([]);
   });
 
@@ -249,6 +315,26 @@ describe('analytics catalogue guard', () => {
         }
       `;
       expect(findSilentMutations('hooks/wrong.ts', wrongPlace).map((f) => f.hook)).toEqual(['useC']);
+    });
+
+    it('finds direct apiClient writes and ignores reads, other clients and hooks', () => {
+      const text = `
+        export default function Screen() {
+          const save = async () => {
+            await apiClient.get('/teams');
+            await apiClient.post('/teams', {});
+            await apiClient.delete('/teams/1');
+            await otherClient.post('/x', {});
+            mutation.mutate({});
+          };
+          return <Button onPress={() => apiClient.patch('/auth/me', {})} />;
+        }
+      `;
+      expect(findDirectWrites('app/screen.tsx', text)).toEqual([
+        { file: 'app/screen.tsx', line: 5, method: 'post' },
+        { file: 'app/screen.tsx', line: 6, method: 'delete' },
+        { file: 'app/screen.tsx', line: 10, method: 'patch' },
+      ]);
     });
   });
 });

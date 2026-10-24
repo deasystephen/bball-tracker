@@ -12,21 +12,28 @@ import { useToast } from '../../components/Toast';
 import { useTheme } from '../../hooks/useTheme';
 import { useGoBack } from '../../hooks/useGoBack';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
-import { apiClient, isRateLimitedError, isTransientRequestError } from '../../services/api-client';
+import {
+  apiClient,
+  getApiErrorMessage,
+  isRateLimitedError,
+  isTransientRequestError,
+} from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
 import { relationshipLabel, relationshipNoun } from '../../utils/guardian';
 import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
 import type { User } from '../../../shared/types';
 import { useAcceptInvitation } from '../../hooks/useInvitations';
+import { useInviteLinkViewed } from '../../hooks/useInviteLinkViewed';
 import { setPendingReturnPath } from '../../utils/return-path';
 import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
-import { AxiosError } from 'axios';
 import { formatCalendarDate } from '../../utils/format-date';
 
 export default function InviteDeepLinkScreen() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  // `src=web` marks the web invite page's Open in App button (#964, #967); it is a
+  // query param, never part of the token.
+  const { token, src } = useLocalSearchParams<{ token: string; src?: string }>();
   const router = useRouter();
   const { colors } = useTheme();
   const toast = useToast();
@@ -34,7 +41,7 @@ export default function InviteDeepLinkScreen() {
   const goBack = useGoBack('/');
   const { isAuthenticated, updateUser } = useAuthStore();
 
-  const { data: invitation, isLoading, error, refetch } = useInvitationByToken(token);
+  const { data: invitation, isLoading, isFetching, error, refetch } = useInvitationByToken(token);
   // Only a transient failure is a retryable error state (and an `error_shown` event); a
   // 400/404 stays the not-found screen below (#892).
   const transientError = error && isTransientRequestError(error) ? error : null;
@@ -43,6 +50,17 @@ export default function InviteDeepLinkScreen() {
     t('invite.loadFailedShort')
   );
   const acceptById = useAcceptInvitation({ source: 'link' });
+  useInviteLinkViewed({
+    token,
+    src,
+    isLoading,
+    isFetching,
+    failed: loadState.failed,
+    retrying: loadState.retrying,
+    error,
+    invitation,
+    isAuthenticated,
+  });
 
   /**
    * Logged-out users must sign in first: accepting needs an identity, and the
@@ -50,7 +68,8 @@ export default function InviteDeepLinkScreen() {
    * `postLoginRoute` brings them straight back here after sign-in.
    */
   async function goToLogin() {
-    if (token) await setPendingReturnPath(`/invite/${token}`);
+    // Keep `src` so the post-sign-in view still says where the link came from.
+    if (token) await setPendingReturnPath(`/invite/${token}${src === 'web' ? '?src=web' : ''}`);
     router.push('/login');
   }
 
@@ -108,11 +127,8 @@ export default function InviteDeepLinkScreen() {
         toast.showToast(t('invite.joined', { team: invitation.teamName }), 'success');
         router.replace('/(tabs)/invitations');
       } catch (err) {
-        const msg =
-          err instanceof AxiosError
-            ? (err.response?.data as { error?: string })?.error ?? err.message
-            : t('invitations.acceptFailed');
-        toast.showToast(msg, 'error');
+        // Through getApiErrorMessage like every other screen, so `error_shown` fires (#967).
+        toast.showToast(getApiErrorMessage(err, t('invitations.acceptFailed')), 'error');
       }
     };
 

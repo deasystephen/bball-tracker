@@ -80,8 +80,8 @@ export default function AuthCallbackScreen() {
   // Guard so the code is only exchanged once, even if the effect re-runs.
   const exchangedRef = useRef(false);
 
-  // A refused callback is never silent (#963): reported once per distinct
-  // failure, enums only, so a re-render repeats nothing and a second refused
+  // A refused callback is never silent: a warning (#963) and `sign_in_failed`
+  // (#967), once per distinct failure, enums only, so a re-render repeats nothing and a second refused
   // deep link into the same mounted screen is still reported.
   const failureStage = paramFailure?.stage;
   const failureCode = paramFailure?.oauth_error;
