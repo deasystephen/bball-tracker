@@ -130,6 +130,29 @@ export class ResendCooldownError extends DetailedError<ResendCooldownDetails> {
   }
 }
 
+/**
+ * 403 — a sign-in whose WorkOS identity has an unverified email matched a
+ * pre-provisioned row (a coach-added player, a `POST /players` account, an
+ * admin pre-create) (#907). Claiming that row hands over its team memberships
+ * and ends the coach's control of it, so only a verified address may claim it.
+ * `User.email` is unique, so a second row for the same address cannot be
+ * created instead: the sign-in is refused, nothing is written, and the person
+ * can sign in again once they verify the address with the identity provider.
+ * Deliberately not a `ConflictError`: the callback treats 409 as the WorkOS
+ * key-cutover signature and alarms on it.
+ */
+export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>> {
+  constructor() {
+    super(
+      'email_not_verified',
+      {},
+      'Verify your email address with your sign-in provider, then sign in again to join the team that added you.',
+      403
+    );
+    Object.setPrototypeOf(this, EmailNotVerifiedError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
