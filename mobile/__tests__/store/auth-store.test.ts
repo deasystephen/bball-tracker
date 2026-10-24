@@ -19,6 +19,7 @@ import {
 } from '../../store/auth-store';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, SecureStoreNative } from '../../services/secure-storage';
 import { setSessionHooks } from '../../store/session-hooks';
+import { log } from '../../services/log';
 import {
   trackEvent,
   identifyUser,
@@ -466,7 +467,14 @@ describe('auth-store rehydration', () => {
   // app/index.tsx shows "Loading…" forever.
   it('clears isLoading and starts logged out when hydration fails', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // #963: the user silently starts signed out (the symptom of the SDK 57
+    // keychain trap), so the failure must be logged.
+    const logWarn = jest.spyOn(log, 'warn');
     getOnRehydrate()(undefined, new Error('corrupt'));
+    expect(logWarn).toHaveBeenCalledWith('Auth storage rehydration failed; starting logged out', {
+      error: expect.any(Error),
+    });
+    logWarn.mockRestore();
     expect(useAuthStore.getState()).toMatchObject({
       isLoading: false,
       isAuthenticated: false,

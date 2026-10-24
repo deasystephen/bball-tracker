@@ -13,6 +13,7 @@ import { apiClient } from '../../services/api-client';
 import { consumePendingLogin } from '../../utils/pkce';
 import { useAuthStore } from '../../store/auth-store';
 import { trackEvent, AnalyticsEvents } from '../../services/analytics';
+import { log } from '../../services/log';
 
 const mockParams: { code?: string; state?: string; error?: string } = {};
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -162,5 +163,99 @@ describe('AuthCallbackScreen', () => {
     expect(await findByText('Failed to complete sign in. Please try again.')).toBeTruthy();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     errorSpy.mockRestore();
+  });
+
+  describe('a refused callback is logged, enums only (#963)', () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => {
+      warn = jest.spyOn(log, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => warn.mockRestore());
+
+    const signInWarnings = () => warn.mock.calls.filter(([message]) => message === 'Sign-in failed');
+
+    it('logs a known OAuth error by its code', async () => {
+      mockParams.error = 'access_denied';
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'oauth_error', oauth_error: 'access_denied' }]]);
+    });
+
+    it('logs an unknown OAuth error as "other", never the raw param', async () => {
+      mockParams.error = 'Your account was suspended, call 555-0100';
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'oauth_error', oauth_error: 'other' }]]);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('555-0100');
+    });
+
+    it('logs a callback with no code', async () => {
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'missing_code' }]]);
+    });
+
+    it('logs a state that does not match a sign-in from this device', async () => {
+      mockParams.code = 'attacker-code';
+      mockParams.state = 'foreign-state';
+      mockedConsume.mockResolvedValue(null);
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'state_mismatch' }]]);
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/attacker-code|foreign-state/);
+    });
+
+    it('logs a failure once however often the screen re-renders, and a new one when the params change', async () => {
+      mockParams.error = 'server_error';
+      const { findByText, rerender } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+      rerender(<AuthCallbackScreen />);
+      rerender(<AuthCallbackScreen />);
+      expect(signInWarnings()).toHaveLength(1);
+
+      // A second refused deep link into the same mounted screen.
+      mockParams.error = 'access_denied';
+      rerender(<AuthCallbackScreen />);
+      await waitFor(() => expect(signInWarnings()).toHaveLength(2));
+      expect(signInWarnings()[1]).toEqual(['Sign-in failed', { stage: 'oauth_error', oauth_error: 'access_denied' }]);
+    });
+
+    it('logs a failed exchange with the HTTP status', async () => {
+      mockParams.code = 'code-1';
+      mockParams.state = 'state-1';
+      mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+      mockedGet.mockRejectedValue({ isAxiosError: true, response: { status: 409 }, message: 'conflict' });
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'exchange', status: 409 }]]);
+      errorSpy.mockRestore();
+    });
+
+    it('logs a failed exchange with no response without a status', async () => {
+      mockParams.code = 'code-1';
+      mockParams.state = 'state-1';
+      mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+      mockedGet.mockRejectedValue(new Error('Network Error'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const { findByText } = render(<AuthCallbackScreen />);
+      await findByText('Sign In Failed');
+
+      expect(signInWarnings()).toEqual([['Sign-in failed', { stage: 'exchange' }]]);
+      errorSpy.mockRestore();
+    });
+
+    it('logs nothing for a successful sign-in', async () => {
+      mockParams.code = 'code-1';
+      mockParams.state = 'state-1';
+      mockedConsume.mockResolvedValue({ state: 'state-1', verifier: 'verifier-1', createdAt: Date.now() });
+      mockedGet.mockResolvedValue({ data: { accessToken: 'at', refreshToken: 'rt', user } });
+      render(<AuthCallbackScreen />);
+      await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)'));
+      expect(signInWarnings()).toEqual([]);
+    });
   });
 });
