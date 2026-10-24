@@ -53,9 +53,13 @@ resource "aws_db_parameter_group" "postgres" {
   family = "postgres18"
 
   # Reject every connection that does not negotiate TLS (28000 "no encryption").
+  # RDS reports this one with apply_method "pending-reboot" (its value equals
+  # the engine default), so declaring "immediate" would show a diff on every
+  # plan without changing anything.
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   # ERROR / FATAL lines without DETAIL, HINT, QUERY or CONTEXT: the primary
