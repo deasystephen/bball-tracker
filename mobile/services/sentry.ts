@@ -4,6 +4,16 @@
  * Init is gated on `sentryDsn` being present in Expo config extras (populated
  * from `SENTRY_DSN` in the EAS build env). Dev builds without a DSN no-op so
  * local dev doesn't ship events.
+ *
+ * Release and dist (#644): left unset unless `SENTRY_RELEASE` overrides them,
+ * so the SDK reports the native defaults, `<bundle id>@<version>+<build>` and
+ * dist `<build>` (e.g. `com.bballtracker.mobile@1.7.0+35`, `35`). That is the
+ * release the Xcode upload phase of the `@sentry/react-native/expo` plugin
+ * names and the one `scripts/sentry-set-commits.js` attaches commits to.
+ * Symbolication does not depend on it: `getSentryExpoConfig` (metro.config.js)
+ * stamps a Debug ID into every bundle, embedded or OTA, and Sentry finds the
+ * uploaded map by that id. An OTA keeps the binary's release; the SDK's
+ * `expo.updates.update_id` context tells OTAs apart.
  */
 
 import * as Sentry from '@sentry/react-native';
@@ -230,11 +240,10 @@ export function initSentry(): void {
     (extra?.appEnv as string | undefined) ||
     (__DEV__ ? 'development' : 'production');
 
-  // Release identifier: EAS build id → version-buildNumber → undefined.
+  // An explicit override only; otherwise undefined, so the SDK fills release
+  // and dist from the native build (header comment).
   const release =
-    (extra?.sentryRelease as string | undefined) ||
-    process.env.SENTRY_RELEASE ||
-    buildReleaseFromConstants();
+    (extra?.sentryRelease as string | undefined) || process.env.SENTRY_RELEASE || undefined;
 
   try {
     Sentry.init({
@@ -256,15 +265,6 @@ export function initSentry(): void {
   } catch (error) {
     log.warn('[Sentry] Failed to initialize', { error });
   }
-}
-
-function buildReleaseFromConstants(): string | undefined {
-  const cfg = Constants.expoConfig as { version?: string } | undefined;
-  const version = cfg?.version;
-  // expo-constants exposes easBuildId via runtime
-  const easBuildId = (Constants as unknown as { easConfig?: { buildId?: string } }).easConfig?.buildId;
-  if (easBuildId) return `${version || 'unknown'}+${easBuildId}`;
-  return version;
 }
 
 /**

@@ -110,11 +110,27 @@ describe('services/sentry', () => {
       expect(sentryInit.mock.calls[0][0].release).toBe('my-release-1');
     });
 
-    it('falls back to version from expoConfig when no release set', () => {
+    it('uses SENTRY_RELEASE when no extras override is set', () => {
       setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      process.env.SENTRY_RELEASE = 'env-release-2';
       const { initSentry } = loadSentryModule();
       initSentry();
-      expect(sentryInit.mock.calls[0][0].release).toBe('1.2.3');
+      expect(sentryInit.mock.calls[0][0].release).toBe('env-release-2');
+    });
+
+    // #644: the app once reported the bare `version` ("1.5.0") while the
+    // build hook uploaded maps under the git SHA, so no event ever matched.
+    // With no override, release and dist stay unset and the SDK fills the
+    // native defaults (`com.bballtracker.mobile@<version>+<build>`, dist
+    // `<build>`): the names the Sentry Xcode phase uploads under and
+    // scripts/sentry-set-commits.js attaches commits to.
+    it('leaves release and dist to the native SDK when no override is set', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1', sentryRelease: '' });
+      const { initSentry } = loadSentryModule();
+      initSentry();
+      const cfg = sentryInit.mock.calls[0][0];
+      expect(cfg.release).toBeUndefined();
+      expect(cfg.dist).toBeUndefined();
     });
 
     it('stays disabled when Sentry.init throws', () => {

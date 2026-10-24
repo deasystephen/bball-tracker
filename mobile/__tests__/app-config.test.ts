@@ -5,7 +5,7 @@
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 import { APP_URL_SCHEME } from '../config/env';
@@ -58,7 +58,7 @@ async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promis
 }
 
 /** The lowest OTA runtime `version` may ever be again; history at the test that uses it. */
-const RUNTIME_FLOOR = '1.6.0';
+const RUNTIME_FLOOR = '1.7.0';
 
 /** [major, minor, patch] compare; true when `version` >= `floor`. */
 function atLeast(version: string, floor: string): boolean {
@@ -177,8 +177,45 @@ describe('app.config.js', () => {
   // - 1.6.0: build #33 (runtime 1.5.0) still compiles lottie-react-native and
   //   expo-status-bar, has no Android App Links filter (#716, #780) and
   //   predates the binary-coupled Expo SDK 57 patch bumps.
+  // - 1.7.0: build #34 (runtime 1.6.0) has no Sentry build phases or Sentry
+  //   8.32 native code (#644), no CFBundleLocalizations (#671), and predates
+  //   the expo 57.0.31 / expo-notifications / expo-router patches and
+  //   Amplitude 1.12.
   it(`keeps the OTA runtime at or past ${RUNTIME_FLOOR}`, async () => {
     expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, RUNTIME_FLOOR)).toBe(true);
+  });
+
+  // Sentry symbolication (#644). The plugin adds the Xcode phases that upload
+  // the embedded bundle's maps and the dSYMs; `npm run ota:production` uploads
+  // to the same org and project (sentry-symbolication.test.ts). The token must
+  // never sit in the config: the plugin would write it into the native project.
+  describe('Sentry Expo plugin', () => {
+    it('names the Sentry org and mobile project, and no token', async () => {
+      const options = pluginOptions(await loadConfig({ APP_ENV: 'production' }), '@sentry/react-native/expo');
+      expect(options).toEqual({ organization: 'satsun-ventures', project: 'bball-tracker-mobile' });
+    });
+  });
+
+  // Spanish declared to iOS (#671). Without CFBundleLocalizations iOS treats
+  // the app as English-only (no per-app Language setting). The list must be
+  // exactly the languages the app ships in i18n/locales/.
+  describe('declared localizations', () => {
+    const shipped = readdirSync(join(__dirname, '..', 'i18n', 'locales'))
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => file.replace(/\.json$/, ''))
+      .sort();
+
+    it('lists every shipped language for iOS through expo-localization', async () => {
+      const options = pluginOptions(await loadConfig({ APP_ENV: 'production' }), 'expo-localization');
+      expect(options).toEqual({ supportedLocales: { ios: shipped } });
+      expect(shipped).toEqual(['en', 'es']);
+    });
+
+    it('evaluates to an Info.plist with CFBundleLocalizations', async () => {
+      const config = await loadConfig({ APP_ENV: 'production' });
+      const { infoPlist } = (await evaluateNativeConfig(config, ['expo-localization'])).ios;
+      expect(infoPlist.CFBundleLocalizations).toEqual(shipped);
+    });
   });
 
   // Xcode 27 / iOS 27 SDK (#576). Without the scene life cycle an app built
