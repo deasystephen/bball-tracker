@@ -69,3 +69,12 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](../r
   credential: tfvars edit → one `terraform apply` (instance + secret version together) → immediate
   `--force-new-deployment`; rollback is the old password through the same two steps, never
   `AWSPREVIOUS` alone.
+- **[WorkOS production cutover](../runbooks/workos-production-cutover.md)** — moving the API from
+  the WorkOS Staging environment to Production (#24): the dashboard checklist (two redirect URIs
+  only, Email + Password for the App Store demo account, email verification required, no custom
+  AuthKit domain), the read-only `backend/scripts/workos-cutover-check.mjs`, a rehearsal on a
+  restored snapshot (it doubles as the restore drill) and one on a local stack, the cutover
+  sequence, verification and rollback. No database write: `WorkOSService.syncUser` relinks each
+  account by verified email on its first production sign-in, and back again on rollback. The
+  WorkOS secret versions are Terraform resources, so the keys change through `terraform.tfvars`
+  and one `terraform apply`, never a bare `put-secret-value` (the next apply would revert it).

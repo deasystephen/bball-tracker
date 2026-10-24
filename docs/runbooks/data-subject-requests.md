@@ -212,8 +212,11 @@ the provider record is gone, and WorkOS still holds their email. Finish it by ha
 dashboard (User Management → the email → Delete). Two known causes:
 
 - WorkOS outage or rate limit — retry the dashboard delete later.
-- The row carried a **staging** WorkOS id after the #24 production-key cutover — the production
-  environment has no such user; delete it from the *staging* environment's dashboard instead.
+- The row carried a **staging** WorkOS id after the #24 production-key cutover (the person never
+  signed in again, so it was never relinked) — the production environment has no such user;
+  delete it from the *staging* environment's dashboard instead. The cutover runbook's
+  "Afterwards" step deletes real people's staging identities once the rollback window closes
+  ([WorkOS production cutover](workos-production-cutover.md)).
 
 ## Reversal
 
