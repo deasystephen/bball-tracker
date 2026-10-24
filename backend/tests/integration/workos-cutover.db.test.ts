@@ -94,6 +94,15 @@ afterAll(async () => {
 });
 
 describe('syncUser relink after the key switch (#24)', () => {
+  // The owner turns the relink on for the cutover window (runbook).
+  beforeEach(() => {
+    process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES;
+  });
+
   it('moves a staging-linked row to the production identity and keeps everything else', async () => {
     const id = await mkUser('relink', { role: 'COACH', workosUserId: stagingId('relink'), emailVerified: true });
     mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(notFound());
@@ -204,6 +213,7 @@ describe('scripts/workos-cutover-check.mjs (read-only)', () => {
   interface Report {
     users: Record<string, number>;
     caseCollisions: string[][];
+    untrimmedEmailUserIds: string[];
     workos?: { environment: string; checked: number; unknownUserIds: string[]; failedUserIds: string[] };
     problems: string[];
   }
@@ -223,20 +233,24 @@ describe('scripts/workos-cutover-check.mjs (read-only)', () => {
   }
 
   let collisionIds: string[];
+  let paddedId: string;
   let staleId: string;
   let currentId: string;
 
   beforeAll(async () => {
     collisionIds = [await mkUser('pair'), await mkUser('pairupper', { email: `PAIR.${RUN}@example.test` })].sort();
     staleId = await mkUser('stale', { workosUserId: stagingId('stale') });
+    // Leading space only: removeTestRows anchors its pattern at the end.
+    paddedId = await mkUser('padded', { email: ` padded.${RUN}@example.test` });
     currentId = await mkUser('current', { workosUserId: `workos-prod-current-${RUN}` });
   });
 
-  it('reports addresses held by more than one live account (exit 2), as user ids only', async () => {
+  it('reports case collisions and untrimmed addresses (exit 2), as user ids only', async () => {
     const { code, report } = await check([]);
 
     expect(code).toBe(2);
     expect(report.caseCollisions).toContainEqual(collisionIds);
+    expect(report.untrimmedEmailUserIds).toContain(paddedId);
     expect(report.users.linked).toBeGreaterThanOrEqual(2);
     expect(report.users.mixedCaseEmail).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(report)).not.toContain('@example.test');

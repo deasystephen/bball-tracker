@@ -15,8 +15,13 @@
  *                   mixedCaseEmail (stored address is not lower-case; matched
  *                   case-insensitively since #955, informational)
  *   caseCollisions  BLOCKING. Groups of live user ids whose emails differ only by
- *                   case. A sign-in for such an address gets 409 (syncUser
- *                   refuses to guess), so resolve every group by hand first.
+ *                   case (grouped by lower(email), the comparison syncUser makes
+ *                   through emailEquals). A sign-in for such an address gets 409
+ *                   (syncUser refuses to guess), so resolve every group first.
+ *   untrimmedEmailUserIds  BLOCKING. Live rows whose stored email has leading or
+ *                   trailing whitespace. No sign-in can match them (syncUser
+ *                   trims what WorkOS sends), so the person would get a second,
+ *                   empty account. Fix the stored address first.
  *   workos          with --check-workos only: each linked row's workosUserId
  *                   looked up in the WorkOS environment WORKOS_API_KEY belongs to.
  *                   `unknown` rows relink on their next sign-in; `unknownUserIds`
@@ -28,7 +33,7 @@
  *   node scripts/workos-cutover-check.mjs
  *   node scripts/workos-cutover-check.mjs --check-workos      # also needs WORKOS_API_KEY
  *
- * Exit codes: 0 ready; 2 case collisions found; 3 a WorkOS lookup failed
+ * Exit codes: 0 ready; 2 case collisions or untrimmed emails found; 3 a WorkOS lookup failed
  * (anything but 200 or 404); 1 the script itself failed. `--no-fail` reports
  * without a non-zero exit for 2 and 3.
  *
@@ -64,9 +69,12 @@ const USER_COUNTS = `SELECT
 const CASE_COLLISIONS = `SELECT array_agg("id" ORDER BY "id") AS "ids"
   FROM "User"
   WHERE "deletedAt" IS NULL AND "email" IS NOT NULL
-  GROUP BY lower(trim("email"))
+  GROUP BY lower("email")
   HAVING count(*) > 1
   ORDER BY min("id")`;
+
+const UNTRIMMED = `SELECT "id" FROM "User"
+  WHERE "deletedAt" IS NULL AND "email" IS NOT NULL AND "email" <> trim("email") ORDER BY "id"`;
 
 const LINKED = `SELECT "id", "workosUserId" FROM "User"
   WHERE "deletedAt" IS NULL AND "workosUserId" IS NOT NULL ORDER BY "id"`;
@@ -82,7 +90,8 @@ function parseArgs(argv) {
 }
 
 function sslConfig(connectionString) {
-  if (/@(localhost|127\.0\.0\.1)[:/]/.test(connectionString)) return undefined;
+  const { hostname } = new URL(connectionString);
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return undefined;
   const caPath = process.env.RDS_CA_BUNDLE_PATH || join(process.cwd(), 'certs', 'rds-global-bundle.pem');
   return { ca: readFileSync(caPath, 'utf8'), rejectUnauthorized: true };
 }
@@ -135,23 +144,29 @@ async function main() {
   await client.connect();
   let users;
   let caseCollisions;
+  let untrimmedEmailUserIds;
   let linkedRows;
   try {
     // One snapshot for every query, and nothing in it can write.
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     users = (await client.query(USER_COUNTS)).rows[0];
     caseCollisions = (await client.query(CASE_COLLISIONS)).rows.map((row) => row.ids);
+    untrimmedEmailUserIds = (await client.query(UNTRIMMED)).rows.map((row) => row.id);
     linkedRows = args.checkWorkos ? (await client.query(LINKED)).rows : [];
     await client.query('COMMIT');
   } finally {
     await client.end();
   }
 
-  const report = { collectedAt: new Date().toISOString(), users, caseCollisions };
+  const report = { collectedAt: new Date().toISOString(), users, caseCollisions, untrimmedEmailUserIds };
   const problems = [];
   let exitCode = 0;
   if (caseCollisions.length > 0) {
     problems.push(`${caseCollisions.length} email address(es) held by more than one live account, differing only by case`);
+    exitCode = 2;
+  }
+  if (untrimmedEmailUserIds.length > 0) {
+    problems.push(`${untrimmedEmailUserIds.length} live account(s) whose stored email has outer whitespace`);
     exitCode = 2;
   }
   if (args.checkWorkos) {
@@ -165,11 +180,13 @@ async function main() {
   report.problems = problems;
   console.log(JSON.stringify(report, null, 2));
   if (problems.length > 0) console.error(`workos-cutover-check: ${problems.length} problem(s):\n - ${problems.join('\n - ')}`);
-  process.exit(args.fail ? exitCode : 0);
+  // exitCode, not exit(): a piped stdout is written asynchronously, and exit()
+  // could cut the report off.
+  process.exitCode = args.fail ? exitCode : 0;
 }
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message || error.code || error.name : String(error);
   console.error(`workos-cutover-check: ${message}`);
-  process.exit(1);
+  process.exitCode = 1;
 });

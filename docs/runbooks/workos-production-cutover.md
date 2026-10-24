@@ -11,7 +11,7 @@ dashboard access, a Terraform apply and a production deploy. Nothing in this rep
 | What changes | The two Secrets Manager values `bball-tracker-production/workos-api-key` and `bball-tracker-production/workos-client-id`, and with them every WorkOS identity |
 | What does not change | Every `User` row, team, membership, game and stat. No database write is needed |
 | Who is affected | Every signed-in user is signed out once, and must **sign up again with the same email** (production WorkOS has no users and no passwords) |
-| How accounts are kept | `WorkOSService.syncUser` relinks each row by verified email on its first production sign-in (branch 3a, below) |
+| How accounts are kept | `WorkOSService.syncUser` relinks each row by verified email on its first production sign-in (branch 3a, below), while `WORKOS_RELINK_UNKNOWN_IDENTITIES=true` is set in `infra/task-definition.json` |
 | Window | About 10 minutes of operator time; users are signed out from the moment the new task serves until they next open the app |
 | Rollback | Put the staging values back and redeploy. No snapshot restore: the same relink runs in reverse |
 | Read-only check | `backend/scripts/workos-cutover-check.mjs` (case collisions, counts, which rows have relinked) |
@@ -38,16 +38,25 @@ Two designs were considered:
    reports the email **verified**, the row is moved to the new identity with a compare-and-set on
    the old id (`relinkUnknownIdentity`), guarded by `deletedAt IS NULL`; role, name, memberships
    and `isManaged` are untouched, and the callback answers 200 with `claimedInvite: false`. It
-   logs `Relinked user to a new WorkOS identity` (`userId` only).
+   logs `Relinked user to a new WorkOS identity` with `userId` and `previousWorkosUserId`, which
+   is the audit trail of every move.
 
-   Everything else keeps the 409: the old identity still exists (two live identities for one
-   address), the email is not verified, or the row changed underneath the sign-in. Any WorkOS
-   failure other than 404 is a 503, never a relink on a guess.
+   **The branch is off unless `WORKOS_RELINK_UNKNOWN_IDENTITIES=true`** is in the task
+   definition. It is turned on for the cutover and its rollback window and off again afterwards,
+   so that later a WorkOS user deleted in the dashboard cannot hand its row (role, staff rows,
+   memberships) to a new sign-up with the same address.
+
+   Everything else keeps the 409, and the warn line `Refusing to link WorkOS identity to an email
+   owned by another identity` carries the `reason`: `disabled` (flag off), `email_unverified`,
+   `identity_exists` (two live identities for one address) or `row_changed` (the row moved to some
+   other identity underneath the sign-in; a retried sign-in that already moved it to the *same*
+   identity succeeds). Any WorkOS failure other than 404 is a 503, never a relink on a guess.
 
 Consequences:
 
-- **Inert until the keys change.** On staging keys every stored id is known to staging, so the
-  branch never fires; the only extra work is one `getUser` call on a path that was already a 409.
+- **Inert until switched on, and until the keys change.** With the flag off nothing changes.
+  With it on and staging keys still live, every stored id is known to staging, so the branch
+  never fires; the only extra work is one `getUser` call on a path that was already a 409.
 - **No timing gap.** The relink happens when each person signs in, whenever that is.
 - **No spurious cutover alarm.** A relinked sign-in never reaches the 409, so the Sentry capture
   `flow: auth-callback-conflict` (the "New issue in production" email) keeps meaning "something
@@ -65,6 +74,11 @@ Consequences:
 
 - [ ] This preparation PR is merged and deployed (`curl -s https://api.hooplings.com/health`
       shows its commit or a later one).
+- [ ] **T−1 day: the flag PR is merged and deployed.** One line in `infra/task-definition.json`,
+      `environment`: `{ "name": "WORKOS_RELINK_UNKNOWN_IDENTITIES", "value": "true" }`. Merging
+      deploys (check for live games first). On staging keys it changes nothing (see above), and
+      it keeps the cutover itself to a secrets change plus `--force-new-deployment`, independent
+      of CI timing.
 - [ ] #952 (verified-email gate on the claim) is merged, or knowingly deferred.
 - [ ] Docker Postgres available on the machine that runs Rehearsal B (`docker-compose up -d`).
 - [ ] The owner can reach the WorkOS dashboard, run `terraform apply` from `infra/`, and run a
@@ -120,6 +134,9 @@ runbook's Drill log**: it is also the periodic restore drill.
      accounts whose emails differ only by case. Decide with the person which row is theirs and
      merge or delete the other (data-subject runbook, operator delete by id) *on production*,
      then re-run.
+   - `untrimmedEmailUserIds: []`. Any id there is also a blocker: its stored address has outer
+     whitespace, so no sign-in matches it and the person would get a second, empty account.
+     Correct the stored address (trimmed, lower-case) on production, then re-run.
    - Note `users.total`, `users.linked` (accounts that will relink), `users.linkedAdmins`.
    - With the staging key, `workos.unknown` should be 0. A non-zero value lists rows whose staging
      identity was deleted in the dashboard; they already relink on their next staging sign-in.
@@ -143,7 +160,8 @@ on sign-in instead of looping), and production access tokens carry `iss = https:
 
    Expect `404`. **Anything else (400, 403, 422) stops the cutover**: `identityExists` would answer
    503 to every returning user. Report it on #24.
-2. Local stack: `docker-compose up -d`, backend with the **staging** keys in `backend/.env`,
+2. Local stack: `docker-compose up -d`, backend with the **staging** keys and
+   `WORKOS_RELINK_UNKNOWN_IDENTITIES=true` in `backend/.env`,
    `npx expo run:ios`. Sign in with your own email (a real WorkOS sign-in, not dev-login). Note
    your user id and teams.
 3. Stop the backend. Put the **production** API key and client id in `backend/.env` (keep a copy
@@ -167,7 +185,7 @@ Pick a quiet hour. Tell testers beforehand (template below).
 
 | Step | Time | Action |
 | --- | --- | --- |
-| 1 | T−1 day | Run the check against **production** from a one-off task (read-only, same command as Rehearsal A step 2). `caseCollisions` must be `[]`. |
+| 1 | T−1 day | Run the check against **production** from a one-off task (read-only, same command as Rehearsal A step 2). `caseCollisions` and `untrimmedEmailUserIds` must be `[]`. Confirm the flag PR (Preconditions) is deployed. |
 | 2 | T−10 min | **Live-game check.** No `IN_PROGRESS` game (Datadog US5 `service:bball-tracker-api ("Game created" OR "Game event created")` over the last hours, or ask the testers). The redeploy in step 4 splits live games like any deploy. |
 | 3 | T0 | **Secrets, through Terraform** (see below). No effect on the running task. |
 | 4 | T+2 min | `--force-new-deployment` and wait for `services-stable` (about 3–5 min). |
@@ -246,7 +264,10 @@ the overlap.
 - [ ] On a device with the latest TestFlight build: the app opens on sign-in; sign up with your own
       email; you land on Home with your teams, your ADMIN role intact (Profile).
 - [ ] Datadog (US5) `service:bball-tracker-api "Relinked user to a new WorkOS identity"` — one line
-      per returning user. `"Auth callback email linked to a different WorkOS user"` — none.
+      per returning user. `"Auth callback email linked to a different WorkOS user"` — none; if
+      there is one, the warn line just before it names the `reason` (`disabled` means the flag is
+      not in the running task definition; `email_unverified` means AuthKit is not requiring
+      verification).
       `"WorkOS getUser failed while checking a linked identity"` — none.
 - [ ] Sentry `bball-tracker-backend`, `production`: no new `auth-callback-conflict` issue.
 - [ ] From a one-off task (the live task env now has the production key):
@@ -286,6 +307,10 @@ which means `identityExists` cannot read WorkOS) and the cause is not obvious wi
 ## 7. Afterwards
 
 - [ ] Leave the Staging environment untouched for **14 days** (the rollback window).
+- [ ] Then open a PR that removes `WORKOS_RELINK_UNKNOWN_IDENTITIES` from
+      `infra/task-definition.json` (merging deploys). From then on an account that has not signed
+      in again since the cutover gets the 409 with `reason: disabled`; turn the flag on again for
+      a day if a straggler appears, or relink that one row by hand after verifying the person.
 - [ ] Then, in **Staging**: delete the identities of real people (everyone not in
       `docs/testing/workos-test-accounts.md`'s dev personas), so Staging stops holding their
       email and name. Until then, an account deletion for a row that never relinked reports

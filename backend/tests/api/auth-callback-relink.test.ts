@@ -86,6 +86,25 @@ describe('GET /api/v1/auth/callback across the WorkOS key cutover (#24, #955)', 
     (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
     errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    // The owner turns the relink on for the cutover window (runbook).
+    process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES;
+    mockWorkOSClient.userManagement.getUser.mockReset();
+  });
+
+  it('keeps the 409 when the relink is switched off, without asking WorkOS', async () => {
+    delete process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES;
+    storedRow(userRow());
+    signInAs({ id: PRODUCTION_ID, email: STORED_EMAIL, emailVerified: true });
+
+    const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
+
+    expect(response.status).toBe(409);
+    expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
+    expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('relinks a staging-linked account on its first production sign-in (no 409, no alarm)', async () => {

@@ -74,7 +74,9 @@ Production incident and recurring-ops procedures live in [`docs/runbooks/`](../r
   only, Email + Password for the App Store demo account, email verification required, no custom
   AuthKit domain), the read-only `backend/scripts/workos-cutover-check.mjs`, a rehearsal on a
   restored snapshot (it doubles as the restore drill) and one on a local stack, the cutover
-  sequence, verification and rollback. No database write: `WorkOSService.syncUser` relinks each
-  account by verified email on its first production sign-in, and back again on rollback. The
+  sequence, verification and rollback. No database write: while `WORKOS_RELINK_UNKNOWN_IDENTITIES=true` is set in
+  `infra/task-definition.json` (the cutover and its rollback window only),
+  `WorkOSService.syncUser` relinks each account by verified email on its first production
+  sign-in, and back again on rollback. The
   WorkOS secret versions are Terraform resources, so the keys change through `terraform.tfvars`
   and one `terraform apply`, never a bare `put-secret-value` (the next apply would revert it).

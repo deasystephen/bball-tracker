@@ -65,6 +65,18 @@ export interface SyncUserResult {
  */
 export const JWT_CLOCK_TOLERANCE_SECONDS = 30;
 
+/** Why `relinkUnknownIdentity` left a row alone; logged with the 409. */
+export type RelinkRefusal = 'disabled' | 'email_unverified' | 'identity_exists' | 'row_changed';
+
+/**
+ * The cutover relink (#24) runs only while the owner has set
+ * `WORKOS_RELINK_UNKNOWN_IDENTITIES=true` in `infra/task-definition.json`.
+ * Read on every call, so a test can flip it.
+ */
+export function relinkEnabled(): boolean {
+  return process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES === 'true';
+}
+
 export class WorkOSService {
   /**
    * Get authorization URL for user login
@@ -210,9 +222,10 @@ export class WorkOSService {
    * 3. `email` match on a row linked to a *different* WorkOS identity:
    *    a. that identity does not exist in the WorkOS environment the API now
    *       runs against (the Staging → Production key cutover, #24, or a user
-   *       deleted in the WorkOS dashboard) and WorkOS reports this email
-   *       verified: relink the row to the signing-in identity
-   *       (`relinkUnknownIdentity`);
+   *       deleted in the WorkOS dashboard), WorkOS reports this email
+   *       verified, and the owner has turned the cutover relink on
+   *       (`WORKOS_RELINK_UNKNOWN_IDENTITIES=true`): relink the row to the
+   *       signing-in identity (`relinkUnknownIdentity`);
    *    b. otherwise refuse with 409 rather than silently merging accounts.
    * 4. Otherwise create.
    *
@@ -243,14 +256,26 @@ export class WorkOSService {
     // 1. Already linked by WorkOS id
     const linked = await prisma.user.findUnique({ where: { workosUserId: workosUser.id } });
     if (linked) {
+      // A change of case alone is not a change of address: leave a legacy
+      // mixed-case row and its delivery state alone (#955).
+      const emailChanged = !isSameEmail(linked.email, email);
+      if (emailChanged) {
+        // `User.email` is unique byte for byte only; refuse a new address that
+        // another live row holds in another case, as P2002 refuses an exact one.
+        const holder = await prisma.user.findFirst({
+          where: { email: emailEquals(email), deletedAt: null, NOT: { id: linked.id } },
+          select: { id: true },
+        });
+        if (holder) {
+          throw new ConflictError('An account with this email already exists');
+        }
+      }
       const updated = await WorkOSService.mapUniqueViolation(() =>
         prisma.user.updateMany({
           where: { id: linked.id, deletedAt: null },
           data: {
             emailVerified,
-            // A change of case alone is not a change of address: leave a
-            // legacy mixed-case row and its delivery state alone (#955).
-            ...(!isSameEmail(linked.email, email) && {
+            ...(emailChanged && {
               email,
               ...EMAIL_SUPPRESSION_CLEARED,
             }),
@@ -269,16 +294,17 @@ export class WorkOSService {
     const byEmail = await WorkOSService.findLiveUserByEmail(email);
     if (byEmail) {
       if (byEmail.workosUserId) {
-        const relinked = await WorkOSService.relinkUnknownIdentity(byEmail, {
+        const relink = await WorkOSService.relinkUnknownIdentity(byEmail, {
           workosUserId: workosUser.id,
           emailVerified,
           workosAvatar,
         });
-        if (relinked) {
-          return { user: relinked, claimedInvite: false, wasManaged: false };
+        if ('user' in relink) {
+          return { user: relink.user, claimedInvite: false, wasManaged: false };
         }
         logger.warn('Refusing to link WorkOS identity to an email owned by another identity', {
           userId: byEmail.id,
+          reason: relink.refused,
         });
         throw new ConflictError('An account with this email is already linked to a different login');
       }
@@ -347,7 +373,7 @@ export class WorkOSService {
    * and `%` literal (`emailEquals`, #955). `User.email` is unique byte for
    * byte only, so two legacy rows can differ by case alone: that is refused
    * with 409 rather than guessed at. The cutover check
-   * (`scripts/workos-cutover-check.ts`) lists such rows so they are resolved
+   * (`scripts/workos-cutover-check.mjs`) lists such rows so they are resolved
    * before the key switch (#24).
    */
   private static async findLiveUserByEmail(email: string): Promise<User | null> {
@@ -396,29 +422,39 @@ export class WorkOSService {
    * moves to the new identity and nothing else changes (role, memberships,
    * name, `isManaged`).
    *
-   * Returns `null`, having written nothing, when WorkOS does not report the
-   * email verified, when the old identity still exists (two live identities
-   * for one address: a real conflict), or when the row changed underneath
-   * us; the caller answers 409 and the cutover alarm keeps its meaning.
-   * Reversible by construction: switching back to the old keys relinks each
-   * account the same way on its next sign-in.
+   * **Off unless `WORKOS_RELINK_UNKNOWN_IDENTITIES=true`** (`relinkEnabled`).
+   * The owner turns it on for the cutover and its rollback window and off
+   * again afterwards (`docs/runbooks/workos-production-cutover.md`), so a
+   * WorkOS user deleted in the dashboard later cannot hand its row to a new
+   * sign-up for the same address.
+   *
+   * Refuses, having written nothing, when the flag is off, when WorkOS does
+   * not report the email verified, when the old identity still exists (two
+   * live identities for one address: a real conflict), or when the row moved
+   * to some other identity underneath us; the caller logs the reason and
+   * answers 409. A concurrent sign-in that already moved the row to *this*
+   * identity is a success, not a conflict. Reversible by construction:
+   * switching back to the old keys relinks each account the same way.
    */
   private static async relinkUnknownIdentity(
     row: User,
     incoming: { workosUserId: string; emailVerified: boolean; workosAvatar: string | null }
-  ): Promise<User | null> {
+  ): Promise<{ user: User } | { refused: RelinkRefusal }> {
     const previousWorkosUserId = row.workosUserId;
-    if (!previousWorkosUserId || !incoming.emailVerified) {
-      return null;
+    if (!relinkEnabled() || !previousWorkosUserId) {
+      return { refused: 'disabled' };
+    }
+    if (!incoming.emailVerified) {
+      return { refused: 'email_unverified' };
     }
     if (await WorkOSService.identityExists(previousWorkosUserId)) {
-      return null;
+      return { refused: 'identity_exists' };
     }
 
     const relinked = await WorkOSService.mapUniqueViolation(() =>
       prisma.user.updateMany({
         // Compare-and-set on the stale id: a concurrent relink or deletion
-        // leaves zero rows, and the caller answers 409.
+        // leaves zero rows.
         where: { id: row.id, workosUserId: previousWorkosUserId, deletedAt: null },
         data: {
           workosUserId: incoming.workosUserId,
@@ -428,10 +464,16 @@ export class WorkOSService {
       })
     );
     if (relinked.count !== 1) {
-      return null;
+      // A double-tapped or retried first sign-in: the other request already
+      // moved the row to this same identity.
+      const current = await prisma.user.findUnique({ where: { id: row.id } });
+      if (current && !current.deletedAt && current.workosUserId === incoming.workosUserId) {
+        return { user: current };
+      }
+      return { refused: 'row_changed' };
     }
-    logger.info('Relinked user to a new WorkOS identity', { userId: row.id });
-    return prisma.user.findUniqueOrThrow({ where: { id: row.id } });
+    logger.info('Relinked user to a new WorkOS identity', { userId: row.id, previousWorkosUserId });
+    return { user: await prisma.user.findUniqueOrThrow({ where: { id: row.id } }) };
   }
 
   /** Turn a Prisma unique-constraint violation (P2002) into a 409 instead of a 500. */
