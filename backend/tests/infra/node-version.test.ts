@@ -7,7 +7,8 @@
  * (CLAUDE.md: "Tests exercise the path production runs"). The major is written
  * in files that cannot share a constant:
  *
- *  - `docker/Dockerfile` (`FROM node:<major>-alpine`), the production image;
+ *  - `docker/Dockerfile` (`FROM node:<major>-alpine`), the production image,
+ *    and `web/Dockerfile`, the web app's image (#30);
  *  - the root `.nvmrc`, which every `actions/setup-node` step reads through
  *    `node-version-file: .nvmrc`;
  *  - `backend/package.json` `engines.node` (`>=<major>`).
@@ -24,6 +25,7 @@ import path from 'path';
 import { ROOT, WORKFLOWS_DIR, workflowFiles } from './workflows';
 
 const DOCKERFILE = path.join(ROOT, 'docker/Dockerfile');
+const WEB_DOCKERFILE = path.join(ROOT, 'web/Dockerfile');
 const NVMRC = path.join(ROOT, '.nvmrc');
 const BACKEND_PACKAGE = path.join(ROOT, 'backend/package.json');
 
@@ -103,6 +105,10 @@ describe('Node.js major — Dockerfile / .nvmrc / engines / workflows parity', (
   it('pins the production image major in .nvmrc and backend engines.node', () => {
     expect(nvmrc).toBe(docker);
     expect(engines).toBe(docker);
+  });
+
+  it('builds the web image on the same major', () => {
+    expect(extractMajor(readFileSync(WEB_DOCKERFILE, 'utf8'), DOCKERFILE_PATTERN, 'web/Dockerfile')).toBe(docker);
   });
 
   it('runs every actions/setup-node step in every workflow on the production major', () => {
