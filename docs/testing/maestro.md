@@ -17,7 +17,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `-AppleLanguages (es) -AppleLocale es_ES`. That sets Foundation's argument domain for this process
   only: `Locale.preferredLanguages` (what expo-localization's `getLocales()` reads, and so
   `mobile/i18n/config.ts`) starts with `es`, while the simulator, its keyboard and the next flow stay
-  English. Checked against the Maestro 2.11.0 jar (`util.IOSLaunchArguments`), not yet on a run. If it
+  English. Checked against the Maestro 2.11.0 jar (`util.IOSLaunchArguments`) and on a run (2026-10-24). If it
   ever stops working, set the simulator itself (`xcrun simctl spawn booted defaults write -g
   AppleLanguages -array es`, the same for `AppleLocale -string es_ES`, then reboot the simulator) and
   put it back to `en` / `en_US` afterwards; the flow header repeats this.
@@ -166,8 +166,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `hideKeyboard` does and broke two flows. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
   be revived); flows are deliberately manual-only.
-- **Flows not yet run.** `spanish-locale.yaml` (#671) and `invite-deep-link.yaml` (#972, #973) were
-  added on 2026-10-24 from the code and docs, on a machine with no Docker, so neither has passed
-  once; the same PR added the "Share game" absence checks (#731) to `game-lifecycle.yaml` and
-  `player-no-tracking.yaml`. The suite is 27 flows with them; the run record above predates all four
-  changes.
+- **Run record, 2026-10-24.** 27 flows passed on the iPhone 17 / iOS 26.5 simulator against a fresh
+  1.6.0 Debug build (ad-hoc signed `xcodebuild`, `main` at `a840311`) and the local stack, with a
+  reseed before each: the 25 existing flows, all on the first attempt, plus `spanish-locale.yaml`
+  (#671) and `invite-deep-link.yaml` (#972, #973, seeded with `SEED_MAESTRO_INVITE_TOKEN=true`).
+  The "Share game" absence checks (#731) in `game-lifecycle.yaml` and `player-no-tracking.yaml`
+  passed too. The suite is 27 flows.

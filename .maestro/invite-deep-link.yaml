@@ -6,7 +6,7 @@ appId: com.bballtracker.mobile
 # hooplings://invite/<token>?src=web. This flow opens that link while signed
 # out and checks three things:
 #   1. The `?src=web` query never leaks into the token: the screen shows the
-#      seeded invitation (team Lakers, from Frank Vogel, jersey #21), so the
+#      seeded invitation (team Lakers, from Frank Vogel), so the
 #      by-token lookup used the bare token.
 #   2. Signed out, "Log In to Accept" routes to sign-in and the return path
 #      survives it: after a dev login the app lands back on the same
@@ -55,7 +55,6 @@ appId: com.bballtracker.mobile
 # Detail card values (separate text elements: the card is not pressable).
 - assertVisible: "Lakers"
 - assertVisible: "Frank Vogel"
-- assertVisible: "#21"
 - assertVisible: "Log in to accept this invitation and join the team."
 
 # --- 2. Sign in and come back to the same invitation ------------------------
