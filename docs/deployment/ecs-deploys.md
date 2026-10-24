@@ -38,16 +38,74 @@ down until someone notices.
 **It catches crashes, not semantic regressions.** A deploy that still answers `/health` but breaks
 a query path rolls out normally — the breaker is not a substitute for a staging gate (#73).
 
-**Every deploy briefly splits live games — avoid scheduled game windows.** The rollout runs with
-`deployment_maximum_percent = 200`, so for a short overlap the old and the new task both hold
-connections. Socket.io rooms are in process memory (single-replica, #446), so a coach tracking on
-one task and the spectators on the other stop seeing each other's events until the old task stops
-and clients reconnect; nobody gets an error. Check for `IN_PROGRESS` games before merging anything
-that deploys, and before starting a deploy by hand. Of the automated merges, the daily scan's
-backend pull requests deploy on their own and Dependabot's do not (next section). The startup guard
-(`utils/replica-guard.ts`) checks the configured ceiling, not the live task count, so it does not
-trip on the overlap. The window only closes with the Redis adapter (#452). Operator-facing copy:
-`docs/deployment/aws-setup.md` ("Deploy window").
+**Migrations run in the entrypoint, inside a 300 s grace period (#752).** `docker/entrypoint.sh`
+runs `prisma migrate deploy` before it starts node, so a new task refuses connections until every
+pending migration has finished. `aws_ecs_service.app` sets `health_check_grace_period_seconds = 300`:
+for the first 300 s after a task starts, the service scheduler ignores failing ALB (and container)
+health checks. Without it (the AWS default is 0) ECS stopped the task after the target group's
+`unhealthy_threshold * interval` (about 90 s), and a migration killed mid-flight leaves a
+`_prisma_migrations` row with `finished_at` NULL that fails every later task launch with **P3009**
+until someone runs `prisma migrate resolve` by hand.
+
+- **The grace period is the migration-time budget.** Measured on production in October 2026, the
+  entrypoint takes 6-11 s for `migrate deploy` with nothing pending (Prisma CLI start-up) and node
+  takes another 5-11 s to log `Server running on port 3000`. Once it listens, the target needs
+  `healthy_threshold` (2) passing checks 30 s apart, up to about 60 s, and it must be healthy
+  before the 300 s run out. So **every pending migration together has about 200 s**. A
+  backfill that may not fit is timed on a restored snapshot first ("Variant — rehearse a schema
+  migration on a restored copy" in `docs/runbooks/rds-backup-restore.md`) and split into batches
+  if it does not; see `docs/testing/migration-backfill-guard.md`.
+- **The grace period does not slow a good deploy**: ECS counts the task healthy as soon as the ALB
+  does (2 passing checks, 30 s apart). It slows the replacement of a task that starts but never
+  answers `/health`: each attempt now takes up to 300 s, so a hang of that kind outlasts CI's
+  10-minute stability wait (red **Build & Deploy to ECS** job) before the circuit breaker's third
+  failed launch rolls it back, about 15-18 minutes in. Do not start another deploy while that
+  rollback is still running. A task that exits (a crash, a failing migration) is unaffected.
+- The container-level `healthCheck.startPeriod` (120 s) in `infra/task-definition.json` is a
+  separate knob: it only stops the container's own `wget` check from counting failures early.
+  With `startPeriod 120 / interval 30 / retries 3` the container check reports unhealthy at about
+  210 s, which the grace period also covers.
+- Verify the applied value:
+  `aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-api --query 'services[0].healthCheckGracePeriodSeconds'`
+  (0 before the apply)
+
+**Every deploy splits live games for under a minute — avoid scheduled game windows.** The
+rollout runs with `deployment_maximum_percent = 200`, so for a short overlap the old and the new
+task both hold connections. Socket.io rooms are in process memory (single-replica, #446), so a
+coach tracking on one task and the spectators on the other stop seeing each other's events until
+the old task stops and clients reconnect; nobody gets an error. The overlap runs from the moment
+the new task's target turns healthy (the ALB then sends every new request, the coach's tracker
+calls included, to it) to the end of the old target's **deregistration delay**:
+`aws_lb_target_group.app` sets `deregistration_delay = 30` (#748), so the split is about 30 s plus
+the few seconds ECS takes to start the drain and the clients take to reconnect.
+
+- **Why 30 s.** The ALB keeps a draining target's WebSockets open for the whole delay and ECS
+  sends SIGTERM only when it ends. Under the AWS default of 300 s, production logs showed the old
+  task's `Shutting down` 5m50s-6m26s after the new task's `Server running` on every deploy of
+  2026-10-18 and 2026-10-19, which is about five minutes of silent split. 30 s still covers the
+  slowest bounded request, a coach finishing a game (`PATCH /games/:id` awaits
+  `finalizeGameStats`): up to 3.5 s of pool wait (`DB_CONNECTION_TIMEOUT_MS`), Prisma's 2 s
+  `maxWait` and the 15 s transaction cap (`FINALIZE_TRANSACTION_TIMEOUT_MS`), about 21 s, so an
+  in-flight REST call still finishes on the old task; a request still running when the delay ends
+  can be cut off. Going much above 30 s breaks "under a minute": ECS itself takes up to about 25 s
+  after the new target turns healthy to start the drain.
+- **Then the clients converge.** On SIGTERM the shutdown routine (`utils/shutdown.ts`, #747)
+  closes every socket with a transport close, socket.io-client reconnects to the new task, re-joins
+  the room and resyncs from the join snapshot (every broadcast also carries the score).
+- Verify the applied value:
+  `aws elbv2 describe-target-groups --names bball-tracker-production-tg --query 'TargetGroups[0].TargetGroupArn' --output text`,
+  then `aws elbv2 describe-target-group-attributes --target-group-arn <that arn> --query "Attributes[?Key=='deregistration_delay.timeout_seconds']"`
+  (300 before the apply)
+- `backend/tests/infra/ecs-deploy-timing.test.ts` holds both values to these bounds: the grace
+  period at least 300 s and past the container check's unhealthy point, the delay between the
+  finish-game request bound and 30 s. Change the test and `infra/ecs.tf` together.
+
+Check for `IN_PROGRESS` games before merging anything that deploys, and before starting a deploy by
+hand. Of the automated merges, the daily scan's backend pull requests deploy on their own and
+Dependabot's do not (next section). The startup guard (`utils/replica-guard.ts`) checks the
+configured ceiling, not the live task count, so it does not trip on the overlap. The window only
+closes with the Redis adapter (#452). Operator-facing copy: `docs/deployment/aws-setup.md` ("Deploy
+window").
 
 ## Keep-alive vs the ALB idle timeout (#749)
 
