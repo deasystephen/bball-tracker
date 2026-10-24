@@ -68,6 +68,27 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `__tests__/app/{tab-pill-selection,game-detail-rsvp-picker}.test.tsx` (Games tab, game detail RSVP),
   `{league-detail-delete,team-detail-roster-sort,stats-tab-states,player-stats-states,players-roster-status,invitations-guardian,players-email-issue}.test.tsx`
   (league seasons, team detail, Stats tab, player stats, roster and Add Player form, invitations).
+- **Every change keeps every language current.** A PR that adds or changes user-facing copy changes
+  `en.json` **and** every other file in `i18n/locales/` in the same PR, then marks the translated keys
+  with `npm run i18n:mark -- <code> <key>…`. CI enforces it with three guards:
+  `hardcoded-copy.test.ts` (no literal copy in source); `locale-parity.test.ts` (every locale has the
+  same keys and placeholders as `en.json`; no value copied from English, in any letter case, unless it
+  is in `IDENTICAL_TO_ENGLISH` with the reason the word really is the same, e.g. "Final", PTS; and no
+  stale translation: `i18n/translated-from.json` holds a hash of the English each translation was
+  written from, so editing an English value fails until the translation is updated and re-marked);
+  and `locale-registry.test.ts` (every locale file is registered in `i18n/config.ts#LOCALES`, every
+  registered language loads, and an unshipped device language resolves to English). The Spanish
+  render tests above sit beside them. No guard can see a value that is only partly translated, and
+  marking is a claim a reviewer checks in the diff: agent or machine translations are drafts, so flag
+  uncertain ones in the PR for a native speaker. Text that must not be translated (the word typed to
+  confirm a deletion, `DELETE_CONFIRMATION`) comes from code through a `{{placeholder}}`, never from
+  a locale value.
+- **Adding a language:** add `i18n/locales/<code>.json` with every key of `en.json` translated, add
+  `<code>` to `LOCALES` in `i18n/config.ts`, run `npm run i18n:mark -- <code> --all`, and add an
+  `IDENTICAL_TO_ENGLISH.<code>` block in `locale-parity.test.ts` only for words that really are the
+  same; the guards list whatever is missing. Add a render test in that language and a row in the E2E
+  test plan's locale case (B.4). Telling iOS about the language (`CFBundleLocalizations`, below) is
+  native config: it goes in the next native build's PR, never in a JavaScript-only PR.
 - **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
   yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
   the app and localizes system UI around it.
