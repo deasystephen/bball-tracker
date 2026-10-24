@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository. This file holds **commands, hard ru
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`) that hosts the public `hooplings.com/invite/<token>` accept flow. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
+Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`, ECS behind the API's ALB) that hosts the public `hooplings.com/invite/<token>` accept flow and the support, privacy and terms pages. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
 
 Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Prisma, Redis cache).
 
@@ -26,6 +26,7 @@ Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Pr
 | Mobile analytics: Amplitude event catalogue, user properties, screen views, guard test | `docs/architecture/analytics.md` |
 | Mobile builds, runtime versions, OTA drift guard, URL scheme, eas-cli | `docs/deployment/mobile-builds-and-ota.md` |
 | ECS deploys: task definition, circuit breaker, what a deploy carries | `docs/deployment/ecs-deploys.md` |
+| Web app hosting (ECS behind the API's ALB), web deploys, two-apply bring-up | `docs/deployment/web-app.md` |
 | Runbooks index (on-call, email deliverability, data-subject requests, RDS) | `docs/runbooks/README.md` |
 | Testing conventions (API tests, schema tests, real-database suites, migration guard) | `docs/testing/conventions.md` |
 | Maestro E2E flows and their gotchas | `docs/testing/maestro.md` |
@@ -179,7 +180,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Deploys and operations
 
-- **A push to `main` that touches `backend/`, `infra/`, `docker/` or `ci.yml` (minus Markdown) builds and deploys to ECS.** It ships everything waiting on `main` since the commit production runs (`curl -s https://api.hooplings.com/health` returns `commit`); read the run's "What this deploy carries" summary before blaming the change that started it. Dependabot's auto-merged backend bumps start no CI and wait; the daily scan's backend PRs deploy unattended.
+- **A push to `main` that touches `backend/`, `infra/`, `docker/` or `ci.yml` (minus Markdown) builds and deploys to ECS.** It ships everything waiting on `main` since the commit production runs (`curl -s https://api.hooplings.com/health` returns `commit`); read the run's "What this deploy carries" summary before blaming the change that started it. Dependabot's auto-merged backend bumps start no CI and wait; the daily scan's backend PRs deploy unattended. A push that changes `web/` or `infra/web-task-definition.json` deploys only the web service (`build-and-deploy-web`, `docs/deployment/web-app.md`); `infra/web.tf` and that file never roll the API.
 - **Every deploy briefly splits live games** (single-replica Socket.io during the rolling overlap). Check for `IN_PROGRESS` games before merging anything that deploys or deploying by hand (`gh workflow run CI --ref main`).
 - `infra/task-definition.json` is the **only** source of truth for the task definition (env vars, secrets, image). Terraform declares no task definition; a value written into `.tf` or `.tfvars` changes nothing and fails silently.
 - **CI never applies Terraform.** `terraform apply` from `infra/` first, then merge; the merge of a `.tf` file still triggers a full ECS deploy that contains none of the infra change.

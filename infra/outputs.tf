@@ -85,6 +85,21 @@ output "ecs_task_definition_family" {
   value       = local.task_definition_family
 }
 
+output "web_ecr_repository_url" {
+  description = "ECR repository for the web app image (web.tf, #30)"
+  value       = aws_ecr_repository.web.repository_url
+}
+
+output "web_task_definition_family" {
+  description = "ECS task definition family CI registers infra/web-task-definition.json into"
+  value       = local.web_family
+}
+
+output "web_service_name" {
+  description = "Web app ECS service name; null until web_enabled = true"
+  value       = one(aws_ecs_service.web[*].name)
+}
+
 # The IAM role and Secrets Manager ARNs that infra/task-definition.json carries
 # each have an output here, so a replaced resource can be re-read with
 # `terraform output -raw <name>` (one name per invocation). The output names

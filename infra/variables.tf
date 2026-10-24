@@ -153,6 +153,15 @@ variable "primary_domain" {
   default     = "hooplings.com"
 }
 
+# Web app (#30). Off until CI has registered the first revision of the
+# bball-tracker-production-web family: ECS cannot create a service before that.
+# web.tf, infra/README.md "Web app".
+variable "web_enabled" {
+  description = "Create the web app's ECS service, listener rules, apex/www records and uptime alarm (web.tf)."
+  type        = bool
+  default     = false
+}
+
 # Tags
 variable "tags" {
   description = "Common tags applied to all resources"
