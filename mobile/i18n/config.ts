@@ -23,8 +23,8 @@ export type SupportedLanguage = keyof typeof LOCALES;
 export const SUPPORTED_LANGUAGES = Object.keys(LOCALES) as SupportedLanguage[];
 
 const resources = Object.fromEntries(
-  Object.entries(LOCALES).map(([code, translation]) => [code, { translation }]),
-);
+  SUPPORTED_LANGUAGES.map((code) => [code, { translation: LOCALES[code] }]),
+) as { [K in SupportedLanguage]: { translation: (typeof LOCALES)[K] } };
 
 // Get device locale
 const deviceLocale = getLocales()[0]?.languageCode || 'en';

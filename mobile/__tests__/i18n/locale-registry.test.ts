@@ -34,8 +34,18 @@ describe('locale registry', () => {
     }
   });
 
-  it('falls back to English for a device language the app does not ship', () => {
-    const t = i18n.getFixedT('fr');
-    expect(t('common.cancel')).toBe(LOCALES.en.common.cancel);
+  it('accepts only the registered languages, so an unshipped device language resolves to English', async () => {
+    expect(i18n.options.supportedLngs).toEqual(expect.arrayContaining(SUPPORTED_LANGUAGES));
+    const device = i18n.cloneInstance({ lng: 'fr' });
+    await device.changeLanguage('fr');
+    expect(device.resolvedLanguage).toBe('en');
+    expect(device.languages).toEqual(['en']);
+    expect(device.t('common.cancel')).toBe(LOCALES.en.common.cancel);
+  });
+
+  it('resolves a shipped device language to itself', async () => {
+    const device = i18n.cloneInstance({ lng: 'es' });
+    await device.changeLanguage('es');
+    expect(device.resolvedLanguage).toBe('es');
   });
 });

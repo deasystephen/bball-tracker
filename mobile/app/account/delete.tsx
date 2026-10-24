@@ -163,8 +163,8 @@ export default function DeleteAccountScreen() {
         )}
 
         <Input
-          label={t('account.delete.confirmLabel')}
-          placeholder={t('account.delete.confirmPlaceholder')}
+          label={t('account.delete.confirmLabel', { word: DELETE_CONFIRMATION })}
+          placeholder={DELETE_CONFIRMATION}
           value={confirmation}
           onChangeText={setConfirmation}
           autoCapitalize="characters"
