@@ -8,8 +8,30 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - All flows start with `clearState: true`, skip onboarding, and dev-login as a test user
 - **Flows select by English copy on an en-US simulator.** Every string and label they match is an
   `en.json` value (`tabs.tabA11y` gives "Teams tab", `common.goBack` "Go back"), so changing English copy
-  in `en.json` is a flow change; run the flows that match it. Spanish is covered by Jest
-  (`__tests__/i18n/`), not by Maestro.
+  in `en.json` is a flow change; run the flows that match it. The one exception is
+  `.maestro/spanish-locale.yaml` (#671), which matches `es.json` values and so changes with Spanish
+  copy. Spanish coverage is otherwise Jest (`__tests__/i18n/`).
+- **Running the app in another language without touching the simulator.** `launchApp` takes
+  `arguments`; Maestro 2.11 hands them to `xcrun simctl launch` as `-<key> <value>` (it adds the dash
+  itself), so `arguments: { AppleLanguages: "(es)", AppleLocale: "es_ES" }` starts the app with
+  `-AppleLanguages (es) -AppleLocale es_ES`. That sets Foundation's argument domain for this process
+  only: `Locale.preferredLanguages` (what expo-localization's `getLocales()` reads, and so
+  `mobile/i18n/config.ts`) starts with `es`, while the simulator, its keyboard and the next flow stay
+  English. Checked against the Maestro 2.11.0 jar (`util.IOSLaunchArguments`), not yet on a run. If it
+  ever stops working, set the simulator itself (`xcrun simctl spawn booted defaults write -g
+  AppleLanguages -array es`, the same for `AppleLocale -string es_ES`, then reboot the simulator) and
+  put it back to `en` / `en_US` afterwards; the flow header repeats this.
+- **One seeded invitation can have a fixed token.** `.maestro/invite-deep-link.yaml` opens
+  `hooplings://invite/<MAESTRO_INVITE_TOKEN>?src=web` (`backend/tests/support/seed-fixtures.ts`), Iris
+  Invited's PENDING Lakers invitation. The token is in the repo and is a live bearer secret, so the seed
+  writes it only when the run opts in on the command line, `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db
+  seed` (never put it in `.env`), and also only with `NODE_ENV` not `production`, no
+  `SEED_ALLOW_PRODUCTION`, and a `DATABASE_URL` host in `LOCAL_DATABASE_HOSTS`
+  (`prisma/reset-guard.ts`). The opt-in is the guard that matters: a production database reached
+  through a tunnel on `localhost` passes the host check. Without it Iris gets a random token like every
+  other fixture and the flow fails on "Invitation Not Found". Setting it for every flow in a suite run
+  is harmless. The by-token lookup is rate limited to 30 per token per 15 minutes, so loop the flow no
+  more than about ten times in that window.
 - Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
 - When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
 - **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**
@@ -32,8 +54,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `openLink` with a conditional `runFlow: { when: { visible: "Open" }, commands: [ tapOn: "Open" ] }`;
   conditional because the simulator may remember the choice. `.maestro/coach-onboarding.yaml`
   (after `hooplings://teams` and `hooplings://games`), `.maestro/error-way-back.yaml` (after its
-  two `hooplings://teams/…` and `hooplings://games/…` links) and `.maestro/auth-callback.yaml`
-  (after the `hooplings://auth/callback?error=…` link) all do this.
+  two `hooplings://teams/…` and `hooplings://games/…` links), `.maestro/auth-callback.yaml`
+  (after the `hooplings://auth/callback?error=…` link) and `.maestro/invite-deep-link.yaml` (after
+  both of its `hooplings://invite/…` links) all do this.
 - There is no tab bar on pushed routes. `app/_layout.tsx` is a `Stack` with `(tabs)` as one screen, so
   `teams/[id]`, its roster, `games/[id]` and friends render **above** the tabs — `tapOn: "Teams tab"`
   cannot work there. Reaching a tab from a pushed screen means popping back, or a deep link.
@@ -143,3 +166,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `hideKeyboard` does and broke two flows. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
   be revived); flows are deliberately manual-only.
+- **Flows not yet run.** `spanish-locale.yaml` (#671) and `invite-deep-link.yaml` (#972, #973) were
+  added on 2026-10-24 from the code and docs, on a machine with no Docker, so neither has passed
+  once; the same PR added the "Share game" absence checks (#731) to `game-lifecycle.yaml` and
+  `player-no-tracking.yaml`. The suite is 27 flows with them; the run record above predates all four
+  changes.

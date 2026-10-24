@@ -12,8 +12,10 @@ import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tes
 import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
+  MAESTRO_INVITE_TOKEN,
   SEED_IDS,
   invitationFixtureRow,
+  invitationFixtureToken,
   inviteStateFixtures,
   lakersVsSunsEvents,
   seededGames,
@@ -755,8 +757,12 @@ async function main() {
       },
     });
 
-    // Random token per run — the fixtures are asserted by name/chip, never by
-    // token, and a committed bearer secret must not exist (security review).
+    // Random token per run: the roster flows assert these fixtures by name and
+    // chip, and a committed bearer secret must never be live (security review).
+    // The one exception is Iris's PENDING row, which .maestro/invite-deep-link.yaml
+    // opens by its fixed MAESTRO_INVITE_TOKEN; invitationFixtureToken writes that
+    // token only for a run with SEED_MAESTRO_INVITE_TOKEN=true, not production,
+    // against a local DATABASE_URL host.
     // Delete-then-create keeps re-seeds deterministic after QA interaction: a
     // manual Resend (supersede) leaves EXPIRED + PENDING rows, and updating an
     // arbitrary findFirst row could re-PENDING the old one alongside the live
@@ -764,16 +770,20 @@ async function main() {
     await prisma.teamInvitation.deleteMany({
       where: { teamId: lakers.id, playerId: fixturePlayer.id },
     });
+    const token = invitationFixtureToken(fixture, process.env, () => randomBytes(32).toString('base64url'));
     await prisma.teamInvitation.create({
       data: {
         teamId: lakers.id,
         playerId: fixturePlayer.id,
         invitedById: coachFrank.id,
-        token: randomBytes(32).toString('base64url'),
+        token,
         ...invitationFixtureRow(fixture),
       },
     });
     console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
+    if (token === MAESTRO_INVITE_TOKEN) {
+      console.log('      with the fixed Maestro token (invite-deep-link.yaml)');
+    }
   }
 
   // =========================================================================

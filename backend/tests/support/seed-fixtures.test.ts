@@ -5,8 +5,9 @@
  * in CI. This suite checks the pure data in `seed-fixtures.ts`: the seeded
  * event logs add up to the documented scores under the production scoring
  * rule, the seeded games are the five fixed ids, the managed-player ids are
- * real UUIDs. It reads the seed's source only to check that it imports the
- * shared resets; what those resets do is proven against Postgres in
+ * real UUIDs, and the fixed Maestro invitation token is written only by a
+ * local, opted-in, non-production seed run. It reads the seed's source only to check that it imports the
+ * shared resets and the token rule; what those resets do is proven against Postgres in
  * `tests/integration/seed-resets.db.test.ts`.
  */
 
@@ -16,13 +17,17 @@ import { GameStatus } from '@prisma/client';
 import { computeHomeScore } from '../../src/services/game-event-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { hashRecipient } from '../../src/utils/hash-recipient';
+import { isValidInvitationTokenFormat } from '../../src/utils/invitation-token';
 import {
   BRYCE_JAMES_ID,
   FINISHED_GAME_SCORES,
   SEED_IDS,
   SEEDED_GAME_IDS,
   SEEDED_LAKERS_MANAGED_IDS,
+  MAESTRO_INVITE_TOKEN,
+  MAESTRO_INVITE_TOKEN_FLAG,
   invitationFixtureRow,
+  invitationFixtureToken,
   inviteStateFixtures,
   lakersVsSunsEvents,
   seededGames,
@@ -156,5 +161,70 @@ describe('invite-state fixtures (#715 cooldown)', () => {
       expect(row.createdAt).toBe(f.createdAt);
       expect('acceptedAt' in row).toBe(f.status === 'ACCEPTED');
     }
+  });
+});
+
+describe('the Maestro invitation token (#972, #973)', () => {
+  const fixtures = inviteStateFixtures(new Date('2026-10-24T00:00:00Z'), {
+    iris: 'iris',
+    xander: 'xander',
+    wendy: 'wendy',
+  });
+  const iris = fixtures.find((f) => f.name === 'Iris Invited')!;
+  const random = (): string => 'random-token-for-this-run';
+  const LOCAL_URL = 'postgresql://postgres:postgres@localhost:5432/bball_tracker?schema=public';
+  const optedIn = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
+    [MAESTRO_INVITE_TOKEN_FLAG]: 'true',
+    DATABASE_URL: LOCAL_URL,
+    ...env,
+  });
+
+  it('is a token the public by-token routes accept', () => {
+    expect(isValidInvitationTokenFormat(MAESTRO_INVITE_TOKEN)).toBe(true);
+  });
+
+  it('belongs to the PENDING fixture only', () => {
+    expect(fixtures.filter((f) => f.deepLinkToken)).toEqual([iris]);
+    expect(iris.status).toBe('PENDING');
+  });
+
+  it.each([
+    LOCAL_URL,
+    'postgresql://postgres:postgres@127.0.0.1:5432/bball_tracker',
+    'postgresql://postgres:postgres@postgres:5432/bball_tracker',
+  ])('is written into a local database when the run opts in (%s)', (url) => {
+    expect(invitationFixtureToken(iris, optedIn({ DATABASE_URL: url }), random)).toBe(MAESTRO_INVITE_TOKEN);
+  });
+
+  it.each<[string, NodeJS.ProcessEnv]>([
+    ['without the opt-in', { DATABASE_URL: LOCAL_URL }],
+    ['with the opt-in set to anything but true', { [MAESTRO_INVITE_TOKEN_FLAG]: '1', DATABASE_URL: LOCAL_URL }],
+    ['with NODE_ENV=production (a tunnel on localhost)', optedIn({ NODE_ENV: 'production' })],
+    ['with SEED_ALLOW_PRODUCTION=true', optedIn({ SEED_ALLOW_PRODUCTION: 'true' })],
+    [
+      'into an RDS host',
+      optedIn({ DATABASE_URL: 'postgresql://app:secret@db.abc123.us-east-1.rds.amazonaws.com:5432/bball_tracker' }),
+    ],
+    ['into any other remote host', optedIn({ DATABASE_URL: 'postgresql://app:secret@db.example.org:5432/db' })],
+    ['for an unparsable URL', optedIn({ DATABASE_URL: 'not a url' })],
+    ['with no URL', { [MAESTRO_INVITE_TOKEN_FLAG]: 'true' }],
+  ])('is never written %s', (_label, env) => {
+    expect(invitationFixtureToken(iris, env, random)).toBe('random-token-for-this-run');
+  });
+
+  it('leaves every other fixture random, even when opted in locally', () => {
+    for (const f of fixtures.filter((x) => x !== iris)) {
+      expect(invitationFixtureToken(f, optedIn({}), random)).toBe('random-token-for-this-run');
+    }
+  });
+
+  it('is what the seed writes and what the flow opens', () => {
+    expect(SEED_SOURCE).toMatch(/token\s*=\s*invitationFixtureToken\(\s*fixture\s*,\s*process\.env\s*,/);
+    const flow = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', '..', '.maestro', 'invite-deep-link.yaml'),
+      'utf8'
+    );
+    expect(flow).toContain(`hooplings://invite/${MAESTRO_INVITE_TOKEN}?src=web`);
+    expect(flow).toContain(`${MAESTRO_INVITE_TOKEN_FLAG}=true`);
   });
 });
