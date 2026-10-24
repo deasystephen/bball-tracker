@@ -1,5 +1,6 @@
 import { invitationByTokenUrl } from './api-urls';
 import type { InvitationDetails } from './invitation-types';
+import { log } from './log';
 
 /**
  * Outcome of the server-side `GET /invitations/by-token/:token` lookup (#720).
@@ -16,8 +17,9 @@ export type LookupResult =
 export type UnavailableReason = 'network' | 'status' | 'body';
 
 function unavailable(reason: UnavailableReason, status?: number): LookupResult {
-  // Reason and status only: never the URL or the token (the token is a bearer secret).
-  console.warn('Invitation lookup unavailable', { reason, status: status ?? null });
+  // Reason and status only: never the URL or the token (the token is a bearer
+  // secret). A JSON line through lib/log.ts, forwarded to Datadog (#966).
+  log.warn('Invitation lookup unavailable', { reason, status: status ?? null });
   return { kind: 'unavailable', status };
 }
 

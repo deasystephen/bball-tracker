@@ -92,6 +92,53 @@ describe('utils/logger', () => {
     });
   });
 
+  describe('deploy identity (#966)', () => {
+    const originalRelease = process.env.SENTRY_RELEASE;
+    const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+
+    afterEach(() => {
+      if (originalRelease === undefined) delete process.env.SENTRY_RELEASE;
+      else process.env.SENTRY_RELEASE = originalRelease;
+    });
+
+    it('writes the deployed commit on every line, at every level', () => {
+      process.env.SENTRY_RELEASE = COMMIT;
+      process.env.LOG_LEVEL = 'debug';
+
+      logger.debug('d');
+      logger.info('i');
+      logger.warn('w');
+      logger.error('e');
+
+      const lines = [...parseLogLines(out), ...parseLogLines(err)];
+      expect(lines).toHaveLength(4);
+      for (const line of lines) {
+        expect(line).toEqual(expect.objectContaining({ service: 'bball-tracker-api', commit: COMMIT }));
+      }
+    });
+
+    it('writes commit null when no commit is deployed (development)', () => {
+      delete process.env.SENTRY_RELEASE;
+      logger.info('i');
+      expect(parseLogLines(out)[0]).toEqual(expect.objectContaining({ commit: null }));
+    });
+
+    it('never lets a context key overwrite service or commit', () => {
+      process.env.SENTRY_RELEASE = COMMIT;
+      logger.info('i', { service: 'spoofed', commit: 'spoofed' });
+      expect(parseLogLines(out)[0]).toEqual(expect.objectContaining({ service: 'bball-tracker-api', commit: COMMIT }));
+    });
+  });
+
+  describe('request client (#963)', () => {
+    it('merges the ambient client into every entry', () => {
+      runWithLogContext({ requestId: 'req-1', client: 'web' }, () => {
+        logger.info('inside');
+      });
+      expect(parseLogLines(out)[0]).toEqual(expect.objectContaining({ requestId: 'req-1', client: 'web' }));
+    });
+  });
+
   describe('request context', () => {
     it('has no context outside a request', () => {
       expect(getLogContext()).toBeUndefined();

@@ -13,6 +13,9 @@
  *   OPTIONS + Origin: apex ─────────────────────────────────────▶ 204 + ACAO: apex
  *   OPTIONS + Origin: evil ─────────────────────────────────────▶ 204, no ACAO
  *   POST    + no Origin (mobile) ───────────────────────────────▶ route reached, no ACAO
+ *
+ * The allowed request headers are an explicit list (Content-Type,
+ * Authorization and the #963 correlation headers), and X-Request-Id is exposed.
  */
 
 import request from 'supertest';
@@ -100,6 +103,34 @@ describe('CORS allowlist (#447)', () => {
       expect(res.headers['access-control-allow-credentials']).toBe('true');
     });
 
+    it.each([APEX_ORIGIN, WWW_ORIGIN])(
+      'allows the correlation headers of #963 in a preflight from %s',
+      async (origin) => {
+        // The web page's accept sends X-Hooplings-Client: web (#964); a client
+        // may also send X-Request-Id.
+        const res = await request(app)
+          .options(ACCEPT_PATH)
+          .set('Origin', origin)
+          .set('Access-Control-Request-Method', 'POST')
+          .set('Access-Control-Request-Headers', 'content-type,x-hooplings-client,x-request-id');
+
+        expect(res.status).toBe(204);
+        expect(res.headers['access-control-allow-origin']).toBe(origin);
+        const allowed = String(res.headers['access-control-allow-headers']).toLowerCase().split(',');
+        expect(allowed).toEqual(expect.arrayContaining(['content-type', 'x-hooplings-client', 'x-request-id']));
+      }
+    );
+
+    it('allows only the listed request headers, not whatever the preflight asks for', async () => {
+      const res = await request(app)
+        .options(ACCEPT_PATH)
+        .set('Origin', APEX_ORIGIN)
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'x-something-else');
+
+      expect(String(res.headers['access-control-allow-headers']).toLowerCase()).not.toContain('x-something-else');
+    });
+
     it('returns no Access-Control-Allow-Origin for an origin that is not listed', async () => {
       const res = await request(app)
         .options(ACCEPT_PATH)
@@ -131,6 +162,18 @@ describe('CORS allowlist (#447)', () => {
       expect(res.status).toBe(200);
       expect(res.headers['access-control-allow-origin']).toBe(APEX_ORIGIN);
       expect(res.headers['vary']).toMatch(/origin/i);
+    });
+
+    it('exposes X-Request-Id to the page, so a browser script can read the logged id', async () => {
+      const res = await request(app)
+        .post(ACCEPT_PATH)
+        .set('Origin', APEX_ORIGIN)
+        .set('X-Hooplings-Client', 'web')
+        .set('Content-Type', 'application/json');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['x-request-id']).toEqual(expect.any(String));
+      expect(String(res.headers['access-control-expose-headers']).toLowerCase()).toContain('x-request-id');
     });
 
     it('omits the header for a foreign origin but does not reject the request itself', async () => {

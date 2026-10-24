@@ -74,7 +74,7 @@ describe('infra/web-task-definition.json (#30)', () => {
     expect(taskDefinition.taskRoleArn).toBeUndefined();
   });
 
-  it('logs to its own group, which web.tf creates and Datadog does not forward', () => {
+  it('logs to its own group, which web.tf creates (datadog-forwarding.test.ts pins what Datadog receives from it)', () => {
     expect(container.logConfiguration.options['awslogs-group']).toBe('/ecs/bball-tracker-production-web');
     expect(WEB_TF).toContain('name              = "/ecs/${local.web_family}"');
   });

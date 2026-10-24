@@ -17,7 +17,7 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | API | `https://api.hooplings.com` — health endpoint `/health` (pings Postgres; 503 when the DB is unreachable) |
 | ECS | cluster `bball-tracker-production-cluster`, service `bball-tracker-production-api`, **one task by design** |
 | RDS | `bball-tracker-production-postgres` |
-| Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` |
+| Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` (the API) or `service:bball-tracker-web` (hooplings.com, #966); every line carries `@commit` and the tag `env:production` |
 | Errors | Sentry org `satsun-ventures`, projects `bball-tracker-backend` and `bball-tracker-mobile` |
 | Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, a separate list from the SNS subscriber above. The owner's account delivers them to `alerts@hooplings.com` too (since 2026-09-29, #555). |
 
@@ -111,6 +111,22 @@ Its `/health` does not call the API, so this alarm is about the web service alon
    --task-definition bball-tracker-production-web:<previous revision>`, `docs/deployment/web-app.md`
    "Rolling back"), then revert the commit. A run by hand rebuilds `main`, the broken commit, and
    deploys the API too.
+
+## Web site errors
+
+The Datadog monitor `[hooplings.com] Web server errors` (#966; created by hand from the JSON in
+`docs/deployment/web-app.md`, "Web error monitor"): the site is up but logged a server error.
+
+1. Datadog Logs: `service:bball-tracker-web status:error`, grouped by `@routePath` and
+   `@errorName`. `@commit` says which deploy; compare with `curl -s https://hooplings.com/health`.
+2. The stack is not in Datadog (it can quote a URL with a token). Find Next.js's own output for the
+   same `@digest` in CloudWatch: `aws logs filter-log-events --log-group-name
+   /ecs/bball-tracker-production-web --filter-pattern '"<digest>"' --start-time <epoch ms>`.
+3. On `/invite/[token]`, check the API next (`service:bball-tracker-api
+   @path:"/api/v1/invitations/by-token/[redacted]"`): the page renders a fallback card for a failed
+   lookup and logs `Invitation lookup unavailable` at warn, so an error line there is a rendering
+   bug, not an API outage.
+4. A bad deploy: roll back as in [Web site is down](#web-site-is-down), step 4.
 
 ## API is returning errors
 
@@ -307,9 +323,12 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 The rules live in Sentry, not in this repository. They were created through Sentry's API; to
 change one, edit it in Sentry (Alerts) and update the table above in the same change.
 
-## Datadog has logs, and no monitors
+## Datadog has logs, and one monitor
 
-Datadog receives the API's logs (`infra/datadog.tf`) and alerts on nothing. Its seven default
+Datadog receives the API's logs and the web site's JSON lines (`infra/datadog.tf`). Its one
+monitor is `[hooplings.com] Web server errors` ([Web site errors](#web-site-errors)), created by
+hand from the JSON in `docs/deployment/web-app.md` once the site is live (#966); until the owner
+creates it, Datadog alerts on nothing. Its seven default
 monitors were deleted on 2026-09-29 (#448): they queried `system.*` host metrics, which Fargate
 never emits, so all seven sat in "No Data", and each notified the literal placeholder
 `@your-team-handle`. Alerting is CloudWatch and Sentry.

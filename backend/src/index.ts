@@ -14,6 +14,7 @@ import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
+import { CLIENT_HEADER, REQUEST_ID_HEADER } from './api/middleware/request-headers';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
@@ -60,9 +61,15 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
+// The browser (the web invite page's accept, #964) may send only these
+// request headers; X-Request-Id and X-Hooplings-Client are the correlation
+// headers of #963 (api/middleware/request-headers.ts). X-Request-Id is exposed
+// so a browser script can read the id the API logged the request under.
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', REQUEST_ID_HEADER, CLIENT_HEADER],
+  exposedHeaders: [REQUEST_ID_HEADER],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));

@@ -26,6 +26,10 @@ const mockTeamService = TeamService as jest.Mocked<typeof TeamService>;
 const USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const DOMAIN_EVENT = 'Domain event from a service';
+// Client request ids are honoured only when they are UUIDs (#963).
+const REQ_WORKOS = 'c0ffee00-0000-4000-8000-000000000001';
+const REQ_DEV = 'c0ffee00-0000-4000-8000-000000000002';
+const REQ_ANON = 'c0ffee00-0000-4000-8000-000000000003';
 const verified: VerifiedToken = { id: 'workos_123', expiresAt: Date.now() + 60_000 };
 
 const dbUser = authUser({ id: USER_ID });
@@ -59,11 +63,11 @@ describe('domain-event log context', () => {
     const res = await request(app)
       .get('/api/v1/teams')
       .set('Authorization', 'Bearer valid-token')
-      .set('X-Request-Id', 'req-workos');
+      .set('X-Request-Id', REQ_WORKOS);
 
     expect(res.status).toBe(200);
     expect(domainEventLines(consoleSpy)).toEqual([
-      expect.objectContaining({ requestId: 'req-workos', userId: USER_ID, teamId: TEAM_ID }),
+      expect.objectContaining({ requestId: REQ_WORKOS, userId: USER_ID, teamId: TEAM_ID }),
     ]);
   });
 
@@ -75,12 +79,12 @@ describe('domain-event log context', () => {
     const res = await request(app)
       .get('/api/v1/teams')
       .set('Authorization', `Bearer ${token}`)
-      .set('X-Request-Id', 'req-dev');
+      .set('X-Request-Id', REQ_DEV);
 
     expect(res.status).toBe(200);
     expect(verifySpy).not.toHaveBeenCalled();
     expect(domainEventLines(consoleSpy)).toEqual([
-      expect.objectContaining({ requestId: 'req-dev', userId: USER_ID, teamId: TEAM_ID }),
+      expect.objectContaining({ requestId: REQ_DEV, userId: USER_ID, teamId: TEAM_ID }),
     ]);
   });
 
@@ -88,10 +92,10 @@ describe('domain-event log context', () => {
     jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue(verified);
     await request(app).get('/api/v1/teams').set('Authorization', 'Bearer valid-token');
 
-    const refused = await request(app).get('/api/v1/teams').set('X-Request-Id', 'req-anon');
+    const refused = await request(app).get('/api/v1/teams').set('X-Request-Id', REQ_ANON);
     expect(refused.status).toBe(401);
 
-    const lines = parseLogLines(consoleSpy).filter((line) => line.requestId === 'req-anon');
+    const lines = parseLogLines(consoleSpy).filter((line) => line.requestId === REQ_ANON);
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
       expect(line).not.toHaveProperty('userId');

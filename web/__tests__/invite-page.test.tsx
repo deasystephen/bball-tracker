@@ -32,6 +32,13 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/** The `Invitation lookup unavailable` lines lib/log.ts printed, parsed (#966). */
+function lookupLines(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
+  return spy.mock.calls
+    .map((call: unknown[]) => JSON.parse(String(call[0])) as Record<string, unknown>)
+    .filter((entry: Record<string, unknown>) => entry.message === 'Invitation lookup unavailable');
+}
+
 async function renderPage(): Promise<string> {
   return renderToStaticMarkup(await InvitePage({ params: Promise.resolve({ token: TOKEN }) }));
 }
@@ -40,7 +47,8 @@ describe('invite page lookup states (#720)', () => {
   let warn: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // lib/log.ts writes warn lines to stdout as JSON.
+    warn = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.stubEnv('API_URL', 'https://api.example.test');
   });
 
@@ -98,7 +106,9 @@ describe('invite page lookup states (#720)', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, {})));
     await renderPage();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith('Invitation lookup unavailable', { reason: 'status', status: 503 });
+    expect(lookupLines(warn)).toEqual([
+      expect.objectContaining({ level: 'warn', reason: 'status', status: 503, service: 'bball-tracker-web' }),
+    ]);
     const logged = JSON.stringify(warn.mock.calls);
     expect(logged).not.toContain(TOKEN);
     expect(logged).not.toContain('api.example.test');
@@ -112,7 +122,7 @@ describe('invite page lookup states (#720)', () => {
   ] as const)('logs reason %s for an unavailable lookup', async (reason, makeFetch, status) => {
     vi.stubGlobal('fetch', makeFetch());
     await getInvitation(TOKEN);
-    expect(warn).toHaveBeenCalledWith('Invitation lookup unavailable', { reason, status });
+    expect(lookupLines(warn)).toEqual([expect.objectContaining({ reason, status })]);
   });
 
   it('requests the by-token URL with the token encoded', async () => {

@@ -12,6 +12,10 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 const eslintConfig = [
   { ignores: ['node_modules/**', '.next/**', 'out/**', 'build/**', 'next-env.d.ts'] },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
+  // Server output goes through lib/log.ts, the one file allowed to print: its
+  // JSON lines are what Datadog receives, with invitation tokens masked (#966).
+  { rules: { 'no-console': 'error' } },
+  { files: ['lib/log.ts'], rules: { 'no-console': 'off' } },
 ];
 
 export default eslintConfig;

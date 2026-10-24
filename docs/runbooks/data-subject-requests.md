@@ -114,7 +114,20 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   nothing in `infra/` manages. It is read in Datadog under Logs → Configuration → Indexes and was
   confirmed on 2026-10-04 from the oldest retained `service:bball-tracker-api` line; re-check it
   there before the privacy policy repeats the number. Supersedes D8 of
-  `docs/plans/account-deletion.md` on this point, which named only the hashing.
+  `docs/plans/account-deletion.md` on this point, which named only the hashing. Every line also
+  carries the deployed commit and an `env` tag, and, inside a request, the client's app version
+  (`client`, for example `ios/1.6.0+<update id>` or `web`, #963), which is not a user or device
+  identifier.
+- **Website server logs (hooplings.com, #966)** are kept **30 days** in CloudWatch Logs
+  (`/ecs/bball-tracker-production-web`, `retention_in_days` on `aws_cloudwatch_log_group.web` in
+  `infra/web.tf`). The site has no sign-in, so its lines carry **no user id**, no IP address and no
+  invitation token: the server logs only a failed invitation lookup (reason and status) and a
+  server error (the route pattern such as `/invite/[token]`, the error's type and an error id),
+  through `web/lib/log.ts`, which masks tokens in every value. Those lines, and only those, are
+  also forwarded to **Datadog** (a subscription filtered on `service = "bball-tracker-web"` in
+  `infra/datadog.tf`) and kept there for the same **15 days** as the API's. Next.js's own output
+  (start-up lines and its error dumps) stays in CloudWatch for the 30 days. A data-subject request
+  has nothing to find here: no line can be tied to a person.
 - **Database server log (PostgreSQL, #757)** is kept **30 days** in CloudWatch Logs
   (`/aws/rds/instance/bball-tracker-production-postgres/postgresql`, `retention_in_days` on
   `aws_cloudwatch_log_group.rds_postgresql` in `infra/rds.tf`) and **3 days** on the database
