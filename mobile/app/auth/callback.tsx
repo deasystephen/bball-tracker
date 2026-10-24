@@ -30,9 +30,10 @@ import { consumePendingLogin } from '../../utils/pkce';
 import { useTranslation } from '../../i18n';
 import {
   callbackParamFailure,
-  isOAuthErrorCode,
+  failureStatus,
   reportSignInFailure,
   type OAuthErrorCode,
+  type SignInFailure,
 } from '../../utils/sign-in-failure';
 
 /**
@@ -52,13 +53,13 @@ const OAUTH_ERROR_KEYS: Record<OAuthErrorCode, string> = {
   temporarily_unavailable: 'authCallback.temporarilyUnavailable',
 };
 
-/** The i18n key of the error the deep link itself carries, or null. */
-function getParamErrorKey(oauthError?: string, code?: string): string | null {
-  if (oauthError) {
-    return isOAuthErrorCode(oauthError) ? OAUTH_ERROR_KEYS[oauthError] : 'authCallback.incomplete';
-  }
-  if (!code) return 'authCallback.noCode';
-  return null;
+/** The i18n key for a failure the params already show (`callbackParamFailure`), or null. */
+function getParamErrorKey(failure: SignInFailure | null): string | null {
+  if (!failure) return null;
+  if (failure.stage === 'missing_code') return 'authCallback.noCode';
+  return failure.oauth_error && failure.oauth_error !== 'other'
+    ? OAUTH_ERROR_KEYS[failure.oauth_error]
+    : 'authCallback.incomplete';
 }
 
 export default function AuthCallbackScreen() {
@@ -72,20 +73,26 @@ export default function AuthCallbackScreen() {
     error?: string;
   }>();
 
-  const paramError = getParamErrorKey(oauthError, code);
+  const paramFailure = callbackParamFailure(oauthError, code);
+  const paramError = getParamErrorKey(paramFailure);
   /** i18n key of the token-exchange failure. */
   const [exchangeErrorKey, setExchangeErrorKey] = useState<string | null>(null);
   // Guard so the code is only exchanged once, even if the effect re-runs.
   const exchangedRef = useRef(false);
 
-  // A refused callback is never silent (#963): once per mount, enums only.
-  const paramFailure = callbackParamFailure(oauthError, code);
-  const paramFailureReportedRef = useRef(false);
+  // A refused callback is never silent (#963): reported once per distinct
+  // failure, enums only, so a re-render repeats nothing and a second refused
+  // deep link into the same mounted screen is still reported.
+  const failureStage = paramFailure?.stage;
+  const failureCode = paramFailure?.oauth_error;
+  const reportedFailureRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!paramFailure || paramFailureReportedRef.current) return;
-    paramFailureReportedRef.current = true;
-    reportSignInFailure(paramFailure);
-  }, [paramFailure]);
+    if (!failureStage) return;
+    const key = `${failureStage}:${failureCode ?? ''}`;
+    if (reportedFailureRef.current === key) return;
+    reportedFailureRef.current = key;
+    reportSignInFailure(failureCode ? { stage: failureStage, oauth_error: failureCode } : { stage: failureStage });
+  }, [failureStage, failureCode]);
 
   useEffect(() => {
     if (paramError || !code) return;
@@ -112,6 +119,7 @@ export default function AuthCallbackScreen() {
       } catch (err) {
         captureException(err, { flow: 'auth-callback' });
         log.error('Token exchange error', { error: err });
+        reportSignInFailure({ stage: 'exchange', status: failureStatus(err) });
         setExchangeErrorKey('authCallback.exchangeFailed');
       }
     })();

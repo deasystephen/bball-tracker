@@ -79,12 +79,22 @@ const VERSION_PATTERN = /^\d+(\.\d+){0,3}$/;
 const BUILD_PATTERN = /^[A-Za-z0-9._-]{1,40}$/;
 const CLIENT_MAX_LENGTH = 64;
 
+/** `clientHeaderValue()` for the running build; computed once, since an OTA applies only on the next launch. */
+let cachedClientHeader: string | null | undefined;
+
 /**
  * The `X-Hooplings-Client` value, e.g. `ios/1.6.0+01a15220-8b6d-7172-a9a5-2d5fce7c6954`
  * or `ios/1.6.0+embedded`; null (header not sent) on a platform other than
- * iOS or Android or a version the API would not accept.
+ * iOS or Android or a version the API would not accept. Without an argument,
+ * the running build's value, read once per process.
  */
-export function clientHeaderValue(build: RunningBuild = getRunningBuild()): string | null {
+export function clientHeaderValue(build?: RunningBuild): string | null {
+  if (build) return formatClientHeader(build);
+  if (cachedClientHeader === undefined) cachedClientHeader = formatClientHeader(getRunningBuild());
+  return cachedClientHeader;
+}
+
+function formatClientHeader(build: RunningBuild): string | null {
   const platform = Platform.OS;
   if (platform !== 'ios' && platform !== 'android') return null;
   if (!VERSION_PATTERN.test(build.appVersion)) return null;

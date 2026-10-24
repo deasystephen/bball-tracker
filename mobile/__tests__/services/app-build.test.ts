@@ -113,8 +113,11 @@ describe('app-build (#963)', () => {
       expect(clientHeaderValue(build({ appVersion: '1.2.3.4.5' }))).toBeNull();
     });
 
-    it('reads the running build when not given one', () => {
+    it('reads the running build when not given one, once per process', () => {
       withUpdates({ isEnabled: true, isEmbeddedLaunch: false, updateId: UPDATE_ID, runtimeVersion: '1.6.0' });
+      expect(clientHeaderValue()).toBe(`ios/1.6.0+${UPDATE_ID}`);
+      // An OTA applies only on the next launch, so the value never changes in a process.
+      withUpdates(null);
       expect(clientHeaderValue()).toBe(`ios/1.6.0+${UPDATE_ID}`);
     });
   });

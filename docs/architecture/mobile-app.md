@@ -573,7 +573,7 @@ never inline a role check in a screen:
   never captured. A `NoSessionError` (#582) is captured **once per endpoint
   pattern per session end** (keyed on `getLogoutEpoch()`), so a screen that retries after sign-out
   reports one event, not a storm; every refusal still leaves a breadcrumb.
-- **Every request the app sends carries `X-Request-Id` and `X-Hooplings-Client`** (#963,
+- **Every api-client request carries `X-Request-Id` and `X-Hooplings-Client`** (#963,
   `services/app-build.ts`, stamped by the api-client's request interceptor once the request is
   certain to go out; a `NoSessionError` refusal is never stamped). `X-Request-Id` is a fresh UUID
   v4 per send (expo-modules-core's native generator, the one `utils/pkce.ts` uses, with a
@@ -585,9 +585,11 @@ never inline a role check in a screen:
   `android/…`), `+embedded` when the binary's bundled JS runs; `<version>` is
   `expoConfig.version`. The header is left out when the value would not match the API's contract
   (`docs/architecture/backend-services.md`, logging), e.g. on a platform other than iOS or
-  Android. The update id and runtime come from `requireOptionalNativeModule('ExpoUpdates')`, not
-  the `expo-updates` wrapper (which throws at import without its native module), so the
-  api-client can never crash an older binary. JavaScript only: ships by OTA.
+  Android; it is computed once per process (an OTA applies only on the next launch). The update
+  id and runtime come from `requireOptionalNativeModule('ExpoUpdates')`, not the `expo-updates`
+  wrapper (which throws at import without its native module), so the api-client can never crash
+  an older binary. The Socket.io handshake (`services/socket.ts`) and the presigned S3 upload
+  are not api-client requests and carry neither header. JavaScript only: ships by OTA.
 - **Failures with no user-facing error still log a warning** (#963), so the breadcrumb trail
   explains them: push registration (`hooks/useNotifications.ts`, `Push token registration
   failed` with `step`: `permission` / `token` / `register`, and for `register` the route pattern,
@@ -596,7 +598,8 @@ never inline a role check in a screen:
   (`store/auth-store.ts`), the root screen's initial navigation (`app/index.tsx`), and a refused
   sign-in callback (`app/auth/callback.tsx` via `utils/sign-in-failure.ts#reportSignInFailure`,
   `Sign-in failed` with `stage`: `oauth_error` (plus `oauth_error`: an allow-listed OAuth code or
-  `other`, never the raw param, which any app can set), `missing_code` or `state_mismatch`).
+  `other`, never the raw param, which any app can set), `missing_code`, `state_mismatch`, or
+  `exchange` with the HTTP `status` when the API answered).
   `log.warn` is a breadcrumb only, so these reach Sentry with the next captured event; Sentry
   Logs (`enableLogs`, which would send each warning on its own) is an open owner decision on #963.
 - **Sentry is the mobile source of truth for errors and diagnostics; Datadog's React Native SDK

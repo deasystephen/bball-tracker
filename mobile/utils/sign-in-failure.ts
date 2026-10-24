@@ -43,7 +43,19 @@ export function callbackParamFailure(oauthError?: string, code?: string): SignIn
   return null;
 }
 
-/** Record a failed sign-in: a `log.warn` (Sentry breadcrumb) with the enums above. */
+/** The HTTP status of a failed API call, or undefined when nothing answered. */
+export function failureStatus(error: unknown): number | undefined {
+  const status = (error as { response?: { status?: unknown } } | null)?.response?.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Record a failed sign-in: a `log.warn` (Sentry breadcrumb) with the enums
+ * above. `status` is left out, never logged as undefined, when nothing answered.
+ */
 export function reportSignInFailure(failure: SignInFailure): void {
-  log.warn('Sign-in failed', { ...failure });
+  const props: SignInFailure = { stage: failure.stage };
+  if (failure.oauth_error !== undefined) props.oauth_error = failure.oauth_error;
+  if (failure.status !== undefined) props.status = failure.status;
+  log.warn('Sign-in failed', { ...props });
 }

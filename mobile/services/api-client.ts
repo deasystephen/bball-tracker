@@ -2,7 +2,8 @@ import { create as createAxiosInstance, AxiosInstance, AxiosError, AxiosResponse
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
 import { NO_SESSION_CODE, NoSessionError, isNoSessionError } from './no-session-error';
-import { addBreadcrumb, captureException, endpointPattern } from './sentry';
+import { addBreadcrumb, captureException } from './sentry';
+import { requestPattern } from './request-pattern';
 import { trackEvent, AnalyticsEvents } from './analytics';
 import { CLIENT_HEADER, REQUEST_ID_HEADER, clientHeaderValue, newRequestId } from './app-build';
 
@@ -50,11 +51,8 @@ type RetriableConfig = InternalAxiosRequestConfig & {
 };
 
 /** Route pattern for a request config: base URL + url, redacted and id-collapsed. */
-const configPattern = (config?: Pick<InternalAxiosRequestConfig, 'baseURL' | 'url'>): string => {
-  if (!config?.url) return '';
-  const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(config.url);
-  return endpointPattern(absolute || !config.baseURL ? config.url : `${config.baseURL}${config.url}`);
-};
+const configPattern = (config?: Pick<InternalAxiosRequestConfig, 'baseURL' | 'url'>): string =>
+  requestPattern(config);
 
 const configMethod = (config?: Pick<InternalAxiosRequestConfig, 'method'>): string =>
   (config?.method ?? 'get').toUpperCase();
@@ -402,13 +400,11 @@ const createApiClient = (): AxiosInstance => {
       const token = useAuthStore.getState().accessToken;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
-        stampRequest(config);
-        return config;
-      }
-      // No session: a request that needs one is never sent (#582).
-      if (!isPublicPath(config.url)) {
+      } else if (!isPublicPath(config.url)) {
+        // No session: a request that needs one is never sent (#582).
         return Promise.reject(new NoSessionError(config));
       }
+      // Every request that goes out is stamped, once, here (#963).
       stampRequest(config);
       return config;
     },

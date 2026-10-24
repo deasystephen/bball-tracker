@@ -10,7 +10,7 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
-import { endpointPattern } from '../services/sentry';
+import { requestPattern } from '../services/request-pattern';
 import { log } from '../services/log';
 import { useIsAuthenticated } from '../store/auth-store';
 
@@ -69,10 +69,9 @@ export function pushRegistrationFailure(step: PushRegistrationStep, error: unkno
     config?: { baseURL?: string; url?: string };
   } | null;
   const status = failed?.response?.status;
-  const url = failed?.config?.url;
   return {
     step,
-    endpoint_pattern: url ? endpointPattern(/^[a-z]+:\/\//i.test(url) ? url : `${failed?.config?.baseURL ?? ''}${url}`) : '',
+    endpoint_pattern: requestPattern(failed?.config),
     status: typeof status === 'number' ? status : 'network',
     ...(typeof failed?.code === 'string' ? { code: failed.code } : {}),
   };
