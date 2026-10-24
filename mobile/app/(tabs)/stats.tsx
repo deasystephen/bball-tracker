@@ -22,7 +22,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useTabBarPadding } from '../../hooks/useTabBarPadding';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
-import { describeRecord, describeResults, getResultColor } from '../../utils/game-result';
+import { describeRecord, describeResults, getResultColor, resultLetter } from '../../utils/game-result';
 import { useTranslation } from '../../i18n';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import { isDeletedUser, playerDisplayName } from '../../utils/display-name';
@@ -260,7 +260,7 @@ export default function Stats() {
                           ]}
                         >
                           <ThemedText variant="footnoteBold">
-                            {result}
+                            {resultLetter(t, result)}
                           </ThemedText>
                         </View>
                       );

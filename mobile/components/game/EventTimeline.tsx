@@ -14,6 +14,7 @@ import { formatShotDescription } from '../../utils/shot-label';
 import type { GameEvent, ShotMetadata, ReboundMetadata } from '../../types/game';
 import { displayName } from '../../utils/display-name';
 import { formatClockTime } from '../../utils/format-date';
+import { i18n, useTranslation } from '../../i18n';
 
 interface EventTimelineProps {
   events: GameEvent[];
@@ -26,19 +27,20 @@ const getEventDescription = (event: GameEvent): string => {
       return formatShotDescription(event.metadata as ShotMetadata);
     case 'REBOUND': {
       const metadata = event.metadata as unknown as ReboundMetadata;
-      const type = metadata?.type === 'offensive' ? 'Offensive' : 'Defensive';
-      return `${type} rebound`;
+      return metadata?.type === 'offensive'
+        ? i18n.t('tracker.event.offensiveRebound')
+        : i18n.t('tracker.event.defensiveRebound');
     }
     case 'ASSIST':
-      return 'Assist';
+      return i18n.t('tracker.event.assist');
     case 'STEAL':
-      return 'Steal';
+      return i18n.t('tracker.event.steal');
     case 'BLOCK':
-      return 'Block';
+      return i18n.t('tracker.event.block');
     case 'TURNOVER':
-      return 'Turnover';
+      return i18n.t('tracker.event.turnover');
     case 'FOUL':
-      return 'Foul';
+      return i18n.t('tracker.event.foul');
     default:
       return event.eventType.toLowerCase();
   }
@@ -84,6 +86,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
   maxEvents = 10,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const displayEvents = events.slice(0, maxEvents);
 
   if (displayEvents.length === 0) {
@@ -99,10 +102,10 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
           color="textTertiary"
           style={styles.emptyText}
         >
-          No events yet
+          {t('tracker.noEvents')}
         </ThemedText>
         <ThemedText variant="caption" color="textTertiary">
-          Start tracking to see plays here
+          {t('tracker.noEventsHint')}
         </ThemedText>
       </ThemedView>
     );
@@ -132,7 +135,7 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
         <View style={styles.eventContent}>
           <View style={styles.eventHeader}>
             <ThemedText variant="bodyBold" numberOfLines={1}>
-              {displayName(item.player) || 'Unknown Player'}
+              {displayName(item.player) || t('tracker.unknownPlayer')}
             </ThemedText>
             <ThemedText variant="caption" color="textTertiary">
               {formatClockTime(item.timestamp || item.createdAt, { seconds: true })}
@@ -149,9 +152,9 @@ export const EventTimeline: React.FC<EventTimelineProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <ThemedText variant="h4" heading>Recent Plays</ThemedText>
+        <ThemedText variant="h4" heading>{t('tracker.recentPlays')}</ThemedText>
         <ThemedText variant="caption" color="textTertiary">
-          {events.length} total
+          {t('tracker.totalEvents', { total: events.length })}
         </ThemedText>
       </View>
       <FlatList

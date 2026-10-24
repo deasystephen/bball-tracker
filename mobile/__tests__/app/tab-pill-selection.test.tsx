@@ -8,7 +8,9 @@
  */
 
 import { StyleSheet } from 'react-native';
-import { render, fireEvent, screen } from '@testing-library/react-native';
+import { act, render, fireEvent, screen } from '@testing-library/react-native';
+
+import { i18n } from '../../i18n';
 
 import GamesScreen from '../../app/(tabs)/games';
 import StatsScreen from '../../app/(tabs)/stats';
@@ -81,6 +83,24 @@ describe('Games tab filter pills', () => {
 
     for (const name of ['All', 'Live', 'Upcoming', 'Completed']) {
       expect(minHeightOf(name)).toBe(44);
+    }
+  });
+
+  it('reads Spanish on a Spanish device: header, pills, filtered empty state (#671)', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      render(<GamesScreen />);
+
+      expect(screen.getByText('Partidos')).toBeTruthy();
+      expect(selectedOf('Todos')).toBe(true);
+      fireEvent.press(screen.getByRole('button', { name: 'Próximos' }));
+      expect(screen.getByText('No hay partidos')).toBeTruthy();
+      expect(screen.getByText('No hay próximos partidos.')).toBeTruthy();
+      expect(screen.queryByText('Upcoming')).toBeNull();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
     }
   });
 });

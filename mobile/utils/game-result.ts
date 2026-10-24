@@ -58,6 +58,14 @@ export function formatRecord(wins: number, losses: number, ties = 0): string {
     .join('-');
 }
 
+/**
+ * The letter shown for a result: W / L / T in English, V / D / E in Spanish.
+ * Every badge, stripe caption and streak dot reads it here (#671).
+ */
+export function resultLetter(t: TFunction, result: GameResult): string {
+  return t(`stats.resultLetter.${result}`);
+}
+
 const RECORD_COUNT_KEY: Record<GameResult, string> = {
   W: 'stats.wins',
   L: 'stats.losses',

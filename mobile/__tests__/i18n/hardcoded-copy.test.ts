@@ -38,7 +38,6 @@ const MIN_SCANNED_FILES = 100;
 
 /** Files still carrying English literals, converted by the next #671 PRs. */
 const PENDING_FILES: readonly string[] = [
-  'app/(tabs)/games.tsx',
   'app/(tabs)/home.tsx',
   'app/(tabs)/invitations.tsx',
   'app/(tabs)/profile.tsx',
@@ -51,11 +50,6 @@ const PENDING_FILES: readonly string[] = [
   'app/admin/leagues/create.tsx',
   'app/admin/seasons/create.tsx',
   'app/auth/callback.tsx',
-  'app/games/[id]/index.tsx',
-  'app/games/[id]/live.tsx',
-  'app/games/[id]/stats.tsx',
-  'app/games/[id]/track.tsx',
-  'app/games/create.tsx',
   'app/invite/[token].tsx',
   'app/login.tsx',
   'app/onboarding/index.tsx',
@@ -69,17 +63,6 @@ const PENDING_FILES: readonly string[] = [
   'app/teams/[id]/staff.tsx',
   'app/teams/[id]/stats.tsx',
   'app/teams/create.tsx',
-  'components/game/EventTimeline.tsx',
-  'components/game/GameCard.tsx',
-  'components/game/OpponentScoreButtons.tsx',
-  'components/game/PlayerRoster.tsx',
-  'components/game/ScoreDisplay.tsx',
-  'components/game/ShotButtons.tsx',
-  'components/game/StatButtons.tsx',
-  'components/game/UndoBanner.tsx',
-  'components/stats/BoxScoreTable.tsx',
-  'components/stats/PlayerStatsCard.tsx',
-  'components/stats/SeasonAverages.tsx',
 ];
 
 function scannedFiles(): string[] {
