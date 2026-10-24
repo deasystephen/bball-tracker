@@ -248,7 +248,11 @@ eng-review amendments recorded there).
   restores his email and delivery state on every run). Maestro: `.maestro/roster-management.yaml`
   (add → immediate roster + chip), `.maestro/roster-invite-status.yaml` (all four chips + action
   gating) and `.maestro/roster-email-bounced.yaml` (email chip → fix → invitation re-sent;
-  mutates Xander, so re-seed first).
+  mutates Xander, so re-seed first). Every seeded invitation token is random except Iris's PENDING
+  one, which carries the fixed `MAESTRO_INVITE_TOKEN` (`tests/support/seed-fixtures.ts`) for
+  `.maestro/invite-deep-link.yaml` when the seed runs with `SEED_MAESTRO_INVITE_TOKEN=true` against a
+  local, non-production database. The by-token routes' format check is
+  `src/utils/invitation-token.ts#isValidInvitationTokenFormat`.
 - **Roster ordering:** the backend returns `members` jersey-asc, nulls last, name tiebreak,
   then `id` (the shared `ROSTER_MEMBERS_ORDER_BY` in `team-service.ts`, imported by
   `GAME_DETAIL_INCLUDE.team.members`), so the team-detail and game-detail rosters carry a

@@ -18,6 +18,7 @@ import { GuardianService } from '../../services/guardian-service';
 import { NotFoundError } from '../../utils/errors';
 import { respondWithError } from '../../utils/respond-with-error';
 import { logger } from '../../utils/logger';
+import { isValidInvitationTokenFormat } from '../../utils/invitation-token';
 import { omitToken } from './serializers';
 import {
   invitationLookupIpRateLimit,
@@ -29,12 +30,6 @@ const router = Router();
 
 /** Every 404 on this public surface reads the same, whichever row was missing. */
 const INVITATION_NOT_FOUND = 'Invitation not found';
-
-const TOKEN_RE = /^[A-Za-z0-9\-_]+$/;
-
-function validateToken(token: string): boolean {
-  return TOKEN_RE.test(token) && token.length >= 8 && token.length <= 128;
-}
 
 /** What the recipient saw on a by-token lookup (#964): the stored status, or `expired` once past `expiresAt`. */
 export type InvitationViewState = 'pending' | 'expired' | 'accepted' | 'rejected' | 'cancelled';
@@ -106,7 +101,7 @@ async function resolveByKind<T, G>(
 router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateLimit, async (req, res) => {
   const { token } = req.params;
 
-  if (!validateToken(token as string)) {
+  if (!isValidInvitationTokenFormat(token as string)) {
     res.status(400).json({ error: 'Invalid token format' });
     return;
   }
@@ -144,7 +139,7 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
 router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) => {
   const { token } = req.params;
 
-  if (!validateToken(token as string)) {
+  if (!isValidInvitationTokenFormat(token as string)) {
     res.status(400).json({ error: 'Invalid token format' });
     return;
   }

@@ -1,0 +1,98 @@
+appId: com.bballtracker.mobile
+---
+# Invite deep link from the web invite page (#972, #973; E2E plan E.7a).
+#
+# hooplings.com/invite/<token> has an "Open in App" button that opens
+# hooplings://invite/<token>?src=web. This flow opens that link while signed
+# out and checks three things:
+#   1. The `?src=web` query never leaks into the token: the screen shows the
+#      seeded invitation (team Lakers, from Frank Vogel), so the
+#      by-token lookup used the bare token.
+#   2. Signed out, "Log In to Accept" routes to sign-in and the return path
+#      survives it: after a dev login the app lands back on the same
+#      invitation, now with the signed-in "Accept Invitation" button.
+#   3. An unknown token renders "Invitation Not Found", and "Go Home" works.
+#
+# Token: Iris Invited's PENDING Lakers invitation, with the fixed
+# MAESTRO_INVITE_TOKEN (backend/tests/support/seed-fixtures.ts). It is a live
+# bearer secret, so the seed writes it only when asked, on the command line,
+# against a local database. Seed before this flow with:
+#   cd backend && SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed
+# A plain `npx prisma db seed` gives Iris a random token, and step 1 then shows
+# "Invitation Not Found".
+#
+# Read-only: the accept is cancelled at the confirmation alert, so no
+# invitation changes state. Frank (the inviter) is the signed-in user because
+# he needs no role or name step after a dev login; accepting as him is never
+# attempted.
+#
+# The by-token lookup is rate limited per token (30 per 15 minutes); one run
+# makes two or three lookups.
+#
+# Needs a dev client that registers `hooplings://` (docs/testing/maestro.md,
+# "openLink").
+- launchApp:
+    clearState: true
+# Dismiss the intro carousel first: with hasOnboarded unset, app/index.tsx
+# replaces to /onboarding shortly after mount and would clobber the deep link.
+- tapOn: "Skip"
+- assertVisible: "Hooplings"
+
+# --- 1. Signed out: the link opens the seeded invitation ---------------------
+- openLink: "hooplings://invite/maestro-fixture-iris-pending-invite?src=web"
+# iOS asks "Open in <app>?" for custom-scheme URLs; conditional because the
+# simulator may remember the choice (same handling as auth-callback.yaml).
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Team Invitation"
+    timeout: 15000
+- assertNotVisible: "Invitation Not Found"
+- assertVisible: "You've been invited to join a team!"
+# Detail card values (separate text elements: the card is not pressable).
+- assertVisible: "Lakers"
+- assertVisible: "Frank Vogel"
+- assertVisible: "Log in to accept this invitation and join the team."
+
+# --- 2. Sign in and come back to the same invitation ------------------------
+- tapOn: "Log In to Accept"
+- assertVisible: "Developer login with test users"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+# postLoginRoute consumes the stored return path (/invite/<token>?src=web)
+# instead of going Home. Wait for the signed-in button, which only the invite
+# screen draws after sign-in, then check Home did not take over afterwards.
+- extendedWaitUntil:
+    visible: "Accept Invitation"
+    timeout: 15000
+- assertVisible: "Team Invitation"
+- assertVisible: "Lakers"
+- assertNotVisible: "Your Teams"
+- assertNotVisible: "Log In to Accept"
+- assertNotVisible: "Log in to accept this invitation and join the team."
+# Signed in, the button is "Accept Invitation". Tapping it opens the
+# confirmation alert, whose title is the same text; cancel it.
+- tapOn: "Accept Invitation"
+- assertVisible: "Join Lakers?"
+- tapOn: "Cancel"
+- assertVisible: "Team Invitation"
+
+# --- 3. An unknown token -----------------------------------------------------
+# Valid format (so the API answers 404, not 400), but no such invitation.
+- openLink: "hooplings://invite/maestro-unknown-invite-token?src=web"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Invitation Not Found"
+    timeout: 15000
+- assertVisible: "This invitation link is invalid or has been removed."
+- assertNotVisible: "Team Invitation"
+- tapOn: "Go Home"
+- assertVisible: "Your Teams"

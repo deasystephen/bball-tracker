@@ -202,7 +202,12 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
   team/player names and server error text stay as they are. There is no in-app language picker; the app
   follows the device language. Back to English: every screen and label English again.
-- **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`.
+- **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`. Maestro:
+  `.maestro/spanish-locale.yaml` covers the coach slice without changing the device language (it
+  launches the app with `-AppleLanguages (es) -AppleLocale es_ES`): sign-in, the tab bar labels, Home,
+  Teams → Lakers → team stats, Track → a scheduled game → Start → one shot → leave, Stats and Profile,
+  asserting `es.json` strings and the absence of their English. Added 2026-10-24 and not yet run. The
+  device walk-through above (VoiceOver, offline, the player role, back to English) stays manual.
 
 ### B.5 — About screen (version / OTA diagnostics)
 - [ ] Pass / Fail / Skipped
@@ -541,6 +546,21 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** App cold-starts and lands directly on the invite screen (not on home tab).
 - **Notes:** Per `mobile/app/invite/[token].tsx` + Expo deep-link config.
 
+### E.7a — Invite link from the web page, signed out (#972, #973)
+- [ ] Pass / Fail / Skipped
+- **Role:** signed out, then a coach (dev-login)
+- **Steps:** Signed out, open `hooplings://invite/<token>?src=web` (the link hooplings.com's "Open in
+  App" button opens) for a PENDING invitation. Tap **Log In to Accept**, sign in, then open
+  `hooplings://invite/<unknown token>?src=web`.
+- **Expected:** The invite screen shows that invitation (team, inviter, jersey): the `?src=web` query
+  never becomes part of the token. Log In to Accept goes to sign-in, and after it the app comes back to
+  the same invitation with **Accept Invitation**, not to Home. An unknown token shows "Invitation Not
+  Found", and Go Home lands on Home. Amplitude records `invite_link_viewed` with `source: web`.
+- **Notes:** Maestro: `.maestro/invite-deep-link.yaml` (seeded Iris Invited invitation; seed with
+  `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed`, which writes its fixed token only into a local,
+  non-production database; read-only, the accept is cancelled at the alert). Added 2026-10-24 and not
+  yet run.
+
 ### E.8 — Expired invitation token
 - [ ] Pass / Fail / Skipped
 - **Steps:**
@@ -553,7 +573,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Steps:** Open `hooplings://invite/totally-fake-token-12345`.
 - **Expected:** "Invitation Not Found" or 404-style screen. Does NOT crash.
-- **Notes:** ___________
+- **Notes:** Maestro: the last step of `.maestro/invite-deep-link.yaml` (signed in, with `?src=web`). ___________
 
 ### E.10 — Already-accepted invitation
 - [ ] Pass / Fail / Skipped
@@ -693,7 +713,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageTeam`, then a PLAYER on the same team
 - **Steps:** Open a SCHEDULED, an IN_PROGRESS and a FINISHED game as each role; with VoiceOver on, swipe through the dark header. Then open a game from a push notification (no screen behind it) and tap the back arrow.
-- **Expected:** The header holds only the back arrow ("Go back") and, for the coach on SCHEDULED and FINISHED games, the trash icon ("Delete game"); there is no share icon and VoiceOver announces no "Share game" button (#731). Both icons are drawn the same size. With nothing to pop, the back arrow lands on the Games tab. Jest: `__tests__/app/game-detail-gating.test.tsx`.
+- **Expected:** The header holds only the back arrow ("Go back") and, for the coach on SCHEDULED and FINISHED games, the trash icon ("Delete game"); there is no share icon and VoiceOver announces no "Share game" button (#731). Both icons are drawn the same size. With nothing to pop, the back arrow lands on the Games tab. Jest: `__tests__/app/game-detail-gating.test.tsx`. Maestro asserts no "Share game" for the coach on a scheduled, in-progress and finished game (`.maestro/game-lifecycle.yaml`, which also checks the trash icon is there when scheduled or finished and gone in progress) and for a player (`.maestro/player-no-tracking.yaml`); the VoiceOver swipe and the push-notification back arrow stay manual.
 - **Notes:** ___________
 
 ---
@@ -1359,13 +1379,15 @@ After testing, optionally tear down:
 - Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend; **not** run in CI). All flows dev-login and skip the intro carousel:
   - `login.yaml`, `logout.yaml`, `navigation.yaml`, `profile.yaml` — session + tab smoke (Frank Vogel)
   - `auth-callback.yaml` — `hooplings://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
+  - `invite-deep-link.yaml` — `hooplings://invite/<token>?src=web` signed out → Log In to Accept → back on the same invitation; unknown token → "Invitation Not Found" (E.7a, E.9; Frank Vogel)
+  - `spanish-locale.yaml` — the coach walk in Spanish via launch arguments (B.4, Frank Vogel)
   - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)
   - `create-team.yaml`, `team-detail.yaml`, `roster-management.yaml` — D.1 / D.2 / D.3 (`team-detail.yaml` also asserts the roster sort pills: both pills visible, Name pill selected after tap)
   - `team-staff.yaml` — staff screen + "Add staff" form for the head coach, read-only (D.8)
   - `game-lifecycle.yaml`, `game-tracking.yaml`, `live-spectator.yaml`, `stats-viewing.yaml` — F.1–F.3, G.1/G.2, H.1, K
   - `player-no-tracking.yaml` — PLAYER sees RSVP but no lifecycle/tracking controls (G.8, Steph Curry)
   - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
-  - Not covered: invite accept (E), announcements (J), exports (M), push (N), any WorkOS sign-in
+  - Not covered: completing an invite accept (E.5; the deep-link flow stops at the confirmation alert), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management
 To verify additional sandbox recipients for broader testing:
@@ -1390,3 +1412,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-10-05: audit batch #775 #776. P.10 (VoiceOver Headings rotor reaches screen titles and section headings) and P.11 (largest accessibility text size on the tracker, tab bar, box score and toasts): device-only checks.
 - 2026-10-05: audit batch #655 #772 #773. P.12 (VoiceOver roles, labels and selected state), P.13 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.
 - 2026-10-05: first ticked boxes. K.3a and P.10–P.13 recorded as passed on a device by the owner after OTA f08483ab-0387-4b03-8148-5d949d7970fa (main at `78eebfb`); the record for each is on its Notes line, and the matching issues (#655 #772 #773 #775 #776 #778) carry the same note. G.3c (#773, opponent score buttons) is not yet recorded.
+- 2026-10-24: Maestro for the day's mobile work. New E.7a (the web page's `?src=web` invite link, signed out, return path kept; #972, #973) with `.maestro/invite-deep-link.yaml`, which also covers E.9; B.4 gained `.maestro/spanish-locale.yaml` (#671), F.6 the "Share game" absence checks (#731). The flow list in appendix B lists both new flows, and announcements came off its "Not covered" line (`announcement-reply.yaml`). None of the new flows has been run yet. Nothing marked passed.
