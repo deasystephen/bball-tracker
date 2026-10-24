@@ -35,7 +35,7 @@ import { formatClockTime, formatLongDate } from '../../../utils/format-date';
 import { getGamePermissions } from '../../../utils/game-permissions';
 import type { GameStatus, RsvpStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
-import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
+import { HEADER_ICON_HIT_SLOP, MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
 
 const getStatusColor = (
@@ -225,7 +225,7 @@ export default function GameDetailScreen() {
         ]}
       >
         <View style={[styles.headerActions, { paddingHorizontal: padding }]}>
-          <BackButton onPress={() => router.back()} style={styles.backButton} color="#FFFFFF" />
+          <BackButton onPress={goBack} style={styles.backButton} color="#FFFFFF" />
           <View style={styles.headerSpacer} />
           {/* Scheduled or finished only — deleting mid-tracking is more likely a
               mis-tap than intent (end the game first). Finished-game deletion
@@ -234,19 +234,13 @@ export default function GameDetailScreen() {
             <TouchableOpacity
               onPress={handleDelete}
               style={styles.iconButton}
+              hitSlop={HEADER_ICON_HIT_SLOP}
               accessibilityRole="button"
               accessibilityLabel="Delete game"
             >
               <Ionicons name="trash-outline" size={24} color="#FFFFFF80" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Share game"
-          >
-            <Ionicons name="share-outline" size={24} color="#FFFFFF80" />
-          </TouchableOpacity>
         </View>
 
         {/* Status */}
@@ -559,14 +553,10 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
-  // Delete and share sit side by side with no gap, so they grow to 44pt
-  // rather than take hitSlop (overlapping slop would hand one the other's taps).
+  // Drawn like BackButton (24pt icon, spacing.sm padding = 40pt) so both
+  // header icons share one size; HEADER_ICON_HIT_SLOP makes it a 44pt target.
   iconButton: {
     padding: spacing.sm,
-    minWidth: MIN_TOUCH_TARGET,
-    minHeight: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   statusContainer: {
     alignItems: 'center',

@@ -683,6 +683,13 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** Removed from list. For the finished game the confirm warns that recorded stats are removed from player and team season totals; after delete the Stats tab reflects the removal without a manual refresh.
 - **Notes:** ___________
 
+### F.6 — Game detail header controls
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageTeam`, then a PLAYER on the same team
+- **Steps:** Open a SCHEDULED, an IN_PROGRESS and a FINISHED game as each role; with VoiceOver on, swipe through the dark header. Then open a game from a push notification (no screen behind it) and tap the back arrow.
+- **Expected:** The header holds only the back arrow ("Go back") and, for the coach on SCHEDULED and FINISHED games, the trash icon ("Delete game"); there is no share icon and VoiceOver announces no "Share game" button (#731). Both icons are drawn the same size. With nothing to pop, the back arrow lands on the Games tab. Jest: `__tests__/app/game-detail-gating.test.tsx`.
+- **Notes:** ___________
+
 ---
 
 ## G. Live game tracking
