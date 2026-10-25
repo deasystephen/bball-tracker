@@ -24,23 +24,45 @@ function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
 }
 
-/** Short game date, e.g. "Sat, Oct 3" (GameCard). */
-export function formatShortDate(value: Date | string): string {
-  return toDate(value).toLocaleDateString(deviceLocale(), {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
+/**
+ * Uppercase the first character, in the given locale. For the weekday-led
+ * formats below, which always stand at the start of their label: Spanish
+ * writes weekdays and months lowercase in running text ("el sábado"), but a
+ * label that starts with one capitalizes it ("Sábado, 3 de octubre"). English
+ * output is unchanged.
+ */
+function capitalizeFirst(text: string, locale: string | undefined): string {
+  return text.charAt(0).toLocaleUpperCase(locale) + text.slice(1);
 }
 
-/** Long game date, e.g. "Saturday, October 3, 2026" (game detail, game stats, Create Game). */
+/** Short game date, e.g. "Sat, Oct 3" / "Sáb, 3 oct" (GameCard). Starts its label, so capitalized. */
+export function formatShortDate(value: Date | string): string {
+  const locale = deviceLocale();
+  return capitalizeFirst(
+    toDate(value).toLocaleDateString(locale, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }),
+    locale,
+  );
+}
+
+/**
+ * Long game date, e.g. "Saturday, October 3, 2026" / "Sábado, 3 de octubre de 2026" (game
+ * detail, game stats, Create Game). Starts its label, so capitalized.
+ */
 export function formatLongDate(value: Date | string): string {
-  return toDate(value).toLocaleDateString(deviceLocale(), {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const locale = deviceLocale();
+  return capitalizeFirst(
+    toDate(value).toLocaleDateString(locale, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    locale,
+  );
 }
 
 /** Calendar date without a weekday, e.g. "October 3, 2026" (invitation expiry). */
