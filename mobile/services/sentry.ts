@@ -252,6 +252,14 @@ export function initSentry(): void {
       dsn,
       environment,
       release,
+      // Always start the native SDK from here. When a release bundle carries
+      // `sentry.options.json` (getSentryExpoConfig embeds it as
+      // __SENTRY_OPTIONS__), @sentry/react-native 8.x skips native init unless
+      // this key is present, expecting AppDelegate to have started it — which
+      // only the plugin's `useNativeInit` does, and we do not use it. Without
+      // this line builds #35/#36 sent nothing at all: every event goes through
+      // the native transport (#644).
+      autoInitializeNativeSdk: true,
       enableAutoSessionTracking: true,
       sendDefaultPii: false,
       tracesSampleRate: 0.1,

@@ -83,6 +83,24 @@ describe('services/sentry', () => {
       expect(isSentryEnabled()).toBe(true);
     });
 
+    // Builds #35 and #36 (runtime 1.7.0) sent Sentry nothing: getSentryExpoConfig
+    // bundles sentry.options.json, and with it @sentry/react-native skips native
+    // init in a release build unless `autoInitializeNativeSdk` is in the options.
+    it('always starts the native SDK from JS (autoInitializeNativeSdk: true)', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry } = loadSentryModule();
+      initSentry();
+      expect(sentryInit.mock.calls[0][0].autoInitializeNativeSdk).toBe(true);
+    });
+
+    it('relies on an SDK rule that is still keyed on the presence of autoInitializeNativeSdk', () => {
+      // If the SDK changes how it decides to skip native init, this fails and the
+      // workaround above must be re-checked on a device before the next build.
+      const { readFileSync } = jest.requireActual<typeof import('fs')>('fs');
+      const sdk = readFileSync(require.resolve('@sentry/react-native/dist/js/sdk.js'), 'utf8');
+      expect(sdk).toContain("!('autoInitializeNativeSdk' in userOptions) && RN_GLOBAL_OBJ.__SENTRY_OPTIONS__");
+    });
+
     it('falls back to SENTRY_DSN env var', () => {
       process.env.SENTRY_DSN = 'https://env@sentry.io/2';
       const { initSentry } = loadSentryModule();
