@@ -47,19 +47,45 @@ const CAMERA_PURPOSE =
 const PHOTOS_PURPOSE =
   'Hooplings uses your photo library so you can choose a profile photo for yourself or for a player on your team roster.';
 
+// Per-language Info.plist overrides (#671). Prebuild writes each as
+// ios/<app>/Supporting/<lang>.lproj/InfoPlist.strings. Those .lproj folders
+// are what the App Store reads to list the app's languages and what puts the
+// permission prompts in Spanish; CFBundleLocalizations alone (expo-localization
+// below) declares the languages but ships no localized resources. Keys present
+// in CAMERA_PURPOSE / PHOTOS_PURPOSE stay single-sourced for English;
+// __tests__/app-config.test.ts ties these keys to the languages in i18n/locales/.
+const NATIVE_LOCALES = {
+  en: {
+    CFBundleDisplayName: 'Hooplings',
+    NSCameraUsageDescription: CAMERA_PURPOSE,
+    NSPhotoLibraryUsageDescription: PHOTOS_PURPOSE,
+  },
+  es: {
+    CFBundleDisplayName: 'Hooplings',
+    NSCameraUsageDescription:
+      'Hooplings usa tu cámara para tomar una foto de perfil para ti o para un jugador de la plantilla de tu equipo.',
+    NSPhotoLibraryUsageDescription:
+      'Hooplings usa tu fototeca para que elijas una foto de perfil para ti o para un jugador de la plantilla de tu equipo.',
+  },
+};
+
 export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.6.0 = OTA runtime boundary for the "next native binary" bundle: the
-    // Android App Links intent filter (#716), dropping the unused native
-    // packages lottie-react-native and expo-status-bar (#780), and the
-    // binary-coupled Expo SDK 57 patch bumps held on #275. An OTA ships
-    // JavaScript from the lockfile and runs it against the native code frozen
-    // in the binary. runtimeVersion policy is appVersion: every OTA from here
-    // on reaches 1.6.0 builds only, and build #33 stays on the last 1.5.0 OTA.
+    // 1.7.0 = OTA runtime boundary for the "next native binary" bundle: the
+    // Sentry Expo config plugin (#644: the Xcode build phases that upload the
+    // embedded bundle's source maps and the dSYMs), Spanish declared to iOS
+    // through CFBundleLocalizations (#671), and the binary-coupled Expo SDK 57
+    // patch, Sentry and Amplitude bumps held on #275. An OTA ships JavaScript
+    // from the lockfile and runs it against the native code frozen in the
+    // binary. runtimeVersion policy is appVersion: every OTA from here on
+    // reaches 1.7.0 builds only, and build #34 stays on the last 1.6.0 OTA.
     //
-    // Earlier boundaries: 1.5.0 was the Expo SDK 57 upgrade (#576: React
+    // Earlier boundaries: 1.6.0 was the Android App Links intent filter
+    // (#716), dropping lottie-react-native and expo-status-bar (#780) and SDK
+    // 57 patch bumps (build #33 stays on the last 1.5.0 OTA); 1.5.0 was the
+    // Expo SDK 57 upgrade (#576: React
     // Native 0.83 -> 0.86, React 19.3.0 -> 19.2.3, every expo-* native module;
     // build #32 stays on the last 1.4.0 OTA); 1.4.0 was dependency drift (#562: Amplitude, Sentry,
     // expo-updates and react moved on main after build #31 was cut); 1.3.0 was
@@ -67,7 +93,7 @@ export default {
     // from the OTA MANIFEST while the schemes a binary answers are baked into
     // Info.plist, so builds #25-#30 stay on the last 1.2.0 OTA); 1.2.0 was
     // expo-secure-store (audit #52).
-    version: '1.6.0',
+    version: '1.7.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -77,6 +103,7 @@ export default {
     // The pre-rename scheme left the array in #513; build #31 still
     // registers it natively until its successor is cut.
     scheme: 'hooplings',
+    locales: NATIVE_LOCALES,
     owner: 'deasystephen',
     runtimeVersion: {
       policy: 'appVersion',
@@ -148,7 +175,15 @@ export default {
       // with an `eas build`, never an OTA.
       ['expo-build-properties', { ios: { enableSceneSupport: true } }],
       'expo-router',
-      'expo-localization',
+      // Declares the app's languages to iOS (#671): CFBundleLocalizations
+      // ['en', 'es'] in Info.plist, the languages i18n/locales/ ships. Without
+      // it iOS treats the app as English-only: no per-app Language row in
+      // Settings, and the system UI the app presents stays English on a
+      // Spanish device. The iOS-only form on purpose: the array form also
+      // writes Android's localeConfig and resourceConfigurations, which waits
+      // for Android release work. Native (Info.plist), so it ships with an
+      // `eas build`; `__tests__/app-config.test.ts` ties it to i18n/locales/.
+      ['expo-localization', { supportedLocales: { ios: ['en', 'es'] } }],
       'expo-font',
       // The app never asks for biometric unlock (services/secure-storage.ts
       // passes only `keychainAccessible`, never `requireAuthentication`), so
@@ -167,6 +202,19 @@ export default {
           photosPermission: PHOTOS_PURPOSE,
           microphonePermission: false,
         },
+      ],
+      // Sentry symbolication (#644). Adds the Xcode build phases that upload
+      // the embedded bundle's source maps and the native debug files (dSYMs)
+      // to this org and project, and writes ios/sentry.properties at prebuild.
+      // It pairs with getSentryExpoConfig in metro.config.js, which stamps a
+      // Debug ID into every bundle (embedded or OTA), so Sentry finds the map
+      // whatever release an event carries. No token here: SENTRY_AUTH_TOKEN
+      // comes from the EAS production environment on the builder. Native
+      // (build phases), so it ships with an `eas build`;
+      // `__tests__/app-config.test.ts` pins the entry.
+      [
+        '@sentry/react-native/expo',
+        { organization: 'satsun-ventures', project: 'bball-tracker-mobile' },
       ],
     ],
     extra: {

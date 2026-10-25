@@ -46,8 +46,8 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   config in `app.config.js` (any key but `name`/`version`/`extra`/`web`, plugin output, referenced
   icons/splash) move only with a native build and a runtime bump; `npm test` fails otherwise. Never edit
   `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production` (the script
-  runs the drift guard, then `eas update --environment production`, which supplies `APP_ENV`);
-  verify the served manifest; publish it in the
-  same session as the merge.
+  needs `SENTRY_AUTH_TOKEN` in the shell, runs the drift guard, then `eas update --environment
+  production`, which supplies `APP_ENV`, then uploads the source maps to Sentry); verify the served
+  manifest; publish it in the same session as the merge.
 - Entitlements, permission strings, icons and splash ship only with an `eas build`.
 - Major new functionality gets a Maestro flow and, if it mutates data, a reset in the seed.

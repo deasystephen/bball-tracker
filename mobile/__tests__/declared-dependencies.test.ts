@@ -25,7 +25,7 @@ const SOURCE_FILES = [
   'babel.config.js',
   'metro.config.js',
   'eslint.config.mjs',
-  'scripts/sentry-upload-sourcemaps.js',
+  'scripts/sentry-set-commits.js',
   'assets/brand/render-icons.mjs',
 ];
 /** Test code and test config: these also count for `devDependencies` only, so a `jest.mock` cannot hide an unused runtime package. */

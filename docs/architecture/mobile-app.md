@@ -89,9 +89,25 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   same; the guards list whatever is missing. Add a render test in that language and a row in the E2E
   test plan's locale case (B.4). Telling iOS about the language (`CFBundleLocalizations`, below) is
   native config: it goes in the next native build's PR, never in a JavaScript-only PR.
-- **Next binary:** `ios.infoPlist.CFBundleLocalizations` (`en`, `es`) is native config, so it is not set
-  yet (it would trip the OTA drift guard); it ships with the next `eas build` so iOS lists Spanish for
-  the app and localizes system UI around it.
+- **Declared to iOS (runtime 1.7.0 on, #671):** `CFBundleLocalizations` (`en`, `es`) comes from the
+  `expo-localization` plugin option `supportedLocales: { ios: ['en', 'es'] }` in `app.config.js`, so iOS
+  offers the per-app Language setting and localizes system UI the app presents. The iOS-only form on
+  purpose: the array form also writes Android's `localeConfig` and `resourceConfigurations`, which waits
+  for Android release work. `__tests__/app-config.test.ts` ties the list to the files in
+  `i18n/locales/` and evaluates the Info.plist. It is native config and reached devices only with
+  build 1.7.0; a language added later needs its code there too, in a native build's PR.
+- **Localized resources (runtime 1.7.0 on, #671):** `CFBundleLocalizations` alone ships no localized
+  resource: build #35 had the key and no `.lproj` folder at all. The App Store reads an app's
+  languages from its `.lproj` folders, and the permission prompts are only localized through
+  `<lang>.lproj/InfoPlist.strings`. So `app.config.js` also sets Expo's `locales` (`NATIVE_LOCALES`),
+  which prebuild writes as `ios/<app>/Supporting/<lang>.lproj/InfoPlist.strings`, with
+  `CFBundleDisplayName` and the camera and photo-library purpose strings in each language. English
+  reuses `CAMERA_PURPOSE` / `PHOTOS_PURPOSE`. `__tests__/app-config.test.ts` fails if a shipped
+  language has no entry or a non-English purpose string equals the English one. A new language adds
+  a block there too, in a native build's PR.
+- **Per-app Language row:** iOS shows Settings → Apps → Hooplings → Language only when the **device**
+  has more than one preferred language (Settings → General → Language & Region). A device with English
+  alone shows no row whatever the app declares.
 
 ### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks
@@ -621,6 +637,16 @@ never inline a role check in a screen:
   strings; no URL or token is involved.
 - Jest mocks `@sentry/react-native` globally (`jest.setup.js`); a suite that asserts on the SDK
   installs its own mock, as `sentry.test.ts` does.
+- **Symbolication: the Debug-ID variant of #644** (runtime 1.7.0 on). `metro.config.js` uses
+  `getSentryExpoConfig`, the `@sentry/react-native/expo` plugin uploads the embedded bundle's maps and
+  the dSYMs during `eas build`, and `npm run ota:production` uploads every OTA bundle's maps. Chosen
+  over the minimal variant (matching a hand-built release name on both sides) because production runs
+  OTA bundles almost all the time, and a Debug ID matches each bundle to its own map whatever release
+  the event carries, so neither side has to agree on a name. `services/sentry.ts` leaves `release` and
+  `dist` to the SDK's native defaults (`com.bballtracker.mobile@<version>+<build>`, dist `<build>`),
+  which the Xcode upload and the commit-association hook (`scripts/sentry-set-commits.js`) also use.
+  `__tests__/sentry-symbolication.test.ts` pins each piece. Procedure and environment:
+  `docs/deployment/mobile-builds-and-ota.md`, "Sentry symbolication".
 
 ## Analytics events, user properties and screen views (#616)
 

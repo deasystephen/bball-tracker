@@ -183,8 +183,13 @@ Mobile builds use Expo Application Services (EAS):
 - **Production builds** create IPA files for TestFlight/App Store submission
 - Native module changes (e.g., adding `@sentry/react-native`) require a new
   production build — OTA cannot ship native code
-- **Sentry source maps** upload automatically on EAS build via the post-build hook
-  (`mobile/scripts/sentry-upload-sourcemaps.js`)
+- **Sentry source maps** (runtime 1.7.0 on, #644): every bundle carries a Debug ID
+  (`getSentryExpoConfig` in `mobile/metro.config.js`). An EAS build uploads the embedded
+  bundle's maps and the dSYMs from the Xcode phases of the `@sentry/react-native/expo`
+  plugin, and `npm run ota:production` uploads each OTA bundle's maps after `eas update`
+  (it needs `SENTRY_AUTH_TOKEN` in the publishing shell). The post-build hook
+  (`mobile/scripts/sentry-set-commits.js`) only attaches commits to the build's release.
+  Detail: `docs/deployment/mobile-builds-and-ota.md`, "Sentry symbolication"
 
 ## Automation
 

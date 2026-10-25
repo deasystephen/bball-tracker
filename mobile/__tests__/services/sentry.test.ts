@@ -83,6 +83,24 @@ describe('services/sentry', () => {
       expect(isSentryEnabled()).toBe(true);
     });
 
+    // Builds #35 and #36 (runtime 1.7.0) sent Sentry nothing: getSentryExpoConfig
+    // bundles sentry.options.json, and with it @sentry/react-native skips native
+    // init in a release build unless `autoInitializeNativeSdk` is in the options.
+    it('always starts the native SDK from JS (autoInitializeNativeSdk: true)', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+      const { initSentry } = loadSentryModule();
+      initSentry();
+      expect(sentryInit.mock.calls[0][0].autoInitializeNativeSdk).toBe(true);
+    });
+
+    it('relies on an SDK rule that is still keyed on the presence of autoInitializeNativeSdk', () => {
+      // If the SDK changes how it decides to skip native init, this fails and the
+      // workaround above must be re-checked on a device before the next build.
+      const { readFileSync } = jest.requireActual<typeof import('fs')>('fs');
+      const sdk = readFileSync(require.resolve('@sentry/react-native/dist/js/sdk.js'), 'utf8');
+      expect(sdk).toContain("!('autoInitializeNativeSdk' in userOptions) && RN_GLOBAL_OBJ.__SENTRY_OPTIONS__");
+    });
+
     it('falls back to SENTRY_DSN env var', () => {
       process.env.SENTRY_DSN = 'https://env@sentry.io/2';
       const { initSentry } = loadSentryModule();
@@ -110,11 +128,19 @@ describe('services/sentry', () => {
       expect(sentryInit.mock.calls[0][0].release).toBe('my-release-1');
     });
 
-    it('falls back to version from expoConfig when no release set', () => {
-      setExtra({ sentryDsn: 'https://test@sentry.io/1' });
+    // #644: the app once reported the bare `version` ("1.5.0") while the
+    // build hook uploaded maps under the git SHA, so no event ever matched.
+    // With no override, release and dist stay unset and the SDK fills the
+    // native defaults (`com.bballtracker.mobile@<version>+<build>`, dist
+    // `<build>`): the names the Sentry Xcode phase uploads under and
+    // scripts/sentry-set-commits.js attaches commits to.
+    it('leaves release and dist to the native SDK when no override is set', () => {
+      setExtra({ sentryDsn: 'https://test@sentry.io/1', sentryRelease: '' });
       const { initSentry } = loadSentryModule();
       initSentry();
-      expect(sentryInit.mock.calls[0][0].release).toBe('1.2.3');
+      const cfg = sentryInit.mock.calls[0][0];
+      expect(cfg.release).toBeUndefined();
+      expect(cfg.dist).toBeUndefined();
     });
 
     it('stays disabled when Sentry.init throws', () => {
