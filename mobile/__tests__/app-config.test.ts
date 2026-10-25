@@ -29,6 +29,8 @@ type ExpoConfig = {
     android: { permissions?: string[]; intentFilters: AndroidIntentFilter[] };
     plugins: PluginEntry[];
     extra: { apiUrl: string; appEnv: string };
+    /** Per-language Info.plist overrides: prebuild writes <lang>.lproj/InfoPlist.strings. */
+    locales?: Record<string, Record<string, string>>;
   };
 };
 
@@ -214,6 +216,29 @@ describe('app.config.js', () => {
       const config = await loadConfig({ APP_ENV: 'production' });
       const { infoPlist } = (await evaluateNativeConfig(config, ['expo-localization'])).ios;
       expect(infoPlist.CFBundleLocalizations).toEqual(shipped);
+    });
+
+    // CFBundleLocalizations ships no localized resource. `locales` makes
+    // prebuild write <lang>.lproj/InfoPlist.strings, which is what the App
+    // Store reads for the listing's languages and what localizes the
+    // permission prompts. Build #35 had the key but no .lproj folder.
+    it('gives every shipped language its own Info.plist strings (an .lproj folder)', async () => {
+      const config = await loadConfig({ APP_ENV: 'production' });
+      expect(Object.keys(config.expo.locales ?? {}).sort()).toEqual(shipped);
+    });
+
+    it('localizes every purpose string, with English equal to the plugin options', async () => {
+      const config = await loadConfig({ APP_ENV: 'production' });
+      const locales = config.expo.locales ?? {};
+      const picker = pluginOptions(config, 'expo-image-picker');
+      expect(locales.en.NSCameraUsageDescription).toBe(picker?.cameraPermission);
+      expect(locales.en.NSPhotoLibraryUsageDescription).toBe(picker?.photosPermission);
+      for (const code of shipped.filter((c) => c !== 'en')) {
+        for (const key of ['NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription']) {
+          expect(locales[code][key]).toEqual(expect.any(String));
+          expect(locales[code][key]).not.toBe(locales.en[key]);
+        }
+      }
     });
   });
 

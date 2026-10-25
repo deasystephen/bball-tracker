@@ -47,6 +47,28 @@ const CAMERA_PURPOSE =
 const PHOTOS_PURPOSE =
   'Hooplings uses your photo library so you can choose a profile photo for yourself or for a player on your team roster.';
 
+// Per-language Info.plist overrides (#671). Prebuild writes each as
+// ios/<app>/Supporting/<lang>.lproj/InfoPlist.strings. Those .lproj folders
+// are what the App Store reads to list the app's languages and what puts the
+// permission prompts in Spanish; CFBundleLocalizations alone (expo-localization
+// below) declares the languages but ships no localized resources. Keys present
+// in CAMERA_PURPOSE / PHOTOS_PURPOSE stay single-sourced for English;
+// __tests__/app-config.test.ts ties these keys to the languages in i18n/locales/.
+const NATIVE_LOCALES = {
+  en: {
+    CFBundleDisplayName: 'Hooplings',
+    NSCameraUsageDescription: CAMERA_PURPOSE,
+    NSPhotoLibraryUsageDescription: PHOTOS_PURPOSE,
+  },
+  es: {
+    CFBundleDisplayName: 'Hooplings',
+    NSCameraUsageDescription:
+      'Hooplings usa tu cámara para tomar una foto de perfil para ti o para un jugador de la plantilla de tu equipo.',
+    NSPhotoLibraryUsageDescription:
+      'Hooplings usa tu fototeca para que elijas una foto de perfil para ti o para un jugador de la plantilla de tu equipo.',
+  },
+};
+
 export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
@@ -81,6 +103,7 @@ export default {
     // The pre-rename scheme left the array in #513; build #31 still
     // registers it natively until its successor is cut.
     scheme: 'hooplings',
+    locales: NATIVE_LOCALES,
     owner: 'deasystephen',
     runtimeVersion: {
       policy: 'appVersion',

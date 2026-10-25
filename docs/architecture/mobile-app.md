@@ -95,11 +95,19 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   purpose: the array form also writes Android's `localeConfig` and `resourceConfigurations`, which waits
   for Android release work. `__tests__/app-config.test.ts` ties the list to the files in
   `i18n/locales/` and evaluates the Info.plist. It is native config and reached devices only with
-  build 1.7.0; a language added later needs its code there too, in a native build's PR. The bundle has
-  no `.lproj` folders, so whether App Store Connect lists Spanish under Languages from
-  `CFBundleLocalizations` alone is checked on the 1.7.0 build; if not, Expo's `locales` key (an
-  `es.lproj/InfoPlist.strings`, which would also translate the permission purpose strings) is the
-  follow-up.
+  build 1.7.0; a language added later needs its code there too, in a native build's PR.
+- **Localized resources (runtime 1.7.0 on, #671):** `CFBundleLocalizations` alone ships no localized
+  resource: build #35 had the key and no `.lproj` folder at all. The App Store reads an app's
+  languages from its `.lproj` folders, and the permission prompts are only localized through
+  `<lang>.lproj/InfoPlist.strings`. So `app.config.js` also sets Expo's `locales` (`NATIVE_LOCALES`),
+  which prebuild writes as `ios/<app>/Supporting/<lang>.lproj/InfoPlist.strings`, with
+  `CFBundleDisplayName` and the camera and photo-library purpose strings in each language. English
+  reuses `CAMERA_PURPOSE` / `PHOTOS_PURPOSE`. `__tests__/app-config.test.ts` fails if a shipped
+  language has no entry or a non-English purpose string equals the English one. A new language adds
+  a block there too, in a native build's PR.
+- **Per-app Language row:** iOS shows Settings → Apps → Hooplings → Language only when the **device**
+  has more than one preferred language (Settings → General → Language & Region). A device with English
+  alone shows no row whatever the app declares.
 
 ### Mobile list pagination & cache invalidation
 - Server list endpoints default to `limit=20` (max 100). Scrolling screens use the `useInfiniteQuery` hooks

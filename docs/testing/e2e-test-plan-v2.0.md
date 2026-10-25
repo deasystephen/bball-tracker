@@ -202,9 +202,13 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
   team/player names and server error text stay as they are. There is no in-app language picker; the app
   follows the device language. Back to English: every screen and label English again.
-- **Per-app language (runtime 1.7.0 on, `CFBundleLocalizations`):** with the device in English,
+- **Per-app language (runtime 1.7.0 on, `CFBundleLocalizations` + `es.lproj`):** add Español to the
+  device's Preferred Languages (Settings → General → Language & Region) with English first; iOS shows
+  the per-app Language row only when the device has more than one preferred language. Then
   Settings → Apps → Hooplings shows a Language row offering English and Español; choosing Español
-  relaunches the app in Spanish with the rest of the device still English. A 1.6.0 build has no such row.
+  relaunches the app in Spanish with the rest of the device still English. With the app in Spanish,
+  the camera and photo-library permission prompts read in Spanish (`es.lproj/InfoPlist.strings`).
+  A 1.6.0 build has no such row.
 - **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`. Maestro:
   `.maestro/spanish-locale.yaml` covers the coach slice without changing the device language (it
   launches the app with `-AppleLanguages (es) -AppleLocale es_ES`): sign-in, the tab bar labels, Home,
