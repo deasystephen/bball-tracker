@@ -42,7 +42,6 @@ import {
   isDeletableAge,
   isIssuedAvatarKey,
   listAvatarObjectPages,
-  listAvatarObjects,
   scheduleUserUploadCleanup,
   settleUploadCleanups,
   ACCOUNT_UPLOAD_MIN_AGE_MS,
@@ -339,7 +338,19 @@ describe('Upload Service', () => {
     const sentOf = (kind: string): Sent[] =>
       mockSend.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === kind);
 
-    describe('listAvatarObjects', () => {
+    /** Collects every page `listAvatarObjectPages` yields. */
+    async function collect(
+      prefix: string,
+      options?: Parameters<typeof listAvatarObjectPages>[1]
+    ): Promise<{ key: string; lastModified: Date | undefined }[]> {
+      const objects: { key: string; lastModified: Date | undefined }[] = [];
+      for await (const page of listAvatarObjectPages(prefix, options)) {
+        objects.push(...page);
+      }
+      return objects;
+    }
+
+    describe('listAvatarObjectPages (paging)', () => {
       it('pages through ListObjectsV2 until the listing is not truncated', async () => {
         const t = new Date('2026-01-01T00:00:00Z');
         mockSend
@@ -353,7 +364,7 @@ describe('Upload Service', () => {
             IsTruncated: false,
           });
 
-        const objects = await listAvatarObjects('avatars/');
+        const objects = await collect('avatars/');
 
         expect(objects).toEqual([
           { key: 'avatars/u/a.jpg', lastModified: t },
@@ -378,7 +389,7 @@ describe('Upload Service', () => {
           NextContinuationToken: 'more',
         });
 
-        const objects = await listAvatarObjects('avatars/u/', { signal: controller.signal, maxPages: 1 });
+        const objects = await collect('avatars/u/', { signal: controller.signal, maxPages: 1 });
 
         expect(objects).toEqual([{ key: 'avatars/u/a.jpg', lastModified: undefined }]);
         expect(mockSend).toHaveBeenCalledTimes(1);
@@ -393,13 +404,13 @@ describe('Upload Service', () => {
             NextContinuationToken: 'n',
           })
           .mockRejectedValueOnce(new Error('AccessDenied'));
-        await expect(listAvatarObjects('avatars/')).rejects.toThrow('AccessDenied');
+        await expect(collect('avatars/')).rejects.toThrow('AccessDenied');
       });
 
       it('throws when aborted before a page', async () => {
         const controller = new AbortController();
         controller.abort();
-        await expect(listAvatarObjects('avatars/', { signal: controller.signal })).rejects.toThrow(/aborted/);
+        await expect(collect('avatars/', { signal: controller.signal })).rejects.toThrow(/aborted/);
         expect(mockSend).not.toHaveBeenCalled();
       });
     });
@@ -453,36 +464,6 @@ describe('Upload Service', () => {
         expect(settled).toBe(true);
         await expect(settleUploadCleanups()).resolves.toBeUndefined(); // nothing pending
       });
-
-      it('logs, never rejects, if the cleanup itself throws', async () => {
-        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-        // The cleanup's own warn throws; the scheduler's catch is the guard.
-        warnSpy.mockImplementationOnce(() => {
-          throw new Error('logger broke');
-        });
-        mockSend.mockRejectedValueOnce(new Error('denied'));
-
-        scheduleUserUploadCleanup(userId);
-        await settleUploadCleanups();
-
-        expect(warnSpy).toHaveBeenLastCalledWith(
-          'Account avatar upload cleanup failed (ignored)',
-          expect.objectContaining({ userId, error: 'logger broke' })
-        );
-        warnSpy.mockRestore();
-      });
-
-      it('stringifies a non-Error from the cleanup', async () => {
-        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-        warnSpy.mockImplementationOnce(() => {
-          throw 'odd';
-        });
-        mockSend.mockRejectedValueOnce(new Error('denied'));
-        scheduleUserUploadCleanup(userId);
-        await settleUploadCleanups();
-        expect(warnSpy).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ error: 'odd' }));
-        warnSpy.mockRestore();
-      });
     });
 
     describe('isIssuedAvatarKey', () => {
@@ -527,32 +508,37 @@ describe('Upload Service', () => {
     });
 
     describe('loadReferencedAvatarKeys', () => {
-      it('collects the key of every stored profilePictureUrl that contains the fragment', async () => {
+      const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+
+      it('loads rows whose URL contains the bare id and keys them over-inclusively', async () => {
         (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
-          { profilePictureUrl: `${BUCKET_BASE}coach/kid.jpg` },
-          { profilePictureUrl: 'https://workos.example/photo.jpg' },
+          { profilePictureUrl: `${BUCKET_BASE}${userId}/kid.jpg` },
+          // An encoded `avatars/` segment still names the id verbatim, so it loads and decodes
+          { profilePictureUrl: `https://bball-tracker-avatars-dev.s3.amazonaws.com/%61vatars/${userId}/enc.jpg` },
           { profilePictureUrl: null },
         ]);
 
-        const keys = await loadReferencedAvatarKeys('avatars/');
+        const keys = await loadReferencedAvatarKeys(userId);
 
-        expect([...keys]).toEqual(['avatars/coach/kid.jpg']);
-        // Narrowed by the fragment; tombstones included: no deletedAt filter
+        expect(keys.has(`avatars/${userId}/kid.jpg`)).toBe(true);
+        expect(keys.has(`avatars/${userId}/enc.jpg`)).toBe(true);
+        // Filtered on the id alone; tombstones included: no deletedAt filter
         expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-          where: { profilePictureUrl: { contains: 'avatars/' } },
+          where: { profilePictureUrl: { contains: userId } },
           select: { profilePictureUrl: true },
         });
       });
 
-      it('refuses a fragment that LIKE would read as a wildcard', async () => {
-        await expect(loadReferencedAvatarKeys('avatars/a_b/')).rejects.toThrow(/wildcards/);
-        await expect(loadReferencedAvatarKeys('avatars/%/')).rejects.toThrow(/wildcards/);
+      it('refuses an id that LIKE would read as a wildcard or that is not a plain segment', async () => {
+        await expect(loadReferencedAvatarKeys('a_b')).rejects.toThrow(/plain id/);
+        await expect(loadReferencedAvatarKeys('a%b')).rejects.toThrow(/plain id/);
+        await expect(loadReferencedAvatarKeys('a/b')).rejects.toThrow(/plain id/);
         expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
       });
 
       it('propagates a database error', async () => {
         (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
-        await expect(loadReferencedAvatarKeys('avatars/')).rejects.toThrow('db down');
+        await expect(loadReferencedAvatarKeys(userId)).rejects.toThrow('db down');
       });
     });
 
@@ -649,9 +635,9 @@ describe('Upload Service', () => {
 
         const list = sentOf('ListObjectsV2');
         expect(list[0].input).toEqual(expect.objectContaining({ Prefix: `avatars/${userId}/` }));
-        // References narrowed to this user's prefix
+        // References narrowed to rows naming this user's id
         expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-          where: { profilePictureUrl: { contains: `avatars/${userId}/` } },
+          where: { profilePictureUrl: { contains: userId } },
           select: { profilePictureUrl: true },
         });
         const deletes = sentOf('DeleteObjects');

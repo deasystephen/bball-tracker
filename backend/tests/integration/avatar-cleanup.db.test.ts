@@ -75,19 +75,22 @@ afterAll(async () => {
 });
 
 describe('avatar cleanup (real Postgres, #957)', () => {
-  it('loadReferencedAvatarKeys sees every stored URL, including a non-canonical host', async () => {
+  it('loadReferencedAvatarKeys(userId) finds every row naming the id, however the URL is spelled', async () => {
     const a = await mkUser('ref-a');
+    // Canonical, regional host, and a percent-encoded `avatars/` segment, each on a different row
     await prisma.user.update({ where: { id: a }, data: { profilePictureUrl: urlOf(`avatars/${a}/one.jpg`) } });
-    const b = await mkUser('ref-b');
-    await prisma.user.update({
-      where: { id: b },
-      data: { profilePictureUrl: `https://${BUCKET}.s3.us-east-1.amazonaws.com/avatars/${b}/two.jpg` },
-    });
+    await mkUser('ref-b', { profilePictureUrl: `https://${BUCKET}.s3.us-east-1.amazonaws.com/avatars/${a}/two.jpg` });
+    await mkUser('ref-c', { profilePictureUrl: `https://${BUCKET}.s3.amazonaws.com/%61vatars/${a}/three.jpg` });
+    // Another user's photo is not loaded
+    const other = await mkUser('ref-d');
+    await prisma.user.update({ where: { id: other }, data: { profilePictureUrl: urlOf(`avatars/${other}/x.jpg`) } });
 
-    const keys = await loadReferencedAvatarKeys('avatars/');
+    const keys = await loadReferencedAvatarKeys(a);
 
     expect(keys.has(`avatars/${a}/one.jpg`)).toBe(true);
-    expect(keys.has(`avatars/${b}/two.jpg`)).toBe(true);
+    expect(keys.has(`avatars/${a}/two.jpg`)).toBe(true);
+    expect(keys.has(`avatars/${a}/three.jpg`)).toBe(true);
+    expect(keys.has(`avatars/${other}/x.jpg`)).toBe(false);
   });
 
   it("deleting a coach removes the coach's orphaned upload and keeps the photo on a managed player's row", async () => {

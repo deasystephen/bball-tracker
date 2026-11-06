@@ -23,10 +23,18 @@
 
 jest.unmock('../../src/models');
 
+// S3 double (#957): account deletion lists and deletes the user's avatar
+// uploads after the response. Never a real bucket; see tests/support/s3-mock.ts.
+const mockS3Send = jest.fn().mockResolvedValue({});
+jest.mock('@aws-sdk/client-s3', () =>
+  jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))
+);
+
 import { readFileSync } from 'fs';
 import path from 'path';
 import { Prisma, TeamRoleType } from '@prisma/client';
 import prisma from '../../src/models';
+import { settleUploadCleanups } from '../../src/services/upload-service';
 import { TeamService } from '../../src/services/team-service';
 import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
@@ -110,6 +118,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fx.cleanup();
+  await settleUploadCleanups();
   await prisma.$disconnect();
 });
 

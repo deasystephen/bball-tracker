@@ -209,7 +209,6 @@ was last checked against it on 2026-10-03):
   Both are read only through `backend/src/utils/urls.ts`; unset they fall back to `http://localhost:3000` (fail-loud) and the server logs a warning at boot in production.
 - `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
-- `AVATAR_SWEEP_ENABLED` (`true` to enable, unset by default): the 6-hourly sweep of avatar uploads no profile references (#957). Set it only after the task role has `s3:ListBucket` on the avatars bucket (`docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`)
 - `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.hooplings.com`): SES mailer
 - `SES_CONFIGURATION_SET` (`bball-tracker-production-transactional`), `SES_EVENTS_QUEUE_URL` (the
   SQS queue from `terraform output ses_events_queue_url`): SES event publishing and the in-process

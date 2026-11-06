@@ -74,17 +74,16 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
-- **Profile photos.** On deletion, the person's current photo is deleted, and shortly after, the
-  other photos they uploaded more than an hour earlier that no profile shows. This is best-effort:
-  a failure is logged and the deletion still succeeds. A photo they uploaded for a child or player they manage stays while that profile
-  shows it. A photo that was uploaded but never saved to any profile (a cancelled edit, an
-  abandoned Add Player) **is not deleted today**: it stays readable by anyone who has its URL
-  (the bucket is public-read; URLs are unguessable). **Once the sweep is enabled**, such photos
-  are deleted after **7 days** (a sweep every 6 hours, `services/avatar-sweep.ts`). That
-  also collects any upload the deletion-time cleanup left. Until then, the privacy policy must
-  not promise it. *State (#957): the deletion-time cleanup works once the task role's
-  `s3:ListBucket` is applied (`infra/ecs.tf`); the sweep is off until `AVATAR_SWEEP_ENABLED=true`
-  is deployed in `infra/task-definition.json`. Update this paragraph in that PR. See
+- **Profile photos.** On deletion, the person's current photo is deleted. Shortly after, any other
+  photo they uploaded more than an hour earlier is deleted too, unless a profile still shows it.
+  This is best-effort: a failure is logged and the deletion still succeeds. A photo they uploaded
+  for a child or player they manage stays while that profile shows it. A photo uploaded within the
+  hour before the deletion stays. **A photo that was uploaded but never saved to any profile (a
+  cancelled edit, an abandoned Add Player) is not deleted while its uploader keeps their account**:
+  it stays readable by anyone who has its URL (the bucket is public-read; URLs are unguessable).
+  Expiring those is #1005; the privacy policy must not promise it until that ships. *State
+  (#957): the deletion-time cleanup works once the task role's `s3:ListBucket` is applied
+  (`infra/ecs.tf`) and PR #1000 is merged. See
   `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.*
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited.

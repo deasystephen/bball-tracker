@@ -225,10 +225,13 @@ export async function discardOwnAvatar(
 // Unreferenced uploads (#957)
 //
 // An upload exists in the public bucket as soon as the POST finishes, before
-// any profile write stores its URL. The helpers below find and delete objects
-// that no `User.profilePictureUrl` references. They need `s3:ListBucket` on
-// the bucket (task role, `infra/ecs.tf`); without it the list call is denied,
-// the caller logs it, and nothing is deleted.
+// any profile write stores its URL. On account deletion, the helpers below
+// find and delete the user's own uploads that no `User.profilePictureUrl`
+// references. They need `s3:ListBucket` on the bucket (task role,
+// `infra/ecs.tf`); without it the list call is denied, the cleanup logs it,
+// and nothing is deleted. Uploads that are never saved, by anyone still
+// signed up, are not collected here: that is the pending-prefix design
+// tracked in its own issue.
 // ---------------------------------------------------------------------------
 
 /** DeleteObjects takes at most 1000 keys per request. */
@@ -237,7 +240,8 @@ const DELETE_BATCH_SIZE = 1000;
 /**
  * Deadline for the account-deletion cleanup. It runs after the response
  * (`scheduleUserUploadCleanup`); the deadline aborts its S3 calls and, once
- * passed, stops it before any delete. Anything it leaves is the sweep's.
+ * passed, stops it before any delete. It also bounds how long graceful
+ * shutdown waits for it (`settleUploadCleanups`).
  */
 export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 30_000;
 
@@ -245,13 +249,18 @@ export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 30_000;
  * The account-deletion cleanup leaves objects younger than this: an upload
  * whose profile write has not landed yet (an admin deleting a coach mid-save)
  * would otherwise lose its object before the row references it.
+ *
+ * Accepted residual race: a save that lands more than an hour after its
+ * upload, while an admin deletes that same coach. It is rare, admin-only, and
+ * the photo is the deleted coach's own upload.
  */
 export const ACCOUNT_UPLOAD_MIN_AGE_MS = 60 * 60 * 1000;
 
 /**
  * User ids become an S3 prefix and a LIKE fragment. They are UUIDs; anything
  * else (a `/` that widens the prefix, a `%` or `_` that LIKE reads as a
- * wildcard) skips the cleanup.
+ * wildcard) skips the cleanup. A UUID has no character a URL ever
+ * percent-encodes, so a stored URL always carries it verbatim.
  */
 const SAFE_ID = /^[A-Za-z0-9-]+$/;
 
@@ -278,10 +287,9 @@ export interface AvatarDeleteResult {
 
 /**
  * Pages of objects under `prefix` from ListObjectsV2, one page (up to 1000
- * keys) at a time, so a caller can filter as it goes instead of holding the
- * bucket in memory. Throws when a page cannot be read (AccessDenied without
- * `s3:ListBucket`, network, abort), so a failed read is never mistaken for an
- * empty prefix.
+ * keys) at a time, up to `maxPages`. Throws when a page cannot be read
+ * (AccessDenied without `s3:ListBucket`, network, abort), so a failed read is
+ * never mistaken for an empty prefix.
  */
 export async function* listAvatarObjectPages(
   prefix: string,
@@ -307,15 +315,6 @@ export async function* listAvatarObjectPages(
     yield objects;
     continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (continuationToken && pages < maxPages);
-}
-
-/** Every object under `prefix` (all pages unless `maxPages` is set). */
-export async function listAvatarObjects(prefix: string, options: ListAvatarObjectsOptions = {}): Promise<AvatarObject[]> {
-  const objects: AvatarObject[] = [];
-  for await (const page of listAvatarObjectPages(prefix, options)) {
-    objects.push(...page);
-  }
-  return objects;
 }
 
 /** True when `key` has the exact shape `avatars/<id>/<file>` (same rule as `ISSUED_KEY_PATH`). */
@@ -364,24 +363,24 @@ export function referencedAvatarKeys(storedUrl: string): string[] {
 }
 
 /**
- * The object keys referenced by `User.profilePictureUrl` values containing
- * `fragment` (`avatars/` for the sweep, `avatars/<userId>/` for one user),
- * tombstones and every row included. Throws on a database error, so a caller
- * can never mistake "could not read references" for "nothing is referenced".
+ * The object keys referenced by any `User.profilePictureUrl` that contains
+ * `userId`, tombstones and every row included. Throws on a database error, so
+ * a caller can never mistake "could not read references" for "nothing is
+ * referenced".
  *
- * `contains` compiles to LIKE, so `fragment` must hold no `%` or `_`: callers
- * pass the literal `avatars/` or a UUID checked against `SAFE_ID`. The filter
- * matches the literal text only; a stored URL that percent-encodes those
- * characters is not loaded. Accepted: clients store the `imageUrl` the API
- * issued, verbatim. What is loaded is still matched over-inclusively
+ * Filtering on the bare id, not `avatars/<id>/`, is what makes the narrowing
+ * safe: a UUID has no character a URL percent-encodes, so every stored URL
+ * naming an object under the user's prefix contains it verbatim, however the
+ * rest of the URL is spelled. `contains` compiles to LIKE, hence `SAFE_ID`
+ * (no `%` or `_`). What loads is matched over-inclusively
  * (`referencedAvatarKeys`).
  */
-export async function loadReferencedAvatarKeys(fragment: string): Promise<Set<string>> {
-  if (/[%_\\]/.test(fragment)) {
-    throw new Error('Reference fragment must not contain LIKE wildcards');
+export async function loadReferencedAvatarKeys(userId: string): Promise<Set<string>> {
+  if (!SAFE_ID.test(userId)) {
+    throw new Error('Reference filter must be a plain id');
   }
   const rows = await prisma.user.findMany({
-    where: { profilePictureUrl: { contains: fragment } },
+    where: { profilePictureUrl: { contains: userId } },
     select: { profilePictureUrl: true },
   });
   const keys = new Set<string>();
@@ -456,7 +455,7 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
  * uploads a player's photo under their OWN prefix and writes it onto the
  * player's row, so the prefix can hold photos in use elsewhere; those stay.
  * Objects younger than `ACCOUNT_UPLOAD_MIN_AGE_MS` stay too (a save may be in
- * flight); the sweep collects them once enabled.
+ * flight).
  *
  * Best-effort, like `deletePreviousAvatar`: never throws. When the listing or
  * the reference query fails, or the deadline passes, nothing (more) is
@@ -476,13 +475,16 @@ export async function deleteUnreferencedUserUploads(
   const signal = AbortSignal.timeout(timeoutMs);
   const cutoff = now.getTime() - ACCOUNT_UPLOAD_MIN_AGE_MS;
   try {
-    const objects = await listAvatarObjects(prefix, { signal, maxPages: 1 });
+    const objects: AvatarObject[] = [];
+    for await (const page of listAvatarObjectPages(prefix, { signal, maxPages: 1 })) {
+      objects.push(...page);
+    }
     const candidates = objects.filter((o) => isDeletableAge(o, cutoff)).map((o) => o.key);
     if (candidates.length === 0) {
       return;
     }
     // Read references AFTER listing, so they are at least as fresh as the list.
-    const referenced = await loadReferencedAvatarKeys(prefix);
+    const referenced = await loadReferencedAvatarKeys(userId);
     if (signal.aborted) {
       throw new Error('Account upload cleanup deadline passed before delete');
     }
@@ -510,23 +512,19 @@ const pendingUploadCleanups = new Set<Promise<void>>();
 /**
  * Start `deleteUnreferencedUserUploads` without awaiting it, so S3 and the
  * reference query never sit on the account-deletion response. It never
- * rejects (the catch is belt and braces); the deadline bounds it.
+ * rejects (it catches and logs everything itself); the deadline bounds it.
  */
 export function scheduleUserUploadCleanup(userId: string): void {
-  const cleanup: Promise<void> = deleteUnreferencedUserUploads(userId)
-    .catch((err: unknown) => {
-      logger.warn('Account avatar upload cleanup failed (ignored)', {
-        userId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
-    .finally(() => {
-      pendingUploadCleanups.delete(cleanup);
-    });
+  const cleanup: Promise<void> = deleteUnreferencedUserUploads(userId).finally(() => {
+    pendingUploadCleanups.delete(cleanup);
+  });
   pendingUploadCleanups.add(cleanup);
 }
 
-/** Resolves once every scheduled cleanup has settled (for tests). */
+/**
+ * Resolves once every scheduled cleanup has settled. Graceful shutdown awaits
+ * it (`utils/shutdown.ts`), bounded by each cleanup's deadline.
+ */
 export async function settleUploadCleanups(): Promise<void> {
   await Promise.all([...pendingUploadCleanups]);
 }

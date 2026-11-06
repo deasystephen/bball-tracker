@@ -28,9 +28,18 @@
  * one surviving row of any retained relation keeps the tombstone.
  */
 jest.unmock('../../src/models');
+
+// S3 double (#957): account deletion lists and deletes the user's avatar
+// uploads after the response. Never a real bucket; see tests/support/s3-mock.ts.
+const mockS3Send = jest.fn().mockResolvedValue({});
+jest.mock('@aws-sdk/client-s3', () =>
+  jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))
+);
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
+import { settleUploadCleanups } from '../../src/services/upload-service';
+import { sentOfKind } from '../support/s3-mock';
 import { AccountService, DELETED_USER_NAME, DELETED_LEAGUE_NAME } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
 import { LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
@@ -239,6 +248,7 @@ afterAll(async () => {
   // user ids stay for rows that lost their run id on the way, such as an
   // account that was deleted and is now a tombstone.
   await removeTestRows(prisma, { run: RUN, alsoUserIds: Object.values(ids.users) });
+  await settleUploadCleanups();
   await prisma.$disconnect();
 });
 
@@ -272,6 +282,9 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     const result = await AccountService.deleteAccount(coach, { actorId: coach, mode: 'self' });
     expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
     expect(deleteUserSpy).toHaveBeenCalledWith(`workos-${RUN}`);
+    // The avatar cleanup started after the response and listed only this user's prefix (#957)
+    await settleUploadCleanups();
+    expect(sentOfKind(mockS3Send, 'ListObjectsV2').map((c) => c.input.Prefix)).toContain(`avatars/${coach}/`);
 
     // Tombstone columns
     const row = await prisma.user.findUniqueOrThrow({ where: { id: coach } });

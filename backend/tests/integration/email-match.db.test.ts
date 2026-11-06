@@ -17,9 +17,17 @@
  * a per-run id and removed in afterAll.
  */
 jest.unmock('../../src/models');
+
+// S3 double (#957): account deletion lists and deletes the user's avatar
+// uploads after the response. Never a real bucket; see tests/support/s3-mock.ts.
+const mockS3Send = jest.fn().mockResolvedValue({});
+jest.mock('@aws-sdk/client-s3', () =>
+  jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))
+);
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
+import { settleUploadCleanups } from '../../src/services/upload-service';
 import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
 import { InvitationService } from '../../src/services/invitation-service';
@@ -119,6 +127,7 @@ afterAll(async () => {
   // user ids stay for rows that lost their run id on the way, such as an
   // account that was deleted and is now a tombstone.
   await removeTestRows(prisma, { run: RUN, alsoUserIds: userIds });
+  await settleUploadCleanups();
   await prisma.$disconnect();
   jest.restoreAllMocks();
 });

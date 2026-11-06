@@ -267,23 +267,6 @@ jest.mock('../src/models', () => {
   };
 });
 
-// Stub S3 for every suite (#957). Account deletion lists and deletes avatar
-// uploads after the response, so any suite that reaches `deleteAccount`,
-// real-database ones included, would otherwise call a real bucket or wait on
-// the credential chain (IMDS). The stub answers every call with `{}` (an empty
-// listing, a clean delete). A suite that asserts on S3 declares its own
-// `jest.mock('@aws-sdk/client-s3', …)`, which replaces this one.
-jest.mock('@aws-sdk/client-s3', () => {
-  const command = (kind: string): jest.Mock =>
-    jest.fn().mockImplementation((input: unknown) => ({ kind, input }));
-  return {
-    S3Client: jest.fn().mockImplementation(() => ({ send: async (): Promise<object> => ({}) })),
-    DeleteObjectCommand: command('DeleteObject'),
-    DeleteObjectsCommand: command('DeleteObjects'),
-    ListObjectsV2Command: command('ListObjectsV2'),
-  };
-});
-
 // Mock WorkOS client (shared factory: tests/support/workos-mock.ts)
 jest.mock('../src/utils/workos-client', () => jest.requireActual('./support/workos-mock').mockWorkOSClientModule());
 

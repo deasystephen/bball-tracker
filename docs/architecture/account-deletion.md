@@ -26,8 +26,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   the user's own `avatars/<userId>/` prefix that no `User.profilePictureUrl` references, so a
   photo the user uploaded as coach or guardian onto a player's row stays. It is started last and not
   awaited, so neither S3 nor the reference read delays the response. It is bounded: one listing page,
-  objects at least 1 h old only (a save may be in flight), references narrowed to that prefix, and
-  a 30 s deadline. It needs `s3:ListBucket`; see
+  objects at least 1 h old only (a save may be in flight), references read from rows containing
+  the user id, and a 30 s deadline; graceful shutdown waits for it. Uploads never saved by users who
+  keep their accounts are not collected anywhere yet (#1005). It needs `s3:ListBucket`; see
   `backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`. The WorkOS step (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**
