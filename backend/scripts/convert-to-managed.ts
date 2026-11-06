@@ -11,13 +11,17 @@
  * transaction un-claims the row (no login, no email, managed by the coach),
  * then the WorkOS user is deleted best-effort, which ends every session. The
  * output says which coach now manages the record and whether the WorkOS
- * deletion succeeded.
+ * deletion succeeded. When it did not, the active sessions are revoked as a
+ * stopgap, the output carries the WorkOS user id (the row no longer does), a
+ * warning goes to stderr and the exit code is 3: the operator deletes the
+ * WorkOS user by hand before replying to the reporter.
  *
  * Without `--coach` the record goes to the one head coach of the player's
  * teams in active seasons; the script refuses (exit 1, nothing written) when
- * there is none or more than one, and when the account holds a staff role, a
- * league admin role or a guardian link (an adult account: delete it with
- * `data-subject-request.ts` instead).
+ * there is none or more than one, when a named coach is not staff on one of
+ * those teams, and when the account holds a staff role, a league admin role,
+ * a guardian link or a personal league with teams (an adult account: delete
+ * it with `data-subject-request.ts` instead).
  */
 
 // Loads backend/.env locally (DATABASE_URL, WORKOS_*). In production run with the task's env.
@@ -65,11 +69,30 @@ async function main(argv: string[]): Promise<void> {
         converted: true,
         managedById: result.managedById,
         identityDeleted: result.identityDeleted,
+        ...(result.workosUserId && { workosUserId: result.workosUserId, sessionsRevoked: result.sessionsRevoked }),
       },
       null,
       2
     ) + '\n'
   );
+
+  if (result.workosUserId) {
+    // The row is converted, but the identity-provider user survives: a new
+    // sign-in would create a fresh account for the child. Exit non-zero so
+    // nobody reads this run as finished.
+    process.stderr.write(
+      [
+        '',
+        '!!! WorkOS user NOT deleted. The conversion is committed; the child can still sign in.',
+        `!!! Delete WorkOS user ${result.workosUserId} in the WorkOS dashboard NOW, before replying to the reporter.`,
+        result.sessionsRevoked === null
+          ? '!!! Revoking its sessions failed too: delete the user immediately.'
+          : `!!! Revoked ${result.sessionsRevoked} active session(s) as a stopgap.`,
+        '',
+      ].join('\n')
+    );
+    process.exitCode = 3;
+  }
 }
 
 main(process.argv.slice(2))

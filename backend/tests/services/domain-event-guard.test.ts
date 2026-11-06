@@ -38,6 +38,12 @@ const ALLOWED: Record<string, string> = {
   // In-transaction helpers: the public method that calls them logs the event.
   'account-service.ts#unclaimManagedRow':
     'un-claim write inside convertToManaged (and the #981 age screen), whose caller logs `Account converted to managed`',
+  'account-service.ts#assertPlayerAccount':
+    'removes an empty personal league inside convertToManaged, which logs `Account converted to managed`',
+  'account-service.ts#purgeLoginBindings':
+    'token and invitation purge inside deleteAccount and unclaimManagedRow; their callers log `Account deleted` / `Account converted to managed`',
+  'account-service.ts#scrubInvitedEmail':
+    'D17 guardian-invitation scrub inside deleteAccount and unclaimManagedRow; their callers log the domain event',
   'game-event-service.ts#recomputeHomeScore':
     'derives Game.homeScore inside createEvent/deleteEvent, which log `Game event created` / `deleted`',
   'guardian-service.ts#promoteNextPrimary':

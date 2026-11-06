@@ -224,6 +224,32 @@ describe('WorkOSService', () => {
     });
   });
 
+  describe('revokeAllSessions (#983)', () => {
+    it('revokes every active session of the user and skips ended ones', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockResolvedValue({
+        autoPagination: jest.fn().mockResolvedValue([
+          { id: 'session_a', status: 'active' },
+          { id: 'session_b', status: 'revoked' },
+          { id: 'session_c', status: 'active' },
+        ]),
+      });
+      mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).resolves.toBe(2);
+
+      expect(mockWorkOSClient.userManagement.listSessions).toHaveBeenCalledWith('user_123');
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledTimes(2);
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_a' });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_c' });
+    });
+
+    it('propagates WorkOS errors', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockRejectedValue(new Error('WorkOS down'));
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).rejects.toThrow('WorkOS down');
+    });
+  });
+
   describe('revokeSession', () => {
     it('revokes the WorkOS session by id', async () => {
       mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);

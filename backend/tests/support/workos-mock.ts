@@ -14,6 +14,7 @@ export const mockWorkOSClient = {
     authenticateWithCode: jest.fn(),
     authenticateWithRefreshToken: jest.fn(),
     revokeSession: jest.fn(),
+    listSessions: jest.fn(),
     deleteUser: jest.fn().mockResolvedValue(undefined),
     getUser: jest.fn(),
     listUsers: jest.fn(),

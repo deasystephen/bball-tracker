@@ -186,6 +186,21 @@ export class WorkOSService {
   }
 
   /**
+   * Revoke every active session of a WorkOS user, which kills the refresh
+   * tokens bound to them. The fallback when `deleteUser` fails and no single
+   * session id is known (the operator's convert-to-managed path, #983).
+   * Returns how many sessions were revoked; WorkOS errors propagate.
+   */
+  static async revokeAllSessions(workosUserId: string): Promise<number> {
+    const sessions = await (await getWorkOS().userManagement.listSessions(workosUserId)).autoPagination();
+    const active = sessions.filter((session) => session.status === 'active');
+    for (const session of active) {
+      await getWorkOS().userManagement.revokeSession({ sessionId: session.id });
+    }
+    return active.length;
+  }
+
+  /**
    * Get user information from WorkOS
    */
   static async getUser(userId: string): Promise<WorkOSUser> {
