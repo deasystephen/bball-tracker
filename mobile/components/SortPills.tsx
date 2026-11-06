@@ -29,6 +29,12 @@ interface SortPillsProps<K extends string> {
    * the wording Maestro asserts); other single-choice rows (team gender) pass their own.
    */
   labelPrefix?: string;
+  /**
+   * Full accessibility label per option, for rows whose label is a translated
+   * sentence with the option in it (an i18n key with an `{{answer}}`-style
+   * placeholder) rather than a prefix. Wins over `labelPrefix`.
+   */
+  accessibilityLabelFor?: (option: SortPillOption<K>) => string;
 }
 
 export function SortPills<K extends string>({
@@ -37,6 +43,7 @@ export function SortPills<K extends string>({
   onSelect,
   style,
   labelPrefix,
+  accessibilityLabelFor,
 }: SortPillsProps<K>) {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -58,9 +65,11 @@ export function SortPills<K extends string>({
             ]}
             accessibilityRole="button"
             accessibilityLabel={
-              labelPrefix === undefined
-                ? t('common.sortBy', { label: option.label })
-                : `${labelPrefix}${option.label}`
+              accessibilityLabelFor
+                ? accessibilityLabelFor(option)
+                : labelPrefix === undefined
+                  ? t('common.sortBy', { label: option.label })
+                  : `${labelPrefix}${option.label}`
             }
             accessibilityState={{ selected: isSelected }}
           >

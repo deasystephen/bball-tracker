@@ -200,13 +200,18 @@ eng-review amendments recorded there).
   `guardianReason` surfaces as info.
 - **Players under 13 (#982, part of #980 adults-only accounts).** Before the player-email field
   the form asks "Is this player 13 or older?" (Yes / No, `components/SortPills` with
-  `accessibilityState.selected`). **No** hides the player-email field, clears anything typed in
-  it, never sends a `playerEmail`, and makes the parent/guardian email required (valid address)
-  with the "Players under 13 don't get their own login" hint, so the child stays a managed roster
-  record and the parent gets the PARENT account (`docs/architecture/guardians.md`). **Yes** shows
-  the field as before. When the team's free-text `ageGroup` reads as under 13
-  (`utils/age-group.ts#isUnder13AgeGroup`: `U1`–`U12`, `K`–`6th grade`, `5U`–`12U`) the question
-  defaults to No; otherwise it has no default and the form will not submit until it is answered.
+  `accessibilityState.selected`, label from `roster.ageAnswerA11y`). **No** hides the
+  player-email field, clears anything typed in it, never sends a `playerEmail`, and makes the
+  parent/guardian email required, with the "Players under 13 don't get their own login" note shown
+  as its own text above the field (so an invalid-address error never hides it). The child stays a
+  managed roster record and the parent gets the PARENT account (`docs/architecture/guardians.md`).
+  **Yes** shows the field as before; the parent email stays optional, but a typed one must be valid
+  in either branch. When the team's free-text `ageGroup` reads as a bracket that can hold an
+  under-13 player (`utils/age-group.ts#isUnder13AgeGroup`: `U1`–`U13` with or without a space or
+  hyphen, `1U`–`13U`, "Under 12", "12 & Under", K–6th grade in either order, Kindergarten, Pre-K,
+  and ranges that start there such as "U12-U14") the question defaults to No. Otherwise it has
+  **no** default, deliberately never Yes, and the submit stays disabled until it is answered: the
+  explicit answer is what backs the Terms warranty (#25).
   **The answer is never sent to the API or stored**: a per-player under-13 flag would itself be age
   data about a child. The server does not enforce this (it cannot from free text; that needs
   structured age groups, #462); the hard stop is the first-sign-in age screen (#981). Maestro:

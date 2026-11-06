@@ -614,9 +614,11 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       fireEvent.press(screen.getByTestId('add-player-submit'));
       expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
 
-      // An invalid address says so and still blocks the submit
+      // An invalid address says so, keeps the under-13 explanation on screen,
+      // and still blocks the submit
       fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'mom@');
       expect(screen.getByText('Enter a valid email address')).toBeTruthy();
+      expect(screen.getByText(/Players under 13 don't get their own login/)).toBeTruthy();
       fireEvent.press(screen.getByTestId('add-player-submit'));
       expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
 
@@ -637,6 +639,50 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       );
       // The answer itself is never sent
       expect(Object.keys(sent.data).some((key) => /age|adult|under/i.test(key))).toBe(false);
+    });
+
+    it('on Yes the parent email stays optional but a typed one must be valid', async () => {
+      mockAddRosterPlayer.mutateAsync.mockResolvedValue(guardianOnlyResult);
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+      fireEvent.press(screen.getByLabelText(AGE_YES));
+      fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Teen');
+
+      fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'dad@nowhere');
+      expect(screen.getByText('Enter a valid email address')).toBeTruthy();
+      expect(screen.queryByText(/Players under 13/)).toBeNull();
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+
+      // Cleared again: optional on Yes, so the add goes through
+      fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), '');
+      expect(screen.queryByText('Enter a valid email address')).toBeNull();
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      await waitFor(() =>
+        expect(mockAddRosterPlayer.mutateAsync).toHaveBeenCalledWith({
+          teamId: 't1',
+          data: expect.objectContaining({ name: 'Teen', guardianEmail: undefined }),
+        })
+      );
+    });
+
+    it('a youth spelling like "12 & Under" also defaults to No', () => {
+      mockTeam = { ...baseTeam(), ageGroup: '12 & Under' };
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+      expect(screen.getByLabelText(AGE_NO).props.accessibilityState).toEqual({ selected: true });
+    });
+
+    it('labels the age pills from the translated sentence in Spanish', async () => {
+      await i18n.changeLanguage('es');
+      try {
+        const screen = render(<ManagePlayersScreen />);
+        fireEvent.press(screen.getByTestId('add-player-button'));
+        expect(screen.getByLabelText('¿Este jugador tiene 13 años o más? Sí')).toBeTruthy();
+        expect(screen.getByLabelText('¿Este jugador tiene 13 años o más? No')).toBeTruthy();
+      } finally {
+        await i18n.changeLanguage('en');
+      }
     });
 
     it('switching to No clears a typed player email and never sends it', async () => {

@@ -202,13 +202,18 @@ export default function ManagePlayersScreen() {
   const ageAnswer: AgeAnswer | null =
     ageAnswerChoice ?? (isUnder13AgeGroup(team?.ageGroup) ? 'no' : null);
   const isUnder13 = ageAnswer === 'no';
-  const trimmedNewGuardianEmail = guardianEmail.trim();
+  const trimmedGuardianEmail = guardianEmail.trim();
+  // A typed parent email must be valid in either branch; under 13 it is also required.
   const guardianEmailInvalid =
-    isUnder13 && trimmedNewGuardianEmail !== '' && !EMAIL_PATTERN.test(trimmedNewGuardianEmail);
+    trimmedGuardianEmail !== '' && !EMAIL_PATTERN.test(trimmedGuardianEmail);
+  // The submit button is disabled until this holds, so handleAddPlayer has no
+  // validation of its own: the name field, the unanswered question and the
+  // inline guardian-email error already show what is missing.
   const canSubmitAddPlayer =
     !!name.trim() &&
     ageAnswer !== null &&
-    (!isUnder13 || EMAIL_PATTERN.test(trimmedNewGuardianEmail));
+    !guardianEmailInvalid &&
+    (!isUnder13 || trimmedGuardianEmail !== '');
 
   const selectAgeAnswer = (answer: AgeAnswer) => {
     setAgeAnswerChoice(answer);
@@ -284,13 +289,6 @@ export default function ManagePlayersScreen() {
   };
 
   const handleAddPlayer = async () => {
-    if (!name.trim()) {
-      Alert.alert(t('common.error'), t('roster.nameRequired'));
-      return;
-    }
-    // Submit is disabled in both cases; this guards a stale press.
-    if (!canSubmitAddPlayer) return;
-    const trimmedGuardianEmail = guardianEmail.trim();
 
     try {
       let profilePictureUrl: string | undefined;
@@ -903,7 +901,9 @@ export default function ManagePlayersScreen() {
                   ]}
                   selected={ageAnswer}
                   onSelect={selectAgeAnswer}
-                  labelPrefix={`${t('roster.ageQuestion')} `}
+                  accessibilityLabelFor={(option) =>
+                    t('roster.ageAnswerA11y', { answer: option.label })
+                  }
                 />
               </View>
 
@@ -938,12 +938,20 @@ export default function ManagePlayersScreen() {
                 autoCapitalize="words"
               />
 
+              {/* Its own text, not the Input's helperText: Input shows
+                  `error || helperText`, and the explanation must stay
+                  visible while the address is invalid. */}
+              {isUnder13 && (
+                <ThemedText variant="footnote" color="textSecondary" style={styles.under13Hint}>
+                  {t('roster.under13Hint')}
+                </ThemedText>
+              )}
+
               <Input
                 label={
                   isUnder13 ? t('roster.guardianEmailRequiredLabel') : t('roster.guardianEmailLabel')
                 }
                 placeholder={t('roster.guardianEmailPlaceholder')}
-                helperText={isUnder13 ? t('roster.under13Hint') : undefined}
                 error={guardianEmailInvalid ? t('common.invalidEmail') : undefined}
                 value={guardianEmail}
                 onChangeText={setGuardianEmail}
@@ -1340,6 +1348,9 @@ const styles = StyleSheet.create({
   },
   ageQuestion: {
     marginBottom: spacing.md,
+  },
+  under13Hint: {
+    marginBottom: spacing.sm,
   },
   editBackdropContainer: {
     flex: 1,
