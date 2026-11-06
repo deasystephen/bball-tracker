@@ -42,10 +42,10 @@ appId: com.bballtracker.mobile
 # Under-13 steer (#982): the player-email field stays hidden until the coach
 # answers the age question. Lakers has no age group, so nothing is preselected.
 # The pills are SortPills; their accessibility label is "<question> <answer>".
-- assertVisible: "Is this player 13 or older?"
+- assertVisible: "Is this player 13 or older\\?"
 - assertNotVisible:
     id: "add-player-email-input"
-- tapOn: "Is this player 13 or older? Yes"
+- tapOn: "Is this player 13 or older\\? Yes"
 - assertVisible: "Player Email (optional)"
 - assertVisible: "Parent/Guardian Email (optional)"
 
@@ -109,13 +109,13 @@ appId: com.bballtracker.mobile
     timeout: 10000
 - tapOn:
     id: "add-player-button"
-- tapOn: "Is this player 13 or older? Yes"
+- tapOn: "Is this player 13 or older\\? Yes"
 - tapOn:
     id: "add-player-email-input"
 - inputText: "e2e-under13-kid@example.test"
 - pressKey: Enter
 # No clears the typed player email and removes the field
-- tapOn: "Is this player 13 or older? No"
+- tapOn: "Is this player 13 or older\\? No"
 - assertNotVisible:
     id: "add-player-email-input"
 - assertVisible: "Parent/Guardian Email"
