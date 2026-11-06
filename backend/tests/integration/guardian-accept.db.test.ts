@@ -28,7 +28,6 @@ jest.mock('@aws-sdk/client-s3', () =>
 );
 import { randomBytes } from 'node:crypto';
 import prisma from '../../src/models';
-import { settleUploadCleanups } from '../../src/services/upload-service';
 import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
 import { BadRequestError } from '../../src/utils/errors';
@@ -142,7 +141,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fx.cleanup();
-  await settleUploadCleanups();
   await prisma.$disconnect();
 });
 

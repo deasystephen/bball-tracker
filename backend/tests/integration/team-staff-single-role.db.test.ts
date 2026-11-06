@@ -34,7 +34,6 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { Prisma, TeamRoleType } from '@prisma/client';
 import prisma from '../../src/models';
-import { settleUploadCleanups } from '../../src/services/upload-service';
 import { TeamService } from '../../src/services/team-service';
 import { AccountService } from '../../src/services/account-service';
 import { getTeamPermissions } from '../../src/utils/permissions';
@@ -118,7 +117,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fx.cleanup();
-  await settleUploadCleanups();
   await prisma.$disconnect();
 });
 

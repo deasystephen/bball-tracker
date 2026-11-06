@@ -27,7 +27,6 @@ jest.mock('@aws-sdk/client-s3', () =>
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
-import { settleUploadCleanups } from '../../src/services/upload-service';
 import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
 import { InvitationService } from '../../src/services/invitation-service';
@@ -127,7 +126,6 @@ afterAll(async () => {
   // user ids stay for rows that lost their run id on the way, such as an
   // account that was deleted and is now a tombstone.
   await removeTestRows(prisma, { run: RUN, alsoUserIds: userIds });
-  await settleUploadCleanups();
   await prisma.$disconnect();
   jest.restoreAllMocks();
 });

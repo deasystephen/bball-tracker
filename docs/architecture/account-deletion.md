@@ -21,13 +21,14 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
-  delete of the current photo, `WorkOSService.deleteUser`, and then
-  `upload-service.ts#scheduleUserUploadCleanup` (#957), which deletes the other objects under
+  delete of the current photo, `WorkOSService.deleteUser`, and then, awaited,
+  `upload-service.ts#deleteUnreferencedUserUploads` (#957), which deletes the other objects under
   the user's own `avatars/<userId>/` prefix that no `User.profilePictureUrl` references, so a
-  photo the user uploaded as coach or guardian onto a player's row stays. It is started last and not
-  awaited, so neither S3 nor the reference read delays the response. It is bounded: one listing page,
-  objects at least 1 h old only (a save may be in flight), references read from rows containing
-  the user id, and a 30 s deadline; graceful shutdown waits for it. Uploads never saved by users who
+  photo the user uploaded as coach or guardian onto a player's row stays. It lists every page,
+  reads references from rows containing the user id, and runs under a 10 s deadline; it never
+  throws, and its counts come back as `avatarCleanup` on the result (logged, printed by the
+  operator CLI, never in an API response). A failed or `incomplete` run is re-run with
+  `data-subject-request.ts cleanup-avatars <userId>` (runbook). Uploads never saved by users who
   keep their accounts are not collected anywhere yet (#1005). It needs `s3:ListBucket`; see
   `backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`. The WorkOS step (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone

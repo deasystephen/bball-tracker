@@ -32,8 +32,8 @@ left, or a coach who only ever held staff roles, ends up here. If anything remai
 tombstoned as described next and the response says `erased: false`. In ONE transaction:
 
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
-  best-effort, then, after the response, every other upload at least an hour old under their own
-  `avatars/<userId>/` prefix that no profile references; photos they put on a child's or player's row stay with that row, #957), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
+  best-effort, then every other upload under their own `avatars/<userId>/` prefix that no
+  profile references, during the deletion itself; see "When the avatar cleanup does not finish"; photos they put on a child's or player's row stay with that row, #957), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
   `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
   role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
   each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`), the
@@ -74,16 +74,16 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
-- **Profile photos.** On deletion, the person's current photo is deleted. Shortly after, any other
-  photo they uploaded more than an hour earlier is deleted too, unless a profile still shows it.
-  This is best-effort: a failure is logged and the deletion still succeeds. A photo they uploaded
-  for a child or player they manage stays while that profile shows it. A photo uploaded within the
-  hour before the deletion stays. **A photo that was uploaded but never saved to any profile (a
-  cancelled edit, an abandoned Add Player) is not deleted while its uploader keeps their account**:
-  it stays readable by anyone who has its URL (the bucket is public-read; URLs are unguessable).
-  Expiring those is #1005; the privacy policy must not promise it until that ships. *State
-  (#957): the deletion-time cleanup works once the task role's `s3:ListBucket` is applied
-  (`infra/ecs.tf`) and PR #1000 is merged. See
+- **Profile photos.** During the deletion, the person's current photo is deleted, and so is every
+  other photo they uploaded that no profile still shows. This is best-effort: a failure is logged
+  and the deletion still succeeds; the operator then re-runs it ("When the avatar cleanup does not
+  finish"). A photo they uploaded for a child or player they manage stays while that profile
+  shows it. **A photo that was uploaded but never saved to any profile (a cancelled edit, an
+  abandoned Add Player) is not deleted while its uploader keeps their account**: it stays
+  readable by anyone who has its URL (the bucket is public-read; URLs are unguessable). Expiring
+  those is #1005; the privacy policy must not promise it until that ships. *State (#957): the
+  deletion-time cleanup works once the task role's `s3:ListBucket` is applied (`infra/ecs.tf`)
+  and PR #1000 is merged. See
   `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.*
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited.
@@ -199,7 +199,7 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    ```bash
    cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts delete <email>
    ```
-   Output: `{ userId, deleted, identityDeleted, erased, adminlessLeagueIds }` (`erased: true` means
+   Output: `{ userId, deleted, identityDeleted, erased, adminlessLeagueIds, avatarCleanup }` (`erased: true` means
    the row was deleted outright because nothing referenced it; `false` means it was tombstoned —
    record which in the log table). The last-head-coach rule
    still applies: if it refuses, ask the person to hand the team over, or (with their consent)
@@ -209,6 +209,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 ## Post-deletion checklist
 
 - `identityDeleted: false` → see "When WorkOS deletion fails".
+- `avatarCleanup` shows an `error`, `incomplete: true` or `failed` > 0 → see "When the avatar
+  cleanup does not finish".
 - `adminlessLeagueIds` non-empty (also in the API log line `Account deleted`) → a real league
   lost its only admin. Appoint one: `POST /leagues/:id/admins { userId }` (system ADMIN only).
   The league keeps working meanwhile; only renames and new seasons are blocked.
@@ -229,6 +231,28 @@ dashboard (User Management → the email → Delete). Two known causes:
   delete it from the *staging* environment's dashboard instead. The cutover runbook's
   "Afterwards" step deletes real people's staging identities once the rollback window closes
   ([WorkOS production cutover](workos-production-cutover.md)).
+
+## When the avatar cleanup does not finish
+
+Every deletion (self-service, guardian, or operator) runs the avatar cleanup before it answers:
+it deletes the person's own uploads under `avatars/<userId>/` that no profile references, within
+a 10 s deadline (#957). It never fails the deletion. When it did not finish, the API logs
+`Account avatar upload cleanup did not finish cleanly` at warn with the `userId` and counts
+(`listed`, `kept`, `deleted`, `failed`, `unknown`, `incomplete`, `error`). Datadog:
+`service:bball-tracker-api "Account avatar upload cleanup did not finish cleanly"`. The operator
+CLI's `delete` output carries the same result as `avatarCleanup`.
+
+Re-run it for that user id (the account must already be deleted; an active account is refused):
+
+```bash
+cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId>
+```
+
+It prints `{ userId, avatarCleanup }` and exits non-zero while anything is left (an `error`,
+`incomplete: true`, or `failed` > 0). `unknown` counts keys whose delete request the deadline
+cut off; S3 may or may not have applied it, and a re-run settles it (deleting a missing key is a
+no-op). An `error` of `Access Denied` means the task role lacks `s3:ListBucket` on the avatars
+bucket (`infra/ecs.tf`). Record a re-run in the request log's Follow-ups column.
 
 ## Reversal
 

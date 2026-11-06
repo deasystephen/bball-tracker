@@ -19,7 +19,6 @@ function deps(overrides: Partial<ShutdownDeps> = {}): { deps: ShutdownDeps; orde
     deps: {
       io: { close: step('io') },
       consumer: { stop: step('consumer') },
-      settleUploadCleanups: step('uploads'),
       disconnectPrisma: step('prisma'),
       closeRedis: step('redis'),
       exit: jest.fn((code: number) => {
@@ -55,16 +54,6 @@ describe('createShutdown', () => {
     expect(order.at(-1)).toBe('exit:0');
     expect(d.exit).toHaveBeenCalledTimes(1);
     expect(logger.info).toHaveBeenCalledWith('Shutting down', { signal: 'SIGTERM' });
-  });
-
-  it('settles in-flight avatar cleanups concurrently with the SES consumer stop, before Prisma quits (#957)', async () => {
-    const { deps: d, order } = deps();
-    await createShutdown(d)('SIGTERM');
-    // Both started before either finished
-    expect(order.indexOf('uploads:start')).toBeLessThan(order.indexOf('consumer:end'));
-    expect(order.indexOf('consumer:start')).toBeLessThan(order.indexOf('uploads:end'));
-    expect(order.indexOf('uploads:end')).toBeLessThan(order.indexOf('prisma:start'));
-    expect(d.exit).toHaveBeenCalledWith(0);
   });
 
   it('tolerates a missing SES consumer', async () => {

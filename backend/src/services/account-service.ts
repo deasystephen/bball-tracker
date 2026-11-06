@@ -60,7 +60,7 @@ import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar, scheduleUserUploadCleanup } from './upload-service';
+import { deletePreviousAvatar, deleteUnreferencedUserUploads, type AvatarCleanupResult } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -139,6 +139,9 @@ export interface DeleteAccountOptions {
   sessionId?: string;
 }
 
+/** Deadline for the operator re-run of the avatar cleanup (#957). */
+export const OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS = 120_000;
+
 export interface DeleteAccountResult {
   success: true;
   /** Whether the WorkOS user was deleted (false for managed/dev accounts and on provider failure). */
@@ -151,6 +154,12 @@ export interface DeleteAccountResult {
   erased: boolean;
   /** Real leagues left with zero admins — the runbook's post-deletion checklist (D18). */
   adminlessLeagueIds: string[];
+  /**
+   * The cleanup of the user's own unreferenced avatar uploads (#957). Not in
+   * any API response; the operator CLI prints it, and a failed or
+   * `incomplete` run is re-run with `data-subject-request.ts cleanup-avatars`.
+   */
+  avatarCleanup: AvatarCleanupResult;
 }
 
 interface LockedUserRow {
@@ -360,10 +369,10 @@ export class AccountService {
 
     // Every other upload under the user's own prefix that no row references
     // (abandoned edits, replaced photos whose delete failed); photos the user
-    // put on a player's row as coach or guardian stay (#957). Started, not
-    // awaited: S3 and the reference read never sit on the response. It never
-    // throws and carries its own deadline.
-    scheduleUserUploadCleanup(userId);
+    // put on a player's row as coach or guardian stay (#957). Awaited, with a
+    // 10 s deadline: deletion is rare, and a request in flight is covered by
+    // the HTTP drain on shutdown. It never throws; it logs its own outcome.
+    const avatarCleanup = await deleteUnreferencedUserUploads(userId);
 
     logger.info('Account deleted', {
       userId,
@@ -379,7 +388,25 @@ export class AccountService {
       identityDeleted,
       erased: committed.erased,
       adminlessLeagueIds: committed.adminlessLeagueIds,
+      avatarCleanup,
     };
+  }
+
+  /**
+   * Operator re-run of the avatar upload cleanup for an account that is
+   * already deleted (`data-subject-request.ts cleanup-avatars <userId>`, #957),
+   * for when the deletion's log shows the cleanup failed or was `incomplete`.
+   * Refuses an active account: its unreferenced uploads may be a profile
+   * save in flight. An erased account (no row left) is fine. The deadline is
+   * longer than the in-request one because nothing waits on it but the
+   * operator.
+   */
+  static async cleanupDeletedUserUploads(userId: string): Promise<AvatarCleanupResult> {
+    const row = await prisma.user.findUnique({ where: { id: userId }, select: { deletedAt: true } });
+    if (row && row.deletedAt === null) {
+      throw new ForbiddenError('Account is not deleted; cleanup-avatars runs only for deleted accounts');
+    }
+    return deleteUnreferencedUserUploads(userId, { timeoutMs: OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS });
   }
 
   /**

@@ -23,7 +23,6 @@ jest.mock('@aws-sdk/client-s3', () =>
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
-import { settleUploadCleanups } from '../../src/services/upload-service';
 import { handleSesEventMessage } from '../../src/services/mailer/ses-events';
 import { AccountService } from '../../src/services/account-service';
 import { PlayerService } from '../../src/services/player-service';
@@ -107,7 +106,6 @@ describe('email suppression against Postgres (#449)', () => {
     // records a row still cleans up (#584). The ids stay for an account
     // that was deleted during the test and lost its address.
     await removeTestRows(prisma, { run: RUN, alsoUserIds: userIds });
-    await settleUploadCleanups();
     await prisma.$disconnect();
     jest.restoreAllMocks();
   });

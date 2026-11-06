@@ -48,11 +48,13 @@ const mockIsGuardianOf = isGuardianOf as jest.Mock;
 
 const AUTH = { Authorization: 'Bearer token' };
 const DEV_AUTH = { Authorization: 'Bearer dev_abc' };
+/** The service reports its avatar cleanup (#957); no route ever returns it (the toEqual bodies prove that). */
+const CLEANUP = { listed: 2, kept: 1, deleted: 1, failed: 0, unknown: 0, incomplete: false };
 
 describe('DELETE /api/v1/auth/me', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [], avatarCleanup: CLEANUP });
     mockWorkOS.verifyToken.mockResolvedValue({ id: 'workos_1', sessionId: 'sess_1', expiresAt: 0 });
   });
 
@@ -108,7 +110,7 @@ describe('DELETE /api/v1/auth/me', () => {
   });
 
   it('reports identityDeleted:false when the provider call failed but the row is gone', async () => {
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: false, adminlessLeagueIds: ['l1'] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: false, adminlessLeagueIds: ['l1'], avatarCleanup: CLEANUP });
 
     const res = await request(app).delete('/api/v1/auth/me').set(AUTH);
 
@@ -130,7 +132,7 @@ describe('DELETE /api/v1/players/:id/account', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: true, adminlessLeagueIds: [] });
+    mockAccount.deleteAccount.mockResolvedValue({ success: true, identityDeleted: false, erased: true, adminlessLeagueIds: [], avatarCleanup: CLEANUP });
     mockIsGuardianOf.mockResolvedValue(true);
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(managedChild);
   });

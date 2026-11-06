@@ -5,6 +5,8 @@
  *
  *   NODE_ENV=production npx tsx scripts/data-subject-request.ts export <email>   # JSON to stdout
  *   NODE_ENV=production npx tsx scripts/data-subject-request.ts delete <email>   # anonymize in place
+ *   NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId>
+ *     # re-run the avatar upload cleanup for an already-deleted account (#957)
  *
  * NODE_ENV=production keeps Prisma's development query log off stdout so the
  * export is pure JSON.
@@ -12,7 +14,9 @@
  * Both run against DATABASE_URL. `delete` uses AccountService in `operator`
  * mode: the owner/guardian gate is skipped (identity was verified by hand),
  * the last-head-coach rule still applies, and the WorkOS user is deleted
- * best-effort after commit (the output says whether it succeeded).
+ * best-effort after commit (the output says whether it succeeded). Its output
+ * also carries `avatarCleanup`: when that shows an `error`, `incomplete: true`
+ * or `failed` > 0, run `cleanup-avatars` with the printed `userId`.
  *
  * The address is matched exactly, case-insensitively, with `_` and `%`
  * literal (`emailEquals`, #648); when more than one active account matches
@@ -29,8 +33,18 @@ import { findActiveUserIdByEmail } from './data-subject-lookup';
 
 async function main(argv: string[]): Promise<void> {
   const [command, email] = argv;
+  if (command === 'cleanup-avatars' && email) {
+    // The argument is a user id here: a deleted account has no address left.
+    const userId = email;
+    const avatarCleanup = await AccountService.cleanupDeletedUserUploads(userId);
+    process.stdout.write(JSON.stringify({ userId, avatarCleanup }, null, 2) + '\n');
+    if (avatarCleanup.error !== undefined || avatarCleanup.incomplete || avatarCleanup.failed > 0) {
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (!email || (command !== 'export' && command !== 'delete')) {
-    process.stderr.write('usage: data-subject-request.ts <export|delete> <email>\n');
+    process.stderr.write('usage: data-subject-request.ts <export|delete> <email> | cleanup-avatars <userId>\n');
     process.exitCode = 2;
     return;
   }
@@ -60,6 +74,7 @@ async function main(argv: string[]): Promise<void> {
         identityDeleted: result.identityDeleted,
         erased: result.erased,
         adminlessLeagueIds: result.adminlessLeagueIds,
+        avatarCleanup: result.avatarCleanup,
       },
       null,
       2

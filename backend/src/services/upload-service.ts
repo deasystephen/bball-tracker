@@ -222,39 +222,27 @@ export async function discardOwnAvatar(
 }
 
 // ---------------------------------------------------------------------------
-// Unreferenced uploads (#957)
+// Unreferenced uploads on account deletion (#957)
 //
 // An upload exists in the public bucket as soon as the POST finishes, before
-// any profile write stores its URL. On account deletion, the helpers below
-// find and delete the user's own uploads that no `User.profilePictureUrl`
-// references. They need `s3:ListBucket` on the bucket (task role,
-// `infra/ecs.tf`); without it the list call is denied, the cleanup logs it,
-// and nothing is deleted. Uploads that are never saved, by anyone still
-// signed up, are not collected here: that is the pending-prefix design
-// tracked in its own issue.
+// any profile write stores its URL. When an account is deleted, the helpers
+// below find and delete that user's own uploads that no
+// `User.profilePictureUrl` references. They need `s3:ListBucket` on the bucket
+// (task role, `infra/ecs.tf`); without it the list call is denied, the cleanup
+// reports it, and nothing is deleted. Uploads never saved by users who keep
+// their accounts are not collected here (#1005).
 // ---------------------------------------------------------------------------
 
 /** DeleteObjects takes at most 1000 keys per request. */
 const DELETE_BATCH_SIZE = 1000;
 
 /**
- * Deadline for the account-deletion cleanup. It runs after the response
- * (`scheduleUserUploadCleanup`); the deadline aborts its S3 calls and, once
- * passed, stops it before any delete. It also bounds how long graceful
- * shutdown waits for it (`settleUploadCleanups`).
+ * Deadline for one cleanup. `deleteAccount` awaits it, so it stays well under
+ * the 25 s shutdown grace and the ALB idle timeout; the deadline aborts the S3
+ * calls and is checked again before any delete. The operator re-run
+ * (`data-subject-request.ts cleanup-avatars`) passes a longer one.
  */
-export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 30_000;
-
-/**
- * The account-deletion cleanup leaves objects younger than this: an upload
- * whose profile write has not landed yet (an admin deleting a coach mid-save)
- * would otherwise lose its object before the row references it.
- *
- * Accepted residual race: a save that lands more than an hour after its
- * upload, while an admin deletes that same coach. It is rare, admin-only, and
- * the photo is the deleted coach's own upload.
- */
-export const ACCOUNT_UPLOAD_MIN_AGE_MS = 60 * 60 * 1000;
+export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 10_000;
 
 /**
  * User ids become an S3 prefix and a LIKE fragment. They are UUIDs; anything
@@ -264,72 +252,26 @@ export const ACCOUNT_UPLOAD_MIN_AGE_MS = 60 * 60 * 1000;
  */
 const SAFE_ID = /^[A-Za-z0-9-]+$/;
 
-export interface ListAvatarObjectsOptions {
-  signal?: AbortSignal;
-  /**
-   * Stop after this many pages. Safe because every deletion decision is per
-   * key: a shorter listing only leaves objects for a later pass.
-   */
-  maxPages?: number;
-}
-
-export interface AvatarObject {
-  key: string;
-  lastModified: Date | undefined;
-}
-
-export interface AvatarDeleteResult {
+/** What one cleanup did. Logged by the cleanup, printed by the operator CLI. */
+export interface AvatarCleanupResult {
+  /** Objects listed under `avatars/<userId>/`. */
+  listed: number;
+  /** Issued keys still referenced by some profile, left in place. */
+  kept: number;
   deleted: number;
+  /** Keys S3 reported as not deleted. */
   failed: number;
-  /** True when the signal fired: the remaining keys were not attempted. */
-  aborted: boolean;
-}
-
-/**
- * Pages of objects under `prefix` from ListObjectsV2, one page (up to 1000
- * keys) at a time, up to `maxPages`. Throws when a page cannot be read
- * (AccessDenied without `s3:ListBucket`, network, abort), so a failed read is
- * never mistaken for an empty prefix.
- */
-export async function* listAvatarObjectPages(
-  prefix: string,
-  { signal, maxPages = Infinity }: ListAvatarObjectsOptions = {}
-): AsyncGenerator<AvatarObject[]> {
-  let continuationToken: string | undefined;
-  let pages = 0;
-  do {
-    if (signal?.aborted) {
-      throw new Error('Avatar listing aborted');
-    }
-    const page = await s3Client.send(
-      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix, ContinuationToken: continuationToken }),
-      { abortSignal: signal }
-    );
-    pages += 1;
-    const objects: AvatarObject[] = [];
-    for (const item of page.Contents ?? []) {
-      if (item.Key) {
-        objects.push({ key: item.Key, lastModified: item.LastModified });
-      }
-    }
-    yield objects;
-    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-  } while (continuationToken && pages < maxPages);
+  /** Keys in a DeleteObjects call the deadline aborted: deleted or not, S3 never said. */
+  unknown: number;
+  /** True when the deadline cut the cleanup short (listing, reference read or deletes). */
+  incomplete: boolean;
+  /** Set when the cleanup did not run or a read failed (nothing more was deleted). */
+  error?: string;
 }
 
 /** True when `key` has the exact shape `avatars/<id>/<file>` (same rule as `ISSUED_KEY_PATH`). */
 export function isIssuedAvatarKey(key: string): boolean {
   return ISSUED_KEY_PATH.test(`/${key}`);
-}
-
-/**
- * True for an issued key last modified at or before `cutoff`. An object with
- * no `LastModified` is never old enough.
- */
-export function isDeletableAge(object: AvatarObject, cutoff: number): boolean {
-  return (
-    isIssuedAvatarKey(object.key) && object.lastModified !== undefined && object.lastModified.getTime() <= cutoff
-  );
 }
 
 /**
@@ -379,6 +321,8 @@ export async function loadReferencedAvatarKeys(userId: string): Promise<Set<stri
   if (!SAFE_ID.test(userId)) {
     throw new Error('Reference filter must be a plain id');
   }
+  // `LIKE '%<id>%'` is a sequential scan of "User"; acceptable because it runs
+  // once per account deletion (rare) against a table of this app's size.
   const rows = await prisma.user.findMany({
     where: { profilePictureUrl: { contains: userId } },
     select: { profilePictureUrl: true },
@@ -395,17 +339,17 @@ export async function loadReferencedAvatarKeys(userId: string): Promise<Set<stri
 }
 
 /**
- * Delete `keys` in batches of 1000. A failed batch or a per-key error is
- * counted and logged (no keys in the line), never thrown. An abort (shutdown,
- * deadline) is not a failure: it stops at the next batch boundary, or ends the
- * in-flight batch, logs at info, and sets `aborted`.
+ * Delete `keys` in batches of 1000 into `result`. A failed batch or a
+ * per-key error counts as `failed` and is logged (no keys in the line). When
+ * the deadline aborts an in-flight batch, its keys count as `unknown` (S3
+ * may or may not have applied it) and the rest are not attempted; both set
+ * `incomplete`.
  */
-export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Promise<AvatarDeleteResult> {
-  const result: AvatarDeleteResult = { deleted: 0, failed: 0, aborted: false };
+async function deleteKeys(keys: string[], signal: AbortSignal, result: AvatarCleanupResult): Promise<void> {
   for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
-    if (signal?.aborted) {
-      result.aborted = true;
-      break;
+    if (signal.aborted) {
+      result.incomplete = true;
+      return;
     }
     const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
     try {
@@ -427,9 +371,10 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
         });
       }
     } catch (err) {
-      if (signal?.aborted) {
-        result.aborted = true;
-        break;
+      if (signal.aborted) {
+        result.unknown += batch.length;
+        result.incomplete = true;
+        return;
       }
       result.failed += batch.length;
       logger.warn('Avatar batch delete failed', {
@@ -439,92 +384,86 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
       });
     }
   }
-  if (result.aborted) {
-    logger.info('Avatar deletes stopped (aborted)', {
-      operation: 'DeleteObjects',
-      deleted: result.deleted,
-      notAttempted: keys.length - result.deleted - result.failed,
-    });
-  }
-  return result;
 }
 
 /**
- * After account deletion: delete the objects under `avatars/<userId>/` that
- * no `User.profilePictureUrl` still references (#957). A coach or guardian
- * uploads a player's photo under their OWN prefix and writes it onto the
- * player's row, so the prefix can hold photos in use elsewhere; those stay.
- * Objects younger than `ACCOUNT_UPLOAD_MIN_AGE_MS` stay too (a save may be in
- * flight).
+ * Delete the objects under `avatars/<userId>/` that no
+ * `User.profilePictureUrl` references (#957). A coach or guardian uploads a
+ * player's photo under their OWN prefix and writes it onto the player's row,
+ * so the prefix can hold photos in use elsewhere; those stay.
  *
- * Best-effort, like `deletePreviousAvatar`: never throws. When the listing or
- * the reference query fails, or the deadline passes, nothing (more) is
- * deleted. Bounded: one listing page, references narrowed to this user's
- * prefix, and the deadline on every S3 call and before the delete.
+ * Awaited by `AccountService.deleteAccount` after commit and after the WorkOS
+ * step, and re-run by the operator (`data-subject-request.ts cleanup-avatars`)
+ * when a deletion's log shows it failed or was `incomplete`. Never throws: the
+ * outcome is the returned result, logged at info when complete and at warn
+ * otherwise. Order: list every page (within the deadline), then read
+ * references, then delete. A failed or cut-short listing or reference read
+ * deletes nothing.
+ *
+ * Accepted race: an admin deleting a coach while that coach's profile save is
+ * in flight can delete the just-uploaded photo before the row references it.
+ * Rare, admin-only, and the photo is the deleted coach's own upload.
  */
 export async function deleteUnreferencedUserUploads(
   userId: string,
-  { timeoutMs = ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS, now = new Date() }: { timeoutMs?: number; now?: Date } = {}
-): Promise<void> {
+  { timeoutMs = ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS }: { timeoutMs?: number } = {}
+): Promise<AvatarCleanupResult> {
+  const result: AvatarCleanupResult = { listed: 0, kept: 0, deleted: 0, failed: 0, unknown: 0, incomplete: false };
   if (!SAFE_ID.test(userId)) {
-    logger.warn('Account upload cleanup skipped: user id is not a safe key segment');
-    return;
+    result.error = 'user id is not a safe key segment';
+    logger.warn('Account avatar upload cleanup skipped', { userId, reason: result.error });
+    return result;
   }
 
   const prefix = `avatars/${userId}/`;
   const signal = AbortSignal.timeout(timeoutMs);
-  const cutoff = now.getTime() - ACCOUNT_UPLOAD_MIN_AGE_MS;
   try {
-    const objects: AvatarObject[] = [];
-    for await (const page of listAvatarObjectPages(prefix, { signal, maxPages: 1 })) {
-      objects.push(...page);
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const page = await s3Client.send(
+        new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix, ContinuationToken: continuationToken }),
+        { abortSignal: signal }
+      );
+      for (const item of page.Contents ?? []) {
+        if (item.Key) {
+          result.listed += 1;
+          keys.push(item.Key);
+        }
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    const candidates = keys.filter(isIssuedAvatarKey);
+    if (candidates.length > 0) {
+      // References are read AFTER listing, so they are at least as fresh as the list.
+      const referenced = await loadReferencedAvatarKeys(userId);
+      if (signal.aborted) {
+        // The reference read cannot be aborted; never delete past the deadline.
+        throw new Error('deadline passed before delete');
+      }
+      const orphans = candidates.filter((key) => !referenced.has(key));
+      result.kept = candidates.length - orphans.length;
+      await deleteKeys(orphans, signal, result);
     }
-    const candidates = objects.filter((o) => isDeletableAge(o, cutoff)).map((o) => o.key);
-    if (candidates.length === 0) {
-      return;
-    }
-    // Read references AFTER listing, so they are at least as fresh as the list.
-    const referenced = await loadReferencedAvatarKeys(userId);
-    if (signal.aborted) {
-      throw new Error('Account upload cleanup deadline passed before delete');
-    }
-    const orphans = candidates.filter((key) => !referenced.has(key));
-    const { deleted, failed } = await deleteAvatarKeys(orphans, signal);
-    logger.info('Account avatar uploads cleaned up', {
-      userId,
-      listed: objects.length,
-      kept: candidates.length - orphans.length,
-      deleted,
-      failed,
-    });
   } catch (err) {
-    logger.warn('Account avatar upload cleanup failed (ignored)', {
-      userId,
-      operation: 'ListObjectsV2/references',
-      error: err instanceof Error ? err.message : String(err),
-    });
+    if (signal.aborted) {
+      result.incomplete = true;
+    } else {
+      result.error = err instanceof Error ? err.message : String(err);
+    }
   }
-}
 
-/** Cleanups started by `scheduleUserUploadCleanup` that have not settled. */
-const pendingUploadCleanups = new Set<Promise<void>>();
-
-/**
- * Start `deleteUnreferencedUserUploads` without awaiting it, so S3 and the
- * reference query never sit on the account-deletion response. It never
- * rejects (it catches and logs everything itself); the deadline bounds it.
- */
-export function scheduleUserUploadCleanup(userId: string): void {
-  const cleanup: Promise<void> = deleteUnreferencedUserUploads(userId).finally(() => {
-    pendingUploadCleanups.delete(cleanup);
-  });
-  pendingUploadCleanups.add(cleanup);
-}
-
-/**
- * Resolves once every scheduled cleanup has settled. Graceful shutdown awaits
- * it (`utils/shutdown.ts`), bounded by each cleanup's deadline.
- */
-export async function settleUploadCleanups(): Promise<void> {
-  await Promise.all([...pendingUploadCleanups]);
+  const { error, ...counts } = result;
+  if (error !== undefined || result.incomplete || result.failed > 0) {
+    logger.warn('Account avatar upload cleanup did not finish cleanly', {
+      userId,
+      operation: 'ListObjectsV2/DeleteObjects',
+      ...counts,
+      ...(error !== undefined && { error }),
+    });
+  } else {
+    logger.info('Account avatar uploads cleaned up', { userId, ...counts });
+  }
+  return result;
 }

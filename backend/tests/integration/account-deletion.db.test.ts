@@ -35,10 +35,11 @@ const mockS3Send = jest.fn().mockResolvedValue({});
 jest.mock('@aws-sdk/client-s3', () =>
   jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))
 );
+/** The cleanup's result when the S3 double lists nothing. */
+const NO_UPLOADS = { listed: 0, kept: 0, deleted: 0, failed: 0, unknown: 0, incomplete: false };
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
-import { settleUploadCleanups } from '../../src/services/upload-service';
 import { sentOfKind } from '../support/s3-mock';
 import { AccountService, DELETED_USER_NAME, DELETED_LEAGUE_NAME } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
@@ -248,7 +249,6 @@ afterAll(async () => {
   // user ids stay for rows that lost their run id on the way, such as an
   // account that was deleted and is now a tombstone.
   await removeTestRows(prisma, { run: RUN, alsoUserIds: Object.values(ids.users) });
-  await settleUploadCleanups();
   await prisma.$disconnect();
 });
 
@@ -280,10 +280,15 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
     const deleteUserSpy = jest.spyOn(WorkOSService, 'deleteUser').mockResolvedValue(undefined);
 
     const result = await AccountService.deleteAccount(coach, { actorId: coach, mode: 'self' });
-    expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
+    expect(result).toEqual({
+      success: true,
+      identityDeleted: true,
+      erased: false,
+      adminlessLeagueIds: [],
+      avatarCleanup: NO_UPLOADS,
+    });
     expect(deleteUserSpy).toHaveBeenCalledWith(`workos-${RUN}`);
-    // The avatar cleanup started after the response and listed only this user's prefix (#957)
-    await settleUploadCleanups();
+    // The avatar cleanup ran (awaited) and listed only this user's prefix (#957)
     expect(sentOfKind(mockS3Send, 'ListObjectsV2').map((c) => c.input.Prefix)).toContain(`avatars/${coach}/`);
 
     // Tombstone columns
@@ -487,7 +492,13 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
 
       const result = await AccountService.deleteAccount(looker, { actorId: looker, mode: 'self' });
 
-      expect(result).toEqual({ success: true, identityDeleted: true, erased: true, adminlessLeagueIds: [] });
+      expect(result).toEqual({
+        success: true,
+        identityDeleted: true,
+        erased: true,
+        adminlessLeagueIds: [],
+        avatarCleanup: NO_UPLOADS,
+      });
       expect(deleteUserSpy).toHaveBeenCalledWith(`workos-looker-${RUN}`);
       expect(await prisma.user.findUnique({ where: { id: looker } })).toBeNull();
       // Nothing cascaded: the rows around the account are as they were

@@ -20,7 +20,6 @@ import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
 import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
-import { settleUploadCleanups } from './services/upload-service';
 import { createShutdown } from './utils/shutdown';
 import { closeRedis } from './utils/redis';
 
@@ -222,7 +221,6 @@ if (require.main === module) {
   const shutdown = createShutdown({
     io,
     consumer,
-    settleUploadCleanups,
     disconnectPrisma: () => prisma.$disconnect(),
     closeRedis,
     exit: (code) => process.exit(code),

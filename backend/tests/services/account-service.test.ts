@@ -13,21 +13,25 @@ import {
   AccountService,
   DELETED_LEAGUE_NAME,
   DELETED_USER_NAME,
+  OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS,
   USER_OUTBOUND_RELATIONS,
   USER_REFERENCE_COUNT_SELECT,
   USER_REFERENCE_SELECT,
   isUnreferenced,
 } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
-import { deletePreviousAvatar, scheduleUserUploadCleanup } from '../../src/services/upload-service';
+import { deletePreviousAvatar, deleteUnreferencedUserUploads } from '../../src/services/upload-service';
 import { captureException } from '../../src/utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
 
 jest.mock('../../src/services/workos-service');
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
-  scheduleUserUploadCleanup: jest.fn(),
+  deleteUnreferencedUserUploads: jest.fn(),
 }));
+
+/** What the mocked avatar cleanup reports (#957). */
+const CLEANUP = { listed: 3, kept: 1, deleted: 2, failed: 0, unknown: 0, incomplete: false };
 jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
@@ -35,7 +39,8 @@ jest.mock('../../src/utils/sentry', () => ({
 
 const mockWorkOS = WorkOSService as jest.Mocked<typeof WorkOSService>;
 const mockDeleteAvatar = deletePreviousAvatar as jest.Mock;
-const mockDeleteUploads = scheduleUserUploadCleanup as jest.Mock;
+const mockDeleteUploads = deleteUnreferencedUserUploads as jest.Mock;
+mockDeleteUploads.mockResolvedValue(CLEANUP);
 const mockCapture = captureException as jest.Mock;
 
 const USER_ID = '11111111-1111-4111-a111-111111111111';
@@ -166,7 +171,13 @@ describe('AccountService.deleteAccount', () => {
 
     const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
-    expect(result).toEqual({ success: true, identityDeleted: true, erased: false, adminlessLeagueIds: [] });
+    expect(result).toEqual({
+      success: true,
+      identityDeleted: true,
+      erased: false,
+      adminlessLeagueIds: [],
+      avatarCleanup: CLEANUP,
+    });
     // Lock first
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     // Purge
@@ -216,7 +227,7 @@ describe('AccountService.deleteAccount', () => {
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
     // ...and the rest of the user's own upload prefix, minus what other rows reference (#957),
-    // started (not awaited) only after the identity step, so S3 never delays it
+    // awaited, after the identity step
     expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID);
     expect(mockDeleteUploads.mock.invocationCallOrder[0]).toBeGreaterThan(
       mockWorkOS.deleteUser.mock.invocationCallOrder[0]
@@ -231,7 +242,13 @@ describe('AccountService.deleteAccount', () => {
 
       const result = await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
 
-      expect(result).toEqual({ success: true, identityDeleted: true, erased: true, adminlessLeagueIds: [] });
+      expect(result).toEqual({
+        success: true,
+        identityDeleted: true,
+        erased: true,
+        adminlessLeagueIds: [],
+        avatarCleanup: CLEANUP,
+      });
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
       // The purge still ran first: the count is taken AFTER it, so purged rows never keep a tombstone
@@ -523,6 +540,27 @@ describe('USER_REFERENCE_SELECT covers every relation on model User (#529)', () 
     expect(relations).toEqual(expect.arrayContaining(['teamMembers', 'gameEvents', 'personalLeague', 'managedBy']));
     expect(relations).not.toContain('role'); // enum
     expect(relations).not.toContain('email'); // scalar
+  });
+});
+
+describe('AccountService.cleanupDeletedUserUploads (#957 operator re-run)', () => {
+  it('re-runs the cleanup for a tombstoned account with the operator deadline', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ deletedAt: new Date() });
+
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).resolves.toEqual(CLEANUP);
+
+    expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID, { timeoutMs: OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS });
+  });
+
+  it('runs for an erased account (no row left)', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).resolves.toEqual(CLEANUP);
+  });
+
+  it('refuses an active account: its unreferenced uploads may be a save in flight', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ deletedAt: null });
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(mockDeleteUploads).not.toHaveBeenCalled();
   });
 });
 
