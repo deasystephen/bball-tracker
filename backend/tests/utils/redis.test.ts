@@ -195,6 +195,19 @@ describe('redis cache helpers', () => {
       mockRedisInstance.status = 'wait';
     });
 
+    it('after closeRedis no client is created again (shutdown races fail open)', async () => {
+      mockRedisInstance.quit.mockResolvedValue('OK');
+      mockRedisInstance.status = 'ready';
+      const mod = await import('../../src/utils/redis');
+      mod.getRedisClient();
+      await mod.closeRedis();
+      expect(mod.getRedisClient()).toBeNull();
+      expect(mod.getReadyRedisClient()).toBeNull();
+      await expect(mod.cacheGetJson('k')).resolves.toBeNull();
+      expect(RedisCtor).toHaveBeenCalledTimes(1);
+      mockRedisInstance.status = 'wait';
+    });
+
     it('closeRedis quits the client', async () => {
       mockRedisInstance.quit.mockResolvedValue('OK');
       const mod = await import('../../src/utils/redis');

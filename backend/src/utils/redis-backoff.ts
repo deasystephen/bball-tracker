@@ -1,7 +1,7 @@
 /**
  * The one back-off policy for every rate-limit counter that lives in Redis
- * (#452): the HTTP stores (`api/middleware/rate-limit-store.ts`) and the
- * Socket.io counters (`websocket/rate-limit.ts`). They all use the one shared
+ * (#452): the HTTP stores (`api/middleware/rate-limit-store.ts`), including
+ * the Socket.io handshake window (`websocket/rate-limit.ts`). They all use the one shared
  * client (`utils/redis.ts`), so they share ONE `RedisBackoff`
  * (`sharedRedisBackoff`): an outage seen by any of them sends all of them to
  * memory, and they recover together.
@@ -13,8 +13,13 @@
  * - **Probe, single-flight:** once that window has passed, exactly ONE caller
  *   tries Redis; everyone else keeps using memory while it is in flight
  *   rather than queueing behind it. Success ends the outage (one `info`);
- *   failure starts a new window. So a Redis that stalls while still `ready`
- *   holds up at most one request per window, not every request.
+ *   failure starts a new window.
+ *
+ * What a stall costs: the requests already in flight when Redis stops
+ * answering (it still looks `ready`) each wait up to `REDIS_COMMAND_TIMEOUT_MS`
+ * once, since nothing has failed yet. From the first failure on, single-flight
+ * applies: at most one request per window waits on Redis, never every
+ * request.
  *
  * A client that is not configured or not ready is not an outage: the caller
  * throws `RedisUnavailableError`, counts in memory, and nothing is logged

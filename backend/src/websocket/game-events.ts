@@ -783,8 +783,9 @@ export function registerGameEventHandlers(io: SocketServer): void {
   // never reaches the JWKS/user lookup (audit #16). A rejection here is a
   // `connect_error: Rate limited` on the client, which backs off and retries
   // like `Service unavailable`.
-  // Shared across tasks through Redis (#452); falls back to this task's
-  // counters and never refuses a handshake because of Redis.
+  // The handshake window is shared across tasks through Redis (#452) and
+  // falls back to memory; the concurrency cap is per task. Neither refuses a
+  // handshake because of Redis.
   io.use(handshakeRateLimit);
 
   io.use((socket, next) => {
@@ -795,7 +796,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     const typedSocket = socket as GameSocket;
     const userId = typedSocket.data.user?.id;
     const ip = socketClientIp(socket);
-    void registerConnection(ip);
+    registerConnection(ip);
     scheduleSocketReauth(typedSocket);
     logger.info('Socket connected', { socketId: socket.id, userId });
 
@@ -860,7 +861,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     });
 
     socket.on('disconnect', (reason: string) => {
-      void releaseConnection(ip);
+      releaseConnection(ip);
       clearSocketReauth(socket.id);
       logger.info('Socket disconnected', { socketId: socket.id, userId, reason });
     });

@@ -11,10 +11,13 @@
  * publisher uses the same connection options as the shared cache client
  * (`utils/redis.ts#redisClientOptions`).
  *
- * **Degradation (Redis is a best-effort dependency):** the adapter delivers to
- * this task's own sockets before it publishes, so a Redis outage never stops
- * local delivery. While Redis is unreachable a publish fails fast (no offline
- * queue) and is dropped; sockets on other tasks miss those broadcasts, and
+ * **Degradation (Redis is a best-effort dependency):** on a broadcast the
+ * adapter publishes to Redis first and then delivers to this task's own
+ * sockets, in the same call. Local delivery survives a Redis outage only
+ * because the patched `publish` below can neither throw synchronously nor
+ * reject: any error is caught and the broadcast continues to the local
+ * sockets. While Redis is unreachable a publish fails fast (no offline queue)
+ * and is dropped; sockets on other tasks miss those broadcasts, and
  * because every broadcast carries the current score their score converges on
  * the next one they receive after Redis recovers (events in between are
  * recovered by the `game-snapshot` on the next join or reconnect). The
@@ -115,14 +118,22 @@ export function attachRedisAdapter(
     });
   }
 
-  // The adapter does not await `publish`; a rejection (disconnected, timed
-  // out) would be unhandled. Drop it: local delivery already happened.
+  // The adapter calls `publish` BEFORE delivering locally and does not await
+  // it. A synchronous throw would abort the broadcast before the local
+  // sockets got it, and a rejection would be unhandled, so the wrapper
+  // catches both and drops the publish: local delivery always runs.
   const publish = pubClient.publish.bind(pubClient);
-  pubClient.publish = ((channel: string | Buffer, message: string | Buffer) =>
-    publish(channel, message).catch((error: unknown) => {
+  pubClient.publish = ((channel: string | Buffer, message: string | Buffer) => {
+    try {
+      return publish(channel, message).catch((error: unknown) => {
+        logFailure('pub', error);
+        return 0;
+      });
+    } catch (error) {
       logFailure('pub', error);
-      return 0;
-    })) as Redis['publish'];
+      return Promise.resolve(0);
+    }
+  }) as Redis['publish'];
 
   // Nor does it await (P)SUBSCRIBE (at attach) or (P)UNSUBSCRIBE (on
   // `io.close()`). Those wait in the subscriber's offline queue while it is not

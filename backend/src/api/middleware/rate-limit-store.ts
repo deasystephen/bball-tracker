@@ -8,7 +8,7 @@
  * dependency in this codebase, so the store never rejects a request because of
  * Redis: with no `REDIS_URL`, a client not connected yet, or whenever the
  * shared back-off (`utils/redis-backoff.ts#sharedRedisBackoff`, one for every
- * store and the Socket.io counters) says so, the hit goes to this limiter's
+ * store, the Socket.io handshake window included) says so, the hit goes to this limiter's
  * in-process `MemoryStore`, so the limit still holds per task.
  *
  * The window is the same fixed window from the first hit in both stores, and
@@ -21,8 +21,6 @@ import { MemoryStore, type ClientRateLimitInfo, type IncrementResponse, type Opt
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { getReadyRedisClient } from '../../utils/redis';
 import { RedisUnavailableError, sharedRedisBackoff } from '../../utils/redis-backoff';
-
-export { REDIS_RETRY_AFTER_FAILURE_MS } from '../../utils/redis-backoff';
 
 /** Every Redis rate-limit key starts with this, then the limiter's own name. */
 export const RATE_LIMIT_KEY_PREFIX = 'rl:';

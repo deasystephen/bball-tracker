@@ -8,10 +8,10 @@ import { logger } from './logger';
  * counters in process memory. With a second task a live game splits silently
  * — the coach tracks on task A, the parents watch on task B, nobody sees an
  * error — and every rate limit becomes N times its budget. #452 moved the
- * rate-limit counters to Redis and added the Redis adapter
+ * HTTP and socket-handshake rate limits to Redis and added the Redis adapter
  * (`websocket/redis-adapter.ts`, enabled by `REDIS_SOCKET_ADAPTER_URL`); the
- * guard stays closed until a load test on two tasks flips
- * `MULTI_REPLICA_SUPPORTED`.
+ * per-IP socket cap is still per task. The guard stays closed until the
+ * cross-task cap and a load test on two tasks flip `MULTI_REPLICA_SUPPORTED`.
  *
  * A process cannot observe the autoscaling target, so the replica ceiling is
  * explicit configuration: `MAX_REPLICAS` in `infra/task-definition.json`, pinned
@@ -36,8 +36,8 @@ export const REDIS_ADAPTER_ISSUE = '#452';
 
 /**
  * Whether this build can run more than one replica at all. The adapter and the
- * shared rate-limit store are in (#452); this stays false until the two-task
- * load test that follows it.
+ * shared rate-limit store are in (#452); this stays false until the cross-task
+ * socket cap and the two-task load test that follow it.
  */
 export const MULTI_REPLICA_SUPPORTED = false;
 
@@ -75,9 +75,10 @@ export interface ReplicaGuardDeps {
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 
 const SINGLE_REPLICA_WHY =
-  'Rate-limit counters are shared through Redis and the Socket.io Redis adapter exists ' +
-  `(${SOCKET_ADAPTER_URL_ENV_VAR}), but cross-task delivery has not been load-tested on two tasks, ` +
-  'so MULTI_REPLICA_SUPPORTED is still false and a second replica is not yet trusted with live games.';
+  'The HTTP and socket-handshake rate limits are shared through Redis and the Socket.io Redis adapter ' +
+  `exists (${SOCKET_ADAPTER_URL_ENV_VAR}), but the per-IP socket cap is still per task and cross-task ` +
+  'delivery has not been load-tested on two tasks, so MULTI_REPLICA_SUPPORTED is still false and a ' +
+  'second replica is not yet trusted with live games.';
 
 /**
  * Parses a replica ceiling. Returns `undefined` for unset/blank, `null` for

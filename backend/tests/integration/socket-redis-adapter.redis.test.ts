@@ -27,15 +27,8 @@ import { setIo } from '../../src/websocket/io-registry';
 import { gameRoom } from '../../src/websocket/game-events';
 import { SharedRateLimitStore } from '../../src/api/middleware/rate-limit-store';
 import {
-  CONCURRENT_KEY_PREFIX,
-  INSTANCE_ID,
-  INSTANCE_KEY_PREFIX,
-  INSTANCE_TTL_MS,
   MAX_HANDSHAKES_PER_WINDOW,
   checkHandshakeAllowed,
-  hasConcurrentCapacity,
-  registerConnection,
-  releaseConnection,
   resetSocketRateLimits,
 } from '../../src/websocket/rate-limit';
 import { closeRedis, getReadyRedisClient } from '../../src/utils/redis';
@@ -302,44 +295,6 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
       resetSocketRateLimits();
       expect(await checkHandshakeAllowed(ip)).toBe(false);
       expect(await redis.pttl(`rl:ws-hs:${ip}`)).toBeGreaterThan(0);
-    });
-
-    it('sums live other tasks plus this task, drops a dead task and ignores its own stale field', async () => {
-      const ip = `${RUN}-conc`;
-      const hash = `${CONCURRENT_KEY_PREFIX}${ip}`;
-      keysToDelete.add(hash);
-      keysToDelete.add(`${INSTANCE_KEY_PREFIX}${INSTANCE_ID}`);
-      const liveOther = `${RUN}-live-task`;
-      keysToDelete.add(`${INSTANCE_KEY_PREFIX}${liveOther}`);
-
-      await registerConnection(ip);
-      await registerConnection(ip);
-      expect(await redis.hget(hash, INSTANCE_ID)).toBe('2');
-
-      // Another live task holds 47 sockets from the same IP: 49 in all, one slot left.
-      await redis.set(`${INSTANCE_KEY_PREFIX}${liveOther}`, '1', 'PX', 60_000);
-      await redis.hset(hash, liveOther, '47');
-      // A crashed task (no liveness key) left 100 behind; they must not count.
-      await redis.hset(hash, `${RUN}-dead-task`, '100');
-      // A stale, inflated field for THIS task (a lost write) is ignored: this
-      // task counts itself from memory, and its next write corrects the field.
-      await redis.hset(hash, INSTANCE_ID, '500');
-
-      expect(await hasConcurrentCapacity(ip)).toBe(true);
-      expect(await redis.hexists(hash, `${RUN}-dead-task`)).toBe(0);
-      await registerConnection(ip);
-      expect(await redis.hget(hash, INSTANCE_ID)).toBe('3');
-      expect(await hasConcurrentCapacity(ip)).toBe(false);
-
-      await releaseConnection(ip);
-      expect(await hasConcurrentCapacity(ip)).toBe(true);
-      await releaseConnection(ip);
-      await releaseConnection(ip);
-      // The last release deletes the field; a release past zero leaves it gone.
-      expect(await redis.hexists(hash, INSTANCE_ID)).toBe(0);
-      await releaseConnection(ip);
-      expect(await redis.hexists(hash, INSTANCE_ID)).toBe(0);
-      expect(await redis.pttl(hash)).toBeLessThanOrEqual(INSTANCE_TTL_MS);
     });
   });
 });

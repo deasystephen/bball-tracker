@@ -6,8 +6,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
 Real-time game updates use Socket.io. **Production still runs a single
 task.** The adapter is in-memory unless `REDIS_SOCKET_ADAPTER_URL` is set, and
-the task definition does not set it yet; every rate-limit counter that is keyed
-by something other than a socket lives in Redis (#452). With the in-memory
+the task definition does not set it yet; the HTTP rate limits and the socket
+handshake window live in Redis (#452), the per-IP socket concurrency cap is
+still per task. With the in-memory
 adapter a second task silently splits a live game (coach on task A, spectators
 on task B, no error anywhere).
 
@@ -25,13 +26,16 @@ retry, 500 ms `commandTimeout`); the subscriber keeps an offline queue with
 ioredis re-subscribes after every reconnect. Both reconnect forever
 (`redisRetryDelay`). The shutdown routine quits both after `io.close()`.
 
-**Degradation (Redis is a best-effort dependency):** the adapter delivers to
-the emitting task's own sockets before it publishes, so a Redis outage never
-stops local delivery. While Redis is unreachable a publish fails fast and is
-dropped. The adapter awaits neither `publish` nor the subscriber's
-(P)SUBSCRIBE / (P)UNSUBSCRIBE, so each is wrapped with a handler: a failed
-publish, or a queued subscriber command flushed by closing during a reconnect,
-never becomes an unhandled rejection. Logging is per client (`pub`, `sub`):
+**Degradation (Redis is a best-effort dependency):** on a broadcast the
+adapter publishes to Redis first and then delivers to the emitting task's own
+sockets, in the same call. Local delivery survives a Redis outage only because
+the wrapped `publish` can neither throw synchronously nor reject: any error is
+caught, the publish is dropped and the broadcast continues to the local sockets
+(`tests/websocket/redis-adapter-delivery.test.ts` drives the real adapter with
+a `publish` that throws synchronously). While Redis is unreachable a publish
+fails fast. The adapter also does not await the subscriber's (P)SUBSCRIBE /
+(P)UNSUBSCRIBE, so those are wrapped too: a queued subscriber command flushed
+by closing during a reconnect never becomes an unhandled rejection. Logging is per client (`pub`, `sub`):
 until a client has connected once, its failures log at `debug` (`Socket.io
 adapter: Redis not connected yet`); if it is still not connected
 `ADAPTER_BOOT_GRACE_MS` (30 s) after boot, one `warn` (`Socket.io adapter:
@@ -197,53 +201,40 @@ current score so a client can drop events and still converge.
   (real transport: timer cleared on disconnect, `refresh-auth` keeps the connection past the
   handshake token's expiry, `reauth_required` then `transport close`, automatic reconnect with
   a fresh token).
-- Rate limits (audit #16, `websocket/rate-limit.ts`; shared across tasks since #452):
-  handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
-  max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`);
-  `refresh-auth` 10/min per socket.
+- Rate limits (audit #16, `websocket/rate-limit.ts`; the handshake window shared across tasks since
+  #452): handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches
+  JWKS/DB; max 50 concurrent sockets per IP **per task**; `join-game` 20/min per socket (ack
+  `code: 'rate_limited'`); `refresh-auth` 10/min per socket.
   A limited handshake rejects with `connect_error: Rate limited`, which mobile `services/socket.ts`
   backs off and retries exactly like `Service unavailable`. The IP key is the rightmost
   `x-forwarded-for` entry (the ALB-appended hop, same trust rule as `trust proxy: 1`), falling back
   to the peer address.
   - **Where the counters live.** The handshake window is a `SharedRateLimitStore` named `ws-hs`
-    (Redis key `rl:ws-hs:<ip>`), the same store, fixed window and back-off as the HTTP limiters
-    (`backend-services.md#rate-limits`). The concurrency cap: this task's own count per IP is in
-    memory (`concurrentByIp`) and is the truth for its sockets. In Redis each task writes its
-    **absolute** count as a field of the hash `ws:conc:<ip>` (named by `INSTANCE_ID`, a UUID per
-    process; deleted at 0) on every register and release, and marks itself alive with
-    `ws:inst:<id>` in the same script; both expire after `INSTANCE_TTL_MS` (60 s). The task
-    remembers the count it last wrote per IP (`written`, entries removed once 0 is written), and an
-    IP needs a write whenever its local count differs. A heartbeat every 20 s writes every IP held
-    locally plus every IP in `written` in **one script call** per 500 IPs, which also refreshes the
-    liveness key once; it stops when there is nothing to write and restarts on the next change.
-    Because each write is absolute, a lost write (Redis down, in back-off, or the client not ready
-    yet) is corrected by the next one instead of leaving a count wrong for good. The retry set is
-    bounded: an IP that was never written and drops back to 0 has nothing to clear and is never
-    retried. The capacity check is the live **other** tasks' fields (fields of tasks whose
-    liveness key expired are deleted as they are read) plus this task's local count, so a stale
-    field of this task's own never counts. The scripts read keys they are not handed in `KEYS`,
-    which needs a non-cluster Redis (the production node is one). The per-socket `join-game` and
-    `refresh-auth` throttles stay in WeakMaps: a socket lives on exactly one task, so they are per
-    socket by definition.
+    (Redis key `rl:ws-hs:<ip>`), the same store, fixed window, fail-open and back-off as the HTTP
+    limiters (`backend-services.md#rate-limits`): in Redis when it answers, in this task's memory
+    otherwise; a Redis problem never refuses a handshake. The concurrency cap is an in-memory map
+    per task (`concurrentByIp`), exactly as before #452, and the per-socket `join-game` and
+    `refresh-auth` throttles are WeakMaps (a socket lives on one task).
+  - **The cross-task concurrency cap lands with the multi-replica flip, not before.** While
+    `MULTI_REPLICA_SUPPORTED` is false there is one task, so a shared cap buys nothing; an earlier
+    draft of #452 (per-task hash fields, liveness keys, a heartbeat) was cut from the PR because
+    every review found a new failure mode in its bookkeeping. Suggested design for that change: a
+    per-IP sorted set of socket ids scored by expiry (`ZADD` on connect with a refreshed expiry,
+    `ZREM` on disconnect, `ZREMRANGEBYSCORE` then `ZCARD` on the check), so a crashed task's
+    sockets age out by score with no per-task bookkeeping.
+  - **Window first, `next` once.** `handshakeRateLimit` (the pre-auth middleware) checks the
+    window first, the only Redis call, and stops there once it is spent; then the in-memory
+    capacity (`evaluateHandshake`, which never rejects; an unexpected error allows the handshake).
+    It calls `next` exactly once, outside any `try`: an error thrown by downstream middleware is
+    logged, never answered with a second `next`.
   - **Eviction.** The ElastiCache parameter group (`default.redis7`) uses `maxmemory-policy
     volatile-lru`: under memory pressure Redis evicts keys that have a TTL first, which is every
-    key here (`rl:*`, `ws:conc:*`, `ws:inst:*`). Fail-open covers it: an evicted window restarts,
-    an evicted liveness key makes that task's sockets stop counting until its next write, so limits
-    loosen and never tighten. Whether to move to `noeviction` or `allkeys-lru` is left to the
-    TLS/AUTH replacement of the node (#755).
-  - **One round trip per handshake, `next` once.** `handshakeRateLimit` (the pre-auth middleware)
-    runs the window increment and the other-tasks count in parallel (`evaluateHandshake`, which
-    never rejects; an unexpected error allows the handshake), then calls `next` exactly once,
-    outside any `try`: an error thrown by downstream middleware is logged, never answered with a
-    second `next`.
-  - **Fail-open.** With no `REDIS_URL`, while the client is (re)connecting, or whenever the
-    shared back-off (`utils/redis-backoff.ts#sharedRedisBackoff`, one for the HTTP stores and these
-    counters) sends callers to memory, the handshake window counts in memory and the capacity check
-    uses the local count alone. A Redis problem never refuses a handshake. The log lines are the
-    back-off's (`Rate limit store: Redis unavailable, counting in memory`, once per outage). Tests: `tests/websocket/rate-limit.test.ts`,
-    `tests/websocket/rate-limit-fallback.test.ts` (register before the client is ready and a
-    release lost to a blip, both healed by the heartbeat; the batched heartbeat; the bounded retry
-    set; the back-off shared with the HTTP stores) and the real-Redis suite.
+    `rl:*` key. Fail-open covers it: an evicted window restarts, so limits loosen and never
+    tighten. Whether to move to `noeviction` or `allkeys-lru` is left to the TLS/AUTH replacement
+    of the node (#755).
+  - Tests: `tests/websocket/rate-limit.test.ts` (windows, cap, middleware calls `next` once),
+    `tests/websocket/rate-limit-fallback.test.ts` (Redis answers, Redis fails, window first, cap
+    never through Redis) and the real-Redis suite (a fresh task sees the same window).
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.

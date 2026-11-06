@@ -21,6 +21,12 @@ import { logger } from './logger';
 
 let client: Redis | null = null;
 let connectionErrorLogged = false;
+/**
+ * Set by `closeRedis()` (shutdown): from then on no client is created again,
+ * so a rate-limit check or cache call that races the shutdown gets `null`
+ * (fail-open) instead of opening a fresh connection the process then waits on.
+ */
+let closed = false;
 
 const RETRY_BASE_MS = 200;
 const RETRY_MAX_MS = 30_000;
@@ -61,10 +67,11 @@ export function redisClientOptions(): RedisOptions {
 /**
  * Get (or lazily create) the shared Redis client.
  *
- * Returns `null` when no `REDIS_URL` is configured, signalling callers to skip
- * caching entirely.
+ * Returns `null` when no `REDIS_URL` is configured, or after `closeRedis()`,
+ * signalling callers to skip Redis entirely.
  */
 export function getRedisClient(): Redis | null {
+  if (closed) return null;
   if (client) return client;
 
   const url = process.env.REDIS_URL;
@@ -91,7 +98,7 @@ export function getRedisClient(): Redis | null {
   // `end` fires when ioredis will not reconnect on its own (e.g. after
   // `quit()`). Drop the dead client so the next cache access creates a fresh one.
   instance.on('end', () => {
-    if (client === instance) {
+    if (client === instance && !closed) {
       client = null;
       logger.warn('Redis connection ended — a new client will be created on next use');
     }
@@ -180,12 +187,14 @@ export async function cacheDelete(...keys: string[]): Promise<void> {
  * `utils/shutdown.ts` (wired in `src/index.ts`) and by test cleanup.
  */
 export async function closeRedis(): Promise<void> {
+  closed = true;
   if (client) {
+    const closing = client;
+    client = null;
     try {
-      await client.quit();
+      await closing.quit();
     } catch {
       // Ignore — we're shutting down anyway.
     }
-    client = null;
   }
 }

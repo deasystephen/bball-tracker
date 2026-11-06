@@ -125,29 +125,29 @@ describe('websocket/rate-limit', () => {
   });
 
   describe('concurrent connection cap', () => {
-    it('reports capacity until the cap and none at it', async () => {
+    it('reports capacity until the cap and none at it', () => {
       for (let i = 0; i < MAX_CONCURRENT_PER_IP; i++) {
-        expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
-        await registerConnection('203.0.113.9');
+        expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
+        registerConnection('203.0.113.9');
       }
-      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(false);
-      expect(await hasConcurrentCapacity('198.51.100.7')).toBe(true);
+      expect(hasConcurrentCapacity('203.0.113.9')).toBe(false);
+      expect(hasConcurrentCapacity('198.51.100.7')).toBe(true);
     });
 
-    it('frees capacity when a connection is released', async () => {
+    it('frees capacity when a connection is released', () => {
       for (let i = 0; i < MAX_CONCURRENT_PER_IP; i++) {
-        await registerConnection('203.0.113.9');
+        registerConnection('203.0.113.9');
       }
-      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(false);
-      await releaseConnection('203.0.113.9');
-      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
+      expect(hasConcurrentCapacity('203.0.113.9')).toBe(false);
+      releaseConnection('203.0.113.9');
+      expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
     });
 
-    it('never goes negative on an unmatched release', async () => {
-      await releaseConnection('203.0.113.9');
-      await registerConnection('203.0.113.9');
-      await releaseConnection('203.0.113.9');
-      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
+    it('never goes negative on an unmatched release', () => {
+      releaseConnection('203.0.113.9');
+      registerConnection('203.0.113.9');
+      releaseConnection('203.0.113.9');
+      expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
     });
   });
 
