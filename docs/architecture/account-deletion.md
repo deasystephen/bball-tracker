@@ -32,7 +32,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   never name a CLI flag, and the script maps each code to the next step. One `$transaction`:
   1. **Unlocked read** (`assertConvertible`): no live row is 404; `already_managed` (a re-run) and
      `never_signed_in` (an invited row the child never claimed: `workosUserId` null, not managed)
-     are refused before the coach is chosen. Then the **managing coach**: the `--coach` id or the
+     are refused before the coach is chosen, and so is an adult account (the adult signals of
+     step 3, read unlocked here and again under the lock), so an unrostered adult gets
+     `adult_account`, never `no_active_team`. Then the **managing coach**: the `--coach` id or the
      single head coach, both staff on one of the player's teams in an **active** season;
      otherwise `coach_not_on_team`, `no_active_team` (delete instead), `no_head_coach` (name a
      staff member) or `several_head_coaches`.
@@ -75,21 +77,26 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
   **Sign-in race.** `WorkOSService.syncUser`'s branch-1 update (a returning linked user) is
   conditioned on `workosUserId` as well as `deletedAt IS NULL`. A sign-in that read the row before
-  the conversion committed updates zero rows; it re-reads the row and, finding it live but
-  un-linked, refuses with 401 instead of writing the email, verified flag or photo back, or
-  falling through to a claim or create. A tombstoned row still falls through to a fresh create
-  (D9). Other requests authenticated just before the commit can still finish a write, bounded by
+  the conversion committed updates zero rows; it re-reads the row and, finding it live with
+  `workosUserId` null, refuses with 401 instead of writing the email, verified flag or photo
+  back, or falling through to a claim or create. A tombstoned row (D9) or one relinked to another
+  identity meanwhile continues to the email branches as before. Other requests authenticated just before the commit can still finish a write, bounded by
   the access-token lifetime (#1004).
 
-  After commit, best-effort: the S3 avatar delete and `WorkOSService.deleteUser` (every
-  convertible row has a WorkOS identity, so the script requires the WorkOS credentials up front).
-  `identityDeleted` is `true` or `false`. On `false`: Sentry `flow: convert-to-managed`, then
+  After commit, best-effort and reported: the S3 delete of the cleared photo through
+  `upload-service.ts#deleteAvatarObject` (`photoDeletion`: `none`, `deleted`, `not_ours` or
+  `failed`; `failed` is logged at error and the script exits 4), and `WorkOSService.deleteUser`
+  (every convertible row has a WorkOS identity, so the script requires the WorkOS credentials and
+  `S3_AVATARS_BUCKET`, `assertAvatarStorageConfig`, up front). `identityDeleted` is `true` or
+  `false`; a WorkOS 404 counts as `true` with `identityNote: not_found_at_workos` (already gone,
+  or a Staging id after the #24 cutover) and no alarm. On `false`: Sentry `flow: convert-to-managed`, then
   `WorkOSService.revokeAllSessions` (one client, `Promise.allSettled`, `{ revoked, failed }`); the
   result carries `workosUserId` and `sessions`, the error lines and the domain event log the
   `workosUserId`, and the script exits 3. Open Socket.io connections are not closed: they last
   until their access token expires, the same as after `deleteAccount` (#1004). Domain event
   `Account converted to managed` (`userId`, `actorId`, `managedById`, `identityDeleted`,
-  `deletedReplyCount`, plus `workosUserId` on failure). Procedure:
+  `photoDeletion`, `deletedReplyCount`, plus `identityNote` on a 404 and `workosUserId` on
+  failure). Procedure:
   [`docs/runbooks/data-subject-requests.md`](../runbooks/data-subject-requests.md#we-learned-an-account-holder-is-under-13);
   real-Postgres cases: `tests/integration/convert-to-managed.db.test.ts`.
 - Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and

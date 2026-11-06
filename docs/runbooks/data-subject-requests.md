@@ -223,11 +223,16 @@ collected from the child. Follow these steps every time; no code is written at t
      # or, to choose the managing coach:
      cd backend && NODE_ENV=production npx tsx scripts/convert-to-managed.ts <userId> --coach <coachUserId>
      ```
-     The script needs the WorkOS credentials (`WORKOS_API_KEY`, `WORKOS_CLIENT_ID`) and refuses
-     to start without them. Output: `{ userId, converted, managedById, identityDeleted,
-     expiredGuardianInvitations, deletedReplyCount }`. `identityDeleted` is `true` (WorkOS user
-     deleted) or `false` (deletion failed: the output adds `workosUserId` and `sessions`, see step
-     5).
+     The script needs the WorkOS credentials (`WORKOS_API_KEY`, `WORKOS_CLIENT_ID`) and
+     `S3_AVATARS_BUCKET`, and refuses to start without them. Output: `{ userId, converted,
+     managedById, identityDeleted, photoDeletion, expiredGuardianInvitations, deletedReplyCount }`.
+     `identityDeleted` is `true` (WorkOS user deleted; with `identityNote: not_found_at_workos`
+     when WorkOS had no such user, for example a Staging id left after the production-key
+     cutover, which needs nothing) or `false` (deletion failed: the output adds `workosUserId` and
+     `sessions`, see step 5). `photoDeletion` is `none` (no photo object of ours to delete),
+     `deleted`, `not_ours` (the stored URL is not an upload key of ours; nothing to delete), or
+     `failed`: the script then exits **4** (3 if the WorkOS deletion failed as well) and the
+     object must be deleted by hand, see step 5.
 
      One transaction (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`)
      turns the account into a roster record kept by `managedById`. That is the one head coach of
@@ -277,7 +282,7 @@ collected from the child. Follow these steps every time; no code is written at t
      | --- | --- | --- |
      | `already_managed` | already a managed record (a re-run) | nothing to do |
      | `never_signed_in` | an invited row the child never claimed | nothing to convert; nothing to un-claim |
-     | `adult_account` | system ADMIN role, a staff role, admin of a league other than its own personal league, a guardian-of link, players it manages, announcements it posted, or team or guardian invitations it sent and did not cancel (a former coach); the COACH account type alone is not a signal, a child can pick it at sign-up | verify again; if the report holds, delete with (b) |
+     | `adult_account` (checked before the coach lookup, so an unrostered adult gets this, not `no_active_team`) | system ADMIN role, a staff role, admin of a league other than its own personal league, a guardian-of link, players it manages, announcements it posted, or team or guardian invitations it sent and did not cancel (a former coach); the COACH account type alone is not a signal, a child can pick it at sign-up | verify again; if the report holds, delete with (b) |
      | `personal_league_in_use` | its personal league holds teams or has another admin | verify again; if the report holds, delete with (b) |
      | `no_active_team` | the child is on no team in an active season at all: no roster to keep the record on | delete with (b); `--coach` cannot help |
      | `no_head_coach` | the child's active-season teams have staff but no head coach | pass `--coach` with one of those staff members |
@@ -294,7 +299,7 @@ collected from the child. Follow these steps every time; no code is written at t
    - **(b) Delete** (the parent asks for deletion, the child is on no team in an active
      season, or conversion is refused): run the `delete` command of the [Operator procedure](#operator-procedure-request-by-email)
      step 4. It erases or anonymises by the usual rules and deletes the WorkOS user.
-5. **WorkOS: finish it before you reply.** Either path deletes the WorkOS user best-effort. When
+5. **WorkOS and the photo: finish both before you reply.** Either path deletes the WorkOS user best-effort. When
    it fails, `identityDeleted` is `false`; the convert script then prints `workosUserId` (the row
    no longer holds it, nor the email to search by; the id is also in the `Account converted to
    managed` log line and the `Failed to delete WorkOS user …` error line) and the stopgap's
@@ -304,6 +309,10 @@ collected from the child. Follow these steps every time; no code is written at t
    to stderr and exits **3**. Delete that WorkOS user by hand in the dashboard **before step 7**
    ([When WorkOS deletion fails](#when-workos-deletion-fails)): until it is gone the child can
    still sign in, and a sign-in would create a fresh account.
+   If `photoDeletion` is `failed` (exit 4), the photo object is still in S3 but no record points
+   at it any more: take its URL from the `Failed to delete avatar object` log line (or the export
+   from step 3) and delete the object by hand (`aws s3 rm s3://<bucket>/avatars/<id>/<file>`)
+   before step 7.
 6. **Vendor deletion requests** for the internal user id, per [Retention](#retention-this-is-what-the-privacy-policy-must-say):
    Amplitude (user deletion by user id), Sentry (backend events carry the user id) and Datadog (log
    lines carry the user id). CloudWatch has no per-id deletion; its 30-day window applies. File

@@ -60,7 +60,13 @@ import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar, isManagedAvatarUrl, isOwnUploadUrl } from './upload-service';
+import {
+  type AvatarDeletion,
+  deleteAvatarObject,
+  deletePreviousAvatar,
+  isManagedAvatarUrl,
+  isOwnUploadUrl,
+} from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -449,17 +455,19 @@ export class AccountService {
    *   ┌──────────────────────────────────────────────────────────────────┐
    *   │ 1  unlocked read: no live row ──────────────────────────► 404      │
    *   │    never signed in, or already managed (a re-run) ──────► 409      │
+   *   │    any adult signal (assertPlayerAccount) ──────────────► 409      │
    *   │    managing coach: the operator's choice or the one head coach,   │
    *   │    staff on the player's active-season teams ──── else ─► 409      │
    *   │ 2  SELECT … FOR UPDATE player + coach, one id-ordered statement   │
    *   │    the step-1 checks again; coach tombstoned or the choice        │
    *   │    changed ─────────────────────────────────────────────► 409      │
-   *   │ 3  adult signals, one read (assertPlayerAccount) ───────► 409      │
+   *   │ 3  adult signals again, one read, under the lock ───────► 409      │
    *   │    an empty personal league the child started is deleted (D16)    │
    *   │ 4  unclaimManagedRow (shared with the age screen, #981)           │
    *   └──────────────────────────────────────────────────────────────────┘
-   *   after commit, best-effort: delete the cleared photo's S3 object,
-   *   delete the WorkOS user (ends its WorkOS sessions and refresh tokens;
+   *   after commit, best-effort, both reported: delete the cleared photo's
+   *   S3 object (photoDeletion), delete the WorkOS user (a 404 counts as
+   *   gone) (ends its WorkOS sessions and refresh tokens;
    *   an open Socket.io connection lasts until its access token expires,
    *   #1004); if that fails, revoke every active session and report
    *   identityDeleted: false
@@ -482,15 +490,18 @@ export class AccountService {
     const { actorId } = options;
 
     const committed = await prisma.$transaction(async (tx) => {
-      // 1. Unlocked: a mistyped id reads as "not found" and a re-run as
-      // "already converted", before the coach (whom the lock must name) is
-      // resolved; a re-run's team may have no head coach left.
+      // 1. Unlocked: a mistyped id reads as "not found", a re-run as "already
+      // converted" and an adult as "adult account", all before the coach
+      // (whom the lock must name) is resolved: a re-run's team may have no
+      // head coach left, and an unrostered adult must not be told to "delete,
+      // no active team" on the strength of a coach lookup.
       assertConvertible(
         await tx.user.findUnique({
           where: { id: userId },
           select: { deletedAt: true, isManaged: true, workosUserId: true },
         })
       );
+      assertPlayerAccount(await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT }));
       const managedById = await resolveManagingCoach(tx, userId, options.managedById);
 
       // 2. Lock the player and the coach, then the checks again.
@@ -510,7 +521,7 @@ export class AccountService {
         throw new ConvertRefusedError('coaches_changed', "The player's coaches changed while converting");
       }
 
-      // 3. A player account, not an adult's.
+      // 3. A player account, not an adult's: authoritative now, under the lock.
       const signals = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT });
       const emptyPersonalLeagueId = assertPlayerAccount(signals);
       if (emptyPersonalLeagueId !== null) {
@@ -523,42 +534,57 @@ export class AccountService {
       return { ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
 
-    await deletePreviousAvatar(committed.removedAvatar, null);
+    // The photo is a picture of the child that nobody could find once the row
+    // lets go of it: its deletion is reported, never silent.
+    const photoDeletion: PhotoDeletion =
+      committed.removedAvatar === null ? 'none' : await deleteAvatarObject(committed.removedAvatar);
+    if (photoDeletion === 'failed') {
+      logger.error('Failed to delete the photo object after converting an account to managed', { userId });
+    }
 
     // A converted row always had a WorkOS identity: assertConvertible refuses
     // an unclaimed one. The id is not personal data; it is logged on failure
     // so the operator can finish the deletion without the terminal output.
     const { workosUserId } = committed;
     let identityDeleted = false;
+    let identityNote: IdentityNote | undefined;
     let sessions: SessionRevocation | null = null;
     try {
       await WorkOSService.deleteUser(workosUserId);
       identityDeleted = true;
     } catch (error) {
-      logger.error('Failed to delete WorkOS user after converting an account to managed', {
-        userId,
-        workosUserId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      captureException(error, { flow: 'convert-to-managed', userId });
-      // The row no longer resolves the identity, but a refresh token would
-      // still mint access tokens until WorkOS ends the session.
-      try {
-        sessions = await WorkOSService.revokeAllSessions(workosUserId);
-      } catch (revokeError) {
-        logger.error('Failed to list WorkOS sessions after converting an account to managed', {
+      if ((error as { status?: unknown }).status === 404) {
+        // WorkOS does not know this id: already deleted, or a Staging id left
+        // on the row after the production-key cutover (#24). Nothing is left
+        // to delete, so nothing to alarm on.
+        identityDeleted = true;
+        identityNote = 'not_found_at_workos';
+      } else {
+        logger.error('Failed to delete WorkOS user after converting an account to managed', {
           userId,
           workosUserId,
-          error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+          error: error instanceof Error ? error.message : String(error),
         });
-      }
-      if (sessions !== null && sessions.failed > 0) {
-        logger.error('Failed to revoke some WorkOS sessions after converting an account to managed', {
-          userId,
-          workosUserId,
-          revoked: sessions.revoked,
-          failed: sessions.failed,
-        });
+        captureException(error, { flow: 'convert-to-managed', userId });
+        // The row no longer resolves the identity, but a refresh token would
+        // still mint access tokens until WorkOS ends the session.
+        try {
+          sessions = await WorkOSService.revokeAllSessions(workosUserId);
+        } catch (revokeError) {
+          logger.error('Failed to list WorkOS sessions after converting an account to managed', {
+            userId,
+            workosUserId,
+            error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+          });
+        }
+        if (sessions !== null && sessions.failed > 0) {
+          logger.error('Failed to revoke some WorkOS sessions after converting an account to managed', {
+            userId,
+            workosUserId,
+            revoked: sessions.revoked,
+            failed: sessions.failed,
+          });
+        }
       }
     }
 
@@ -567,7 +593,9 @@ export class AccountService {
       actorId,
       managedById: committed.managedById,
       identityDeleted,
+      ...(identityNote && { identityNote }),
       ...(!identityDeleted && { workosUserId }),
+      photoDeletion,
       deletedReplyCount: committed.deletedReplyCount,
     });
 
@@ -575,6 +603,8 @@ export class AccountService {
       success: true,
       managedById: committed.managedById,
       identityDeleted,
+      ...(identityNote && { identityNote }),
+      photoDeletion,
       expiredGuardianInvitations: committed.expiredGuardianInvitations,
       deletedReplyCount: committed.deletedReplyCount,
       // The operator needs the provider id to finish the deletion by hand: the
@@ -583,6 +613,16 @@ export class AccountService {
     };
   }
 }
+
+/** Why `identityDeleted` is true without a deletion having happened. */
+export type IdentityNote = 'not_found_at_workos';
+
+/**
+ * The cleared photo's S3 object after commit: `none` when no object was ours
+ * to delete (no photo, kept, external, or another row still shows it), else
+ * `deleteAvatarObject`'s outcome. `failed` must be finished by hand.
+ */
+export type PhotoDeletion = 'none' | AvatarDeletion;
 
 export interface ConvertToManagedOptions {
   /** Who ran it; `operator` from the script. Logged, never stored. */
@@ -604,8 +644,15 @@ export interface SessionRevocation {
 export interface ConvertToManagedResult {
   success: true;
   managedById: string;
-  /** `true`: the WorkOS user was deleted. `false`: deleting it failed (finish by hand). */
+  /**
+   * `true`: the WorkOS user is gone (deleted now, or WorkOS answered 404, see
+   * `identityNote`). `false`: deleting it failed (finish by hand).
+   */
   identityDeleted: boolean;
+  /** Set when WorkOS already had no such user (404): nothing was deleted. */
+  identityNote?: IdentityNote;
+  /** The cleared photo's S3 object; `failed` must be deleted by hand before replying. */
+  photoDeletion: PhotoDeletion;
   /**
    * PENDING guardian invitations sent to the child's address, for any child,
    * expired by the conversion: the operator asks each child's coach to

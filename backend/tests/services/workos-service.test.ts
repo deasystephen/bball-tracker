@@ -507,7 +507,7 @@ describe('WorkOSService', () => {
       const existingUser = createPlayer({ email: 'kid@example.com', workosUserId: 'workos_kid' });
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(existingUser) // by workosUserId, read before the conversion committed
-        .mockResolvedValueOnce({ deletedAt: null }); // re-read: live, but un-linked
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: null }); // re-read: live, but un-linked
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await expect(
@@ -516,6 +516,23 @@ describe('WorkOSService', () => {
       expect(mockPrisma.user.updateMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
       expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('continues to the email branches when the linked row was relinked to another login meanwhile', async () => {
+      const existingUser = createPlayer({ email: 'moved@example.com', workosUserId: 'workos_old' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId, before the relink committed
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'workos_other' }); // re-read: relinked
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      // The email lookup finds the row, now bound to the other identity: the
+      // usual refusal for an email owned by another login.
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([{ ...existingUser, workosUserId: 'workos_other' }]);
+
+      await expect(
+        WorkOSService.syncUser({ id: 'workos_old', email: 'moved@example.com', emailVerified: true })
+      ).rejects.toThrow(ConflictError);
+      expect(mockPrisma.user.findMany).toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
     it('should claim a pre-provisioned row by email and clear managed-player ownership (audit #2)', async () => {

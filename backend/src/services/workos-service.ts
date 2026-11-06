@@ -277,8 +277,9 @@ export class WorkOSService {
     // WorkOS id (#983): `AccountService.convertToManaged` un-links a child's
     // row and clears its email, verified flag and photo, and a sign-in that
     // read the row before that committed must not write them back. A live row
-    // that lost this identity refuses the sign-in (401) rather than falling
-    // through to a claim or a create.
+    // now un-linked (workosUserId null) refuses the sign-in (401) rather than
+    // falling through to a claim or a create; a row relinked to another
+    // identity meanwhile continues to the email branches as before.
 
     // 1. Already linked by WorkOS id
     const linked = await prisma.user.findUnique({ where: { workosUserId: workosUser.id } });
@@ -314,12 +315,19 @@ export class WorkOSService {
         const user = await prisma.user.findUniqueOrThrow({ where: { id: linked.id } });
         return { user, claimedInvite: false, wasManaged: false };
       }
-      const current = await prisma.user.findUnique({ where: { id: linked.id }, select: { deletedAt: true } });
-      if (current && current.deletedAt === null) {
+      const current = await prisma.user.findUnique({
+        where: { id: linked.id },
+        select: { deletedAt: true, workosUserId: true },
+      });
+      if (current && current.deletedAt === null && current.workosUserId === null) {
+        // Un-linked (the under-13 conversion, #983): refuse, write nothing.
         logger.warn('Refusing sign-in: the row was un-linked from this login during sign-in', { userId: linked.id });
         throw new UnauthorizedError('This login is no longer linked to an account');
       }
-      logger.info('Linked user was deleted during sign-in; creating a fresh account', { userId: linked.id });
+      // Deleted (D9), or relinked to another identity meanwhile: carry on with
+      // the email branches below as before, which create, refuse (409) or
+      // relink as they would for any sign-in.
+      logger.info('Linked user changed during sign-in; continuing with the email lookup', { userId: linked.id });
     }
 
     // 2./3. A live row with the same email, in any case

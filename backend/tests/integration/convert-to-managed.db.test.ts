@@ -77,7 +77,7 @@ beforeAll(async () => {
 beforeEach(() => {
   deleteUser = jest.spyOn(WorkOSService, 'deleteUser').mockResolvedValue(undefined);
   revokeAllSessions = jest.spyOn(WorkOSService, 'revokeAllSessions').mockResolvedValue({ revoked: 0, failed: 0 });
-  deleteAvatar = jest.spyOn(uploadService, 'deletePreviousAvatar').mockResolvedValue(undefined);
+  deleteAvatar = jest.spyOn(uploadService, 'deleteAvatarObject').mockResolvedValue('deleted');
 });
 
 afterEach(() => {
@@ -163,6 +163,7 @@ describe('AccountService.convertToManaged', () => {
       success: true,
       managedById: head,
       identityDeleted: true,
+      photoDeletion: 'deleted',
       expiredGuardianInvitations: expect.arrayContaining([
         { id: sharedAddress.id, childId: kid },
         { id: toKidAddress.id, childId: sibling },
@@ -172,7 +173,7 @@ describe('AccountService.convertToManaged', () => {
     expect(result.expiredGuardianInvitations).toHaveLength(2);
     expect(deleteUser).toHaveBeenCalledWith(`workos-kid-${fx.run}`);
     expect(revokeAllSessions).not.toHaveBeenCalled();
-    expect(deleteAvatar).toHaveBeenCalledWith(ownUpload, null);
+    expect(deleteAvatar).toHaveBeenCalledWith(ownUpload);
     expect(await snapshot(kid)).toEqual({
       workosUserId: null,
       email: null,
@@ -244,7 +245,7 @@ describe('AccountService.convertToManaged', () => {
     await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
     expect(await snapshot(kid)).toMatchObject({ isManaged: true, profilePictureUrl: null });
-    expect(deleteAvatar).toHaveBeenCalledWith(null, null);
+    expect(deleteAvatar).not.toHaveBeenCalled();
   });
 
   it('clears and deletes an upload by someone not on the player’s current staff (a parent, a past coach)', async () => {
@@ -258,7 +259,7 @@ describe('AccountService.convertToManaged', () => {
     await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
     expect(await snapshot(kid)).toMatchObject({ profilePictureUrl: null });
-    expect(deleteAvatar).toHaveBeenCalledWith(photo, null);
+    expect(deleteAvatar).toHaveBeenCalledWith(photo);
   });
 
   it('clears but keeps the object of a photo another user row still shows', async () => {
@@ -273,7 +274,7 @@ describe('AccountService.convertToManaged', () => {
     await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
     expect(await snapshot(kid)).toMatchObject({ profilePictureUrl: null });
-    expect(deleteAvatar).toHaveBeenCalledWith(null, null);
+    expect(deleteAvatar).not.toHaveBeenCalled();
   });
 
   it('does not treat a cancelled invitation the child once sent as an adult signal', async () => {
@@ -326,7 +327,7 @@ describe('AccountService.convertToManaged', () => {
     const result = await AccountService.convertToManaged(kid, { actorId: 'operator', managedById: assistant });
 
     expect(result.managedById).toBe(assistant);
-    expect(deleteAvatar).toHaveBeenCalledWith(null, null);
+    expect(deleteAvatar).not.toHaveBeenCalled();
     expect(await snapshot(kid)).toMatchObject({ managedById: assistant, profilePictureUrl: coachPhoto });
   });
 
@@ -361,6 +362,39 @@ describe('AccountService.convertToManaged', () => {
     expect(await prisma.user.count({ where: { email: kidEmail } })).toBe(0);
   });
 
+  it('counts a WorkOS 404 as already deleted (a Staging id after the cutover), with a note and no fallback', async () => {
+    const org = await fx.org('gone404');
+    const head = await fx.user('gone404Head', 'COACH');
+    await fx.staff(head, org);
+    const kid = await claimedPlayer('gone404Kid', org);
+    deleteUser.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }));
+
+    const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
+
+    expect(result).toMatchObject({ identityDeleted: true, identityNote: 'not_found_at_workos' });
+    expect(result).not.toHaveProperty('workosUserId');
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed S3 delete of the child’s photo after commit', async () => {
+    const org = await fx.org('s3fail');
+    const head = await fx.user('s3failHead', 'COACH');
+    await fx.staff(head, org);
+    const kid = await fx.user('s3failKid', 'PLAYER');
+    const photo = `https://${BUCKET}.s3.amazonaws.com/avatars/${kid}/selfie.jpg`;
+    await prisma.user.update({
+      where: { id: kid },
+      data: { workosUserId: `workos-s3failKid-${fx.run}`, profilePictureUrl: photo },
+    });
+    await fx.member(kid, org);
+    deleteAvatar.mockResolvedValue('failed');
+
+    const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
+
+    expect(result).toMatchObject({ photoDeletion: 'failed', identityDeleted: true });
+    expect(await snapshot(kid)).toMatchObject({ profilePictureUrl: null, isManaged: true });
+  });
+
   it('reports a failed WorkOS deletion and a partial session revocation without undoing the conversion', async () => {
     const org = await fx.org('wfail');
     const head = await fx.user('wfailHead', 'COACH');
@@ -376,6 +410,7 @@ describe('AccountService.convertToManaged', () => {
       success: true,
       managedById: head,
       identityDeleted: false,
+      photoDeletion: 'none',
       expiredGuardianInvitations: [],
       deletedReplyCount: 0,
       workosUserId: `workos-wfailKid-${fx.run}`,
@@ -544,6 +579,23 @@ describe('AccountService.convertToManaged', () => {
 
       await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
+    });
+
+    it('answers adult_account, not no_active_team, for an adult on no active team', async () => {
+      const elsewhere = await fx.org('unrosteredAdult');
+      const adult = await fx.user('unrosteredAdult', 'COACH');
+      await prisma.user.update({ where: { id: adult }, data: { workosUserId: `workos-unrostered-${fx.run}` } });
+      await prisma.announcement.create({
+        data: { teamId: elsewhere.teamId, authorId: adult, title: `U-${fx.run}`, body: 'hi' },
+      });
+      const managed = await fx.user('unrosteredManaged', 'PLAYER');
+      await prisma.user.update({ where: { id: managed }, data: { isManaged: true, managedById: adult } });
+      const before = await snapshot(adult);
+
+      await expect(AccountService.convertToManaged(adult, { actorId: 'operator' })).rejects.toEqual(
+        refusal('adult_account')
+      );
+      await expectUntouched(adult, before);
     });
 
     it('refuses a system admin', async () => {

@@ -15,6 +15,11 @@
  * stopgap, the output carries the WorkOS user id (the row no longer does) and
  * the session outcome, a warning goes to stderr and the exit code is 3: the
  * operator deletes the WorkOS user by hand before replying to the reporter.
+ * A WorkOS 404 counts as deleted (`identityNote: not_found_at_workos`). When
+ * the S3 delete of the cleared photo fails (`photoDeletion: failed`) the exit
+ * code is 4 (3 wins when both failed) and the operator deletes the object by
+ * hand. The WorkOS credentials and `S3_AVATARS_BUCKET` are checked before
+ * anything is written.
  * `expiredGuardianInvitations` lists pending guardian invitations sent to the
  * child's address (with the child each was for) that were expired: the
  * operator asks each child's coach to re-invite at a parent's address.
@@ -28,6 +33,7 @@ import 'dotenv/config';
 import prisma from '../src/models';
 import { AccountService } from '../src/services/account-service';
 import { ConvertRefusedError, type ConvertRefusalCode } from '../src/utils/errors';
+import { assertAvatarStorageConfig } from '../src/services/upload-service';
 import { assertWorkOSConfig } from '../src/utils/workos-client';
 
 const USAGE = 'usage: convert-to-managed.ts <userId> [--coach <coachUserId>]\n';
@@ -66,8 +72,9 @@ async function main(argv: string[]): Promise<void> {
 
   // Before anything is written: every convertible row has a WorkOS identity,
   // and converting without the credentials would leave it (and its sessions)
-  // behind.
+  // behind; without the avatar bucket a photo of the child would be left in S3.
   assertWorkOSConfig();
+  assertAvatarStorageConfig();
 
   const result = await AccountService.convertToManaged(args.userId, {
     actorId: 'operator',
@@ -80,6 +87,8 @@ async function main(argv: string[]): Promise<void> {
         converted: true,
         managedById: result.managedById,
         identityDeleted: result.identityDeleted,
+        ...(result.identityNote && { identityNote: result.identityNote }),
+        photoDeletion: result.photoDeletion,
         expiredGuardianInvitations: result.expiredGuardianInvitations,
         deletedReplyCount: result.deletedReplyCount,
         ...(!result.identityDeleted && { workosUserId: result.workosUserId, sessions: result.sessions }),
@@ -95,6 +104,22 @@ async function main(argv: string[]): Promise<void> {
       `\nNote: ${result.expiredGuardianInvitations.length} pending guardian invitation(s) sent to the child's address were expired, ` +
         `for child id(s) ${children.join(', ')}. Ask each child's coach to re-invite the parent at a parent's own address.\n`
     );
+  }
+
+  if (result.identityNote === 'not_found_at_workos') {
+    process.stderr.write(
+      '\nNote: WorkOS has no user with this id (already deleted, or a Staging id from before the production-key cutover). Nothing to delete there.\n'
+    );
+  }
+
+  if (result.photoDeletion === 'failed') {
+    // Committed: the row no longer shows the photo, so nobody can find the
+    // object again but us.
+    process.stderr.write(
+      '\n!!! The photo object was NOT deleted from S3 (see the "Failed to delete avatar object" log line for its URL).\n' +
+        '!!! Delete it by hand before replying to the reporter.\n'
+    );
+    process.exitCode = 4;
   }
 
   if (!result.identityDeleted) {
@@ -124,7 +149,7 @@ async function main(argv: string[]): Promise<void> {
 main(process.argv.slice(2))
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    const next = error instanceof ConvertRefusedError ? `. ${NEXT_STEP[error.code as ConvertRefusalCode]}` : '';
+    const next = error instanceof ConvertRefusedError ? `. ${NEXT_STEP[error.code]}` : '';
     process.stderr.write(`${message}${next}\n`);
     process.exitCode = 1;
   })

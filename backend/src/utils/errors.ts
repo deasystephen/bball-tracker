@@ -179,6 +179,8 @@ export type ConvertRefusalCode =
  * `code` to what to do next.
  */
 export class ConvertRefusedError extends DetailedError<Record<string, unknown>> {
+  declare readonly code: ConvertRefusalCode;
+
   constructor(code: ConvertRefusalCode, message: string) {
     super(code, {}, message, 409);
     Object.setPrototypeOf(this, ConvertRefusedError.prototype);
