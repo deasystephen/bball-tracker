@@ -91,10 +91,10 @@
     "@react-native-async-storage/async-storage": "^2.2.0",
     "browserslist": "^4.28.7",
     "diff": "8.0.3",
-    "node-forge": "^1.4.0",
+    "node-forge": "^1.4.3",
     "tar": "^7.5.8",
     "@xmldom/xmldom": "^0.8.12",
-    "follow-redirects": "^1.16.1",
+    "follow-redirects": "^1.16.2",
     "eas-cli": {
       "minimatch@^5": "^5.1.8"
     },
