@@ -25,7 +25,8 @@ import prisma from '../../src/models';
 import { AccountService } from '../../src/services/account-service';
 import * as uploadService from '../../src/services/upload-service';
 import { WorkOSService } from '../../src/services/workos-service';
-import { ConflictError, NotFoundError } from '../../src/utils/errors';
+import { logger } from '../../src/utils/logger';
+import { ConvertRefusedError, NotFoundError, UnauthorizedError, type ConvertRefusalCode } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
 jest.setTimeout(30000);
@@ -59,6 +60,11 @@ const SNAPSHOT_SELECT = {
 } satisfies Prisma.UserSelect;
 
 type Snapshot = Prisma.UserGetPayload<{ select: typeof SNAPSHOT_SELECT }> | null;
+
+/** A refusal with this stable code (the CLI keys its advice on it). */
+function refusal(code: ConvertRefusalCode): ConvertRefusedError {
+  return expect.objectContaining({ code, statusCode: 409 }) as ConvertRefusedError;
+}
 
 async function snapshot(id: string): Promise<Snapshot> {
   return prisma.user.findUnique({ where: { id }, select: SNAPSHOT_SELECT });
@@ -157,9 +163,13 @@ describe('AccountService.convertToManaged', () => {
       success: true,
       managedById: head,
       identityDeleted: true,
-      expiredGuardianInvitationIds: [sharedAddress.id],
+      expiredGuardianInvitations: expect.arrayContaining([
+        { id: sharedAddress.id, childId: kid },
+        { id: toKidAddress.id, childId: sibling },
+      ]),
       deletedReplyCount: 1,
     });
+    expect(result.expiredGuardianInvitations).toHaveLength(2);
     expect(deleteUser).toHaveBeenCalledWith(`workos-kid-${fx.run}`);
     expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(deleteAvatar).toHaveBeenCalledWith(ownUpload, null);
@@ -289,20 +299,6 @@ describe('AccountService.convertToManaged', () => {
     expect(await snapshot(kid)).toMatchObject({ isManaged: true });
   });
 
-  it('converts a row that never had a WorkOS identity and reports identityDeleted: null', async () => {
-    const org = await fx.org('noIdentity');
-    const head = await fx.user('noIdentityHead', 'COACH');
-    await fx.staff(head, org);
-    const kid = await fx.user('noIdentityKid', 'PLAYER');
-    await fx.member(kid, org);
-
-    const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
-
-    expect(result).toEqual({ success: true, managedById: head, identityDeleted: null, expiredGuardianInvitationIds: [], deletedReplyCount: 0 });
-    expect(deleteUser).not.toHaveBeenCalled();
-    expect(await snapshot(kid)).toMatchObject({ isManaged: true, managedById: head, email: null });
-  });
-
   it('removes an empty personal league the child once created, with its admin row', async () => {
     const org = await fx.org('personal');
     const head = await fx.user('personalHead', 'COACH');
@@ -334,14 +330,45 @@ describe('AccountService.convertToManaged', () => {
     expect(await snapshot(kid)).toMatchObject({ managedById: assistant, profilePictureUrl: coachPhoto });
   });
 
+  it('a sign-in that read the row before the conversion committed writes nothing back and is refused', async () => {
+    const org = await fx.org('stale');
+    const head = await fx.user('staleHead', 'COACH');
+    await fx.staff(head, org);
+    const kid = await claimedPlayer('staleKid', org);
+    const workosId = `workos-staleKid-${fx.run}`;
+    const kidEmail = `stalekid.${fx.run}@example.test`;
+    const staleRead = await prisma.user.findUniqueOrThrow({ where: { id: kid } });
+
+    await AccountService.convertToManaged(kid, { actorId: 'operator' });
+    const after = await snapshot(kid);
+
+    // The sync's branch-1 read ran before the commit and saw the linked row.
+    const findUnique = jest.spyOn(prisma.user, 'findUnique').mockResolvedValueOnce(staleRead as never);
+    try {
+      await expect(
+        WorkOSService.syncUser({
+          id: workosId,
+          email: kidEmail,
+          emailVerified: true,
+          profilePictureUrl: 'https://lh3.googleusercontent.example.test/a/child',
+        })
+      ).rejects.toThrow(UnauthorizedError);
+    } finally {
+      findUnique.mockRestore();
+    }
+
+    expect(await snapshot(kid)).toEqual(after);
+    expect(await prisma.user.count({ where: { email: kidEmail } })).toBe(0);
+  });
+
   it('reports a failed WorkOS deletion and a partial session revocation without undoing the conversion', async () => {
     const org = await fx.org('wfail');
     const head = await fx.user('wfailHead', 'COACH');
     await fx.staff(head, org);
     const kid = await claimedPlayer('wfailKid', org);
     deleteUser.mockRejectedValue(new Error('WorkOS down'));
-
     revokeAllSessions.mockResolvedValue({ revoked: 2, failed: 1 });
+    const info = jest.spyOn(logger, 'info');
 
     const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
@@ -349,13 +376,19 @@ describe('AccountService.convertToManaged', () => {
       success: true,
       managedById: head,
       identityDeleted: false,
-      expiredGuardianInvitationIds: [],
+      expiredGuardianInvitations: [],
       deletedReplyCount: 0,
       workosUserId: `workos-wfailKid-${fx.run}`,
       sessions: { revoked: 2, failed: 1 },
     });
     expect(revokeAllSessions).toHaveBeenCalledWith(`workos-wfailKid-${fx.run}`);
+    // The provider id reaches the logs, so the operator can finish without the terminal output.
+    expect(info).toHaveBeenCalledWith(
+      'Account converted to managed',
+      expect.objectContaining({ userId: kid, identityDeleted: false, workosUserId: `workos-wfailKid-${fx.run}` })
+    );
     expect(await snapshot(kid)).toMatchObject({ workosUserId: null, isManaged: true, managedById: head });
+    info.mockRestore();
   });
 
   it('reports sessions: null when the sessions cannot even be listed', async () => {
@@ -386,7 +419,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.staff(kid, other);
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(ConflictError);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
     });
 
@@ -398,7 +431,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.leagueAdmin(kid, org);
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(ConflictError);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
     });
 
@@ -411,7 +444,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.guardian(kid, sibling);
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(ConflictError);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
     });
 
@@ -420,9 +453,7 @@ describe('AccountService.convertToManaged', () => {
       await prisma.user.update({ where: { id: kid }, data: { workosUserId: `workos-lone-${fx.run}` } });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(
-        /on no team in an active season.*Delete the account/
-      );
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('no_active_team'));
       await expectUntouched(kid, before);
     });
 
@@ -437,7 +468,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.member(kid, b);
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/more than one/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('several_head_coaches'));
       await expectUntouched(kid, before);
     });
 
@@ -453,7 +484,7 @@ describe('AccountService.convertToManaged', () => {
 
       await expect(
         AccountService.convertToManaged(kid, { actorId: 'operator', managedById: stranger })
-      ).rejects.toThrow(/not on the staff/);
+      ).rejects.toEqual(refusal('coach_not_on_team'));
       await expectUntouched(kid, before);
     });
 
@@ -471,7 +502,7 @@ describe('AccountService.convertToManaged', () => {
 
       await expect(
         AccountService.convertToManaged(kid, { actorId: 'operator', managedById: formerCoach })
-      ).rejects.toThrow(/active season/);
+      ).rejects.toEqual(refusal('coach_not_on_team'));
       await expectUntouched(kid, before);
     });
 
@@ -486,7 +517,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.org('ownTeamsTeam', { league: { leagueId, leagueName: 'personal', seasonId: season.id } });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/personal league/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('personal_league_in_use'));
       await expectUntouched(kid, before);
       expect(await prisma.league.count({ where: { id: leagueId } })).toBe(1);
       expect(await prisma.leagueAdmin.count({ where: { userId: kid } })).toBe(1);
@@ -499,7 +530,7 @@ describe('AccountService.convertToManaged', () => {
       const kid = await claimedPlayer('noHeadKid', org);
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/pass --coach/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('no_head_coach'));
       await expectUntouched(kid, before);
     });
 
@@ -511,7 +542,7 @@ describe('AccountService.convertToManaged', () => {
       await prisma.announcement.create({ data: { teamId: org.teamId, authorId: kid, title: `P-${fx.run}`, body: 'hi' } });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/adult account/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
     });
 
@@ -522,7 +553,7 @@ describe('AccountService.convertToManaged', () => {
       const kid = await claimedPlayer('sysAdminKid', org, { role: 'ADMIN' });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/system admin/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
       await expectUntouched(kid, before);
     });
 
@@ -547,7 +578,7 @@ describe('AccountService.convertToManaged', () => {
 
       for (const kid of [managing, inviter]) {
         const before = await snapshot(kid);
-        await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/adult account/);
+        await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('adult_account'));
         await expectUntouched(kid, before);
       }
     });
@@ -562,7 +593,7 @@ describe('AccountService.convertToManaged', () => {
       await fx.leagueAdmin(head, { leagueId });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/personal league/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('personal_league_in_use'));
       await expectUntouched(kid, before);
       expect(await prisma.leagueAdmin.count({ where: { leagueId } })).toBe(2);
     });
@@ -576,8 +607,20 @@ describe('AccountService.convertToManaged', () => {
       deleteUser.mockClear();
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(
-        /already a managed roster record/
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('already_managed'));
+      await expectUntouched(kid, before);
+    });
+
+    it('refuses an invited row that never signed in: nothing to convert', async () => {
+      const org = await fx.org('neverSigned');
+      const head = await fx.user('neverSignedHead', 'COACH');
+      await fx.staff(head, org);
+      const kid = await fx.user('neverSignedKid', 'PLAYER');
+      await fx.member(kid, org);
+      const before = await snapshot(kid);
+
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(
+        refusal('never_signed_in')
       );
       await expectUntouched(kid, before);
     });
@@ -592,7 +635,7 @@ describe('AccountService.convertToManaged', () => {
       const tomb = await fx.user('tombKid', 'PLAYER');
       await prisma.user.update({ where: { id: tomb }, data: { deletedAt: new Date() } });
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/already/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toEqual(refusal('already_managed'));
       await expect(AccountService.convertToManaged(tomb, { actorId: 'operator' })).rejects.toThrow(NotFoundError);
       await expect(
         AccountService.convertToManaged('00000000-0000-4000-8000-000000000000', { actorId: 'operator' })

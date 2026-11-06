@@ -9,33 +9,42 @@
  *
  * Runs `AccountService.convertToManaged` against DATABASE_URL: one
  * transaction un-claims the row (no login, no email, managed by the coach),
- * then the WorkOS user is deleted best-effort, which ends every session. The
+ * then the WorkOS user is deleted best-effort, which ends its sessions. The
  * output says which coach now manages the record and whether the WorkOS
- * deletion succeeded (`identityDeleted`: `true`, `false`, or `null` when the
- * row had no WorkOS identity; exit 0). When it failed, the active sessions
- * are revoked as a stopgap, the output carries the WorkOS user id (the row no
- * longer does) and the session outcome, a warning goes to stderr and the exit
- * code is 3: the operator deletes the WorkOS user by hand before replying to
- * the reporter. `expiredGuardianInvitationIds` lists pending guardian
- * invitations for the child that went to the child's own address and were
- * expired: the coach re-invites the parent at a parent's address.
+ * deletion succeeded. When it failed, the active sessions are revoked as a
+ * stopgap, the output carries the WorkOS user id (the row no longer does) and
+ * the session outcome, a warning goes to stderr and the exit code is 3: the
+ * operator deletes the WorkOS user by hand before replying to the reporter.
+ * `expiredGuardianInvitations` lists pending guardian invitations sent to the
+ * child's address (with the child each was for) that were expired: the
+ * operator asks each child's coach to re-invite at a parent's address.
  *
- * Without `--coach` the record goes to the one head coach of the player's
- * teams in active seasons; the script refuses (exit 1, nothing written) when
- * there is none or more than one, when a named coach is not staff on one of
- * those teams, when the account is already a managed record, and when it
- * shows any adult signal (staff or league admin role, guardian link, managed
- * players, sent invitations, a personal league with teams or other admins):
- * delete it with `data-subject-request.ts` instead.
+ * A refusal writes nothing, exits 1 and prints the service's reason plus what
+ * to do next, keyed on the refusal code (`ConvertRefusedError.code`).
  */
 
 // Loads backend/.env locally (DATABASE_URL, WORKOS_*). In production run with the task's env.
 import 'dotenv/config';
 import prisma from '../src/models';
 import { AccountService } from '../src/services/account-service';
+import { ConvertRefusedError, type ConvertRefusalCode } from '../src/utils/errors';
 import { assertWorkOSConfig } from '../src/utils/workos-client';
 
 const USAGE = 'usage: convert-to-managed.ts <userId> [--coach <coachUserId>]\n';
+
+/** What the operator does next for each refusal; the runbook lists the same. */
+const NEXT_STEP: Record<ConvertRefusalCode, string> = {
+  already_managed: 'Nothing to do: the record was converted already.',
+  never_signed_in: 'Nothing to convert: the child never signed in. Nothing to un-claim.',
+  adult_account: 'Verify the report again; if it holds, delete the account with data-subject-request.ts delete.',
+  personal_league_in_use: 'Verify the report again; if it holds, delete the account with data-subject-request.ts delete.',
+  coach_not_on_team: "Pass --coach with a staff member of one of the child's active-season teams.",
+  no_active_team: 'There is no roster to keep the record on: delete the account with data-subject-request.ts delete.',
+  no_head_coach: "Pass --coach with a staff member of the child's active-season team.",
+  several_head_coaches: 'Pass --coach with the head coach who should keep the record.',
+  coach_unavailable: 'Run it again, or pass --coach with another staff member.',
+  coaches_changed: 'Run it again.',
+};
 
 function parseArgs(argv: string[]): { userId: string; coachId?: string } | null {
   const [userId, ...rest] = argv;
@@ -55,13 +64,10 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  // Before anything is written: a conversion without WorkOS credentials would
-  // un-claim the row and leave the identity-provider user (and its sessions)
-  // behind. A row with no workosUserId never reaches WorkOS.
-  const target = await prisma.user.findUnique({ where: { id: args.userId }, select: { workosUserId: true } });
-  if (target?.workosUserId) {
-    assertWorkOSConfig();
-  }
+  // Before anything is written: every convertible row has a WorkOS identity,
+  // and converting without the credentials would leave it (and its sessions)
+  // behind.
+  assertWorkOSConfig();
 
   const result = await AccountService.convertToManaged(args.userId, {
     actorId: 'operator',
@@ -73,24 +79,25 @@ async function main(argv: string[]): Promise<void> {
         userId: args.userId,
         converted: true,
         managedById: result.managedById,
-        // null: the row had no WorkOS identity, nothing to delete.
         identityDeleted: result.identityDeleted,
-        expiredGuardianInvitationIds: result.expiredGuardianInvitationIds,
+        expiredGuardianInvitations: result.expiredGuardianInvitations,
         deletedReplyCount: result.deletedReplyCount,
-        ...(result.workosUserId && { workosUserId: result.workosUserId, sessions: result.sessions }),
+        ...(!result.identityDeleted && { workosUserId: result.workosUserId, sessions: result.sessions }),
       },
       null,
       2
     ) + '\n'
   );
 
-  if (result.expiredGuardianInvitationIds.length > 0) {
+  if (result.expiredGuardianInvitations.length > 0) {
+    const children = [...new Set(result.expiredGuardianInvitations.map((invitation) => invitation.childId))];
     process.stderr.write(
-      `\nNote: ${result.expiredGuardianInvitationIds.length} pending guardian invitation(s) for this child went to the child's own address and were expired. Ask the coach to re-invite the parent at a parent's address.\n`
+      `\nNote: ${result.expiredGuardianInvitations.length} pending guardian invitation(s) sent to the child's address were expired, ` +
+        `for child id(s) ${children.join(', ')}. Ask each child's coach to re-invite the parent at a parent's own address.\n`
     );
   }
 
-  if (result.identityDeleted === false) {
+  if (!result.identityDeleted) {
     // The row is converted, but the identity-provider user survives: a new
     // sign-in would create a fresh account for the child. Exit non-zero so
     // nobody reads this run as finished.
@@ -116,7 +123,9 @@ async function main(argv: string[]): Promise<void> {
 
 main(process.argv.slice(2))
   .catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    const message = error instanceof Error ? error.message : String(error);
+    const next = error instanceof ConvertRefusedError ? `. ${NEXT_STEP[error.code as ConvertRefusalCode]}` : '';
+    process.stderr.write(`${message}${next}\n`);
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());

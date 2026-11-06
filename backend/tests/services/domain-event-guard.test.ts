@@ -38,7 +38,7 @@ const ALLOWED: Record<string, string> = {
   // In-transaction helpers: the public method that calls them logs the event.
   'account-service.ts#unclaimManagedRow':
     'un-claim write inside convertToManaged (and the #981 age screen), whose caller logs `Account converted to managed`',
-  'account-service.ts#deleteEmptyPersonalLeague':
+  'account-service.ts#deletePersonalLeagueIfEmpty':
     'D16 inside deleteAccount and convertToManaged, which log `Account deleted` / `Account converted to managed`',
   'account-service.ts#purgeLoginBindings':
     'token and invitation purge inside deleteAccount and unclaimManagedRow; their callers log `Account deleted` / `Account converted to managed`',

@@ -10,7 +10,7 @@ import { logger } from '../utils/logger';
 import { isAdminEmail } from '../utils/admin-emails';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail, normaliseEmail } from '../utils/email-match';
-import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError } from '../utils/errors';
+import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError, UnauthorizedError } from '../utils/errors';
 
 type UserManagement = ReturnType<typeof getWorkOS>['userManagement'];
 export type WorkOSAuthentication = Awaited<ReturnType<UserManagement['authenticateWithCode']>>;
@@ -272,6 +272,13 @@ export class WorkOSService {
     // WorkOS id straight back onto the tombstone. Zero rows updated means the
     // row was deleted underneath us — fall through to a fresh create, which is
     // exactly what a post-deletion sign-in gets in the steady state.
+    //
+    // The branch-1 write is also conditioned on the row still carrying this
+    // WorkOS id (#983): `AccountService.convertToManaged` un-links a child's
+    // row and clears its email, verified flag and photo, and a sign-in that
+    // read the row before that committed must not write them back. A live row
+    // that lost this identity refuses the sign-in (401) rather than falling
+    // through to a claim or a create.
 
     // 1. Already linked by WorkOS id
     const linked = await prisma.user.findUnique({ where: { workosUserId: workosUser.id } });
@@ -292,7 +299,7 @@ export class WorkOSService {
       }
       const updated = await WorkOSService.mapUniqueViolation(() =>
         prisma.user.updateMany({
-          where: { id: linked.id, deletedAt: null },
+          where: { id: linked.id, deletedAt: null, workosUserId: workosUser.id },
           data: {
             emailVerified,
             ...(emailChanged && {
@@ -306,6 +313,11 @@ export class WorkOSService {
       if (updated.count === 1) {
         const user = await prisma.user.findUniqueOrThrow({ where: { id: linked.id } });
         return { user, claimedInvite: false, wasManaged: false };
+      }
+      const current = await prisma.user.findUnique({ where: { id: linked.id }, select: { deletedAt: true } });
+      if (current && current.deletedAt === null) {
+        logger.warn('Refusing sign-in: the row was un-linked from this login during sign-in', { userId: linked.id });
+        throw new UnauthorizedError('This login is no longer linked to an account');
       }
       logger.info('Linked user was deleted during sign-in; creating a fresh account', { userId: linked.id });
     }

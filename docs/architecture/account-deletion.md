@@ -27,53 +27,69 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Convert instead of delete (under 13, #983).** When we learn an account holder is under 13,
   the operator may turn the account back into a managed roster record instead of deleting it:
   `backend/scripts/convert-to-managed.ts <userId> [--coach <coachUserId>]` →
-  `AccountService.convertToManaged` (no route). One `$transaction`:
-  1. **Unlocked read** (`assertConvertible`): no live row is 404; an already-managed, unclaimed
-     row is 409 "already a managed roster record", so a re-run never reaches the coach check.
-     Then the **managing coach** is chosen: the `--coach` id or the single head coach, both staff
-     on one of the player's teams in an **active** season. When no active-season team exists the
-     409 says to delete instead; when one exists but has no head coach, it says to pass `--coach`;
-     several head coaches is 409 too.
+  `AccountService.convertToManaged` (no route). Every refusal is a 409 `ConvertRefusedError`
+  (`utils/errors.ts`) with a stable `code` (`ConvertRefusalCode`); messages describe the state and
+  never name a CLI flag, and the script maps each code to the next step. One `$transaction`:
+  1. **Unlocked read** (`assertConvertible`): no live row is 404; `already_managed` (a re-run) and
+     `never_signed_in` (an invited row the child never claimed: `workosUserId` null, not managed)
+     are refused before the coach is chosen. Then the **managing coach**: the `--coach` id or the
+     single head coach, both staff on one of the player's teams in an **active** season;
+     otherwise `coach_not_on_team`, `no_active_team` (delete instead), `no_head_coach` (name a
+     staff member) or `several_head_coaches`.
   2. **`SELECT … FOR UPDATE` on the player and the coach in one id-ordered statement**, the order
      and strength `deleteAccount` uses for a user and the children they guard, so the two can wait
-     on each other but not deadlock. Then `assertConvertible` again, the coach must be live, and
-     the coach choice is re-checked. FOR UPDATE on the player blocks the key-share lock a new
-     `TeamStaff`, `LeagueAdmin`, `Guardian`, invitation, announcement or managed-player row naming
-     it takes.
-  3. **Adult signals in one read** (`ADULT_SIGNALS_SELECT`, `_count`s plus the personal league's
-     admin and per-season team counts), judged by the pure `assertPlayerAccount`. 409 for: the
-     global `ADMIN` role (a refusal signal, not an access check; `COACH` is not a signal, a child
-     can self-select it), a staff row, a guardian-of link, managed players, announcements authored,
-     sent team or guardian invitations that are not `CANCELLED`, admin of any league but its own
-     personal league, or a personal league with teams or another admin. An empty personal league
-     is deleted by `deleteEmptyPersonalLeague` (D16, shared with `deleteAccount`).
+     on each other but not deadlock. Then `assertConvertible` again, the coach must be live
+     (`coach_unavailable`), and the choice is re-checked (`coaches_changed`). FOR UPDATE on the
+     player blocks the key-share lock a new `TeamStaff`, `LeagueAdmin`, `Guardian`, invitation,
+     announcement or managed-player row naming it takes.
+  3. **Adult signals in one read** (`ADULT_SIGNALS_SELECT`: `_count`s plus the personal league's
+     admin and per-season team counts), judged by the pure `assertPlayerAccount`:
+     `adult_account` for the global `ADMIN` role (a refusal signal, not an access check; `COACH`
+     is not a signal, a child can self-select it), a staff row, a guardian-of link, managed
+     players, announcements authored, sent team or guardian invitations that are not `CANCELLED`,
+     or admin of any league but its own personal league; `personal_league_in_use` for a personal
+     league with teams or another admin. An empty personal league is deleted by
+     `deletePersonalLeagueIfEmpty` (D16, shared with `deleteAccount`, which passes its own team
+     count; the conversion passes the count from this read).
   4. **`unclaimManagedRow(tx, lockedRow, managedById)`**, exported for the age screen's under-13
      branch (#981).
-     - **Deleted** (collected from the child): `workosUserId`, `email` (with
-       `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified`; announcement replies the child wrote (the
-       only free text a player authors; the schema holds no chat or messages);
-       `purgeLoginBindings` (push and calendar-feed tokens, pending team invitations `CANCELLED`,
-       `recipientHash` cleared); the photo unless it is an upload under the `avatars/<id>/` prefix
-       of the coach or another live staff member of the player's active-season teams (external
-       URLs are cleared too, since the identity provider's photo is copied at claim time; a
-       cleared photo in our bucket is deleted from S3 whoever uploaded it, unless another `User`
-       row still references the URL); and the address on every guardian invitation that carries
-       it, any status, any child (`scrubInvitedEmail`, D17, shared with `deleteAccount`), after
-       every PENDING one is expired. The PENDING ones for this child at the child's own address
-       are returned as `expiredGuardianInvitationIds`, because accepting one would create a PARENT
-       account at the child's address.
+     - **Deleted** (what identifies or reaches the child, or what the child wrote):
+       `workosUserId`, `email` (with `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified`;
+       announcement replies the child wrote (the only free text a player authors; the schema
+       holds no chat or messages); `purgeLoginBindings` (push and calendar-feed tokens, pending
+       team invitations `CANCELLED`, `recipientHash` cleared); the photo unless it is an upload
+       under the `avatars/<id>/` prefix of the coach or another live staff member of the player's
+       active-season teams (external URLs are cleared too, since the identity provider's photo is
+       copied at claim time; a cleared photo in our bucket is deleted from S3 whoever uploaded it,
+       unless another `User` row still references the URL); and the address on every guardian
+       invitation that carries it, any status, any child (`scrubInvitedEmail`, D17, shared with
+       `deleteAccount`), after every PENDING one is expired. Every expired one is returned with
+       its `childId` as `expiredGuardianInvitations`, so the operator can contact each child's
+       coach.
      - **Reset:** `isManaged` true, `managedById` the coach, role `PLAYER`, free tier.
-     - **Kept** (team records): memberships, game events, stats, RSVPs, `Guardian` links (an
-       accepted link survives the scrub of its invitation's address), and guardian invitations for
-       the child at other addresses.
+     - **Kept:** `name` (a roster record needs one, and it is what the coach entered or sees; the
+       coach can edit it), memberships, game events, stats, RSVPs, `Guardian` links (an accepted
+       link survives the scrub of its invitation's address), and guardian invitations for the
+       child at other addresses. The conversion is not "delete everything collected from the
+       child".
 
-  After commit, best-effort: the S3 avatar delete and `WorkOSService.deleteUser`. The result's
-  `identityDeleted` is `true`, `null` (no identity) or `false`. On `false`: Sentry `flow:
-  convert-to-managed`, then `WorkOSService.revokeAllSessions` (one client, `Promise.allSettled`,
-  `{ revoked, failed }`); the result carries `workosUserId` and `sessions`, and the script exits 3.
-  Open Socket.io connections are not closed: they last until their access token expires, the same
-  as after `deleteAccount` (#1004). Domain event `Account converted to managed` (`userId`,
-  `actorId`, `managedById`, `identityDeleted`, `deletedReplyCount`). Procedure:
+  **Sign-in race.** `WorkOSService.syncUser`'s branch-1 update (a returning linked user) is
+  conditioned on `workosUserId` as well as `deletedAt IS NULL`. A sign-in that read the row before
+  the conversion committed updates zero rows; it re-reads the row and, finding it live but
+  un-linked, refuses with 401 instead of writing the email, verified flag or photo back, or
+  falling through to a claim or create. A tombstoned row still falls through to a fresh create
+  (D9). Other requests authenticated just before the commit can still finish a write, bounded by
+  the access-token lifetime (#1004).
+
+  After commit, best-effort: the S3 avatar delete and `WorkOSService.deleteUser` (every
+  convertible row has a WorkOS identity, so the script requires the WorkOS credentials up front).
+  `identityDeleted` is `true` or `false`. On `false`: Sentry `flow: convert-to-managed`, then
+  `WorkOSService.revokeAllSessions` (one client, `Promise.allSettled`, `{ revoked, failed }`); the
+  result carries `workosUserId` and `sessions`, the error lines and the domain event log the
+  `workosUserId`, and the script exits 3. Open Socket.io connections are not closed: they last
+  until their access token expires, the same as after `deleteAccount` (#1004). Domain event
+  `Account converted to managed` (`userId`, `actorId`, `managedById`, `identityDeleted`,
+  `deletedReplyCount`, plus `workosUserId` on failure). Procedure:
   [`docs/runbooks/data-subject-requests.md`](../runbooks/data-subject-requests.md#we-learned-an-account-holder-is-under-13);
   real-Postgres cases: `tests/integration/convert-to-managed.db.test.ts`.
 - Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and
@@ -90,7 +106,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Every write onto a `User` row is guarded by `deletedAt IS NULL`**: `PATCH /auth/me`,
   `PATCH /auth/me/role` (`updateMany` + re-read, 401 on zero rows), push-token registration (`FOR
   SHARE` probe inside the upsert transaction) and both `syncUser` branches (`updateMany`, fall
-  through to create on zero rows). Since #643 also `PATCH /players/:id` (tombstone 404 for an ADMIN
+  through to create on zero rows; branch 1 is also conditioned on `workosUserId`, #983). Since #643 also `PATCH /players/:id` (tombstone 404 for an ADMIN
   too; one `update` with `where: { id, deletedAt: null }`, P2025 is 404), `DELETE /players/:id`
   (tombstone 404 and a `delete` with the same guarded `where`; before, it hard-deleted the tombstone
   and the `onDelete: Cascade` relations such as `AnnouncementReply.author` silently took the retained
