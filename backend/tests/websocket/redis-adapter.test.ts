@@ -12,6 +12,12 @@ class MockRedis extends EventEmitter {
   publish: jest.Mock = jest.fn().mockResolvedValue(1);
   /** The original publish, before attachRedisAdapter wraps it. */
   readonly rawPublish = this.publish;
+  subscribe: jest.Mock = jest.fn().mockResolvedValue(1);
+  psubscribe: jest.Mock = jest.fn().mockResolvedValue(1);
+  unsubscribe: jest.Mock = jest.fn().mockResolvedValue(1);
+  punsubscribe: jest.Mock = jest.fn().mockResolvedValue(1);
+  /** The original subscriber commands, before attachRedisAdapter wraps them. */
+  readonly rawUnsubscribe = this.unsubscribe;
   quit = jest.fn().mockResolvedValue('OK');
   disconnect = jest.fn();
 }
@@ -52,11 +58,13 @@ describe('attachRedisAdapter', () => {
     info = jest.spyOn(logger, 'info').mockImplementation(() => logger);
     debug = jest.spyOn(logger, 'debug').mockImplementation(() => logger);
     io = { adapter: jest.fn() } as unknown as SocketServer;
-    handle = attachRedisAdapter(io, 'redis://example.test:6379');
+    jest.useFakeTimers();
+    handle = attachRedisAdapter(io, 'redis://example.test:6379', { bootGraceMs: 30_000 });
     [pub, sub] = mockClients;
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     warn.mockRestore();
     info.mockRestore();
     debug.mockRestore();
@@ -92,6 +100,36 @@ describe('attachRedisAdapter', () => {
 
     pub.emit('error', new Error('read ECONNRESET'));
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('warns once per client still not connected 30 s after boot, then logs its recovery', () => {
+    pub.emit('ready');
+    jest.advanceTimersByTime(30_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'Socket.io adapter: Redis not reachable since boot, delivering to this task only',
+      expect.objectContaining({ client: 'sub' })
+    );
+    sub.emit('ready');
+    expect(info).toHaveBeenCalledWith('Socket.io adapter: Redis recovered', { client: 'sub' });
+  });
+
+  it('tracks outages per client: only the client that was down logs a recovery', () => {
+    pub.emit('ready');
+    sub.emit('ready');
+    sub.emit('error', new Error('read ECONNRESET'));
+    pub.emit('ready');
+    expect(info).not.toHaveBeenCalledWith('Socket.io adapter: Redis recovered', expect.anything());
+    pub.emit('error', new Error('read ECONNRESET'));
+    expect(warn).toHaveBeenCalledTimes(2);
+    sub.emit('ready');
+    expect(info).toHaveBeenCalledWith('Socket.io adapter: Redis recovered', { client: 'sub' });
+    expect(info).not.toHaveBeenCalledWith('Socket.io adapter: Redis recovered', { client: 'pub' });
+  });
+
+  it('settles a subscriber command flushed by close() instead of leaving it unhandled', async () => {
+    sub.rawUnsubscribe.mockRejectedValueOnce(new Error('Connection is closed.'));
+    await expect(sub.unsubscribe('channel')).resolves.toBeUndefined();
   });
 
   it('close quits a ready client and drops one still connecting', async () => {

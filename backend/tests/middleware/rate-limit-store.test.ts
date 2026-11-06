@@ -13,11 +13,8 @@ jest.mock('../../src/utils/redis', () => ({
 
 import type { Options } from 'express-rate-limit';
 import { logger } from '../../src/utils/logger';
-import {
-  REDIS_RETRY_AFTER_FAILURE_MS,
-  SharedRateLimitStore,
-  resetRateLimitStoreOutageLog,
-} from '../../src/api/middleware/rate-limit-store';
+import { SharedRateLimitStore } from '../../src/api/middleware/rate-limit-store';
+import { REDIS_RETRY_AFTER_FAILURE_MS, sharedRedisBackoff } from '../../src/utils/redis-backoff';
 
 const OPTIONS = { windowMs: 60_000 } as Options;
 
@@ -36,7 +33,7 @@ describe('SharedRateLimitStore', () => {
   beforeEach(() => {
     mockClientConfigured = true;
     mockCall.mockReset();
-    resetRateLimitStoreOutageLog();
+    sharedRedisBackoff.reset();
     warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
   });
 
@@ -88,6 +85,35 @@ describe('SharedRateLimitStore', () => {
     healthyRedis(42);
     jest.setSystemTime(1_000_000 + REDIS_RETRY_AFTER_FAILURE_MS);
     expect((await store.increment('k')).totalHits).toBe(42);
+    store.shutdown();
+  });
+
+  it('a Redis that stalls while ready holds up only the one probe; other hits use memory meanwhile', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    mockCall.mockRejectedValue(new Error('Command timed out'));
+    const store = new SharedRateLimitStore('t5');
+    store.init(OPTIONS);
+    await store.increment('k');
+    jest.setSystemTime(1_000_000 + REDIS_RETRY_AFTER_FAILURE_MS);
+
+    let release: () => void = () => undefined;
+    const stalled = new Promise<void>((resolve) => (release = resolve));
+    mockCall.mockReset();
+    mockCall.mockImplementation(async (command: string) => {
+      if (command === 'SCRIPT') {
+        await stalled;
+        return 'sha';
+      }
+      return [9, 30_000];
+    });
+    const probe = store.increment('k');
+    const callsWithProbe = mockCall.mock.calls.length;
+    expect((await store.increment('k')).totalHits).toBe(2);
+    expect((await store.increment('k')).totalHits).toBe(3);
+    expect(mockCall.mock.calls.length).toBe(callsWithProbe);
+
+    release();
+    expect((await probe).totalHits).toBe(9);
     store.shutdown();
   });
 

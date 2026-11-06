@@ -190,6 +190,23 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
       expect(io.of('/').adapter).toBe(before);
     });
 
+    it('closes during a reconnect without unhandled rejections from queued (un)subscribes', async () => {
+      const unhandled = jest.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        // Port 1: the subscriber never connects, so the adapter's SUBSCRIBE and
+        // PSUBSCRIBE sit in its offline queue and io.close() queues the
+        // UNSUBSCRIBEs behind them; closing must settle all of them quietly.
+        const server = await startServer('redis://127.0.0.1:1');
+        await new Promise((r) => setTimeout(r, 300));
+        await stopServer(server);
+        await new Promise((r) => setTimeout(r, 300));
+        expect(unhandled).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
+    });
+
     it('still delivers to its own clients when Redis is unreachable, without crashing', async () => {
       const unhandled = jest.fn();
       process.on('unhandledRejection', unhandled);

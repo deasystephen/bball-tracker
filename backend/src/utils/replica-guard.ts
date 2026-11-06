@@ -75,8 +75,9 @@ export interface ReplicaGuardDeps {
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 
 const SINGLE_REPLICA_WHY =
-  'Socket.io uses the in-memory adapter and rate-limit counters live in process memory, ' +
-  'so a second replica silently splits live-game rooms and multiplies every rate limit.';
+  'Rate-limit counters are shared through Redis and the Socket.io Redis adapter exists ' +
+  `(${SOCKET_ADAPTER_URL_ENV_VAR}), but cross-task delivery has not been load-tested on two tasks, ` +
+  'so MULTI_REPLICA_SUPPORTED is still false and a second replica is not yet trusted with live games.';
 
 /**
  * Parses a replica ceiling. Returns `undefined` for unset/blank, `null` for
@@ -99,7 +100,7 @@ export function parseMaxReplicas(raw: string | undefined): number | null | undef
  * | production | unset / blank     | warn  (boots; pre-guard behaviour)         |
  * | production | not a positive int| exit                                       |
  * | production | 1                 | start (info)                               |
- * | production | > 1               | exit  (until #452; then needs adapter URL) |
+ * | production | > 1               | exit  (until the #452 load test; then needs adapter URL) |
  *
  * Unset is a warning rather than a failure so the deploy that introduces the
  * guard — or a rollback to a task definition that predates it — cannot
@@ -126,7 +127,7 @@ export function evaluateReplicaGuard(
       message:
         `${MAX_REPLICAS_ENV_VAR} is not set, so the single-replica guard cannot verify the replica ceiling. ` +
         `${SINGLE_REPLICA_WHY} Set ${MAX_REPLICAS_ENV_VAR}=1 in infra/task-definition.json and keep the ` +
-        `autoscaling max_capacity at 1 until the Redis adapter lands (${REDIS_ADAPTER_ISSUE}).`,
+        `autoscaling max_capacity at 1 until the two-task load test (${REDIS_ADAPTER_ISSUE}) flips MULTI_REPLICA_SUPPORTED.`,
     };
   }
 
@@ -148,8 +149,8 @@ export function evaluateReplicaGuard(
       reason: 'single-replica',
       maxReplicas,
       message:
-        `Replica ceiling is 1 (${MAX_REPLICAS_ENV_VAR}); Socket.io runs on the in-memory adapter. ` +
-        `Scaling out requires the Redis adapter (${REDIS_ADAPTER_ISSUE}).`,
+        `Replica ceiling is 1 (${MAX_REPLICAS_ENV_VAR}). Scaling out waits for the two-task load test ` +
+        `of the Socket.io Redis adapter (${REDIS_ADAPTER_ISSUE}).`,
     };
   }
 
@@ -160,9 +161,9 @@ export function evaluateReplicaGuard(
       maxReplicas,
       message:
         `Refusing to start: ${MAX_REPLICAS_ENV_VAR}=${maxReplicas} but this build is single-replica only. ` +
-        `${SINGLE_REPLICA_WHY} @socket.io/redis-adapter is not wired up, so ` +
-        `${SOCKET_ADAPTER_URL_ENV_VAR} has no effect and does not make this safe. ` +
-        `Set ${MAX_REPLICAS_ENV_VAR}=1 and max_capacity=1 until ${REDIS_ADAPTER_ISSUE} lands.`,
+        `${SINGLE_REPLICA_WHY} Until then ${SOCKET_ADAPTER_URL_ENV_VAR} has no effect on this check ` +
+        `and does not make this safe. Set ${MAX_REPLICAS_ENV_VAR}=1 and max_capacity=1 until the load ` +
+        `test for ${REDIS_ADAPTER_ISSUE} flips MULTI_REPLICA_SUPPORTED.`,
     };
   }
 

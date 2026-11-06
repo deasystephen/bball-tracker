@@ -19,7 +19,7 @@ jest.mock('../../src/utils/redis', () => ({
 }));
 
 import { logger } from '../../src/utils/logger';
-import { REDIS_RETRY_AFTER_FAILURE_MS, resetRateLimitStoreOutageLog } from '../../src/api/middleware/rate-limit-store';
+import { REDIS_RETRY_AFTER_FAILURE_MS, sharedRedisBackoff } from '../../src/utils/redis-backoff';
 import {
   INSTANCE_ID,
   MAX_CONCURRENT_PER_IP,
@@ -40,11 +40,21 @@ function redisAnswers(others: number): void {
   mockClient.eval.mockImplementation(async (script: string) => (script.includes('HGETALL') ? others : 1));
 }
 
-/** The absolute counts written for IP, in order (a SYNC_SCRIPT call's ARGV[2]). */
-function writtenCounts(): number[] {
-  return mockClient.eval.mock.calls
-    .filter(([script, , hash]) => !String(script).includes('HGETALL') && hash === `ws:conc:${IP}`)
-    .map((call) => Number(call[5]));
+/**
+ * The absolute counts written for IP, in order. A sync call is
+ * eval(script, n + 1, livenessKey, ...hashes, id, ttl, ...counts).
+ */
+function writtenCounts(ip: string = IP): number[] {
+  const counts: number[] = [];
+  for (const call of mockClient.eval.mock.calls as unknown[][]) {
+    if (String(call[0]).includes('HGETALL')) continue;
+    const ipCount = Number(call[1]) - 1;
+    const hashes = call.slice(3, 3 + ipCount) as string[];
+    const values = call.slice(3 + ipCount + 2) as number[];
+    const index = hashes.indexOf(`ws:conc:${ip}`);
+    if (index >= 0) counts.push(Number(values[index]));
+  }
+  return counts;
 }
 
 describe('websocket/rate-limit with a shared Redis', () => {
@@ -56,7 +66,7 @@ describe('websocket/rate-limit with a shared Redis', () => {
     mockRedisState.ready = true;
     mockClient.eval.mockReset();
     mockClient.call.mockReset();
-    resetRateLimitStoreOutageLog();
+    sharedRedisBackoff.reset();
     resetSocketRateLimits();
     warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
   });
@@ -163,6 +173,37 @@ describe('websocket/rate-limit with a shared Redis', () => {
       await runHeartbeatNow();
       expect(writtenCounts()).toEqual([1]);
       expect(isHeartbeatRunning()).toBe(true);
+    });
+
+    it('never retries an IP that was never written and dropped back to 0 (nothing to clear)', async () => {
+      mockRedisState.ready = false;
+      redisAnswers(0);
+      await registerConnection(IP);
+      await releaseConnection(IP);
+      mockRedisState.ready = true;
+      await runHeartbeatNow();
+      expect(mockClient.eval).not.toHaveBeenCalled();
+      expect(isHeartbeatRunning()).toBe(false);
+    });
+
+    it('batches the heartbeat: one script call writes every IP and the liveness key once', async () => {
+      redisAnswers(0);
+      for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) await registerConnection(ip);
+      mockClient.eval.mockClear();
+      await runHeartbeatNow();
+      expect(mockClient.eval).toHaveBeenCalledTimes(1);
+      const call = mockClient.eval.mock.calls[0] as unknown[];
+      expect(call[1]).toBe(4);
+      expect(call[2]).toBe(`ws:inst:${INSTANCE_ID}`);
+      expect(writtenCounts('198.51.100.2')).toEqual([1]);
+    });
+
+    it('shares one back-off with the HTTP stores: a failed handshake count sends the concurrency count to memory', async () => {
+      mockClient.call.mockRejectedValue(new Error('Command timed out'));
+      redisAnswers(MAX_CONCURRENT_PER_IP);
+      await checkHandshakeAllowed(IP);
+      expect(await hasConcurrentCapacity(IP)).toBe(true);
+      expect(mockClient.eval).not.toHaveBeenCalled();
     });
 
     it('starts no heartbeat and sends nothing without a configured Redis', async () => {

@@ -113,7 +113,9 @@ describe('utils/replica-guard (#446)', () => {
           REDIS_SOCKET_ADAPTER_URL: ADAPTER_URL,
         });
         expect(decision).toMatchObject({ action: 'exit', reason: 'multi-replica-unsupported', maxReplicas: 2 });
-        expect(decision.message).toContain('REDIS_SOCKET_ADAPTER_URL has no effect');
+        expect(decision.message).toContain('REDIS_SOCKET_ADAPTER_URL has no effect on this check');
+        expect(decision.message).toContain('MULTI_REPLICA_SUPPORTED');
+        expect(decision.message).not.toMatch(/in-memory adapter|not wired/);
       });
 
       it.each([['0'], ['-1'], ['1.5'], ['four'], ['1e3'], ['01']])('is fatal for the invalid ceiling %j', (raw) => {

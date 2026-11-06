@@ -28,14 +28,19 @@ ioredis re-subscribes after every reconnect. Both reconnect forever
 **Degradation (Redis is a best-effort dependency):** the adapter delivers to
 the emitting task's own sockets before it publishes, so a Redis outage never
 stops local delivery. While Redis is unreachable a publish fails fast and is
-dropped (the adapter does not await `publish`; the wrapper catches the
-rejection so it is never unhandled). Until a client has connected once, its
-failures are the boot window and log at `debug` only (`Socket.io adapter: Redis
-not connected yet`); after that, the first failure of an outage is a `warn`
-(`Socket.io adapter: Redis unavailable, delivering to this task only`) and the
-recovery an `info` (`Socket.io adapter: Redis recovered`). A Redis that is
-unreachable from boot therefore shows only at `debug`; the
-`Socket.io adapter: redis` line at startup confirms the adapter is on.
+dropped. The adapter awaits neither `publish` nor the subscriber's
+(P)SUBSCRIBE / (P)UNSUBSCRIBE, so each is wrapped with a handler: a failed
+publish, or a queued subscriber command flushed by closing during a reconnect,
+never becomes an unhandled rejection. Logging is per client (`pub`, `sub`):
+until a client has connected once, its failures log at `debug` (`Socket.io
+adapter: Redis not connected yet`); if it is still not connected
+`ADAPTER_BOOT_GRACE_MS` (30 s) after boot, one `warn` (`Socket.io adapter:
+Redis not reachable since boot, delivering to this task only`), so a wrong URL
+is visible. After that, a client's first failure of an outage is a `warn`
+(`Socket.io adapter: Redis unavailable, delivering to this task only`) and
+only that client's recovery logs the `info` (`Socket.io adapter: Redis
+recovered`). The URL's variable name is `SOCKET_ADAPTER_URL_ENV_VAR` from
+`utils/replica-guard.ts`, shared with the guard.
 Tests: `tests/websocket/redis-adapter.test.ts`. Sockets on other tasks miss those
 broadcasts; every broadcast carries the current score, so their score
 converges on the next one after recovery, and the events in between come back
@@ -206,28 +211,39 @@ current score so a client can drop events and still converge.
     memory (`concurrentByIp`) and is the truth for its sockets. In Redis each task writes its
     **absolute** count as a field of the hash `ws:conc:<ip>` (named by `INSTANCE_ID`, a UUID per
     process; deleted at 0) on every register and release, and marks itself alive with
-    `ws:inst:<id>` in the same script; both expire after `INSTANCE_TTL_MS` (60 s). A heartbeat every
-    20 s rewrites every IP the task holds sockets for, and every IP whose last write was lost (Redis
-    down, back-off, or the client not ready yet); it stops when there is nothing left to write and
-    restarts on the next change. Because each write is absolute, a lost write is corrected by the
-    next one instead of leaving a count wrong for good. The capacity check is the live **other**
-    tasks' fields (fields of tasks whose liveness key expired are deleted as they are read) plus
-    this task's local count, so a stale field of this task's own never counts. The scripts read
-    keys they are not handed in `KEYS`, which needs a non-cluster Redis (the production node is
-    one). The per-socket `join-game` and `refresh-auth` throttles stay in WeakMaps: a socket lives
-    on exactly one task, so they are per socket by definition.
+    `ws:inst:<id>` in the same script; both expire after `INSTANCE_TTL_MS` (60 s). The task
+    remembers the count it last wrote per IP (`written`, entries removed once 0 is written), and an
+    IP needs a write whenever its local count differs. A heartbeat every 20 s writes every IP held
+    locally plus every IP in `written` in **one script call** per 500 IPs, which also refreshes the
+    liveness key once; it stops when there is nothing to write and restarts on the next change.
+    Because each write is absolute, a lost write (Redis down, in back-off, or the client not ready
+    yet) is corrected by the next one instead of leaving a count wrong for good. The retry set is
+    bounded: an IP that was never written and drops back to 0 has nothing to clear and is never
+    retried. The capacity check is the live **other** tasks' fields (fields of tasks whose
+    liveness key expired are deleted as they are read) plus this task's local count, so a stale
+    field of this task's own never counts. The scripts read keys they are not handed in `KEYS`,
+    which needs a non-cluster Redis (the production node is one). The per-socket `join-game` and
+    `refresh-auth` throttles stay in WeakMaps: a socket lives on exactly one task, so they are per
+    socket by definition.
+  - **Eviction.** The ElastiCache parameter group (`default.redis7`) uses `maxmemory-policy
+    volatile-lru`: under memory pressure Redis evicts keys that have a TTL first, which is every
+    key here (`rl:*`, `ws:conc:*`, `ws:inst:*`). Fail-open covers it: an evicted window restarts,
+    an evicted liveness key makes that task's sockets stop counting until its next write, so limits
+    loosen and never tighten. Whether to move to `noeviction` or `allkeys-lru` is left to the
+    TLS/AUTH replacement of the node (#755).
   - **One round trip per handshake, `next` once.** `handshakeRateLimit` (the pre-auth middleware)
     runs the window increment and the other-tasks count in parallel (`evaluateHandshake`, which
     never rejects; an unexpected error allows the handshake), then calls `next` exactly once,
     outside any `try`: an error thrown by downstream middleware is logged, never answered with a
     second `next`.
-  - **Fail-open.** With no `REDIS_URL`, while the client is (re)connecting, or during the 5 s
-    back-off after a failed or timed-out (500 ms) command, the handshake window counts in memory
-    and the capacity check uses the local count alone. A Redis problem never refuses a handshake.
-    Failures share the HTTP stores' log line (`Rate limit store: Redis unavailable, counting in
-    memory`, once per outage). Tests: `tests/websocket/rate-limit.test.ts`,
+  - **Fail-open.** With no `REDIS_URL`, while the client is (re)connecting, or whenever the
+    shared back-off (`utils/redis-backoff.ts#sharedRedisBackoff`, one for the HTTP stores and these
+    counters) sends callers to memory, the handshake window counts in memory and the capacity check
+    uses the local count alone. A Redis problem never refuses a handshake. The log lines are the
+    back-off's (`Rate limit store: Redis unavailable, counting in memory`, once per outage). Tests: `tests/websocket/rate-limit.test.ts`,
     `tests/websocket/rate-limit-fallback.test.ts` (register before the client is ready and a
-    release lost to a blip, both healed by the heartbeat) and the real-Redis suite.
+    release lost to a blip, both healed by the heartbeat; the batched heartbeat; the bounded retry
+    set; the back-off shared with the HTTP stores) and the real-Redis suite.
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.

@@ -23,7 +23,9 @@
  *    deleted as they are read, so a crashed task stops counting within
  *    `INSTANCE_TTL_MS`. The scripts read keys they are not handed in `KEYS`,
  *    which is fine on the single-node, non-cluster ElastiCache the API uses;
- *    a cluster-mode Redis would need hash tags first.
+ *    a cluster-mode Redis would need hash tags first. Every key here has a TTL,
+ *    so the node's `volatile-lru` policy evicts them first under memory
+ *    pressure; that only loosens limits (fail-open, #755).
  *  - **`join-game` and `refresh-auth` throttles per socket** (fixed window):
  *    each join costs two DB queries plus a 100-event snapshot, each offer a
  *    JWKS check and a user lookup. A socket lives on exactly one task, so these
@@ -31,8 +33,9 @@
  *    definition and dies with it.
  *
  * **Fail-open (Redis is a best-effort dependency):** with no `REDIS_URL`, while
- * the client is not ready, or after a Redis failure (then for the shared
- * back-off, `RedisBackoff`), the handshake window is counted in memory and the
+ * the client is not ready, or whenever the back-off shared with the HTTP
+ * stores (`utils/redis-backoff.ts#sharedRedisBackoff`) sends callers to memory,
+ * the handshake window is counted in memory and the
  * capacity check uses this task's local count alone. Neither ever refuses a
  * handshake because of Redis.
  *
@@ -46,7 +49,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Options } from 'express-rate-limit';
 import type { Socket } from 'socket.io';
-import { RedisBackoff, SharedRateLimitStore } from '../api/middleware/rate-limit-store';
+import { SharedRateLimitStore } from '../api/middleware/rate-limit-store';
+import { RedisUnavailableError, sharedRedisBackoff } from '../utils/redis-backoff';
 import { getReadyRedisClient, getRedisClient } from '../utils/redis';
 import { logger } from '../utils/logger';
 
@@ -88,9 +92,16 @@ const concurrentByIp = new Map<string, number>();
 const joinWindows = new WeakMap<object, Window>();
 const refreshAuthWindows = new WeakMap<object, Window>();
 
-/** IPs whose absolute count has not reached Redis since it last changed. */
-const unsynced = new Set<string>();
-const concurrencyBackoff = new RedisBackoff();
+/**
+ * The count this task last wrote successfully for each IP whose field it may
+ * still hold in Redis (deleted once 0 is written). An IP needs a write when its
+ * local count differs from this, and the heartbeat writes every IP held locally
+ * or listed here. It is bounded by construction: it only ever holds IPs whose
+ * nonzero count reached Redis, and each leaves on its first successful write
+ * of 0. An IP that was never written and drops to 0 has nothing to clear and
+ * is never retried.
+ */
+const written = new Map<string, number>();
 let heartbeat: NodeJS.Timeout | null = null;
 
 /**
@@ -134,65 +145,71 @@ end
 return total`;
 
 /**
- * KEYS[1] hash, KEYS[2] this task's liveness key; ARGV[1] task id, ARGV[2]
- * absolute count, ARGV[3] TTL ms. Writes the count (deletes the field at 0)
- * and marks the task alive in one step.
+ * KEYS[1] this task's liveness key, KEYS[2..n] per-IP hashes; ARGV[1] task id,
+ * ARGV[2] TTL ms, ARGV[3..] the absolute counts, aligned with KEYS[2..]. For
+ * each IP writes the count (deletes the field at 0), then marks the task alive
+ * once. One call per batch, so the heartbeat is one round trip per
+ * `SYNC_BATCH_SIZE` IPs.
  */
 const SYNC_SCRIPT = `
-if tonumber(ARGV[2]) > 0 then
-  redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
-  redis.call('PEXPIRE', KEYS[1], ARGV[3])
-else
-  redis.call('HDEL', KEYS[1], ARGV[1])
+for i = 2, #KEYS do
+  local count = tonumber(ARGV[i + 1])
+  if count > 0 then
+    redis.call('HSET', KEYS[i], ARGV[1], count)
+    redis.call('PEXPIRE', KEYS[i], ARGV[2])
+  else
+    redis.call('HDEL', KEYS[i], ARGV[1])
+  end
 end
-redis.call('SET', KEYS[2], '1', 'PX', ARGV[3])
-return 1`;
+redis.call('SET', KEYS[1], '1', 'PX', ARGV[2])
+return #KEYS - 1`;
 
-/** The shared client if it may be used now, else `null` (count locally). */
-function concurrencyClient(): ReturnType<typeof getReadyRedisClient> {
-  return concurrencyBackoff.available() ? getReadyRedisClient() : null;
-}
+/** IPs per sync script call, so one call never blocks Redis for long. */
+export const SYNC_BATCH_SIZE = 500;
 
-/** Write this task's absolute count for `ip`; on any miss, leave it for the heartbeat. */
-async function syncIp(ip: string): Promise<void> {
-  const client = concurrencyClient();
-  if (!client) {
-    unsynced.add(ip);
-    return;
-  }
-  const count = concurrentByIp.get(ip) ?? 0;
-  try {
-    await client.eval(
-      SYNC_SCRIPT,
-      2,
-      `${CONCURRENT_KEY_PREFIX}${ip}`,
-      `${INSTANCE_KEY_PREFIX}${INSTANCE_ID}`,
-      INSTANCE_ID,
-      count,
-      INSTANCE_TTL_MS
-    );
-    concurrencyBackoff.succeeded();
-    // A change made while this write was in flight re-queued the IP itself.
-    if ((concurrentByIp.get(ip) ?? 0) === count) unsynced.delete(ip);
-  } catch (error) {
-    concurrencyBackoff.failed('concurrent-sync', error);
-    unsynced.add(ip);
+/**
+ * Write this task's absolute counts for `ips` in one script call per batch,
+ * through the shared back-off. A batch it skips or loses is retried by the
+ * heartbeat, because `written` still differs from the local count.
+ */
+async function syncIps(ips: string[]): Promise<void> {
+  for (let i = 0; i < ips.length; i += SYNC_BATCH_SIZE) {
+    const batch = ips.slice(i, i + SYNC_BATCH_SIZE);
+    const counts = batch.map((ip) => concurrentByIp.get(ip) ?? 0);
+    const result = await sharedRedisBackoff.attempt('concurrent-sync', async () => {
+      const client = getReadyRedisClient();
+      if (!client) throw new RedisUnavailableError();
+      return client.eval(
+        SYNC_SCRIPT,
+        batch.length + 1,
+        `${INSTANCE_KEY_PREFIX}${INSTANCE_ID}`,
+        ...batch.map((ip) => `${CONCURRENT_KEY_PREFIX}${ip}`),
+        INSTANCE_ID,
+        INSTANCE_TTL_MS,
+        ...counts
+      );
+    });
+    if (!result.ok) return;
+    batch.forEach((ip, j) => {
+      if (counts[j] > 0) written.set(ip, counts[j]);
+      else written.delete(ip);
+    });
   }
 }
 
 /**
  * Every `INSTANCE_HEARTBEAT_MS`: rewrite every IP this task holds sockets for
- * (refreshing its liveness key and the hashes' expiry) and every IP whose last
- * write was lost. Stops itself once there is nothing left to write, and is
- * restarted by the next change.
+ * (refreshing its liveness key and the hashes' expiry) and every IP whose
+ * field may still need clearing. Stops itself once there is nothing to write,
+ * and is restarted by the next change.
  */
 async function heartbeatTick(): Promise<void> {
-  const ips = new Set<string>([...concurrentByIp.keys(), ...unsynced]);
+  const ips = new Set<string>([...concurrentByIp.keys(), ...written.keys()]);
   if (ips.size === 0) {
     stopHeartbeat();
     return;
   }
-  await Promise.all([...ips].map((ip) => syncIp(ip)));
+  await syncIps([...ips]);
 }
 
 function ensureHeartbeat(): void {
@@ -215,29 +232,19 @@ export function isHeartbeatRunning(): boolean {
 
 /** Live other tasks' count for `ip`, or 0 when Redis cannot answer (fail-open). */
 async function otherTasksCount(ip: string): Promise<number> {
-  const client = concurrencyClient();
-  if (!client) return 0;
-  try {
-    const total = await client.eval(
-      OTHERS_COUNT_SCRIPT,
-      1,
-      `${CONCURRENT_KEY_PREFIX}${ip}`,
-      INSTANCE_KEY_PREFIX,
-      INSTANCE_ID
-    );
-    concurrencyBackoff.succeeded();
-    return Number(total) || 0;
-  } catch (error) {
-    concurrencyBackoff.failed('concurrent-count', error);
-    return 0;
-  }
+  const result = await sharedRedisBackoff.attempt('concurrent-count', async () => {
+    const client = getReadyRedisClient();
+    if (!client) throw new RedisUnavailableError();
+    return client.eval(OTHERS_COUNT_SCRIPT, 1, `${CONCURRENT_KEY_PREFIX}${ip}`, INSTANCE_KEY_PREFIX, INSTANCE_ID);
+  });
+  return result.ok ? Number(result.value) || 0 : 0;
 }
 
 /** A connection count changed on this task: write it now and keep it fresh. */
 function connectionCountChanged(ip: string): Promise<void> {
   if (!getRedisClient()) return Promise.resolve();
   ensureHeartbeat();
-  return syncIp(ip);
+  return syncIps([ip]);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +364,6 @@ export function resetSocketRateLimits(): void {
   handshakeStore.shutdown();
   handshakeStore = createHandshakeStore();
   concurrentByIp.clear();
-  unsynced.clear();
-  concurrencyBackoff.reset();
+  written.clear();
   stopHeartbeat();
 }
