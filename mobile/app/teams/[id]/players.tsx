@@ -7,6 +7,8 @@
  * already has an account → invitation only (appears in the "Invited" section
  * until they accept). An optional parent email invites a guardian in the same
  * step (rostered cases only — the server refuses it for existing accounts).
+ * "Is this player 13 or older?" gates the player email: No (the default on a
+ * youth age group, utils/age-group.ts) means guardian email only (#982).
  *
  * Chips derive via utils/roster-status.ts (never inline). Resend targets only
  * PENDING rows; "Invite"/"Resend" are the same supersede create call.
@@ -36,6 +38,7 @@ import {
   ErrorState,
   Card,
   AvatarPicker,
+  SortPills,
 } from '../../../components';
 import {
   useTeam,
@@ -71,6 +74,7 @@ import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import { displayName } from '../../../utils/display-name';
+import { isUnder13AgeGroup } from '../../../utils/age-group';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
@@ -149,6 +153,12 @@ function EmailIssueChip({
 /** Same shape the backend's `z.string().email()` accepts for everyday addresses. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Answer to "Is this player 13 or older?" in Add Player (#982). Drives the form
+ * only: never sent to the API and never stored (it would be age data about a child).
+ */
+type AgeAnswer = 'yes' | 'no';
+
 /** Roster statuses where the player is still waiting on an invitation email. */
 const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_expired', 'not_invited']);
 
@@ -171,6 +181,8 @@ export default function ManagePlayersScreen() {
   const [guardianEmail, setGuardianEmail] = useState('');
   const [guardianRelationship, setGuardianRelationship] =
     useState<GuardianRelationship>('GUARDIAN');
+  // The coach's explicit answer; null falls back to the team-derived default.
+  const [ageAnswerChoice, setAgeAnswerChoice] = useState<AgeAnswer | null>(null);
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -185,6 +197,24 @@ export default function ManagePlayersScreen() {
   const [editEmail, setEditEmail] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
+  // A youth age group ("U10", "5th Grade") defaults the question to No;
+  // otherwise there is no default and the form waits for an answer (#982).
+  const ageAnswer: AgeAnswer | null =
+    ageAnswerChoice ?? (isUnder13AgeGroup(team?.ageGroup) ? 'no' : null);
+  const isUnder13 = ageAnswer === 'no';
+  const trimmedNewGuardianEmail = guardianEmail.trim();
+  const guardianEmailInvalid =
+    isUnder13 && trimmedNewGuardianEmail !== '' && !EMAIL_PATTERN.test(trimmedNewGuardianEmail);
+  const canSubmitAddPlayer =
+    !!name.trim() &&
+    ageAnswer !== null &&
+    (!isUnder13 || EMAIL_PATTERN.test(trimmedNewGuardianEmail));
+
+  const selectAgeAnswer = (answer: AgeAnswer) => {
+    setAgeAnswerChoice(answer);
+    // Under 13: the player gets no login, so drop any player email typed so far.
+    if (answer === 'no') setPlayerEmail('');
+  };
   const removePlayer = useRemovePlayerFromTeam();
   const updateTeamMember = useUpdateTeamMember();
   const updatePlayer = useUpdatePlayer();
@@ -225,6 +255,7 @@ export default function ManagePlayersScreen() {
     setPlayerEmail('');
     setGuardianEmail('');
     setGuardianRelationship('GUARDIAN');
+    setAgeAnswerChoice(null);
     setJerseyNumber('');
     setPosition('');
     setAvatarUri(null);
@@ -257,6 +288,8 @@ export default function ManagePlayersScreen() {
       Alert.alert(t('common.error'), t('roster.nameRequired'));
       return;
     }
+    // Submit is disabled in both cases; this guards a stale press.
+    if (!canSubmitAddPlayer) return;
     const trimmedGuardianEmail = guardianEmail.trim();
 
     try {
@@ -271,7 +304,8 @@ export default function ManagePlayersScreen() {
         teamId: id,
         data: {
           name: name.trim(),
-          playerEmail: playerEmail.trim() || undefined,
+          // Never a player email for a player under 13 (#982).
+          playerEmail: isUnder13 ? undefined : playerEmail.trim() || undefined,
           guardianEmail: trimmedGuardianEmail || undefined,
           guardianRelationship: trimmedGuardianEmail ? guardianRelationship : undefined,
           jerseyNumber: jerseyNumber ? parseInt(jerseyNumber, 10) : undefined,
@@ -857,16 +891,34 @@ export default function ManagePlayersScreen() {
                 testID="add-player-name-input"
               />
 
-              <Input
-                label={t('roster.playerEmailLabel')}
-                placeholder={t('roster.playerEmailPlaceholder')}
-                value={playerEmail}
-                onChangeText={setPlayerEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="add-player-email-input"
-              />
+              {/* Under-13 steer (#980/#982): the answer only shapes this form. */}
+              <View style={styles.ageQuestion}>
+                <ThemedText variant="captionBold" style={styles.relationshipLabel}>
+                  {t('roster.ageQuestion')}
+                </ThemedText>
+                <SortPills
+                  options={[
+                    { key: 'yes', label: t('roster.ageYes') },
+                    { key: 'no', label: t('roster.ageNo') },
+                  ]}
+                  selected={ageAnswer}
+                  onSelect={selectAgeAnswer}
+                  labelPrefix={`${t('roster.ageQuestion')} `}
+                />
+              </View>
+
+              {ageAnswer === 'yes' && (
+                <Input
+                  label={t('roster.playerEmailLabel')}
+                  placeholder={t('roster.playerEmailPlaceholder')}
+                  value={playerEmail}
+                  onChangeText={setPlayerEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="add-player-email-input"
+                />
+              )}
 
               <Input
                 label={t('players.jerseyNumber')}
@@ -887,8 +939,12 @@ export default function ManagePlayersScreen() {
               />
 
               <Input
-                label={t('roster.guardianEmailLabel')}
+                label={
+                  isUnder13 ? t('roster.guardianEmailRequiredLabel') : t('roster.guardianEmailLabel')
+                }
                 placeholder={t('roster.guardianEmailPlaceholder')}
+                helperText={isUnder13 ? t('roster.under13Hint') : undefined}
+                error={guardianEmailInvalid ? t('common.invalidEmail') : undefined}
                 value={guardianEmail}
                 onChangeText={setGuardianEmail}
                 keyboardType="email-address"
@@ -914,7 +970,7 @@ export default function ManagePlayersScreen() {
                   title={uploadingAvatar ? t('roster.uploadingPhoto') : t('teams.addPlayer')}
                   onPress={handleAddPlayer}
                   loading={addRosterPlayer.isPending || uploadingAvatar}
-                  disabled={!name.trim()}
+                  disabled={!canSubmitAddPlayer}
                   fullWidth
                   testID="add-player-submit"
                 />
@@ -1281,6 +1337,9 @@ const styles = StyleSheet.create({
   relationshipLabel: {
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+  },
+  ageQuestion: {
+    marginBottom: spacing.md,
   },
   editBackdropContainer: {
     flex: 1,

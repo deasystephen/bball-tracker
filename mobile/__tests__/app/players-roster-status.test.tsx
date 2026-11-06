@@ -143,6 +143,10 @@ const MENU_LABELS = [
 const visibleMenuItems = (screen: ReturnType<typeof render>): string[] =>
   MENU_LABELS.filter((label) => screen.queryByText(label) !== null);
 
+/** The Add Player age question's pills (#982), by their accessibility labels. */
+const AGE_YES = 'Is this player 13 or older? Yes';
+const AGE_NO = 'Is this player 13 or older? No';
+
 const closeMenu = (screen: ReturnType<typeof render>): void => {
   fireEvent.press(screen.getByLabelText('Close'));
 };
@@ -182,6 +186,8 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       expect(screen.getByText('Buscar jugadores')).toBeTruthy();
 
       fireEvent.press(screen.getByTestId('add-player-button'));
+      expect(screen.getByText('¿Este jugador tiene 13 años o más?')).toBeTruthy();
+      fireEvent.press(screen.getByLabelText('¿Este jugador tiene 13 años o más? Sí'));
 
       for (const text of [
         'Agregar jugador',
@@ -413,9 +419,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       guardianReason: 'Guardians can be added after the player accepts the invitation and joins the roster',
       emails: { player: true },
     });
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'Zoe');
     fireEvent.changeText(getByTestId('add-player-email-input'), 'zoe@example.com');
     fireEvent.changeText(getByTestId('add-player-guardian-email-input'), 'mom@example.com');
@@ -453,9 +460,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       guardianInvited: false,
       emails: { player: false },
     });
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
     fireEvent.changeText(getByTestId('add-player-email-input'), 'new@example.com');
     fireEvent.press(getByTestId('add-player-submit'));
@@ -482,9 +490,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       guardianInvited: true,
       emails: { player: true, guardian: false },
     });
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
     fireEvent.changeText(getByTestId('add-player-email-input'), 'new@example.com');
     fireEvent.changeText(getByTestId('add-player-guardian-email-input'), 'mom@example.com');
@@ -509,9 +518,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       guardianInvited: false,
       emails: {},
     });
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'Kid');
     fireEvent.press(getByTestId('add-player-submit'));
 
@@ -526,9 +536,10 @@ describe('ManagePlayersScreen — roster status and actions', () => {
 
   it('a rejected add surfaces the error and keeps the form open', async () => {
     mockAddRosterPlayer.mutateAsync.mockRejectedValue(new Error('Player is already on this team'));
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'Dup Kid');
     fireEvent.press(getByTestId('add-player-submit'));
 
@@ -541,13 +552,129 @@ describe('ManagePlayersScreen — roster status and actions', () => {
 
   it('submit is inert while the add is pending (double-tap guard)', () => {
     mockAddRosterPlayer.isPending = true;
-    const { getByTestId } = render(<ManagePlayersScreen />);
+    const { getByTestId, getByLabelText } = render(<ManagePlayersScreen />);
 
     fireEvent.press(getByTestId('add-player-button'));
+    fireEvent.press(getByLabelText(AGE_YES));
     fireEvent.changeText(getByTestId('add-player-name-input'), 'Kid');
     fireEvent.press(getByTestId('add-player-submit'));
 
     expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  describe('under-13 steer (#982)', () => {
+    const guardianOnlyResult = {
+      success: true,
+      rostered: true,
+      invited: false,
+      member: makeMember('p-kid', 'Kid', true),
+      invitation: null,
+      guardianInvited: true,
+      emails: { guardian: true },
+    };
+
+    it('asks the age question with no default on a team without a youth age group', () => {
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+
+      expect(screen.getByText('Is this player 13 or older?')).toBeTruthy();
+      expect(screen.getByLabelText(AGE_YES).props.accessibilityState).toEqual({ selected: false });
+      expect(screen.getByLabelText(AGE_NO).props.accessibilityState).toEqual({ selected: false });
+      // No player-email field until the question is answered
+      expect(screen.queryByTestId('add-player-email-input')).toBeNull();
+
+      // Unanswered: a named player still cannot be submitted
+      fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Kid');
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+
+      fireEvent.press(screen.getByLabelText(AGE_YES));
+      expect(screen.getByLabelText(AGE_YES).props.accessibilityState).toEqual({ selected: true });
+      expect(screen.getByTestId('add-player-email-input')).toBeTruthy();
+      expect(screen.getByText('Parent/Guardian Email (optional)')).toBeTruthy();
+    });
+
+    it('defaults to No on a youth team: no player email, guardian email required', async () => {
+      mockTeam = { ...baseTeam(), ageGroup: 'U10' };
+      mockAddRosterPlayer.mutateAsync.mockResolvedValue(guardianOnlyResult);
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+
+      expect(screen.getByLabelText(AGE_NO).props.accessibilityState).toEqual({ selected: true });
+      expect(screen.queryByTestId('add-player-email-input')).toBeNull();
+      expect(screen.getByText('Parent/Guardian Email')).toBeTruthy();
+      expect(
+        screen.getByText(
+          "Players under 13 don't get their own login. Invite a parent or guardian; they can RSVP and follow games for the player."
+        )
+      ).toBeTruthy();
+
+      // Name alone is not enough: the guardian email is required
+      fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Kid');
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+
+      // An invalid address says so and still blocks the submit
+      fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'mom@');
+      expect(screen.getByText('Enter a valid email address')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+
+      fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'mom@example.com');
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+
+      await waitFor(() => expect(mockAddRosterPlayer.mutateAsync).toHaveBeenCalledTimes(1));
+      const sent = mockAddRosterPlayer.mutateAsync.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(sent.data).toEqual(
+        expect.objectContaining({
+          name: 'Kid',
+          playerEmail: undefined,
+          guardianEmail: 'mom@example.com',
+          guardianRelationship: 'GUARDIAN',
+        })
+      );
+      // The answer itself is never sent
+      expect(Object.keys(sent.data).some((key) => /age|adult|under/i.test(key))).toBe(false);
+    });
+
+    it('switching to No clears a typed player email and never sends it', async () => {
+      mockAddRosterPlayer.mutateAsync.mockResolvedValue(guardianOnlyResult);
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+
+      fireEvent.press(screen.getByLabelText(AGE_YES));
+      fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Kid');
+      fireEvent.changeText(screen.getByTestId('add-player-email-input'), 'kid@example.com');
+      fireEvent.press(screen.getByLabelText(AGE_NO));
+      expect(screen.queryByTestId('add-player-email-input')).toBeNull();
+
+      // Back to Yes: the field returns empty
+      fireEvent.press(screen.getByLabelText(AGE_YES));
+      expect(screen.getByTestId('add-player-email-input').props.value).toBe('');
+
+      fireEvent.press(screen.getByLabelText(AGE_NO));
+      fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'mom@example.com');
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+
+      await waitFor(() =>
+        expect(mockAddRosterPlayer.mutateAsync).toHaveBeenCalledWith({
+          teamId: 't1',
+          data: expect.objectContaining({ playerEmail: undefined, guardianEmail: 'mom@example.com' }),
+        })
+      );
+    });
+
+    it('Cancel resets the answer to the team default', () => {
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+      fireEvent.press(screen.getByLabelText(AGE_NO));
+      fireEvent.press(screen.getByText('Cancel'));
+
+      fireEvent.press(screen.getByTestId('add-player-button'));
+      expect(screen.getByLabelText(AGE_NO).props.accessibilityState).toEqual({ selected: false });
+    });
   });
 
   it('search → select → Send Invitation flow, including a failed email warning', async () => {

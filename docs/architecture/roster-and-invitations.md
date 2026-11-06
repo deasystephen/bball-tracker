@@ -198,6 +198,19 @@ eng-review amendments recorded there).
   `useAddPlayerToTeam` are gone. Result handling: `rostered: false` (existing account) toasts an
   explanation; `emails.player/guardian === false` toasts an error (never silent);
   `guardianReason` surfaces as info.
+- **Players under 13 (#982, part of #980 adults-only accounts).** Before the player-email field
+  the form asks "Is this player 13 or older?" (Yes / No, `components/SortPills` with
+  `accessibilityState.selected`). **No** hides the player-email field, clears anything typed in
+  it, never sends a `playerEmail`, and makes the parent/guardian email required (valid address)
+  with the "Players under 13 don't get their own login" hint, so the child stays a managed roster
+  record and the parent gets the PARENT account (`docs/architecture/guardians.md`). **Yes** shows
+  the field as before. When the team's free-text `ageGroup` reads as under 13
+  (`utils/age-group.ts#isUnder13AgeGroup`: `U1`–`U12`, `K`–`6th grade`, `5U`–`12U`) the question
+  defaults to No; otherwise it has no default and the form will not submit until it is answered.
+  **The answer is never sent to the API or stored**: a per-player under-13 flag would itself be age
+  data about a child. The server does not enforce this (it cannot from free text; that needs
+  structured age groups, #462); the hard stop is the first-sign-in age screen (#981). Maestro:
+  the under-13 branch at the end of `.maestro/roster-management.yaml`.
 - **Chips derive ONLY via `utils/roster-status.ts#getRosterStatus(member, team.invitations)`**
   (same never-inline rule as `game-result.ts`): Active = `player.isManaged === false` OR an
   ACCEPTED row; Invited/Invite expired from the PENDING row (expiry client-computed); else Not

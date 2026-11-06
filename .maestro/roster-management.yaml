@@ -39,6 +39,13 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "add-player-button"
 - assertVisible: "Add Player"
+# Under-13 steer (#982): the player-email field stays hidden until the coach
+# answers the age question. Lakers has no age group, so nothing is preselected.
+# The pills are SortPills; their accessibility label is "<question> <answer>".
+- assertVisible: "Is this player 13 or older?"
+- assertNotVisible:
+    id: "add-player-email-input"
+- tapOn: "Is this player 13 or older? Yes"
 - assertVisible: "Player Email (optional)"
 - assertVisible: "Parent/Guardian Email (optional)"
 
@@ -90,3 +97,45 @@ appId: com.bballtracker.mobile
 
 # The row subtitle re-renders with the new jersey and position
 - assertVisible: "#12 • Guard"
+
+# Under-13 branch (#982): answering No hides the player email and makes the
+# parent/guardian email required. The seed reset deletes this flow-created
+# managed player (removeFlowCreatedManagedPlayers), and its guardian invitation
+# cascades with it.
+- scrollUntilVisible:
+    element:
+      id: "add-player-button"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "add-player-button"
+- tapOn: "Is this player 13 or older? Yes"
+- tapOn:
+    id: "add-player-email-input"
+- inputText: "e2e-under13-kid@example.test"
+- pressKey: Enter
+# No clears the typed player email and removes the field
+- tapOn: "Is this player 13 or older? No"
+- assertNotVisible:
+    id: "add-player-email-input"
+- assertVisible: "Parent/Guardian Email"
+- assertVisible: "Players under 13 don't get their own login.*"
+- tapOn:
+    id: "add-player-name-input"
+- inputText: "E2E Under13 Player"
+- pressKey: Enter
+- tapOn:
+    id: "add-player-guardian-email-input"
+- inputText: "e2e-under13-parent@example.test"
+- pressKey: Enter
+# The relationship chips appear once a guardian email is typed; the default
+# (Guardian) is kept.
+- tapOn:
+    id: "add-player-submit"
+- scrollUntilVisible:
+    element:
+      text: "E2E Under13 Player"
+    direction: DOWN
+    timeout: 10000
+# No player email went out: the row is a roster-only managed player
+- assertVisible: "E2E Under13 Player status: Not invited"
