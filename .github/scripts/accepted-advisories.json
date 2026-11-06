@@ -4,12 +4,12 @@
   "web": [],
   "mobile": [
     {
-      "ghsa": "GHSA-86w9-cpqp-85rv",
-      "package": "node-forge",
-      "range": "<=1.4.0",
+      "ghsa": "GHSA-qr28-fpjm-wq7f",
+      "package": "decode-uri-component",
+      "range": "<=0.5.0",
       "severity": "high",
-      "why": "RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements. Every published node-forge (<= 1.4.0, the latest) is affected and the advisory lists no patched version. It arrives through @expo/code-signing-certificates (expo-updates and @expo/cli), which this app does not use: EAS Update code signing is not configured. The GitHub alert was dismissed by the owner on 2026-10-18 (#924).",
-      "revisit": "When node-forge publishes a release the advisory names as patched, or Expo drops node-forge: add an override (or take the upstream bump) and remove this entry in the same PR."
+      "why": "Quadratic-time replacement of percent-encoded runs: a crafted string makes decoding slow. The only copy is decode-uri-component 0.2.2 under expo-router 57 -> query-string 7.1.3 (^0.2.2), which parses URLs on the user's own device, so the worst case is a slow parse of a link that user opened, never a server or another user. The only patched release, 0.5.1, is ESM-only and breaks query-string under Jest (Unexpected token 'export'), and a version-keyed override desyncs npm ci (#275). npm's only fix is expo-router 58 (Expo SDK 58), which needs a new native binary (#922). Accepted by the owner on 2026-11-06.",
+      "revisit": "With the Expo SDK 58 binary (#922), whose expo-router no longer pulls decode-uri-component (Dependabot #997), or a CommonJS patched release: take it and remove this entry in the same PR."
     }
   ]
 }
