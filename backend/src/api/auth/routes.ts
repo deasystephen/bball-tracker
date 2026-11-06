@@ -27,7 +27,7 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
-import { assertOwnUploadUrl, deletePreviousAvatar } from '../../services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar, promoteAvatarUpload } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
 import { emailEquals } from '../../utils/email-match';
@@ -484,6 +484,12 @@ router.patch('/me', authenticate, async (req, res) => {
       profilePictureUrl !== undefined
         ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
         : null;
+    // A new upload is promoted out of the pending state before it is stored
+    // (#1005); an expired one is a 400 `upload_expired` and nothing is written.
+    // Re-sending the URL already stored needs nothing.
+    if (profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl) {
+      await promoteAvatarUpload(profilePictureUrl);
+    }
     // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
     // `authenticate` a moment before an account deletion committed must not
     // write a real name or photo back onto the tombstone. Zero rows → 401.

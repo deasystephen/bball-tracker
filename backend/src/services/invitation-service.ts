@@ -37,7 +37,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { assertOwnUploadUrl, discardOwnAvatar } from './upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1126,7 +1126,9 @@ export class InvitationService {
     let playerId: string;
 
     if (!data.playerEmail) {
-      // Case 1 — roster-only managed player.
+      // Case 1 — roster-only managed player. The photo leaves the pending
+      // state before it is stored (#1005); expired → 400 `upload_expired`.
+      await promoteAvatarUpload(data.profilePictureUrl);
       result.member = await prisma.$transaction(async (tx) => {
         const managedUser = await tx.user.create({
           data: {
@@ -1173,6 +1175,10 @@ export class InvitationService {
         // the loser's user.create aborts the transaction with P2002 and we
         // retry once against the row that now exists.
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
+        // The photo may be stored on the new or reused row: out of the pending
+        // state first (#1005). If the row keeps its own photo, or the add falls
+        // back to case 3, the upload is discarded below as before.
+        await promoteAvatarUpload(data.profilePictureUrl);
         try {
           created = await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email);
         } catch (err) {

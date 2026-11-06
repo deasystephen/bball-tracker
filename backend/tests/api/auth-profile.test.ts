@@ -14,6 +14,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
     deleteObjectCalls.push(input);
     return { input };
   }),
+  DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
 }));
 
 import request from 'supertest';
@@ -118,6 +119,59 @@ describe('PATCH /api/v1/auth/me', () => {
     expect(deleteObjectCalls).toEqual([
       { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/old.jpg` },
     ]);
+  });
+
+  describe('pending upload promotion (#1005)', () => {
+    type Sent = { kind?: string; input: Record<string, unknown> };
+    const taggingCalls = (): Sent[] =>
+      mockS3Send.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === 'DeleteObjectTagging');
+
+    it('removes the pending tag of a new upload before the row is written', async () => {
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(200);
+      expect(taggingCalls().map((c) => c.input)).toEqual([
+        { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/new.jpg` },
+      ]);
+      const tagAt = mockS3Send.mock.invocationCallOrder[0];
+      expect(tagAt).toBeLessThan((mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0]);
+    });
+
+    it('answers 400 upload_expired and writes nothing when the upload is gone', async () => {
+      mockS3Send.mockRejectedValueOnce(
+        Object.assign(new Error('The specified key does not exist.'), {
+          name: 'NoSuchKey',
+          $metadata: { httpStatusCode: 404 },
+        })
+      );
+
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'That photo upload expired. Please choose it again.',
+        code: 'upload_expired',
+      });
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('skips promotion for an external URL', async () => {
+      const res = await request(app)
+        .patch('/api/v1/auth/me')
+        .set(AUTH)
+        .send({ profilePictureUrl: 'https://workos.example/photo.jpg' });
+
+      expect(res.status).toBe(200);
+      expect(taggingCalls()).toHaveLength(0);
+    });
+
+    it('skips promotion when the request re-sends the URL already stored', async () => {
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_OLD });
+
+      expect(res.status).toBe(200);
+      expect(taggingCalls()).toHaveLength(0);
+    });
   });
 
   it('does not look up or delete the avatar on a name-only update', async () => {

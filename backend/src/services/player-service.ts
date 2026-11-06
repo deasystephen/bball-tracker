@@ -15,7 +15,7 @@ import {
   ForbiddenError,
   ConflictError,
 } from '../utils/errors';
-import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar, promoteAvatarUpload } from './upload-service';
 import {
   getGuardianChildIds,
   getPlayerTeamAccess,
@@ -178,6 +178,10 @@ export class PlayerService {
     if (existingUser) {
       throw new BadRequestError('A user with this email already exists');
     }
+
+    // Out of the pending state before it is stored (#1005); 400 `upload_expired`
+    // when the upload is gone, and nothing is written.
+    await promoteAvatarUpload(data.profilePictureUrl);
 
     try {
       // Create the player (as a User with role PLAYER)
@@ -456,6 +460,13 @@ export class PlayerService {
       if (existingUser) {
         throw new BadRequestError('A user with this email already exists');
       }
+    }
+
+    // A new upload leaves the pending state before it is stored (#1005); an
+    // expired one is a 400 `upload_expired` with nothing written. Re-sending
+    // the stored URL needs nothing.
+    if (data.profilePictureUrl && data.profilePictureUrl !== player.profilePictureUrl) {
+      await promoteAvatarUpload(data.profilePictureUrl);
     }
 
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a

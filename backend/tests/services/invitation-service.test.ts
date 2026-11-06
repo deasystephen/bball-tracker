@@ -5,7 +5,7 @@
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { GuardianService } from '../../src/services/guardian-service';
-import { BadRequestError, ResendCooldownError } from '../../src/utils/errors';
+import { BadRequestError, ResendCooldownError, UploadExpiredError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
@@ -20,8 +20,10 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
+  promoteAvatarUpload: jest.fn().mockResolvedValue(undefined),
 }));
-import { assertOwnUploadUrl, discardOwnAvatar } from '../../src/services/upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload } from '../../src/services/upload-service';
+const mockPromote = promoteAvatarUpload as jest.Mock;
 const mockDiscardOwnAvatar = discardOwnAvatar as jest.Mock;
 const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
 const AVATAR_URL = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/coach/photo.jpg';
@@ -1695,6 +1697,9 @@ describe('InvitationService', () => {
       );
       // The photo lives on the managed user — never discarded (#419)
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+      // ...and leaves the pending state before the row is written (#1005)
+      expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockPromote.mock.invocationCallOrder[0]).toBeLessThan(txUserCreate.mock.invocationCallOrder[0]);
       // Jersey 0 is a valid number — must survive to the membership row
       expect(txMemberCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ jerseyNumber: 0 }) })
@@ -1713,6 +1718,34 @@ describe('InvitationService', () => {
       ).rejects.toBeInstanceOf(BadRequestError);
 
       expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('case 1 — an expired upload is a 400 upload_expired and nothing is written (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      mockPromote.mockRejectedValueOnce(new UploadExpiredError());
+
+      await expect(
+        InvitationService.addRosterPlayer(team.id, { name: 'Kid', profilePictureUrl: AVATAR_URL }, coach.id)
+      ).rejects.toBeInstanceOf(UploadExpiredError);
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('case 2 — an expired upload is a 400 upload_expired and nothing is written (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      mockPromote.mockRejectedValueOnce(new UploadExpiredError());
+
+      await expect(
+        InvitationService.addRosterPlayer(
+          team.id,
+          { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+          coach.id
+        )
+      ).rejects.toBeInstanceOf(UploadExpiredError);
+
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       expect(mockedMailerSend).not.toHaveBeenCalled();
     });
@@ -1763,8 +1796,10 @@ describe('InvitationService', () => {
           }),
         })
       );
-      // The photo lives on the managed user — never discarded (#419)
+      // The photo lives on the managed user — never discarded (#419), promoted first (#1005)
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+      expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockPromote.mock.invocationCallOrder[0]).toBeLessThan(txUserCreate.mock.invocationCallOrder[0]);
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'jane@example.com',

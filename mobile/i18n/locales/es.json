@@ -591,7 +591,8 @@
     "removePhoto": "Quitar foto",
     "unreadable": "No se pudo leer la imagen seleccionada",
     "tooLarge": "La foto debe pesar 5 MB o menos",
-    "uploadFailed": "No se pudo subir la foto"
+    "uploadFailed": "No se pudo subir la foto",
+    "uploadExpired": "La subida de esa foto caducó. Vuelve a elegirla."
   },
   "tabs": {
     "home": "Inicio",

@@ -18,6 +18,7 @@ jest.mock('@aws-sdk/client-s3', () => {
       deleteObjectCalls.push(input);
       return { input };
     }),
+    DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
   };
 });
 
@@ -39,7 +40,11 @@ import {
   isManagedAvatarUrl,
   isOwnUploadUrl,
   MAX_AVATAR_BYTES,
+  PENDING_TAGGING_XML,
+  promoteAvatarUpload,
 } from '../../src/services/upload-service';
+import { UploadExpiredError } from '../../src/utils/errors';
+import * as sentry from '../../src/utils/sentry';
 import { BadRequestError } from '../../src/utils/errors';
 
 const mockCreatePresignedPost = createPresignedPost as jest.MockedFunction<typeof createPresignedPost>;
@@ -70,7 +75,7 @@ describe('Upload Service', () => {
       expect(result.imageUrl).toMatch(/\.png$/);
     });
 
-    it('caps the object size and pins the content type in the policy', async () => {
+    it('caps the object size, pins the content type and pins the pending tag in the policy (#1005)', async () => {
       await generateAvatarUploadUrl(userId, 'image/png');
 
       expect(mockCreatePresignedPost).toHaveBeenCalledWith(
@@ -81,10 +86,17 @@ describe('Upload Service', () => {
           Conditions: [
             ['content-length-range', 1, MAX_AVATAR_BYTES],
             ['eq', '$Content-Type', 'image/png'],
+            ['eq', '$tagging', PENDING_TAGGING_XML],
           ],
-          Fields: { 'Content-Type': 'image/png' },
+          Fields: { 'Content-Type': 'image/png', tagging: PENDING_TAGGING_XML },
           Expires: 300,
         })
+      );
+    });
+
+    it('the pending tag set is exactly pending=true', () => {
+      expect(PENDING_TAGGING_XML).toBe(
+        '<Tagging><TagSet><Tag><Key>pending</Key><Value>true</Value></Tag></TagSet></Tagging>'
       );
     });
 
@@ -305,6 +317,95 @@ describe('Upload Service', () => {
         expect.objectContaining({ error: 'AccessDenied' })
       );
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('promoteAvatarUpload (#1005)', () => {
+    const OWN = `${BUCKET_BASE}u1/pic.jpg`;
+    const sdkError = (name: string, status: number): Error =>
+      Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } });
+
+    beforeEach(() => {
+      mockSend.mockReset();
+      mockSend.mockResolvedValue({});
+    });
+
+    it('removes the tags of an upload in our bucket', async () => {
+      await promoteAvatarUpload(OWN);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockSend.mock.calls[0][0]).toEqual({
+        kind: 'DeleteObjectTagging',
+        input: { Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u1/pic.jpg' },
+      });
+    });
+
+    it('skips external URLs and empty values', async () => {
+      await promoteAvatarUpload('https://workos.example/photo.jpg');
+      await promoteAvatarUpload(undefined);
+      await promoteAvatarUpload(null);
+      await promoteAvatarUpload('');
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('refuses a managed URL outside the issued key shape without calling S3', async () => {
+      await expect(promoteAvatarUpload(`${BUCKET_BASE}u1/x/../../../other.jpg`)).rejects.toBeInstanceOf(
+        BadRequestError
+      );
+      await expect(promoteAvatarUpload(`${BUCKET_BASE}u1/nested/pic.jpg`)).rejects.toBeInstanceOf(BadRequestError);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 upload_expired when the object is gone (NoSuchKey)', async () => {
+      mockSend.mockRejectedValueOnce(sdkError('NoSuchKey', 404));
+      const err = await promoteAvatarUpload(OWN).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UploadExpiredError);
+      expect((err as UploadExpiredError).statusCode).toBe(400);
+      expect((err as UploadExpiredError).body()).toEqual({
+        error: 'That photo upload expired. Please choose it again.',
+        code: 'upload_expired',
+      });
+    });
+
+    it('treats a bare 404 as expired too', async () => {
+      mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { $metadata: { httpStatusCode: 404 } }));
+      await expect(promoteAvatarUpload(OWN)).rejects.toBeInstanceOf(UploadExpiredError);
+    });
+
+    it('fails open on AccessDenied: logs at error, reports to Sentry, and lets the write go ahead', async () => {
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+      mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
+
+      await expect(promoteAvatarUpload(OWN)).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/denied/),
+        expect.objectContaining({ operation: 'DeleteObjectTagging', error: 'AccessDenied' })
+      );
+      expect(captureSpy).toHaveBeenCalledWith(expect.any(Error), { flow: 'avatar-promote' });
+      errorSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    it('rethrows any other failure (never stores a URL that would silently expire)', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      mockSend.mockRejectedValueOnce('socket hang up');
+      await expect(promoteAvatarUpload(OWN)).rejects.toBe('socket hang up');
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Avatar promotion failed',
+        expect.objectContaining({ operation: 'DeleteObjectTagging', error: 'socket hang up' })
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('stringifies a non-Error AccessDenied-shaped rejection', async () => {
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+      mockSend.mockRejectedValueOnce({ name: 'AccessDenied' });
+      await expect(promoteAvatarUpload(OWN)).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: '[object Object]' }));
+      errorSpy.mockRestore();
+      captureSpy.mockRestore();
     });
   });
 });

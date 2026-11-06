@@ -153,6 +153,19 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
   }
 }
 
+/**
+ * 400 `upload_expired` — the avatar upload a profile write names no longer
+ * exists: it was never saved within the pending window and the bucket's
+ * lifecycle rule expired it (#1005). Nothing was written; the client asks the
+ * user to choose the photo again.
+ */
+export class UploadExpiredError extends DetailedError<Record<string, unknown>> {
+  constructor() {
+    super('upload_expired', {}, 'That photo upload expired. Please choose it again.', 400);
+    Object.setPrototypeOf(this, UploadExpiredError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

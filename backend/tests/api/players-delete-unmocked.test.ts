@@ -18,6 +18,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
     deleteObjectCalls.push(input);
     return { input };
   }),
+  DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
 }));
 
 jest.mock('../../src/api/auth/middleware', () => ({

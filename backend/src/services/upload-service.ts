@@ -1,8 +1,9 @@
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
-import { BadRequestError } from '../utils/errors';
+import { BadRequestError, UploadExpiredError } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { captureException } from '../utils/sentry';
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -16,6 +17,17 @@ export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 /** Presigned upload validity (seconds). */
 const UPLOAD_EXPIRES_SECONDS = 300;
+
+/**
+ * Every upload is born tagged `pending=true` (#1005). The profile write that
+ * stores its URL removes the tag (`promoteAvatarUpload`); the bucket's
+ * lifecycle rule (`infra/s3.tf`, `expire-pending-avatars`) deletes whatever is
+ * still pending 3 days after upload. Tag key and value must match that rule.
+ */
+export const PENDING_TAG_KEY = 'pending';
+export const PENDING_TAG_VALUE = 'true';
+/** The S3 POST `tagging` form field: the tag set as XML. */
+export const PENDING_TAGGING_XML = `<Tagging><TagSet><Tag><Key>${PENDING_TAG_KEY}</Key><Value>${PENDING_TAG_VALUE}</Value></Tag></TagSet></Tagging>`;
 
 const CONTENT_TYPE_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -56,11 +68,15 @@ export async function generateAvatarUploadUrl(
   const { url, fields } = await createPresignedPost(s3Client, {
     Bucket: BUCKET_NAME,
     Key: key,
+    // The policy pins the `tagging` field to the exact pending tag set, so a
+    // client cannot drop or change the tag and keep an unsaved upload forever.
+    // Every binary posts every field it is given, so no client change is needed.
     Conditions: [
       ['content-length-range', 1, MAX_AVATAR_BYTES],
       ['eq', '$Content-Type', contentType],
+      ['eq', '$tagging', PENDING_TAGGING_XML],
     ],
-    Fields: { 'Content-Type': contentType },
+    Fields: { 'Content-Type': contentType, tagging: PENDING_TAGGING_XML },
     Expires: UPLOAD_EXPIRES_SECONDS,
   });
 
@@ -212,5 +228,69 @@ export async function discardOwnAvatar(
       imageUrl,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+/** The SDK error's name / HTTP status, whatever shape the rejection takes. */
+function s3ErrorInfo(err: unknown): { name?: string; status?: number } {
+  if (typeof err !== 'object' || err === null) return {};
+  const e = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return {
+    name: typeof e.name === 'string' ? e.name : undefined,
+    status: typeof e.$metadata?.httpStatusCode === 'number' ? e.$metadata.httpStatusCode : undefined,
+  };
+}
+
+/**
+ * Mark an upload as saved: remove its `pending` tag so the lifecycle rule
+ * never expires it (#1005). Every write that stores a `profilePictureUrl`
+ * calls this after `assertOwnUploadUrl` and BEFORE the database write.
+ *
+ * - External URLs (WorkOS photos and the like) and empty values: nothing to do.
+ * - The object is gone (`NoSuchKey`, the lifecycle expired it): throws
+ *   `UploadExpiredError` (400 `upload_expired`), so a dead URL is never stored.
+ * - `AccessDenied` fails OPEN: logged at error and reported to Sentry, and the
+ *   write goes ahead with the URL. This covers the window where the code is
+ *   live before the task role's `s3:DeleteObjectTagging` grant (the apply goes
+ *   first; this is the safety net). The object then stays tagged and expires
+ *   in 3 days, which the error makes visible.
+ * - Anything else (network, throttling) throws, and the route answers 5xx:
+ *   storing a URL that will silently expire is worse than a failed save.
+ *
+ * A write that fails after a successful promotion leaves an untagged,
+ * unreferenced object; that is accepted (it is only kept, never exposed).
+ */
+export async function promoteAvatarUpload(imageUrl: string | null | undefined): Promise<void> {
+  if (!isManagedAvatarUrl(imageUrl)) {
+    return;
+  }
+  const path = parsedPath(imageUrl);
+  if (path === null || !ISSUED_KEY_PATH.test(path)) {
+    // `assertOwnUploadUrl` has already refused this shape on every write path.
+    throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+  }
+  const key = path.slice(1);
+
+  try {
+    await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
+  } catch (err) {
+    const { name, status } = s3ErrorInfo(err);
+    if (name === 'NoSuchKey' || status === 404) {
+      throw new UploadExpiredError();
+    }
+    if (name === 'AccessDenied' || status === 403) {
+      logger.error('Avatar promotion denied; stored the URL still pending (expires in 3 days)', {
+        operation: 'DeleteObjectTagging',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      captureException(err, { flow: 'avatar-promote' });
+      return;
+    }
+    // The route logs the 5xx too; this line names the S3 operation.
+    logger.warn('Avatar promotion failed', {
+      operation: 'DeleteObjectTagging',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 }
