@@ -32,7 +32,8 @@ left, or a coach who only ever held staff roles, ends up here. If anything remai
 tombstoned as described next and the response says `erased: false`. In ONE transaction:
 
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
-  best-effort), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
+  best-effort, together with every other upload under their own `avatars/<userId>/` prefix that
+  no profile references; photos they put on a child's or player's row stay with that row, #957), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
   `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
   role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
   each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`), the
@@ -73,6 +74,16 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
+- **Profile photos.** On deletion, the person's current photo and every other photo they
+  uploaded that no profile shows are deleted (best-effort; a failure is logged and retried by the
+  sweep below). A photo they uploaded for a child or player they manage stays while that profile
+  shows it. Independently, a photo that was uploaded but never saved to any profile (a cancelled
+  edit, an abandoned Add Player) is deleted after **24 hours** by a sweep that runs every
+  6 hours (`services/avatar-sweep.ts`). Until it is deleted, an uploaded photo is readable by
+  anyone who has its URL (the bucket is public-read, URLs are unguessable). *Operational
+  prerequisite (#957): both need `s3:ListBucket` on the task role and the sweep needs
+  `AVATAR_SWEEP_ENABLED=true` in `infra/task-definition.json`; see
+  `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.*
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited.
 - **Error reports (Sentry)** are kept for Sentry's retention window (90 days by default). No name,

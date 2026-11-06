@@ -18,6 +18,8 @@ jest.mock('@aws-sdk/client-s3', () => {
       deleteObjectCalls.push(input);
       return { input };
     }),
+    DeleteObjectsCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjects', input })),
+    ListObjectsV2Command: jest.fn().mockImplementation((input: unknown) => ({ kind: 'ListObjectsV2', input })),
   };
 });
 
@@ -34,13 +36,20 @@ import {
   assertOwnUploadUrl,
   generateAvatarUploadUrl,
   deleteAvatar,
+  deleteAvatarKeys,
   deletePreviousAvatar,
+  deleteUnreferencedUserUploads,
+  isIssuedAvatarKey,
+  listAvatarObjects,
+  loadReferencedAvatarKeys,
+  referencedAvatarKeys,
   discardOwnAvatar,
   isManagedAvatarUrl,
   isOwnUploadUrl,
   MAX_AVATAR_BYTES,
 } from '../../src/services/upload-service';
 import { BadRequestError } from '../../src/utils/errors';
+import { mockPrisma } from '../setup';
 
 const mockCreatePresignedPost = createPresignedPost as jest.MockedFunction<typeof createPresignedPost>;
 
@@ -305,6 +314,263 @@ describe('Upload Service', () => {
         expect.objectContaining({ error: 'AccessDenied' })
       );
       warnSpy.mockRestore();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Unreferenced uploads (#957)
+  // -------------------------------------------------------------------------
+
+  describe('unreferenced uploads (#957)', () => {
+    beforeEach(() => {
+      // `clearAllMocks` keeps queued `…Once` values; start each case clean.
+      mockSend.mockReset();
+      mockSend.mockResolvedValue({});
+      (mockPrisma.user.findMany as jest.Mock).mockReset();
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
+    type Sent = { kind: string; input: Record<string, unknown> };
+    const sentOf = (kind: string): Sent[] =>
+      mockSend.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === kind);
+
+    describe('listAvatarObjects', () => {
+      it('pages through ListObjectsV2 until the listing is not truncated', async () => {
+        const t = new Date('2026-01-01T00:00:00Z');
+        mockSend
+          .mockResolvedValueOnce({
+            Contents: [{ Key: 'avatars/u/a.jpg', LastModified: t }, { LastModified: t }],
+            IsTruncated: true,
+            NextContinuationToken: 'next',
+          })
+          .mockResolvedValueOnce({
+            Contents: [{ Key: 'avatars/u/b.jpg', LastModified: t }],
+            IsTruncated: false,
+          });
+
+        const objects = await listAvatarObjects('avatars/');
+
+        expect(objects).toEqual([
+          { key: 'avatars/u/a.jpg', lastModified: t },
+          { key: 'avatars/u/b.jpg', lastModified: t },
+        ]);
+        const lists = sentOf('ListObjectsV2');
+        expect(lists).toHaveLength(2);
+        expect(lists[0].input).toEqual(
+          expect.objectContaining({
+            Prefix: 'avatars/',
+            ContinuationToken: undefined,
+          })
+        );
+        expect(lists[1].input).toEqual(expect.objectContaining({ ContinuationToken: 'next' }));
+      });
+
+      it('throws rather than returning a partial listing when a page fails', async () => {
+        mockSend
+          .mockResolvedValueOnce({
+            Contents: [{ Key: 'avatars/u/a.jpg' }],
+            IsTruncated: true,
+            NextContinuationToken: 'n',
+          })
+          .mockRejectedValueOnce(new Error('AccessDenied'));
+        await expect(listAvatarObjects('avatars/')).rejects.toThrow('AccessDenied');
+      });
+
+      it('throws when aborted before a page', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        await expect(listAvatarObjects('avatars/', controller.signal)).rejects.toThrow(/aborted/);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('isIssuedAvatarKey', () => {
+      it('accepts only avatars/<id>/<file>', () => {
+        expect(isIssuedAvatarKey('avatars/u/a.jpg')).toBe(true);
+        expect(isIssuedAvatarKey('avatars/a.jpg')).toBe(false);
+        expect(isIssuedAvatarKey('avatars/u/x/a.jpg')).toBe(false);
+        expect(isIssuedAvatarKey('other/u/a.jpg')).toBe(false);
+      });
+    });
+
+    describe('referencedAvatarKeys', () => {
+      it('takes the key from our canonical URL', () => {
+        expect(referencedAvatarKeys(`${BUCKET_BASE}u/a.jpg`)).toEqual(['avatars/u/a.jpg']);
+      });
+
+      it('ignores the host, so a regional or path-style URL still protects the object', () => {
+        expect(referencedAvatarKeys('https://b.s3.us-east-1.amazonaws.com/avatars/u/a.jpg')).toEqual([
+          'avatars/u/a.jpg',
+        ]);
+        expect(referencedAvatarKeys('https://s3.amazonaws.com/b/avatars/u/a.jpg')).toEqual(['avatars/u/a.jpg']);
+      });
+
+      it('protects both the raw and the decoded key', () => {
+        expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%20b.jpg`)).toEqual(
+          expect.arrayContaining(['avatars/u/a%20b.jpg', 'avatars/u/a b.jpg'])
+        );
+      });
+
+      it('keeps the raw form when the escape is malformed', () => {
+        expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%E0.jpg`)).toEqual(['avatars/u/a%E0.jpg']);
+      });
+
+      it('falls back to the raw string when the URL does not parse', () => {
+        expect(referencedAvatarKeys('not a url avatars/u/a.jpg?x=1')).toEqual(['avatars/u/a.jpg']);
+      });
+
+      it('returns nothing for a URL outside avatars/', () => {
+        expect(referencedAvatarKeys('https://workos.example/photo.jpg')).toEqual([]);
+      });
+    });
+
+    describe('loadReferencedAvatarKeys', () => {
+      it('collects the key of every stored profilePictureUrl', async () => {
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { profilePictureUrl: `${BUCKET_BASE}coach/kid.jpg` },
+          { profilePictureUrl: 'https://workos.example/photo.jpg' },
+          { profilePictureUrl: null },
+        ]);
+
+        const keys = await loadReferencedAvatarKeys();
+
+        expect([...keys]).toEqual(['avatars/coach/kid.jpg']);
+        // Every row, tombstones included: no deletedAt filter
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+          where: { profilePictureUrl: { not: null } },
+          select: { profilePictureUrl: true },
+        });
+      });
+
+      it('propagates a database error', async () => {
+        (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
+        await expect(loadReferencedAvatarKeys()).rejects.toThrow('db down');
+      });
+    });
+
+    describe('deleteAvatarKeys', () => {
+      it('deletes in batches of 1000 and counts per-key errors', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        const keys = Array.from({ length: 1001 }, (_, i) => `avatars/u/${i}.jpg`);
+        mockSend
+          .mockResolvedValueOnce({
+            Errors: [{ Key: 'avatars/u/0.jpg', Code: 'AccessDenied' }],
+          })
+          .mockResolvedValueOnce({});
+
+        const result = await deleteAvatarKeys(keys);
+
+        expect(result).toEqual({ deleted: 1000, failed: 1 });
+        const deletes = sentOf('DeleteObjects');
+        expect(deletes).toHaveLength(2);
+        expect((deletes[0].input.Delete as { Objects: unknown[] }).Objects).toHaveLength(1000);
+        expect((deletes[1].input.Delete as { Objects: unknown[] }).Objects).toEqual([{ Key: 'avatars/u/1000.jpg' }]);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ failed: 1, code: 'AccessDenied' })
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('counts a failed batch and never throws', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        mockSend.mockRejectedValueOnce(new Error('throttled'));
+        await expect(deleteAvatarKeys(['avatars/u/a.jpg'])).resolves.toEqual({
+          deleted: 0,
+          failed: 1,
+        });
+        expect(warnSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'throttled' }));
+        warnSpy.mockRestore();
+      });
+
+      it('stops between batches once aborted', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        await expect(deleteAvatarKeys(['avatars/u/a.jpg'], controller.signal)).resolves.toEqual({
+          deleted: 0,
+          failed: 0,
+        });
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('stringifies a non-Error rejection', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        mockSend.mockRejectedValueOnce('boom');
+        await deleteAvatarKeys(['avatars/u/a.jpg']);
+        expect(warnSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
+        warnSpy.mockRestore();
+      });
+    });
+
+    describe('deleteUnreferencedUserUploads', () => {
+      const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+
+      it("deletes the user's uploads that no row references and keeps the ones on a player's row", async () => {
+        mockSend
+          .mockResolvedValueOnce({
+            Contents: [
+              { Key: `avatars/${userId}/orphan.jpg` },
+              { Key: `avatars/${userId}/kid.jpg` },
+              { Key: `avatars/${userId}/nested/odd.jpg` },
+            ],
+          })
+          .mockResolvedValueOnce({});
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { profilePictureUrl: `${BUCKET_BASE}${userId}/kid.jpg` },
+        ]);
+
+        await deleteUnreferencedUserUploads(userId);
+
+        const list = sentOf('ListObjectsV2');
+        expect(list[0].input).toEqual(expect.objectContaining({ Prefix: `avatars/${userId}/` }));
+        const deletes = sentOf('DeleteObjects');
+        expect(deletes).toHaveLength(1);
+        expect(deletes[0].input.Delete).toEqual({
+          Objects: [{ Key: `avatars/${userId}/orphan.jpg` }],
+          Quiet: true,
+        });
+      });
+
+      it('reads no references and deletes nothing when the prefix is empty', async () => {
+        mockSend.mockResolvedValueOnce({});
+        await deleteUnreferencedUserUploads(userId);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+      });
+
+      it('deletes nothing when references cannot be read', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        mockSend.mockResolvedValueOnce({
+          Contents: [{ Key: `avatars/${userId}/a.jpg` }],
+        });
+        (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
+
+        await expect(deleteUnreferencedUserUploads(userId)).resolves.toBeUndefined();
+
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/cleanup failed/),
+          expect.objectContaining({ error: 'db down' })
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('deletes nothing and never throws when listing is denied (no s3:ListBucket)', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        mockSend.mockRejectedValueOnce('AccessDenied');
+        await expect(deleteUnreferencedUserUploads(userId)).resolves.toBeUndefined();
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'AccessDenied' }));
+        warnSpy.mockRestore();
+      });
+
+      it('refuses an id that would widen the prefix', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        await deleteUnreferencedUserUploads('');
+        await deleteUnreferencedUserUploads('a/b');
+        expect(mockSend).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
     });
   });
 });

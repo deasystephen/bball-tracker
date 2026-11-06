@@ -19,6 +19,7 @@ function deps(overrides: Partial<ShutdownDeps> = {}): { deps: ShutdownDeps; orde
     deps: {
       io: { close: step('io') },
       consumer: { stop: step('consumer') },
+      avatarSweeper: { stop: step('sweeper') },
       disconnectPrisma: step('prisma'),
       closeRedis: step('redis'),
       exit: jest.fn((code: number) => {
@@ -54,6 +55,20 @@ describe('createShutdown', () => {
     expect(order.at(-1)).toBe('exit:0');
     expect(d.exit).toHaveBeenCalledTimes(1);
     expect(logger.info).toHaveBeenCalledWith('Shutting down', { signal: 'SIGTERM' });
+  });
+
+  it('stops the avatar sweeper after the SES consumer and before Prisma quits (#957)', async () => {
+    const { deps: d, order } = deps();
+    await createShutdown(d)('SIGTERM');
+    expect(order.indexOf('consumer:end')).toBeLessThan(order.indexOf('sweeper:start'));
+    expect(order.indexOf('sweeper:end')).toBeLessThan(order.indexOf('prisma:start'));
+    expect(d.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('tolerates a missing avatar sweeper', async () => {
+    const { deps: d } = deps({ avatarSweeper: null });
+    await createShutdown(d)('SIGTERM');
+    expect(d.exit).toHaveBeenCalledWith(0);
   });
 
   it('tolerates a missing SES consumer', async () => {

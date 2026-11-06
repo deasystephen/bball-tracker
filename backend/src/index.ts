@@ -20,6 +20,7 @@ import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
 import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
+import { createAvatarSweeper } from './services/avatar-sweep';
 import { createShutdown } from './utils/shutdown';
 import { closeRedis } from './utils/redis';
 
@@ -217,10 +218,16 @@ if (require.main === module) {
   const consumer = createSesEventConsumer();
   consumer?.start();
 
+  // Unreferenced avatar uploads (#957). Null, and a no-op, until
+  // AVATAR_SWEEP_ENABLED=true (needs s3:ListBucket on the task role).
+  const avatarSweeper = createAvatarSweeper();
+  avatarSweeper?.start();
+
   // Graceful stop on ECS's SIGTERM (and Ctrl-C locally): utils/shutdown.ts (#747).
   const shutdown = createShutdown({
     io,
     consumer,
+    avatarSweeper,
     disconnectPrisma: () => prisma.$disconnect(),
     closeRedis,
     exit: (code) => process.exit(code),

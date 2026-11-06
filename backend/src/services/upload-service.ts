@@ -1,6 +1,12 @@
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
+import prisma from '../models';
 import { BadRequestError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
@@ -210,6 +216,201 @@ export async function discardOwnAvatar(
   } catch (err) {
     logger.warn('Failed to discard unreferenced avatar object (ignored)', {
       imageUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unreferenced uploads (#957)
+//
+// An upload exists in the public bucket as soon as the POST finishes, before
+// any profile write stores its URL. The helpers below find and delete objects
+// that no `User.profilePictureUrl` references. They need `s3:ListBucket` on
+// the bucket (task role, `infra/ecs.tf`); without it the list call is denied,
+// the caller logs it, and nothing is deleted.
+// ---------------------------------------------------------------------------
+
+/** Every object key under `avatars/` that `generateAvatarUploadUrl` can issue. */
+const ISSUED_KEY = /^avatars\/[^/]+\/[^/]+$/;
+
+/** DeleteObjects takes at most 1000 keys per request. */
+const DELETE_BATCH_SIZE = 1000;
+
+export interface AvatarObject {
+  key: string;
+  lastModified: Date | undefined;
+}
+
+export interface AvatarDeleteResult {
+  deleted: number;
+  failed: number;
+}
+
+/**
+ * Every object under `prefix`, paging through ListObjectsV2. Throws when a
+ * page cannot be read (AccessDenied without `s3:ListBucket`, network): a
+ * partial listing is never returned, so a caller never acts on half a bucket.
+ */
+export async function listAvatarObjects(prefix: string, signal?: AbortSignal): Promise<AvatarObject[]> {
+  const objects: AvatarObject[] = [];
+  let continuationToken: string | undefined;
+  do {
+    if (signal?.aborted) {
+      throw new Error('Avatar listing aborted');
+    }
+    const page = await s3Client.send(
+      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix, ContinuationToken: continuationToken })
+    );
+    for (const item of page.Contents ?? []) {
+      if (item.Key) {
+        objects.push({ key: item.Key, lastModified: item.LastModified });
+      }
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return objects;
+}
+
+/** True when `key` has the exact shape `avatars/<id>/<file>`. */
+export function isIssuedAvatarKey(key: string): boolean {
+  return ISSUED_KEY.test(key);
+}
+
+/**
+ * Every object key a stored `profilePictureUrl` could be pointing at.
+ *
+ * Deliberately over-inclusive, because a miss deletes a photo that is in use
+ * and the bucket is unversioned: the host is ignored (a regional or path-style
+ * URL to our bucket still protects its object), and both the raw and the
+ * percent-decoded path are taken from the first `avatars/` segment on.
+ * Protecting a key that does not exist costs nothing.
+ */
+export function referencedAvatarKeys(storedUrl: string): string[] {
+  const paths = new Set<string>();
+  let pathname: string;
+  try {
+    pathname = new URL(storedUrl).pathname;
+  } catch {
+    // Unparsable: fall back to the raw string, minus any query or fragment.
+    pathname = storedUrl.split(/[?#]/)[0];
+  }
+  paths.add(pathname);
+  try {
+    paths.add(decodeURIComponent(pathname));
+  } catch {
+    // Malformed escape: the raw form is already in the set.
+  }
+
+  const keys: string[] = [];
+  for (const path of paths) {
+    const at = path.indexOf('avatars/');
+    if (at !== -1) {
+      keys.push(path.slice(at));
+    }
+  }
+  return keys;
+}
+
+/**
+ * The set of object keys referenced by any `User.profilePictureUrl`, tombstones
+ * and every row included. Throws on a database error, so a caller can never
+ * mistake "could not read references" for "nothing is referenced".
+ */
+export async function loadReferencedAvatarKeys(): Promise<Set<string>> {
+  const rows = await prisma.user.findMany({
+    where: { profilePictureUrl: { not: null } },
+    select: { profilePictureUrl: true },
+  });
+  const keys = new Set<string>();
+  for (const { profilePictureUrl } of rows) {
+    if (profilePictureUrl) {
+      for (const key of referencedAvatarKeys(profilePictureUrl)) {
+        keys.add(key);
+      }
+    }
+  }
+  return keys;
+}
+
+/**
+ * Delete `keys` in batches of 1000. A failed batch or a per-key error is
+ * counted and logged (no keys in the line), never thrown.
+ */
+export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Promise<AvatarDeleteResult> {
+  const result: AvatarDeleteResult = { deleted: 0, failed: 0 };
+  for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
+    if (signal?.aborted) {
+      break;
+    }
+    const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
+    try {
+      const response = await s3Client.send(
+        new DeleteObjectsCommand({
+          Bucket: BUCKET_NAME,
+          Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+        })
+      );
+      const errors = response.Errors?.length ?? 0;
+      result.failed += errors;
+      result.deleted += batch.length - errors;
+      if (errors > 0) {
+        logger.warn('Some avatar objects could not be deleted', {
+          operation: 'DeleteObjects',
+          failed: errors,
+          code: response.Errors?.[0]?.Code,
+        });
+      }
+    } catch (err) {
+      result.failed += batch.length;
+      logger.warn('Avatar batch delete failed', {
+        operation: 'DeleteObjects',
+        failed: batch.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * After account deletion: delete every object under `avatars/<userId>/` that
+ * no `User.profilePictureUrl` still references (#957). A coach or guardian
+ * uploads a player's photo under their OWN prefix and writes it onto the
+ * player's row, so the prefix can hold photos in use elsewhere; those stay.
+ *
+ * Best-effort, like `deletePreviousAvatar`: the account is already gone, so a
+ * failure is logged and the function resolves. When either the listing or the
+ * reference query fails, nothing is deleted.
+ */
+export async function deleteUnreferencedUserUploads(userId: string): Promise<void> {
+  // The id becomes an S3 prefix; never let an odd value widen it.
+  if (!/^[A-Za-z0-9_-]+$/.test(userId)) {
+    logger.warn('Account upload cleanup skipped: user id is not a safe key segment');
+    return;
+  }
+
+  try {
+    const objects = await listAvatarObjects(`avatars/${userId}/`);
+    const candidates = objects.map((o) => o.key).filter(isIssuedAvatarKey);
+    if (candidates.length === 0) {
+      return;
+    }
+    // Read references AFTER listing, so they are at least as fresh as the list.
+    const referenced = await loadReferencedAvatarKeys();
+    const orphans = candidates.filter((key) => !referenced.has(key));
+    const { deleted, failed } = await deleteAvatarKeys(orphans);
+    logger.info('Account avatar uploads cleaned up', {
+      userId,
+      listed: candidates.length,
+      kept: candidates.length - orphans.length,
+      deleted,
+      failed,
+    });
+  } catch (err) {
+    logger.warn('Account avatar upload cleanup failed (ignored)', {
+      userId,
+      operation: 'ListObjectsV2/references',
       error: err instanceof Error ? err.message : String(err),
     });
   }

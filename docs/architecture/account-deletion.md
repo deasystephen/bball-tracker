@@ -21,7 +21,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
-  delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
+  delete (the current photo, then `upload-service.ts#deleteUnreferencedUserUploads`, which deletes
+  every other object under the user's own `avatars/<userId>/` prefix that no
+  `User.profilePictureUrl` references, so a photo the user uploaded as coach or guardian onto a
+  player's row stays; #957, needs `s3:ListBucket`, see `backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`)
+  and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**
 - Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and
