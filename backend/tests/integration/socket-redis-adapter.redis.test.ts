@@ -28,9 +28,9 @@ import { gameRoom } from '../../src/websocket/game-events';
 import { SharedRateLimitStore } from '../../src/api/middleware/rate-limit-store';
 import {
   CONCURRENT_KEY_PREFIX,
-  HANDSHAKE_KEY_PREFIX,
   INSTANCE_ID,
   INSTANCE_KEY_PREFIX,
+  INSTANCE_TTL_MS,
   MAX_HANDSHAKES_PER_WINDOW,
   checkHandshakeAllowed,
   hasConcurrentCapacity,
@@ -39,6 +39,7 @@ import {
   resetSocketRateLimits,
 } from '../../src/websocket/rate-limit';
 import { closeRedis, getReadyRedisClient } from '../../src/utils/redis';
+import { logger } from '../../src/utils/logger';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import request from 'supertest';
@@ -192,6 +193,7 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
     it('still delivers to its own clients when Redis is unreachable, without crashing', async () => {
       const unhandled = jest.fn();
       process.on('unhandledRejection', unhandled);
+      const warn = jest.spyOn(logger, 'warn');
       try {
         // Port 1: nothing listens, every connect is refused.
         const server = await startServer('redis://127.0.0.1:1');
@@ -209,8 +211,14 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
         // Let the failed publish settle.
         await new Promise((r) => setTimeout(r, 200));
         expect(unhandled).not.toHaveBeenCalled();
+        // Never connected: the boot window logs at debug, not a false warn.
+        expect(warn).not.toHaveBeenCalledWith(
+          'Socket.io adapter: Redis unavailable, delivering to this task only',
+          expect.anything()
+        );
       } finally {
         process.off('unhandledRejection', unhandled);
+        warn.mockRestore();
       }
     });
   });
@@ -269,17 +277,17 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
 
     it('counts socket handshakes in Redis, so a fresh task sees the same window', async () => {
       const ip = `${RUN}-hs`;
-      keysToDelete.add(`${HANDSHAKE_KEY_PREFIX}${ip}`);
+      keysToDelete.add(`rl:ws-hs:${ip}`);
       for (let i = 0; i < MAX_HANDSHAKES_PER_WINDOW; i++) {
         expect(await checkHandshakeAllowed(ip)).toBe(true);
       }
       // Forget this task's local window: only the shared counter remains.
       resetSocketRateLimits();
       expect(await checkHandshakeAllowed(ip)).toBe(false);
-      expect(await redis.pttl(`${HANDSHAKE_KEY_PREFIX}${ip}`)).toBeGreaterThan(0);
+      expect(await redis.pttl(`rl:ws-hs:${ip}`)).toBeGreaterThan(0);
     });
 
-    it('sums live tasks in the concurrency cap and drops a dead task', async () => {
+    it('sums live other tasks plus this task, drops a dead task and ignores its own stale field', async () => {
       const ip = `${RUN}-conc`;
       const hash = `${CONCURRENT_KEY_PREFIX}${ip}`;
       keysToDelete.add(hash);
@@ -296,19 +304,25 @@ describe('Socket.io Redis adapter and shared rate limits (real Redis)', () => {
       await redis.hset(hash, liveOther, '47');
       // A crashed task (no liveness key) left 100 behind; they must not count.
       await redis.hset(hash, `${RUN}-dead-task`, '100');
+      // A stale, inflated field for THIS task (a lost write) is ignored: this
+      // task counts itself from memory, and its next write corrects the field.
+      await redis.hset(hash, INSTANCE_ID, '500');
 
       expect(await hasConcurrentCapacity(ip)).toBe(true);
       expect(await redis.hexists(hash, `${RUN}-dead-task`)).toBe(0);
       await registerConnection(ip);
+      expect(await redis.hget(hash, INSTANCE_ID)).toBe('3');
       expect(await hasConcurrentCapacity(ip)).toBe(false);
 
       await releaseConnection(ip);
       expect(await hasConcurrentCapacity(ip)).toBe(true);
       await releaseConnection(ip);
       await releaseConnection(ip);
-      // A release past zero removes the field instead of going negative.
+      // The last release deletes the field; a release past zero leaves it gone.
+      expect(await redis.hexists(hash, INSTANCE_ID)).toBe(0);
       await releaseConnection(ip);
       expect(await redis.hexists(hash, INSTANCE_ID)).toBe(0);
+      expect(await redis.pttl(hash)).toBeLessThanOrEqual(INSTANCE_TTL_MS);
     });
   });
 });

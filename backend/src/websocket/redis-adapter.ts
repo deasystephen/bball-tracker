@@ -14,7 +14,8 @@
  * **Degradation (Redis is a best-effort dependency):** the adapter delivers to
  * this task's own sockets before it publishes, so a Redis outage never stops
  * local delivery. While Redis is unreachable a publish fails fast (no offline
- * queue) and is dropped with one `warn` per outage; sockets on other tasks miss
+ * queue) and is dropped with one `warn` per outage (before the client has
+ * connected for the first time, `debug` only); sockets on other tasks miss
  * those broadcasts, and because every broadcast carries the current score
  * their score converges on the next one they receive after Redis recovers
  * (events in between are recovered by the `game-snapshot` on the next join or
@@ -54,20 +55,30 @@ export function attachRedisAdapter(
   // for the connection instead of rejecting; ioredis re-subscribes on reconnect.
   const subClient = new Redis(url, { retryStrategy: redisRetryDelay, maxRetriesPerRequest: null });
 
+  // Until a client has been ready once, its failures are the boot window
+  // (connecting, or a publish before the connection is up): `debug` only.
+  // After that, the first failure of an outage is a `warn` and the recovery an
+  // `info`, once per outage across both clients.
+  const everReady = { pub: false, sub: false };
   let outageLogged = false;
-  const logOutage = (client: string, error: unknown): void => {
+  const logFailure = (client: 'pub' | 'sub', error: unknown): void => {
+    const detail = { client, error: error instanceof Error ? error.message : String(error) };
+    if (!everReady[client]) {
+      logger.debug('Socket.io adapter: Redis not connected yet', detail);
+      return;
+    }
     if (outageLogged) return;
     outageLogged = true;
-    logger.warn('Socket.io adapter: Redis unavailable, delivering to this task only', {
-      client,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    logger.warn('Socket.io adapter: Redis unavailable, delivering to this task only', detail);
   };
   for (const [name, client] of [['pub', pubClient], ['sub', subClient]] as const) {
-    client.on('error', (error: unknown) => logOutage(name, error));
+    client.on('error', (error: unknown) => logFailure(name, error));
     client.on('ready', () => {
-      if (outageLogged) logger.info('Socket.io adapter: Redis connected', { client: name });
-      outageLogged = false;
+      everReady[name] = true;
+      if (outageLogged) {
+        outageLogged = false;
+        logger.info('Socket.io adapter: Redis recovered', { client: name });
+      }
     });
   }
 
@@ -76,7 +87,7 @@ export function attachRedisAdapter(
   const publish = pubClient.publish.bind(pubClient);
   pubClient.publish = ((channel: string | Buffer, message: string | Buffer) =>
     publish(channel, message).catch((error: unknown) => {
-      logOutage('pub', error);
+      logFailure('pub', error);
       return 0;
     })) as Redis['publish'];
 

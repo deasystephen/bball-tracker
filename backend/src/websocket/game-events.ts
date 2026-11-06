@@ -37,11 +37,9 @@ import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
-  RATE_LIMITED_MESSAGE,
-  checkHandshakeAllowed,
   checkJoinAllowed,
   checkRefreshAuthAllowed,
-  hasConcurrentCapacity,
+  handshakeRateLimit,
   registerConnection,
   releaseConnection,
   socketClientIp,
@@ -785,21 +783,9 @@ export function registerGameEventHandlers(io: SocketServer): void {
   // never reaches the JWKS/user lookup (audit #16). A rejection here is a
   // `connect_error: Rate limited` on the client, which backs off and retries
   // like `Service unavailable`.
-  // Shared across tasks through Redis (#452); both checks fall back to this
-  // task's counters and never throw, so a Redis problem never refuses a
-  // handshake on its own.
-  io.use((socket, next) => {
-    const ip = socketClientIp(socket);
-    void (async () => {
-      const allowed = (await checkHandshakeAllowed(ip)) && (await hasConcurrentCapacity(ip));
-      if (!allowed) {
-        logger.warn('Socket handshake rate limited', { socketId: socket.id, ip });
-        next(new Error(RATE_LIMITED_MESSAGE));
-        return;
-      }
-      next();
-    })().catch(() => next());
-  });
+  // Shared across tasks through Redis (#452); falls back to this task's
+  // counters and never refuses a handshake because of Redis.
+  io.use(handshakeRateLimit);
 
   io.use((socket, next) => {
     void authenticateSocket(socket as GameSocket, next);

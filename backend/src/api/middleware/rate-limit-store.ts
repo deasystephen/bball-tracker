@@ -50,6 +50,49 @@ async function sendCommand(...args: string[]): Promise<RedisReply> {
 /** Logged once per outage across every limiter, so a Redis blip is one line, not one per limiter. */
 let outageLogged = false;
 
+/**
+ * The one back-off policy for every shared rate-limit counter (#452): the HTTP
+ * stores below and the Socket.io concurrency counters
+ * (`websocket/rate-limit.ts`). After a Redis failure the owner skips Redis for
+ * `REDIS_RETRY_AFTER_FAILURE_MS` and counts in memory; the first failure of an
+ * outage is logged at `warn`, the first success after it at `info`, once
+ * across all owners. A client that is simply not ready (or not configured) is
+ * not an outage worth a line: `utils/redis.ts` logs connection errors itself.
+ */
+export class RedisBackoff {
+  private retryAt = 0;
+
+  /** Whether Redis may be tried now. */
+  available(now: number = Date.now()): boolean {
+    return now >= this.retryAt;
+  }
+
+  failed(operation: string, error: unknown, now: number = Date.now()): void {
+    this.retryAt = now + REDIS_RETRY_AFTER_FAILURE_MS;
+    if (!outageLogged && !(error instanceof RedisUnavailableError)) {
+      outageLogged = true;
+      logger.warn('Rate limit store: Redis unavailable, counting in memory', {
+        operation,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Forget a back-off in progress. Test-only. */
+  reset(): void {
+    this.retryAt = 0;
+  }
+
+  succeeded(): void {
+    if (outageLogged) {
+      outageLogged = false;
+      logger.info('Rate limit store: Redis recovered');
+    }
+  }
+}
+
+export { RedisUnavailableError };
+
 export class SharedRateLimitStore implements Store {
   /** Keys are shared across tasks, never local to this instance. */
   readonly localKeys = false;
@@ -58,7 +101,7 @@ export class SharedRateLimitStore implements Store {
   private readonly memory = new MemoryStore();
   private options: Options | null = null;
   private redisStore: Promise<RedisStore> | null = null;
-  private redisRetryAt = 0;
+  private readonly backoff = new RedisBackoff();
 
   /**
    * @param name The limiter's name, unique per limiter (`api`, `auth`, …): it
@@ -79,7 +122,7 @@ export class SharedRateLimitStore implements Store {
    * outage is retried once Redis is back. `null` means "count in memory".
    */
   private async redis(now: number): Promise<RedisStore | null> {
-    if (!this.options || !getReadyRedisClient() || now < this.redisRetryAt) return null;
+    if (!this.options || !getReadyRedisClient() || !this.backoff.available(now)) return null;
     if (!this.redisStore) {
       const store = new RedisStore({ sendCommand, prefix: this.prefix });
       const ready = store.init(this.options).then(() => store);
@@ -88,25 +131,6 @@ export class SharedRateLimitStore implements Store {
       this.redisStore = ready;
     }
     return this.redisStore;
-  }
-
-  private redisFailed(operation: string, error: unknown, now: number): void {
-    this.redisStore = null;
-    this.redisRetryAt = now + REDIS_RETRY_AFTER_FAILURE_MS;
-    if (!outageLogged && !(error instanceof RedisUnavailableError)) {
-      outageLogged = true;
-      logger.warn('Rate limit store: Redis unavailable, counting in memory', {
-        operation,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  private redisSucceeded(): void {
-    if (outageLogged) {
-      outageLogged = false;
-      logger.info('Rate limit store: Redis recovered');
-    }
   }
 
   private async withRedis<T>(
@@ -119,11 +143,12 @@ export class SharedRateLimitStore implements Store {
       const store = await this.redis(now);
       if (store) {
         const result = await viaRedis(store);
-        this.redisSucceeded();
+        this.backoff.succeeded();
         return result;
       }
     } catch (error) {
-      this.redisFailed(operation, error, now);
+      this.redisStore = null;
+      this.backoff.failed(operation, error, now);
     }
     return viaMemory();
   }

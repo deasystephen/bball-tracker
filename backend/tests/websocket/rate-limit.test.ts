@@ -15,7 +15,9 @@ import {
   MAX_HANDSHAKES_PER_WINDOW,
   MAX_JOINS_PER_WINDOW,
   checkHandshakeAllowed,
+  RATE_LIMITED_MESSAGE,
   checkJoinAllowed,
+  handshakeRateLimit,
   hasConcurrentCapacity,
   registerConnection,
   releaseConnection,
@@ -50,30 +52,75 @@ describe('websocket/rate-limit', () => {
   });
 
   describe('checkHandshakeAllowed', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it('allows up to the per-window budget and rejects the attempt after it', async () => {
-      const now = 1_000_000;
       for (let i = 0; i < MAX_HANDSHAKES_PER_WINDOW; i++) {
-        expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(true);
+        expect(await checkHandshakeAllowed('203.0.113.9')).toBe(true);
       }
-      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
+      expect(await checkHandshakeAllowed('203.0.113.9')).toBe(false);
     });
 
     it('tracks IPs independently', async () => {
-      const now = 1_000_000;
       for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
-        await checkHandshakeAllowed('203.0.113.9', now);
+        await checkHandshakeAllowed('203.0.113.9');
       }
-      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
-      expect(await checkHandshakeAllowed('198.51.100.7', now)).toBe(true);
+      expect(await checkHandshakeAllowed('203.0.113.9')).toBe(false);
+      expect(await checkHandshakeAllowed('198.51.100.7')).toBe(true);
     });
 
     it('resets once the window has elapsed', async () => {
-      const now = 1_000_000;
+      jest.useFakeTimers({ now: 1_000_000 });
+      resetSocketRateLimits();
       for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
-        await checkHandshakeAllowed('203.0.113.9', now);
+        await checkHandshakeAllowed('203.0.113.9');
       }
-      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
-      expect(await checkHandshakeAllowed('203.0.113.9', now + HANDSHAKE_WINDOW_MS)).toBe(true);
+      expect(await checkHandshakeAllowed('203.0.113.9')).toBe(false);
+      jest.setSystemTime(1_000_000 + HANDSHAKE_WINDOW_MS);
+      expect(await checkHandshakeAllowed('203.0.113.9')).toBe(true);
+    });
+  });
+
+  describe('handshakeRateLimit middleware', () => {
+    const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+    it('calls next once, with no error, within the budget', async () => {
+      const next = jest.fn();
+      handshakeRateLimit(fakeSocket({ 'x-forwarded-for': '203.0.113.20' }), next);
+      await flush();
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    it('calls next once with the rate-limited error over the budget', async () => {
+      const socket = fakeSocket({ 'x-forwarded-for': '203.0.113.21' });
+      for (let i = 0; i < MAX_HANDSHAKES_PER_WINDOW; i++) {
+        await checkHandshakeAllowed('203.0.113.21');
+      }
+      const next = jest.fn();
+      handshakeRateLimit(socket, next);
+      await flush();
+      expect(next).toHaveBeenCalledTimes(1);
+      expect((next.mock.calls[0] as [Error])[0].message).toBe(RATE_LIMITED_MESSAGE);
+    });
+
+    it('never calls next a second time when downstream middleware throws', async () => {
+      const next = jest.fn(() => {
+        throw new Error('downstream exploded');
+      });
+      const unhandled = jest.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        handshakeRateLimit(fakeSocket({ 'x-forwarded-for': '203.0.113.22' }), next);
+        await flush();
+        await flush();
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(unhandled).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
     });
   });
 
