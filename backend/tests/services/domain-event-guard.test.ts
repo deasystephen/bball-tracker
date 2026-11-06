@@ -36,6 +36,8 @@ const SERVICES = path.join(BACKEND, 'src/services');
  */
 const ALLOWED: Record<string, string> = {
   // In-transaction helpers: the public method that calls them logs the event.
+  'account-service.ts#unclaimManagedRow':
+    'un-claim write inside convertToManaged (and the #981 age screen), whose caller logs `Account converted to managed`',
   'game-event-service.ts#recomputeHomeScore':
     'derives Game.homeScore inside createEvent/deleteEvent, which log `Game event created` / `deleted`',
   'guardian-service.ts#promoteNextPrimary':

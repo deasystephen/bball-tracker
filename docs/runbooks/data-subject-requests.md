@@ -12,6 +12,7 @@ The privacy policy (#25) must describe **exactly** what "Retention" below says.
 | Guardian | a guardian of a **managed, unclaimed** child | Profile → My kids → ⋯ → **Delete <child>'s record** | `DELETE /api/v1/players/:id/account` → child record anonymized (or erased, if never rostered) |
 | Operator (delete) | you, after verifying identity | `scripts/data-subject-request.ts delete <email>` | same transaction in `operator` mode |
 | Operator (export) | you, after verifying identity | `scripts/data-subject-request.ts export <email>` | one JSON document to stdout |
+| Operator (under 13, convert) | you, after verifying the reporter | `scripts/convert-to-managed.ts <userId> [--coach <coachUserId>]` | the account becomes a managed roster record again, WorkOS user deleted; see [We learned an account holder is under 13](#we-learned-an-account-holder-is-under-13) |
 
 A claimed account (one that has signed in) can be deleted **only** by its owner through the
 app, or by an operator through the script. Guardians cannot delete a claimed child's account and
@@ -193,6 +194,70 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    still applies: if it refuses, ask the person to hand the team over, or (with their consent)
    re-role another staff member yourself via `PATCH /teams/:id/staff/:userId`.
 5. Run the post-deletion checklist below, then record the request in the log table.
+
+## We learned an account holder is under 13
+
+Account holders must be 13 or older (#980); a younger player is a roster record kept by a coach
+or a parent. When we **learn** after the fact that someone holding an account is under 13 (a
+parent writes to `privacy@hooplings.com`, a coach tells support, or a support thread plus a team's
+age group makes it plain), we have actual knowledge under COPPA and must stop holding what was
+collected from the child. Follow these steps every time; no code is written at the time.
+
+1. **Acknowledge within 1 business day.** Reply to the reporter that we have received the report
+   and will act within 5 business days. Do not ask the child for anything.
+2. **Verify the reporter** with the identity rules of [Operator procedure](#operator-procedure-request-by-email)
+   step 1: the account's own address, or a guardian whose address is on a `Guardian` /
+   `GuardianInvitation` row for the child. A coach's report is acted on too (the coach is staff on
+   the child's team), but confirm with the coach from the address on their own account. A report
+   from anyone else: thank them and check the account yourself (the roster, the team's age group,
+   the support thread); act when it is plain, without needing their identity.
+3. **Find the user id and export.** Run the `export` command of the
+   [Operator procedure](#operator-procedure-request-by-email) step 3 with the account's email; it
+   prints `user.id`, and `teamMembers` says whether the child is on a roster. A coach's report
+   usually names the team and the player instead: find the row on that team's roster. Keep the
+   export only until the case is closed (a parent may ask what was held), then delete it.
+4. **Within 5 business days, do ONE of the following.**
+   - **(a) Convert** (the child is on a roster and the team wants to keep them): run
+     ```bash
+     cd backend && NODE_ENV=production npx tsx scripts/convert-to-managed.ts <userId>
+     # or, to choose the managing coach:
+     cd backend && NODE_ENV=production npx tsx scripts/convert-to-managed.ts <userId> --coach <coachUserId>
+     ```
+     Output: `{ userId, converted, managedById, identityDeleted }`. In one transaction
+     (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`) the row loses its
+     login (`workosUserId`), its email and verified flag (so a new sign-up with the same address
+     cannot claim it again), any photo that came from the child (a sign-in photo or one the child
+     uploaded; a photo the coach uploaded stays), push tokens, calendar-feed tokens and pending
+     team invitations (→ `CANCELLED`); role goes back to `PLAYER` and the subscription to free. It
+     becomes `isManaged` under `managedById`: by default the one head coach of the child's teams in
+     active seasons, or the staff member `--coach` names (who must be on the staff of one of the
+     child's teams). Roster memberships, game events, statistics, RSVPs and guardian links stay,
+     so the coach's roster looks the same. After commit the WorkOS user is deleted, which ends
+     every session and refresh token; the old access token already fails (no row has its id).
+     **Refusals** (exit 1, nothing written): the account holds a staff role, a league admin role
+     or is a guardian of someone (an adult account: verify again, then delete it with (b) if the
+     report still holds); the child is on no team in an active season with a head coach (delete
+     with (b), or pass `--coach`); several head coaches qualify (pass `--coach`); the account is
+     already a managed record or deleted. If **no guardian is linked**, ask the managing coach to
+     invite the parent from the child's roster entry (the guardian flow,
+     `docs/architecture/guardians.md`); give the coach the parent's address only if the parent
+     asked us to.
+   - **(b) Delete** (the parent asks for deletion, the child is on no roster, or conversion is
+     refused): run the `delete` command of the [Operator procedure](#operator-procedure-request-by-email)
+     step 4. It erases or anonymises by the usual rules and deletes the WorkOS user.
+5. **WorkOS.** Either path deletes the WorkOS user best-effort. On `identityDeleted: false`, delete
+   it by hand now ([When WorkOS deletion fails](#when-workos-deletion-fails)): until it is gone the
+   child can still sign in to WorkOS, and after (a) a sign-in would reach an empty new account.
+6. **Vendor deletion requests** for the internal user id, per [Retention](#retention-this-is-what-the-privacy-policy-must-say):
+   Amplitude (user deletion by user id), Sentry (backend events carry the user id) and Datadog (log
+   lines carry the user id). CloudWatch has no per-id deletion; its 30-day window applies. File
+   all three the same day.
+7. **Reply to the reporter** with what was done: converted to a record their coach keeps (and
+   whether a parent invitation is on its way) or deleted, and that our vendors were asked to
+   delete their copies.
+8. **Record the case, ids only** (user id, path a/b, `managedById`, `identityDeleted`, the dates
+   of steps 1, 4 and 6), in the private operations log. **Never** in a GitHub issue, a pull
+   request or this repository: the record says a named account belonged to a child.
 
 ## Post-deletion checklist
 

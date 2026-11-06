@@ -54,13 +54,14 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
-import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
+import { ConflictError, ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
+import { lockUsers } from '../utils/user-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar } from './upload-service';
+import { deletePreviousAvatar, isOwnUploadUrl } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -453,6 +454,219 @@ export class AccountService {
       announcementReplies,
     };
   }
+
+  /**
+   * Turns a signed-in account back into a managed roster record (#983): the
+   * operator path for an account holder we learn is under 13
+   * (`docs/runbooks/data-subject-requests.md`, "We learned an account holder
+   * is under 13"; `scripts/convert-to-managed.ts`).
+   *
+   *   $transaction
+   *   ┌──────────────────────────────────────────────────────────────┐
+   *   │ 1  lock the User row (FOR NO KEY UPDATE)                       │
+   *   │    missing or tombstoned ───────────────────────────► 404      │
+   *   │    already managed and unclaimed ───────────────────► 409      │
+   *   │ 2  staff row, league admin row or guardian-of link ─► 409      │
+   *   │    (an adult account, not a player: delete instead)            │
+   *   │ 3  managing coach: the operator's choice (must be staff on a   │
+   *   │    team the player is on) or the one head coach of the        │
+   *   │    player's teams in active seasons; none or several ─► 409    │
+   *   │ 4  unclaimManagedRow (shared with the age screen, #981)        │
+   *   └──────────────────────────────────────────────────────────────┘
+   *   after commit, best-effort: delete the S3 avatar the child uploaded,
+   *   delete the WorkOS user (kills every session and refresh token)
+   */
+  static async convertToManaged(userId: string, options: ConvertToManagedOptions): Promise<ConvertToManagedResult> {
+    const { actorId } = options;
+
+    const committed = await prisma.$transaction(async (tx) => {
+      const [locked] = await lockUsers(tx, [userId]);
+      if (!locked || locked.deletedAt !== null) {
+        throw new NotFoundError('Account not found');
+      }
+
+      const row = await tx.user.findUnique({ where: { id: userId }, select: CONVERT_TARGET_SELECT });
+      if (!row) {
+        throw new NotFoundError('Account not found');
+      }
+      if (row.isManaged && row.workosUserId === null) {
+        throw new ConflictError('Account is already a managed roster record');
+      }
+      const { teamStaff, leagueAdmins, guardiansAsParent } = row._count;
+      if (teamStaff > 0 || leagueAdmins > 0 || guardiansAsParent > 0) {
+        throw new ConflictError(
+          'Account holds a staff role, a league admin role or a guardian link: it is an adult account, not a player. Delete it instead'
+        );
+      }
+
+      const managedById = await resolveManagingCoach(tx, userId, options.managedById);
+      const unclaimed = await unclaimManagedRow(tx, userId, managedById);
+      return { ...unclaimed, managedById };
+    });
+
+    await deletePreviousAvatar(committed.removedAvatar, null);
+
+    let identityDeleted = false;
+    if (committed.workosUserId) {
+      try {
+        await WorkOSService.deleteUser(committed.workosUserId);
+        identityDeleted = true;
+      } catch (error) {
+        logger.error('Failed to delete WorkOS user after converting an account to managed', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        captureException(error, { flow: 'convert-to-managed', userId });
+      }
+    }
+
+    logger.info('Account converted to managed', {
+      userId,
+      actorId,
+      managedById: committed.managedById,
+      identityDeleted,
+    });
+
+    return { success: true, managedById: committed.managedById, identityDeleted };
+  }
+}
+
+export interface ConvertToManagedOptions {
+  /** Who ran it; `operator` from the script. Logged, never stored. */
+  actorId: string;
+  /**
+   * The coach who manages the record from now on. Optional: by default the
+   * one head coach of the player's teams in active seasons.
+   */
+  managedById?: string;
+}
+
+export interface ConvertToManagedResult {
+  success: true;
+  managedById: string;
+  /** Whether the WorkOS user was deleted (false when there was none, or on provider failure). */
+  identityDeleted: boolean;
+}
+
+const CONVERT_TARGET_SELECT = {
+  isManaged: true,
+  workosUserId: true,
+  _count: { select: { teamStaff: true, leagueAdmins: true, guardiansAsParent: true } },
+} satisfies Prisma.UserSelect;
+
+/**
+ * Who manages the converted record. An operator-supplied id must be a live
+ * user on the staff of a team the player is rostered on, so a typo cannot
+ * hand a child's record to a stranger. Without one, the head coach of the
+ * player's teams in active seasons, when exactly one person holds that role.
+ */
+async function resolveManagingCoach(
+  tx: Prisma.TransactionClient,
+  playerId: string,
+  requested: string | undefined
+): Promise<string> {
+  if (requested) {
+    const staff = await tx.teamStaff.findFirst({
+      where: { userId: requested, user: { deletedAt: null }, team: { members: { some: { playerId } } } },
+      select: { userId: true },
+    });
+    if (!staff) {
+      throw new ConflictError('The coach given is not on the staff of any team this player is rostered on');
+    }
+    return staff.userId;
+  }
+
+  const heads = await tx.teamStaff.findMany({
+    where: {
+      role: { type: 'HEAD_COACH' },
+      user: { deletedAt: null },
+      team: { season: { isActive: true }, members: { some: { playerId } } },
+    },
+    select: { userId: true },
+    distinct: ['userId'],
+  });
+  if (heads.length !== 1) {
+    throw new ConflictError(
+      heads.length === 0
+        ? 'The player is on no team in an active season with a head coach; pass a coach id or delete the account instead'
+        : 'The player has more than one head coach across active teams; pass the coach id to use'
+    );
+  }
+  return heads[0].userId;
+}
+
+/**
+ * The un-claim write: a signed-in account becomes a managed roster record
+ * again, the state a coach's Add Player left it in before the child signed
+ * in (#983; the age screen's under-13 branch, #981, reuses it). The caller
+ * holds the row lock, has checked the row is live and claimable, and chose
+ * `managedById`; it also logs the domain event and, after commit, deletes the
+ * WorkOS user and the returned avatar.
+ *
+ * - Login and contact: `workosUserId` and `email` are cleared (the email too,
+ *   so a fresh sign-up with the same address cannot claim the row again
+ *   through `syncUser`'s email match), `emailVerified` false, suppression
+ *   state cleared with the email.
+ * - `isManaged` true, `managedById` the coach, role back to `PLAYER`,
+ *   subscription back to free.
+ * - Photo: cleared when it came from the child (an external URL, which only
+ *   sign-in writes, or an upload under the child's own prefix); a photo the
+ *   coach uploaded stays. The cleared URL is returned for the S3 delete.
+ * - Device and feed bindings go: push tokens, calendar feed tokens.
+ * - Pending team invitations addressed to the player are cancelled (they
+ *   invite the child to sign in) and their recipient hash cleared.
+ *
+ * Roster memberships, game events, stats, RSVPs and guardian links stay: the
+ * coach's view of the roster does not change.
+ */
+export async function unclaimManagedRow(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  managedById: string
+): Promise<{ workosUserId: string | null; removedAvatar: string | null }> {
+  const before = await tx.user.findUnique({
+    where: { id: userId },
+    select: { workosUserId: true, profilePictureUrl: true },
+  });
+  if (!before) {
+    throw new NotFoundError('Account not found');
+  }
+  const removedAvatar =
+    before.profilePictureUrl !== null && isOwnUploadUrl(before.profilePictureUrl, userId)
+      ? before.profilePictureUrl
+      : null;
+
+  const updated = await tx.user.updateMany({
+    where: { id: userId, deletedAt: null },
+    data: {
+      workosUserId: null,
+      email: null,
+      ...EMAIL_SUPPRESSION_CLEARED,
+      emailVerified: false,
+      isManaged: true,
+      managedById,
+      role: 'PLAYER',
+      subscriptionTier: 'FREE',
+      subscriptionExpiresAt: null,
+      ...(removedAvatar !== null && { profilePictureUrl: null }),
+    },
+  });
+  if (updated.count === 0) {
+    throw new NotFoundError('Account not found');
+  }
+
+  await tx.pushToken.deleteMany({ where: { userId } });
+  await tx.calendarFeedToken.deleteMany({ where: { userId } });
+  await tx.teamInvitation.updateMany({
+    where: { playerId: userId, status: 'PENDING' },
+    data: { status: 'CANCELLED' },
+  });
+  await tx.teamInvitation.updateMany({
+    where: { playerId: userId, recipientHash: { not: null } },
+    data: { recipientHash: null },
+  });
+
+  return { workosUserId: before.workosUserId, removedAvatar };
 }
 
 // Named select/include constants so the export type is explicit (CLAUDE.md
