@@ -39,8 +39,13 @@ import {
   deleteAvatarKeys,
   deletePreviousAvatar,
   deleteUnreferencedUserUploads,
+  isDeletableAge,
   isIssuedAvatarKey,
+  listAvatarObjectPages,
   listAvatarObjects,
+  scheduleUserUploadCleanup,
+  settleUploadCleanups,
+  ACCOUNT_UPLOAD_MIN_AGE_MS,
   loadReferencedAvatarKeys,
   referencedAvatarKeys,
   discardOwnAvatar,
@@ -399,6 +404,87 @@ describe('Upload Service', () => {
       });
     });
 
+    describe('listAvatarObjectPages', () => {
+      it('yields one page at a time', async () => {
+        mockSend
+          .mockResolvedValueOnce({ Contents: [{ Key: 'avatars/u/a.jpg' }], IsTruncated: true, NextContinuationToken: 'n' })
+          .mockResolvedValueOnce({ Contents: [{ Key: 'avatars/u/b.jpg' }] });
+        const pages: string[][] = [];
+        for await (const page of listAvatarObjectPages('avatars/')) {
+          pages.push(page.map((o) => o.key));
+        }
+        expect(pages).toEqual([['avatars/u/a.jpg'], ['avatars/u/b.jpg']]);
+      });
+    });
+
+    describe('isDeletableAge', () => {
+      it('needs an issued key and a LastModified at or before the cutoff', () => {
+        const t = new Date('2026-01-01T00:00:00Z');
+        expect(isDeletableAge({ key: 'avatars/u/a.jpg', lastModified: t }, t.getTime())).toBe(true);
+        expect(isDeletableAge({ key: 'avatars/u/a.jpg', lastModified: t }, t.getTime() - 1)).toBe(false);
+        expect(isDeletableAge({ key: 'avatars/u/a.jpg', lastModified: undefined }, t.getTime())).toBe(false);
+        expect(isDeletableAge({ key: 'avatars/a.jpg', lastModified: t }, t.getTime())).toBe(false);
+      });
+    });
+
+    describe('scheduleUserUploadCleanup', () => {
+      const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+
+      it('starts the cleanup without waiting for it; settleUploadCleanups waits', async () => {
+        let releaseList: (v: unknown) => void = () => undefined;
+        mockSend.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              releaseList = resolve;
+            })
+        );
+
+        scheduleUserUploadCleanup(userId); // returns at once
+        expect(sentOf('ListObjectsV2')).toHaveLength(1);
+
+        let settled = false;
+        const settling = settleUploadCleanups().then(() => {
+          settled = true;
+        });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        releaseList({});
+        await settling;
+        expect(settled).toBe(true);
+        await expect(settleUploadCleanups()).resolves.toBeUndefined(); // nothing pending
+      });
+
+      it('logs, never rejects, if the cleanup itself throws', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        // The cleanup's own warn throws; the scheduler's catch is the guard.
+        warnSpy.mockImplementationOnce(() => {
+          throw new Error('logger broke');
+        });
+        mockSend.mockRejectedValueOnce(new Error('denied'));
+
+        scheduleUserUploadCleanup(userId);
+        await settleUploadCleanups();
+
+        expect(warnSpy).toHaveBeenLastCalledWith(
+          'Account avatar upload cleanup failed (ignored)',
+          expect.objectContaining({ userId, error: 'logger broke' })
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('stringifies a non-Error from the cleanup', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        warnSpy.mockImplementationOnce(() => {
+          throw 'odd';
+        });
+        mockSend.mockRejectedValueOnce(new Error('denied'));
+        scheduleUserUploadCleanup(userId);
+        await settleUploadCleanups();
+        expect(warnSpy).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ error: 'odd' }));
+        warnSpy.mockRestore();
+      });
+    });
+
     describe('isIssuedAvatarKey', () => {
       it('accepts only avatars/<id>/<file>', () => {
         expect(isIssuedAvatarKey('avatars/u/a.jpg')).toBe(true);
@@ -482,7 +568,7 @@ describe('Upload Service', () => {
 
         const result = await deleteAvatarKeys(keys);
 
-        expect(result).toEqual({ deleted: 1000, failed: 1 });
+        expect(result).toEqual({ deleted: 1000, failed: 1, aborted: false });
         const deletes = sentOf('DeleteObjects');
         expect(deletes).toHaveLength(2);
         expect((deletes[0].input.Delete as { Objects: unknown[] }).Objects).toHaveLength(1000);
@@ -497,10 +583,7 @@ describe('Upload Service', () => {
       it('counts a failed batch and never throws', async () => {
         const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         mockSend.mockRejectedValueOnce(new Error('throttled'));
-        await expect(deleteAvatarKeys(['avatars/u/a.jpg'])).resolves.toEqual({
-          deleted: 0,
-          failed: 1,
-        });
+        await expect(deleteAvatarKeys(['avatars/u/a.jpg'])).resolves.toEqual({ deleted: 0, failed: 1, aborted: false });
         expect(warnSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'throttled' }));
         warnSpy.mockRestore();
       });
@@ -508,11 +591,30 @@ describe('Upload Service', () => {
       it('stops between batches once aborted', async () => {
         const controller = new AbortController();
         controller.abort();
-        await expect(deleteAvatarKeys(['avatars/u/a.jpg'], controller.signal)).resolves.toEqual({
-          deleted: 0,
-          failed: 0,
-        });
+        await expect(deleteAvatarKeys(['avatars/u/a.jpg'], controller.signal)).resolves.toEqual({ deleted: 0, failed: 0, aborted: true });
         expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('treats an abort during a batch as a stop, logged at info, not a failed batch', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+        const controller = new AbortController();
+        mockSend.mockImplementationOnce(async () => {
+          controller.abort();
+          throw new Error('Request aborted');
+        });
+
+        const result = await deleteAvatarKeys(['avatars/u/a.jpg', 'avatars/u/b.jpg'], controller.signal);
+
+        expect(result).toEqual({ deleted: 0, failed: 0, aborted: true });
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(infoSpy).toHaveBeenCalledWith(
+          'Avatar deletes stopped (aborted)',
+          expect.objectContaining({ deleted: 0, notAttempted: 2 })
+        );
+        expect((mockSend.mock.calls[0][1] as { abortSignal: AbortSignal }).abortSignal).toBe(controller.signal);
+        warnSpy.mockRestore();
+        infoSpy.mockRestore();
       });
 
       it('stringifies a non-Error rejection', async () => {
@@ -526,14 +628,16 @@ describe('Upload Service', () => {
 
     describe('deleteUnreferencedUserUploads', () => {
       const userId = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+      // Older than the 1 h floor (ACCOUNT_UPLOAD_MIN_AGE_MS)
+      const OLD = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
       it("deletes the user's uploads that no row references and keeps the ones on a player's row", async () => {
         mockSend
           .mockResolvedValueOnce({
             Contents: [
-              { Key: `avatars/${userId}/orphan.jpg` },
-              { Key: `avatars/${userId}/kid.jpg` },
-              { Key: `avatars/${userId}/nested/odd.jpg` },
+              { Key: `avatars/${userId}/orphan.jpg`, LastModified: OLD },
+              { Key: `avatars/${userId}/kid.jpg`, LastModified: OLD },
+              { Key: `avatars/${userId}/nested/odd.jpg`, LastModified: OLD },
             ],
           })
           .mockResolvedValueOnce({});
@@ -562,9 +666,53 @@ describe('Upload Service', () => {
         }
       });
 
+      it('leaves uploads younger than an hour (a save may be in flight) and undated ones', async () => {
+        const now = new Date('2026-11-06T12:00:00Z');
+        mockSend
+          .mockResolvedValueOnce({
+            Contents: [
+              { Key: `avatars/${userId}/old.jpg`, LastModified: new Date(now.getTime() - ACCOUNT_UPLOAD_MIN_AGE_MS) },
+              { Key: `avatars/${userId}/fresh.jpg`, LastModified: new Date(now.getTime() - ACCOUNT_UPLOAD_MIN_AGE_MS + 1) },
+              { Key: `avatars/${userId}/undated.jpg` },
+            ],
+          })
+          .mockResolvedValueOnce({});
+
+        await deleteUnreferencedUserUploads(userId, { now });
+
+        expect(sentOf('DeleteObjects')[0].input.Delete).toEqual({
+          Objects: [{ Key: `avatars/${userId}/old.jpg` }],
+          Quiet: true,
+        });
+      });
+
+      it('reads no references when every upload is too young', async () => {
+        mockSend.mockResolvedValueOnce({ Contents: [{ Key: `avatars/${userId}/fresh.jpg`, LastModified: new Date() }] });
+        await deleteUnreferencedUserUploads(userId);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+      });
+
+      it('deletes nothing when the deadline passes during the reference read', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        mockSend.mockResolvedValueOnce({ Contents: [{ Key: `avatars/${userId}/a.jpg`, LastModified: OLD }] });
+        (mockPrisma.user.findMany as jest.Mock).mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve([]), 30))
+        );
+
+        await deleteUnreferencedUserUploads(userId, { timeoutMs: 5 });
+
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Account avatar upload cleanup failed (ignored)',
+          expect.objectContaining({ error: expect.stringMatching(/deadline/) })
+        );
+        warnSpy.mockRestore();
+      });
+
       it('lists one page only, so the request stays bounded', async () => {
         mockSend.mockResolvedValueOnce({
-          Contents: [{ Key: `avatars/${userId}/a.jpg` }],
+          Contents: [{ Key: `avatars/${userId}/a.jpg`, LastModified: OLD }],
           IsTruncated: true,
           NextContinuationToken: 'more',
         });
@@ -583,7 +731,7 @@ describe('Upload Service', () => {
             })
         );
 
-        await expect(deleteUnreferencedUserUploads(userId, 10)).resolves.toBeUndefined();
+        await expect(deleteUnreferencedUserUploads(userId, { timeoutMs: 10 })).resolves.toBeUndefined();
 
         expect(sentOf('DeleteObjects')).toHaveLength(0);
         expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
@@ -604,7 +752,7 @@ describe('Upload Service', () => {
       it('deletes nothing when references cannot be read', async () => {
         const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         mockSend.mockResolvedValueOnce({
-          Contents: [{ Key: `avatars/${userId}/a.jpg` }],
+          Contents: [{ Key: `avatars/${userId}/a.jpg`, LastModified: OLD }],
         });
         (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
 

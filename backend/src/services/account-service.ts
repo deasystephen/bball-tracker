@@ -60,7 +60,7 @@ import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar, deleteUnreferencedUserUploads } from './upload-service';
+import { deletePreviousAvatar, scheduleUserUploadCleanup } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -360,9 +360,10 @@ export class AccountService {
 
     // Every other upload under the user's own prefix that no row references
     // (abandoned edits, replaced photos whose delete failed); photos the user
-    // put on a player's row as coach or guardian stay (#957). After the
-    // identity step so S3 never delays it; best-effort and time-bounded.
-    await deleteUnreferencedUserUploads(userId);
+    // put on a player's row as coach or guardian stay (#957). Started, not
+    // awaited: S3 and the reference read never sit on the response. It never
+    // throws and carries its own deadline.
+    scheduleUserUploadCleanup(userId);
 
     logger.info('Account deleted', {
       userId,

@@ -7,7 +7,7 @@
 
 jest.mock('../../src/services/upload-service', () => ({
   ...jest.requireActual('../../src/services/upload-service'),
-  listAvatarObjects: jest.fn(),
+  listAvatarObjectPages: jest.fn(),
   loadReferencedAvatarKeys: jest.fn(),
   deleteAvatarKeys: jest.fn(),
 }));
@@ -26,11 +26,27 @@ import {
   sweepOrphanedAvatars,
   type AvatarSweepResult,
 } from '../../src/services/avatar-sweep';
-import { deleteAvatarKeys, listAvatarObjects, loadReferencedAvatarKeys } from '../../src/services/upload-service';
+import { deleteAvatarKeys, listAvatarObjectPages, loadReferencedAvatarKeys } from '../../src/services/upload-service';
+import type { AvatarObject } from '../../src/services/upload-service';
 import { captureException } from '../../src/utils/sentry';
 import { logger } from '../../src/utils/logger';
 
-const mockList = listAvatarObjects as jest.Mock;
+const mockPages = listAvatarObjectPages as jest.Mock;
+
+/** The listing yields `objects` as one page. */
+function pagesOf(objects: AvatarObject[]): void {
+  mockPages.mockImplementation(async function* () {
+    yield objects;
+  });
+}
+
+/** The listing fails on its first page. */
+function failListing(error: unknown): void {
+  mockPages.mockImplementation(async function* () {
+    yield* [];
+    throw error;
+  });
+}
 const mockRefs = loadReferencedAvatarKeys as jest.Mock;
 const mockDelete = deleteAvatarKeys as jest.Mock;
 const mockCapture = captureException as jest.Mock;
@@ -55,7 +71,7 @@ beforeEach(() => {
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
   mockRefs.mockResolvedValue(new Set());
-  mockDelete.mockImplementation(async (keys: string[]) => ({ deleted: keys.length, failed: 0 }));
+  mockDelete.mockImplementation(async (keys: string[]) => ({ deleted: keys.length, failed: 0, aborted: false }));
 });
 
 afterEach(() => {
@@ -64,7 +80,7 @@ afterEach(() => {
 
 describe('sweepOrphanedAvatars', () => {
   it('deletes only old, issued, unreferenced keys', async () => {
-    mockList.mockResolvedValue([
+    pagesOf([
       { key: 'avatars/u/orphan.jpg', lastModified: OLD },
       { key: 'avatars/u/cutoff.jpg', lastModified: EXACTLY_CUTOFF },
       { key: 'avatars/coach/kid.jpg', lastModified: OLD },
@@ -77,18 +93,22 @@ describe('sweepOrphanedAvatars', () => {
 
     const result = await sweepOrphanedAvatars(NOW);
 
-    expect(mockList).toHaveBeenCalledWith('avatars/', { signal: undefined });
+    expect(mockPages).toHaveBeenCalledWith('avatars/', { signal: undefined });
     expect(mockRefs).toHaveBeenCalledWith('avatars/');
     expect(mockDelete).toHaveBeenCalledWith(['avatars/u/orphan.jpg', 'avatars/u/cutoff.jpg'], undefined);
     expect(result).toEqual({ listed: 7, candidates: 3, referenced: 1, deleted: 2, failed: 0, capped: false });
     expect(logger.info).toHaveBeenCalledWith('Avatar sweep finished', result);
   });
 
-  it('reads references only after the listing', async () => {
+  it('uses a 7-day age floor', () => {
+    expect(AVATAR_SWEEP_MIN_AGE_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it('reads references only after the chunk was listed', async () => {
     const order: string[] = [];
-    mockList.mockImplementation(async () => {
+    mockPages.mockImplementation(async function* () {
       order.push('list');
-      return [{ key: 'avatars/u/a.jpg', lastModified: OLD }];
+      yield [{ key: 'avatars/u/a.jpg', lastModified: OLD }];
     });
     mockRefs.mockImplementation(async () => {
       order.push('refs');
@@ -98,8 +118,30 @@ describe('sweepOrphanedAvatars', () => {
     expect(order).toEqual(['list', 'refs']);
   });
 
+  it('filters page by page and checks each full chunk before listing on', async () => {
+    const page = (p: number): AvatarObject[] =>
+      Array.from({ length: 1000 }, (_, i) => ({ key: `avatars/u${p}/${i}.jpg`, lastModified: OLD }));
+    const listed: number[] = [];
+    mockPages.mockImplementation(async function* () {
+      for (const p of [0, 1]) {
+        listed.push(p);
+        yield page(p);
+      }
+    });
+    // Every key of the first page is in use: the sweep must move past them.
+    mockRefs.mockResolvedValue(new Set(page(0).map((o) => o.key)));
+
+    const result = await sweepOrphanedAvatars(NOW);
+
+    expect(mockRefs).toHaveBeenCalledTimes(2);
+    expect(mockDelete).toHaveBeenCalledTimes(2);
+    expect(mockDelete.mock.calls[0][0]).toEqual([]);
+    expect(mockDelete.mock.calls[1][0]).toHaveLength(1000);
+    expect(result).toEqual({ listed: 2000, candidates: 2000, referenced: 1000, deleted: 1000, failed: 0, capped: false });
+  });
+
   it('skips the reference query and deletes nothing when there are no candidates', async () => {
-    mockList.mockResolvedValue([{ key: 'avatars/u/fresh.jpg', lastModified: FRESH }]);
+    pagesOf([{ key: 'avatars/u/fresh.jpg', lastModified: FRESH }]);
     const result = await sweepOrphanedAvatars(NOW);
     expect(mockRefs).not.toHaveBeenCalled();
     expect(mockDelete).not.toHaveBeenCalled();
@@ -107,7 +149,7 @@ describe('sweepOrphanedAvatars', () => {
   });
 
   it('deletes nothing when the reference query fails', async () => {
-    mockList.mockResolvedValue([{ key: 'avatars/u/a.jpg', lastModified: OLD }]);
+    pagesOf([{ key: 'avatars/u/a.jpg', lastModified: OLD }]);
     mockRefs.mockRejectedValue(new Error('db down'));
     await expect(sweepOrphanedAvatars(NOW)).rejects.toThrow('db down');
     expect(mockDelete).not.toHaveBeenCalled();
@@ -115,7 +157,7 @@ describe('sweepOrphanedAvatars', () => {
 
   it('deletes nothing when S3 denies the listing (task role without s3:ListBucket)', async () => {
     const denied = Object.assign(new Error('Access Denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
-    mockList.mockRejectedValue(denied);
+    failListing(denied);
     const sweeper = new AvatarSweeper();
 
     await expect(sweeper.runOnce()).resolves.toBeUndefined();
@@ -123,29 +165,40 @@ describe('sweepOrphanedAvatars', () => {
     expect(mockRefs).not.toHaveBeenCalled();
     expect(mockDelete).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(
-      'Avatar sweep failed; nothing deleted this run',
+      'Avatar sweep failed; nothing more deleted this run',
       expect.objectContaining({ error: 'Access Denied', consecutiveFailures: 1 })
     );
   });
 
-  it('deletes nothing when the listing fails', async () => {
-    mockList.mockRejectedValue(new Error('AccessDenied'));
-    await expect(sweepOrphanedAvatars(NOW)).rejects.toThrow('AccessDenied');
-    expect(mockRefs).not.toHaveBeenCalled();
-    expect(mockDelete).not.toHaveBeenCalled();
-  });
-
-  it(`caps one run at ${MAX_DELETES_PER_RUN} deletions`, async () => {
-    mockList.mockResolvedValue(
-      Array.from({ length: MAX_DELETES_PER_RUN + 5 }, (_, i) => ({ key: `avatars/u/${i}.jpg`, lastModified: OLD }))
-    );
+  it(`caps one run at ${MAX_DELETES_PER_RUN} deletions and stops paging`, async () => {
+    let pagesServed = 0;
+    mockPages.mockImplementation(async function* () {
+      for (let p = 0; p < 5; p++) {
+        pagesServed += 1;
+        yield Array.from({ length: 1005 }, (_, i) => ({ key: `avatars/u${p}/${i}.jpg`, lastModified: OLD }));
+      }
+    });
     const result = await sweepOrphanedAvatars(NOW);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
     expect(mockDelete.mock.calls[0][0]).toHaveLength(MAX_DELETES_PER_RUN);
     expect(result.capped).toBe(true);
+    expect(pagesServed).toBe(1);
+  });
+
+  it('stops when a delete is aborted', async () => {
+    mockPages.mockImplementation(async function* () {
+      for (let p = 0; p < 3; p++) {
+        yield Array.from({ length: 1000 }, (_, i) => ({ key: `avatars/u${p}/${i}.jpg`, lastModified: OLD }));
+      }
+    });
+    mockDelete.mockResolvedValue({ deleted: 10, failed: 0, aborted: true });
+    const result = await sweepOrphanedAvatars(NOW);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(result.deleted).toBe(10);
   });
 
   it('defaults to the current time', async () => {
-    mockList.mockResolvedValue([]);
+    pagesOf([]);
     await expect(sweepOrphanedAvatars()).resolves.toEqual(EMPTY_RESULT);
   });
 });
@@ -265,7 +318,7 @@ describe('AvatarSweeper', () => {
     await sweeper.runOnce();
     await sweeper.runOnce();
     expect(logger.error).toHaveBeenCalledWith(
-      'Avatar sweep failed; nothing deleted this run',
+      'Avatar sweep failed; nothing more deleted this run',
       expect.objectContaining({ error: 'still denied', consecutiveFailures: 2 })
     );
     expect(mockCapture).toHaveBeenCalledTimes(1);
@@ -291,6 +344,26 @@ describe('AvatarSweeper', () => {
     await stopping;
     expect(logger.error).not.toHaveBeenCalled();
     expect(mockCapture).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith('Avatar sweep stopped');
+  });
+
+  it('logs "stopped" when a run ends early because of stop()', async () => {
+    jest.useFakeTimers();
+    let finish: () => void = () => undefined;
+    const sweep = jest.fn(
+      () =>
+        new Promise<AvatarSweepResult>((resolve) => {
+          finish = () => resolve(EMPTY_RESULT);
+        })
+    );
+    const sweeper = new AvatarSweeper({ sweep, firstRunDelayMs: 0 });
+    sweeper.start();
+    await jest.advanceTimersByTimeAsync(0);
+    const stopping = sweeper.stop();
+    finish();
+    await stopping;
+    expect(logger.info).toHaveBeenCalledWith('Avatar sweep stopped');
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
 

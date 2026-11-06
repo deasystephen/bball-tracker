@@ -19,14 +19,14 @@ import {
   isUnreferenced,
 } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
-import { deletePreviousAvatar, deleteUnreferencedUserUploads } from '../../src/services/upload-service';
+import { deletePreviousAvatar, scheduleUserUploadCleanup } from '../../src/services/upload-service';
 import { captureException } from '../../src/utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
 
 jest.mock('../../src/services/workos-service');
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
-  deleteUnreferencedUserUploads: jest.fn().mockResolvedValue(undefined),
+  scheduleUserUploadCleanup: jest.fn(),
 }));
 jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
@@ -35,7 +35,7 @@ jest.mock('../../src/utils/sentry', () => ({
 
 const mockWorkOS = WorkOSService as jest.Mocked<typeof WorkOSService>;
 const mockDeleteAvatar = deletePreviousAvatar as jest.Mock;
-const mockDeleteUploads = deleteUnreferencedUserUploads as jest.Mock;
+const mockDeleteUploads = scheduleUserUploadCleanup as jest.Mock;
 const mockCapture = captureException as jest.Mock;
 
 const USER_ID = '11111111-1111-4111-a111-111111111111';
@@ -216,7 +216,7 @@ describe('AccountService.deleteAccount', () => {
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
     // ...and the rest of the user's own upload prefix, minus what other rows reference (#957),
-    // only after the identity step so S3 never delays it
+    // started (not awaited) only after the identity step, so S3 never delays it
     expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID);
     expect(mockDeleteUploads.mock.invocationCallOrder[0]).toBeGreaterThan(
       mockWorkOS.deleteUser.mock.invocationCallOrder[0]

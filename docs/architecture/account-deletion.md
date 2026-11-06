@@ -22,11 +22,12 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
   delete of the current photo, `WorkOSService.deleteUser`, and then
-  `upload-service.ts#deleteUnreferencedUserUploads` (#957), which deletes the other objects under
+  `upload-service.ts#scheduleUserUploadCleanup` (#957), which deletes the other objects under
   the user's own `avatars/<userId>/` prefix that no `User.profilePictureUrl` references, so a
-  photo the user uploaded as coach or guardian onto a player's row stays. It runs last so S3 never
-  delays the identity step, and it is bounded (one listing page, references narrowed to that
-  prefix, a 5 s timeout on every S3 call). It needs `s3:ListBucket`; see
+  photo the user uploaded as coach or guardian onto a player's row stays. It is started last and not
+  awaited, so neither S3 nor the reference read delays the response. It is bounded: one listing page,
+  objects at least 1 h old only (a save may be in flight), references narrowed to that prefix, and
+  a 30 s deadline. It needs `s3:ListBucket`; see
   `backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`. The WorkOS step (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**

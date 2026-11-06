@@ -9,12 +9,13 @@
  * `User.profilePictureUrl` references.
  *
  * Safety:
- *   - The bucket listing comes first and the reference set is read after it,
- *     so references are at least as fresh as the list. Either read failing
- *     ends the run with nothing deleted.
+ *   - Each chunk of the listing is read before the references it is checked
+ *     against, so references are at least as fresh as the list. A failed
+ *     read ends the run; nothing more is deleted.
  *   - Only keys of the exact issued shape `avatars/<id>/<file>` are candidates.
- *   - The 24 h age floor leaves an in-flight upload (presign valid 5 min) far
- *     more time than the client needs to save its URL.
+ *   - The 7-day age floor covers a photo picked, then saved after a long
+ *     background pause (the presign itself is valid 5 min).
+ *   - Memory is bounded: pages are filtered as they arrive.
  *   - Reference matching is over-inclusive (`referencedAvatarKeys`).
  *   - At most `MAX_DELETES_PER_RUN` objects go per run, so a logic error can
  *     never empty the unversioned bucket in one pass.
@@ -29,13 +30,13 @@ import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import {
   deleteAvatarKeys,
-  isIssuedAvatarKey,
-  listAvatarObjects,
+  isDeletableAge,
+  listAvatarObjectPages,
   loadReferencedAvatarKeys,
 } from './upload-service';
 
 /** Objects younger than this are never swept. */
-export const AVATAR_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+export const AVATAR_SWEEP_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** Gap between the end of one run and the start of the next. */
 export const AVATAR_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** First run after boot: well clear of the deploy overlap. */
@@ -52,41 +53,65 @@ export interface AvatarSweepResult {
   capped: boolean;
 }
 
+/** Candidates gathered before each reference check and delete. */
+const SWEEP_CHUNK = 1000;
+
 /**
- * One sweep. Throws when the listing or the reference query fails, in which
- * case nothing has been deleted.
+ * One sweep. Pages through `avatars/`, keeping only old issued keys, and
+ * every `SWEEP_CHUNK` candidates reads references (after that chunk was
+ * listed) and deletes the unreferenced ones, so memory holds at most a chunk
+ * plus the reference set, never the bucket. Stops once
+ * `MAX_DELETES_PER_RUN` deletes were attempted or the signal fires. Throws
+ * when a listing page or a reference read fails; nothing more is deleted.
  */
 export async function sweepOrphanedAvatars(
   now: Date = new Date(),
   signal?: AbortSignal
 ): Promise<AvatarSweepResult> {
-  const objects = await listAvatarObjects('avatars/', { signal });
   const cutoff = now.getTime() - AVATAR_SWEEP_MIN_AGE_MS;
-  const candidates = objects
-    .filter((o) => isIssuedAvatarKey(o.key) && o.lastModified !== undefined && o.lastModified.getTime() <= cutoff)
-    .map((o) => o.key);
-
   const result: AvatarSweepResult = {
-    listed: objects.length,
-    candidates: candidates.length,
+    listed: 0,
+    candidates: 0,
     referenced: 0,
     deleted: 0,
     failed: 0,
     capped: false,
   };
-  if (candidates.length === 0) {
-    logger.info('Avatar sweep finished', { ...result });
-    return result;
+  let pending: string[] = [];
+
+  /** Check and delete the pending chunk; false when the run must stop. */
+  const flush = async (): Promise<boolean> => {
+    if (pending.length === 0) return true;
+    const referenced = await loadReferencedAvatarKeys('avatars/');
+    const orphans = pending.filter((key) => !referenced.has(key));
+    result.referenced += pending.length - orphans.length;
+    pending = [];
+    const room = MAX_DELETES_PER_RUN - result.deleted - result.failed;
+    if (orphans.length > room) result.capped = true;
+    const { deleted, failed, aborted } = await deleteAvatarKeys(orphans.slice(0, room), signal);
+    result.deleted += deleted;
+    result.failed += failed;
+    return !aborted && !result.capped;
+  };
+
+  let keepGoing = true;
+  for await (const page of listAvatarObjectPages('avatars/', { signal })) {
+    result.listed += page.length;
+    for (const object of page) {
+      if (isDeletableAge(object, cutoff)) {
+        pending.push(object.key);
+        result.candidates += 1;
+      }
+    }
+    if (pending.length >= SWEEP_CHUNK) {
+      keepGoing = await flush();
+      if (!keepGoing) break;
+    }
+  }
+  if (keepGoing) {
+    await flush();
   }
 
-  const referencedKeys = await loadReferencedAvatarKeys('avatars/');
-  const orphans = candidates.filter((key) => !referencedKeys.has(key));
-  result.referenced = candidates.length - orphans.length;
-  result.capped = orphans.length > MAX_DELETES_PER_RUN;
-
-  const { deleted, failed } = await deleteAvatarKeys(orphans.slice(0, MAX_DELETES_PER_RUN), signal);
-  result.deleted = deleted;
-  result.failed = failed;
   logger.info('Avatar sweep finished', { ...result });
   return result;
 }
@@ -147,10 +172,15 @@ export class AvatarSweeper {
     try {
       await this.sweep(new Date(), signal);
       this.consecutiveFailures = 0;
+      if (signal.aborted) logger.info('Avatar sweep stopped');
     } catch (error) {
-      if (signal.aborted) return;
+      // Shutdown aborted an in-flight call: a normal stop, not a failure.
+      if (signal.aborted) {
+        logger.info('Avatar sweep stopped');
+        return;
+      }
       this.consecutiveFailures += 1;
-      logger.error('Avatar sweep failed; nothing deleted this run', {
+      logger.error('Avatar sweep failed; nothing more deleted this run', {
         operation: 'avatar-sweep',
         error: error instanceof Error ? error.message : String(error),
         consecutiveFailures: this.consecutiveFailures,

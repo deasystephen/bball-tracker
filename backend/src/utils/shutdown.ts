@@ -36,7 +36,7 @@ export interface ShutdownDeps {
   /** Null when SES_EVENTS_QUEUE_URL is unset. */
   consumer: { stop(): Promise<void> } | null;
   /** Null unless AVATAR_SWEEP_ENABLED=true (#957). */
-  avatarSweeper?: { stop(): Promise<void> } | null;
+  avatarSweeper: { stop(): Promise<void> } | null;
   disconnectPrisma: () => Promise<void>;
   closeRedis: () => Promise<void>;
   exit: (code: number) => void;

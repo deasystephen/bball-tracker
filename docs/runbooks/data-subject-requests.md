@@ -32,8 +32,8 @@ left, or a coach who only ever held staff roles, ends up here. If anything remai
 tombstoned as described next and the response says `erased: false`. In ONE transaction:
 
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
-  best-effort, together with every other upload under their own `avatars/<userId>/` prefix that
-  no profile references; photos they put on a child's or player's row stay with that row, #957), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
+  best-effort, then, after the response, every other upload at least an hour old under their own
+  `avatars/<userId>/` prefix that no profile references; photos they put on a child's or player's row stay with that row, #957), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
   `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
   role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
   each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`), the
@@ -74,14 +74,14 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
-- **Profile photos.** On deletion, the person's current photo and other photos they uploaded
-  that no profile shows are deleted, best-effort: a failure is logged and the deletion still
-  succeeds. A photo they uploaded for a child or player they manage stays while that profile
+- **Profile photos.** On deletion, the person's current photo is deleted, and shortly after, the
+  other photos they uploaded more than an hour earlier that no profile shows. This is best-effort:
+  a failure is logged and the deletion still succeeds. A photo they uploaded for a child or player they manage stays while that profile
   shows it. A photo that was uploaded but never saved to any profile (a cancelled edit, an
   abandoned Add Player) **is not deleted today**: it stays readable by anyone who has its URL
   (the bucket is public-read; URLs are unguessable). **Once the sweep is enabled**, such photos
-  are deleted after **24 hours** (a sweep every 6 hours, `services/avatar-sweep.ts`). That
-  also collects any upload the deletion-time cleanup missed. Until then, the privacy policy must
+  are deleted after **7 days** (a sweep every 6 hours, `services/avatar-sweep.ts`). That
+  also collects any upload the deletion-time cleanup left. Until then, the privacy policy must
   not promise it. *State (#957): the deletion-time cleanup works once the task role's
   `s3:ListBucket` is applied (`infra/ecs.tf`); the sweep is off until `AVATAR_SWEEP_ENABLED=true`
   is deployed in `infra/task-definition.json`. Update this paragraph in that PR. See

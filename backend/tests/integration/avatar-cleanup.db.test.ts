@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
 import prisma from '../../src/models';
 import { AccountService } from '../../src/services/account-service';
-import { loadReferencedAvatarKeys } from '../../src/services/upload-service';
+import { loadReferencedAvatarKeys, settleUploadCleanups } from '../../src/services/upload-service';
 import { logger } from '../../src/utils/logger';
 import { spyOnInfo } from '../support/domain-events';
 
@@ -95,16 +95,22 @@ describe('avatar cleanup (real Postgres, #957)', () => {
     const inUse = `avatars/${coach}/kid.jpg`;
     const orphan = `avatars/${coach}/abandoned.jpg`;
     const own = `avatars/${coach}/me.jpg`;
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     await prisma.user.update({ where: { id: coach }, data: { profilePictureUrl: urlOf(own) } });
     await mkUser('kid', { isManaged: true, managedById: coach, profilePictureUrl: urlOf(inUse) });
 
     mockS3Send.mockImplementation(async (cmd: Sent) =>
       cmd.kind === 'ListObjectsV2'
-        ? { Contents: [{ Key: inUse }, { Key: orphan }, { Key: own }], IsTruncated: false }
+        ? {
+            Contents: [inUse, orphan, own].map((Key) => ({ Key, LastModified: twoHoursAgo })),
+            IsTruncated: false,
+          }
         : {}
     );
 
     await AccountService.deleteAccount(coach, { actorId: coach, mode: 'self' });
+    // The prefix cleanup runs after the response; wait for it.
+    await settleUploadCleanups();
 
     // The current photo goes through deletePreviousAvatar as before.
     expect(sentOf('DeleteObject').map((c) => c.input.Key)).toEqual([own]);

@@ -235,12 +235,18 @@ export async function discardOwnAvatar(
 const DELETE_BATCH_SIZE = 1000;
 
 /**
- * Ceiling on the account-deletion cleanup, which runs inside the
- * `DELETE /auth/me` request: one ListObjectsV2 page (up to 1000 keys), one
- * indexed-size reference query, one DeleteObjects call, all under this
- * timeout. Anything it leaves is the sweep's to collect.
+ * Deadline for the account-deletion cleanup. It runs after the response
+ * (`scheduleUserUploadCleanup`); the deadline aborts its S3 calls and, once
+ * passed, stops it before any delete. Anything it leaves is the sweep's.
  */
-export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 5_000;
+export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 30_000;
+
+/**
+ * The account-deletion cleanup leaves objects younger than this: an upload
+ * whose profile write has not landed yet (an admin deleting a coach mid-save)
+ * would otherwise lose its object before the row references it.
+ */
+export const ACCOUNT_UPLOAD_MIN_AGE_MS = 60 * 60 * 1000;
 
 /**
  * User ids become an S3 prefix and a LIKE fragment. They are UUIDs; anything
@@ -266,19 +272,21 @@ export interface AvatarObject {
 export interface AvatarDeleteResult {
   deleted: number;
   failed: number;
+  /** True when the signal fired: the remaining keys were not attempted. */
+  aborted: boolean;
 }
 
 /**
- * Objects under `prefix`, paging through ListObjectsV2 (all pages unless
- * `maxPages` is set). Throws when a page cannot be read (AccessDenied without
- * `s3:ListBucket`, network, abort), so a caller never mistakes a failed read
- * for an empty prefix.
+ * Pages of objects under `prefix` from ListObjectsV2, one page (up to 1000
+ * keys) at a time, so a caller can filter as it goes instead of holding the
+ * bucket in memory. Throws when a page cannot be read (AccessDenied without
+ * `s3:ListBucket`, network, abort), so a failed read is never mistaken for an
+ * empty prefix.
  */
-export async function listAvatarObjects(
+export async function* listAvatarObjectPages(
   prefix: string,
   { signal, maxPages = Infinity }: ListAvatarObjectsOptions = {}
-): Promise<AvatarObject[]> {
-  const objects: AvatarObject[] = [];
+): AsyncGenerator<AvatarObject[]> {
   let continuationToken: string | undefined;
   let pages = 0;
   do {
@@ -290,13 +298,23 @@ export async function listAvatarObjects(
       { abortSignal: signal }
     );
     pages += 1;
+    const objects: AvatarObject[] = [];
     for (const item of page.Contents ?? []) {
       if (item.Key) {
         objects.push({ key: item.Key, lastModified: item.LastModified });
       }
     }
+    yield objects;
     continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (continuationToken && pages < maxPages);
+}
+
+/** Every object under `prefix` (all pages unless `maxPages` is set). */
+export async function listAvatarObjects(prefix: string, options: ListAvatarObjectsOptions = {}): Promise<AvatarObject[]> {
+  const objects: AvatarObject[] = [];
+  for await (const page of listAvatarObjectPages(prefix, options)) {
+    objects.push(...page);
+  }
   return objects;
 }
 
@@ -306,24 +324,29 @@ export function isIssuedAvatarKey(key: string): boolean {
 }
 
 /**
+ * True for an issued key last modified at or before `cutoff`. An object with
+ * no `LastModified` is never old enough.
+ */
+export function isDeletableAge(object: AvatarObject, cutoff: number): boolean {
+  return (
+    isIssuedAvatarKey(object.key) && object.lastModified !== undefined && object.lastModified.getTime() <= cutoff
+  );
+}
+
+/**
  * Every object key a stored `profilePictureUrl` could be pointing at.
  *
  * Deliberately over-inclusive, because a miss deletes a photo that is in use
  * and the bucket is unversioned: the host is ignored (a regional or path-style
  * URL to our bucket still protects its object), and both the raw and the
  * percent-decoded path are taken from the first `avatars/` segment on.
+ * The path comes from `parsedPath`, the same parser every other check uses;
+ * an unparsable value falls back to the raw string minus query and fragment.
  * Protecting a key that does not exist costs nothing.
  */
 export function referencedAvatarKeys(storedUrl: string): string[] {
-  const paths = new Set<string>();
-  let pathname: string;
-  try {
-    pathname = new URL(storedUrl).pathname;
-  } catch {
-    // Unparsable: fall back to the raw string, minus any query or fragment.
-    pathname = storedUrl.split(/[?#]/)[0];
-  }
-  paths.add(pathname);
+  const pathname = parsedPath(storedUrl) ?? storedUrl.split(/[?#]/)[0];
+  const paths = new Set<string>([pathname]);
   try {
     paths.add(decodeURIComponent(pathname));
   } catch {
@@ -374,12 +397,15 @@ export async function loadReferencedAvatarKeys(fragment: string): Promise<Set<st
 
 /**
  * Delete `keys` in batches of 1000. A failed batch or a per-key error is
- * counted and logged (no keys in the line), never thrown.
+ * counted and logged (no keys in the line), never thrown. An abort (shutdown,
+ * deadline) is not a failure: it stops at the next batch boundary, or ends the
+ * in-flight batch, logs at info, and sets `aborted`.
  */
 export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Promise<AvatarDeleteResult> {
-  const result: AvatarDeleteResult = { deleted: 0, failed: 0 };
+  const result: AvatarDeleteResult = { deleted: 0, failed: 0, aborted: false };
   for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
     if (signal?.aborted) {
+      result.aborted = true;
       break;
     }
     const batch = keys.slice(i, i + DELETE_BATCH_SIZE);
@@ -402,6 +428,10 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
         });
       }
     } catch (err) {
+      if (signal?.aborted) {
+        result.aborted = true;
+        break;
+      }
       result.failed += batch.length;
       logger.warn('Avatar batch delete failed', {
         operation: 'DeleteObjects',
@@ -410,24 +440,32 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
       });
     }
   }
+  if (result.aborted) {
+    logger.info('Avatar deletes stopped (aborted)', {
+      operation: 'DeleteObjects',
+      deleted: result.deleted,
+      notAttempted: keys.length - result.deleted - result.failed,
+    });
+  }
   return result;
 }
 
 /**
- * After account deletion: delete every object under `avatars/<userId>/` that
+ * After account deletion: delete the objects under `avatars/<userId>/` that
  * no `User.profilePictureUrl` still references (#957). A coach or guardian
  * uploads a player's photo under their OWN prefix and writes it onto the
  * player's row, so the prefix can hold photos in use elsewhere; those stay.
+ * Objects younger than `ACCOUNT_UPLOAD_MIN_AGE_MS` stay too (a save may be in
+ * flight); the sweep collects them once enabled.
  *
- * Best-effort, like `deletePreviousAvatar`: the account is already gone, so a
- * failure is logged and the function resolves. When either the listing or the
- * reference query fails, nothing is deleted. Bounded, because it runs inside
- * the request: one listing page, references narrowed to this user's prefix,
- * and `ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS` on every S3 call.
+ * Best-effort, like `deletePreviousAvatar`: never throws. When the listing or
+ * the reference query fails, or the deadline passes, nothing (more) is
+ * deleted. Bounded: one listing page, references narrowed to this user's
+ * prefix, and the deadline on every S3 call and before the delete.
  */
 export async function deleteUnreferencedUserUploads(
   userId: string,
-  timeoutMs: number = ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS
+  { timeoutMs = ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS, now = new Date() }: { timeoutMs?: number; now?: Date } = {}
 ): Promise<void> {
   if (!SAFE_ID.test(userId)) {
     logger.warn('Account upload cleanup skipped: user id is not a safe key segment');
@@ -436,19 +474,23 @@ export async function deleteUnreferencedUserUploads(
 
   const prefix = `avatars/${userId}/`;
   const signal = AbortSignal.timeout(timeoutMs);
+  const cutoff = now.getTime() - ACCOUNT_UPLOAD_MIN_AGE_MS;
   try {
     const objects = await listAvatarObjects(prefix, { signal, maxPages: 1 });
-    const candidates = objects.map((o) => o.key).filter(isIssuedAvatarKey);
+    const candidates = objects.filter((o) => isDeletableAge(o, cutoff)).map((o) => o.key);
     if (candidates.length === 0) {
       return;
     }
     // Read references AFTER listing, so they are at least as fresh as the list.
     const referenced = await loadReferencedAvatarKeys(prefix);
+    if (signal.aborted) {
+      throw new Error('Account upload cleanup deadline passed before delete');
+    }
     const orphans = candidates.filter((key) => !referenced.has(key));
     const { deleted, failed } = await deleteAvatarKeys(orphans, signal);
     logger.info('Account avatar uploads cleaned up', {
       userId,
-      listed: candidates.length,
+      listed: objects.length,
       kept: candidates.length - orphans.length,
       deleted,
       failed,
@@ -460,4 +502,31 @@ export async function deleteUnreferencedUserUploads(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** Cleanups started by `scheduleUserUploadCleanup` that have not settled. */
+const pendingUploadCleanups = new Set<Promise<void>>();
+
+/**
+ * Start `deleteUnreferencedUserUploads` without awaiting it, so S3 and the
+ * reference query never sit on the account-deletion response. It never
+ * rejects (the catch is belt and braces); the deadline bounds it.
+ */
+export function scheduleUserUploadCleanup(userId: string): void {
+  const cleanup: Promise<void> = deleteUnreferencedUserUploads(userId)
+    .catch((err: unknown) => {
+      logger.warn('Account avatar upload cleanup failed (ignored)', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
+    .finally(() => {
+      pendingUploadCleanups.delete(cleanup);
+    });
+  pendingUploadCleanups.add(cleanup);
+}
+
+/** Resolves once every scheduled cleanup has settled (for tests). */
+export async function settleUploadCleanups(): Promise<void> {
+  await Promise.all([...pendingUploadCleanups]);
 }
