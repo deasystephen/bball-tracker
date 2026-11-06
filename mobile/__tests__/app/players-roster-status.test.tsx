@@ -132,6 +132,7 @@ const openMenu = (screen: ReturnType<typeof render>, playerName: string): void =
 };
 
 const MENU_LABELS = [
+  'Fix email address',
   'Resend invitation',
   'Send invitation',
   'Cancel invitation',
@@ -614,9 +615,11 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       fireEvent.press(screen.getByTestId('add-player-submit'));
       expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
 
-      // An invalid address says so, keeps the under-13 explanation on screen,
-      // and still blocks the submit
+      // An invalid address blocks the submit; the error waits for blur, then
+      // shows next to the under-13 explanation
       fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'mom@');
+      expect(screen.queryByText('Enter a valid email address')).toBeNull();
+      fireEvent(screen.getByTestId('add-player-guardian-email-input'), 'blur');
       expect(screen.getByText('Enter a valid email address')).toBeTruthy();
       expect(screen.getByText(/Players under 13 don't get their own login/)).toBeTruthy();
       fireEvent.press(screen.getByTestId('add-player-submit'));
@@ -649,6 +652,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
       fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Teen');
 
       fireEvent.changeText(screen.getByTestId('add-player-guardian-email-input'), 'dad@nowhere');
+      fireEvent(screen.getByTestId('add-player-guardian-email-input'), 'blur');
       expect(screen.getByText('Enter a valid email address')).toBeTruthy();
       expect(screen.queryByText(/Players under 13/)).toBeNull();
       fireEvent.press(screen.getByTestId('add-player-submit'));
@@ -664,6 +668,42 @@ describe('ManagePlayersScreen — roster status and actions', () => {
           data: expect.objectContaining({ name: 'Teen', guardianEmail: undefined }),
         })
       );
+    });
+
+    it('on Yes a malformed player email blocks the submit (and any upload); its error waits for blur', async () => {
+      mockAddRosterPlayer.mutateAsync.mockResolvedValue(guardianOnlyResult);
+      const screen = render(<ManagePlayersScreen />);
+      fireEvent.press(screen.getByTestId('add-player-button'));
+      fireEvent.press(screen.getByLabelText(AGE_YES));
+      fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'Teen');
+
+      fireEvent.changeText(screen.getByTestId('add-player-email-input'), 'teen@');
+      // Not from the first keystroke
+      expect(screen.queryByText('Enter a valid email address')).toBeNull();
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      expect(mockAddRosterPlayer.mutateAsync).not.toHaveBeenCalled();
+
+      fireEvent(screen.getByTestId('add-player-email-input'), 'blur');
+      expect(screen.getByText('Enter a valid email address')).toBeTruthy();
+
+      fireEvent.changeText(screen.getByTestId('add-player-email-input'), 'teen@example.com');
+      expect(screen.queryByText('Enter a valid email address')).toBeNull();
+      fireEvent.press(screen.getByTestId('add-player-submit'));
+      await waitFor(() =>
+        expect(mockAddRosterPlayer.mutateAsync).toHaveBeenCalledWith({
+          teamId: 't1',
+          data: expect.objectContaining({ name: 'Teen', playerEmail: 'teen@example.com' }),
+        })
+      );
+    });
+
+    it('a player with no email gets no roster action that attaches one (no bypass of the age question)', () => {
+      const screen = render(<ManagePlayersScreen />);
+      openMenu(screen, 'Eve RosterOnly');
+      // Neither "Fix email address" nor "Send invitation": the way in is the parent
+      expect(screen.queryByText('Fix email address')).toBeNull();
+      expect(screen.queryByText('Send invitation')).toBeNull();
+      expect(screen.getByText('Invite a parent')).toBeTruthy();
     });
 
     it('a youth spelling like "12 & Under" also defaults to No', () => {

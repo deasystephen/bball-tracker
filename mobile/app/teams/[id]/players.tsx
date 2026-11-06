@@ -183,6 +183,9 @@ export default function ManagePlayersScreen() {
     useState<GuardianRelationship>('GUARDIAN');
   // The coach's explicit answer; null falls back to the team-derived default.
   const [ageAnswerChoice, setAgeAnswerChoice] = useState<AgeAnswer | null>(null);
+  // Email errors show once the field has been left, not from the first keystroke.
+  const [playerEmailTouched, setPlayerEmailTouched] = useState(false);
+  const [guardianEmailTouched, setGuardianEmailTouched] = useState(false);
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -202,16 +205,21 @@ export default function ManagePlayersScreen() {
   const ageAnswer: AgeAnswer | null =
     ageAnswerChoice ?? (isUnder13AgeGroup(team?.ageGroup) ? 'no' : null);
   const isUnder13 = ageAnswer === 'no';
+  // Under 13 there is never a player email, whatever is left in state.
+  const trimmedPlayerEmail = isUnder13 ? '' : playerEmail.trim();
   const trimmedGuardianEmail = guardianEmail.trim();
-  // A typed parent email must be valid in either branch; under 13 it is also required.
+  // A typed email must be well formed (player: Yes branch; parent: either
+  // branch); under 13 the parent email is also required.
+  const playerEmailInvalid = trimmedPlayerEmail !== '' && !EMAIL_PATTERN.test(trimmedPlayerEmail);
   const guardianEmailInvalid =
     trimmedGuardianEmail !== '' && !EMAIL_PATTERN.test(trimmedGuardianEmail);
-  // The submit button is disabled until this holds, so handleAddPlayer has no
-  // validation of its own: the name field, the unanswered question and the
-  // inline guardian-email error already show what is missing.
+  // The submit button is disabled until this holds (before any avatar upload);
+  // the name field, the unanswered question and the inline email errors show
+  // what is missing.
   const canSubmitAddPlayer =
     !!name.trim() &&
     ageAnswer !== null &&
+    !playerEmailInvalid &&
     !guardianEmailInvalid &&
     (!isUnder13 || trimmedGuardianEmail !== '');
 
@@ -261,6 +269,8 @@ export default function ManagePlayersScreen() {
     setGuardianEmail('');
     setGuardianRelationship('GUARDIAN');
     setAgeAnswerChoice(null);
+    setPlayerEmailTouched(false);
+    setGuardianEmailTouched(false);
     setJerseyNumber('');
     setPosition('');
     setAvatarUri(null);
@@ -289,7 +299,7 @@ export default function ManagePlayersScreen() {
   };
 
   const handleAddPlayer = async () => {
-
+    if (!canSubmitAddPlayer) return;
     try {
       let profilePictureUrl: string | undefined;
       if (avatarUri) {
@@ -303,7 +313,7 @@ export default function ManagePlayersScreen() {
         data: {
           name: name.trim(),
           // Never a player email for a player under 13 (#982).
-          playerEmail: isUnder13 ? undefined : playerEmail.trim() || undefined,
+          playerEmail: trimmedPlayerEmail || undefined,
           guardianEmail: trimmedGuardianEmail || undefined,
           guardianRelationship: trimmedGuardianEmail ? guardianRelationship : undefined,
           jerseyNumber: jerseyNumber ? parseInt(jerseyNumber, 10) : undefined,
@@ -422,8 +432,16 @@ export default function ManagePlayersScreen() {
     }
   };
 
+  /**
+   * Corrects an address the player already has (it opens only from "Fix email
+   * address", which needs a bounced or complained address). It never attaches a
+   * first email to a player who has none: that would hand a possibly under-13
+   * player a login invite past the Add Player age question (#982). A player with
+   * no email is reached through "Invite a parent" instead.
+   */
   const openEmailEdit = (member: TeamMember) => {
-    setEditEmail(member.player.email ?? '');
+    if (!member.player.email) return;
+    setEditEmail(member.player.email);
     setEmailEditMember(member);
   };
 
@@ -431,6 +449,7 @@ export default function ManagePlayersScreen() {
   // The flag follows the address: saving the same one would change nothing
   // server-side, so the sheet only accepts a different, well-formed address.
   const canSaveEmail =
+    !!emailEditMember?.player.email &&
     EMAIL_PATTERN.test(trimmedEditEmail) &&
     trimmedEditEmail !== (emailEditMember?.player.email ?? '').trim().toLowerCase();
 
@@ -901,9 +920,7 @@ export default function ManagePlayersScreen() {
                   ]}
                   selected={ageAnswer}
                   onSelect={selectAgeAnswer}
-                  accessibilityLabelFor={(option) =>
-                    t('roster.ageAnswerA11y', { answer: option.label })
-                  }
+                  labelPrefix={`${t('roster.ageQuestion')} `}
                 />
               </View>
 
@@ -913,6 +930,10 @@ export default function ManagePlayersScreen() {
                   placeholder={t('roster.playerEmailPlaceholder')}
                   value={playerEmail}
                   onChangeText={setPlayerEmail}
+                  onBlur={() => setPlayerEmailTouched(true)}
+                  error={
+                    playerEmailTouched && playerEmailInvalid ? t('common.invalidEmail') : undefined
+                  }
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -952,7 +973,10 @@ export default function ManagePlayersScreen() {
                   isUnder13 ? t('roster.guardianEmailRequiredLabel') : t('roster.guardianEmailLabel')
                 }
                 placeholder={t('roster.guardianEmailPlaceholder')}
-                error={guardianEmailInvalid ? t('common.invalidEmail') : undefined}
+                error={
+                  guardianEmailTouched && guardianEmailInvalid ? t('common.invalidEmail') : undefined
+                }
+                onBlur={() => setGuardianEmailTouched(true)}
                 value={guardianEmail}
                 onChangeText={setGuardianEmail}
                 keyboardType="email-address"

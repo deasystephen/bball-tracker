@@ -39,6 +39,30 @@ describe('isUnder13AgeGroup (#982)', () => {
     'Grades 4-6',
     'Kindergarten',
     'Pre-K',
+    // plural and suffix forms
+    'U12s',
+    "U10's",
+    '12Us',
+    'Under 10s',
+    // Spanish
+    'Sub-12',
+    'Sub 10',
+    'sub12',
+    'Menores de 12',
+    'Menor de 10',
+    // age in years, top 12 or less
+    'Ages 8-10',
+    'Age 9',
+    'Ages 9 to 11',
+    'Ages 11-12',
+    '10 years and under',
+    '10 yrs & under',
+    '9-10 yo',
+    '10 y.o.',
+    '8-10 years',
+    '10 years old',
+    '10 & younger',
+    '12 and younger',
   ])('treats %p as under 13', (ageGroup) => {
     expect(isUnder13AgeGroup(ageGroup)).toBe(true);
   });
@@ -73,6 +97,24 @@ describe('isUnder13AgeGroup (#982)', () => {
     'U100',
     '112U',
     'Under',
+    // The spec leaves these with no default: the coach must answer
+    'U14s',
+    '14Us',
+    'Under 14s',
+    'Sub-14',
+    'Menores de 14',
+    '7th grade',
+    'Ages 10-14',
+    'Ages 13-15',
+    'Ages 10+',
+    'Age 13',
+    '13 years and under',
+    '14 & younger',
+    '13-14 yo',
+    '10 years and up',
+    '12 years and older',
+    '15 years old',
+    'Subway League',
   ])('does not treat %p as under 13', (ageGroup) => {
     expect(isUnder13AgeGroup(ageGroup)).toBe(false);
   });

@@ -1,7 +1,10 @@
 /**
- * Horizontal sort-option pill row, shared by the team overview roster and the
- * team stats screen. Tinted-primary active style; each pill is labelled
- * "Sort by <label>" with `accessibilityState.selected` (Maestro asserts both).
+ * Horizontal single-choice pill row, used for sort options (team overview
+ * roster, team stats) and simple form choices (team gender, the Add Player
+ * "Is this player 13 or older?" question). Tinted-primary active style; each
+ * pill carries `accessibilityState.selected`. Sort rows are labelled
+ * "Sort by <label>" by default; form rows pass `labelPrefix` (for example
+ * "Gender: ") and are labelled "<prefix><label>". Maestro asserts both.
  * Pills are full 44pt touch targets.
  */
 
@@ -29,12 +32,6 @@ interface SortPillsProps<K extends string> {
    * the wording Maestro asserts); other single-choice rows (team gender) pass their own.
    */
   labelPrefix?: string;
-  /**
-   * Full accessibility label per option, for rows whose label is a translated
-   * sentence with the option in it (an i18n key with an `{{answer}}`-style
-   * placeholder) rather than a prefix. Wins over `labelPrefix`.
-   */
-  accessibilityLabelFor?: (option: SortPillOption<K>) => string;
 }
 
 export function SortPills<K extends string>({
@@ -43,7 +40,6 @@ export function SortPills<K extends string>({
   onSelect,
   style,
   labelPrefix,
-  accessibilityLabelFor,
 }: SortPillsProps<K>) {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -65,11 +61,9 @@ export function SortPills<K extends string>({
             ]}
             accessibilityRole="button"
             accessibilityLabel={
-              accessibilityLabelFor
-                ? accessibilityLabelFor(option)
-                : labelPrefix === undefined
-                  ? t('common.sortBy', { label: option.label })
-                  : `${labelPrefix}${option.label}`
+              labelPrefix === undefined
+                ? t('common.sortBy', { label: option.label })
+                : `${labelPrefix}${option.label}`
             }
             accessibilityState={{ selected: isSelected }}
           >

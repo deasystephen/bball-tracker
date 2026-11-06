@@ -671,7 +671,6 @@
     "ageQuestion": "¿Este jugador tiene 13 años o más?",
     "ageYes": "Sí",
     "ageNo": "No",
-    "ageAnswerA11y": "¿Este jugador tiene 13 años o más? {{answer}}",
     "under13Hint": "Los jugadores menores de 13 años no tienen su propio inicio de sesión. Invita a un padre, madre o tutor; podrá confirmar asistencia y seguir los partidos del jugador.",
     "guardianEmailRequiredLabel": "Correo del padre o tutor",
     "uploadingPhoto": "Subiendo foto...",

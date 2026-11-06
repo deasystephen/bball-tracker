@@ -671,7 +671,6 @@
     "ageQuestion": "Is this player 13 or older?",
     "ageYes": "Yes",
     "ageNo": "No",
-    "ageAnswerA11y": "Is this player 13 or older? {{answer}}",
     "under13Hint": "Players under 13 don't get their own login. Invite a parent or guardian; they can RSVP and follow games for the player.",
     "guardianEmailRequiredLabel": "Parent/Guardian Email",
     "uploadingPhoto": "Uploading photo...",
