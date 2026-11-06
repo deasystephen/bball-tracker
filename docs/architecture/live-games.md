@@ -4,11 +4,50 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
 ## Socket.io (Live Game Broadcast)
 
-Real-time game updates use Socket.io with an in-memory adapter. **Single-replica
-only**: rooms and every rate-limit counter live in process memory, so a second
-task silently splits a live game (coach on task A, spectators on task B, no
-error anywhere). The Redis adapter and shared rate-limit store are the open
-follow-up **#452** (#26, which shipped the handlers, was closed without them).
+Real-time game updates use Socket.io. **Production still runs a single
+task.** The adapter is in-memory unless `REDIS_SOCKET_ADAPTER_URL` is set, and
+the task definition does not set it yet; every rate-limit counter that is keyed
+by something other than a socket lives in Redis (#452). With the in-memory
+adapter a second task silently splits a live game (coach on task A, spectators
+on task B, no error anywhere).
+
+### Redis adapter (#452)
+
+`websocket/redis-adapter.ts#attachRedisAdapter` runs in `index.ts` before
+`httpServer.listen`. With `REDIS_SOCKET_ADAPTER_URL` set it installs
+`@socket.io/redis-adapter` (classic pub/sub, default key `socket.io`) on two
+ioredis connections; unset, it logs `Socket.io adapter: in-memory` and changes
+nothing. TLS and AUTH come from the URL (`rediss://:<token>@host:port`; the
+production node has neither today, #755). The publisher uses the shared
+client options (`utils/redis.ts#redisClientOptions`: no offline queue, one
+retry, 500 ms `commandTimeout`); the subscriber keeps an offline queue with
+`maxRetriesPerRequest: null`, so its subscriptions wait for the connection and
+ioredis re-subscribes after every reconnect. Both reconnect forever
+(`redisRetryDelay`). The shutdown routine quits both after `io.close()`.
+
+**Degradation (Redis is a best-effort dependency):** the adapter delivers to
+the emitting task's own sockets before it publishes, so a Redis outage never
+stops local delivery. While Redis is unreachable a publish fails fast and is
+dropped (the adapter does not await `publish`; the wrapper catches the
+rejection so it is never unhandled), logged once per outage as `Socket.io
+adapter: Redis unavailable, delivering to this task only` and `Socket.io
+adapter: Redis connected` on recovery. Sockets on other tasks miss those
+broadcasts; every broadcast carries the current score, so their score
+converges on the next one after recovery, and the events in between come back
+with the `game-snapshot` of the next join or reconnect. Room membership is
+local to each task, which is all the code uses (no `fetchSockets`,
+`serverSideEmit` or cross-task room queries).
+
+Test: `tests/integration/socket-redis-adapter.redis.test.ts` (real Redis via
+`REDIS_TEST_URL`, a service on CI's backend job): a `game-event` emitted with
+the production `emitGameEvent` on one server reaches a client on a second
+server and not a client in another game's room; with an unreachable Redis the
+local client still gets it and nothing is unhandled.
+
+**Turning it on is a separate step** (not done in the PR that added it): set
+`REDIS_SOCKET_ADAPTER_URL` in `infra/task-definition.json` (the same endpoint
+as `REDIS_URL` is fine), deploy, then load-test two tasks before flipping
+`MULTI_REPLICA_SUPPORTED` and the capacity pins below.
 
 Three things pin the replica count, and they change together (#446):
 
@@ -31,15 +70,17 @@ Three things pin the replica count, and they change together (#446):
   | not a positive integer | **exits 1** before listening |
   | `> 1` | **exits 1** before listening |
 
-  `REDIS_SOCKET_ADAPTER_URL` is **not** accepted as an escape hatch:
-  `@socket.io/redis-adapter` is not installed and nothing reads the URL, so
-  honouring it would be false assurance. #452 flips `MULTI_REPLICA_SUPPORTED`
-  in the guard module; from then on a ceiling above 1 requires the URL. The
+  `REDIS_SOCKET_ADAPTER_URL` is **not yet** accepted as an escape hatch:
+  the adapter is wired (above) but cross-task delivery is proven only in Jest,
+  not on two ECS tasks. The load-test follow-up to #452 flips
+  `MULTI_REPLICA_SUPPORTED` in the guard module; from then on a ceiling above
+  1 requires the URL. The
   guard is configuration-based, so the two tasks of a rolling deploy do not
   trip it — see the deploy-window caveat under "ECS deploy safety".
 
 Do not raise capacity as a fix for load: adapter and shared rate-limit store
-first (#452), capacity second.
+first (#452, merged; the adapter is off until its URL is set), then the
+two-task load test, capacity last.
 
 | Direction       | Event                | Payload                                                        |
 | --------------- | -------------------- | -------------------------------------------------------------- |
@@ -141,18 +182,35 @@ current score so a client can drop events and still converge.
     evicted; it simply stops receiving that game's broadcasts.
 
   Timers are cleared on `disconnect` (`clearSocketReauth`) and `unref`'d, and live in process
-  memory like rooms (single replica). Tests: `tests/websocket/socket-reauth.test.ts` (fake
+  memory on the task that holds the socket. Tests: `tests/websocket/socket-reauth.test.ts` (fake
   timers) and the "mid-session re-auth" block of `tests/websocket/game-events.integration.test.ts`
   (real transport: timer cleared on disconnect, `refresh-auth` keeps the connection past the
   handshake token's expiry, `reauth_required` then `transport close`, automatic reconnect with
   a fresh token).
-- Rate limits (audit #16, `websocket/rate-limit.ts` — in-memory, single-replica like the adapter):
+- Rate limits (audit #16, `websocket/rate-limit.ts`; shared across tasks since #452):
   handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches JWKS/DB;
-  max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`).
+  max 50 concurrent sockets per IP; `join-game` 20/min per socket (ack `code: 'rate_limited'`);
+  `refresh-auth` 10/min per socket.
   A limited handshake rejects with `connect_error: Rate limited`, which mobile `services/socket.ts`
   backs off and retries exactly like `Service unavailable`. The IP key is the rightmost
   `x-forwarded-for` entry (the ALB-appended hop, same trust rule as `trust proxy: 1`), falling back
   to the peer address.
+  - **Where the counters live.** The handshake window is a Redis key `ws:hs:<ip>` (INCR, expiry
+    set on the first hit: a fixed window, as before). The concurrency cap is a hash
+    `ws:conc:<ip>` with one field per task (`INSTANCE_ID`, a UUID per process); a task marks itself
+    alive with `ws:inst:<id>` (60 s TTL, set on every registration and refreshed every 20 s while it
+    holds sockets), and the capacity check sums only live tasks' fields and deletes dead ones, so a
+    task that crashed with sockets open stops counting within a minute. A release never leaves a
+    field at or below zero. The scripts read keys they are not handed in `KEYS`, which needs a
+    non-cluster Redis (the production node is one). The per-socket `join-game` and `refresh-auth`
+    throttles stay in WeakMaps: a socket lives on exactly one task, so they are per socket by
+    definition.
+  - **Fail-open.** The shared client is `utils/redis.ts#getReadyRedisClient` (`REDIS_URL`). With no
+    URL, while it is (re)connecting, or when a command fails or times out (500 ms), each check uses
+    this task's in-memory counters, which are always kept alongside; a failure is logged once per
+    outage (`Socket rate limit: Redis unavailable, counting in memory`). A Redis problem never
+    refuses a handshake. During an outage longer than a minute other tasks may drop this task's
+    concurrency field (its liveness key expired), which under-counts until those sockets reconnect.
 - Room naming: `game:<gameId>` (see `GAME_ROOM_PREFIX` / `gameRoom()`).
 - Snapshot cap: `SNAPSHOT_EVENT_LIMIT = 100` most-recent events returned on
   join, in chronological order.

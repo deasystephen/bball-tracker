@@ -15,6 +15,18 @@ import { config as loadEnv } from 'dotenv';
 // failure reads "The server does not support SSL connections".
 loadEnv();
 
+// backend/.env points REDIS_URL at the docker-compose Redis for `npm run dev`.
+// The suites must not share rate-limit counters (or cache entries) through it
+// across workers and runs, so they get no Redis: the rate limiters count in
+// memory exactly as they did before the shared store (#452), and CI, which has
+// no .env, behaves the same. The real-Redis suite reads REDIS_TEST_URL instead
+// (tests/integration/socket-redis-adapter.redis.test.ts).
+// Set empty rather than deleted: src/config/env.ts runs dotenv again when a
+// suite imports the app, and dotenv only fills variables that are absent, so
+// a deleted REDIS_URL would come back from .env.
+process.env.REDIS_URL = '';
+process.env.REDIS_SOCKET_ADAPTER_URL = '';
+
 // Create mock Prisma client first (before mocking). Every delegate method
 // that src/ calls must exist here; tests/utils/prisma-mock-coverage-guard.test.ts
 // fails naming any that is missing (#766).

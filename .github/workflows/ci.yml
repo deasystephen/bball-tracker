@@ -69,6 +69,17 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      # The Socket.io Redis adapter and shared rate-limit suite (#452):
+      # tests/integration/socket-redis-adapter.redis.test.ts, via REDIS_TEST_URL.
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
     
     steps:
       - uses: actions/checkout@v7
@@ -99,6 +110,7 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bball_tracker_test
+          REDIS_TEST_URL: redis://localhost:6379
           NODE_ENV: test
         run: npm test -- --coverage
 

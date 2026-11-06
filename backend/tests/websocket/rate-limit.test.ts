@@ -1,7 +1,9 @@
 /**
  * Unit tests for the Socket.io rate limiters (audit #16).
  *
- * Pure in-memory logic — no Socket.io server. The integration test verifies
+ * In-memory path (the suites run without Redis) — no Socket.io server.
+ * Redis fallback: rate-limit-fallback.test.ts; shared counters against a
+ * real Redis: tests/integration/socket-redis-adapter.redis.test.ts. The integration test verifies
  * the happy path still connects with the limiter middleware in place.
  */
 
@@ -48,57 +50,57 @@ describe('websocket/rate-limit', () => {
   });
 
   describe('checkHandshakeAllowed', () => {
-    it('allows up to the per-window budget and rejects the attempt after it', () => {
+    it('allows up to the per-window budget and rejects the attempt after it', async () => {
       const now = 1_000_000;
       for (let i = 0; i < MAX_HANDSHAKES_PER_WINDOW; i++) {
-        expect(checkHandshakeAllowed('203.0.113.9', now)).toBe(true);
+        expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(true);
       }
-      expect(checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
+      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
     });
 
-    it('tracks IPs independently', () => {
+    it('tracks IPs independently', async () => {
       const now = 1_000_000;
       for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
-        checkHandshakeAllowed('203.0.113.9', now);
+        await checkHandshakeAllowed('203.0.113.9', now);
       }
-      expect(checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
-      expect(checkHandshakeAllowed('198.51.100.7', now)).toBe(true);
+      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
+      expect(await checkHandshakeAllowed('198.51.100.7', now)).toBe(true);
     });
 
-    it('resets once the window has elapsed', () => {
+    it('resets once the window has elapsed', async () => {
       const now = 1_000_000;
       for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
-        checkHandshakeAllowed('203.0.113.9', now);
+        await checkHandshakeAllowed('203.0.113.9', now);
       }
-      expect(checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
-      expect(checkHandshakeAllowed('203.0.113.9', now + HANDSHAKE_WINDOW_MS)).toBe(true);
+      expect(await checkHandshakeAllowed('203.0.113.9', now)).toBe(false);
+      expect(await checkHandshakeAllowed('203.0.113.9', now + HANDSHAKE_WINDOW_MS)).toBe(true);
     });
   });
 
   describe('concurrent connection cap', () => {
-    it('reports capacity until the cap and none at it', () => {
+    it('reports capacity until the cap and none at it', async () => {
       for (let i = 0; i < MAX_CONCURRENT_PER_IP; i++) {
-        expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
-        registerConnection('203.0.113.9');
+        expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
+        await registerConnection('203.0.113.9');
       }
-      expect(hasConcurrentCapacity('203.0.113.9')).toBe(false);
-      expect(hasConcurrentCapacity('198.51.100.7')).toBe(true);
+      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(false);
+      expect(await hasConcurrentCapacity('198.51.100.7')).toBe(true);
     });
 
-    it('frees capacity when a connection is released', () => {
+    it('frees capacity when a connection is released', async () => {
       for (let i = 0; i < MAX_CONCURRENT_PER_IP; i++) {
-        registerConnection('203.0.113.9');
+        await registerConnection('203.0.113.9');
       }
-      expect(hasConcurrentCapacity('203.0.113.9')).toBe(false);
-      releaseConnection('203.0.113.9');
-      expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
+      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(false);
+      await releaseConnection('203.0.113.9');
+      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
     });
 
-    it('never goes negative on an unmatched release', () => {
-      releaseConnection('203.0.113.9');
-      registerConnection('203.0.113.9');
-      releaseConnection('203.0.113.9');
-      expect(hasConcurrentCapacity('203.0.113.9')).toBe(true);
+    it('never goes negative on an unmatched release', async () => {
+      await releaseConnection('203.0.113.9');
+      await registerConnection('203.0.113.9');
+      await releaseConnection('203.0.113.9');
+      expect(await hasConcurrentCapacity('203.0.113.9')).toBe(true);
     });
   });
 

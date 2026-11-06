@@ -306,8 +306,8 @@ export async function authenticateSocket(
 // can no longer view (one `game.findMany` over `readableTeamsWhere` for the
 // whole set, the same rule `canViewGame` applies to a single join), so a removed coach stops receiving
 // broadcasts at the next refresh or re-check rather than at disconnect.
-// Timers live in process memory, like rooms and rate-limit counters (the API
-// is single-replica), and are cleared on disconnect.
+// Timers live in process memory with the socket they belong to (a socket
+// lives on one task), and are cleared on disconnect.
 // ---------------------------------------------------------------------------
 
 /** Client → server: a fresh access token for the open connection. */
@@ -785,14 +785,20 @@ export function registerGameEventHandlers(io: SocketServer): void {
   // never reaches the JWKS/user lookup (audit #16). A rejection here is a
   // `connect_error: Rate limited` on the client, which backs off and retries
   // like `Service unavailable`.
+  // Shared across tasks through Redis (#452); both checks fall back to this
+  // task's counters and never throw, so a Redis problem never refuses a
+  // handshake on its own.
   io.use((socket, next) => {
     const ip = socketClientIp(socket);
-    if (!checkHandshakeAllowed(ip) || !hasConcurrentCapacity(ip)) {
-      logger.warn('Socket handshake rate limited', { socketId: socket.id, ip });
-      next(new Error(RATE_LIMITED_MESSAGE));
-      return;
-    }
-    next();
+    void (async () => {
+      const allowed = (await checkHandshakeAllowed(ip)) && (await hasConcurrentCapacity(ip));
+      if (!allowed) {
+        logger.warn('Socket handshake rate limited', { socketId: socket.id, ip });
+        next(new Error(RATE_LIMITED_MESSAGE));
+        return;
+      }
+      next();
+    })().catch(() => next());
   });
 
   io.use((socket, next) => {
@@ -803,7 +809,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     const typedSocket = socket as GameSocket;
     const userId = typedSocket.data.user?.id;
     const ip = socketClientIp(socket);
-    registerConnection(ip);
+    void registerConnection(ip);
     scheduleSocketReauth(typedSocket);
     logger.info('Socket connected', { socketId: socket.id, userId });
 
@@ -868,7 +874,7 @@ export function registerGameEventHandlers(io: SocketServer): void {
     });
 
     socket.on('disconnect', (reason: string) => {
-      releaseConnection(ip);
+      void releaseConnection(ip);
       clearSocketReauth(socket.id);
       logger.info('Socket disconnected', { socketId: socket.id, userId, reason });
     });

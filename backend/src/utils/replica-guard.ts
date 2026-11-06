@@ -3,12 +3,15 @@ import { logger } from './logger';
 /**
  * Single-replica startup guard (#446).
  *
- * The API is single-replica by construction: Socket.io uses the in-memory
- * adapter (rooms are local to one process) and every rate limiter keeps its
- * counters in process memory (`websocket/rate-limit.ts`, the default
- * `express-rate-limit` MemoryStore). With a second task a live game splits
- * silently — the coach tracks on task A, the parents watch on task B, nobody
- * sees an error — and every rate limit becomes N times its budget.
+ * The API was single-replica by construction: Socket.io used the in-memory
+ * adapter (rooms are local to one process) and every rate limiter kept its
+ * counters in process memory. With a second task a live game splits silently
+ * — the coach tracks on task A, the parents watch on task B, nobody sees an
+ * error — and every rate limit becomes N times its budget. #452 moved the
+ * rate-limit counters to Redis and added the Redis adapter
+ * (`websocket/redis-adapter.ts`, enabled by `REDIS_SOCKET_ADAPTER_URL`); the
+ * guard stays closed until a load test on two tasks flips
+ * `MULTI_REPLICA_SUPPORTED`.
  *
  * A process cannot observe the autoscaling target, so the replica ceiling is
  * explicit configuration: `MAX_REPLICAS` in `infra/task-definition.json`, pinned
@@ -17,13 +20,12 @@ import { logger } from './logger';
  * deploy briefly runs two tasks (`deployment_maximum_percent = 200`) and must
  * not trip it.
  *
- * `REDIS_SOCKET_ADAPTER_URL` is deliberately NOT accepted as proof of safety
- * today. `@socket.io/redis-adapter` is not installed and nothing reads that
- * URL, so treating it as an escape hatch would be false assurance: setting one
- * env var would silence the guard while rooms still split. The change that
- * installs and wires the adapter and a shared rate-limit store (#452) flips
- * `MULTI_REPLICA_SUPPORTED`; from then on a ceiling above 1 is allowed only
- * when the URL is set.
+ * `REDIS_SOCKET_ADAPTER_URL` is NOT yet accepted as proof of safety: the
+ * adapter is wired, but cross-task delivery has only been proven in Jest
+ * (`tests/integration/socket-redis-adapter.redis.test.ts`), not on two ECS
+ * tasks. The follow-up to #452 sets the URL in the task definition, runs that
+ * load test and flips `MULTI_REPLICA_SUPPORTED`; from then on a ceiling above
+ * 1 is allowed only when the URL is set.
  */
 
 export const MAX_REPLICAS_ENV_VAR = 'MAX_REPLICAS';
@@ -33,9 +35,9 @@ export const SOCKET_ADAPTER_URL_ENV_VAR = 'REDIS_SOCKET_ADAPTER_URL';
 export const REDIS_ADAPTER_ISSUE = '#452';
 
 /**
- * Whether this build can run more than one replica at all. False until #452
- * installs `@socket.io/redis-adapter`, wires it to `REDIS_SOCKET_ADAPTER_URL`
- * and moves the rate-limit counters to a shared store.
+ * Whether this build can run more than one replica at all. The adapter and the
+ * shared rate-limit store are in (#452); this stays false until the two-task
+ * load test that follows it.
  */
 export const MULTI_REPLICA_SUPPORTED = false;
 

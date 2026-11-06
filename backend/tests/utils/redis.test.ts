@@ -13,6 +13,8 @@ const mockRedisInstance = {
   del: jest.fn(),
   quit: jest.fn(),
   on: jest.fn(),
+  connect: jest.fn(),
+  status: 'wait' as string,
 };
 
 const RedisCtor = jest.fn(() => mockRedisInstance);
@@ -167,6 +169,30 @@ describe('redis cache helpers', () => {
       expect(RedisCtor).toHaveBeenCalledTimes(2);
       // Same mocked instance object, but a fresh construction happened.
       expect(second).toBe(first);
+    });
+
+    it('passes a command timeout so a stalled Redis fails the command (#452)', async () => {
+      const { getRedisClient, REDIS_COMMAND_TIMEOUT_MS } = await import('../../src/utils/redis');
+      getRedisClient();
+      const options = (RedisCtor.mock.calls[0] as unknown[])[1] as { commandTimeout: number; enableOfflineQueue: boolean };
+      expect(options.commandTimeout).toBe(REDIS_COMMAND_TIMEOUT_MS);
+      expect(options.enableOfflineQueue).toBe(false);
+    });
+
+    it('getReadyRedisClient starts a lazy connection and returns null until ready', async () => {
+      mockRedisInstance.connect.mockResolvedValue(undefined);
+      mockRedisInstance.status = 'wait';
+      const { getReadyRedisClient } = await import('../../src/utils/redis');
+      expect(getReadyRedisClient()).toBeNull();
+      expect(mockRedisInstance.connect).toHaveBeenCalledTimes(1);
+
+      mockRedisInstance.status = 'reconnecting';
+      expect(getReadyRedisClient()).toBeNull();
+      expect(mockRedisInstance.connect).toHaveBeenCalledTimes(1);
+
+      mockRedisInstance.status = 'ready';
+      expect(getReadyRedisClient()).toBe(mockRedisInstance);
+      mockRedisInstance.status = 'wait';
     });
 
     it('closeRedis quits the client', async () => {
