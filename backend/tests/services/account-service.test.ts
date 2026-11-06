@@ -28,6 +28,7 @@ jest.mock('../../src/services/workos-service');
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   deleteUnreferencedUserUploads: jest.fn(),
+  skippedAvatarCleanup: jest.requireActual('../../src/services/upload-service').skippedAvatarCleanup,
 }));
 
 /** What the mocked avatar cleanup reports (#957). */
@@ -267,6 +268,27 @@ describe('AccountService.deleteAccount', () => {
       expect(result).toMatchObject({ erased: true, identityDeleted: false });
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('skips the avatar cleanup for a managed record that never signed in (no uploads of its own, #957)', async () => {
+      armHappyPath(lockedRow({ email: null, workosUserId: null, isManaged: true }));
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references());
+
+      const result = await AccountService.deleteAccount(USER_ID, { actorId: 'parent-1', mode: 'guardian' });
+
+      expect(mockDeleteUploads).not.toHaveBeenCalled();
+      expect(result.avatarCleanup).toEqual(
+        expect.objectContaining({ listed: 0, deleted: 0, skipped: 'managed record that never signed in' })
+      );
+    });
+
+    it('still runs the avatar cleanup for a managed record that was claimed (it has a login)', async () => {
+      armHappyPath(lockedRow({ workosUserId: 'workos_1', isManaged: true }));
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(references());
+
+      await AccountService.deleteAccount(USER_ID, { actorId: USER_ID, mode: 'self' });
+
+      expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID);
     });
 
     it.each(Object.keys(USER_REFERENCE_COUNT_SELECT) as (keyof typeof USER_REFERENCE_COUNT_SELECT)[])(
@@ -552,9 +574,16 @@ describe('AccountService.cleanupDeletedUserUploads (#957 operator re-run)', () =
     expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID, { timeoutMs: OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS });
   });
 
-  it('runs for an erased account (no row left)', async () => {
+  it('runs for an erased account (no row left) only when the operator says --erased', async () => {
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).resolves.toEqual(CLEANUP);
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID, { erased: true })).resolves.toEqual(CLEANUP);
+  });
+
+  it('refuses a missing row without --erased, so a mistyped id never reads as a clean run', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).rejects.toThrow(/pass --erased/);
+    await expect(AccountService.cleanupDeletedUserUploads(USER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(mockDeleteUploads).not.toHaveBeenCalled();
   });
 
   it('refuses an active account: its unreferenced uploads may be a save in flight', async () => {

@@ -1,7 +1,7 @@
 /**
  * Shared double of `@aws-sdk/client-s3` for suites that reach S3 incidentally,
  * such as the real-database suites that call `AccountService.deleteAccount`
- * (whose avatar cleanup lists and deletes after the response, #957). There is
+ * (whose avatar cleanup lists and deletes before it returns, #957). There is
  * deliberately no global S3 mock in `tests/setup.ts`: each suite that reaches
  * S3 declares one, so a suite that ought to assert on S3 never passes silently
  * against a stub it did not know about.

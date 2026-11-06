@@ -5,8 +5,9 @@
  *
  *   NODE_ENV=production npx tsx scripts/data-subject-request.ts export <email>   # JSON to stdout
  *   NODE_ENV=production npx tsx scripts/data-subject-request.ts delete <email>   # anonymize in place
- *   NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId>
- *     # re-run the avatar upload cleanup for an already-deleted account (#957)
+ *   NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId> [--erased]
+ *     # re-run the avatar upload cleanup for an already-deleted account (#957);
+ *     # --erased when the row is gone (hard-erased), else a missing row is refused
  *
  * NODE_ENV=production keeps Prisma's development query log off stdout so the
  * export is pure JSON.
@@ -28,15 +29,26 @@
 import 'dotenv/config';
 import prisma from '../src/models';
 import { AccountService } from '../src/services/account-service';
+import { ForbiddenError, NotFoundError } from '../src/utils/errors';
 import { assertWorkOSConfig } from '../src/utils/workos-client';
 import { findActiveUserIdByEmail } from './data-subject-lookup';
 
 async function main(argv: string[]): Promise<void> {
-  const [command, email] = argv;
+  const [command, email, ...flags] = argv;
   if (command === 'cleanup-avatars' && email) {
     // The argument is a user id here: a deleted account has no address left.
     const userId = email;
-    const avatarCleanup = await AccountService.cleanupDeletedUserUploads(userId);
+    let avatarCleanup;
+    try {
+      avatarCleanup = await AccountService.cleanupDeletedUserUploads(userId, { erased: flags.includes('--erased') });
+    } catch (error) {
+      if (error instanceof NotFoundError || error instanceof ForbiddenError) {
+        process.stderr.write(`${error.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      throw error;
+    }
     process.stdout.write(JSON.stringify({ userId, avatarCleanup }, null, 2) + '\n');
     if (avatarCleanup.error !== undefined || avatarCleanup.incomplete || avatarCleanup.failed > 0) {
       process.exitCode = 1;
@@ -44,7 +56,7 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (!email || (command !== 'export' && command !== 'delete')) {
-    process.stderr.write('usage: data-subject-request.ts <export|delete> <email> | cleanup-avatars <userId>\n');
+    process.stderr.write('usage: data-subject-request.ts <export|delete> <email> | cleanup-avatars <userId> [--erased]\n');
     process.exitCode = 2;
     return;
   }

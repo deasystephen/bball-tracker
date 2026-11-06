@@ -60,7 +60,12 @@ import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar, deleteUnreferencedUserUploads, type AvatarCleanupResult } from './upload-service';
+import {
+  deletePreviousAvatar,
+  deleteUnreferencedUserUploads,
+  skippedAvatarCleanup,
+  type AvatarCleanupResult,
+} from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -336,7 +341,15 @@ export class AccountService {
         });
       }
 
-      return { previousAvatar: row.profilePictureUrl, workosUserId: row.workosUserId, adminlessLeagueIds, erased };
+      return {
+        previousAvatar: row.profilePictureUrl,
+        workosUserId: row.workosUserId,
+        // A managed record that was never claimed never signed in, so it never
+        // called POST /uploads/avatar-url: nothing can sit under its own prefix.
+        neverSignedIn: row.isManaged && row.workosUserId === null,
+        adminlessLeagueIds,
+        erased,
+      };
     });
 
     // 5. After commit: best-effort external cleanup. The local row is already
@@ -370,9 +383,13 @@ export class AccountService {
     // Every other upload under the user's own prefix that no row references
     // (abandoned edits, replaced photos whose delete failed); photos the user
     // put on a player's row as coach or guardian stay (#957). Awaited, with a
-    // 10 s deadline: deletion is rare, and a request in flight is covered by
-    // the HTTP drain on shutdown. It never throws; it logs its own outcome.
-    const avatarCleanup = await deleteUnreferencedUserUploads(userId);
+    // 3 s deadline (the app gives the whole request 10 s): deletion is rare,
+    // and a request in flight is covered by the HTTP drain on shutdown. It
+    // never throws; it logs its own outcome, and the operator re-runs an
+    // incomplete one.
+    const avatarCleanup = committed.neverSignedIn
+      ? skippedAvatarCleanup('managed record that never signed in')
+      : await deleteUnreferencedUserUploads(userId);
 
     logger.info('Account deleted', {
       userId,
@@ -397,14 +414,23 @@ export class AccountService {
    * already deleted (`data-subject-request.ts cleanup-avatars <userId>`, #957),
    * for when the deletion's log shows the cleanup failed or was `incomplete`.
    * Refuses an active account: its unreferenced uploads may be a profile
-   * save in flight. An erased account (no row left) is fine. The deadline is
+   * save in flight. An erased account (no row left) needs `erased: true`, so
+   * a mistyped id is refused instead of reporting a clean run. The deadline is
    * longer than the in-request one because nothing waits on it but the
    * operator.
    */
-  static async cleanupDeletedUserUploads(userId: string): Promise<AvatarCleanupResult> {
+  static async cleanupDeletedUserUploads(
+    userId: string,
+    { erased = false }: { erased?: boolean } = {}
+  ): Promise<AvatarCleanupResult> {
     const row = await prisma.user.findUnique({ where: { id: userId }, select: { deletedAt: true } });
     if (row && row.deletedAt === null) {
       throw new ForbiddenError('Account is not deleted; cleanup-avatars runs only for deleted accounts');
+    }
+    // A mistyped id finds no row either; only the operator can tell it apart
+    // from a hard-erased account, so they must say so.
+    if (!row && !erased) {
+      throw new NotFoundError('No user row; pass --erased if the account was hard-erased');
     }
     return deleteUnreferencedUserUploads(userId, { timeoutMs: OPERATOR_UPLOAD_CLEANUP_TIMEOUT_MS });
   }

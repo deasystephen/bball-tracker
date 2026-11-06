@@ -6,22 +6,16 @@
  * clients.
  */
 
-import type { DeleteObjectCommandInput } from '@aws-sdk/client-s3';
+import { sentOfKind, type SentS3Command } from '../support/s3-mock';
 
-const deleteObjectCalls: DeleteObjectCommandInput[] = [];
 const mockSend = jest.fn().mockResolvedValue({});
 
-jest.mock('@aws-sdk/client-s3', () => {
-  return {
-    S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
-    DeleteObjectCommand: jest.fn().mockImplementation((input: DeleteObjectCommandInput) => {
-      deleteObjectCalls.push(input);
-      return { input };
-    }),
-    DeleteObjectsCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjects', input })),
-    ListObjectsV2Command: jest.fn().mockImplementation((input: unknown) => ({ kind: 'ListObjectsV2', input })),
-  };
-});
+jest.mock('@aws-sdk/client-s3', () =>
+  jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockSend(...args))
+);
+
+/** Inputs of every DeleteObjectCommand sent so far (cleared by `clearAllMocks`). */
+const deleteObjectCalls = (): Record<string, unknown>[] => sentOfKind(mockSend, 'DeleteObject').map((c) => c.input);
 
 jest.mock('@aws-sdk/s3-presigned-post', () => ({
   createPresignedPost: jest.fn().mockResolvedValue({
@@ -38,7 +32,7 @@ import {
   deleteAvatar,
   deletePreviousAvatar,
   deleteUnreferencedUserUploads,
-  isIssuedAvatarKey,
+  skippedAvatarCleanup,
   loadReferencedAvatarKeys,
   referencedAvatarKeys,
   discardOwnAvatar,
@@ -57,7 +51,6 @@ describe('Upload Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSend.mockResolvedValue({});
-    deleteObjectCalls.length = 0;
   });
 
   describe('generateAvatarUploadUrl', () => {
@@ -130,8 +123,8 @@ describe('Upload Service', () => {
     it('deletes the object addressed by the image URL', async () => {
       await deleteAvatar(`${BUCKET_BASE}user-1/pic.jpg`);
 
-      expect(deleteObjectCalls).toHaveLength(1);
-      expect(deleteObjectCalls[0]).toEqual({
+      expect(deleteObjectCalls()).toHaveLength(1);
+      expect(deleteObjectCalls()[0]).toEqual({
         Bucket: 'bball-tracker-avatars-dev',
         Key: 'avatars/user-1/pic.jpg',
       });
@@ -160,27 +153,27 @@ describe('Upload Service', () => {
   describe('deletePreviousAvatar', () => {
     it('deletes the previous object when a new avatar replaces it', async () => {
       await deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, `${BUCKET_BASE}u/new.jpg`);
-      expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u/old.jpg' }]);
+      expect(deleteObjectCalls()).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u/old.jpg' }]);
     });
 
     it('deletes the previous object when the avatar is cleared', async () => {
       await deletePreviousAvatar(`${BUCKET_BASE}u/old.jpg`, null);
-      expect(deleteObjectCalls).toHaveLength(1);
+      expect(deleteObjectCalls()).toHaveLength(1);
     });
 
     it('is a no-op when the URL did not change', async () => {
       await deletePreviousAvatar(`${BUCKET_BASE}u/same.jpg`, `${BUCKET_BASE}u/same.jpg`);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
     });
 
     it('never touches objects outside our bucket (e.g. WorkOS profile photos)', async () => {
       await deletePreviousAvatar('https://workos.example/photo.jpg', `${BUCKET_BASE}u/new.jpg`);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
     });
 
     it('is a no-op when there was no previous avatar', async () => {
       await deletePreviousAvatar(null, `${BUCKET_BASE}u/new.jpg`);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
     });
 
     it('swallows S3 errors (the profile update already succeeded)', async () => {
@@ -204,7 +197,7 @@ describe('Upload Service', () => {
       ])('sends no DeleteObjectCommand for %s and warns without the URL', async (_label, url) => {
         await deletePreviousAvatar(url, null);
 
-        expect(deleteObjectCalls).toHaveLength(0);
+        expect(deleteObjectCalls()).toHaveLength(0);
         expect(mockSend).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalledWith(
           expect.stringMatching(/not an issued upload key/),
@@ -215,7 +208,7 @@ describe('Upload Service', () => {
 
       it('still deletes a key of the issued shape', async () => {
         await deletePreviousAvatar(`${BUCKET_BASE}${a}/pic.jpg`, null);
-        expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${a}/pic.jpg` }]);
+        expect(deleteObjectCalls()).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${a}/pic.jpg` }]);
       });
     });
   });
@@ -260,7 +253,7 @@ describe('Upload Service', () => {
     it('deletes an object under the caller\'s own avatars/<userId>/ prefix', async () => {
       await discardOwnAvatar(`${BUCKET_BASE}${callerId}/pic.jpg`, callerId);
 
-      expect(deleteObjectCalls).toEqual([
+      expect(deleteObjectCalls()).toEqual([
         { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${callerId}/pic.jpg` },
       ]);
       expect(mockSend).toHaveBeenCalledTimes(1);
@@ -269,13 +262,13 @@ describe('Upload Service', () => {
     it('never deletes an object under another user\'s prefix (client-supplied URL)', async () => {
       await discardOwnAvatar(`${BUCKET_BASE}${otherId}/pic.jpg`, callerId);
 
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
     it('does not let a prefix-sharing id match (avatars/<id>-suffix/)', async () => {
       await discardOwnAvatar(`${BUCKET_BASE}${callerId}-x/pic.jpg`, callerId);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
     });
 
     it('checks ownership on the normalised path, so a ../ hop out of the own prefix deletes nothing', async () => {
@@ -283,7 +276,7 @@ describe('Upload Service', () => {
       await discardOwnAvatar(`${BUCKET_BASE}${callerId}/../${otherId}/pic.jpg`, callerId);
       await discardOwnAvatar(`${BUCKET_BASE}${callerId}/%2e%2e/${otherId}/pic.jpg`, callerId);
 
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
@@ -291,14 +284,14 @@ describe('Upload Service', () => {
       await discardOwnAvatar('https://workos.example/photo.jpg', callerId);
       await discardOwnAvatar(`https://evil.example/avatars/${callerId}/pic.jpg`, callerId);
 
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
     it('is a no-op without a URL', async () => {
       await discardOwnAvatar(undefined, callerId);
       await discardOwnAvatar(null, callerId);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(deleteObjectCalls()).toHaveLength(0);
     });
 
     it('logs a warning and never throws when S3 rejects (the invitation already exists)', async () => {
@@ -339,9 +332,8 @@ describe('Upload Service', () => {
       infoSpy.mockRestore();
     });
 
-    type Sent = { kind: string; input: Record<string, unknown> };
-    const sentOf = (kind: string): Sent[] =>
-      mockSend.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === kind);
+    type Sent = SentS3Command;
+    const sentOf = (kind: string): Sent[] => sentOfKind(mockSend, kind);
     const deletedKeys = (): string[] =>
       sentOf('DeleteObjects').flatMap((c) => (c.input.Delete as { Objects: { Key: string }[] }).Objects.map((o) => o.Key));
     const key = (file: string): string => `avatars/${userId}/${file}`;
@@ -356,13 +348,17 @@ describe('Upload Service', () => {
         options.abortSignal.addEventListener('abort', () => reject(new Error('Request aborted')));
       });
 
-    describe('isIssuedAvatarKey', () => {
-      it('accepts only avatars/<id>/<file>', () => {
-        expect(isIssuedAvatarKey('avatars/u/a.jpg')).toBe(true);
-        expect(isIssuedAvatarKey('avatars/a.jpg')).toBe(false);
-        expect(isIssuedAvatarKey('avatars/u/x/a.jpg')).toBe(false);
-        expect(isIssuedAvatarKey('other/u/a.jpg')).toBe(false);
-        expect(isIssuedAvatarKey('/avatars/u/a.jpg')).toBe(false);
+    describe('skippedAvatarCleanup', () => {
+      it('reports zero counts and the reason', () => {
+        expect(skippedAvatarCleanup('why')).toEqual({
+          listed: 0,
+          kept: 0,
+          deleted: 0,
+          failed: 0,
+          unknown: 0,
+          incomplete: false,
+          skipped: 'why',
+        });
       });
     });
 
@@ -390,6 +386,16 @@ describe('Upload Service', () => {
 
       it('falls back to the raw string when the URL does not parse', () => {
         expect(referencedAvatarKeys('not a url avatars/u/a.jpg?x=1')).toEqual(['avatars/u/a.jpg']);
+      });
+
+      it('takes a key from every avatars/ occurrence, so a bucket named *avatars still protects the real key', () => {
+        // Path-style URL for a bucket whose name ends in "avatars"
+        expect(referencedAvatarKeys('https://s3.amazonaws.com/team-avatars/avatars/u/a.jpg')).toEqual(
+          expect.arrayContaining(['avatars/u/a.jpg'])
+        );
+        expect(referencedAvatarKeys('https://s3.amazonaws.com/avatars/avatars/u/a.jpg')).toEqual(
+          expect.arrayContaining(['avatars/avatars/u/a.jpg', 'avatars/u/a.jpg'])
+        );
       });
 
       it('returns nothing for a URL outside avatars/', () => {
@@ -439,9 +445,11 @@ describe('Upload Service', () => {
 
         const result = await deleteUnreferencedUserUploads(userId);
 
-        expect(result).toEqual({ listed: 3, kept: 1, deleted: 1, failed: 0, unknown: 0, incomplete: false });
+        // The nested key is the user's own too: unreferenced, so deleted. Counts add up.
+        expect(result).toEqual({ listed: 3, kept: 1, deleted: 2, failed: 0, unknown: 0, incomplete: false });
+        expect(result.listed).toBe(result.kept + result.deleted + result.failed + result.unknown);
         expect(sentOf('ListObjectsV2')[0].input).toEqual(expect.objectContaining({ Prefix: `avatars/${userId}/` }));
-        expect(deletedKeys()).toEqual([key('orphan.jpg')]);
+        expect(deletedKeys()).toEqual([key('orphan.jpg'), key('nested/odd.jpg')]);
         expect(sentOf('DeleteObjects')[0].input.Delete).toEqual(expect.objectContaining({ Quiet: true }));
         // Every S3 call carries the deadline's signal
         for (const [, options] of mockSend.mock.calls) {
@@ -474,6 +482,23 @@ describe('Upload Service', () => {
         expect(sentOf('ListObjectsV2').map((c) => c.input.ContinuationToken)).toEqual([undefined, 'p2', 'p3']);
         expect(deletedKeys()).toEqual([key('a.jpg'), key('b.jpg'), key('c.jpg')]);
         expect(result.deleted).toBe(3);
+      });
+
+      it('keeps a nested key a profile references', async () => {
+        listing({ Contents: [{ Key: key('nested/kept.jpg') }] });
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+          { profilePictureUrl: `${BUCKET_BASE}${userId}/nested/kept.jpg` },
+        ]);
+        const result = await deleteUnreferencedUserUploads(userId);
+        expect(result).toEqual(expect.objectContaining({ listed: 1, kept: 1, deleted: 0 }));
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+      });
+
+      it('never deletes a listed key outside the prefix', async () => {
+        listing({ Contents: [{ Key: 'avatars/someone-else/x.jpg' }] });
+        const result = await deleteUnreferencedUserUploads(userId);
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(result).toEqual(expect.objectContaining({ listed: 1, kept: 0, deleted: 0 }));
       });
 
       it('deletes regardless of age (no floor)', async () => {

@@ -25,10 +25,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `upload-service.ts#deleteUnreferencedUserUploads` (#957), which deletes the other objects under
   the user's own `avatars/<userId>/` prefix that no `User.profilePictureUrl` references, so a
   photo the user uploaded as coach or guardian onto a player's row stays. It lists every page,
-  reads references from rows containing the user id, and runs under a 10 s deadline; it never
+  reads references from rows containing the user id, and runs under a 3 s deadline (skipped for a managed record that never signed in); it never
   throws, and its counts come back as `avatarCleanup` on the result (logged, printed by the
   operator CLI, never in an API response). A failed or `incomplete` run is re-run with
-  `data-subject-request.ts cleanup-avatars <userId>` (runbook). Uploads never saved by users who
+  `data-subject-request.ts cleanup-avatars <userId> [--erased]` (runbook). Uploads never saved by users who
   keep their accounts are not collected anywhere yet (#1005). It needs `s3:ListBucket`; see
   `backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`. The WorkOS step (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone

@@ -81,10 +81,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   shows it. **A photo that was uploaded but never saved to any profile (a cancelled edit, an
   abandoned Add Player) is not deleted while its uploader keeps their account**: it stays
   readable by anyone who has its URL (the bucket is public-read; URLs are unguessable). Expiring
-  those is #1005; the privacy policy must not promise it until that ships. *State (#957): the
-  deletion-time cleanup works once the task role's `s3:ListBucket` is applied (`infra/ecs.tf`)
-  and PR #1000 is merged. See
-  `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.*
+  those is #1005; the privacy policy must not promise it until that ships. Detail:
+  `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited.
 - **Error reports (Sentry)** are kept for Sentry's retention window (90 days by default). No name,
@@ -236,16 +234,21 @@ dashboard (User Management → the email → Delete). Two known causes:
 
 Every deletion (self-service, guardian, or operator) runs the avatar cleanup before it answers:
 it deletes the person's own uploads under `avatars/<userId>/` that no profile references, within
-a 10 s deadline (#957). It never fails the deletion. When it did not finish, the API logs
+a 3 s deadline (#957). It never fails the deletion. A managed child that was never claimed has no
+uploads of its own, so its result says `skipped` and nothing ran. When it did not finish, the API logs
 `Account avatar upload cleanup did not finish cleanly` at warn with the `userId` and counts
 (`listed`, `kept`, `deleted`, `failed`, `unknown`, `incomplete`, `error`). Datadog:
 `service:bball-tracker-api "Account avatar upload cleanup did not finish cleanly"`. The operator
 CLI's `delete` output carries the same result as `avatarCleanup`.
 
-Re-run it for that user id (the account must already be deleted; an active account is refused):
+Re-run it for that user id. The account must already be deleted; an active account is refused
+(exit 2). If the deletion **erased** the row (`erased: true` in the deletion's output or log
+line), add `--erased`: without it, an id with no row is refused (exit 2, `No user row; pass
+--erased if the account was hard-erased`), so a mistyped id never reads as a clean run.
 
 ```bash
-cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId>
+cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId>            # tombstoned
+cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts cleanup-avatars <userId> --erased   # erased
 ```
 
 It prints `{ userId, avatarCleanup }` and exits non-zero while anything is left (an `error`,

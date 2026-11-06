@@ -13,15 +13,13 @@
 jest.unmock('../../src/models');
 
 const mockS3Send = jest.fn();
-jest.mock('@aws-sdk/client-s3', () => ({
-  S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
-  DeleteObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObject', input })),
-  DeleteObjectsCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjects', input })),
-  ListObjectsV2Command: jest.fn().mockImplementation((input: unknown) => ({ kind: 'ListObjectsV2', input })),
-}));
+jest.mock('@aws-sdk/client-s3', () =>
+  jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))
+);
 
 import { randomUUID } from 'node:crypto';
 import { removeTestRows } from '../support/test-leftovers';
+import { sentOfKind, type SentS3Command } from '../support/s3-mock';
 import prisma from '../../src/models';
 import { AccountService } from '../../src/services/account-service';
 import { loadReferencedAvatarKeys } from '../../src/services/upload-service';
@@ -44,9 +42,8 @@ async function mkUser(local: string, extra: Record<string, unknown> = {}): Promi
   return user.id;
 }
 
-type Sent = { kind: string; input: Record<string, unknown> };
-const sentOf = (kind: string): Sent[] =>
-  mockS3Send.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === kind);
+type Sent = SentS3Command;
+const sentOf = (kind: string): Sent[] => sentOfKind(mockS3Send, kind);
 
 beforeAll(async () => {
   try {

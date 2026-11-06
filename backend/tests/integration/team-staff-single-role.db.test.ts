@@ -24,7 +24,7 @@
 jest.unmock('../../src/models');
 
 // S3 double (#957): account deletion lists and deletes the user's avatar
-// uploads after the response. Never a real bucket; see tests/support/s3-mock.ts.
+// uploads before it returns. Never a real bucket; see tests/support/s3-mock.ts.
 const mockS3Send = jest.fn().mockResolvedValue({});
 jest.mock('@aws-sdk/client-s3', () =>
   jest.requireActual('../support/s3-mock').mockS3ClientModule((...args: unknown[]) => mockS3Send(...args))

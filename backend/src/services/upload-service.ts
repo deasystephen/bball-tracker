@@ -237,12 +237,14 @@ export async function discardOwnAvatar(
 const DELETE_BATCH_SIZE = 1000;
 
 /**
- * Deadline for one cleanup. `deleteAccount` awaits it, so it stays well under
- * the 25 s shutdown grace and the ALB idle timeout; the deadline aborts the S3
- * calls and is checked again before any delete. The operator re-run
- * (`data-subject-request.ts cleanup-avatars`) passes a longer one.
+ * Deadline for the cleanup inside `deleteAccount`. It starts only after the
+ * transaction and the WorkOS step, and the mobile client gives the whole
+ * request 10 s, so it stays short: a slow S3 must not turn a completed
+ * deletion into an error on the phone. What it cannot finish is reported as
+ * `incomplete` and re-run by the operator
+ * (`data-subject-request.ts cleanup-avatars`, with a longer deadline).
  */
-export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 10_000;
+export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 3_000;
 
 /**
  * User ids become an S3 prefix and a LIKE fragment. They are UUIDs; anything
@@ -267,11 +269,13 @@ export interface AvatarCleanupResult {
   incomplete: boolean;
   /** Set when the cleanup did not run or a read failed (nothing more was deleted). */
   error?: string;
+  /** Set when there was nothing to clean by construction (the reason); no S3 call was made. */
+  skipped?: string;
 }
 
-/** True when `key` has the exact shape `avatars/<id>/<file>` (same rule as `ISSUED_KEY_PATH`). */
-export function isIssuedAvatarKey(key: string): boolean {
-  return ISSUED_KEY_PATH.test(`/${key}`);
+/** The result for an account that cannot have uploads of its own. */
+export function skippedAvatarCleanup(reason: string): AvatarCleanupResult {
+  return { listed: 0, kept: 0, deleted: 0, failed: 0, unknown: 0, incomplete: false, skipped: reason };
 }
 
 /**
@@ -279,11 +283,17 @@ export function isIssuedAvatarKey(key: string): boolean {
  *
  * Deliberately over-inclusive, because a miss deletes a photo that is in use
  * and the bucket is unversioned: the host is ignored (a regional or path-style
- * URL to our bucket still protects its object), and both the raw and the
- * percent-decoded path are taken from the first `avatars/` segment on.
+ * URL to our bucket still protects its object), both the raw and the
+ * percent-decoded path count, and a key is taken from EVERY `avatars/`
+ * occurrence in the path, so a path-style URL whose bucket name ends in
+ * `avatars` (`/<x>-avatars/avatars/<id>/f.jpg`) still yields the real key.
  * The path comes from `parsedPath`, the same parser every other check uses;
  * an unparsable value falls back to the raw string minus query and fragment.
- * Protecting a key that does not exist costs nothing.
+ *
+ * Accepted consequence: because the host is ignored, a row pointing at some
+ * OTHER bucket's `avatars/<A>/f.jpg` (or any user storing a URL that names
+ * A's key) keeps A's object alive. Keeping is the safe direction; protecting
+ * a key that does not exist, or one we could have deleted, costs nothing.
  */
 export function referencedAvatarKeys(storedUrl: string): string[] {
   const pathname = parsedPath(storedUrl) ?? storedUrl.split(/[?#]/)[0];
@@ -294,14 +304,13 @@ export function referencedAvatarKeys(storedUrl: string): string[] {
     // Malformed escape: the raw form is already in the set.
   }
 
-  const keys: string[] = [];
+  const keys = new Set<string>();
   for (const path of paths) {
-    const at = path.indexOf('avatars/');
-    if (at !== -1) {
-      keys.push(path.slice(at));
+    for (let at = path.indexOf('avatars/'); at !== -1; at = path.indexOf('avatars/', at + 1)) {
+      keys.add(path.slice(at));
     }
   }
-  return keys;
+  return [...keys];
 }
 
 /**
@@ -434,7 +443,10 @@ export async function deleteUnreferencedUserUploads(
       continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (continuationToken);
 
-    const candidates = keys.filter(isIssuedAvatarKey);
+    // Every key under the user's own prefix is a candidate, whatever its shape
+    // (it is that user's prefix), so the counts add up:
+    // listed = kept + deleted + failed + unknown (+ not attempted when incomplete).
+    const candidates = keys.filter((key) => key.startsWith(prefix));
     if (candidates.length > 0) {
       // References are read AFTER listing, so they are at least as fresh as the list.
       const referenced = await loadReferencedAvatarKeys(userId);
