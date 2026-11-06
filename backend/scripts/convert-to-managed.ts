@@ -11,17 +11,20 @@
  * transaction un-claims the row (no login, no email, managed by the coach),
  * then the WorkOS user is deleted best-effort, which ends every session. The
  * output says which coach now manages the record and whether the WorkOS
- * deletion succeeded. When it did not, the active sessions are revoked as a
- * stopgap, the output carries the WorkOS user id (the row no longer does), a
- * warning goes to stderr and the exit code is 3: the operator deletes the
- * WorkOS user by hand before replying to the reporter.
+ * deletion succeeded (`identityDeleted`: `true`, `false`, or `null` when the
+ * row had no WorkOS identity; exit 0). When it failed, the active sessions
+ * are revoked as a stopgap, the output carries the WorkOS user id (the row no
+ * longer does) and the session outcome, a warning goes to stderr and the exit
+ * code is 3: the operator deletes the WorkOS user by hand before replying to
+ * the reporter.
  *
  * Without `--coach` the record goes to the one head coach of the player's
  * teams in active seasons; the script refuses (exit 1, nothing written) when
  * there is none or more than one, when a named coach is not staff on one of
- * those teams, and when the account holds a staff role, a league admin role,
- * a guardian link or a personal league with teams (an adult account: delete
- * it with `data-subject-request.ts` instead).
+ * those teams, when the account is already a managed record, and when it
+ * shows any adult signal (staff or league admin role, guardian link, managed
+ * players, sent invitations, a personal league with teams or other admins):
+ * delete it with `data-subject-request.ts` instead.
  */
 
 // Loads backend/.env locally (DATABASE_URL, WORKOS_*). In production run with the task's env.
@@ -68,26 +71,32 @@ async function main(argv: string[]): Promise<void> {
         userId: args.userId,
         converted: true,
         managedById: result.managedById,
+        // null: the row had no WorkOS identity, nothing to delete.
         identityDeleted: result.identityDeleted,
-        ...(result.workosUserId && { workosUserId: result.workosUserId, sessionsRevoked: result.sessionsRevoked }),
+        ...(result.workosUserId && { workosUserId: result.workosUserId, sessions: result.sessions }),
       },
       null,
       2
     ) + '\n'
   );
 
-  if (result.workosUserId) {
+  if (result.identityDeleted === false) {
     // The row is converted, but the identity-provider user survives: a new
     // sign-in would create a fresh account for the child. Exit non-zero so
     // nobody reads this run as finished.
+    const sessions = result.sessions ?? null;
+    const sessionLine =
+      sessions === null
+        ? '!!! Its sessions could not even be listed: nothing was revoked. Delete the user immediately.'
+        : sessions.failed > 0
+          ? `!!! Sessions NOT fully revoked: ${sessions.revoked} revoked, ${sessions.failed} failed. Delete the user immediately.`
+          : `!!! Revoked ${sessions.revoked} active session(s) as a stopgap.`;
     process.stderr.write(
       [
         '',
         '!!! WorkOS user NOT deleted. The conversion is committed; the child can still sign in.',
         `!!! Delete WorkOS user ${result.workosUserId} in the WorkOS dashboard NOW, before replying to the reporter.`,
-        result.sessionsRevoked === null
-          ? '!!! Revoking its sessions failed too: delete the user immediately.'
-          : `!!! Revoked ${result.sessionsRevoked} active session(s) as a stopgap.`,
+        sessionLine,
         '',
       ].join('\n')
     );

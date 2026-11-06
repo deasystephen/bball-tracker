@@ -27,30 +27,43 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **Convert instead of delete (under 13, #983).** When we learn an account holder is under 13,
   the operator may turn the account back into a managed roster record instead of deleting it:
   `backend/scripts/convert-to-managed.ts <userId> [--coach <coachUserId>]` →
-  `AccountService.convertToManaged` (no route). One `$transaction`: an unlocked existence check
-  (404) and choice of the managing coach (the `--coach` id or the single head coach, both staff on
-  one of the player's teams in an **active** season; none or several is 409), then `SELECT … FOR
-  UPDATE` on the player and the coach in one id-ordered statement. FOR UPDATE, as in deletion,
-  because a new `TeamStaff`, `LeagueAdmin` or `Guardian` row takes a key-share lock on the
-  player that only FOR UPDATE blocks; locking the coach stops a concurrent coach deletion from
-  leaving `managedById` on a tombstone. Under the lock: the coach choice is re-checked; 409 when
-  the row is already managed and unclaimed, or is an adult account (`assertPlayerAccount`: a
-  staff row, a guardian-of link, admin of any league but its own personal league, or a personal
-  league that holds teams); an empty personal league is deleted with its admin row. Then
-  `unclaimManagedRow(tx, lockedRow, managedById)` (exported for the age screen's under-13 branch,
-  #981): `workosUserId`, `email` (with `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified` cleared,
-  `isManaged` true, `managedById` set, role `PLAYER`, free tier, a photo cleared only when it is
-  the child's own upload (`avatars/<childId>/…`; external URLs and coach uploads stay), the
-  address expired and scrubbed on guardian invitations (`scrubInvitedEmail`, D17), and
-  `purgeLoginBindings` (push and calendar-feed tokens deleted, pending team invitations
-  `CANCELLED`, `recipientHash` cleared). `purgeLoginBindings` and `scrubInvitedEmail` are shared
-  with `deleteAccount`. Memberships, events, stats, RSVPs and guardian links stay. After commit,
-  best-effort: S3 avatar delete and `WorkOSService.deleteUser`; on failure Sentry `flow:
-  convert-to-managed`, `WorkOSService.revokeAllSessions` as a fallback, and the result carries
-  `identityDeleted: false`, `workosUserId` and `sessionsRevoked` (the script exits 3). The email
-  is cleared so a fresh sign-up with the same address cannot claim the row again through
-  `syncUser`. Domain event `Account converted to managed` (`userId`, `actorId`, `managedById`,
-  `identityDeleted`). Procedure:
+  `AccountService.convertToManaged` (no route). One `$transaction`:
+  1. **Unlocked checks** (`assertConvertible`): no live row is 404; an already-managed,
+     unclaimed row is 409 "already a managed roster record", so a re-run never reaches the coach
+     check.
+  2. **`SELECT … FOR UPDATE` on the player**, and the same checks again. FOR UPDATE, as in
+     deletion, because a new `TeamStaff`, `LeagueAdmin`, `Guardian`, `TeamInvitation` or
+     managed-player row naming the player takes a key-share lock that only FOR UPDATE blocks, so
+     the adult signals read next cannot change before commit.
+  3. **`assertPlayerAccount`** answers 409 for an adult account: a staff row, a guardian-of link,
+     managed players, sent team or guardian invitations, admin of any league but its own personal
+     league, or a personal league with teams or another admin. An empty personal league is
+     deleted, and its admin row goes with it by cascade.
+  4. **Managing coach**, resolved once under the player's lock: the `--coach` id or the single
+     head coach, both staff on one of the player's teams in an **active** season; none or several
+     is 409. The coach row is then taken `FOR KEY SHARE`, which conflicts with deletion's FOR
+     UPDATE, and must be live (409 otherwise). Staff rows are not locked.
+  5. **`unclaimManagedRow(tx, lockedRow, managedById)`**, exported for the age screen's under-13
+     branch (#981):
+     - clears `workosUserId`, `email` (with `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified`;
+     - sets `isManaged`, `managedById`, role `PLAYER` and the free tier;
+     - keeps the photo only when it is an upload under the `avatars/<id>/` prefix of the coach or
+       another staff member of the player's active-season teams. Anything else is cleared,
+       external URLs included, since the identity provider's photo is copied at claim time; the
+       S3 object is deleted only when it is the child's own upload;
+     - expires and scrubs the address only on guardian invitations for **other** children
+       (`scrubInvitedEmail` with `exceptChildId`, D17); invitations for this child stay;
+     - runs `purgeLoginBindings` (push and calendar-feed tokens deleted, pending team invitations
+       `CANCELLED`, `recipientHash` cleared).
+
+  `purgeLoginBindings` and `scrubInvitedEmail` are shared with `deleteAccount`. Memberships,
+  events, stats, RSVPs and guardian links stay. After commit, best-effort: the S3 avatar delete
+  and `WorkOSService.deleteUser`. The result's `identityDeleted` is `true`, `null` (no identity)
+  or `false`. On `false`: Sentry `flow: convert-to-managed`, then `WorkOSService.revokeAllSessions`
+  (one client, `Promise.allSettled`, `{ revoked, failed }`); the result carries `workosUserId` and
+  `sessions`, and the script exits 3. The email is cleared so a fresh sign-up with the same
+  address cannot claim the row again through `syncUser`. Domain event `Account converted to
+  managed` (`userId`, `actorId`, `managedById`, `identityDeleted`). Procedure:
   [`docs/runbooks/data-subject-requests.md`](../runbooks/data-subject-requests.md#we-learned-an-account-holder-is-under-13);
   real-Postgres cases: `tests/integration/convert-to-managed.db.test.ts`.
 - Routes: `DELETE /auth/me` (any user, ADMIN included — the allowlist re-promotes on re-signup) and

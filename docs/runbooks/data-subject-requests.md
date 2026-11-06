@@ -223,28 +223,36 @@ collected from the child. Follow these steps every time; no code is written at t
      # or, to choose the managing coach:
      cd backend && NODE_ENV=production npx tsx scripts/convert-to-managed.ts <userId> --coach <coachUserId>
      ```
-     Output: `{ userId, converted, managedById, identityDeleted }`, plus `workosUserId` and
-     `sessionsRevoked` when the WorkOS deletion failed (see step 5). In one transaction
-     (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`) the row loses its
-     login (`workosUserId`), its email and verified flag (so a new sign-up with the same address
-     cannot claim it again), a photo the child uploaded (an external photo or one the coach
-     uploaded stays), push tokens, calendar-feed tokens and pending team invitations
-     (→ `CANCELLED`); the child's address is expired and overwritten on any guardian invitation
-     that carried it, as deletion does; role goes back to `PLAYER` and the subscription to free.
-     An **empty** personal league the child once created is deleted with its admin row. The row
-     becomes `isManaged` under `managedById`: by default the one head coach of the child's teams
-     in active seasons, or the staff member `--coach` names, who must be on the staff of one of
-     the child's teams **in an active season**. Roster memberships, game events, statistics,
-     RSVPs, guardian links and guardian invitations to the parent stay, so the coach's roster looks the same.
-     After commit the WorkOS user is deleted, which ends every session and refresh token; the old
-     access token already fails (no row has its id).
-     **Refusals** (exit 1, nothing written): the account holds a staff role, admins a league
-     other than its own personal league, owns a personal league that holds teams, or is a
-     guardian of someone (an adult account: verify again, then delete it with (b) if the report
-     still holds); the child is on no team in an active season with a head coach (delete with
-     (b), or pass `--coach`); several head coaches qualify (pass `--coach`); the `--coach` is not
-     staff on one of the child's active-season teams; the account is
-     already a managed record or deleted. If **no guardian is linked**, ask the managing coach to
+     Output: `{ userId, converted, managedById, identityDeleted }`. `identityDeleted` is `true`
+     (WorkOS user deleted), `null` (the row never had a WorkOS identity, nothing to delete; exit
+     0), or `false` (deletion failed: the output adds `workosUserId` and `sessions`, see step 5).
+     In one transaction (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`)
+     the row loses its login (`workosUserId`), its email and verified flag (so a new sign-up with
+     the same address cannot claim it again), push tokens, calendar-feed tokens and pending team
+     invitations (→ `CANCELLED`); role goes back to `PLAYER` and the subscription to free.
+     **Photo:** kept only when it is an upload by the managing coach or another staff member of
+     the child's active-season teams. Every other photo is cleared, **including an external URL a
+     coach typed in**: the sign-in provider's photo of the child (a Google profile picture, say)
+     is copied onto the row when the child signs in, and an external URL cannot be told apart from
+     it, so it is treated as collected from the child. The coach can set the photo again. Only the
+     child's own upload is deleted from S3. **Guardian invitations:** where the child's address was
+     invited to be someone else's guardian, the invitation is expired and the address overwritten,
+     as deletion does; invitations **for** the child (to a parent, even at a family address the
+     child shared) stay, because they are how the record gets its guardian. An **empty**
+     personal league the child once created is deleted. The row becomes `isManaged` under
+     `managedById`: by default the one head coach of the child's teams in active seasons, or the
+     staff member `--coach` names, who must be on the staff of one of the child's teams **in an
+     active season**. Roster memberships, game events, statistics, RSVPs and guardian links stay,
+     so the coach's roster looks the same. After commit the WorkOS user is deleted, which ends
+     every session and refresh token; the old access token already fails (no row has its id).
+     **Refusals** (exit 1, nothing written): the account is already a managed record (a re-run:
+     nothing to do) or deleted; it shows an adult signal: a staff role, admin of a league other
+     than its own personal league, a personal league that holds teams or has another admin, a
+     guardian-of link, players it manages, or team or guardian invitations it sent (a former
+     coach). Verify again, then delete it with (b) if the report still holds. The child is on no
+     team in an active season with a head coach (delete with (b), or pass `--coach`); several
+     head coaches qualify (pass `--coach`); the `--coach` is not staff on one of the child's
+     active-season teams. If **no guardian is linked**, ask the managing coach to
      invite the parent from the child's roster entry (the guardian flow,
      `docs/architecture/guardians.md`); give the coach the parent's address only if the parent
      asked us to.
@@ -252,12 +260,15 @@ collected from the child. Follow these steps every time; no code is written at t
      refused): run the `delete` command of the [Operator procedure](#operator-procedure-request-by-email)
      step 4. It erases or anonymises by the usual rules and deletes the WorkOS user.
 5. **WorkOS: finish it before you reply.** Either path deletes the WorkOS user best-effort. When
-   it fails, `identityDeleted` is `false`; the convert script then also prints `workosUserId` (the
-   row no longer holds it, nor the email to search by), revokes the user's active sessions as a
-   stopgap (`sessionsRevoked`, `null` if that failed too), writes a `!!!` warning to stderr and
-   exits **3**. Delete that WorkOS user by hand in the dashboard **before step 7**
+   it fails, `identityDeleted` is `false`; the convert script then prints `workosUserId` (the row
+   no longer holds it, nor the email to search by) and the stopgap's outcome: `sessions: {
+   revoked, failed }` (the active sessions it revoked and the ones it could not; anything but
+   `failed: 0` means the child is **not** fully signed out) or `sessions: null` (the sessions
+   could not even be listed, nothing was revoked). It writes a `!!!` warning to stderr and exits
+   **3**. Delete that WorkOS user by hand in the dashboard **before step 7**
    ([When WorkOS deletion fails](#when-workos-deletion-fails)): until it is gone the child can
-   still sign in, and a sign-in would create a fresh account.
+   still sign in, and a sign-in would create a fresh account. `identityDeleted: null` needs
+   nothing here.
 6. **Vendor deletion requests** for the internal user id, per [Retention](#retention-this-is-what-the-privacy-policy-must-say):
    Amplitude (user deletion by user id), Sentry (backend events carry the user id) and Datadog (log
    lines carry the user id). CloudWatch has no per-id deletion; its 30-day window applies. File
@@ -265,7 +276,8 @@ collected from the child. Follow these steps every time; no code is written at t
 7. **Reply to the reporter** with what was done: converted to a record their coach keeps (and
    whether a parent invitation is on its way) or deleted, and that our vendors were asked to
    delete their copies.
-8. **Record the case, ids only** (user id, path a/b, `managedById`, `identityDeleted`, the dates
+8. **Record the case, ids only** (user id, path a/b, `managedById`, `identityDeleted` (`true`; `false` and the date you
+   deleted the WorkOS user by hand; or `null`: no identity), the dates
    of steps 1, 4 and 6), in the private operations log. **Never** in a GitHub issue, a pull
    request or this repository: the record says a named account belonged to a child.
 
