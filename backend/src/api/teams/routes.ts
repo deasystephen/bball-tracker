@@ -9,6 +9,7 @@ import { authenticate } from '../auth/middleware';
 import {
   createTeamSchema,
   updateTeamSchema,
+  rolloverTeamSchema,
   updateTeamMemberSchema,
   teamQuerySchema,
   addRosterPlayerSchema,
@@ -161,6 +162,46 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     });
   } catch (error) {
     respondWithError(res, error, { log: 'Error deleting team', fallback: 'Failed to delete team' });
+  }
+});
+
+/**
+ * POST /api/v1/teams/:id/rollover
+ * Start the next season of a team (#461): a new team-season row with the same
+ * lineage, carrying roster and staff. 201 with `created: true` when the row
+ * was made; 200 with `created: false` and the existing row when the lineage
+ * already has one in the target season (a repeated tap is idempotent).
+ *
+ * Not behind `requireTeamCreateLimit`: a rollover continues a team rather
+ * than creating one, so it never counts against a tier's team cap (every cap
+ * is unlimited today, #445). The service invalidates every carried staff
+ * member's usage cache.
+ */
+router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
+  try {
+    const validationResult = rolloverTeamSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const { team, created } = await TeamService.rolloverTeam(
+      req.params.id as string,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(created ? 201 : 200).json({
+      success: true,
+      created,
+      team,
+    });
+  } catch (error) {
+    respondWithError(res, error, {
+      log: 'Error rolling over team',
+      fallback: 'Failed to start the next season',
+    });
   }
 });
 

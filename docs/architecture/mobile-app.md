@@ -281,8 +281,8 @@ never inline a role check in a screen:
   IN_PROGRESS — end the game first; a finished-game confirm warns that the cascade removes the game's stats from
   season totals, and `useDeleteGame` invalidates `statsKeys.all`), Continue Tracking with `canTrack` (players keep
   Watch Live / RSVP / box score); `games/[id]/track` guards itself (toast + `replace` to the game detail) because
-  it is deep-linkable. Admin screens (`admin/*`), `teams/[id]/edit` (`canManageTeam`) and `teams/[id]/players`
-  (`canManageRoster`) use `hooks/useAccessGuard.ts` (toast + `back()`, `replace(fallback)` when there is no
+  it is deep-linkable. Admin screens (`admin/*`), `teams/[id]/edit` (`canManageTeam`), `teams/[id]/next-season`
+  (`canManageStaff`, season rollover #461) and `teams/[id]/players` (`canManageRoster`) use `hooks/useAccessGuard.ts` (toast + `back()`, `replace(fallback)` when there is no
   history; returns `allowed` so the screen renders a spinner instead of flashing gated controls). League admins
   see only their own leagues in `admin/index`; league create/delete stay ADMIN-only.
 - Teams tab shows the spinner until `user` has rehydrated — a `null` user must never render the player empty

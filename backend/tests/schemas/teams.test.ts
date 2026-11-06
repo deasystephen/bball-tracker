@@ -5,7 +5,7 @@
  * `null` clears either; on create `null` is not a value.
  */
 
-import { createTeamSchema, updateTeamSchema } from '../../src/api/teams/schemas';
+import { createTeamSchema, rolloverTeamSchema, updateTeamSchema } from '../../src/api/teams/schemas';
 
 describe('createTeamSchema — ageGroup / gender', () => {
   it('accepts both fields and trims the age group', () => {
@@ -88,5 +88,55 @@ describe('updateTeamSchema — ageGroup / gender', () => {
       success: true,
       data: { ageGroup: 'Grade 7', gender: 'COED' },
     });
+  });
+});
+
+describe('rolloverTeamSchema (#461)', () => {
+  const SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
+
+  it('accepts a season by id or by trimmed name', () => {
+    expect(rolloverTeamSchema.safeParse({ seasonId: SEASON_ID })).toMatchObject({
+      success: true,
+      data: { seasonId: SEASON_ID },
+    });
+    expect(rolloverTeamSchema.safeParse({ seasonName: '  2027 ' })).toMatchObject({
+      success: true,
+      data: { seasonName: '2027' },
+    });
+  });
+
+  it('requires exactly one of seasonId and seasonName', () => {
+    expect(rolloverTeamSchema.safeParse({}).success).toBe(false);
+    expect(rolloverTeamSchema.safeParse({ seasonId: SEASON_ID, seasonName: '2027' }).success).toBe(false);
+  });
+
+  it('rejects a blank or over-long season name and a malformed seasonId', () => {
+    expect(rolloverTeamSchema.safeParse({ seasonName: '   ' }).success).toBe(false);
+    expect(rolloverTeamSchema.safeParse({ seasonName: 'x'.repeat(101) }).success).toBe(false);
+    expect(rolloverTeamSchema.safeParse({ seasonId: 'not-a-uuid' }).success).toBe(false);
+  });
+
+  it('takes optional name and bracket overrides; null clears the bracket, absent carries it', () => {
+    const result = rolloverTeamSchema.safeParse({
+      seasonName: '2027',
+      name: ' Hawks ',
+      ageGroup: 'U13',
+      gender: null,
+    });
+    expect(result).toMatchObject({ success: true, data: { name: 'Hawks', ageGroup: 'U13', gender: null } });
+
+    const bare = rolloverTeamSchema.safeParse({ seasonName: '2027' });
+    expect(bare.success).toBe(true);
+    if (bare.success) {
+      expect('name' in bare.data).toBe(false);
+      expect('ageGroup' in bare.data).toBe(false);
+      expect('gender' in bare.data).toBe(false);
+    }
+  });
+
+  it('applies the team bounds to the overrides', () => {
+    expect(rolloverTeamSchema.safeParse({ seasonName: '2027', name: '' }).success).toBe(false);
+    expect(rolloverTeamSchema.safeParse({ seasonName: '2027', ageGroup: 'x'.repeat(21) }).success).toBe(false);
+    expect(rolloverTeamSchema.safeParse({ seasonName: '2027', gender: 'MEN' }).success).toBe(false);
   });
 });

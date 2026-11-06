@@ -43,6 +43,10 @@ the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware
   **Grandfather rule:** a cap is checked only at create time. Users already
   over the limit KEEP their existing teams (nothing is deleted); they just
   cannot create new ones until under the cap or on an uncapped tier.
+  **Season rollover** (`POST /teams/:id/rollover`, #461) is deliberately not
+  behind it: a rollover continues a team rather than creating one. It
+  invalidates the usage cache of every carried staff member. Detail, and the
+  open question for a future finite cap, in `stats-and-lineage.md`.
 
 ### Comping an account (admin-set tier, #445)
 

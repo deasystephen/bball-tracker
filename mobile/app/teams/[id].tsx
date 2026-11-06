@@ -22,7 +22,7 @@ import {
   Button,
   SortPills,
 } from '../../components';
-import { useTeam, useDeleteTeam, hasTeamPermission } from '../../hooks/useTeams';
+import { useTeam, useDeleteTeam, hasTeamPermission, canManageStaff } from '../../hooks/useTeams';
 import { displayName } from '../../utils/display-name';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
@@ -74,6 +74,9 @@ export default function TeamDetailsScreen() {
 
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
+  // Season rollover (#461) is a head-coach action, like a season move: the
+  // backend gates it on `canManageStaff`, which an assistant coach fails.
+  const canStartNextSeason = canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
 
   const staff = team?.staff ?? [];
   const headCoaches = staff.filter((s) => s.role.type === 'HEAD_COACH');
@@ -216,6 +219,17 @@ export default function TeamDetailsScreen() {
           variant="outline"
           style={styles.statsButton}
         />
+
+        {/* Season rollover (#461): carry roster and staff into a new season */}
+        {canStartNextSeason && (
+          <Button
+            title={t('teams.nextSeason.title')}
+            onPress={() => router.push(`/teams/${id}/next-season`)}
+            variant="outline"
+            style={styles.statsButton}
+            testID="team-start-next-season"
+          />
+        )}
 
         {/* Season/League Info */}
         {team.season && (

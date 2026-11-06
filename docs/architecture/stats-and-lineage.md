@@ -100,6 +100,53 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. Since #493 the migration backfill
   guard runs every new migration against seeded rows on each pull request (see `../testing/migration-backfill-guard.md`); it is the first check, and the snapshot rehearsal is still
   the one that meets production's rows.
+- **Season rollover (#461, `POST /teams/:id/rollover`, `TeamService.rolloverTeam`).** "Start next
+  season" creates a **new `Team` row in the target season with the same `lineageId`** and copies, in
+  one `$transaction`: every `TeamRole` (custom ones too, with their flags), every `TeamStaff` row
+  (re-pointed at the new role ids by name) and every `TeamMember` (jersey number, `0` included, and
+  position). Accounts with `deletedAt` set (tombstones, #444) are not carried. **Not carried:** pending
+  `TeamInvitation`s (the new row starts with none; the coach re-invites from Add Player, so a carried
+  managed player reads "Not invited" until then), `CalendarFeedToken`s (a subscription stays on the
+  season it was issued for), `Announcement`s, games, stats and competition entries (#492). Guardians
+  attach to the child, not the team, so they need nothing; a guardian resend is lineage-scoped already
+  (`guardians.md`). The **old row is left untouched and stays listed** (no archive): its games and
+  `PlayerStats` are last season's, and the player career view (`GET /stats/players/:id`,
+  `StatsService.getPlayerOverallStats`) reads them per membership, so a rolled-over player shows one
+  row per team-season. `tests/integration/team-rollover.db.test.ts` proves it against Postgres.
+  - **Body:** exactly one of `seasonId` (an existing season, which must be in the team's own league,
+    else 400; the team's current season is 400) or `seasonName` (looked up by
+    `@@unique([leagueId, name])` in the team's league, created with `isActive: true` when missing).
+    Optional `name`, `ageGroup`, `gender`: absent carries last season's value, `null` clears the bracket
+    (a U12 team is U13 next year). Schema `rolloverTeamSchema`.
+  - **Who:** two independent checks, like `POST /teams`. WHO is `canManageStaff` on the source team
+    (head coach, league admin, system admin; an assistant coach is refused, as for a season move).
+    WHERE is `canWriteLeague` on the league. **Creating** a season additionally needs `isLeagueAdmin`,
+    the `POST /seasons` rule, so a coach in a club league can roll into a season the club made but
+    never mint one; a personal-league owner holds a `LeagueAdmin` row (#442) and can. Moving a team to
+    another league is adoption (#459), not rollover.
+  - **Idempotent.** The transaction first takes `SELECT … FROM "TeamLineage" … FOR NO KEY UPDATE`, so
+    two rollovers of one lineage serialize, then probes `lineageId_seasonId`: when the lineage already
+    has a row in the target season the route answers **200 `{ created: false, team }`** with that row
+    and writes nothing; a real create is **201 `{ created: true, team }`**. A repeated tap is harmless.
+    There is no P2002 retry; a P2002 can only come from a concurrent season move (`updateTeam`) and
+    answers that path's 400 (`SEASON_SIBLING_MESSAGE`). A named season is an `upsert` with a no-op
+    `update`, which converges with a concurrent creator through the native `INSERT … ON CONFLICT`.
+  - **Entitlements:** not metered. A rollover continues a team rather than creating one, so the route
+    is not behind `requireTeamCreateLimit` and never counts against `maxTeams` (every cap is unlimited
+    today, #445). It does add a staff row per carried coach and possibly a season, so after commit it
+    invalidates the usage cache of the caller and every carried staff member. Should a finite cap
+    return, `countDistinctStaffTeams` counts team-season rows, so it would count past seasons too;
+    decide then whether the cap should count active seasons only.
+  - Domain event `Team rolled over` (`teamId` new row, `fromTeamId`, `lineageId`, `fromSeasonId`,
+    `toSeasonId`, `created`, `seasonUpserted`, `members`, `staff` counts). Mobile: "Start next season"
+    on the team screen for `canManageStaff` callers → `app/teams/[id]/next-season.tsx` (season name
+    prefilled by `utils/season-name.ts#suggestNextSeasonName`: "2026" → "2027", "2026-27" → "2027-28";
+    team name and age group prefilled and editable) → `useRolloverTeam` (`team_rolled_over`) → replaces
+    itself with the new team-season. Tests: `tests/services/team-rollover.test.ts`,
+    `tests/api/teams-rollover.test.ts`, `rolloverTeamSchema` in `tests/schemas/teams.test.ts`, the
+    real-database suite above; mobile `__tests__/app/team-next-season.test.tsx`,
+    `__tests__/hooks/useRolloverTeam.runtime.test.tsx`, `__tests__/utils/season-name.test.ts`; Maestro
+    `.maestro/team-rollover.yaml`.
 - Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
   plan and not built** (#492, gated on an organizer persona; the opponent-linkage half was
   **decided** on 2026-09-07 in `docs/plans/game-opponent-linkage.md`: two `Game` rows under a

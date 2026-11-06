@@ -489,6 +489,13 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ---
 
+### D.10 — Head coach starts the next season (#461)
+- [ ] Pass / Fail / Skipped
+- **Pre:** Seed fresh. Signed in as Frank Vogel (head coach of Lakers, Spring 2024; not a league admin). The seed holds an empty "Spring 2025" season in the same league.
+- **Steps:** Lakers → **Start next season** → the form shows "… stay with Spring 2024" and suggests **Spring 2025**; keep the team name and age group → **Start season**.
+- **Expected:** The screen is replaced by the new Lakers team-season in Spring 2025 with the same roster (jersey numbers kept) and staff; no games, announcements or pending invitations. The Teams list shows both Lakers rows. A player's stats screen lists both the Spring 2024 row (with last season's stats) and the Spring 2025 row. Repeating the action answers with the same team ("This team already has Spring 2025"), never a duplicate. An assistant coach does not see the button. Renaming the season to one the league lacks fails with "You do not have permission to create seasons for this league" (Frank is not a league admin); a coach in their own personal league can type any new name ("2027") and the season is created.
+- **Maestro:** `.maestro/team-rollover.yaml` (written, not yet run on a simulator).
+
 ## E. Invitations & accept flow (NEW v2.0) 📧
 
 The marquee feature shipped this month. Includes the email path (#131) + web/mobile invite-accept screens (#130) + Universal Links (#138).
@@ -1393,6 +1400,7 @@ After testing, optionally tear down:
   - `invite-deep-link.yaml` — `hooplings://invite/<token>?src=web` signed out → Log In to Accept → back on the same invitation; unknown token → "Invitation Not Found" (E.7a, E.9; Frank Vogel)
   - `spanish-locale.yaml` — the coach walk in Spanish via launch arguments (B.4, Frank Vogel)
   - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)
+  - `team-rollover.yaml` — D.10 (season rollover, #461; mutates: the seed's Frank reset removes the new Lakers row)
   - `create-team.yaml`, `team-detail.yaml`, `roster-management.yaml` — D.1 / D.2 / D.3 (`team-detail.yaml` also asserts the roster sort pills: both pills visible, Name pill selected after tap)
   - `team-staff.yaml` — staff screen + "Add staff" form for the head coach, read-only (D.8)
   - `game-lifecycle.yaml`, `game-tracking.yaml`, `live-spectator.yaml`, `stats-viewing.yaml` — F.1–F.3, G.1/G.2, H.1, K

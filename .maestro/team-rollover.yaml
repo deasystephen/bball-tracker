@@ -1,0 +1,61 @@
+appId: com.bballtracker.mobile
+---
+# Season rollover (#461): Frank Vogel (head coach of the seeded Lakers, in
+# "Spring 2024") starts the next season. The form suggests "Spring 2025" (the
+# seed holds that season, team-less: Frank is not a league admin, so he may
+# roll into an existing season but not create one). The new team-season opens
+# with the roster carried over, and a player's career view still lists last
+# season's Lakers row.
+#
+# Mutates data: the new Lakers row is removed by the seed's "Frank's teams
+# other than the seeded Lakers" reset. Run `npx prisma db seed` first.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+# The head-coach action sits under the Announcements button.
+- scrollUntilVisible:
+    element:
+      id: "team-start-next-season"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "team-start-next-season"
+
+# The form explains what carries over and suggests next year's name.
+- assertVisible: "Start next season"
+- assertVisible: ".*stay with Spring 2024.*"
+- assertVisible:
+    id: "next-season-name-input"
+    text: "Spring 2025"
+- tapOn:
+    id: "next-season-submit"
+
+# Replaced by the new team-season: same team, next season, roster carried.
+- extendedWaitUntil:
+    visible: ".*Spring 2025.*"
+    timeout: 10000
+- assertVisible: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "LeBron James"
+    direction: DOWN
+    timeout: 10000
+
+# Last season's stats stay on last season's row: the career view lists both.
+- tapOn: "LeBron James"
+- extendedWaitUntil:
+    visible: ".*Spring 2024.*"
+    timeout: 10000
+- assertVisible: ".*Spring 2025.*"

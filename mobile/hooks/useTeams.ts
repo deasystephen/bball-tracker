@@ -7,6 +7,7 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents, changedFields, setUserProperties } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
 import { usageKeys } from './useUsage';
+import { seasonKeys } from './useSeasons';
 import {
   gameKeys,
   playerKeys,
@@ -141,6 +142,21 @@ export interface UpdateTeamInput {
   seasonId?: string;
   chatLink?: string | null;
   /** `null` clears (server rule shared with jersey/position). */
+  ageGroup?: string | null;
+  gender?: TeamGender | null;
+}
+
+/**
+ * Season rollover — `POST /teams/:id/rollover` (#461). Exactly one of
+ * `seasonId` (an existing season in the team's league) or `seasonName` (found
+ * by name in the team's league, created when missing; creating one needs a
+ * league admin, which a personal-league owner is). Bracket fields: absent
+ * carries last season's value, `null` clears.
+ */
+export interface RolloverTeamInput {
+  seasonId?: string;
+  seasonName?: string;
+  name?: string;
   ageGroup?: string | null;
   gender?: TeamGender | null;
 }
@@ -358,6 +374,38 @@ export function useDeleteTeam() {
       // fed season totals (#729).
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
       queryClient.invalidateQueries({ queryKey: statsKeys.all });
+    },
+  });
+}
+
+/**
+ * Start the next season of a team (#461). Resolves with the new team-season
+ * and `created` (false when the lineage already had a row in that season; the
+ * backend then returns that row, so a repeated tap is harmless).
+ */
+export function useRolloverTeam() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ teamId, data }: { teamId: string; data: RolloverTeamInput }) => {
+      const response = await apiClient.post<{ success: boolean; created: boolean; team: Team }>(
+        `/teams/${teamId}/rollover`,
+        data
+      );
+      return { team: response.data.team, created: response.data.created };
+    },
+    onSuccess: ({ team, created }, variables) => {
+      trackEvent(AnalyticsEvents.TEAM_ROLLED_OVER, {
+        team_id: team.id,
+        from_team_id: variables.teamId,
+        created,
+        new_season: variables.data.seasonName !== undefined,
+      });
+      queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      // A new staff row per carried coach feeds the Profile usage meter (#43),
+      // and a named season may be a new one.
+      queryClient.invalidateQueries({ queryKey: usageKeys.all });
+      queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
     },
   });
 }

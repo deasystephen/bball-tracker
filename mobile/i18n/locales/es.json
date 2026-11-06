@@ -114,6 +114,19 @@
     "forLeague": "para {{league}}"
   },
   "teams": {
+    "nextSeason": {
+      "title": "Empezar la próxima temporada",
+      "intro": "Tu plantilla, los números de camiseta y el cuerpo técnico pasan a la nueva temporada. Los partidos, las estadísticas y las invitaciones pendientes se quedan en {{season}}.",
+      "introNoSeason": "Tu plantilla, los números de camiseta y el cuerpo técnico pasan a la nueva temporada. Los partidos, las estadísticas y las invitaciones pendientes se quedan en esta.",
+      "seasonName": "Nombre de la nueva temporada",
+      "seasonNamePlaceholder": "p. ej. 2027",
+      "seasonNameRequired": "Escribe un nombre para la nueva temporada",
+      "submit": "Empezar temporada",
+      "success": "Temporada {{season}} iniciada",
+      "alreadyExists": "Este equipo ya tiene la temporada {{season}}",
+      "failed": "No se pudo empezar la próxima temporada",
+      "notAllowed": "Solo un entrenador principal puede empezar la próxima temporada."
+    },
     "title": "Equipos",
     "create": "Crear equipo",
     "edit": "Editar equipo",

@@ -126,7 +126,9 @@ current-year season, inside the **existing** `$transaction`, after the `SELECT â
   array in `getLeagueAdminOf` (`api/auth/routes.ts`). So `canAccessAdmin` stays false and no
   "Leagues & Seasons" entry appears. Deliberate client/server divergence: backend rules are unchanged,
   only the client hint list is filtered.
-- Season naming is the year of creation and **does not roll over** on its own (#461).
+- Season naming is the year of creation and **does not roll over** on its own; the coach starts the
+  next season with `POST /teams/:id/rollover` (#461), which may name a new season in the personal
+  league because the owner holds that `LeagueAdmin` row. Rollover's rules: `stats-and-lineage.md`.
 - Mobile branches on "every visible league is personal" (`mobile/utils/league-scope.ts`), never on league
   count â€” after the first team the personal league exists, so a count test would show team #2 a picker
   for a concept the coach never chose. The create and edit screens hide the league/season pickers in that
@@ -167,6 +169,10 @@ tell them apart. Staff management is keyed off the `TeamRole.type` enum instead
 (no schema change): `utils/permissions.ts` exposes `isHeadCoach(userId, teamId)`
 (HEAD_COACH-type staff row exists) and `canManageStaff(userId, teamId)` =
 system `ADMIN` **or** admin of the team's league **or** head coach.
+`canManageStaff` also gates the head-coach-only team actions: deleting the team, moving
+it to another season, and starting its next season (`POST /teams/:id/rollover`, #461,
+which additionally needs `canWriteLeague` on the league and, to create the season,
+`isLeagueAdmin`; detail in `stats-and-lineage.md`).
 
 **One role per user per team (#463).** `TeamStaff` is `@@unique([teamId, userId])`
 (index `TeamStaff_teamId_userId_key`): a user holds at most one staff row, and so one

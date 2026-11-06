@@ -114,6 +114,19 @@
     "forLeague": "for {{league}}"
   },
   "teams": {
+    "nextSeason": {
+      "title": "Start next season",
+      "intro": "Your roster, jersey numbers and staff carry over to the new season. Games, stats and pending invitations stay with {{season}}.",
+      "introNoSeason": "Your roster, jersey numbers and staff carry over to the new season. Games, stats and pending invitations stay with this one.",
+      "seasonName": "New season name",
+      "seasonNamePlaceholder": "e.g. 2027",
+      "seasonNameRequired": "Enter a name for the new season",
+      "submit": "Start season",
+      "success": "{{season}} started",
+      "alreadyExists": "This team already has {{season}}",
+      "failed": "Could not start the next season",
+      "notAllowed": "Only a head coach can start the next season."
+    },
     "title": "Teams",
     "create": "Create Team",
     "edit": "Edit Team",
