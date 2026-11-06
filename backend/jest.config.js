@@ -3,6 +3,11 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
+  // The real-Redis suite (tests/redis/*.redis.test.ts, #452) needs a running
+  // Redis, which plain `npm test` does not assume; `npm run test:redis` runs it
+  // (it overrides this list), and CI runs that script in the job with the
+  // Redis service.
+  testPathIgnorePatterns: ['/node_modules/', '\\.redis\\.test\\.ts$'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },

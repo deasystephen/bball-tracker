@@ -3,7 +3,7 @@
  * adapter mocked: failures before a client has ever been ready are the boot
  * window (`debug`, never a false `warn`); after it, one `warn` per outage and
  * one `info` on recovery. Delivery across real servers is in
- * tests/integration/socket-redis-adapter.redis.test.ts.
+ * tests/redis/socket-redis-adapter.redis.test.ts.
  */
 import { EventEmitter } from 'events';
 

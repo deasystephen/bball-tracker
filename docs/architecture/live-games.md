@@ -52,8 +52,9 @@ with the `game-snapshot` of the next join or reconnect. Room membership is
 local to each task, which is all the code uses (no `fetchSockets`,
 `serverSideEmit` or cross-task room queries).
 
-Test: `tests/integration/socket-redis-adapter.redis.test.ts` (real Redis via
-`REDIS_TEST_URL`, a service on CI's backend job): a `game-event` emitted with
+Test: `tests/redis/socket-redis-adapter.redis.test.ts` (`npm run test:redis`,
+not part of `npm test`; real Redis via `REDIS_TEST_URL`, a service on CI's
+backend job, which runs it in its own step): a `game-event` emitted with
 the production `emitGameEvent` on one server reaches a client on a second
 server and not a client in another game's room; with an unreachable Redis the
 local client still gets it and nothing is unhandled.
@@ -210,7 +211,9 @@ current score so a client can drop events and still converge.
   `x-forwarded-for` entry (the ALB-appended hop, same trust rule as `trust proxy: 1`), falling back
   to the peer address.
   - **Where the counters live.** The handshake window is a `SharedRateLimitStore` named `ws-hs`
-    (Redis key `rl:ws-hs:<ip>`), the same store, fixed window, fail-open and back-off as the HTTP
+    (Redis key `rl:ws-hs:<key>`, where the key is express-rate-limit's `ipKeyGenerator(ip)`: an
+    IPv6 address keys on its /56, the same as the HTTP limiters' default key, and an IPv4-mapped
+    address on its IPv4), initialised by `rateLimit()` like every HTTP limiter; the same store, fixed window, fail-open and back-off as the HTTP
     limiters (`backend-services.md#rate-limits`): in Redis when it answers, in this task's memory
     otherwise; a Redis problem never refuses a handshake. The concurrency cap is an in-memory map
     per task (`concurrentByIp`), exactly as before #452, and the per-socket `join-game` and

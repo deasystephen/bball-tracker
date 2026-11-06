@@ -22,7 +22,7 @@ import { logger } from './logger';
  *
  * `REDIS_SOCKET_ADAPTER_URL` is NOT yet accepted as proof of safety: the
  * adapter is wired, but cross-task delivery has only been proven in Jest
- * (`tests/integration/socket-redis-adapter.redis.test.ts`), not on two ECS
+ * (`tests/redis/socket-redis-adapter.redis.test.ts`), not on two ECS
  * tasks. The follow-up to #452 sets the URL in the task definition, runs that
  * load test and flips `MULTI_REPLICA_SUPPORTED`; from then on a ceiling above
  * 1 is allowed only when the URL is set.

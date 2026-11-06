@@ -4,7 +4,7 @@
  * problem never refuses a handshake, the capacity check is per task and never
  * touches Redis, and the window is checked first (no further Redis work once
  * it is spent). The window against a real Redis:
- * tests/integration/socket-redis-adapter.redis.test.ts.
+ * tests/redis/socket-redis-adapter.redis.test.ts.
  */
 
 const mockClient = {

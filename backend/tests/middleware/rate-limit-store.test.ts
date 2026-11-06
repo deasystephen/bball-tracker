@@ -1,7 +1,7 @@
 /**
  * `SharedRateLimitStore` (#452): Redis when it answers, this task's memory
  * when it does not, and never an error to the limiter. The store against a
- * real Redis is exercised in tests/integration/socket-redis-adapter.redis.test.ts.
+ * real Redis is exercised in tests/redis/socket-redis-adapter.redis.test.ts.
  */
 
 const mockCall = jest.fn();
@@ -11,6 +11,8 @@ jest.mock('../../src/utils/redis', () => ({
   getReadyRedisClient: () => (mockClientConfigured ? { call: mockCall } : null),
 }));
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { Options } from 'express-rate-limit';
 import { logger } from '../../src/utils/logger';
 import { SharedRateLimitStore } from '../../src/api/middleware/rate-limit-store';
@@ -115,6 +117,57 @@ describe('SharedRateLimitStore', () => {
     release();
     expect((await probe).totalHits).toBe(9);
     store.shutdown();
+  });
+
+  it('a script load that fails once is retried on the next probe, and Redis is used from then on', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    let failLoad = true;
+    mockCall.mockImplementation(async (command: string) => {
+      if (command === 'SCRIPT') {
+        if (failLoad) throw new Error('LOADING Redis is loading the dataset in memory');
+        return 'sha';
+      }
+      return [11, 30_000];
+    });
+    const store = new SharedRateLimitStore('t6');
+    store.init(OPTIONS);
+
+    expect((await store.increment('k')).totalHits).toBe(1); // memory: the load failed
+    failLoad = false;
+    jest.setSystemTime(1_000_000 + REDIS_RETRY_AFTER_FAILURE_MS);
+    expect((await store.increment('k')).totalHits).toBe(11); // probe: load retried, Redis answers
+    expect((await store.increment('k')).totalHits).toBe(11); // and stays on Redis
+    expect(mockCall.mock.calls.filter(([c]) => c === 'SCRIPT')).toHaveLength(4); // 2 failed + 2 retried
+    store.shutdown();
+  });
+
+  it('keeps its Redis store across command errors (no script reload after a failed EVALSHA)', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    healthyRedis(3);
+    const store = new SharedRateLimitStore('t7');
+    store.init(OPTIONS);
+    await store.increment('k');
+    mockCall.mockImplementationOnce(async () => {
+      throw new Error('Command timed out');
+    });
+    await store.increment('k');
+    jest.setSystemTime(1_000_000 + REDIS_RETRY_AFTER_FAILURE_MS);
+    healthyRedis(4);
+    expect((await store.increment('k')).totalHits).toBe(4);
+    expect(mockCall.mock.calls.filter(([c]) => c === 'SCRIPT')).toHaveLength(2);
+    store.shutdown();
+  });
+
+  it('decrement is a no-op, and no limiter enables the options that would call it', async () => {
+    healthyRedis(1);
+    const store = new SharedRateLimitStore('t8');
+    store.init(OPTIONS);
+    await store.decrement('k');
+    expect(mockCall).not.toHaveBeenCalled();
+    store.shutdown();
+
+    const source = readFileSync(join(__dirname, '../../src/api/middleware/rate-limit.ts'), 'utf8');
+    expect(source).not.toMatch(/skip(Failed|Successful)Requests/);
   });
 
   it('never throws from decrement or resetKey while Redis is failing', async () => {

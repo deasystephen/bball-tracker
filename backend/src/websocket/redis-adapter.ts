@@ -118,6 +118,10 @@ export function attachRedisAdapter(
     });
   }
 
+  // Patched below (recheck on any @socket.io/redis-adapter upgrade; written
+  // against 8.3.0's ioredis code path): pub `publish`, and sub `subscribe`,
+  // `psubscribe`, `unsubscribe`, `punsubscribe`.
+  //
   // The adapter calls `publish` BEFORE delivering locally and does not await
   // it. A synchronous throw would abort the broadcast before the local
   // sockets got it, and a rejection would be unhandled, so the wrapper

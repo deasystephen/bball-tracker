@@ -3,7 +3,7 @@
  *
  * In-memory path (the suites run without Redis) — no Socket.io server.
  * Redis fallback: rate-limit-fallback.test.ts; shared counters against a
- * real Redis: tests/integration/socket-redis-adapter.redis.test.ts. The integration test verifies
+ * real Redis: tests/redis/socket-redis-adapter.redis.test.ts. The integration test verifies
  * the happy path still connects with the limiter middleware in place.
  */
 
@@ -17,6 +17,7 @@ import {
   checkHandshakeAllowed,
   RATE_LIMITED_MESSAGE,
   checkJoinAllowed,
+  handshakeKey,
   handshakeRateLimit,
   hasConcurrentCapacity,
   registerConnection,
@@ -69,6 +70,19 @@ describe('websocket/rate-limit', () => {
       }
       expect(await checkHandshakeAllowed('203.0.113.9')).toBe(false);
       expect(await checkHandshakeAllowed('198.51.100.7')).toBe(true);
+    });
+
+    it('keys IPv6 by its /56 like the HTTP limiters, so walking the prefix shares one window', async () => {
+      expect(handshakeKey('2001:db8:1:ab::1')).toBe(handshakeKey('2001:db8:1:ff:ffff::2'));
+      expect(handshakeKey('2001:db8:1:ab::1')).not.toBe(handshakeKey('2001:db8:2::1'));
+      expect(handshakeKey('::ffff:203.0.113.9')).toBe('203.0.113.9');
+      expect(handshakeKey('203.0.113.9')).toBe('203.0.113.9');
+
+      for (let i = 0; i < MAX_HANDSHAKES_PER_WINDOW; i++) {
+        await checkHandshakeAllowed(`2001:db8:1:ab::${(i + 1).toString(16)}`);
+      }
+      expect(await checkHandshakeAllowed('2001:db8:1:cd::1')).toBe(false);
+      expect(await checkHandshakeAllowed('2001:db8:9::1')).toBe(true);
     });
 
     it('resets once the window has elapsed', async () => {

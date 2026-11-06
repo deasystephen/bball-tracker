@@ -70,7 +70,8 @@ jobs:
         ports:
           - 5432:5432
       # The Socket.io Redis adapter and shared rate-limit suite (#452):
-      # tests/integration/socket-redis-adapter.redis.test.ts, via REDIS_TEST_URL.
+      # tests/redis/socket-redis-adapter.redis.test.ts, run by the
+      # "Run real-Redis tests" step (npm run test:redis) via REDIS_TEST_URL.
       redis:
         image: redis:7-alpine
         options: >-
@@ -110,9 +111,15 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bball_tracker_test
-          REDIS_TEST_URL: redis://localhost:6379
           NODE_ENV: test
         run: npm test -- --coverage
+
+      - name: Run real-Redis tests
+        working-directory: backend
+        env:
+          REDIS_TEST_URL: redis://localhost:6379
+          NODE_ENV: test
+        run: npm run test:redis
 
   test-mobile:
     name: Test Mobile

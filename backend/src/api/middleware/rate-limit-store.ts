@@ -39,8 +39,15 @@ export class SharedRateLimitStore implements Store {
   readonly prefix: string;
 
   private readonly memory = new MemoryStore();
+  /** Built once, here, and kept for the life of the store (rate-limit-redis recovers from NOSCRIPT itself). */
+  private readonly redisStore: RedisStore;
   private options: Options | null = null;
-  private redisStore: Promise<RedisStore> | null = null;
+  /**
+   * The Lua script load (`RedisStore.init`), started the first time the client
+   * is ready. Never cached once rejected: a failed load is cleared so the next
+   * probe through the shared back-off runs it again on the same store.
+   */
+  private redisReady: Promise<void> | null = null;
 
   /**
    * @param name The limiter's name, unique per limiter (`api`, `auth`, …): it
@@ -48,6 +55,7 @@ export class SharedRateLimitStore implements Store {
    */
   constructor(name: string) {
     this.prefix = `${RATE_LIMIT_KEY_PREFIX}${name}:`;
+    this.redisStore = new RedisStore({ sendCommand, prefix: this.prefix });
   }
 
   init(options: Options): void {
@@ -55,20 +63,18 @@ export class SharedRateLimitStore implements Store {
     this.memory.init(options);
   }
 
-  /**
-   * The Redis-backed store, created (and its Lua scripts loaded) on first use
-   * and again after each failure, so a script load that failed during an
-   * outage is retried once Redis is back.
-   */
-  private redis(): Promise<RedisStore> {
-    if (!this.options || !getReadyRedisClient()) return Promise.reject(new RedisUnavailableError());
-    if (!this.redisStore) {
-      const store = new RedisStore({ sendCommand, prefix: this.prefix });
-      const ready = store.init(this.options).then(() => store);
-      // Awaited by the caller; this only stops an unobserved rejection.
-      ready.catch(() => undefined);
-      this.redisStore = ready;
+  /** The Redis-backed store once its scripts are loaded; rejects (to the back-off) otherwise. */
+  private async redis(): Promise<RedisStore> {
+    const options = this.options;
+    if (!options || !getReadyRedisClient()) throw new RedisUnavailableError();
+    if (!this.redisReady) {
+      const loading = this.redisStore.init(options);
+      this.redisReady = loading;
+      loading.catch(() => {
+        if (this.redisReady === loading) this.redisReady = null;
+      });
     }
+    await this.redisReady;
     return this.redisStore;
   }
 
@@ -86,14 +92,7 @@ export class SharedRateLimitStore implements Store {
     viaRedis: (store: RedisStore) => Promise<T>,
     viaMemory: () => Promise<T>
   ): Promise<T> {
-    const result = await sharedRedisBackoff.attempt(operation, async () => {
-      try {
-        return await viaRedis(await this.redis());
-      } catch (error) {
-        if (!(error instanceof RedisUnavailableError)) this.redisStore = null;
-        throw error;
-      }
-    });
+    const result = await sharedRedisBackoff.attempt(operation, async () => viaRedis(await this.redis()));
     return result.ok ? result.value : viaMemory();
   }
 
@@ -105,8 +104,18 @@ export class SharedRateLimitStore implements Store {
     return this.withRedis('increment', (s) => s.increment(key), () => this.memory.increment(key));
   }
 
-  async decrement(key: string): Promise<void> {
-    await this.withRedis('decrement', (s) => s.decrement(key), () => this.memory.decrement(key));
+  /**
+   * A deliberate no-op. express-rate-limit calls `decrement` only for a
+   * limiter with `skipFailedRequests` or `skipSuccessfulRequests`, which no
+   * limiter sets (`tests/middleware/rate-limit-store.test.ts` scans
+   * `rate-limit.ts` for them). Routing it would be wrong anyway: the hit may
+   * have been counted in Redis and the decrement land in memory, or the other
+   * way round, across a back-off. A no-op only ever errs toward the stricter
+   * limit. A limiter that needs those options needs a store that pins each
+   * request to where it was counted first.
+   */
+  async decrement(_key: string): Promise<void> {
+    // Intentionally empty; see above.
   }
 
   async resetKey(key: string): Promise<void> {

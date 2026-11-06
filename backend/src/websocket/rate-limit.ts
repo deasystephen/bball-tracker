@@ -7,7 +7,8 @@
  *  - **Handshake attempt limit per IP** (fixed window): applied *before* token
  *    verification, so unauthenticated connect spam cannot burn a JWKS check +
  *    user lookup per attempt. Counted by a `SharedRateLimitStore` named
- *    `ws-hs` (Redis key `rl:ws-hs:<ip>`), the same store, window and back-off
+ *    `ws-hs` (Redis key `rl:ws-hs:<ip>`, IPv6 keyed by its /56 like the HTTP
+ *    limiters), the same store, window and back-off
  *    (`utils/redis-backoff.ts#sharedRedisBackoff`) as the HTTP limiters: in
  *    Redis when it is configured and answering, in this task's memory
  *    otherwise. A Redis problem never refuses a handshake.
@@ -31,7 +32,7 @@
  * team spectating from gym Wi-Fi shares one NAT IP.
  */
 
-import type { Options } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Socket } from 'socket.io';
 import { SharedRateLimitStore } from '../api/middleware/rate-limit-store';
 import { logger } from '../utils/logger';
@@ -47,7 +48,7 @@ export const REFRESH_AUTH_WINDOW_MS = 60_000;
 /** `refresh-auth` (#49) runs a JWKS check and a user lookup; a client needs ~1 per token lifetime. */
 export const MAX_REFRESH_AUTHS_PER_WINDOW = 10;
 
-/** The handshake store's name; its Redis keys are `rl:ws-hs:<ip>`. */
+/** The handshake store's name; its Redis keys are `rl:ws-hs:<handshakeKey(ip)>`. */
 export const HANDSHAKE_STORE_NAME = 'ws-hs';
 
 interface Window {
@@ -55,9 +56,20 @@ interface Window {
   windowStart: number;
 }
 
+/**
+ * The handshake window's store. express-rate-limit initialises it with its
+ * fully resolved `Options` (window, limit and the rest), exactly as it does
+ * for the HTTP limiters; the middleware it returns is never mounted, because
+ * Socket.io calls `checkHandshakeAllowed` instead.
+ */
 function createHandshakeStore(): SharedRateLimitStore {
   const store = new SharedRateLimitStore(HANDSHAKE_STORE_NAME);
-  store.init({ windowMs: HANDSHAKE_WINDOW_MS } as Options);
+  rateLimit({
+    windowMs: HANDSHAKE_WINDOW_MS,
+    limit: MAX_HANDSHAKES_PER_WINDOW,
+    store,
+    passOnStoreError: true,
+  });
   return store;
 }
 
@@ -85,11 +97,21 @@ export function socketClientIp(socket: Socket): string {
 }
 
 /**
+ * The handshake window's key for `ip`: express-rate-limit's `ipKeyGenerator`
+ * with its default IPv6 subnet (/56), the same key the HTTP limiters' default
+ * `keyGenerator` uses, so one IPv6 client cannot walk its prefix to reset the
+ * window. IPv4 and IPv4-mapped addresses key on the IPv4 address.
+ */
+export function handshakeKey(ip: string): string {
+  return ipKeyGenerator(ip);
+}
+
+/**
  * Count a handshake attempt from `ip` and report whether it is within the
  * per-window budget, across all tasks. Called before authentication.
  */
 export async function checkHandshakeAllowed(ip: string): Promise<boolean> {
-  const { totalHits } = await handshakeStore.increment(ip);
+  const { totalHits } = await handshakeStore.increment(handshakeKey(ip));
   return totalHits <= MAX_HANDSHAKES_PER_WINDOW;
 }
 

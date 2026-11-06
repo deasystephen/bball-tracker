@@ -16,6 +16,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:db": "jest tests/integration",
+    "test:redis": "jest --testPathIgnorePatterns /node_modules/ --testPathPattern \"\\.redis\\.test\\.ts$\"",
     "db:seed": "npx prisma db seed",
     "db:reset": "tsx prisma/reset.ts",
     "db:fresh": "tsx prisma/reset.ts && npx prisma db seed"

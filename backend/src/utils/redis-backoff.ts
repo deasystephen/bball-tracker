@@ -19,7 +19,12 @@
  * answering (it still looks `ready`) each wait up to `REDIS_COMMAND_TIMEOUT_MS`
  * once, since nothing has failed yet. From the first failure on, single-flight
  * applies: at most one request per window waits on Redis, never every
- * request.
+ * request. Chained limiters (the global `apiRateLimit` plus a route's own) run
+ * one after another, and the first timeout trips the back-off before the
+ * next limiter in the chain sends anything, so a request in flight when a
+ * stall begins pays that wait at most once per limiter in its chain (two or
+ * three), and in practice once: every later limiter finds the back-off
+ * already tripped. Accepted, not engineered away.
  *
  * A client that is not configured or not ready is not an outage: the caller
  * throws `RedisUnavailableError`, counts in memory, and nothing is logged
