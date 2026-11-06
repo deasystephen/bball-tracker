@@ -333,10 +333,6 @@ export class AccountService {
     // 5. After commit: best-effort external cleanup. The local row is already
     // unreachable, so a failure here never fails the request.
     await deletePreviousAvatar(committed.previousAvatar, null);
-    // Every other upload under the user's own prefix that no row references
-    // (abandoned edits, replaced photos whose delete failed); photos the user
-    // put on a player's row as coach or guardian stay (#957).
-    await deleteUnreferencedUserUploads(userId);
 
     let identityDeleted = false;
     if (committed.workosUserId) {
@@ -361,6 +357,12 @@ export class AccountService {
         }
       }
     }
+
+    // Every other upload under the user's own prefix that no row references
+    // (abandoned edits, replaced photos whose delete failed); photos the user
+    // put on a player's row as coach or guardian stay (#957). After the
+    // identity step so S3 never delays it; best-effort and time-bounded.
+    await deleteUnreferencedUserUploads(userId);
 
     logger.info('Account deleted', {
       userId,

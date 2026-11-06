@@ -57,10 +57,12 @@ describe('createShutdown', () => {
     expect(logger.info).toHaveBeenCalledWith('Shutting down', { signal: 'SIGTERM' });
   });
 
-  it('stops the avatar sweeper after the SES consumer and before Prisma quits (#957)', async () => {
+  it('stops the SES consumer and the avatar sweeper concurrently, before Prisma quits (#957)', async () => {
     const { deps: d, order } = deps();
     await createShutdown(d)('SIGTERM');
-    expect(order.indexOf('consumer:end')).toBeLessThan(order.indexOf('sweeper:start'));
+    // Both started before either finished
+    expect(order.indexOf('sweeper:start')).toBeLessThan(order.indexOf('consumer:end'));
+    expect(order.indexOf('consumer:start')).toBeLessThan(order.indexOf('sweeper:end'));
     expect(order.indexOf('sweeper:end')).toBeLessThan(order.indexOf('prisma:start'));
     expect(d.exit).toHaveBeenCalledWith(0);
   });

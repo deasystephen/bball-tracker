@@ -84,7 +84,7 @@ describe('avatar cleanup (real Postgres, #957)', () => {
       data: { profilePictureUrl: `https://${BUCKET}.s3.us-east-1.amazonaws.com/avatars/${b}/two.jpg` },
     });
 
-    const keys = await loadReferencedAvatarKeys();
+    const keys = await loadReferencedAvatarKeys('avatars/');
 
     expect(keys.has(`avatars/${a}/one.jpg`)).toBe(true);
     expect(keys.has(`avatars/${b}/two.jpg`)).toBe(true);

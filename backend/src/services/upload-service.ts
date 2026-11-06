@@ -231,11 +231,32 @@ export async function discardOwnAvatar(
 // the caller logs it, and nothing is deleted.
 // ---------------------------------------------------------------------------
 
-/** Every object key under `avatars/` that `generateAvatarUploadUrl` can issue. */
-const ISSUED_KEY = /^avatars\/[^/]+\/[^/]+$/;
-
 /** DeleteObjects takes at most 1000 keys per request. */
 const DELETE_BATCH_SIZE = 1000;
+
+/**
+ * Ceiling on the account-deletion cleanup, which runs inside the
+ * `DELETE /auth/me` request: one ListObjectsV2 page (up to 1000 keys), one
+ * indexed-size reference query, one DeleteObjects call, all under this
+ * timeout. Anything it leaves is the sweep's to collect.
+ */
+export const ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS = 5_000;
+
+/**
+ * User ids become an S3 prefix and a LIKE fragment. They are UUIDs; anything
+ * else (a `/` that widens the prefix, a `%` or `_` that LIKE reads as a
+ * wildcard) skips the cleanup.
+ */
+const SAFE_ID = /^[A-Za-z0-9-]+$/;
+
+export interface ListAvatarObjectsOptions {
+  signal?: AbortSignal;
+  /**
+   * Stop after this many pages. Safe because every deletion decision is per
+   * key: a shorter listing only leaves objects for a later pass.
+   */
+  maxPages?: number;
+}
 
 export interface AvatarObject {
   key: string;
@@ -248,33 +269,40 @@ export interface AvatarDeleteResult {
 }
 
 /**
- * Every object under `prefix`, paging through ListObjectsV2. Throws when a
- * page cannot be read (AccessDenied without `s3:ListBucket`, network): a
- * partial listing is never returned, so a caller never acts on half a bucket.
+ * Objects under `prefix`, paging through ListObjectsV2 (all pages unless
+ * `maxPages` is set). Throws when a page cannot be read (AccessDenied without
+ * `s3:ListBucket`, network, abort), so a caller never mistakes a failed read
+ * for an empty prefix.
  */
-export async function listAvatarObjects(prefix: string, signal?: AbortSignal): Promise<AvatarObject[]> {
+export async function listAvatarObjects(
+  prefix: string,
+  { signal, maxPages = Infinity }: ListAvatarObjectsOptions = {}
+): Promise<AvatarObject[]> {
   const objects: AvatarObject[] = [];
   let continuationToken: string | undefined;
+  let pages = 0;
   do {
     if (signal?.aborted) {
       throw new Error('Avatar listing aborted');
     }
     const page = await s3Client.send(
-      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix, ContinuationToken: continuationToken })
+      new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: prefix, ContinuationToken: continuationToken }),
+      { abortSignal: signal }
     );
+    pages += 1;
     for (const item of page.Contents ?? []) {
       if (item.Key) {
         objects.push({ key: item.Key, lastModified: item.LastModified });
       }
     }
     continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-  } while (continuationToken);
+  } while (continuationToken && pages < maxPages);
   return objects;
 }
 
-/** True when `key` has the exact shape `avatars/<id>/<file>`. */
+/** True when `key` has the exact shape `avatars/<id>/<file>` (same rule as `ISSUED_KEY_PATH`). */
 export function isIssuedAvatarKey(key: string): boolean {
-  return ISSUED_KEY.test(key);
+  return ISSUED_KEY_PATH.test(`/${key}`);
 }
 
 /**
@@ -313,13 +341,24 @@ export function referencedAvatarKeys(storedUrl: string): string[] {
 }
 
 /**
- * The set of object keys referenced by any `User.profilePictureUrl`, tombstones
- * and every row included. Throws on a database error, so a caller can never
- * mistake "could not read references" for "nothing is referenced".
+ * The object keys referenced by `User.profilePictureUrl` values containing
+ * `fragment` (`avatars/` for the sweep, `avatars/<userId>/` for one user),
+ * tombstones and every row included. Throws on a database error, so a caller
+ * can never mistake "could not read references" for "nothing is referenced".
+ *
+ * `contains` compiles to LIKE, so `fragment` must hold no `%` or `_`: callers
+ * pass the literal `avatars/` or a UUID checked against `SAFE_ID`. The filter
+ * matches the literal text only; a stored URL that percent-encodes those
+ * characters is not loaded. Accepted: clients store the `imageUrl` the API
+ * issued, verbatim. What is loaded is still matched over-inclusively
+ * (`referencedAvatarKeys`).
  */
-export async function loadReferencedAvatarKeys(): Promise<Set<string>> {
+export async function loadReferencedAvatarKeys(fragment: string): Promise<Set<string>> {
+  if (/[%_\\]/.test(fragment)) {
+    throw new Error('Reference fragment must not contain LIKE wildcards');
+  }
   const rows = await prisma.user.findMany({
-    where: { profilePictureUrl: { not: null } },
+    where: { profilePictureUrl: { contains: fragment } },
     select: { profilePictureUrl: true },
   });
   const keys = new Set<string>();
@@ -349,7 +388,8 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
         new DeleteObjectsCommand({
           Bucket: BUCKET_NAME,
           Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-        })
+        }),
+        { abortSignal: signal }
       );
       const errors = response.Errors?.length ?? 0;
       result.failed += errors;
@@ -381,25 +421,31 @@ export async function deleteAvatarKeys(keys: string[], signal?: AbortSignal): Pr
  *
  * Best-effort, like `deletePreviousAvatar`: the account is already gone, so a
  * failure is logged and the function resolves. When either the listing or the
- * reference query fails, nothing is deleted.
+ * reference query fails, nothing is deleted. Bounded, because it runs inside
+ * the request: one listing page, references narrowed to this user's prefix,
+ * and `ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS` on every S3 call.
  */
-export async function deleteUnreferencedUserUploads(userId: string): Promise<void> {
-  // The id becomes an S3 prefix; never let an odd value widen it.
-  if (!/^[A-Za-z0-9_-]+$/.test(userId)) {
+export async function deleteUnreferencedUserUploads(
+  userId: string,
+  timeoutMs: number = ACCOUNT_UPLOAD_CLEANUP_TIMEOUT_MS
+): Promise<void> {
+  if (!SAFE_ID.test(userId)) {
     logger.warn('Account upload cleanup skipped: user id is not a safe key segment');
     return;
   }
 
+  const prefix = `avatars/${userId}/`;
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
-    const objects = await listAvatarObjects(`avatars/${userId}/`);
+    const objects = await listAvatarObjects(prefix, { signal, maxPages: 1 });
     const candidates = objects.map((o) => o.key).filter(isIssuedAvatarKey);
     if (candidates.length === 0) {
       return;
     }
     // Read references AFTER listing, so they are at least as fresh as the list.
-    const referenced = await loadReferencedAvatarKeys();
+    const referenced = await loadReferencedAvatarKeys(prefix);
     const orphans = candidates.filter((key) => !referenced.has(key));
-    const { deleted, failed } = await deleteAvatarKeys(orphans);
+    const { deleted, failed } = await deleteAvatarKeys(orphans, signal);
     logger.info('Account avatar uploads cleaned up', {
       userId,
       listed: candidates.length,

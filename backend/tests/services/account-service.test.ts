@@ -215,8 +215,12 @@ describe('AccountService.deleteAccount', () => {
     expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
-    // ...and the rest of the user's own upload prefix, minus what other rows reference (#957)
+    // ...and the rest of the user's own upload prefix, minus what other rows reference (#957),
+    // only after the identity step so S3 never delays it
     expect(mockDeleteUploads).toHaveBeenCalledWith(USER_ID);
+    expect(mockDeleteUploads.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockWorkOS.deleteUser.mock.invocationCallOrder[0]
+    );
     expect(mockWorkOS.deleteUser).toHaveBeenCalledWith('workos_1');
   });
 

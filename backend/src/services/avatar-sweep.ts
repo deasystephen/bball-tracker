@@ -60,7 +60,7 @@ export async function sweepOrphanedAvatars(
   now: Date = new Date(),
   signal?: AbortSignal
 ): Promise<AvatarSweepResult> {
-  const objects = await listAvatarObjects('avatars/', signal);
+  const objects = await listAvatarObjects('avatars/', { signal });
   const cutoff = now.getTime() - AVATAR_SWEEP_MIN_AGE_MS;
   const candidates = objects
     .filter((o) => isIssuedAvatarKey(o.key) && o.lastModified !== undefined && o.lastModified.getTime() <= cutoff)
@@ -79,7 +79,7 @@ export async function sweepOrphanedAvatars(
     return result;
   }
 
-  const referencedKeys = await loadReferencedAvatarKeys();
+  const referencedKeys = await loadReferencedAvatarKeys('avatars/');
   const orphans = candidates.filter((key) => !referencedKeys.has(key));
   result.referenced = candidates.length - orphans.length;
   result.capped = orphans.length > MAX_DELETES_PER_RUN;
@@ -163,12 +163,17 @@ export class AvatarSweeper {
   }
 
   private schedule(delayMs: number): void {
+    // The loop this timer belongs to. A stop() then start() while a run is in
+    // flight creates a new controller; the old run must not re-arm, or two
+    // loops would sweep side by side.
+    const owner = this.abortController;
     const timer = setTimeout(() => {
       this.timer = null;
-      this.inFlight = this.runOnce().then(() => {
-        this.inFlight = null;
-        if (this.abortController) this.schedule(this.intervalMs);
+      const run = this.runOnce().then(() => {
+        if (this.inFlight === run) this.inFlight = null;
+        if (owner !== null && this.abortController === owner) this.schedule(this.intervalMs);
       });
+      this.inFlight = run;
     }, delayMs);
     // Never keep the process alive just to wait for the next sweep.
     timer.unref?.();

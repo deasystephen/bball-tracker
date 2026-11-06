@@ -365,6 +365,21 @@ describe('Upload Service', () => {
         expect(lists[1].input).toEqual(expect.objectContaining({ ContinuationToken: 'next' }));
       });
 
+      it('stops after maxPages and passes the abort signal to every call', async () => {
+        const controller = new AbortController();
+        mockSend.mockResolvedValue({
+          Contents: [{ Key: 'avatars/u/a.jpg' }],
+          IsTruncated: true,
+          NextContinuationToken: 'more',
+        });
+
+        const objects = await listAvatarObjects('avatars/u/', { signal: controller.signal, maxPages: 1 });
+
+        expect(objects).toEqual([{ key: 'avatars/u/a.jpg', lastModified: undefined }]);
+        expect(mockSend).toHaveBeenCalledTimes(1);
+        expect(mockSend.mock.calls[0][1]).toEqual({ abortSignal: controller.signal });
+      });
+
       it('throws rather than returning a partial listing when a page fails', async () => {
         mockSend
           .mockResolvedValueOnce({
@@ -379,7 +394,7 @@ describe('Upload Service', () => {
       it('throws when aborted before a page', async () => {
         const controller = new AbortController();
         controller.abort();
-        await expect(listAvatarObjects('avatars/', controller.signal)).rejects.toThrow(/aborted/);
+        await expect(listAvatarObjects('avatars/', { signal: controller.signal })).rejects.toThrow(/aborted/);
         expect(mockSend).not.toHaveBeenCalled();
       });
     });
@@ -390,6 +405,7 @@ describe('Upload Service', () => {
         expect(isIssuedAvatarKey('avatars/a.jpg')).toBe(false);
         expect(isIssuedAvatarKey('avatars/u/x/a.jpg')).toBe(false);
         expect(isIssuedAvatarKey('other/u/a.jpg')).toBe(false);
+        expect(isIssuedAvatarKey('/avatars/u/a.jpg')).toBe(false);
       });
     });
 
@@ -425,26 +441,32 @@ describe('Upload Service', () => {
     });
 
     describe('loadReferencedAvatarKeys', () => {
-      it('collects the key of every stored profilePictureUrl', async () => {
+      it('collects the key of every stored profilePictureUrl that contains the fragment', async () => {
         (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
           { profilePictureUrl: `${BUCKET_BASE}coach/kid.jpg` },
           { profilePictureUrl: 'https://workos.example/photo.jpg' },
           { profilePictureUrl: null },
         ]);
 
-        const keys = await loadReferencedAvatarKeys();
+        const keys = await loadReferencedAvatarKeys('avatars/');
 
         expect([...keys]).toEqual(['avatars/coach/kid.jpg']);
-        // Every row, tombstones included: no deletedAt filter
+        // Narrowed by the fragment; tombstones included: no deletedAt filter
         expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-          where: { profilePictureUrl: { not: null } },
+          where: { profilePictureUrl: { contains: 'avatars/' } },
           select: { profilePictureUrl: true },
         });
       });
 
+      it('refuses a fragment that LIKE would read as a wildcard', async () => {
+        await expect(loadReferencedAvatarKeys('avatars/a_b/')).rejects.toThrow(/wildcards/);
+        await expect(loadReferencedAvatarKeys('avatars/%/')).rejects.toThrow(/wildcards/);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+      });
+
       it('propagates a database error', async () => {
         (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
-        await expect(loadReferencedAvatarKeys()).rejects.toThrow('db down');
+        await expect(loadReferencedAvatarKeys('avatars/')).rejects.toThrow('db down');
       });
     });
 
@@ -523,12 +545,53 @@ describe('Upload Service', () => {
 
         const list = sentOf('ListObjectsV2');
         expect(list[0].input).toEqual(expect.objectContaining({ Prefix: `avatars/${userId}/` }));
+        // References narrowed to this user's prefix
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+          where: { profilePictureUrl: { contains: `avatars/${userId}/` } },
+          select: { profilePictureUrl: true },
+        });
         const deletes = sentOf('DeleteObjects');
         expect(deletes).toHaveLength(1);
         expect(deletes[0].input.Delete).toEqual({
           Objects: [{ Key: `avatars/${userId}/orphan.jpg` }],
           Quiet: true,
         });
+        // Every S3 call carries the cleanup's timeout signal
+        for (const [, options] of mockSend.mock.calls) {
+          expect((options as { abortSignal: AbortSignal }).abortSignal).toBeInstanceOf(AbortSignal);
+        }
+      });
+
+      it('lists one page only, so the request stays bounded', async () => {
+        mockSend.mockResolvedValueOnce({
+          Contents: [{ Key: `avatars/${userId}/a.jpg` }],
+          IsTruncated: true,
+          NextContinuationToken: 'more',
+        });
+        await deleteUnreferencedUserUploads(userId);
+        expect(sentOf('ListObjectsV2')).toHaveLength(1);
+        expect(sentOf('DeleteObjects')).toHaveLength(1);
+      });
+
+      it('gives up, deleting nothing, when S3 outlasts the timeout', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        // A list call that only settles when its abort signal fires.
+        mockSend.mockImplementationOnce(
+          (_cmd: unknown, options: { abortSignal: AbortSignal }) =>
+            new Promise((_resolve, reject) => {
+              options.abortSignal.addEventListener('abort', () => reject(new Error('Request aborted')));
+            })
+        );
+
+        await expect(deleteUnreferencedUserUploads(userId, 10)).resolves.toBeUndefined();
+
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Account avatar upload cleanup failed (ignored)',
+          expect.objectContaining({ error: 'Request aborted' })
+        );
+        warnSpy.mockRestore();
       });
 
       it('reads no references and deletes nothing when the prefix is empty', async () => {
@@ -592,6 +655,8 @@ describe('Upload Service', () => {
         const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         await deleteUnreferencedUserUploads('');
         await deleteUnreferencedUserUploads('a/b');
+        await deleteUnreferencedUserUploads('a_b');
+        await deleteUnreferencedUserUploads('a%b');
         expect(mockSend).not.toHaveBeenCalled();
         warnSpy.mockRestore();
       });

@@ -77,7 +77,8 @@ describe('sweepOrphanedAvatars', () => {
 
     const result = await sweepOrphanedAvatars(NOW);
 
-    expect(mockList).toHaveBeenCalledWith('avatars/', undefined);
+    expect(mockList).toHaveBeenCalledWith('avatars/', { signal: undefined });
+    expect(mockRefs).toHaveBeenCalledWith('avatars/');
     expect(mockDelete).toHaveBeenCalledWith(['avatars/u/orphan.jpg', 'avatars/u/cutoff.jpg'], undefined);
     expect(result).toEqual({ listed: 7, candidates: 3, referenced: 1, deleted: 2, failed: 0, capped: false });
     expect(logger.info).toHaveBeenCalledWith('Avatar sweep finished', result);
@@ -211,6 +212,41 @@ describe('AvatarSweeper', () => {
     expect(stopped).toBe(true);
     await jest.advanceTimersByTimeAsync(5_000);
     expect(sweep).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop() then start() during a run leaves exactly one loop', async () => {
+    jest.useFakeTimers();
+    const releases: Array<() => void> = [];
+    const sweep = jest.fn(
+      () =>
+        new Promise<AvatarSweepResult>((resolve) => {
+          releases.push(() => resolve(EMPTY_RESULT));
+        })
+    );
+    const sweeper = new AvatarSweeper({ sweep, firstRunDelayMs: 0, intervalMs: 1_000 });
+    sweeper.start();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(sweep).toHaveBeenCalledTimes(1);
+
+    // Stop without awaiting, restart while run 1 is still in flight.
+    const stopping = sweeper.stop();
+    sweeper.start();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(sweep).toHaveBeenCalledTimes(2); // the new loop's first run
+
+    releases[0](); // the old run finishes: it must NOT re-arm
+    await stopping;
+    releases[1]();
+    await jest.advanceTimersByTimeAsync(0);
+
+    // One loop: one run per interval from here on.
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(sweep).toHaveBeenCalledTimes(3);
+    releases[2]();
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(sweep).toHaveBeenCalledTimes(4);
+    releases[3]();
+    await sweeper.stop();
   });
 
   it('stop is a no-op when never started', async () => {

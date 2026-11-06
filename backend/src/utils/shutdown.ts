@@ -11,7 +11,7 @@
  *     accepting connections. No `disconnect` packet is sent on purpose: a
  *     server-initiated disconnect (`io server disconnect`) is NOT
  *     auto-reconnected by socket.io-client, and live games would stay dark.
- *  2. The SES event consumer and the avatar sweeper stop (in-flight work unwinds).
+ *  2. The SES event consumer and the avatar sweeper stop concurrently (in-flight work unwinds).
  *  3. Prisma and Redis quit, in parallel; a failure in either is logged at
  *     `warn` and does not change the exit code.
  *  4. `exit(0)`.
@@ -61,8 +61,9 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
 
     try {
       await deps.io.close();
-      await deps.consumer?.stop();
-      await deps.avatarSweeper?.stop();
+      // Independent background workers: stop them side by side, so one slow
+      // stop never eats the other's share of the grace period.
+      await Promise.all([deps.consumer?.stop(), deps.avatarSweeper?.stop()]);
       const quits = await Promise.allSettled([deps.disconnectPrisma(), deps.closeRedis()]);
       const names = ['prisma', 'redis'] as const;
       quits.forEach((result, i) => {
