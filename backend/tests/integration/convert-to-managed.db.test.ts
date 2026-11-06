@@ -7,9 +7,11 @@
  *
  * Proves the row-level outcome (no login, no email, managed by the coach,
  * roster and history untouched; a photo kept only when the team's staff
- * uploaded it, the child's own upload deleted from S3; the child's address
- * scrubbed from invitations that made it someone's guardian, while the
- * invitations for the child, even at a shared family address, stay), an empty
+ * uploaded it, any other photo in our bucket deleted from S3 unless another
+ * row shows it; the child's address scrubbed from invitations that made it
+ * someone's guardian, and pending invitations for the child at the child's
+ * own address expired, while those at a parent's address and accepted ones
+ * stay), an empty
  * personal league removed, the refusals that leave every row as it was (adult
  * signals, no or ambiguous coach, a coach from another team or a past season,
  * a re-run), and the WorkOS outcomes: deleted, no identity, or a failure
@@ -98,8 +100,9 @@ describe('AccountService.convertToManaged', () => {
     const sibling = await fx.user('kidSibling', 'PLAYER');
     const expires = new Date(Date.now() + 86_400_000);
     // An invitation that named the child's address as a sibling's guardian
-    // (D17 scrub); one inviting the child's parent; one for the child at the
-    // same address (a shared family inbox). The last two must survive.
+    // (D17 scrub); one inviting the child's parent (stays); a pending one for
+    // the child at the child's own address (expired: accepting it would make a
+    // PARENT account at the child's address); an accepted one there (stays).
     const toKidAddress = await prisma.guardianInvitation.create({
       data: { token: `gi-a-${fx.run}`, childId: sibling, invitedEmail: kidEmail, relationship: 'GUARDIAN', invitedById: head, expiresAt: expires },
       select: { id: true },
@@ -110,6 +113,10 @@ describe('AccountService.convertToManaged', () => {
     });
     const sharedAddress = await prisma.guardianInvitation.create({
       data: { token: `gi-c-${fx.run}`, childId: kid, invitedEmail: kidEmail, relationship: 'FATHER', invitedById: head, expiresAt: expires },
+      select: { id: true },
+    });
+    const acceptedAtKidAddress = await prisma.guardianInvitation.create({
+      data: { token: `gi-d-${fx.run}`, childId: kid, invitedEmail: kidEmail, relationship: 'OTHER', invitedById: head, expiresAt: expires, status: 'ACCEPTED', acceptedAt: new Date() },
       select: { id: true },
     });
     const game = await fx.game(org);
@@ -130,7 +137,12 @@ describe('AccountService.convertToManaged', () => {
 
     const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
-    expect(result).toEqual({ success: true, managedById: head, identityDeleted: true });
+    expect(result).toEqual({
+      success: true,
+      managedById: head,
+      identityDeleted: true,
+      expiredGuardianInvitationIds: [sharedAddress.id],
+    });
     expect(deleteUser).toHaveBeenCalledWith(`workos-kid-${fx.run}`);
     expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(deleteAvatar).toHaveBeenCalledWith(ownUpload, null);
@@ -174,7 +186,13 @@ describe('AccountService.convertToManaged', () => {
         where: { id: sharedAddress.id },
         select: { status: true, invitedEmail: true },
       })
-    ).toEqual({ status: 'PENDING', invitedEmail: kidEmail });
+    ).toEqual({ status: 'EXPIRED', invitedEmail: `deleted-${sharedAddress.id}@invalid` });
+    expect(
+      await prisma.guardianInvitation.findUniqueOrThrow({
+        where: { id: acceptedAtKidAddress.id },
+        select: { status: true, invitedEmail: true },
+      })
+    ).toEqual({ status: 'ACCEPTED', invitedEmail: kidEmail });
   });
 
   it('clears an external photo (it may be the identity provider’s copy of the child) without deleting any object', async () => {
@@ -191,19 +209,56 @@ describe('AccountService.convertToManaged', () => {
     expect(deleteAvatar).toHaveBeenCalledWith(null, null);
   });
 
-  it('clears an upload by someone who is not on the player’s current staff, without deleting their object', async () => {
+  it('clears and deletes an upload by someone not on the player’s current staff (a parent, a past coach)', async () => {
     const org = await fx.org('foreignPhoto');
     const head = await fx.user('foreignPhotoHead', 'COACH');
-    const outsider = await fx.user('foreignPhotoOutsider', 'COACH');
+    const outsider = await fx.user('foreignPhotoOutsider', 'PARENT');
     await fx.staff(head, org);
-    const kid = await claimedPlayer('foreignPhotoKid', org, {
-      profilePictureUrl: `https://${BUCKET}.s3.amazonaws.com/avatars/${outsider}/photo.jpg`,
-    });
+    const photo = `https://${BUCKET}.s3.amazonaws.com/avatars/${outsider}/photo.jpg`;
+    const kid = await claimedPlayer('foreignPhotoKid', org, { profilePictureUrl: photo });
+
+    await AccountService.convertToManaged(kid, { actorId: 'operator' });
+
+    expect(await snapshot(kid)).toMatchObject({ profilePictureUrl: null });
+    expect(deleteAvatar).toHaveBeenCalledWith(photo, null);
+  });
+
+  it('clears but keeps the object of a photo another user row still shows', async () => {
+    const org = await fx.org('sharedPhoto');
+    const head = await fx.user('sharedPhotoHead', 'COACH');
+    const sibling = await fx.user('sharedPhotoSibling', 'PLAYER');
+    await fx.staff(head, org);
+    const photo = `https://${BUCKET}.s3.amazonaws.com/avatars/${sibling}/family.jpg`;
+    await prisma.user.update({ where: { id: sibling }, data: { profilePictureUrl: photo } });
+    const kid = await claimedPlayer('sharedPhotoKid', org, { profilePictureUrl: photo });
 
     await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
     expect(await snapshot(kid)).toMatchObject({ profilePictureUrl: null });
     expect(deleteAvatar).toHaveBeenCalledWith(null, null);
+  });
+
+  it('does not treat a cancelled invitation the child once sent as an adult signal', async () => {
+    const org = await fx.org('cancelled');
+    const head = await fx.user('cancelledHead', 'COACH');
+    await fx.staff(head, org);
+    const kid = await claimedPlayer('cancelledKid', org);
+    const invitee = await fx.user('cancelledInvitee', 'PLAYER');
+    await prisma.teamInvitation.create({
+      data: {
+        teamId: org.teamId,
+        playerId: invitee,
+        invitedById: kid,
+        token: `inv-cancelled-${fx.run}`,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        status: 'CANCELLED',
+      },
+    });
+
+    const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
+
+    expect(result.managedById).toBe(head);
+    expect(await snapshot(kid)).toMatchObject({ isManaged: true });
   });
 
   it('converts a row that never had a WorkOS identity and reports identityDeleted: null', async () => {
@@ -215,7 +270,7 @@ describe('AccountService.convertToManaged', () => {
 
     const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
-    expect(result).toEqual({ success: true, managedById: head, identityDeleted: null });
+    expect(result).toEqual({ success: true, managedById: head, identityDeleted: null, expiredGuardianInvitationIds: [] });
     expect(deleteUser).not.toHaveBeenCalled();
     expect(await snapshot(kid)).toMatchObject({ isManaged: true, managedById: head, email: null });
   });
@@ -266,6 +321,7 @@ describe('AccountService.convertToManaged', () => {
       success: true,
       managedById: head,
       identityDeleted: false,
+      expiredGuardianInvitationIds: [],
       workosUserId: `workos-wfailKid-${fx.run}`,
       sessions: { revoked: 2, failed: 1 },
     });
@@ -403,6 +459,17 @@ describe('AccountService.convertToManaged', () => {
       await expectUntouched(kid, before);
       expect(await prisma.league.count({ where: { id: leagueId } })).toBe(1);
       expect(await prisma.leagueAdmin.count({ where: { userId: kid } })).toBe(1);
+    });
+
+    it('refuses a system admin', async () => {
+      const org = await fx.org('sysAdmin');
+      const head = await fx.user('sysAdminHead', 'COACH');
+      await fx.staff(head, org);
+      const kid = await claimedPlayer('sysAdminKid', org, { role: 'ADMIN' });
+      const before = await snapshot(kid);
+
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/system admin/);
+      await expectUntouched(kid, before);
     });
 
     it('refuses a former coach who manages players or sent invitations', async () => {

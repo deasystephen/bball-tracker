@@ -446,8 +446,8 @@ export class AccountService {
    *   $transaction
    *   ┌──────────────────────────────────────────────────────────────────┐
    *   │ 1  unlocked: no live row ───────────────────────────────► 404      │
-   *   │              already managed and unclaimed ─────────────► 409      │
-   *   │ 2  SELECT … FOR UPDATE the player; both checks again              │
+   *   │ 2  SELECT … FOR UPDATE the player; no live row ─────────► 404      │
+   *   │    already managed and unclaimed ──────────────────────► 409      │
    *   │ 3  assertPlayerAccount: any adult signal ───────────────► 409      │
    *   │    (an empty personal league the child started is deleted)        │
    *   │ 4  managing coach: the operator's choice or the one head coach,   │
@@ -455,8 +455,10 @@ export class AccountService {
    *   │    SELECT … FOR KEY SHARE the coach; tombstoned ─────────► 409      │
    *   │ 5  unclaimManagedRow (shared with the age screen, #981)           │
    *   └──────────────────────────────────────────────────────────────────┘
-   *   after commit, best-effort: delete the S3 avatar the child uploaded,
-   *   delete the WorkOS user (ends every session); if that fails, revoke
+   *   after commit, best-effort: delete the cleared photo's S3 object,
+   *   delete the WorkOS user (ends its WorkOS sessions and refresh tokens;
+   *   an open Socket.io connection lasts until its access token expires,
+   *   #1004); if that fails, revoke
    *   every active session and report identityDeleted: false
    *
    * What the locks protect. FOR UPDATE on the player (not FOR NO KEY UPDATE)
@@ -475,16 +477,14 @@ export class AccountService {
     const { actorId } = options;
 
     const committed = await prisma.$transaction(async (tx) => {
-      // 1. Cheap unlocked checks, so a mistyped id reads as "not found" and a
-      // re-run reads as "already converted", not as a coach problem.
-      assertConvertible(
-        await tx.user.findUnique({
-          where: { id: userId },
-          select: { deletedAt: true, isManaged: true, workosUserId: true },
-        })
-      );
+      // 1. Cheap unlocked existence check, so a mistyped id reads as "not
+      // found"; every other check runs under the lock below.
+      if ((await tx.user.count({ where: { id: userId, deletedAt: null } })) === 0) {
+        throw new NotFoundError('Account not found');
+      }
 
-      // 2. Lock the player; the checks again, now authoritative.
+      // 2. Lock the player. A re-run stops here with "already a managed
+      // roster record", before any coach is resolved.
       const [row] = await tx.$queryRaw<LockedUserRow[]>`
         SELECT "id", "email", "workosUserId", "isManaged", "profilePictureUrl", "deletedAt"
         FROM "User"
@@ -554,6 +554,7 @@ export class AccountService {
       success: true,
       managedById: committed.managedById,
       identityDeleted,
+      expiredGuardianInvitationIds: committed.expiredGuardianInvitationIds,
       // The operator needs the provider id to finish the deletion by hand: the
       // row no longer holds it, nor the email to search by.
       ...(identityDeleted === false && committed.workosUserId && { workosUserId: committed.workosUserId, sessions }),
@@ -586,6 +587,12 @@ export interface ConvertToManagedResult {
    * failed (finish by hand). `null`: the row had no WorkOS identity.
    */
   identityDeleted: boolean | null;
+  /**
+   * PENDING guardian invitations for the child at the child's own address,
+   * expired by the conversion: the coach re-invites the parent at a parent's
+   * address.
+   */
+  expiredGuardianInvitationIds: string[];
   /** Only when `identityDeleted` is `false`: the id to delete by hand. */
   workosUserId?: string;
   /**
@@ -595,7 +602,7 @@ export interface ConvertToManagedResult {
   sessions?: SessionRevocation | null;
 }
 
-/** The checks that hold for a row about to be converted, before and under the lock. */
+/** The checks that hold for a row about to be converted, read under its lock. */
 function assertConvertible(
   row: Pick<LockedUserRow, 'deletedAt' | 'isManaged' | 'workosUserId'> | null | undefined
 ): asserts row is NonNullable<typeof row> {
@@ -650,14 +657,20 @@ async function resolveManagingCoach(
   return heads[0].userId;
 }
 
+/** Invitations that were really sent; a cancelled one is a stray, not a sign of a coach. */
+const SENT_FOR_REAL = { where: { status: { not: 'CANCELLED' } } } satisfies {
+  where: Prisma.TeamInvitationWhereInput & Prisma.GuardianInvitationWhereInput;
+};
+
 const ADULT_SIGNALS_SELECT = {
+  role: true,
   _count: {
     select: {
       teamStaff: true,
       guardiansAsParent: true,
       managedPlayers: true,
-      sentInvitations: true,
-      sentGuardianInvitations: true,
+      sentInvitations: SENT_FOR_REAL,
+      sentGuardianInvitations: SENT_FOR_REAL,
     },
   },
   leagueAdmins: { select: { leagueId: true } },
@@ -665,9 +678,10 @@ const ADULT_SIGNALS_SELECT = {
 } satisfies Prisma.UserSelect;
 
 /**
- * Refuses an account that is an adult's: a staff role, a guardian-of link,
- * players it manages, team or guardian invitations it sent (a former coach
- * still on some roster), admin of a league other than its own personal
+ * Refuses an account that is an adult's: the global ADMIN role, a staff
+ * role, a guardian-of link, players it manages, team or guardian invitations
+ * it sent and did not cancel (a former coach still on some roster), admin of
+ * a league other than its own personal
  * league, or a personal league that holds teams or has another admin. A child
  * who once started creating a team has a personal league and admins it; when
  * nothing else is in it, the league is deleted (its admin row goes with it by
@@ -678,9 +692,18 @@ async function assertPlayerAccount(tx: Prisma.TransactionClient, userId: string)
   const signals = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT });
   const personalLeagueId = signals.personalLeague?.id ?? null;
   const adminElsewhere = signals.leagueAdmins.some(({ leagueId }) => leagueId !== personalLeagueId);
-  if (adminElsewhere || Object.values(signals._count).some((count) => count > 0)) {
+  // The global role is read here as a refusal signal, never as an access
+  // check (the CLAUDE.md rule is about granting access): a system ADMIN is an
+  // adult by construction. COACH is not a signal: anyone, a child included,
+  // can pick it at onboarding; what a real coach did shows up as staff rows,
+  // invitations or a personal league with teams.
+  if (
+    signals.role === 'ADMIN' ||
+    adminElsewhere ||
+    Object.values(signals._count).some((count) => count > 0)
+  ) {
     throw new ConflictError(
-      'Account holds a staff or league admin role, guardian links, managed players or sent invitations: it is an adult account, not a player. Delete it instead'
+      'Account is a system admin, or holds a staff or league admin role, guardian links, managed players or sent invitations: it is an adult account, not a player. Delete it instead'
     );
   }
   if (personalLeagueId !== null) {
@@ -711,17 +734,20 @@ export type UnclaimTarget = Pick<LockedUserRow, 'id' | 'email' | 'workosUserId' 
  *   through `syncUser`'s email match), `emailVerified` false, suppression
  *   state cleared with the email.
  * - Guardian invitations that invited the child's address to be someone
- *   else's guardian are expired and the address overwritten (D17).
- *   Invitations FOR this child (to a parent, maybe at a shared family
- *   address) stay: they are how the record gets its guardian.
+ *   else's guardian are expired and the address overwritten (D17). PENDING
+ *   invitations FOR this child at the child's own address are expired and
+ *   scrubbed too (their ids are returned): accepting one would create a
+ *   PARENT account at the child's address. Invitations for this child at any
+ *   other address, and accepted guardian links, stay.
  * - `isManaged` true, `managedById` the coach, role back to `PLAYER`,
  *   subscription back to free.
  * - Photo: kept only when it is an upload under the `avatars/<id>/` prefix of
  *   the managing coach or another staff member of the player's active-season
  *   teams (a photo the team took). Anything else is cleared, external URLs
  *   included: the identity provider's photo is copied at claim time, and an
- *   external URL cannot be told apart from it. The S3 object is deleted
- *   (returned as `removedAvatar`) only when it is the child's own upload.
+ *   external URL cannot be told apart from it. A cleared photo in our bucket
+ *   is returned as `removedAvatar` for deletion, whoever uploaded it (the
+ *   child, a parent, a past coach), unless another user row still shows it.
  * - `purgeLoginBindings`: push tokens, calendar feed tokens, pending team
  *   invitations cancelled and their recipient hash cleared.
  *
@@ -732,7 +758,7 @@ export async function unclaimManagedRow(
   tx: Prisma.TransactionClient,
   row: UnclaimTarget,
   managedById: string
-): Promise<{ workosUserId: string | null; removedAvatar: string | null }> {
+): Promise<UnclaimResult> {
   const userId = row.id;
   const photo = row.profilePictureUrl;
   let clearPhoto = false;
@@ -748,7 +774,13 @@ export async function unclaimManagedRow(
     const takenByTeam =
       isManagedAvatarUrl(photo) && [...teamUploaders].some((uploaderId) => isOwnUploadUrl(photo, uploaderId));
     clearPhoto = !takenByTeam;
-    removedAvatar = clearPhoto && isManagedAvatarUrl(photo) && isOwnUploadUrl(photo, userId) ? photo : null;
+    if (clearPhoto && isManagedAvatarUrl(photo)) {
+      // A photo of the child in our bucket that nobody could find again once
+      // cleared: delete the object, whoever uploaded it, unless another row
+      // still shows it.
+      const sharedWith = await tx.user.count({ where: { profilePictureUrl: photo, id: { not: userId } } });
+      removedAvatar = sharedWith === 0 ? photo : null;
+    }
   }
 
   const updated = await tx.user.updateMany({
@@ -771,15 +803,46 @@ export async function unclaimManagedRow(
   }
 
   await purgeLoginBindings(tx, userId);
+  let expiredGuardianInvitationIds: string[] = [];
   if (row.email) {
+    // Invitations that made the child's address someone else's guardian.
     await tx.guardianInvitation.updateMany({
       where: { status: 'PENDING', invitedEmail: emailEquals(row.email), childId: { not: userId } },
       data: { status: 'EXPIRED' },
     });
     await scrubInvitedEmail(tx, row.email, { exceptChildId: userId });
+
+    // A PENDING invitation FOR this child at the child's own address cannot be
+    // told apart from a shared family inbox, and accepting it would create a
+    // PARENT account at the child's address. Expire it and scrub the address;
+    // the coach re-invites the parent at a parent's address (runbook). The
+    // child's other invitations and accepted guardian links stay.
+    const ownAddress = await tx.guardianInvitation.findMany({
+      where: { childId: userId, status: 'PENDING', invitedEmail: emailEquals(row.email) },
+      select: { id: true },
+    });
+    expiredGuardianInvitationIds = ownAddress.map((invitation) => invitation.id);
+    if (expiredGuardianInvitationIds.length > 0) {
+      await tx.guardianInvitation.updateMany({
+        where: { id: { in: expiredGuardianInvitationIds } },
+        data: { status: 'EXPIRED' },
+      });
+      await tx.$executeRaw`
+        UPDATE "GuardianInvitation"
+        SET "invitedEmail" = 'deleted-' || "id" || '@invalid'
+        WHERE "id" IN (${Prisma.join(expiredGuardianInvitationIds)})`;
+    }
   }
 
-  return { workosUserId: row.workosUserId, removedAvatar };
+  return { workosUserId: row.workosUserId, removedAvatar, expiredGuardianInvitationIds };
+}
+
+export interface UnclaimResult {
+  workosUserId: string | null;
+  /** A photo object of the child to delete from S3 after commit. */
+  removedAvatar: string | null;
+  /** PENDING invitations for this child at the child's own address, expired here. */
+  expiredGuardianInvitationIds: string[];
 }
 
 /**

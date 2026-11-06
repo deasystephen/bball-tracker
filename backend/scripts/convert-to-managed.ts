@@ -16,7 +16,9 @@
  * are revoked as a stopgap, the output carries the WorkOS user id (the row no
  * longer does) and the session outcome, a warning goes to stderr and the exit
  * code is 3: the operator deletes the WorkOS user by hand before replying to
- * the reporter.
+ * the reporter. `expiredGuardianInvitationIds` lists pending guardian
+ * invitations for the child that went to the child's own address and were
+ * expired: the coach re-invites the parent at a parent's address.
  *
  * Without `--coach` the record goes to the one head coach of the player's
  * teams in active seasons; the script refuses (exit 1, nothing written) when
@@ -73,12 +75,19 @@ async function main(argv: string[]): Promise<void> {
         managedById: result.managedById,
         // null: the row had no WorkOS identity, nothing to delete.
         identityDeleted: result.identityDeleted,
+        expiredGuardianInvitationIds: result.expiredGuardianInvitationIds,
         ...(result.workosUserId && { workosUserId: result.workosUserId, sessions: result.sessions }),
       },
       null,
       2
     ) + '\n'
   );
+
+  if (result.expiredGuardianInvitationIds.length > 0) {
+    process.stderr.write(
+      `\nNote: ${result.expiredGuardianInvitationIds.length} pending guardian invitation(s) for this child went to the child's own address and were expired. Ask the coach to re-invite the parent at a parent's address.\n`
+    );
+  }
 
   if (result.identityDeleted === false) {
     // The row is converted, but the identity-provider user survives: a new
