@@ -76,6 +76,7 @@ async function main(argv: string[]): Promise<void> {
         // null: the row had no WorkOS identity, nothing to delete.
         identityDeleted: result.identityDeleted,
         expiredGuardianInvitationIds: result.expiredGuardianInvitationIds,
+        deletedReplyCount: result.deletedReplyCount,
         ...(result.workosUserId && { workosUserId: result.workosUserId, sessions: result.sessions }),
       },
       null,

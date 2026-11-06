@@ -223,53 +223,71 @@ collected from the child. Follow these steps every time; no code is written at t
      # or, to choose the managing coach:
      cd backend && NODE_ENV=production npx tsx scripts/convert-to-managed.ts <userId> --coach <coachUserId>
      ```
-     Output: `{ userId, converted, managedById, identityDeleted, expiredGuardianInvitationIds }`.
-     `identityDeleted` is `true`
-     (WorkOS user deleted), `null` (the row never had a WorkOS identity, nothing to delete; exit
-     0), or `false` (deletion failed: the output adds `workosUserId` and `sessions`, see step 5).
-     In one transaction (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`)
-     the row loses its login (`workosUserId`), its email and verified flag (so a new sign-up with
-     the same address cannot claim it again), push tokens, calendar-feed tokens and pending team
-     invitations (→ `CANCELLED`); role goes back to `PLAYER` and the subscription to free.
-     **Photo:** kept only when it is an upload by the managing coach or another staff member of
-     the child's active-season teams. Every other photo is cleared, **including an external URL a
-     coach typed in**: the sign-in provider's photo of the child (a Google profile picture, say)
-     is copied onto the row when the child signs in, and an external URL cannot be told apart from
-     it, so it is treated as collected from the child. The coach can set the photo again. A
-     cleared photo stored with us is deleted from S3 whoever uploaded it (the child, a parent, a
-     past coach), since nobody could find it again, unless another account still shows it.
-     **Guardian invitations:** where the child's address was invited to be someone else's
-     guardian, the invitation is expired and the address overwritten, as deletion does. A
-     **pending** invitation **for** the child sent to the child's own address is expired and its
-     address overwritten too (listed in `expiredGuardianInvitationIds`): it cannot be told apart
-     from a family inbox, and accepting it would create a parent account at the child's address.
-     Invitations for the child at any other address, and guardian links already accepted, stay.
-     An **empty**
-     personal league the child once created is deleted. The row becomes `isManaged` under
-     `managedById`: by default the one head coach of the child's teams in active seasons, or the
-     staff member `--coach` names, who must be on the staff of one of the child's teams **in an
-     active season**. Roster memberships, game events, statistics, RSVPs and guardian links stay,
-     so the coach's roster looks the same. After commit the WorkOS user is deleted, which ends
-     WorkOS session and refresh token; the old access token already fails on every API call (no
-     row has its id). A live-game connection the child has open stays connected until that access
-     token expires (minutes), receiving that game's updates; nothing closes it sooner yet (#1004).
-     **Refusals** (exit 1, nothing written): the account is already a managed record (a re-run:
-     nothing to do) or deleted; it shows an adult signal: the system ADMIN role, a staff role,
-     admin of a league other than its own personal league, a personal league that holds teams or
-     has another admin, a guardian-of link, players it manages, or team or guardian invitations it
-     sent and did not cancel (a former coach). The COACH account type alone is not a signal: a
-     child can pick it at sign-up. Verify again, then delete it with (b) if the report still holds. The child is on no
-     team in an active season with a head coach (delete with (b), or pass `--coach`); several
-     head coaches qualify (pass `--coach`); the `--coach` is not staff on one of the child's
-     active-season teams. If `expiredGuardianInvitationIds` is not empty (the script also prints
-     a note), tell the managing coach that the parent invitation went to the child's address and
-     ask them to re-invite the parent at the **parent's own** address. If **no guardian is
-     linked**, ask the managing coach to
-     invite the parent from the child's roster entry (the guardian flow,
+     Output: `{ userId, converted, managedById, identityDeleted, expiredGuardianInvitationIds,
+     deletedReplyCount }`. `identityDeleted` is `true` (WorkOS user deleted), `null` (the row never
+     had a WorkOS identity, nothing to delete; exit 0), or `false` (deletion failed: the output
+     adds `workosUserId` and `sessions`, see step 5).
+
+     One transaction (`AccountService.convertToManaged`, the un-claim in `unclaimManagedRow`)
+     turns the account into a roster record kept by `managedById`. That is the one head coach of
+     the child's teams in active seasons, or the staff member `--coach` names, who must be on the
+     staff of one of the child's teams **in an active season**.
+
+     **Deleted** (collected from the child):
+     - the login (`workosUserId`), the email and its verified flag, so a new sign-up with the same
+       address cannot claim the record again;
+     - push tokens and calendar-feed tokens;
+     - pending team invitations (→ `CANCELLED`);
+     - the announcement replies the child wrote (`deletedReplyCount`);
+     - the photo, unless the managing coach or another staff member of the child's active-season
+       teams uploaded it. Every other photo is cleared, **including an external URL a coach typed
+       in**: the sign-in provider's photo of the child (a Google profile picture, say) is copied
+       onto the row when the child signs in, and an external URL cannot be told apart from it, so
+       it is treated as collected from the child. The coach can set the photo again. A cleared
+       photo stored with us is deleted from S3 whoever uploaded it (the child, a parent, a past
+       coach), unless another account still shows it;
+     - the child's address on **every** guardian invitation that carries it, whatever its status
+       and whichever child it is for (overwritten with a placeholder, as deletion does), after
+       every pending one is expired. Pending ones **for** this child at the child's own address
+       are listed in `expiredGuardianInvitationIds`: they cannot be told apart from a family
+       inbox, and accepting one would create a parent account at the child's address;
+     - an **empty** personal league the child once created.
+
+     **Reset:** role back to `PLAYER`, subscription to free.
+
+     **Kept** (team records): roster memberships, game events, statistics, RSVPs, guardian links
+     (an accepted link survives the scrub of its invitation's address), and guardian invitations
+     for the child at other addresses. The coach's roster looks the same.
+
+     After commit the WorkOS user is deleted, which ends its WorkOS sessions and refresh tokens.
+     The old access token already fails on every API call (no row has its id). A live-game
+     connection the child has open stays connected until that access token expires (minutes),
+     receiving that game's updates; nothing closes it sooner yet (#1004).
+
+     **Refusals** (exit 1, nothing written):
+     - the account is already a managed record (a re-run: nothing to do) or deleted;
+     - it shows an adult signal: the system ADMIN role, a staff role, admin of a league other than
+       its own personal league, a personal league that holds teams or has another admin, a
+       guardian-of link, players it manages, announcements it posted, or team or guardian
+       invitations it sent and did not cancel (a former coach). The COACH account type alone is
+       not a signal: a child can pick it at sign-up. Verify again, then delete it with (b) if the
+       report still holds;
+     - **the child is on no team in an active season at all**: there is no roster to keep the
+       record on, so use (b), delete. `--coach` does not help: it must name staff of an
+       active-season team the child is on;
+     - **the child's active-season teams have staff but no head coach**: pass `--coach` with one
+       of those staff members;
+     - several head coaches qualify: pass `--coach`;
+     - the `--coach` is not staff on one of the child's active-season teams.
+
+     If `expiredGuardianInvitationIds` is not empty (the script also prints a note), tell the
+     managing coach that the parent invitation went to the child's address and ask them to
+     re-invite the parent at the **parent's own** address. If **no guardian is linked**, ask the
+     managing coach to invite the parent from the child's roster entry (the guardian flow,
      `docs/architecture/guardians.md`); give the coach the parent's address only if the parent
      asked us to.
-   - **(b) Delete** (the parent asks for deletion, the child is on no roster, or conversion is
-     refused): run the `delete` command of the [Operator procedure](#operator-procedure-request-by-email)
+   - **(b) Delete** (the parent asks for deletion, the child is on no team in an active
+     season, or conversion is refused): run the `delete` command of the [Operator procedure](#operator-procedure-request-by-email)
      step 4. It erases or anonymises by the usual rules and deletes the WorkOS user.
 5. **WorkOS: finish it before you reply.** Either path deletes the WorkOS user best-effort. When
    it fails, `identityDeleted` is `false`; the convert script then prints `workosUserId` (the row

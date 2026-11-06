@@ -9,9 +9,10 @@
  * roster and history untouched; a photo kept only when the team's staff
  * uploaded it, any other photo in our bucket deleted from S3 unless another
  * row shows it; the child's address scrubbed from invitations that made it
- * someone's guardian, and pending invitations for the child at the child's
- * own address expired, while those at a parent's address and accepted ones
- * stay), an empty
+ * someone's guardian and on every invitation for the child at the child's
+ * own address (pending ones expired), while those at a parent's address and
+ * the accepted guardian link stay; the child's announcement replies deleted),
+ * an empty
  * personal league removed, the refusals that leave every row as it was (adult
  * signals, no or ambiguous coach, a coach from another team or a past season,
  * a re-run), and the WorkOS outcomes: deleted, no identity, or a failure
@@ -102,7 +103,8 @@ describe('AccountService.convertToManaged', () => {
     // An invitation that named the child's address as a sibling's guardian
     // (D17 scrub); one inviting the child's parent (stays); a pending one for
     // the child at the child's own address (expired: accepting it would make a
-    // PARENT account at the child's address); an accepted one there (stays).
+    // PARENT account at the child's address); accepted and rejected ones there
+    // (address scrubbed, status kept, the Guardian link survives).
     const toKidAddress = await prisma.guardianInvitation.create({
       data: { token: `gi-a-${fx.run}`, childId: sibling, invitedEmail: kidEmail, relationship: 'GUARDIAN', invitedById: head, expiresAt: expires },
       select: { id: true },
@@ -119,6 +121,20 @@ describe('AccountService.convertToManaged', () => {
       data: { token: `gi-d-${fx.run}`, childId: kid, invitedEmail: kidEmail, relationship: 'OTHER', invitedById: head, expiresAt: expires, status: 'ACCEPTED', acceptedAt: new Date() },
       select: { id: true },
     });
+    const rejectedAtKidAddress = await prisma.guardianInvitation.create({
+      data: { token: `gi-e-${fx.run}`, childId: kid, invitedEmail: kidEmail, relationship: 'OTHER', invitedById: head, expiresAt: expires, status: 'REJECTED' },
+      select: { id: true },
+    });
+    const parent = await fx.user('kidParent', 'PARENT');
+    await fx.guardian(parent, kid);
+    // Free text: the child's reply goes, a teammate's reply and the coach's
+    // announcement stay.
+    const announcement = await prisma.announcement.create({
+      data: { teamId: org.teamId, authorId: head, title: `T-${fx.run}`, body: 'Practice moved' },
+      select: { id: true },
+    });
+    await prisma.announcementReply.create({ data: { announcementId: announcement.id, authorId: kid, body: 'ok!' } });
+    await prisma.announcementReply.create({ data: { announcementId: announcement.id, authorId: parent, body: 'Thanks' } });
     const game = await fx.game(org);
     await prisma.gameRsvp.create({ data: { gameId: game, userId: kid, status: 'YES' } });
     await prisma.pushToken.create({ data: { userId: kid, token: `ExponentPushToken[${fx.run}]`, platform: 'ios' } });
@@ -142,6 +158,7 @@ describe('AccountService.convertToManaged', () => {
       managedById: head,
       identityDeleted: true,
       expiredGuardianInvitationIds: [sharedAddress.id],
+      deletedReplyCount: 1,
     });
     expect(deleteUser).toHaveBeenCalledWith(`workos-kid-${fx.run}`);
     expect(revokeAllSessions).not.toHaveBeenCalled();
@@ -192,7 +209,18 @@ describe('AccountService.convertToManaged', () => {
         where: { id: acceptedAtKidAddress.id },
         select: { status: true, invitedEmail: true },
       })
-    ).toEqual({ status: 'ACCEPTED', invitedEmail: kidEmail });
+    ).toEqual({ status: 'ACCEPTED', invitedEmail: `deleted-${acceptedAtKidAddress.id}@invalid` });
+    expect(
+      await prisma.guardianInvitation.findUniqueOrThrow({
+        where: { id: rejectedAtKidAddress.id },
+        select: { status: true, invitedEmail: true },
+      })
+    ).toEqual({ status: 'REJECTED', invitedEmail: `deleted-${rejectedAtKidAddress.id}@invalid` });
+    // Scrubbing the accepted invitation's address leaves the link it created.
+    expect(await prisma.guardian.count({ where: { parentId: parent, childId: kid } })).toBe(1);
+    expect(await prisma.announcementReply.count({ where: { authorId: kid } })).toBe(0);
+    expect(await prisma.announcementReply.count({ where: { authorId: parent } })).toBe(1);
+    expect(await prisma.announcement.count({ where: { id: announcement.id } })).toBe(1);
   });
 
   it('clears an external photo (it may be the identity provider’s copy of the child) without deleting any object', async () => {
@@ -270,7 +298,7 @@ describe('AccountService.convertToManaged', () => {
 
     const result = await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
-    expect(result).toEqual({ success: true, managedById: head, identityDeleted: null, expiredGuardianInvitationIds: [] });
+    expect(result).toEqual({ success: true, managedById: head, identityDeleted: null, expiredGuardianInvitationIds: [], deletedReplyCount: 0 });
     expect(deleteUser).not.toHaveBeenCalled();
     expect(await snapshot(kid)).toMatchObject({ isManaged: true, managedById: head, email: null });
   });
@@ -322,6 +350,7 @@ describe('AccountService.convertToManaged', () => {
       managedById: head,
       identityDeleted: false,
       expiredGuardianInvitationIds: [],
+      deletedReplyCount: 0,
       workosUserId: `workos-wfailKid-${fx.run}`,
       sessions: { revoked: 2, failed: 1 },
     });
@@ -391,7 +420,9 @@ describe('AccountService.convertToManaged', () => {
       await prisma.user.update({ where: { id: kid }, data: { workosUserId: `workos-lone-${fx.run}` } });
       const before = await snapshot(kid);
 
-      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/no team/);
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(
+        /on no team in an active season.*Delete the account/
+      );
       await expectUntouched(kid, before);
     });
 
@@ -459,6 +490,29 @@ describe('AccountService.convertToManaged', () => {
       await expectUntouched(kid, before);
       expect(await prisma.league.count({ where: { id: leagueId } })).toBe(1);
       expect(await prisma.leagueAdmin.count({ where: { userId: kid } })).toBe(1);
+    });
+
+    it('asks for --coach when the active team has staff but no head coach', async () => {
+      const org = await fx.org('noHead', { roleType: 'ASSISTANT_COACH' });
+      const assistant = await fx.user('noHeadAsst', 'COACH');
+      await fx.staff(assistant, org);
+      const kid = await claimedPlayer('noHeadKid', org);
+      const before = await snapshot(kid);
+
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/pass --coach/);
+      await expectUntouched(kid, before);
+    });
+
+    it('refuses an account that posted an announcement', async () => {
+      const org = await fx.org('poster');
+      const head = await fx.user('posterHead', 'COACH');
+      await fx.staff(head, org);
+      const kid = await claimedPlayer('posterKid', org);
+      await prisma.announcement.create({ data: { teamId: org.teamId, authorId: kid, title: `P-${fx.run}`, body: 'hi' } });
+      const before = await snapshot(kid);
+
+      await expect(AccountService.convertToManaged(kid, { actorId: 'operator' })).rejects.toThrow(/adult account/);
+      await expectUntouched(kid, before);
     });
 
     it('refuses a system admin', async () => {
