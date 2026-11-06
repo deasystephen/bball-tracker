@@ -210,7 +210,8 @@ eng-review amendments recorded there).
   once the field loses focus. When the team's free-text `ageGroup` reads as a bracket that can hold
   an under-13 player (`utils/age-group.ts#isUnder13AgeGroup`: `U1`–`U13`, `1U`–`13U`, "Under 12",
   "12 & Under", plurals such as "U12s", Spanish "Sub-12" / "Menores de 12", ages in years whose
-  top is 12 or less such as "Ages 8-10" or "10 & younger", K–6th grade in either order,
+  top is 12 or less such as "Ages 8-10" or "10 & younger" (13 for "13 years and under", like
+  "13 & Under"), K–6th grade in either order,
   Kindergarten, Pre-K, and ranges that start there such as "U12-U14") the question defaults to No.
   U14, 14U, Sub-14, 7th grade and "Ages 10-14" are deliberately left with no default.
   The question cannot be bypassed from the roster: the "Fix email address" sheet only corrects an

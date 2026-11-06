@@ -22,7 +22,10 @@
 
 /** 1–13: the number in U13 / 13U / "13 & under" / Sub-13 means "younger than 13". */
 const UNDER_N = '(1[0-3]|[1-9])';
-/** 1–12: the top of an age-in-years range ("Ages 8-10", "10 & younger") must be 12 or less. */
+/**
+ * 1–12: the top of the other age-in-years forms ("Ages 8-10", "10 & younger",
+ * "9-10 yo") must be 12 or less. Only "N & under" / "N years and under" take 13.
+ */
 const AGE_MAX_12 = '(1[0-2]|[1-9])';
 /** Optional plural or possessive suffix: "U12s", "12U's", "Under 10s". */
 const PLURAL = "(?:'?s)?";
@@ -45,9 +48,12 @@ const YOUTH_AGE_GROUP_PATTERNS: readonly RegExp[] = [
   new RegExp(`\\b${UNDER_N}\\s*-?\\s*(&|and)\\s*-?\\s*under\\b`, 'i'),
   // Ages 8-10, Age 9, Ages 9 to 11 (top 12 or less; "Ages 10-14" and "Ages 10+" do not count)
   new RegExp(`\\bages?\\s*${RANGE_START}${AGE_MAX_12}\\b(?!\\s*(?:-|–|to|\\+))`, 'i'),
-  // 10 years and under, 10 yrs & under, 10 & younger, 10 and younger
+  // 13 years and under, 10 yrs & under: same 1–13 top as "13 & Under", since a
+  // 13-and-under bracket holds 12-year-olds
+  new RegExp(`\\b${UNDER_N}\\s*(?:years?|yrs?)\\s*(?:old\\s*)?(&|and)\\s*under\\b`, 'i'),
+  // 10 & younger, 10 years and younger (top 12 or less)
   new RegExp(
-    `\\b${AGE_MAX_12}\\s*(?:years?|yrs?)?\\s*(?:old\\s*)?(&|and)\\s*(under|younger)\\b`,
+    `\\b${AGE_MAX_12}\\s*(?:years?|yrs?)?\\s*(?:old\\s*)?(&|and)\\s*younger\\b`,
     'i'
   ),
   // 9-10 yo, 10 y.o., 8-10 years, 10 years old (not "10 years and up/older/over")
