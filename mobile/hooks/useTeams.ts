@@ -406,6 +406,10 @@ export function useRolloverTeam() {
       // and a named season may be a new one.
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
       queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
+      // Every carried player's career view gains the new team-season, and a
+      // player's detail lists their teams.
+      queryClient.invalidateQueries({ queryKey: statsKeys.playerOveralls() });
+      queryClient.invalidateQueries({ queryKey: playerKeys.details() });
     },
   });
 }

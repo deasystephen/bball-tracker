@@ -153,6 +153,24 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
   }
 }
 
+export interface TeamSeasonExistsDetails extends Record<string, unknown> {
+  /** The lineage's existing team-season in the requested season; its id only. */
+  teamId: string;
+}
+
+/**
+ * 409 — a season rollover (#461) found the lineage already has a team-season
+ * in that season, and the caller may not read that row in full (no
+ * `canManageRoster` on it, e.g. a coach removed from it). The body names the
+ * row's id and nothing else; a caller who may manage it gets the row itself.
+ */
+export class TeamSeasonExistsError extends DetailedError<TeamSeasonExistsDetails> {
+  constructor(teamId: string) {
+    super('team_season_exists', { teamId }, 'This team already has a team-season in that season', 409);
+    Object.setPrototypeOf(this, TeamSeasonExistsError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

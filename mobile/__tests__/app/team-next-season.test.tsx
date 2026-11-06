@@ -32,6 +32,11 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
 jest.mock('../../hooks/useAccessGuard', () => ({ useAccessGuard: () => true }));
+let mockSeasonList: { seasons: { id: string; name: string }[]; canCreate?: boolean };
+jest.mock('../../hooks/useSeasons', () => ({
+  ...jest.requireActual('../../hooks/useSeasons'),
+  useSeasons: () => ({ data: mockSeasonList, isLoading: false, error: null, refetch: jest.fn() }),
+}));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
   useTeam: () => ({ data: mockTeam, isLoading: false, error: null, refetch: jest.fn() }),
@@ -68,7 +73,10 @@ function teamWithMyRole(type: TeamStaff['role']['type']): Team {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockRouter.canGoBack.mockReturnValue(true);
   mockTeam = teamWithMyRole('HEAD_COACH');
+  // A personal league: only the current season so far, and the owner may create.
+  mockSeasonList = { seasons: [{ id: 'se-1', name: '2026' }], canCreate: true };
   mockRollover.mutateAsync.mockResolvedValue({
     team: { ...mockTeam, id: 't2', seasonId: 'se-2', season: { id: 'se-2', name: '2027', isActive: true, league: { id: 'lg-1', name: 'Mine' } } },
     created: true,
@@ -104,9 +112,12 @@ describe('team screen entry point', () => {
 });
 
 describe('NextSeasonScreen', () => {
-  it('prefills next year, the team name and the age group, and explains what carries over', () => {
-    const { getByTestId, getByText } = render(<NextSeasonScreen />);
+  it('offers "New season" with next year prefilled to a coach who may create one, and explains what carries over', () => {
+    const { getByTestId, getByText, queryByTestId } = render(<NextSeasonScreen />);
 
+    // The current season is not offered.
+    expect(queryByTestId('next-season-option-se-1')).toBeNull();
+    expect(getByTestId('next-season-option-new').props.accessibilityState).toEqual({ selected: true });
     expect(getByTestId('next-season-name-input').props.value).toBe('2027');
     expect(getByTestId('next-season-team-name-input').props.value).toBe('Warriors');
     expect(getByTestId('next-season-age-group-input').props.value).toBe('U12');
@@ -117,7 +128,7 @@ describe('NextSeasonScreen', () => {
     ).toBeTruthy();
   });
 
-  it('submits the edited fields and replaces itself with the new team-season', async () => {
+  it('sends a new season by name with the edited fields and replaces itself with the new team-season', async () => {
     const { getByTestId, getByText } = render(<NextSeasonScreen />);
 
     fireEvent.changeText(getByTestId('next-season-age-group-input'), ' U13 ');
@@ -129,6 +140,48 @@ describe('NextSeasonScreen', () => {
       data: { seasonName: '2027', name: 'Warriors', ageGroup: 'U13' },
     });
     expect(mockShowToast).toHaveBeenCalledWith('2027 started', 'success');
+  });
+
+  it("lets a club coach pick the league's existing season, preselecting the suggested one, and sends its id", async () => {
+    mockTeam = {
+      ...teamWithMyRole('HEAD_COACH'),
+      season: { id: 'se-1', name: 'Spring 2024', isActive: true, league: { id: 'lg-1', name: 'Club' } },
+    };
+    mockSeasonList = {
+      seasons: [
+        { id: 'se-1', name: 'Spring 2024' },
+        { id: 'se-fall', name: 'Fall 2024' },
+        { id: 'se-2', name: 'spring 2025' },
+      ],
+      canCreate: false,
+    };
+    const { getByTestId, getByText, queryByTestId } = render(<NextSeasonScreen />);
+
+    // No free-text season for a coach who cannot create one.
+    expect(queryByTestId('next-season-option-new')).toBeNull();
+    expect(queryByTestId('next-season-name-input')).toBeNull();
+    // "Spring 2025" is suggested; the league's "spring 2025" matches it.
+    expect(getByTestId('next-season-option-se-2').props.accessibilityState).toEqual({ selected: true });
+
+    fireEvent.press(getByText('Fall 2024'));
+    expect(getByTestId('next-season-option-se-fall').props.accessibilityState).toEqual({ selected: true });
+    fireEvent.press(getByText('Start season'));
+
+    await waitFor(() => expect(mockRollover.mutateAsync).toHaveBeenCalled());
+    expect(mockRollover.mutateAsync.mock.calls[0][0]).toEqual({
+      teamId: 't1',
+      data: { seasonId: 'se-fall', name: 'Warriors', ageGroup: 'U12' },
+    });
+  });
+
+  it('tells a club coach to ask a league admin when the league has no other season', () => {
+    mockSeasonList = { seasons: [{ id: 'se-1', name: '2026' }], canCreate: false };
+    const { getByText, getByTestId } = render(<NextSeasonScreen />);
+
+    expect(
+      getByText('This league has no other season yet. Ask a league admin to add next season.')
+    ).toBeTruthy();
+    expect(getByTestId('next-season-submit').props.accessibilityState).toMatchObject({ disabled: true });
   });
 
   it('sends null to clear an emptied age group', async () => {
@@ -154,7 +207,7 @@ describe('NextSeasonScreen', () => {
     expect(mockRouter.replace).toHaveBeenCalledWith('/teams/t2');
   });
 
-  it('refuses an empty season name without calling the API', async () => {
+  it('refuses an empty new-season name without calling the API', async () => {
     mockTeam = { ...teamWithMyRole('HEAD_COACH'), season: { id: 'se-1', name: 'Spring', isActive: true, league: { id: 'lg-1', name: 'Mine' } } };
     const { getByTestId, getByText, findByText } = render(<NextSeasonScreen />);
 
@@ -178,5 +231,18 @@ describe('NextSeasonScreen', () => {
     );
     expect(mockRouter.replace).not.toHaveBeenCalled();
     alert.mockRestore();
+  });
+
+  it.each([
+    ['the header back button', 'Go back'],
+    ['Cancel', 'Cancel'],
+  ])('%s falls back to the team when there is no history (a deep link)', (_label, target) => {
+    mockRouter.canGoBack.mockReturnValue(false);
+    const screen = render(<NextSeasonScreen />);
+
+    fireEvent.press(target === 'Go back' ? screen.getByLabelText('Go back') : screen.getByText('Cancel'));
+
+    expect(mockRouter.replace).toHaveBeenCalledWith('/teams/t1');
+    expect(mockRouter.back).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
  * Team service layer for business logic
  */
 
-import { Prisma, TeamRole } from '@prisma/client';
+import { Prisma, SubscriptionTier, TeamRole } from '@prisma/client';
 import prisma from '../models';
 import {
   CreateTeamInput,
@@ -22,6 +22,7 @@ import {
   BadRequestError,
   ForbiddenError,
   PaymentRequiredError,
+  TeamSeasonExistsError,
 } from '../utils/errors';
 import {
   Feature,
@@ -47,7 +48,7 @@ import {
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isUniqueViolation, orNotFound } from '../utils/prisma-errors';
+import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamRow } from '../utils/team-row-lock';
 
 const TEAM_SUMMARY_SELECT = {
@@ -331,6 +332,80 @@ async function resolvePersonalSeasonId(
   return season.id;
 }
 
+/**
+ * The tier team-cap re-check, run inside a transaction that has already taken
+ * `SELECT ... FOR UPDATE` on the caller's own User row, so concurrent team
+ * creates by one caller serialize and the route middleware's check-then-act
+ * race cannot exceed the cap (audit #49). Shared by `createTeam` and
+ * `rolloverTeam` (#461). System admins bypass; unlimited tiers (every tier
+ * since #445) skip the count, so this only does work once a finite `maxTeams`
+ * is put back in `USAGE_LIMITS`.
+ */
+async function assertUnderTeamCap(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  user: { role: string; subscriptionTier: SubscriptionTier | null; subscriptionExpiresAt: Date | null }
+): Promise<void> {
+  if (user.role === 'ADMIN') {
+    return;
+  }
+  const tier = getEffectiveTier({
+    subscriptionTier: user.subscriptionTier ?? 'FREE',
+    subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+  });
+  if (getUsageLimits(tier).maxTeams === Infinity) {
+    return;
+  }
+  const teamCount = await countDistinctStaffTeams(userId, tx);
+  if (!canCreateTeam(tier, teamCount)) {
+    throw new PaymentRequiredError({
+      feature: featureCode(Feature.UNLIMITED_TEAMS),
+      currentTier: tier,
+      requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
+    });
+  }
+}
+
+/** What a rollover (#461) reads from the source team-season behind its row lock. */
+const ROLLOVER_SOURCE_SELECT = {
+  name: true,
+  seasonId: true,
+  season: { select: { leagueId: true } },
+  lineageId: true,
+  chatLink: true,
+  ageGroup: true,
+  gender: true,
+  roles: { select: ROLLOVER_ROLE_SELECT },
+  staff: {
+    where: { user: { deletedAt: null } },
+    select: { userId: true, role: { select: { name: true } } },
+  },
+  members: {
+    where: { player: { deletedAt: null } },
+    select: { playerId: true, jerseyNumber: true, position: true },
+  },
+} satisfies Prisma.TeamSelect;
+
+/**
+ * The id of the season in `leagueId` whose name matches `name` ignoring case
+ * and surrounding whitespace, or null. Raw SQL on purpose: Prisma's
+ * `mode: 'insensitive'` compiles to an unescaped ILIKE (see
+ * `utils/email-match.ts`), and an equality on `lower(trim())` has no wildcard
+ * to escape. Oldest first when an earlier near-duplicate already exists.
+ */
+async function findSeasonIdByName(
+  db: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  leagueId: string,
+  name: string
+): Promise<string | null> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Season"
+    WHERE "leagueId" = ${leagueId} AND lower(trim("name")) = lower(trim(${name}))
+    ORDER BY "createdAt" ASC
+    LIMIT 1`;
+  return rows[0]?.id ?? null;
+}
+
 /** 400 body for a season move that would put two rows of one lineage in one season. */
 export const SEASON_SIBLING_MESSAGE = 'This team already has a row in that season';
 
@@ -415,21 +490,8 @@ export class TeamService {
     const team = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
 
-      if (user && user.role !== 'ADMIN') {
-        const tier = getEffectiveTier({
-          subscriptionTier: user.subscriptionTier ?? 'FREE',
-          subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
-        });
-        if (getUsageLimits(tier).maxTeams !== Infinity) {
-          const teamCount = await countDistinctStaffTeams(userId, tx);
-          if (!canCreateTeam(tier, teamCount)) {
-            throw new PaymentRequiredError({
-              feature: featureCode(Feature.UNLIMITED_TEAMS),
-              currentTier: tier,
-              requiredTier: getRequiredTier(Feature.UNLIMITED_TEAMS),
-            });
-          }
-        }
+      if (user) {
+        await assertUnderTeamCap(tx, userId, user);
       }
 
       const seasonId =
@@ -794,37 +856,47 @@ export class TeamService {
    *            does not exist yet additionally needs `isLeagueAdmin`, the
    *            `POST /seasons` rule: a staff member in a club league may roll
    *            into a season the club made, never mint one.
-   * The target season must be in the source team's league; moving a team
-   * between clubs is adoption (#459), not rollover.
+   * The target season must be in the source team's league; a `seasonId` in
+   * another league answers the same 404 as an unknown one, so season ids
+   * cannot be probed. Moving between clubs is adoption (#459).
+   *
+   * A named season matches an existing one on `lower(trim(name))`, so
+   * "spring 2025" finds "Spring 2025" instead of minting a near-duplicate.
+   *
+   * The tier team cap applies to the CALLER only, exactly as on `POST /teams`
+   * (`requireTeamCreateLimit` on the route, `assertUnderTeamCap` here behind
+   * the caller's User row lock). Carried coaches other than the caller are not
+   * checked: they did not ask for the team, and refusing the whole rollover
+   * because an assistant is at their cap would block the head coach. Like the
+   * grandfather rule, they keep it and cannot create more.
+   *
+   * Locks, in order: the caller's User row (`FOR UPDATE`, the cap re-check),
+   * the source Team row (`lockTeamRow`, the lock staff removals and role
+   * changes take, so the copy never sees a half-applied staff edit; a
+   * concurrent delete makes it 404), the lineage (`FOR NO KEY UPDATE`, so two
+   * rollovers of one lineage serialize), and the league only when a season is
+   * created (so two case-variant names cannot both be minted). User before
+   * Team matches account deletion.
    *
    * Idempotent: `@@unique([lineageId, seasonId])` holds one row per lineage
-   * per season, so when the lineage already has a row in the target season
-   * that row is returned with `created: false` and nothing is written. Two
-   * concurrent rollovers of one lineage serialize on a row lock on the
-   * lineage, so the second one sees the first's row; there is no P2002 retry.
-   * A P2002 can still come from a concurrent season move (`updateTeam`) into
-   * the same season and answers that path's 400.
+   * per season. When the lineage already has a row in the target season,
+   * nothing is written and that row is returned with `created: false`, but
+   * only to a caller who may manage its roster; anyone else gets 409 naming
+   * just its id (the source-team check says nothing about the other row).
+   * A P2002 on that unique (a concurrent season move into the same season)
+   * answers the season move's 400; any other P2002 propagates.
    */
   static async rolloverTeam(
     teamId: string,
     data: RolloverTeamInput,
     userId: string
   ): Promise<{ team: TeamWithRelations; created: boolean }> {
-    const source = await prisma.team.findUnique({
+    const preview = await prisma.team.findUnique({
       where: { id: teamId },
-      select: {
-        id: true,
-        name: true,
-        seasonId: true,
-        lineageId: true,
-        chatLink: true,
-        ageGroup: true,
-        gender: true,
-        season: { select: { leagueId: true } },
-      },
+      select: { id: true, lineageId: true, season: { select: { leagueId: true } } },
     });
 
-    if (!source) {
+    if (!preview) {
       throw new NotFoundError('Team not found');
     }
 
@@ -833,7 +905,7 @@ export class TeamService {
       throw new ForbiddenError('Only a head coach can start the next season for this team');
     }
 
-    const leagueId = source.season.leagueId;
+    const leagueId = preview.season.leagueId;
 
     // Resolve the target season (by id, or by name within the team's league).
     let targetSeasonId: string | null = null;
@@ -842,28 +914,16 @@ export class TeamService {
         where: { id: data.seasonId },
         select: { id: true, leagueId: true },
       });
-      if (!season) {
+      // Another league's season answers exactly like a missing one.
+      if (!season || season.leagueId !== leagueId) {
         throw new NotFoundError('Season not found');
-      }
-      if (season.leagueId !== leagueId) {
-        throw new BadRequestError("The next season must be in this team's league");
       }
       targetSeasonId = season.id;
     } else {
-      const seasonName = data.seasonName as string;
-      const season = await prisma.season.findUnique({
-        where: { leagueId_name: { leagueId, name: seasonName } },
-        select: { id: true },
-      });
-      if (season) {
-        targetSeasonId = season.id;
-      } else if (!(await isLeagueAdmin(userId, leagueId))) {
+      targetSeasonId = await findSeasonIdByName(prisma, leagueId, data.seasonName as string);
+      if (!targetSeasonId && !(await isLeagueAdmin(userId, leagueId))) {
         throw new ForbiddenError('You do not have permission to create seasons for this league');
       }
-    }
-
-    if (targetSeasonId === source.seasonId) {
-      throw new BadRequestError('The team is already in that season');
     }
 
     // WHERE.
@@ -871,119 +931,150 @@ export class TeamService {
       throw new ForbiddenError('You do not have permission to add teams to this league');
     }
 
-    let result: { teamId: string; created: boolean; seasonId: string; members: number; staffUserIds: string[] };
-    try {
-      result = await prisma.$transaction(async (tx) => {
-        // Serializes every rollover of this lineage. NO KEY UPDATE so the FK
-        // inserts naming the lineage (the team insert below) never wait on it.
-        await tx.$queryRaw`SELECT "id" FROM "TeamLineage" WHERE "id" = ${source.lineageId} FOR NO KEY UPDATE`;
+    const caller = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, subscriptionTier: true, subscriptionExpiresAt: true },
+    });
 
-        // A season created here converges with a concurrent creator through
-        // the native INSERT ... ON CONFLICT (see `resolvePersonalSeasonId`);
-        // the `update` writes the unique key back to itself so a later rename
-        // is never clobbered.
-        const seasonId =
-          targetSeasonId ??
-          (
-            await tx.season.upsert({
-              where: { leagueId_name: { leagueId, name: data.seasonName as string } },
-              create: { leagueId, name: data.seasonName as string, isActive: true },
-              update: { name: data.seasonName as string },
-              select: { id: true },
-            })
-          ).id;
+    const result = await createOrConflict(
+      () =>
+        prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+          if (!(await lockTeamRow(tx, teamId))) {
+            throw new NotFoundError('Team not found');
+          }
+          await tx.$queryRaw`SELECT "id" FROM "TeamLineage" WHERE "id" = ${preview.lineageId} FOR NO KEY UPDATE`;
 
-        const existing = await tx.team.findUnique({
-          where: { lineageId_seasonId: { lineageId: source.lineageId, seasonId } },
-          select: { id: true },
-        });
-        if (existing) {
-          return { teamId: existing.id, created: false, seasonId, members: 0, staffUserIds: [] };
-        }
-
-        const created = await tx.team.create({
-          data: {
-            name: data.name ?? source.name,
-            seasonId,
-            lineageId: source.lineageId,
-            chatLink: source.chatLink,
-            ageGroup: data.ageGroup !== undefined ? data.ageGroup : source.ageGroup,
-            gender: data.gender !== undefined ? data.gender : source.gender,
-          },
-          select: { id: true },
-        });
-
-        // Roles first (custom ones too, with their flags), then staff mapped
-        // onto the new role ids by name (`@@unique([teamId, name])`).
-        const roles = await tx.teamRole.findMany({
-          where: { teamId },
-          select: ROLLOVER_ROLE_SELECT,
-        });
-        await tx.teamRole.createMany({
-          data: roles.map((role) => ({ ...role, teamId: created.id })),
-        });
-        const newRoles = await tx.teamRole.findMany({
-          where: { teamId: created.id },
-          select: { id: true, name: true },
-        });
-        const roleIdByName = new Map(newRoles.map((role) => [role.name, role.id]));
-
-        const staff = await tx.teamStaff.findMany({
-          where: { teamId, user: { deletedAt: null } },
-          select: { userId: true, role: { select: { name: true } } },
-        });
-        const staffRows = staff.flatMap((row) => {
-          const roleId = roleIdByName.get(row.role.name);
-          return roleId ? [{ teamId: created.id, userId: row.userId, roleId }] : [];
-        });
-        if (staffRows.length > 0) {
-          await tx.teamStaff.createMany({ data: staffRows });
-        }
-
-        const members = await tx.teamMember.findMany({
-          where: { teamId, player: { deletedAt: null } },
-          select: { playerId: true, jerseyNumber: true, position: true },
-        });
-        if (members.length > 0) {
-          await tx.teamMember.createMany({
-            data: members.map((member) => ({ ...member, teamId: created.id })),
+          // Re-read behind the lock: a season move or rename that committed
+          // since the pre-checks is what this rollover continues from.
+          const source = await tx.team.findUniqueOrThrow({
+            where: { id: teamId },
+            select: ROLLOVER_SOURCE_SELECT,
           });
-        }
 
-        return {
-          teamId: created.id,
-          created: true,
-          seasonId,
-          members: members.length,
-          staffUserIds: staffRows.map((row) => row.userId),
-        };
-      });
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new BadRequestError(SEASON_SIBLING_MESSAGE);
-      }
-      throw err;
-    }
+          // Every check above ran against the league read before the lock; a
+          // season move into another league since then voids them.
+          if (source.season.leagueId !== leagueId) {
+            throw new BadRequestError('This team moved to another league; reload it and try again');
+          }
+
+          if (caller) {
+            await assertUnderTeamCap(tx, userId, caller);
+          }
+
+          let seasonId = targetSeasonId;
+          let seasonCreated = false;
+          if (!seasonId) {
+            const seasonName = data.seasonName as string;
+            await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${leagueId} FOR NO KEY UPDATE`;
+            seasonId = await findSeasonIdByName(tx, leagueId, seasonName);
+            if (!seasonId) {
+              const created = await tx.season.create({
+                data: { leagueId, name: seasonName, isActive: true },
+                select: { id: true },
+              });
+              seasonId = created.id;
+              seasonCreated = true;
+            }
+          }
+
+          if (seasonId === source.seasonId) {
+            throw new BadRequestError('The team is already in that season');
+          }
+
+          const existing = await tx.team.findUnique({
+            where: { lineageId_seasonId: { lineageId: source.lineageId, seasonId } },
+            select: { id: true },
+          });
+          if (existing) {
+            return {
+              teamId: existing.id,
+              created: false,
+              seasonId,
+              seasonCreated,
+              fromSeasonId: source.seasonId,
+              members: 0,
+              staffUserIds: [] as string[],
+            };
+          }
+
+          const created = await tx.team.create({
+            data: {
+              name: data.name ?? source.name,
+              seasonId,
+              lineageId: source.lineageId,
+              chatLink: source.chatLink,
+              ageGroup: data.ageGroup !== undefined ? data.ageGroup : source.ageGroup,
+              gender: data.gender !== undefined ? data.gender : source.gender,
+            },
+            select: { id: true },
+          });
+
+          // Roles first (custom ones too, with their flags); staff then point
+          // at the new role ids by name (`@@unique([teamId, name])`).
+          const newRoles = await tx.teamRole.createManyAndReturn({
+            data: source.roles.map((role) => ({ ...role, teamId: created.id })),
+            select: { id: true, name: true },
+          });
+          const roleIdByName = new Map(newRoles.map((role) => [role.name, role.id]));
+
+          const staffRows = source.staff.map((row) => {
+            const roleId = roleIdByName.get(row.role.name);
+            if (!roleId) {
+              // Every role was just copied, so this is a broken invariant:
+              // fail the whole rollover rather than ship a team without them.
+              throw new Error('Rollover could not map a staff role onto the new team');
+            }
+            return { teamId: created.id, userId: row.userId, roleId };
+          });
+          if (staffRows.length > 0) {
+            await tx.teamStaff.createMany({ data: staffRows });
+          }
+
+          if (source.members.length > 0) {
+            await tx.teamMember.createMany({
+              data: source.members.map((member) => ({ ...member, teamId: created.id })),
+            });
+          }
+
+          return {
+            teamId: created.id,
+            created: true,
+            seasonId,
+            seasonCreated,
+            fromSeasonId: source.seasonId,
+            members: source.members.length,
+            staffUserIds: staffRows.map((row) => row.userId),
+          };
+        }),
+      SEASON_SIBLING_MESSAGE,
+      { anyOf: ['Team_lineageId_seasonId_key', ['lineageId', 'seasonId']] }
+    );
 
     logger.info('Team rolled over', {
       teamId: result.teamId,
       fromTeamId: teamId,
-      lineageId: source.lineageId,
-      fromSeasonId: source.seasonId,
+      lineageId: preview.lineageId,
+      fromSeasonId: result.fromSeasonId,
       toSeasonId: result.seasonId,
       created: result.created,
-      // True when the season was named rather than picked; the upsert may
-      // have met a season a concurrent request created a moment earlier.
-      seasonUpserted: targetSeasonId === null,
+      seasonCreated: result.seasonCreated,
       members: result.members,
       staff: result.staffUserIds.length,
       userId,
     });
 
-    // Every carried staff member is now staff on one more team in one more
-    // season (#658 usage metrics). Best-effort, never throws.
     if (result.created) {
+      // Every carried staff member is now staff on one more team in one more
+      // season (#658 usage metrics). Best-effort, never throws.
       await invalidateUsage(userId, ...result.staffUserIds);
+    } else if (
+      !(await canAccessTeam(userId, result.teamId)) ||
+      !(await hasTeamPermission(userId, result.teamId, 'canManageRoster'))
+    ) {
+      // The lineage's row in that season is not the caller's to read in full
+      // (roster emails, staff). Name it and nothing else.
+      throw new TeamSeasonExistsError(result.teamId);
     }
 
     const team = await prisma.team.findUnique({

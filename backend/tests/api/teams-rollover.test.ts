@@ -1,16 +1,18 @@
 /**
  * API test for POST /api/v1/teams/:id/rollover with the real TeamService (#461).
  *
- * The request runs validation -> route -> TeamService.rolloverTeam -> (mocked)
- * Prisma, the same path as production. The permission helpers are spied so a
- * test states the caller's standing; what Postgres does with the transaction
- * is covered by `tests/integration/team-rollover.db.test.ts`.
+ * The request runs validation -> route (with `requireTeamCreateLimit`) ->
+ * TeamService.rolloverTeam -> (mocked) Prisma, the same path as production.
+ * The permission helpers are spied so a test states the caller's standing;
+ * what Postgres does with the transaction is covered by
+ * `tests/integration/team-rollover.db.test.ts`.
  */
 
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import * as permissions from '../../src/utils/permissions';
 import { mockPrisma } from '../setup';
+import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 const COACH_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -40,17 +42,19 @@ jest.mock('../../src/services/usage-service', () => ({
 }));
 
 const source = {
-  id: TEAM_ID,
   name: 'Hornets',
   seasonId: SEASON_ID,
+  season: { leagueId: LEAGUE_ID },
   lineageId: LINEAGE_ID,
   chatLink: null,
   ageGroup: 'U12',
   gender: null,
-  season: { leagueId: LEAGUE_ID },
+  roles: [],
+  staff: [],
+  members: [],
 };
 
-/** The source read, the sibling probe and the final read, by query shape. */
+/** The pre-check read, the sibling probe and the final read, by query shape. */
 function mockTeamReads(sibling: { id: string } | null): void {
   (mockPrisma.team.findUnique as jest.Mock).mockImplementation(
     (args: { where: Record<string, unknown>; include?: unknown }) => {
@@ -61,36 +65,51 @@ function mockTeamReads(sibling: { id: string } | null): void {
           name: 'Hornets',
           seasonId: NEXT_SEASON_ID,
           lineageId: LINEAGE_ID,
-          season: { id: NEXT_SEASON_ID, name: '2027', league: { id: LEAGUE_ID, name: 'Casey Coach\'s Teams' } },
+          season: { id: NEXT_SEASON_ID, name: '2027', league: { id: LEAGUE_ID, name: "Casey Coach's Teams" } },
           staff: [],
           members: [],
         });
       }
-      return Promise.resolve(source);
+      return Promise.resolve({ id: TEAM_ID, lineageId: LINEAGE_ID, season: { leagueId: LEAGUE_ID } });
     }
   );
 }
 
-let spies: jest.SpyInstance[] = [];
+/** Season-by-name lookups answer `seasonRows` in order; every lock finds its row. */
+function mockRaw(seasonRows: Array<{ id: string }[]> = [[], []]): void {
+  const queue = [...seasonRows];
+  (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('?').includes('FROM "Season"') ? (queue.shift() ?? []) : [{ id: 'locked' }])
+  );
+}
+
+let spies: Record<string, jest.SpyInstance> = {};
 
 beforeEach(() => {
-  spies = [
-    jest.spyOn(permissions, 'canManageStaff').mockResolvedValue(true),
-    jest.spyOn(permissions, 'canWriteLeague').mockResolvedValue(true),
-    jest.spyOn(permissions, 'isLeagueAdmin').mockResolvedValue(true),
-  ];
+  spies = {
+    canManageStaff: jest.spyOn(permissions, 'canManageStaff').mockResolvedValue(true),
+    canWriteLeague: jest.spyOn(permissions, 'canWriteLeague').mockResolvedValue(true),
+    isLeagueAdmin: jest.spyOn(permissions, 'isLeagueAdmin').mockResolvedValue(true),
+    canAccessTeam: jest.spyOn(permissions, 'canAccessTeam').mockResolvedValue(true),
+    hasTeamPermission: jest.spyOn(permissions, 'hasTeamPermission').mockResolvedValue(true),
+  };
   mockTeamReads(null);
+  mockRaw();
+  (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+    role: 'COACH',
+    subscriptionTier: 'FREE',
+    subscriptionExpiresAt: null,
+  });
+  (mockPrisma.team.findUniqueOrThrow as jest.Mock).mockResolvedValue(source);
   (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-  (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID });
+  (mockPrisma.season.create as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID });
   (mockPrisma.team.create as jest.Mock).mockResolvedValue({ id: NEW_TEAM_ID });
-  (mockPrisma.teamRole.findMany as jest.Mock).mockResolvedValue([]);
-  (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 0 });
-  (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([]);
-  (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.teamRole.createManyAndReturn as jest.Mock).mockResolvedValue([]);
 });
 
 afterEach(() => {
-  for (const spy of spies) spy.mockRestore();
+  for (const spy of Object.values(spies)) spy.mockRestore();
+  (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
 });
 
 afterAll((done) => {
@@ -113,11 +132,9 @@ describe('POST /api/v1/teams/:id/rollover', () => {
       created: true,
       team: { id: NEW_TEAM_ID, seasonId: NEXT_SEASON_ID, lineageId: LINEAGE_ID },
     });
-    // The season name reached the service trimmed.
-    expect(mockPrisma.season.findUnique).toHaveBeenCalledWith({
-      where: { leagueId_name: { leagueId: LEAGUE_ID, name: '2027' } },
-      select: { id: true },
-    });
+    // The trimmed name reached the case-insensitive lookup.
+    const [, ...values] = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    expect(values).toEqual([LEAGUE_ID, '2027']);
     expect(mockPrisma.team.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ ageGroup: 'U13', lineageId: LINEAGE_ID }) })
     );
@@ -126,7 +143,16 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(permissions.canWriteLeague).toHaveBeenCalledWith(COACH_ID, LEAGUE_ID);
   });
 
-  it('answers 200 with created: false and the existing row on a repeat', async () => {
+  it('reuses a differently cased season instead of creating a near-duplicate', async () => {
+    mockRaw([[{ id: NEXT_SEASON_ID }]]);
+
+    const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: 'spring 2025' });
+
+    expect(response.status).toBe(201);
+    expect(mockPrisma.season.create).not.toHaveBeenCalled();
+  });
+
+  it('answers 200 with created: false and the existing row to a coach who manages it', async () => {
     mockTeamReads({ id: NEW_TEAM_ID });
     (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID, leagueId: LEAGUE_ID });
 
@@ -137,6 +163,25 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ success: true, created: false, team: { id: NEW_TEAM_ID } });
     expect(mockPrisma.team.create).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 with only the id when the coach was removed from the existing row', async () => {
+    mockTeamReads({ id: NEW_TEAM_ID });
+    (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID, leagueId: LEAGUE_ID });
+    // Head coach of last season's row, no longer on this season's.
+    spies.canAccessTeam.mockImplementation((_user: string, teamId: string) => Promise.resolve(teamId === TEAM_ID));
+    spies.hasTeamPermission.mockImplementation((_user: string, teamId: string) => Promise.resolve(teamId === TEAM_ID));
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/rollover`)
+      .send({ seasonId: NEXT_SEASON_ID });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: 'This team already has a team-season in that season',
+      code: 'team_season_exists',
+      teamId: NEW_TEAM_ID,
+    });
   });
 
   it.each([
@@ -158,7 +203,7 @@ describe('POST /api/v1/teams/:id/rollover', () => {
   });
 
   it('answers 403 when the caller is not a head coach of the team', async () => {
-    spies[0].mockResolvedValue(false);
+    spies.canManageStaff.mockResolvedValue(false);
 
     const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: '2027' });
 
@@ -167,12 +212,12 @@ describe('POST /api/v1/teams/:id/rollover', () => {
   });
 
   it('answers 403 when a new season is needed and the caller is not a league admin', async () => {
-    spies[2].mockResolvedValue(false);
+    spies.isLeagueAdmin.mockResolvedValue(false);
 
     const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: '2027' });
 
     expect(response.status).toBe(403);
-    expect(mockPrisma.season.upsert).not.toHaveBeenCalled();
+    expect(mockPrisma.season.create).not.toHaveBeenCalled();
   });
 
   it('answers 404 for an unknown team', async () => {
@@ -183,6 +228,17 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(response.status).toBe(404);
   });
 
+  it("answers the same 404 for another league's season as for a missing one", async () => {
+    (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID, leagueId: 'another-league' });
+    const foreign = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonId: NEXT_SEASON_ID });
+
+    (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
+    const missing = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonId: NEXT_SEASON_ID });
+
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+  });
+
   it("answers 400 for the team's own season", async () => {
     (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ id: SEASON_ID, leagueId: LEAGUE_ID });
 
@@ -190,5 +246,19 @@ describe('POST /api/v1/teams/:id/rollover', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('The team is already in that season');
+  });
+
+  describe('with a finite FREE team limit', () => {
+    withFiniteFreeTeamLimit();
+
+    it('answers 402 upgrade_required from requireTeamCreateLimit before the service runs', async () => {
+      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+
+      const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: '2027' });
+
+      expect(response.status).toBe(402);
+      expect(response.body.code).toBe('upgrade_required');
+      expect(mockPrisma.team.findUnique).not.toHaveBeenCalled();
+    });
   });
 });

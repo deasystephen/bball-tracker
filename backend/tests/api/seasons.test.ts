@@ -246,6 +246,16 @@ describe('Seasons API', () => {
       expect(response.body).toMatchObject({ success: true, total: 1, limit: 20, offset: 0 });
     });
 
+    it('passes canCreate through when the service answers it for a leagueId filter (#461)', async () => {
+      const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0, canCreate: false };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
+
+      const response = await request(app).get('/api/v1/seasons').query({ leagueId: TEST_LEAGUE_ID_UUID });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ success: true, total: 1, canCreate: false });
+    });
+
     it('should filter by UUID league ID', async () => {
       const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0 };
       mockSeasonService.listSeasons.mockResolvedValue(page);

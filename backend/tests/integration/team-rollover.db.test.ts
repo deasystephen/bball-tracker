@@ -12,7 +12,7 @@
 jest.unmock('../../src/models');
 
 import prisma from '../../src/models';
-import { BadRequestError, ForbiddenError } from '../../src/utils/errors';
+import { BadRequestError, ForbiddenError, NotFoundError, TeamSeasonExistsError } from '../../src/utils/errors';
 import { TeamService } from '../../src/services/team-service';
 import { StatsService } from '../../src/services/stats-service';
 import { DbFixtures, type Org } from '../support/db-fixtures';
@@ -190,6 +190,49 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     const { team, created } = await TeamService.rolloverTeam(c.org.teamId, { seasonId: existing.id }, c.coach);
     expect(created).toBe(true);
     expect(team.seasonId).toBe(existing.id);
+  });
+
+  it('matches a season name ignoring case and surrounding spaces instead of minting a near-duplicate', async () => {
+    const c = await club('case');
+    const existing = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Spring-${fx.run}` },
+      select: { id: true },
+    });
+
+    const { team } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `  SPRING-${fx.run} ` }, c.coach);
+
+    expect(team.seasonId).toBe(existing.id);
+    expect(await prisma.season.count({ where: { leagueId: c.org.leagueId } })).toBe(2);
+  });
+
+  it("answers another league's season id with the same 404 as a missing one", async () => {
+    const c = await club('foreign');
+    const other = await fx.org('foreign-other');
+
+    await expect(
+      TeamService.rolloverTeam(c.org.teamId, { seasonId: other.seasonId }, c.coach)
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
+  });
+
+  it("names only the existing row's id to a coach who was removed from it", async () => {
+    const c = await club('removed');
+    await prisma.leagueAdmin.deleteMany({ where: { leagueId: c.org.leagueId, userId: c.coach } });
+    const next = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Next-${fx.run}` },
+      select: { id: true },
+    });
+    const { team } = await TeamService.rolloverTeam(c.org.teamId, { seasonId: next.id }, c.coach);
+    await prisma.teamStaff.deleteMany({ where: { teamId: team.id, userId: c.coach } });
+
+    const err = await TeamService.rolloverTeam(c.org.teamId, { seasonId: next.id }, c.coach).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(TeamSeasonExistsError);
+    expect((err as TeamSeasonExistsError).body()).toEqual({
+      error: 'This team already has a team-season in that season',
+      code: 'team_season_exists',
+      teamId: team.id,
+    });
   });
 
   it("keeps last season's stats in the player career view after a rollover", async () => {

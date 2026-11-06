@@ -57,6 +57,13 @@ export interface SeasonsResponse {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * Only on a `leagueId`-filtered list: whether the caller may create a season
+   * in that league (league admin; a personal-league owner is one). A hint for
+   * the rollover form (#461); the API stays the authority. Absent from a
+   * backend that predates it.
+   */
+  canCreate?: boolean;
 }
 
 // Query keys

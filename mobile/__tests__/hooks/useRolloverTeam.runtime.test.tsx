@@ -12,6 +12,7 @@ import { seasonKeys } from '../../hooks/useSeasons';
 import { apiClient } from '../../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../../services/analytics';
 import { createQueryWrapper } from '../utils/queryWrapper';
+import { playerKeys, statsKeys } from '../../hooks/query-keys';
 
 jest.mock('../../services/analytics', () => ({
   ...jest.requireActual('../../services/analytics'),
@@ -32,7 +33,7 @@ const nextTeam: Team = {
 beforeEach(() => jest.clearAllMocks());
 
 describe('useRolloverTeam', () => {
-  it('posts a named season, tracks the event and invalidates lists, usage and seasons', async () => {
+  it('posts a named season, tracks the event and invalidates lists, usage, seasons and careers', async () => {
     mockedPost.mockResolvedValueOnce({ data: { success: true, created: true, team: nextTeam } });
     const { wrapper, client } = createQueryWrapper();
     const invalidate = jest.spyOn(client, 'invalidateQueries');
@@ -54,6 +55,9 @@ describe('useRolloverTeam', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: usageKeys.all });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: seasonKeys.lists() });
+    // Carried players' career views gain the new team-season.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: statsKeys.playerOveralls() });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: playerKeys.details() });
   });
 
   it('reports a repeat (created: false) on a picked season', async () => {

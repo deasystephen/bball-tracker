@@ -5,6 +5,7 @@
  * date-range validation, and delete guards.
  */
 
+import * as permissions from '../../src/utils/permissions';
 import { SeasonService } from '../../src/services/season-service';
 import { mockPrisma } from '../setup';
 import {
@@ -306,7 +307,8 @@ describe('SeasonService', () => {
         COACH
       );
 
-      expect(result).toEqual({ seasons, total: 2, limit: 10, offset: 5 });
+      // A leagueId filter also answers whether the caller may create there (#461).
+      expect(result).toEqual({ seasons, total: 2, limit: 10, offset: 5, canCreate: expect.any(Boolean) });
 
       const findArgs = (mockPrisma.season.findMany as jest.Mock).mock.calls[0][0];
       expect(findArgs.where).toEqual({
@@ -334,6 +336,44 @@ describe('SeasonService', () => {
 
       expect((mockPrisma.season.findMany as jest.Mock).mock.calls[0][0].where).toEqual({
         AND: [{ leagueId: 'league-theirs' }, { leagueId: { in: ['league-mine'] } }],
+      });
+    });
+
+    describe('canCreate (the rollover form\'s "new season" hint, #461)', () => {
+      let isLeagueAdmin: jest.SpyInstance;
+      beforeEach(() => {
+        isLeagueAdmin = jest.spyOn(permissions, 'isLeagueAdmin');
+        (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);
+      });
+      afterEach(() => isLeagueAdmin.mockRestore());
+
+      it('is the POST /seasons rule (isLeagueAdmin) on the filtered league', async () => {
+        readable(['league-1']);
+        isLeagueAdmin.mockResolvedValue(true);
+        await expect(
+          SeasonService.listSeasons({ leagueId: 'league-1', limit: 20, offset: 0 }, COACH)
+        ).resolves.toMatchObject({ canCreate: true });
+        expect(isLeagueAdmin).toHaveBeenCalledWith(COACH.id, 'league-1');
+
+        isLeagueAdmin.mockResolvedValue(false);
+        await expect(
+          SeasonService.listSeasons({ leagueId: 'league-1', limit: 20, offset: 0 }, COACH)
+        ).resolves.toMatchObject({ canCreate: false });
+      });
+
+      it('is absent without a leagueId filter', async () => {
+        readable(['league-1']);
+        const result = await SeasonService.listSeasons({ limit: 20, offset: 0 }, COACH);
+        expect('canCreate' in result).toBe(false);
+        expect(isLeagueAdmin).not.toHaveBeenCalled();
+      });
+
+      it('is false, without asking, for a caller who can read no league', async () => {
+        readable([]);
+        const result = await SeasonService.listSeasons({ leagueId: 'league-1', limit: 20, offset: 0 }, COACH);
+        expect(result).toEqual({ seasons: [], total: 0, limit: 20, offset: 0, canCreate: false });
+        expect(isLeagueAdmin).not.toHaveBeenCalled();
       });
     });
 

@@ -1,9 +1,9 @@
 appId: com.bballtracker.mobile
 ---
 # Season rollover (#461): Frank Vogel (head coach of the seeded Lakers, in
-# "Spring 2024") starts the next season. The form suggests "Spring 2025" (the
-# seed holds that season, team-less: Frank is not a league admin, so he may
-# roll into an existing season but not create one). The new team-season opens
+# "Spring 2024") starts the next season. The form lists the league's seasons
+# and preselects "Spring 2025" (seeded, team-less: Frank is not a league
+# admin, so he picks an existing season and is never offered a new one). The new team-season opens
 # with the roster carried over, and a player's career view still lists last
 # season's Lakers row.
 #
@@ -33,12 +33,14 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "team-start-next-season"
 
-# The form explains what carries over and suggests next year's name.
+# The form explains what carries over and preselects the league's next
+# season. Frank cannot create seasons, so there is no "New season" option.
 - assertVisible: "Start next season"
 - assertVisible: ".*stay with Spring 2024.*"
 - assertVisible:
-    id: "next-season-name-input"
     text: "Spring 2025"
+    selected: true
+- assertNotVisible: "New season"
 - tapOn:
     id: "next-season-submit"
 

@@ -88,6 +88,13 @@ export interface SeasonList {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * Only when the query names a `leagueId`: whether the caller may create a
+   * season there (`isLeagueAdmin`, the `POST /seasons` rule; a personal-league
+   * owner holds that row). The rollover form (#461) offers "new season" on it.
+   * A hint for the client; `POST /seasons` and the rollover stay the authority.
+   */
+  canCreate?: boolean;
 }
 
 export class SeasonService {
@@ -237,7 +244,13 @@ export class SeasonService {
     } else {
       const ids = await getReadableLeagueIds(caller.id);
       if (ids.length === 0) {
-        return { seasons: [], total: 0, limit: query.limit, offset: query.offset };
+        return {
+          seasons: [],
+          total: 0,
+          limit: query.limit,
+          offset: query.offset,
+          ...(query.leagueId ? { canCreate: false } : {}),
+        };
       }
       conditions.push({ leagueId: { in: ids } });
     }
@@ -260,11 +273,16 @@ export class SeasonService {
       }),
     ]);
 
+    // A caller who cannot read the league learns nothing from `false`; the
+    // list above is already empty for them.
+    const canCreate = query.leagueId ? await isLeagueAdmin(caller.id, query.leagueId) : undefined;
+
     return {
       seasons,
       total,
       limit: query.limit,
       offset: query.offset,
+      ...(canCreate !== undefined ? { canCreate } : {}),
     };
   }
 
