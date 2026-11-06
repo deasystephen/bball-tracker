@@ -112,6 +112,21 @@ describe('sweepOrphanedAvatars', () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
+  it('deletes nothing when S3 denies the listing (task role without s3:ListBucket)', async () => {
+    const denied = Object.assign(new Error('Access Denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
+    mockList.mockRejectedValue(denied);
+    const sweeper = new AvatarSweeper();
+
+    await expect(sweeper.runOnce()).resolves.toBeUndefined();
+
+    expect(mockRefs).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      'Avatar sweep failed; nothing deleted this run',
+      expect.objectContaining({ error: 'Access Denied', consecutiveFailures: 1 })
+    );
+  });
+
   it('deletes nothing when the listing fails', async () => {
     mockList.mockRejectedValue(new Error('AccessDenied'));
     await expect(sweepOrphanedAvatars(NOW)).rejects.toThrow('AccessDenied');

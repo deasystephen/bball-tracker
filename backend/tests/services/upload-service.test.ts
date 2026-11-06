@@ -557,6 +557,30 @@ describe('Upload Service', () => {
 
       it('deletes nothing and never throws when listing is denied (no s3:ListBucket)', async () => {
         const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+        // The shape the SDK rejects with when the task role lacks s3:ListBucket.
+        const denied = Object.assign(new Error('Access Denied'), {
+          name: 'AccessDenied',
+          $metadata: { httpStatusCode: 403 },
+        });
+        mockSend.mockRejectedValueOnce(denied);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+
+        await expect(deleteUnreferencedUserUploads(userId)).resolves.toBeUndefined();
+
+        // Nothing deleted, no reference read, one warning.
+        expect(sentOf('ListObjectsV2')).toHaveLength(1);
+        expect(sentOf('DeleteObjects')).toHaveLength(0);
+        expect(sentOf('DeleteObject')).toHaveLength(0);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Account avatar upload cleanup failed (ignored)',
+          expect.objectContaining({ userId, error: 'Access Denied' })
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('stringifies a non-Error listing failure', async () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
         mockSend.mockRejectedValueOnce('AccessDenied');
         await expect(deleteUnreferencedUserUploads(userId)).resolves.toBeUndefined();
         expect(sentOf('DeleteObjects')).toHaveLength(0);

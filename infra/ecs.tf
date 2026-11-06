@@ -162,6 +162,16 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
           "s3:DeleteObject"
         ]
         Resource = "${aws_s3_bucket.avatars.arn}/*"
+      },
+      {
+        # Account deletion and the periodic sweep list avatars/ to find
+        # uploads no profile references (#957). Listing only; avatars/ only.
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.avatars.arn
+        Condition = {
+          StringLike = { "s3:prefix" = ["avatars/*"] }
+        }
       }
     ]
   })
