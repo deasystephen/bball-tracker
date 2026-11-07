@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Email, LegalDocument, Placeholder, Section, SUPPORT_EMAIL } from '../_legal/legal-document';
+import { Email, LegalDocument, Placeholder, Section } from '../_legal/legal-document';
+import { SUPPORT_EMAIL } from '../../lib/site';
 
 /*
  * Terms of Service draft (#25). Needs the owner's, and ideally a lawyer's,

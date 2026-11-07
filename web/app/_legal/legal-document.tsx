@@ -7,15 +7,12 @@ import styles from './legal.module.css';
  * folder: nothing in it becomes a route.
  *
  * Both documents are drafts awaiting the owner's (and ideally a lawyer's)
- * review. Every value the owner still has to supply renders through
+ * review. The contact addresses come from `lib/site.ts`, the one copy in the
+ * web package (pinned to the backend's and the app's by `__tests__/site.test.tsx`). Every value the owner still has to supply renders through
  * `Placeholder` as bracketed, highlighted text, so a search for "[" in the
  * rendered page finds all of them. Remove `DraftNotice` when the owner
  * publishes the final text.
  */
-
-export const PRIVACY_EMAIL = 'privacy@hooplings.com';
-/** Must equal `SUPPORT_EMAIL` in `backend/src/services/mailer/templates/brand.ts` (pinned by a test). */
-export const SUPPORT_EMAIL = 'support@hooplings.com';
 
 export function Placeholder({ children }: { children: ReactNode }) {
   return <mark className={styles.placeholder}>[{children}]</mark>;

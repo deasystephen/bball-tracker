@@ -102,7 +102,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 - **Usage analytics (Amplitude)** are kept for the window of the Amplitude plan. Every event
   (the catalogue in `docs/architecture/analytics.md`: screens viewed as route patterns, and the
   teams, rosters, invitations, games and game events the person created, changed or deleted)
-  carries the internal user id, a device id, `identifierForVendor`, device and OS details,
+  carries the internal user id, a device id, `identifierForVendor` (iOS) or the app set id
+  (Android), device manufacturer and model, OS details,
   language, carrier, and the IP address of the request, from which Amplitude derives **city,
   region and country**. Event properties are internal ids, enums, counts and flags (which fields
   changed, never their values; an error's code, never its message). The user record at Amplitude
@@ -120,7 +121,7 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   `backend/src/utils/log-context.ts`, called by `backend/src/api/auth/middleware.ts`;
   `backend/src/api/middleware/request-logger.ts`). The
   `Account deleted` event logs the deleted user's id, the actor's id and the mode. No line carries
-  a client IP address except `Socket handshake rate limited` (`backend/src/websocket/game-events.ts`,
+  a client IP address except `Socket handshake rate limited` (`backend/src/websocket/rate-limit.ts`,
   a `warn` when a live-game connection is refused by the per-IP limiter). At the
   production log level (`LOG_LEVEL=info` in `infra/task-definition.json`) log lines carry no name
   and no secret URL (paths and query strings go through `utils/redact.ts`), and email addresses

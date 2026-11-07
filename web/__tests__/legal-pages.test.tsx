@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { PRIVACY_EMAIL, SUPPORT_EMAIL } from '../app/_legal/legal-document';
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from '../lib/site';
 import PrivacyPolicyPage, { metadata as privacyMetadata } from '../app/privacy/page';
 import TermsOfServicePage, { metadata as termsMetadata } from '../app/terms/page';
 
@@ -29,7 +29,6 @@ function runbookRetention(): string {
   return runbook.slice(start, end === -1 ? undefined : end);
 }
 
-const RETIRED_BRANDS = [/capy[\s_-]*hoops/i, /basketball[\s_-]*tracker/i];
 
 describe('legal pages (#25)', () => {
   it('sets page titles', () => {
@@ -37,18 +36,13 @@ describe('legal pages (#25)', () => {
     expect(termsMetadata.title).toBe('Terms of Service | Hooplings');
   });
 
-  it('uses the backend support address', () => {
-    const brand = readFileSync(resolve(REPO_ROOT, 'backend/src/services/mailer/templates/brand.ts'), 'utf8');
-    expect(brand).toContain(`SUPPORT_EMAIL = '${SUPPORT_EMAIL}'`);
-  });
-
+  // Retired brand names are the mobile brand guard's job (`mobile/__tests__/i18n/brand-guard.test.ts`
+  // scans `web/app` and `web/lib`); one list, not two.
   it.each([
     ['privacy', PrivacyPolicyPage],
     ['terms', TermsOfServicePage],
-  ] as const)('%s page shows the effective-date placeholder and no retired brand', (_name, page) => {
-    const html = render(page);
-    expect(html).toContain('[EFFECTIVE DATE]');
-    for (const pattern of RETIRED_BRANDS) expect(html).not.toMatch(pattern);
+  ] as const)('%s page shows the effective-date placeholder', (_name, page) => {
+    expect(render(page)).toContain('[EFFECTIVE DATE]');
   });
 
   it('privacy page names the contacts and every service provider', () => {

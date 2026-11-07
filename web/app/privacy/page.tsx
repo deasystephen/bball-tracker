@@ -1,14 +1,6 @@
 import type { Metadata } from 'next';
-import {
-  Email,
-  LegalDocument,
-  Placeholder,
-  PRIVACY_EMAIL,
-  Section,
-  Summary,
-  SUPPORT_EMAIL,
-  Table,
-} from '../_legal/legal-document';
+import { Email, LegalDocument, Placeholder, Section, Summary, Table } from '../_legal/legal-document';
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from '../../lib/site';
 
 /*
  * Privacy policy draft (#25). Every fact below is taken from the code or from
@@ -109,7 +101,8 @@ export default function PrivacyPolicyPage() {
           </li>
           <li>
             <strong>Network address:</strong> like any internet service, our servers see the IP address of each
-            request. The API uses it in memory to limit how many requests one address can make. It writes the
+            request. The API keeps a count per address in a short-lived store, for the length of the rate-limit
+            window (fifteen minutes at most), to limit how many requests one address can make. It writes the
             address to its logs only when it refuses a live-game connection for going over that limit. Our analytics
             provider receives it and derives an approximate city, region and country from it (see{' '}
             <a href="#analytics">section 6</a>). The providers your device contacts directly (our sign-in page, error
@@ -365,7 +358,7 @@ export default function PrivacyPolicyPage() {
         <p>Deleting an account removes:</p>
         <ul>
           <li>your sign-in, email address, name and current photo (we also try to delete the photo file);</li>
-          <li>your push notification tokens and calendar subscription links;</li>
+          <li>your push notification tokens;</li>
           <li>your staff roles and league administrator roles, and your RSVPs;</li>
           <li>your guardian links, in both directions;</li>
           <li>
