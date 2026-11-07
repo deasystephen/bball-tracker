@@ -31,9 +31,11 @@ jest.mock('@aws-sdk/s3-presigned-post', () => ({
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { logger } from '../../src/utils/logger';
 import {
+  assertAvatarStorageConfig,
   assertOwnUploadUrl,
   generateAvatarUploadUrl,
   deleteAvatar,
+  deleteAvatarObject,
   deletePreviousAvatar,
   discardOwnAvatar,
   isManagedAvatarUrl,
@@ -147,6 +149,42 @@ describe('Upload Service', () => {
       expect(isManagedAvatarUrl('https://workos.example/photo.jpg')).toBe(false);
       expect(isManagedAvatarUrl(null)).toBe(false);
       expect(isManagedAvatarUrl(undefined)).toBe(false);
+    });
+  });
+
+  describe('deleteAvatarObject (#983)', () => {
+    const a = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
+
+    it('deletes an issued key in our bucket and says so', async () => {
+      await expect(deleteAvatarObject(`${BUCKET_BASE}${a}/pic.jpg`)).resolves.toBe('deleted');
+      expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${a}/pic.jpg` }]);
+    });
+
+    it('reports a failed S3 delete instead of throwing', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      mockSend.mockRejectedValueOnce(new Error('boom'));
+      await expect(deleteAvatarObject(`${BUCKET_BASE}${a}/pic.jpg`)).resolves.toBe('failed');
+      expect(warnSpy).toHaveBeenCalledWith('Failed to delete avatar object', expect.objectContaining({ error: 'boom' }));
+      warnSpy.mockRestore();
+    });
+
+    it('answers not_ours for an external URL, no URL, or a key outside the issued shape', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      await expect(deleteAvatarObject('https://workos.example/photo.jpg')).resolves.toBe('not_ours');
+      await expect(deleteAvatarObject(null)).resolves.toBe('not_ours');
+      await expect(deleteAvatarObject(`${BUCKET_BASE}${a}/extra/pic.jpg`)).resolves.toBe('not_ours');
+      expect(deleteObjectCalls).toHaveLength(0);
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('assertAvatarStorageConfig (#983)', () => {
+    it('throws when S3_AVATARS_BUCKET is unset', () => {
+      expect(() => assertAvatarStorageConfig({})).toThrow(/S3_AVATARS_BUCKET/);
+    });
+
+    it('passes when it is set', () => {
+      expect(() => assertAvatarStorageConfig({ S3_AVATARS_BUCKET: 'bucket' })).not.toThrow();
     });
   });
 
