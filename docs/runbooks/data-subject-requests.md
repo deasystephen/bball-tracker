@@ -216,10 +216,15 @@ itself: an answer under the minimum un-claims a rostered player's account or del
 and the WorkOS user, with no operator step. Two cases still reach you: a report from someone else
 (the steps below), and a Sentry event `flow: age-refusal` ("Under-age answer on a sole head coach
 account needs an operator"): the holder answered under the minimum but is the only head coach of a
-team in an active season, so the account could not be deleted automatically. Its session is
-revoked and the row stays gated (`ageConfirmedAt` null, every request 403), so nothing more is
-collected; within 5 business days run step 4(b) after handing the team over (or deleting it) as
-for any last-head-coach refusal, and do not ask the child for anything.
+team in an active season, so the account could not be deleted automatically. The row is marked
+`ageRefusedAt` (every request 403 whatever `AGE_GATE_ENFORCED` says, a second answer refused
+unread) and its session revoked, so nothing more is collected; within 5 business days run step
+4(b) after handing the team over (or deleting it) as for any last-head-coach refusal, and do not
+ask the child for anything. The conversion script refuses an account with a staff role
+(`adult_account`), so (b) is the path; the tombstone clears the marker. If the report turns out
+to be a typo by an adult (the most likely cause for a head coach), clear it by hand:
+`UPDATE "User" SET "ageRefusedAt" = NULL WHERE "id" = '<userId>'` after the person confirms their
+age in writing from the account's address; the next sign-in asks the question again.
 
 1. **Acknowledge within 1 business day.** Reply to the reporter that we have received the report
    and will act within 5 business days. Do not ask the child for anything.
@@ -279,8 +284,8 @@ for any last-head-coach refusal, and do not ask the child for anything.
        child was waiting on this child to become that child's guardian;
      - an **empty** personal league the child once created.
 
-     **Reset:** role back to `PLAYER`, subscription to free, `ageConfirmedAt` cleared (the next
-     person to claim the row answers the age question again, #981).
+     **Reset:** role back to `PLAYER`, subscription to free, `ageConfirmedAt` and `ageRefusedAt`
+     cleared (the next person to claim the row answers the age question again, #981).
 
      **Kept:** the **name** (a roster record needs one, and it is what the coach entered or sees on
      the roster; the coach can edit it), roster memberships, game events, statistics, RSVPs,

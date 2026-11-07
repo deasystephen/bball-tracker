@@ -60,6 +60,7 @@ import {
   LastHeadCoachError,
   NotFoundError,
   UnauthorizedError,
+  UnderMinimumAgeError,
 } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
@@ -320,6 +321,7 @@ export class AccountService {
             subscriptionTier: 'FREE',
             subscriptionExpiresAt: null,
             ageConfirmedAt: null,
+            ageRefusedAt: null,
             deletedAt: new Date(),
           },
         });
@@ -380,16 +382,20 @@ export class AccountService {
    */
   static async confirmAge(userId: string): Promise<void> {
     const updated = await prisma.user.updateMany({
-      where: { id: userId, deletedAt: null, ageConfirmedAt: null },
+      where: { id: userId, deletedAt: null, ageConfirmedAt: null, ageRefusedAt: null },
       data: { ageConfirmedAt: new Date() },
     });
     if (updated.count === 0) {
       const row = await prisma.user.findUnique({
         where: { id: userId },
-        select: { deletedAt: true, ageConfirmedAt: true },
+        select: { deletedAt: true, ageConfirmedAt: true, ageRefusedAt: true },
       });
       if (!row || row.deletedAt !== null) {
         throw new UnauthorizedError('User not found');
+      }
+      if (row.ageRefusedAt !== null) {
+        // The earlier answer was final; the operator finishes by the runbook.
+        throw new UnderMinimumAgeError();
       }
       return;
     }
@@ -400,9 +406,12 @@ export class AccountService {
    * The age screen's "under the minimum" branch (#981): undo the sign-in so
    * that nothing collected from the child is kept, then end the login.
    *
-   *   $transaction (the row FOR UPDATE)
+   *   $transaction (the player, and the coach who would take the record,
+   *   FOR UPDATE in one id-ordered statement; the branch is read before and
+   *   again under the lock, as convertToManaged does)
    *   ┌──────────────────────────────────────────────────────────────────┐
    *   │ no live row ───────────────────────────────────────────► 404      │
+   *   │ already refused, awaiting the operator ────────────────► no-op    │
    *   │ adult signals (assertPlayerAccount), or on no roster ──► DELETE   │
    *   │ a player on a roster ──► un-claim (unclaimManagedRow) ─► UNCLAIMED│
    *   │     managing coach: the one head coach of the player's active-    │
@@ -411,10 +420,11 @@ export class AccountService {
    *   DELETE runs `deleteAccount` in `self` mode after the decision commits:
    *   erased when nothing references the row (a sign-up that answered the
    *   question and left), tombstoned otherwise. A sole head coach of an
-   *   active-season team cannot be deleted that way; the session is revoked,
-   *   the row stays gated (`ageConfirmedAt` null) and an operator finishes by
-   *   the runbook: outcome `pending_operator`, logged at error and sent to
-   *   Sentry.
+   *   active-season team cannot be deleted that way; the answer is recorded
+   *   as final (`ageRefusedAt`: the gate stays shut and a second answer is
+   *   refused, so the live access token cannot confirm its way back in), the
+   *   session is revoked and an operator finishes by the runbook: outcome
+   *   `pending_operator`, logged at error and sent to Sentry.
    *   After an un-claim commits, best-effort: the cleared photo's S3 object,
    *   then the WorkOS user (a 404 counts as gone), falling back to revoking
    *   every session.
@@ -425,43 +435,61 @@ export class AccountService {
    */
   static async refuseUnderage(userId: string, options: RefuseUnderageOptions = {}): Promise<RefuseUnderageResult> {
     const decision = await prisma.$transaction(async (tx) => {
+      // 1. Unlocked: which branch, and which coach would take the record. The
+      // coach must be named in the lock statement, so it is resolved first and
+      // re-checked under the lock (the order convertToManaged uses).
+      const preview = await tx.user.findUnique({
+        where: { id: userId },
+        select: { deletedAt: true, ageRefusedAt: true },
+      });
+      if (!preview || preview.deletedAt !== null) {
+        throw new NotFoundError('Account not found');
+      }
+      if (preview.ageRefusedAt !== null) {
+        // Already refused and awaiting the operator: nothing more to undo.
+        return { kind: 'already_refused' as const };
+      }
+      const branch = await underageBranch(tx, userId);
+      const candidateCoach = branch.kind === 'unclaim' ? branch.managedById : null;
+
+      // 2. Lock the player (and the coach, when there is one) in one id-ordered
+      // statement, the lock order deletion and conversion use.
+      const ids = candidateCoach ? [userId, candidateCoach] : [userId];
       const locked = await tx.$queryRaw<LockedUserRow[]>`
         SELECT "id", "email", "workosUserId", "isManaged", "profilePictureUrl", "deletedAt"
         FROM "User"
-        WHERE "id" = ${userId}
+        WHERE "id" IN (${Prisma.join(ids)})
+        ORDER BY "id"
         FOR UPDATE`;
-      const row = locked[0];
+      const row = locked.find((candidate) => candidate.id === userId);
       if (!row || row.deletedAt !== null) {
         throw new NotFoundError('Account not found');
       }
 
-      const signals = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT });
-      let emptyPersonalLeagueId: string | null;
-      try {
-        emptyPersonalLeagueId = assertPlayerAccount(signals);
-      } catch (error) {
-        if (error instanceof ConvertRefusedError) {
-          return { kind: 'delete' as const };
-        }
-        throw error;
-      }
-      const onRoster = (await tx.teamMember.count({ where: { playerId: userId } })) > 0;
-      if (!onRoster) {
+      // 3. The branch again, under the lock.
+      const settled = await underageBranch(tx, userId);
+      if (settled.kind === 'delete') {
         return { kind: 'delete' as const };
       }
-
-      let managedById: string | null = null;
-      try {
-        managedById = await resolveManagingCoach(tx, userId, undefined);
-      } catch (error) {
-        if (!(error instanceof ConvertRefusedError)) throw error;
-      }
-      if (emptyPersonalLeagueId !== null) {
-        await deletePersonalLeagueIfEmpty(tx, emptyPersonalLeagueId, 0);
+      // The coach qualifies only if the lock caught a live row and the choice
+      // held; otherwise the record is kept with no manager (an ADMIN can edit
+      // it), never refused: the under-age answer must land.
+      const coach = locked.find((candidate) => candidate.id === settled.managedById);
+      const managedById =
+        settled.managedById !== null && settled.managedById === candidateCoach && coach && coach.deletedAt === null
+          ? settled.managedById
+          : null;
+      if (settled.emptyPersonalLeagueId !== null) {
+        await deletePersonalLeagueIfEmpty(tx, settled.emptyPersonalLeagueId, 0);
       }
       const unclaimed = await unclaimManagedRow(tx, row, managedById);
       return { kind: 'unclaimed' as const, ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
+
+    if (decision.kind === 'already_refused') {
+      logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', identityDeleted: false, repeat: true });
+      return { outcome: 'pending_operator', identityDeleted: false };
+    }
 
     if (decision.kind === 'delete') {
       try {
@@ -476,7 +504,13 @@ export class AccountService {
       } catch (error) {
         if (!(error instanceof LastHeadCoachError)) throw error;
         // The account cannot go yet (live teams would be left headless). The
-        // gate keeps it unusable; the operator takes it from here.
+        // answer is recorded as final: the gate stays shut on every route and
+        // a second answer is refused, so the holder cannot confirm their way
+        // back in while the access token lives. The operator takes it from here.
+        await prisma.user.updateMany({
+          where: { id: userId, deletedAt: null },
+          data: { ageRefusedAt: new Date() },
+        });
         let sessionRevoked = false;
         if (options.sessionId) {
           try {
@@ -509,51 +543,22 @@ export class AccountService {
       logger.error('Failed to delete the photo object after an under-age un-claim', { userId });
     }
 
-    let identityDeleted = decision.workosUserId === null;
-    if (decision.workosUserId !== null) {
-      try {
-        await WorkOSService.deleteUser(decision.workosUserId);
-        identityDeleted = true;
-      } catch (error) {
-        if ((error as { status?: unknown }).status === 404) {
-          identityDeleted = true;
-        } else {
-          logger.error('Failed to delete WorkOS user after an under-age un-claim', {
-            userId,
-            workosUserId: decision.workosUserId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          captureException(error, { flow: 'age-refusal', userId });
-          try {
-            const sessions = await WorkOSService.revokeAllSessions(decision.workosUserId);
-            if (sessions.failed > 0) {
-              logger.error('Failed to revoke some WorkOS sessions after an under-age un-claim', {
-                userId,
-                workosUserId: decision.workosUserId,
-                ...sessions,
-              });
-            }
-          } catch (revokeError) {
-            logger.error('Failed to list WorkOS sessions after an under-age un-claim', {
-              userId,
-              workosUserId: decision.workosUserId,
-              error: revokeError instanceof Error ? revokeError.message : String(revokeError),
-            });
-          }
-        }
-      }
-    }
+    const identity: IdentityTeardown =
+      decision.workosUserId === null
+        ? { identityDeleted: true, sessions: null }
+        : await deleteIdentityOrRevokeSessions(decision.workosUserId, { userId, flow: 'age-refusal' });
 
     logger.info('Under-age answer refused', {
       userId,
       outcome: 'unclaimed',
       managedById: decision.managedById,
-      identityDeleted,
+      identityDeleted: identity.identityDeleted,
+      ...(identity.identityNote && { identityNote: identity.identityNote }),
       photoDeletion,
       deletedReplyCount: decision.deletedReplyCount,
       expiredGuardianInvitations: decision.expiredGuardianInvitations.length,
     });
-    return { outcome: 'unclaimed', identityDeleted };
+    return { outcome: 'unclaimed', identityDeleted: identity.identityDeleted };
   }
 
   /**
@@ -736,47 +741,10 @@ export class AccountService {
     // an unclaimed one. The id is not personal data; it is logged on failure
     // so the operator can finish the deletion without the terminal output.
     const { workosUserId } = committed;
-    let identityDeleted = false;
-    let identityNote: IdentityNote | undefined;
-    let sessions: SessionRevocation | null = null;
-    try {
-      await WorkOSService.deleteUser(workosUserId);
-      identityDeleted = true;
-    } catch (error) {
-      if ((error as { status?: unknown }).status === 404) {
-        // WorkOS does not know this id: already deleted, or a Staging id left
-        // on the row after the production-key cutover (#24). Nothing is left
-        // to delete, so nothing to alarm on.
-        identityDeleted = true;
-        identityNote = 'not_found_at_workos';
-      } else {
-        logger.error('Failed to delete WorkOS user after converting an account to managed', {
-          userId,
-          workosUserId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        captureException(error, { flow: 'convert-to-managed', userId });
-        // The row no longer resolves the identity, but a refresh token would
-        // still mint access tokens until WorkOS ends the session.
-        try {
-          sessions = await WorkOSService.revokeAllSessions(workosUserId);
-        } catch (revokeError) {
-          logger.error('Failed to list WorkOS sessions after converting an account to managed', {
-            userId,
-            workosUserId,
-            error: revokeError instanceof Error ? revokeError.message : String(revokeError),
-          });
-        }
-        if (sessions !== null && sessions.failed > 0) {
-          logger.error('Failed to revoke some WorkOS sessions after converting an account to managed', {
-            userId,
-            workosUserId,
-            revoked: sessions.revoked,
-            failed: sessions.failed,
-          });
-        }
-      }
-    }
+    const { identityDeleted, identityNote, sessions } = await deleteIdentityOrRevokeSessions(workosUserId, {
+      userId,
+      flow: 'convert-to-managed',
+    });
 
     logger.info('Account converted to managed', {
       userId,
@@ -872,6 +840,91 @@ export interface ConvertToManagedResult {
    * sessions could not even be listed. Fully revoked only when `failed` is 0.
    */
   sessions?: SessionRevocation | null;
+}
+
+/** What `deleteIdentityOrRevokeSessions` reports. */
+export interface IdentityTeardown {
+  identityDeleted: boolean;
+  identityNote?: IdentityNote;
+  /** Only after a failed deletion: the fallback's counts, `null` when the sessions could not be listed. */
+  sessions: SessionRevocation | null;
+}
+
+/**
+ * End a WorkOS identity after the row let go of it (the conversion and the
+ * age screen's un-claim share this; deletion revokes one session instead,
+ * `deleteAccount`). Delete the user (a 404 counts as gone: already deleted, or
+ * a Staging id left after the production-key cutover, #24); on any other
+ * failure report to Sentry and revoke every session, so a refresh token cannot
+ * mint access tokens while the id is still known to WorkOS. Every failure is
+ * logged with the id (not personal data) so the operator can finish by hand.
+ */
+async function deleteIdentityOrRevokeSessions(
+  workosUserId: string,
+  context: { userId: string; flow: 'convert-to-managed' | 'age-refusal' }
+): Promise<IdentityTeardown> {
+  const { userId, flow } = context;
+  try {
+    await WorkOSService.deleteUser(workosUserId);
+    return { identityDeleted: true, sessions: null };
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 404) {
+      return { identityDeleted: true, identityNote: 'not_found_at_workos', sessions: null };
+    }
+    logger.error('Failed to delete WorkOS user after releasing the account', {
+      userId,
+      workosUserId,
+      flow,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    captureException(error, { flow, userId });
+    let sessions: SessionRevocation | null = null;
+    try {
+      sessions = await WorkOSService.revokeAllSessions(workosUserId);
+    } catch (revokeError) {
+      logger.error('Failed to list WorkOS sessions after releasing the account', {
+        userId,
+        workosUserId,
+        flow,
+        error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+      });
+    }
+    if (sessions !== null && sessions.failed > 0) {
+      logger.error('Failed to revoke some WorkOS sessions after releasing the account', {
+        userId,
+        workosUserId,
+        flow,
+        revoked: sessions.revoked,
+        failed: sessions.failed,
+      });
+    }
+    return { identityDeleted: false, sessions };
+  }
+}
+
+/** Which way the age screen's under-minimum branch goes for a row (#981); read unlocked, then again under the lock. */
+type UnderageBranch =
+  | { kind: 'delete' }
+  | { kind: 'unclaim'; managedById: string | null; emptyPersonalLeagueId: string | null };
+
+async function underageBranch(tx: Prisma.TransactionClient, userId: string): Promise<UnderageBranch> {
+  const signals = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT });
+  let emptyPersonalLeagueId: string | null;
+  try {
+    emptyPersonalLeagueId = assertPlayerAccount(signals);
+  } catch (error) {
+    if (error instanceof ConvertRefusedError) return { kind: 'delete' };
+    throw error;
+  }
+  const onRoster = (await tx.teamMember.count({ where: { playerId: userId } })) > 0;
+  if (!onRoster) return { kind: 'delete' };
+  let managedById: string | null = null;
+  try {
+    managedById = await resolveManagingCoach(tx, userId, undefined);
+  } catch (error) {
+    if (!(error instanceof ConvertRefusedError)) throw error;
+  }
+  return { kind: 'unclaim', managedById, emptyPersonalLeagueId };
 }
 
 /** The checks that hold for a row about to be converted, before and under its lock. */
@@ -1106,6 +1159,7 @@ export async function unclaimManagedRow(
       // The age answer belonged to the login that is being undone (#981);
       // the next person to claim the row answers again.
       ageConfirmedAt: null,
+      ageRefusedAt: null,
       ...(clearPhoto && { profilePictureUrl: null }),
     },
   });

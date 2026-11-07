@@ -12,11 +12,12 @@
  *
  * Old enough: the store flips `ageConfirmed`, the held-back sign-in analytics
  * fire, and the usual post-login route follows. Under the minimum: the server
- * has already undone the sign-in; the screen explains and Done ends the
- * session with no analytics event at all.
+ * has already undone the sign-in; the session ends at once with no analytics
+ * event at all (`clearSession('age_refused')`, which `useAuthRedirect` does not
+ * answer with `/login`), the screen explains, and Done goes to sign-in.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, BackHandler, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +42,12 @@ export default function AgeConfirmationScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthUser();
   const { clearSession } = useAuthActions();
+  // The user the answer is for; kept so the route after a confirmation can be
+  // computed even if the store changed meanwhile.
+  const userRef = useRef(user);
+  useEffect(() => {
+    if (user) userRef.current = user;
+  }, [user]);
   const confirmAge = useConfirmAge();
   const [month, setMonth] = useState<number | null>(null);
   const [yearText, setYearText] = useState('');
@@ -80,9 +87,14 @@ export default function AgeConfirmationScreen() {
     try {
       await confirmAge.mutateAsync({ birthMonth: month, birthYear: year });
       // The store now says confirmed; the role and name steps follow as usual.
-      router.replace(await postLoginRoute({ ...user!, ageConfirmed: true }));
+      const confirmed = userRef.current;
+      router.replace(await postLoginRoute(confirmed ? { ...confirmed, ageConfirmed: true } : null));
     } catch (error) {
       if (isUnderMinimumAgeError(error)) {
+        // The account is gone on the server. End the session now, so no
+        // background request meets a 401 and records a sign-out on an
+        // identity that was never recorded; the explanation stays on screen.
+        clearSession('age_refused');
         setStep('refused');
         return;
       }
@@ -92,8 +104,7 @@ export default function AgeConfirmationScreen() {
   };
 
   const handleDone = () => {
-    // The account is gone on the server. No event is recorded for it.
-    clearSession('age_refused');
+    router.replace('/login');
   };
 
   if (step === 'refused') {

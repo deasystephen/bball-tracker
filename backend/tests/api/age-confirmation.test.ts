@@ -30,7 +30,7 @@ const USER_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef12';
 const AUTH = { Authorization: 'Bearer valid-token' };
 
 /** The row `authenticate` resolves (`AUTH_USER_SELECT`), unconfirmed unless told otherwise. */
-function authRow(ageConfirmedAt: Date | null = null): Record<string, unknown> {
+function authRow(ageConfirmedAt: Date | null = null, ageRefusedAt: Date | null = null): Record<string, unknown> {
   return {
     id: USER_ID,
     email: 'newcomer@example.test',
@@ -39,6 +39,7 @@ function authRow(ageConfirmedAt: Date | null = null): Record<string, unknown> {
     subscriptionTier: 'FREE',
     subscriptionExpiresAt: null,
     ageConfirmedAt,
+    ageRefusedAt,
     // GET /auth/me re-reads the row through SESSION_USER_SELECT.
     profilePictureUrl: null,
     notifyOnReplies: true,
@@ -184,6 +185,20 @@ describe('the age gate and POST /api/v1/auth/age-confirmation', () => {
           code: 'under_minimum_age',
         });
       }
+    });
+
+    it('refuses a second answer, whatever it says, once a refusal awaits the operator (no retry within the token lifetime)', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(authRow(null, new Date()));
+      const res = await request(app).post('/api/v1/auth/age-confirmation').set(AUTH).send(ADULT);
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('under_minimum_age');
+      expect(mockAccount.confirmAge).not.toHaveBeenCalled();
+      expect(mockAccount.refuseUnderage).not.toHaveBeenCalled();
+      // And every other route stays shut, flag or no flag.
+      process.env.AGE_GATE_ENFORCED = 'false';
+      const gated = await request(app).get('/api/v1/auth/entitlements').set(AUTH);
+      expect(gated.status).toBe(403);
+      expect(gated.body.code).toBe('age_confirmation_required');
     });
 
     it('is a no-op 200 once the account is confirmed', async () => {

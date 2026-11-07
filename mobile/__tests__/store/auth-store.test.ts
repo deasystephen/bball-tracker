@@ -151,6 +151,31 @@ describe('auth-store', () => {
       expect(trackEvent).not.toHaveBeenCalled();
     });
 
+    it('completeAgeConfirmation on an account that was already identified (asked once after the column arrived) records nothing again', () => {
+      useAuthStore.setState({
+        user: makeUser({ ageConfirmed: false }),
+        isAuthenticated: true,
+        accessToken: 't',
+        isLoading: false,
+        pendingLogin: null,
+      });
+      useAuthStore.getState().completeAgeConfirmation();
+      expect(useAuthStore.getState().user?.ageConfirmed).toBe(true);
+      expect(identifyUser).not.toHaveBeenCalled();
+      expect(trackEvent).not.toHaveBeenCalled();
+    });
+
+    it('clearSession records why the session ended, for the redirect hook', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: false }));
+      useAuthStore.getState().setAuthToken('t');
+      useAuthStore.getState().clearSession('age_refused');
+      expect(useAuthStore.getState().lastSessionEnd).toBe('age_refused');
+      useAuthStore.getState().setUser(makeUser());
+      useAuthStore.getState().setAuthToken('t');
+      useAuthStore.getState().clearSession('user');
+      expect(useAuthStore.getState().lastSessionEnd).toBe('user');
+    });
+
     it('a confirmed user is identified at setUser as before, with nothing pending', () => {
       useAuthStore.getState().setUser(makeUser({ ageConfirmed: true }));
       expect(identifyUser).toHaveBeenCalledTimes(1);

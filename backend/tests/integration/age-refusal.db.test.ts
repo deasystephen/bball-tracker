@@ -58,6 +58,7 @@ const STATE_SELECT = {
   isManaged: true,
   managedById: true,
   ageConfirmedAt: true,
+  ageRefusedAt: true,
   deletedAt: true,
   name: true,
 } as const;
@@ -143,6 +144,7 @@ describe('AccountService.refuseUnderage', () => {
       isManaged: true,
       managedById: head,
       ageConfirmedAt: null,
+      ageRefusedAt: null,
       deletedAt: null,
       name: `unclaimKid-${fx.run}`,
     });
@@ -234,12 +236,69 @@ describe('AccountService.refuseUnderage', () => {
     expect(await prisma.user.findUniqueOrThrow({ where: { id: head }, select: STATE_SELECT })).toMatchObject({
       workosUserId: `workos-soleHead-${fx.run}`,
       ageConfirmedAt: null,
+      ageRefusedAt: expect.any(Date),
       deletedAt: null,
     });
     expect(await prisma.teamStaff.count({ where: { userId: head, teamId: org.teamId } })).toBe(1);
     expect(revokeSession).toHaveBeenCalledWith('sess_head');
     expect(deleteUser).not.toHaveBeenCalled();
     expect(captureException).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ flow: 'age-refusal', userId: head }));
+
+    // The refusal is final: a second answer does nothing more, and confirming is refused.
+    jest.clearAllMocks();
+    expect(await AccountService.refuseUnderage(head, { sessionId: 'sess_head' })).toEqual({
+      outcome: 'pending_operator',
+      identityDeleted: false,
+    });
+    expect(revokeSession).not.toHaveBeenCalled();
+    await expect(AccountService.confirmAge(head)).rejects.toMatchObject({ code: 'under_minimum_age', statusCode: 403 });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: head }, select: STATE_SELECT })).ageConfirmedAt).toBeNull();
+
+    // The operator's conversion is refused for an adult account, so the runbook hands the team
+    // over and deletes; with no history left the row is erased, marker and all.
+    const other = await fx.user('soleHeadSuccessor', 'COACH');
+    await fx.staff(other, org);
+    await prisma.teamStaff.deleteMany({ where: { userId: head, teamId: org.teamId } });
+    const deleted = await AccountService.deleteAccount(head, { actorId: 'operator', mode: 'operator' });
+    expect(deleted.erased).toBe(true);
+    expect(await prisma.user.findUnique({ where: { id: head } })).toBeNull();
+  });
+
+  it('keeps the record with no manager when the coach it would go to disappears before the lock', async () => {
+    const org = await fx.org('coachGone');
+    const head = await fx.user('coachGoneHead', 'COACH');
+    await fx.staff(head, org);
+    const kid = await claimedPlayer('coachGoneKid', org);
+    // The coach is deleted between the unlocked read and the lock: simulate by
+    // tombstoning the coach's row while the kid's refusal runs its first read.
+    const original = prisma.$transaction.bind(prisma);
+    const spy = jest.spyOn(prisma, '$transaction').mockImplementation(async (fn: unknown, opts?: unknown) => {
+      return original(async (tx) => {
+        const wrapped = new Proxy(tx, {
+          get(target, prop) {
+            if (prop === '$queryRaw') {
+              return async (...args: unknown[]) => {
+                await prisma.user.update({ where: { id: head }, data: { deletedAt: new Date(), workosUserId: null, email: null } });
+                return (target.$queryRaw as (...a: unknown[]) => Promise<unknown>)(...args);
+              };
+            }
+            return Reflect.get(target, prop);
+          },
+        });
+        return (fn as (t: typeof tx) => Promise<unknown>)(wrapped);
+      }, opts as never);
+    });
+    try {
+      const result = await AccountService.refuseUnderage(kid, {});
+      expect(result.outcome).toBe('unclaimed');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: kid }, select: STATE_SELECT })).toMatchObject({
+      isManaged: true,
+      managedById: null,
+      workosUserId: null,
+    });
   });
 
   it('handles a dev-login row (no WorkOS user) without touching the provider', async () => {
@@ -273,11 +332,11 @@ describe('AccountService.refuseUnderage', () => {
 });
 
 describe('the operator conversion (#983) and the age confirmation', () => {
-  it('convertToManaged clears ageConfirmedAt along with the login', async () => {
+  it('convertToManaged clears ageConfirmedAt and ageRefusedAt along with the login', async () => {
     const org = await fx.org('convert');
     const head = await fx.user('convertHead', 'COACH');
     await fx.staff(head, org);
-    const kid = await claimedPlayer('convertKid', org, { ageConfirmedAt: new Date() });
+    const kid = await claimedPlayer('convertKid', org, { ageConfirmedAt: new Date(), ageRefusedAt: new Date() });
 
     await AccountService.convertToManaged(kid, { actorId: 'operator' });
 
@@ -285,6 +344,7 @@ describe('the operator conversion (#983) and the age confirmation', () => {
       isManaged: true,
       managedById: head,
       ageConfirmedAt: null,
+      ageRefusedAt: null,
     });
   });
 

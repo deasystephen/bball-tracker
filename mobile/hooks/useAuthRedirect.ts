@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'expo-router';
-import { useAuthUser, useIsAuthenticated } from '../store/auth-store';
+import { useAuthStore, useAuthUser, useIsAuthenticated } from '../store/auth-store';
 import { AGE_CONFIRMATION_ROUTE, needsAgeConfirmation } from '../utils/age-gate';
 
 /**
@@ -29,7 +29,11 @@ export function useAuthRedirect(): void {
 
   useEffect(() => {
     if (wasAuthenticated.current && !isAuthenticated) {
-      router.replace('/login');
+      // After an under-age refusal the age screen keeps the explanation on
+      // screen and sends the person to sign-in itself (#981).
+      if (useAuthStore.getState().lastSessionEnd !== 'age_refused') {
+        router.replace('/login');
+      }
     }
     wasAuthenticated.current = isAuthenticated;
   }, [isAuthenticated, router]);

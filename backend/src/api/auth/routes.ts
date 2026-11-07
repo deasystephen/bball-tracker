@@ -2,7 +2,7 @@
  * Authentication routes using WorkOS
  */
 
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { WorkOSService } from '../../services/workos-service';
 import {
   UnauthorizedError,
@@ -130,6 +130,24 @@ async function buildSessionUser(user: SessionUserRow): Promise<SessionUserPayloa
     // shows "Parent" affordances whenever this is non-empty.
     guardianOf: await GuardianService.getGuardianOf(user.id),
   };
+}
+
+/**
+ * The WorkOS session id (`sid`) behind the request's bearer token, for the
+ * routes that revoke a session as a fallback (`DELETE /me`, `/logout`, the
+ * age screen's refusal). `authenticate` has already verified the token; this
+ * re-reads it only for the claim the middleware does not expose. Undefined
+ * for a dev token, a token without `sid`, or a verifier error (the fallback
+ * is best-effort, so an error here is never surfaced).
+ */
+async function sessionIdOf(req: Request): Promise<string | undefined> {
+  const token = req.headers.authorization!.substring(7);
+  if (token.startsWith('dev_')) return undefined;
+  try {
+    return (await WorkOSService.verifyToken(token))?.sessionId;
+  } catch {
+    return undefined;
+  }
 }
 
 // Apply stricter rate limiting to the credential-handling endpoints only.
@@ -490,9 +508,11 @@ router.get('/me', authenticate, async (req, res) => {
  *   `ageConfirmedAt`, logs `Age confirmed` (id only). 200 `{ confirmed: true }`.
  * - Already confirmed: nothing written. 200 `{ confirmed: true, alreadyConfirmed: true }`.
  * - Under the minimum: `AccountService.refuseUnderage` undoes the sign-in (a
- *   claimed roster record is un-claimed, anything else is erased or deleted)
- *   and deletes the WorkOS user; 403 `under_minimum_age`, the same body in
- *   every branch. Nothing about the answer is stored or logged.
+ *   claimed roster record is un-claimed, anything else is erased or deleted;
+ *   a sole head coach is marked refused for the operator) and deletes the
+ *   WorkOS user; 403 `under_minimum_age`, the same body in every branch, and
+ *   again on any later call for a refused account. Nothing about the answer
+ *   is stored or logged.
  * - 400 on a malformed body (field names in the message, never the values).
  */
 router.post('/age-confirmation', authenticate, async (req, res) => {
@@ -500,6 +520,11 @@ router.post('/age-confirmation', authenticate, async (req, res) => {
     const parsed = ageConfirmationSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       throw new BadRequestError(parsed.error.issues.map((issue) => issue.message).join(', '));
+    }
+    if (req.user!.ageRefusedAt !== null) {
+      // An earlier answer was final and the account awaits the operator; no
+      // second answer is evaluated.
+      throw new UnderMinimumAgeError();
     }
     if (req.user!.ageConfirmedAt !== null) {
       res.json({ confirmed: true, alreadyConfirmed: true });
@@ -513,16 +538,7 @@ router.post('/age-confirmation', authenticate, async (req, res) => {
       return;
     }
 
-    const token = req.headers.authorization!.substring(7);
-    let sessionId: string | undefined;
-    if (!token.startsWith('dev_')) {
-      try {
-        sessionId = (await WorkOSService.verifyToken(token))?.sessionId;
-      } catch {
-        // Already verified by `authenticate`; the sid is only a fallback for revocation.
-      }
-    }
-    await AccountService.refuseUnderage(req.user!.id, { sessionId });
+    await AccountService.refuseUnderage(req.user!.id, { sessionId: await sessionIdOf(req) });
     throw new UnderMinimumAgeError();
   } catch (error) {
     respondWithError(res, error, {
@@ -661,19 +677,10 @@ router.patch('/me/role', authenticate, async (req, res) => {
  */
 router.delete('/me', authenticate, async (req, res) => {
   try {
-    const token = req.headers.authorization!.substring(7);
-    let sessionId: string | undefined;
-    if (!token.startsWith('dev_')) {
-      try {
-        sessionId = (await WorkOSService.verifyToken(token))?.sessionId;
-      } catch {
-        // Already verified by `authenticate`; the sid is only a fallback for revocation.
-      }
-    }
     const result = await AccountService.deleteAccount(req.user!.id, {
       actorId: req.user!.id,
       mode: 'self',
-      sessionId,
+      sessionId: await sessionIdOf(req),
     });
     res.json({ success: true, identityDeleted: result.identityDeleted, erased: result.erased });
   } catch (error) {
@@ -706,16 +713,14 @@ router.post('/logout', authenticate, async (req, res) => {
   }
 
   try {
-    // `authenticate` already verified this token; re-reading it here only
-    // extracts the session id (`sid`) that the middleware does not expose.
-    const verified = await WorkOSService.verifyToken(token);
-    if (!verified?.sessionId) {
+    const sessionId = await sessionIdOf(req);
+    if (!sessionId) {
       logger.warn('Logout without a session id in the access token', { userId: req.user!.id });
       res.json({ success: true, revoked: false });
       return;
     }
 
-    await WorkOSService.revokeSession(verified.sessionId);
+    await WorkOSService.revokeSession(sessionId);
     logger.info('Revoked WorkOS session on logout', { userId: req.user!.id });
     res.json({ success: true, revoked: true });
   } catch (error) {

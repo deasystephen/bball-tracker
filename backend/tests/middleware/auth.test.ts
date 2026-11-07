@@ -3,7 +3,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { AGE_GATE_EXEMPT, assertAgeConfirmed, authenticate } from '../../src/api/auth/middleware';
+import { AGE_GATE_EXEMPT, assertAgeConfirmed, authenticate, isAgeConfirmed } from '../../src/api/auth/middleware';
 import { WorkOSService } from '../../src/services/workos-service';
 import { getLogContext, runWithLogContext } from '../../src/utils/log-context';
 import { mockPrisma } from '../setup';
@@ -218,8 +218,9 @@ describe('Auth Middleware', () => {
 
   describe('the age gate (#981)', () => {
     const originalFlag = process.env.AGE_GATE_ENFORCED;
-    const unconfirmed = { ageConfirmedAt: null };
-    const confirmed = { ageConfirmedAt: new Date() };
+    const unconfirmed = { ageConfirmedAt: null, ageRefusedAt: null };
+    const confirmed = { ageConfirmedAt: new Date(), ageRefusedAt: null };
+    const refused = { ageConfirmedAt: null, ageRefusedAt: new Date() };
 
     const requestFor = (method: string, baseUrl: string, path: string): Request =>
       ({ method, baseUrl, path } as unknown as Request);
@@ -258,6 +259,16 @@ describe('Auth Middleware', () => {
 
     it('never refuses a confirmed account', () => {
       expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), confirmed)).not.toThrow();
+    });
+
+    it('a refused account (awaiting the operator) is never allowed, exempt routes aside, even with the flag off', () => {
+      expect(isAgeConfirmed(refused)).toBe(false);
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), refused)).toThrow();
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/auth', '/me'), refused)).not.toThrow();
+      process.env.AGE_GATE_ENFORCED = 'false';
+      expect(isAgeConfirmed(refused)).toBe(false);
+      expect(isAgeConfirmed(unconfirmed)).toBe(true);
+      expect(isAgeConfirmed(confirmed)).toBe(true);
     });
 
     it('is relaxed only by AGE_GATE_ENFORCED=false', () => {

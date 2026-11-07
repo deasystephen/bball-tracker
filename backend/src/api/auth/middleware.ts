@@ -3,7 +3,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { SubscriptionTier } from '@prisma/client';
+import { Prisma, SubscriptionTier } from '@prisma/client';
 import { WorkOSService } from '../../services/workos-service';
 import { AgeConfirmationRequiredError, UnauthorizedError } from '../../utils/errors';
 import { setLogContextUser } from '../../utils/log-context';
@@ -22,7 +22,26 @@ export const AUTH_USER_SELECT = {
   subscriptionTier: true,
   subscriptionExpiresAt: true,
   ageConfirmedAt: true,
-} as const;
+  ageRefusedAt: true,
+} satisfies Prisma.UserSelect;
+
+/** The row `authenticate` resolves; the socket handshake selects the same columns. */
+export type AuthUserRow = Prisma.UserGetPayload<{ select: typeof AUTH_USER_SELECT }>;
+
+/** The age-gate columns a session check needs (#981). */
+export type AgeGateColumns = Pick<AuthUserRow, 'ageConfirmedAt' | 'ageRefusedAt'>;
+
+/**
+ * True when the account may use the service as far as the age gate is
+ * concerned: it answered the question and met the minimum, or the gate is
+ * relaxed by `AGE_GATE_ENFORCED=false`. An account whose answer was refused
+ * but could not be removed automatically (`ageRefusedAt`, pending the
+ * operator) is never allowed, flag or no flag: the refusal is final.
+ */
+export function isAgeConfirmed(user: AgeGateColumns): boolean {
+  if (user.ageRefusedAt !== null && user.ageRefusedAt !== undefined) return false;
+  return user.ageConfirmedAt !== null || !ageGateEnforced();
+}
 
 /**
  * Routes an account that has not yet answered the age question may call
@@ -64,8 +83,8 @@ function routeKey(req: Request): string {
  * reach only the exempt routes. Throws `AgeConfirmationRequiredError` (403)
  * otherwise; `authenticate` calls it after attaching `req.user`.
  */
-export function assertAgeConfirmed(req: Request, user: { ageConfirmedAt: Date | null }): void {
-  if (user.ageConfirmedAt !== null || !ageGateEnforced()) return;
+export function assertAgeConfirmed(req: Request, user: AgeGateColumns): void {
+  if (isAgeConfirmed(user)) return;
   if (AGE_GATE_EXEMPT.has(routeKey(req))) return;
   throw new AgeConfirmationRequiredError();
 }
@@ -86,6 +105,8 @@ declare global {
         subscriptionExpiresAt: Date | null;
         /** Null until the age question is answered (#981); see `assertAgeConfirmed`. */
         ageConfirmedAt: Date | null;
+        /** Set when the answer was refused but the account awaits the operator (#981). */
+        ageRefusedAt: Date | null;
       };
     }
   }
@@ -111,7 +132,7 @@ export async function authenticate(
     // Check for dev token (development only)
     if (process.env.NODE_ENV === 'development' && token.startsWith('dev_')) {
       const devTokenData = token.substring(4);
-      let gated: { ageConfirmedAt: Date | null };
+      let gated: AgeGateColumns;
       try {
         const decoded = JSON.parse(Buffer.from(devTokenData, 'base64').toString());
 

@@ -132,6 +132,13 @@ model User {
   // answer itself is never stored. Cleared by the under-13 un-claim and by
   // account deletion. Not personal data by itself.
   ageConfirmedAt        DateTime?
+  // Set by the age screen's under-minimum branch when the account could not
+  // be un-claimed or deleted automatically (a sole head coach of an
+  // active-season team, `AccountService.refuseUnderage` → pending_operator):
+  // the answer is final, every route stays 403 and a second answer is
+  // refused, until an operator converts or deletes the account by the
+  // runbook. Cleared with ageConfirmedAt by the un-claim and the tombstone.
+  ageRefusedAt          DateTime?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
 

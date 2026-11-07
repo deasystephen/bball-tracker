@@ -90,6 +90,22 @@ describe('useAuthRedirect', () => {
       expect(mockReplace).toHaveBeenCalledWith('/onboarding/age');
     });
 
+    it('does not send an age-refused session to /login: the age screen explains and sends it on itself', () => {
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });
+      mockPathname = '/onboarding/age';
+      renderHook(() => useAuthRedirect());
+      act(() => useAuthStore.getState().clearSession('age_refused'));
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('still sends every other lost session to /login', () => {
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: { ...unconfirmed, ageConfirmed: true } as never });
+      renderHook(() => useAuthRedirect());
+      act(() => useAuthStore.getState().clearSession('session_expired'));
+      expect(mockReplace).toHaveBeenCalledWith('/login');
+    });
+
     it('never redirects a signed-out or confirmed user to the age screen', () => {
       useAuthStore.setState({ accessToken: null, isAuthenticated: false, user: unconfirmed as never });
       renderHook(() => useAuthRedirect());

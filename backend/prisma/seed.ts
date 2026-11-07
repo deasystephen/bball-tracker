@@ -363,6 +363,10 @@ async function main() {
     where: {
       ageConfirmedAt: null,
       deletedAt: null,
+      // Logins only: a managed roster record (a coach-added player with an
+      // email) keeps null, so claiming one locally meets the age screen as
+      // it does in production.
+      isManaged: false,
       email: { not: null, notIn: AGE_GATE_FIXTURES.map((fixture) => fixture.email) },
     },
     data: { ageConfirmedAt: new Date() },

@@ -16,6 +16,7 @@ export function authUser(overrides: Partial<AuthUser> = {}): AuthUser {
     subscriptionTier: 'FREE',
     subscriptionExpiresAt: null,
     ageConfirmedAt: new Date('2026-01-01T00:00:00Z'),
+    ageRefusedAt: null,
     ...overrides,
   };
 }

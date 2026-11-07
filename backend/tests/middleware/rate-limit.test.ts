@@ -83,6 +83,7 @@ function attachTestUser(app: express.Express): void {
         subscriptionTier: 'FREE',
         subscriptionExpiresAt: null,
         ageConfirmedAt: new Date(),
+        ageRefusedAt: null,
       };
     }
     next();

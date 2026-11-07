@@ -106,6 +106,12 @@ interface AuthState {
    * identified in analytics. `null` when nothing is pending.
    */
   pendingLogin: LoginOutcome | null;
+  /**
+   * Why the last session ended (#981): `useAuthRedirect` sends a lost session
+   * to `/login`, except after `age_refused`, when the age screen stays to
+   * explain and sends the person on itself. Not persisted.
+   */
+  lastSessionEnd: SessionEndReason | null;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
   /**
    * Sign-in only: store the user and fire `user_logged_in` with the response's
@@ -166,6 +172,7 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: true,
       pendingLogin: null,
+      lastSessionEnd: null,
 
       setAuthToken: (token: string, refreshToken: string | null = null) => {
         set({ accessToken: token, refreshToken, isAuthenticated: true });
@@ -189,8 +196,12 @@ export const useAuthStore = create<AuthState>()(
         if (!user) return;
         const confirmed = { ...user, ageConfirmed: true };
         set({ user: confirmed, pendingLogin: null });
+        // Only a sign-in that was held back is reported now. An account that
+        // existed before the age column (asked once on its next launch) was
+        // identified when it signed in, and must not count a second time.
+        if (pendingLogin === null) return;
         identifyUser(confirmed.id, userPropertiesFrom(confirmed));
-        trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(pendingLogin ?? {}));
+        trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(pendingLogin));
       },
 
       updateUser: (patch: Partial<User>) => {
@@ -230,7 +241,7 @@ export const useAuthStore = create<AuthState>()(
           }
           resetUser();
         }
-        set(CLEARED_SESSION);
+        set({ ...CLEARED_SESSION, lastSessionEnd: reason });
         // Belt-and-braces: persist writes the cleared state too, but wipe the
         // keychain entries explicitly so a failed write can't leave a token.
         clearPersistedAuth(AUTH_STORAGE_KEY).catch(() => undefined);

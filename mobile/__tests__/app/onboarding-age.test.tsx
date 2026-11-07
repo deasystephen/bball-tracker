@@ -143,7 +143,7 @@ describe('AgeConfirmationScreen', () => {
     expect(JSON.stringify((trackEvent as jest.Mock).mock.calls)).not.toContain('1990');
   });
 
-  it('under the minimum: explains, and Done ends the session with no analytics event', async () => {
+  it('under the minimum: ends the session at once with no analytics event, explains, and Done goes to sign-in', async () => {
     mockPost.mockRejectedValue(refusal());
     const screen = renderScreen();
     answer(screen, String(new Date().getUTCFullYear() - 8));
@@ -151,12 +151,16 @@ describe('AgeConfirmationScreen', () => {
 
     await waitFor(() => expect(screen.getByText('Thanks for letting us know')).toBeTruthy());
     expect(screen.getByText(/ages 13 and up/)).toBeTruthy();
-    expect(mockRouter.replace).not.toHaveBeenCalled();
-    expect(identifyUser).not.toHaveBeenCalled();
-
-    fireEvent.press(screen.getByTestId('age-refused-done'));
+    // The dead tokens are gone before any background request can meet a 401.
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().lastSessionEnd).toBe('age_refused');
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(identifyUser).not.toHaveBeenCalled();
+    expect(trackEvent).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('age-refused-done'));
+    expect(mockRouter.replace).toHaveBeenCalledWith('/login');
     expect(trackEvent).not.toHaveBeenCalled();
   });
 

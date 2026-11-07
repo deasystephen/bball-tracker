@@ -33,7 +33,7 @@ import { UserRole, type GameEvent, type GameStatus, type Prisma } from '@prisma/
 import prisma from '../models';
 import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { JWT_CLOCK_TOLERANCE_SECONDS, WorkOSService } from '../services/workos-service';
-import { ageGateEnforced } from '../api/auth/middleware';
+import { AUTH_USER_SELECT, isAgeConfirmed, type AuthUserRow } from '../api/auth/middleware';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
@@ -215,29 +215,25 @@ async function resolveSessionFromToken(
     : null;
 }
 
-/** The socket session's columns plus the age-gate timestamp the handshake checks (#981). */
-const SOCKET_USER_SELECT = { id: true, email: true, name: true, role: true, ageConfirmedAt: true } as const;
-
-interface SocketUserRow {
-  id: string;
-  email: string | null;
-  name: string;
-  role: UserRole;
-  ageConfirmedAt: Date | null;
-}
+/**
+ * The handshake selects what `authenticate` selects (`AUTH_USER_SELECT`), so a
+ * column added for a gate reaches both paths at once.
+ */
+const SOCKET_USER_SELECT = AUTH_USER_SELECT;
 
 /**
  * The age gate for sockets (#981): an account that has not answered the age
- * question joins no game room, as the REST gate refuses it every non-exempt
- * route. Refused as "Unauthorized" like any other dead session; the client
- * never opens a socket before the age screen is passed, so this only stops a
- * client that bypasses it.
+ * question (or whose answer was refused) joins no game room, as the REST gate
+ * refuses it every non-exempt route (`isAgeConfirmed`, the same predicate).
+ * Refused as "Unauthorized" like any other dead session; the client never
+ * opens a socket before the age screen is passed, so this only stops a client
+ * that bypasses it.
  */
-function socketUserAllowed(user: SocketUserRow): boolean {
-  return user.ageConfirmedAt !== null || !ageGateEnforced();
+function socketUserAllowed(user: AuthUserRow): boolean {
+  return isAgeConfirmed(user);
 }
 
-function sessionUser(user: SocketUserRow): SocketSession['user'] {
+function sessionUser(user: AuthUserRow): SocketSession['user'] {
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
 
