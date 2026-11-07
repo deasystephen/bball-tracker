@@ -294,13 +294,13 @@ export async function isSystemAdmin(userId: string, db: Db = prisma): Promise<bo
 /**
  * Check if user is a league admin for a specific league
  */
-export async function isLeagueAdmin(userId: string, leagueId: string): Promise<boolean> {
+export async function isLeagueAdmin(userId: string, leagueId: string, db: Db = prisma): Promise<boolean> {
   // System admin is also a league admin
-  if (await isSystemAdmin(userId)) {
+  if (await isSystemAdmin(userId, db)) {
     return true;
   }
 
-  const leagueAdmin = await prisma.leagueAdmin.findUnique({
+  const leagueAdmin = await db.leagueAdmin.findUnique({
     where: {
       leagueId_userId: {
         leagueId,

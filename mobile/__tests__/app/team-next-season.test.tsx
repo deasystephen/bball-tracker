@@ -16,6 +16,7 @@ import TeamDetailsScreen from '../../app/teams/[id]';
 import NextSeasonScreen from '../../app/teams/[id]/next-season';
 import { useAuthStore } from '../../store/auth-store';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
+import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockRollover = { mutateAsync: jest.fn(), isPending: false };
@@ -273,6 +274,45 @@ describe('NextSeasonScreen', () => {
 
     expect(await findByText('Enter a name for the new season')).toBeTruthy();
     expect(mockRollover.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('shows translated copy, not the English server message, for season_archived', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const archived = Object.assign(new Error('That season is archived; pick or name an active season'), {
+      apiError: { status: 409, code: 'season_archived' },
+    });
+    mockRollover.mutateAsync.mockRejectedValue(archived);
+    const { getByText } = render(<NextSeasonScreen />);
+
+    fireEvent.press(getByText('Start season'));
+
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith('Error', 'That season is archived. Pick an active season or name a new one.')
+    );
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    alert.mockRestore();
+  });
+
+  it('shows the Spanish copy for season_archived on a Spanish device', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockRollover.mutateAsync.mockRejectedValue(
+      Object.assign(new Error('archived'), { apiError: { status: 409, code: 'season_archived' } })
+    );
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText } = render(<NextSeasonScreen />);
+      fireEvent.press(getByText('Empezar temporada'));
+
+      await waitFor(() =>
+        expect(alert).toHaveBeenCalledWith(
+          'Error',
+          'Esa temporada está archivada. Elige una temporada activa o ponle nombre a una nueva.'
+        )
+      );
+    } finally {
+      await i18n.changeLanguage('en');
+      alert.mockRestore();
+    }
   });
 
   it('shows the API error in an alert and stays on the form', async () => {

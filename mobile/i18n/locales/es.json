@@ -123,6 +123,7 @@
       "seasonRequired": "Elige una temporada",
       "noSeasons": "Esta liga todavía no tiene otra temporada. Pide a un administrador de la liga que añada la próxima.",
       "seasonsFailed": "No se pudieron cargar las temporadas de esta liga",
+      "seasonArchived": "Esa temporada está archivada. Elige una temporada activa o ponle nombre a una nueva.",
       "seasonName": "Nombre de la nueva temporada",
       "seasonNamePlaceholder": "p. ej. 2027",
       "seasonNameRequired": "Escribe un nombre para la nueva temporada",

@@ -408,6 +408,9 @@ export function useRolloverTeam() {
         new_season: variables.data.seasonName !== undefined,
       });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      // The source row is no longer its lineage's latest (`isLatestInLineage`),
+      // so its cached detail would still offer "Start next season".
+      queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
       // A new staff row per carried coach feeds the Profile usage meter (#43),
       // and a named season may be a new one.
       queryClient.invalidateQueries({ queryKey: usageKeys.all });

@@ -6,9 +6,9 @@
  */
 
 import * as permissions from '../../src/utils/permissions';
-import { SeasonService, findOrCreateSeason, findSeasonIdByName } from '../../src/services/season-service';
-import { ConflictError } from '../../src/utils/errors';
+import { SeasonService, findOrCreateSeason, findSeasonByName } from '../../src/services/season-service';
 import { mockPrisma } from '../setup';
+import { BadRequestError } from '../../src/utils/errors';
 import {
   createAdmin,
   createCoach,
@@ -20,7 +20,7 @@ import { expectBadRequestError, expectForbiddenError, expectNotFoundError } from
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 /** `$queryRaw`: the season-name lookup answers `rows`; the League lock finds its row. */
-function mockSeasonRaw(rows: { id: string }[]): void {
+function mockSeasonRaw(rows: { id: string; isActive: boolean }[]): void {
   (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
     Promise.resolve((strings as TemplateStringsArray).join('?').includes('FROM "Season"') ? rows : [{ id: 'league' }])
   );
@@ -30,11 +30,14 @@ afterEach(() => {
   (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
 });
 
-describe('findSeasonIdByName / findOrCreateSeason (#461)', () => {
+describe('findSeasonByName / findOrCreateSeason (#461)', () => {
   it('matches on lower(trim(name)) within the league, oldest first', async () => {
-    mockSeasonRaw([{ id: 'oldest' }]);
+    mockSeasonRaw([{ id: 'oldest', isActive: true }]);
 
-    await expect(findSeasonIdByName(mockPrisma as never, 'league-1', ' Spring 2025 ')).resolves.toBe('oldest');
+    await expect(findSeasonByName(mockPrisma as never, 'league-1', ' Spring 2025 ')).resolves.toEqual({
+      id: 'oldest',
+      isActive: true,
+    });
 
     const [strings, ...values] = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0] as [TemplateStringsArray, ...unknown[]];
     const sql = strings.join('?');
@@ -45,15 +48,16 @@ describe('findSeasonIdByName / findOrCreateSeason (#461)', () => {
 
   it('answers null when nothing matches', async () => {
     mockSeasonRaw([]);
-    await expect(findSeasonIdByName(mockPrisma as never, 'league-1', 'x')).resolves.toBeNull();
+    await expect(findSeasonByName(mockPrisma as never, 'league-1', 'x')).resolves.toBeNull();
   });
 
   it('locks the League row before looking up, and returns an existing match without inserting', async () => {
-    mockSeasonRaw([{ id: 'existing' }]);
+    mockSeasonRaw([{ id: 'existing', isActive: true }]);
 
     await expect(findOrCreateSeason(mockPrisma as never, { leagueId: 'league-1', name: 'spring' }, 'u')).resolves.toEqual({
       id: 'existing',
       created: false,
+      isActive: true,
     });
 
     const statements = (mockPrisma.$queryRaw as jest.Mock).mock.calls.map(([st]) => (st as TemplateStringsArray).join('?'));
@@ -76,7 +80,7 @@ describe('SeasonService', () => {
       mockSeasonRaw([]);
       (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.season.findUniqueOrThrow as jest.Mock)
-        .mockResolvedValueOnce({ id: season.id })
+        .mockResolvedValueOnce({ id: season.id, isActive: true })
         .mockResolvedValueOnce(season);
       const info = spyOnInfo();
 
@@ -125,17 +129,17 @@ describe('SeasonService', () => {
       }
     });
 
-    it('answers 409 for a name an existing season has, ignoring case and surrounding spaces', async () => {
+    it('answers the duplicate-name 400 for a name an existing season has, ignoring case and surrounding spaces', async () => {
       const admin = createAdmin();
       const league = createLeague();
 
       (mockPrisma.league.findUnique as jest.Mock).mockResolvedValue(league);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
-      mockSeasonRaw([{ id: 'existing-fall' }]);
+      mockSeasonRaw([{ id: 'existing-fall', isActive: true }]);
 
       const error = await SeasonService.createSeason({ leagueId: league.id, name: ' fall ' }, admin.id).catch((e) => e);
 
-      expect(error).toBeInstanceOf(ConflictError);
+      expect(error).toBeInstanceOf(BadRequestError);
       expect(error.message).toBe('A season with this name already exists in this league');
       expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
       const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([strings]) =>
@@ -144,7 +148,7 @@ describe('SeasonService', () => {
       expect(lookup?.slice(1)).toEqual([league.id, ' fall ']);
     });
 
-    it('answers 409 when a concurrent create of the exact name wins (ON CONFLICT DO NOTHING inserted nothing)', async () => {
+    it('answers the duplicate-name 400 when a concurrent create of the exact name wins (ON CONFLICT DO NOTHING inserted nothing)', async () => {
       const admin = createAdmin();
       const league = createLeague();
 
@@ -152,12 +156,12 @@ describe('SeasonService', () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
       mockSeasonRaw([]);
       (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 0 });
-      (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 'theirs' });
+      (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 'theirs', isActive: true });
       const info = spyOnInfo();
 
       const error = await SeasonService.createSeason({ leagueId: league.id, name: 'Fall' }, admin.id).catch((e) => e);
 
-      expect(error).toBeInstanceOf(ConflictError);
+      expect(error).toBeInstanceOf(BadRequestError);
       expect(info.mock.calls.filter(([msg]) => msg === 'Season created')).toHaveLength(0);
     });
 

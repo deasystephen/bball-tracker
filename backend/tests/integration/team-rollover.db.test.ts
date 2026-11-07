@@ -14,10 +14,10 @@ jest.unmock('../../src/models');
 import prisma from '../../src/models';
 import {
   BadRequestError,
-  ConflictError,
   ForbiddenError,
   NotFoundError,
   NotLatestSeasonError,
+  SeasonArchivedError,
   TeamSeasonExistsError,
 } from '../../src/utils/errors';
 import { TeamService } from '../../src/services/team-service';
@@ -280,13 +280,50 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     expect((await TeamService.getTeamById(current.id, c.coach)).isLatestInLineage).toBe(true);
   });
 
-  it('answers POST /seasons with 409 for a case or space variant of an existing season name', async () => {
+  it('treats the newest row as latest even when last season was dated and the new one is not', async () => {
+    const c = await club('dated');
+    // The club's season has dates; the next one is named without any.
+    await prisma.season.update({
+      where: { id: c.org.seasonId },
+      data: { startDate: new Date('2031-03-01'), endDate: new Date('2031-06-30') },
+    });
+
+    const { team: next } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Dateless-${fx.run}` }, c.coach);
+
+    expect((await TeamService.getTeamById(next.id, c.coach)).isLatestInLineage).toBe(true);
+    expect((await TeamService.getTeamById(c.org.teamId, c.coach)).isLatestInLineage).toBe(false);
+    // And the dateless row can itself continue the team.
+    const { created } = await TeamService.rolloverTeam(next.id, { seasonName: `After-${fx.run}` }, c.coach);
+    expect(created).toBe(true);
+  });
+
+  it('refuses to roll into an archived season matched by name (409 season_archived), creating nothing', async () => {
+    const c = await club('archived');
+    await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Old-${fx.run}`, isActive: false },
+    });
+
+    await expect(
+      TeamService.rolloverTeam(c.org.teamId, { seasonName: ` old-${fx.run} ` }, c.coach)
+    ).rejects.toBeInstanceOf(SeasonArchivedError);
+    expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
+  });
+
+  it('omits isLatestInLineage for a caller who cannot manage staff (a player)', async () => {
+    const c = await club('omit');
+
+    const view = await TeamService.getTeamById(c.org.teamId, c.players[0]);
+
+    expect('isLatestInLineage' in view).toBe(false);
+  });
+
+  it('answers POST /seasons with the duplicate-name 400 for a case or space variant of an existing season name', async () => {
     const c = await club('variant');
     await SeasonService.createSeason({ leagueId: c.org.leagueId, name: `Fall-${fx.run}` }, c.coach);
 
     await expect(
       SeasonService.createSeason({ leagueId: c.org.leagueId, name: ` FALL-${fx.run} ` }, c.coach)
-    ).rejects.toBeInstanceOf(ConflictError);
+    ).rejects.toThrow('A season with this name already exists in this league');
     expect(await prisma.season.count({ where: { leagueId: c.org.leagueId } })).toBe(2);
   });
 

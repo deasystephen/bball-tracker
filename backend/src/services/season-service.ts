@@ -5,7 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
-import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import {
   isLeagueAdmin,
   isSystemAdmin,
@@ -96,30 +96,34 @@ export interface SeasonList {
   canCreate?: boolean;
 }
 
-/** 409 body for a season whose name an existing season of the league already has. */
+/**
+ * 400 body for a season whose name an existing season of the league already
+ * has, matched ignoring case and surrounding spaces (#461). 400 is the
+ * create endpoints' documented duplicate status since #727.
+ */
 export const SEASON_NAME_TAKEN_MESSAGE = 'A season with this name already exists in this league';
 
 /**
- * The id of the season in `leagueId` whose name matches `name` ignoring case
- * and surrounding whitespace, or null. The ONE definition of "this league
- * already has that season": `findOrCreateSeason` (every season create path)
- * and the season rollover (#461) read it. Raw SQL on purpose: Prisma's
+ * The season in `leagueId` whose name matches `name` ignoring case and
+ * surrounding whitespace, or null. The ONE definition of "this league already
+ * has that season": `findOrCreateSeason` (every season create path) and the
+ * season rollover (#461) read it. Raw SQL on purpose: Prisma's
  * `mode: 'insensitive'` compiles to an unescaped ILIKE (see
  * `utils/email-match.ts`), and an equality on `lower(trim())` has no wildcard
  * to escape. Oldest first when near-duplicates already exist (rows written
  * before this rule; there is no migration).
  */
-export async function findSeasonIdByName(
+export async function findSeasonByName(
   db: Pick<Prisma.TransactionClient, '$queryRaw'>,
   leagueId: string,
   name: string
-): Promise<string | null> {
-  const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT "id" FROM "Season"
+): Promise<{ id: string; isActive: boolean } | null> {
+  const rows = await db.$queryRaw<{ id: string; isActive: boolean }[]>`
+    SELECT "id", "isActive" FROM "Season"
     WHERE "leagueId" = ${leagueId} AND lower(trim("name")) = lower(trim(${name}))
     ORDER BY "createdAt" ASC
     LIMIT 1`;
-  return rows[0]?.id ?? null;
+  return rows[0] ?? null;
 }
 
 export interface NewSeason {
@@ -149,12 +153,12 @@ export async function findOrCreateSeason(
   tx: Prisma.TransactionClient,
   input: NewSeason,
   userId: string
-): Promise<{ id: string; created: boolean }> {
+): Promise<{ id: string; created: boolean; isActive: boolean }> {
   await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${input.leagueId} FOR NO KEY UPDATE`;
 
-  const existing = await findSeasonIdByName(tx, input.leagueId, input.name);
+  const existing = await findSeasonByName(tx, input.leagueId, input.name);
   if (existing) {
-    return { id: existing, created: false };
+    return { id: existing.id, created: false, isActive: existing.isActive };
   }
 
   const inserted = await tx.season.createMany({
@@ -171,13 +175,13 @@ export async function findOrCreateSeason(
   });
   const season = await tx.season.findUniqueOrThrow({
     where: { leagueId_name: { leagueId: input.leagueId, name: input.name } },
-    select: { id: true },
+    select: { id: true, isActive: true },
   });
   const created = inserted.count === 1;
   if (created) {
     logger.info('Season created', { seasonId: season.id, leagueId: input.leagueId, userId });
   }
-  return { id: season.id, created };
+  return { id: season.id, created, isActive: season.isActive };
 }
 
 export class SeasonService {
@@ -209,7 +213,7 @@ export class SeasonService {
 
     // One rule for every create path (`findOrCreateSeason`): a name that
     // matches an existing season ignoring case and surrounding spaces is
-    // taken, 409.
+    // taken, 400 (the duplicate status since #727).
     const { id, created } = await prisma.$transaction((tx) =>
       findOrCreateSeason(
         tx,
@@ -218,7 +222,7 @@ export class SeasonService {
       )
     );
     if (!created) {
-      throw new ConflictError(SEASON_NAME_TAKEN_MESSAGE);
+      throw new BadRequestError(SEASON_NAME_TAKEN_MESSAGE);
     }
 
     const season = await prisma.season.findUniqueOrThrow({ where: { id }, include: SEASON_INCLUDE });

@@ -53,6 +53,8 @@ describe('useRolloverTeam', () => {
       new_season: true,
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
+    // The source row's cached isLatestInLineage is stale now.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: usageKeys.all });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: seasonKeys.lists() });
     // Carried players' career views gain the new team-season.

@@ -5,7 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
-import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '../utils/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
 import { findOrCreateSeason, SEASON_NAME_TAKEN_MESSAGE } from './season-service';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { logger } from '../utils/logger';
@@ -517,12 +517,12 @@ export class LeagueService {
 
     // One rule for every create path (`findOrCreateSeason`): a name that
     // matches an existing season ignoring case and surrounding spaces is
-    // taken, 409. It logs `Season created`.
+    // taken, 400 (the duplicate status since #727). It logs `Season created`.
     const { id, created } = await prisma.$transaction((tx) =>
       findOrCreateSeason(tx, { leagueId, name: data.name, startDate: data.startDate, endDate: data.endDate }, userId)
     );
     if (!created) {
-      throw new ConflictError(SEASON_NAME_TAKEN_MESSAGE);
+      throw new BadRequestError(SEASON_NAME_TAKEN_MESSAGE);
     }
 
     const season = await prisma.season.findUniqueOrThrow({ where: { id }, include: SEASON_INCLUDE });

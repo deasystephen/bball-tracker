@@ -179,8 +179,10 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * capped coach could never continue their own team. The service invalidates
  * every carried staff member's usage cache (their season count changes).
  *
- * 409 `team_season_exists` `{ teamId }` when the lineage already has a row in
- * that season that the caller may not manage.
+ * 409 `team_season_exists` (no ids) when the lineage already has a row in
+ * that season that the caller may not manage; 409 `not_latest_season` (no
+ * ids) when this row is not the lineage's latest team-season; 409
+ * `season_archived` (no ids) when the season resolves to an archived one.
  */
 router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
   try {

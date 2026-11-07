@@ -185,6 +185,18 @@ export class NotLatestSeasonError extends DetailedError<Record<string, never>> {
   }
 }
 
+/**
+ * 409 — a season rollover (#461) resolved to a season of the league that is
+ * archived (`isActive: false`), by name or by id. A team is never rolled
+ * into an archived season; the coach picks or names an active one. No ids.
+ */
+export class SeasonArchivedError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('season_archived', {}, 'That season is archived; pick or name an active season', 409);
+    Object.setPrototypeOf(this, SeasonArchivedError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

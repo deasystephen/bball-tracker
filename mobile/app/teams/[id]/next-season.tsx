@@ -29,8 +29,11 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { suggestNextSeasonName } from '../../../utils/season-name';
 import { useGoBack } from '../../../hooks/useGoBack';
+import type { NormalizedApiError } from '../../../services/api-client';
 import { BackButton } from '../../../components/BackButton';
 
+/** 409 code for a season name that matches an archived season of the league (#461). */
+const SEASON_ARCHIVED_CODE = 'season_archived';
 /** The picker's "new season" choice; every other value is a season id. */
 const NEW_SEASON = 'new';
 /** The API's page ceiling; a league with more seasons than this is not a real case. */
@@ -156,7 +159,16 @@ function NextSeasonForm({ team, seasons, canCreateSeason }: NextSeasonFormProps)
       );
       router.replace(`/teams/${nextTeam.id}`);
     } catch (err) {
-      Alert.alert(t('common.error'), err instanceof Error ? err.message : t('teams.nextSeason.failed'));
+      // The server's own message is English; a code the form knows gets its
+      // translated copy instead.
+      const code = (err as NormalizedApiError).apiError?.code;
+      const message =
+        code === SEASON_ARCHIVED_CODE
+          ? t('teams.nextSeason.seasonArchived')
+          : err instanceof Error
+            ? err.message
+            : t('teams.nextSeason.failed');
+      Alert.alert(t('common.error'), message);
     }
   };
 
