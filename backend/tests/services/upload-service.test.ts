@@ -19,7 +19,7 @@ jest.mock('@aws-sdk/client-s3', () => {
       return { input };
     }),
     DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
-    PutObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'PutObjectTagging', input })),
+    HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
   };
 });
 
@@ -44,13 +44,12 @@ import {
   MAX_AVATAR_BYTES,
   PENDING_TAGGING_XML,
   pendingTagEnabled,
-  promoteAvatarUpload,
-  referencedAvatarKeys,
-  revertAvatarToPending,
+  checkAvatarUpload,
+  untagAvatarUpload,
+  UNTAG_ATTEMPTS,
   withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
-import { mockPrisma } from '../setup';
 import * as sentry from '../../src/utils/sentry';
 import { BadRequestError } from '../../src/utils/errors';
 
@@ -372,267 +371,247 @@ describe('Upload Service', () => {
     });
   });
 
-  describe('promoteAvatarUpload (#1005)', () => {
+  describe('pending upload save order (#1005)', () => {
     const OWN = `${BUCKET_BASE}u1/pic.jpg`;
+    const KEY = 'avatars/u1/pic.jpg';
     const sdkError = (name: string, status: number): Error =>
       Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } });
-    let errorSpy: jest.SpyInstance;
-    let captureSpy: jest.SpyInstance;
-
-    beforeEach(() => {
-      mockSend.mockReset();
-      mockSend.mockResolvedValue({});
-      errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-      captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
-    });
-
-    afterEach(() => {
-      errorSpy.mockRestore();
-      captureSpy.mockRestore();
-    });
-
-    it('removes the tags of an upload in our bucket and says it promoted', async () => {
-      await expect(promoteAvatarUpload(OWN)).resolves.toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(1);
-      expect(mockSend.mock.calls[0][0]).toEqual({
-        kind: 'DeleteObjectTagging',
-        input: { Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u1/pic.jpg' },
-      });
-    });
-
-    it('skips external URLs and empty values', async () => {
-      await expect(promoteAvatarUpload('https://workos.example/photo.jpg')).resolves.toBe(false);
-      await expect(promoteAvatarUpload(undefined)).resolves.toBe(false);
-      await expect(promoteAvatarUpload(null)).resolves.toBe(false);
-      await expect(promoteAvatarUpload('')).resolves.toBe(false);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('refuses a managed URL outside the issued key shape without calling S3', async () => {
-      await expect(promoteAvatarUpload(`${BUCKET_BASE}u1/x/../../../other.jpg`)).rejects.toBeInstanceOf(
-        BadRequestError
-      );
-      await expect(promoteAvatarUpload(`${BUCKET_BASE}u1/nested/pic.jpg`)).rejects.toBeInstanceOf(BadRequestError);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('answers 400 upload_expired when the object is gone (NoSuchKey by name)', async () => {
-      mockSend.mockRejectedValueOnce(sdkError('NoSuchKey', 404));
-      const err = await promoteAvatarUpload(OWN).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(UploadExpiredError);
-      expect((err as UploadExpiredError).statusCode).toBe(400);
-      expect((err as UploadExpiredError).body()).toEqual({
-        error: 'That photo upload expired. Please choose it again.',
-        code: 'upload_expired',
-      });
-      expect(captureSpy).not.toHaveBeenCalled();
-    });
-
-    it('also recognises NoSuchKey given as `Code`', async () => {
-      mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'S3ServiceException', Code: 'NoSuchKey' }));
-      await expect(promoteAvatarUpload(OWN)).rejects.toBeInstanceOf(UploadExpiredError);
-    });
-
-    it.each([
-      ['AccessDenied', 403],
-      ['NoSuchBucket', 404],
-      ['NotFound', 404],
-    ])('treats %s (%i) as a fault: logged at error, captured, rethrown, never upload_expired', async (name, status) => {
-      const fault = sdkError(name, status);
-      mockSend.mockRejectedValueOnce(fault);
-
-      await expect(promoteAvatarUpload(OWN)).rejects.toBe(fault);
-
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Avatar promotion failed',
-        expect.objectContaining({ operation: 'DeleteObjectTagging', code: name, key: 'avatars/u1/pic.jpg' })
-      );
-      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('https://');
-      expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
-    });
-
-    it('rethrows a non-Error rejection as is', async () => {
-      mockSend.mockRejectedValueOnce('socket hang up');
-      await expect(promoteAvatarUpload(OWN)).rejects.toBe('socket hang up');
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Avatar promotion failed',
-        expect.objectContaining({ code: undefined, error: 'socket hang up' })
-      );
-    });
-  });
-
-  describe('referencedAvatarKeys (#1005)', () => {
-    it('ignores the host, keeps raw and decoded keys, and takes every avatars/ occurrence', () => {
-      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a.jpg`)).toEqual(['avatars/u/a.jpg']);
-      expect(referencedAvatarKeys('https://s3.amazonaws.com/team-avatars/avatars/u/a.jpg')).toEqual(
-        expect.arrayContaining(['avatars/u/a.jpg'])
-      );
-      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%20b.jpg`)).toEqual(
-        expect.arrayContaining(['avatars/u/a%20b.jpg', 'avatars/u/a b.jpg'])
-      );
-      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%E0.jpg`)).toEqual(['avatars/u/a%E0.jpg']);
-      expect(referencedAvatarKeys('not a url avatars/u/a.jpg?x=1')).toEqual(['avatars/u/a.jpg']);
-      expect(referencedAvatarKeys('https://workos.example/p.jpg')).toEqual([]);
-    });
-  });
-
-  describe('revertAvatarToPending (#1005)', () => {
-    const OWN = `${BUCKET_BASE}u1/pic.jpg`;
-    let errorSpy: jest.SpyInstance;
-    let captureSpy: jest.SpyInstance;
-
-    beforeEach(() => {
-      mockSend.mockReset();
-      mockSend.mockResolvedValue({});
-      deleteObjectCalls.length = 0;
-      errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-      captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
-    });
-
-    afterEach(() => {
-      errorSpy.mockRestore();
-      captureSpy.mockRestore();
-    });
-
-    beforeEach(() => {
-      (mockPrisma.user.findMany as jest.Mock).mockReset();
-      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
-    });
-
-    it('puts the pending=true tag back on the object when no row stores it', async () => {
-      await revertAvatarToPending(OWN);
-      // Narrowed by the key's file segment, tombstones included
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-        where: { profilePictureUrl: { contains: 'pic.jpg' } },
-        select: { profilePictureUrl: true },
-      });
-      expect(mockSend.mock.calls[0][0]).toEqual({
-        kind: 'PutObjectTagging',
-        input: {
-          Bucket: 'bball-tracker-avatars-dev',
-          Key: 'avatars/u1/pic.jpg',
-          Tagging: { TagSet: [{ Key: 'pending', Value: 'true' }] },
-        },
-      });
-      expect(deleteObjectCalls).toHaveLength(0);
-    });
-
-    it.each([
-      ['the same URL', `${BUCKET_BASE}u1/pic.jpg`],
-      ['a regional-host URL to the same key', 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/avatars/u1/pic.jpg'],
-      ['a percent-encoded URL to the same key', `https://bball-tracker-avatars-dev.s3.amazonaws.com/%61vatars/u1/pic.jpg`],
-    ])('never reverts while any row stores it (%s): logs at info with the key only', async (_label, stored) => {
-      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
-      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([{ profilePictureUrl: stored }]);
-
-      await revertAvatarToPending(OWN);
-
-      expect(mockSend).not.toHaveBeenCalled();
-      expect(infoSpy).toHaveBeenCalledWith('Avatar upload still referenced; not reverted to pending', {
-        key: 'avatars/u1/pic.jpg',
-      });
-      infoSpy.mockRestore();
-    });
-
-    it('reverts when the rows found by the file segment name a different key', async () => {
-      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
-        { profilePictureUrl: `${BUCKET_BASE}someone-else/pic.jpg` },
-        { profilePictureUrl: null },
-      ]);
-      await revertAvatarToPending(OWN);
-      expect(mockSend).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not revert when the reference check fails (unknown counts as referenced)', async () => {
-      (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
-      await revertAvatarToPending(OWN);
-      expect(mockSend).not.toHaveBeenCalled();
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Could not check avatar references; not reverting to pending',
-        expect.objectContaining({ key: 'avatars/u1/pic.jpg', error: 'db down' })
-      );
-    });
-
-    it('stringifies a non-Error reference-check failure', async () => {
-      (mockPrisma.user.findMany as jest.Mock).mockRejectedValue('db gone');
-      await revertAvatarToPending(OWN);
-      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'db gone' }));
-    });
-
-    it('does not revert a key whose file segment LIKE would misread', async () => {
-      await revertAvatarToPending(`${BUCKET_BASE}u1/a_b.jpg`);
-      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('does nothing for an external, empty or misshaped URL', async () => {
-      await revertAvatarToPending('https://workos.example/p.jpg');
-      await revertAvatarToPending(null);
-      await revertAvatarToPending(`${BUCKET_BASE}u1/nested/pic.jpg`);
-      expect(mockSend).not.toHaveBeenCalled();
-    });
-
-    it('never throws and never deletes: logs the key (never the URL) at error and captures', async () => {
-      const fault = Object.assign(new Error('denied'), { name: 'AccessDenied' });
-      mockSend.mockRejectedValueOnce(fault);
-
-      await expect(revertAvatarToPending(OWN)).resolves.toBeUndefined();
-
-      expect(errorSpy).toHaveBeenCalledWith('Could not revert avatar upload to pending', {
-        operation: 'PutObjectTagging',
-        key: 'avatars/u1/pic.jpg',
-        code: 'AccessDenied',
-        error: 'denied',
-      });
-      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('https://');
-      expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-revert' });
-      expect(deleteObjectCalls).toHaveLength(0);
-    });
-
-    it('stringifies a non-Error failure', async () => {
-      mockSend.mockRejectedValueOnce('boom');
-      await revertAvatarToPending(OWN);
-      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
-    });
-  });
-
-  describe('withPromotedAvatar (#1005)', () => {
-    const OWN = `${BUCKET_BASE}u1/pic.jpg`;
     const kinds = (): string[] => mockSend.mock.calls.map(([cmd]) => (cmd as { kind: string }).kind);
+    const noSleep = (): Promise<void> => Promise.resolve();
+    let errorSpy: jest.SpyInstance;
+    let warnSpy: jest.SpyInstance;
+    let captureSpy: jest.SpyInstance;
 
     beforeEach(() => {
       mockSend.mockReset();
       mockSend.mockResolvedValue({});
       deleteObjectCalls.length = 0;
-      (mockPrisma.user.findMany as jest.Mock).mockReset();
-      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
     });
 
-    it('promotes, then writes, and returns the write result', async () => {
-      const write = jest.fn().mockResolvedValue('row');
-      await expect(withPromotedAvatar(OWN, write)).resolves.toBe('row');
-      expect(mockSend.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
-      expect(kinds()).toEqual(['DeleteObjectTagging']);
+    afterEach(() => {
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+      captureSpy.mockRestore();
     });
 
-    it('reverts the upload to pending when the write fails, rethrows, and deletes nothing', async () => {
-      const failure = new Error('P2002');
-      await expect(withPromotedAvatar(OWN, () => Promise.reject(failure))).rejects.toBe(failure);
-      expect(kinds()).toEqual(['DeleteObjectTagging', 'PutObjectTagging']);
-      expect(deleteObjectCalls).toHaveLength(0);
+    describe('checkAvatarUpload (step A)', () => {
+      it('HEADs the validated key and returns it; nothing is untagged', async () => {
+        await expect(checkAvatarUpload(OWN)).resolves.toBe(KEY);
+        expect(mockSend.mock.calls[0][0]).toEqual({
+          kind: 'HeadObject',
+          input: { Bucket: 'bball-tracker-avatars-dev', Key: KEY },
+        });
+        expect(kinds()).toEqual(['HeadObject']);
+      });
+
+      it('returns null without calling S3 for an external or empty value', async () => {
+        await expect(checkAvatarUpload('https://workos.example/p.jpg')).resolves.toBeNull();
+        await expect(checkAvatarUpload(null)).resolves.toBeNull();
+        await expect(checkAvatarUpload('')).resolves.toBeNull();
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('refuses a managed URL outside the issued key shape without calling S3', async () => {
+        await expect(checkAvatarUpload(`${BUCKET_BASE}u1/nested/pic.jpg`)).rejects.toBeInstanceOf(BadRequestError);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['NotFound', 404],
+        ['NoSuchKey', 404],
+      ])('answers 400 upload_expired on a missing object (%s)', async (name, status) => {
+        mockSend.mockRejectedValueOnce(sdkError(name, status));
+        const err = await checkAvatarUpload(OWN).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(UploadExpiredError);
+        expect((err as UploadExpiredError).body()).toEqual({
+          error: 'That photo upload expired. Please choose it again.',
+          code: 'upload_expired',
+        });
+        expect(captureSpy).not.toHaveBeenCalled();
+      });
+
+      it('treats a bare 404 as missing too', async () => {
+        mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { $metadata: { httpStatusCode: 404 } }));
+        await expect(checkAvatarUpload(OWN)).rejects.toBeInstanceOf(UploadExpiredError);
+      });
+
+      it.each([
+        ['NoSuchBucket', 404],
+        ['InternalError', 500],
+      ])('treats %s as a fault: error log, Sentry, rethrown', async (name, status) => {
+        const fault = sdkError(name, status);
+        mockSend.mockRejectedValueOnce(fault);
+        await expect(checkAvatarUpload(OWN)).rejects.toBe(fault);
+        expect(errorSpy).toHaveBeenCalledWith(
+          'Avatar upload check failed',
+          expect.objectContaining({ operation: 'HeadObject', key: KEY, code: name })
+        );
+        expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
+        expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('https://');
+      });
+
+      it('with the flag off, AccessDenied is logged at warn and the save proceeds', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
+        await expect(checkAvatarUpload(OWN)).resolves.toBe(KEY);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/saving anyway/), {
+          operation: 'HeadObject',
+          key: KEY,
+        });
+        expect(captureSpy).not.toHaveBeenCalled();
+      });
+
+      it('with the flag on, AccessDenied is a fault', async () => {
+        process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+        const denied = sdkError('AccessDenied', 403);
+        mockSend.mockRejectedValueOnce(denied);
+        await expect(checkAvatarUpload(OWN)).rejects.toBe(denied);
+        expect(captureSpy).toHaveBeenCalledWith(denied, { flow: 'avatar-promote' });
+      });
+
+      it('rethrows a non-Error rejection as is', async () => {
+        mockSend.mockRejectedValueOnce('socket hang up');
+        await expect(checkAvatarUpload(OWN)).rejects.toBe('socket hang up');
+        expect(errorSpy).toHaveBeenCalledWith(
+          'Avatar upload check failed',
+          expect.objectContaining({ code: undefined, error: 'socket hang up' })
+        );
+      });
     });
 
-    it('does not write when promotion fails, and has nothing to revert for an external URL', async () => {
-      mockSend.mockRejectedValueOnce(Object.assign(new Error('gone'), { name: 'NoSuchKey' }));
-      const write = jest.fn();
-      await expect(withPromotedAvatar(OWN, write)).rejects.toBeInstanceOf(UploadExpiredError);
-      expect(write).not.toHaveBeenCalled();
+    describe('untagAvatarUpload (step C)', () => {
+      it('removes the tags of the key', async () => {
+        await untagAvatarUpload(KEY, noSleep);
+        expect(mockSend.mock.calls[0][0]).toEqual({
+          kind: 'DeleteObjectTagging',
+          input: { Bucket: 'bball-tracker-avatars-dev', Key: KEY },
+        });
+      });
 
-      mockSend.mockClear();
-      await expect(
-        withPromotedAvatar('https://workos.example/p.jpg', () => Promise.reject(new Error('x')))
-      ).rejects.toThrow('x');
-      expect(mockSend).not.toHaveBeenCalled();
+      it('retries with a backoff and succeeds on a later attempt', async () => {
+        const sleep = jest.fn().mockResolvedValue(undefined);
+        mockSend.mockRejectedValueOnce(sdkError('SlowDown', 503)).mockResolvedValueOnce({});
+        await untagAvatarUpload(KEY, sleep);
+        expect(kinds()).toEqual(['DeleteObjectTagging', 'DeleteObjectTagging']);
+        expect(sleep).toHaveBeenCalledWith(100);
+        expect(captureSpy).not.toHaveBeenCalled();
+      });
+
+      it(`gives up after ${UNTAG_ATTEMPTS} attempts: error log with the key, Sentry, never throws`, async () => {
+        const sleep = jest.fn().mockResolvedValue(undefined);
+        const fault = sdkError('InternalError', 500);
+        mockSend.mockRejectedValue(fault);
+
+        await expect(untagAvatarUpload(KEY, sleep)).resolves.toBeUndefined();
+
+        expect(kinds()).toEqual(['DeleteObjectTagging', 'DeleteObjectTagging', 'DeleteObjectTagging']);
+        expect(sleep.mock.calls).toEqual([[100], [300]]);
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Could not untag/), {
+          operation: 'DeleteObjectTagging',
+          key: KEY,
+          attempts: 3,
+          code: 'InternalError',
+          error: 'InternalError',
+        });
+        expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
+      });
+
+      it('logs a missing object (expired between check and untag) without retrying', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('NoSuchKey', 404));
+        await untagAvatarUpload(KEY, noSleep);
+        expect(kinds()).toEqual(['DeleteObjectTagging']);
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/expired before it was untagged/), {
+          operation: 'DeleteObjectTagging',
+          key: KEY,
+        });
+      });
+
+      it('with the flag off, AccessDenied is logged at warn without retrying or Sentry', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
+        await untagAvatarUpload(KEY, noSleep);
+        expect(kinds()).toEqual(['DeleteObjectTagging']);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/untag denied/), expect.objectContaining({ key: KEY }));
+        expect(captureSpy).not.toHaveBeenCalled();
+      });
+
+      it('with the flag on, AccessDenied is retried and reported', async () => {
+        process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+        mockSend.mockRejectedValue(sdkError('AccessDenied', 403));
+        await untagAvatarUpload(KEY, noSleep);
+        expect(kinds()).toHaveLength(3);
+        expect(captureSpy).toHaveBeenCalled();
+      });
+
+      it('uses a real (short) backoff by default', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('SlowDown', 503)).mockResolvedValueOnce({});
+        await untagAvatarUpload(KEY);
+        expect(kinds()).toHaveLength(2);
+      });
+
+      it('stringifies a non-Error final failure', async () => {
+        mockSend.mockRejectedValue('boom');
+        await untagAvatarUpload(KEY, noSleep);
+        expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
+      });
+    });
+
+    describe('withPromotedAvatar (A, B, C)', () => {
+      it('checks, writes, then untags only after the write resolved', async () => {
+        const write = jest.fn().mockResolvedValue('row');
+        await expect(withPromotedAvatar(OWN, write)).resolves.toBe('row');
+        expect(kinds()).toEqual(['HeadObject', 'DeleteObjectTagging']);
+        expect(mockSend.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
+        expect(mockSend.mock.invocationCallOrder[1]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
+      });
+
+      it('a failed write makes no S3 call after the check, and rethrows', async () => {
+        const failure = new Error('P2002');
+        await expect(withPromotedAvatar(OWN, () => Promise.reject(failure))).rejects.toBe(failure);
+        expect(kinds()).toEqual(['HeadObject']);
+        expect(deleteObjectCalls).toHaveLength(0);
+      });
+
+      it('does not write when the check fails', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('NotFound', 404));
+        const write = jest.fn();
+        await expect(withPromotedAvatar(OWN, write)).rejects.toBeInstanceOf(UploadExpiredError);
+        expect(write).not.toHaveBeenCalled();
+      });
+
+      it('does not untag when the committed write did not keep the URL', async () => {
+        await withPromotedAvatar(OWN, () => Promise.resolve({ photoApplied: false }), (r) => r.photoApplied);
+        expect(kinds()).toEqual(['HeadObject']);
+      });
+
+      it('makes no S3 call for an external URL', async () => {
+        await withPromotedAvatar('https://workos.example/p.jpg', () => Promise.resolve('row'));
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('a double submit (one write fails, one succeeds) leaves the object untagged', async () => {
+        let failFirst: (e: Error) => void = () => undefined;
+        let finishSecond: (v: string) => void = () => undefined;
+        const first = withPromotedAvatar(
+          OWN,
+          () => new Promise<string>((_resolve, reject) => (failFirst = reject))
+        ).catch((e: unknown) => e);
+        const second = withPromotedAvatar(OWN, () => new Promise<string>((resolve) => (finishSecond = resolve)));
+        await new Promise((r) => setImmediate(r));
+        // B commits, then A fails afterwards: the failure touches nothing
+        finishSecond('row');
+        await second;
+        failFirst(new Error('P2002'));
+        await first;
+
+        expect(kinds().filter((k) => k === 'DeleteObjectTagging')).toHaveLength(1);
+        expect(kinds().at(-1)).toBe('DeleteObjectTagging');
+        expect(kinds()).not.toContain('PutObjectTagging');
+        expect(deleteObjectCalls).toHaveLength(0);
+      });
     });
   });
 });

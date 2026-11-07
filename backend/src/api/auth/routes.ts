@@ -484,10 +484,10 @@ router.patch('/me', authenticate, async (req, res) => {
       profilePictureUrl !== undefined
         ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
         : null;
-    // A new upload is promoted out of the pending state before it is stored
-    // (#1005): an expired one is a 400 `upload_expired` and nothing is written,
-    // and a failed write reverts it to pending. Re-sending the URL already stored
-    // needs nothing.
+    // A new upload is checked before it is stored (#1005): an expired one is
+    // a 400 `upload_expired` and nothing is written; its pending tag is removed
+    // only after the write committed. Re-sending the URL already stored needs
+    // nothing.
     const newUpload =
       profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl ? profilePictureUrl : null;
     await withPromotedAvatar(newUpload, async () => {

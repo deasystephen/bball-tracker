@@ -357,6 +357,19 @@ dashboard (User Management → the email → Delete). Two known causes:
   "Afterwards" step deletes real people's staging identities once the rollback window closes
   ([WorkOS production cutover](workos-production-cutover.md)).
 
+## When a saved avatar upload is still pending
+
+After a profile photo is saved, the API removes the upload's `pending=true` tag (#1005). If that
+still fails after its retries, Sentry reports it (`flow: avatar-promote`). The API log line
+`Could not untag a saved avatar upload; it will expire unless untagged by hand` carries the object
+`key`. Remove the tag within 3 days of the upload, or S3 deletes the photo:
+
+```bash
+aws s3api delete-object-tagging --bucket bball-tracker-avatars-production --key "avatars/<userId>/<file>"
+```
+
+If it already expired, the profile shows a broken image; ask the person to choose the photo again.
+
 ## Reversal
 
 There is none. The transaction is not reversible after commit; the only copy of the pre-deletion

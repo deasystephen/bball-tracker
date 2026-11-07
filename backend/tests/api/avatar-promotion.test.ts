@@ -1,13 +1,13 @@
 /**
- * Pending upload promotion at every write site that stores a
+ * The pending-upload save order at every write site that stores a
  * `profilePictureUrl` (#1005), through the real route, validation, service
  * and `upload-service`, with Prisma mocked and S3 replaced by the shared double.
  *
- * Every upload is born tagged `pending=true`; the write removes the tag
- * (DeleteObjectTagging) BEFORE the row is written, answers 400
- * `upload_expired` and writes nothing when the object is gone, puts the tag
- * back (PutObjectTagging, never a delete) when the write fails, and skips
- * external URLs. PATCH /auth/me is covered in `auth-profile.test.ts`.
+ * The order (#1005): HeadObject BEFORE the row is written (400
+ * `upload_expired` and nothing written when it is gone), the write, and the
+ * untag (DeleteObjectTagging) only AFTER it committed. A failed write makes
+ * no S3 call after the check. External URLs make no S3 call at all.
+ * PATCH /auth/me is covered in `auth-profile.test.ts`.
  */
 
 const mockS3Send = jest.fn().mockResolvedValue({});
@@ -40,6 +40,8 @@ import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
 import { s3Error, sentOfKind } from '../support/s3-mock';
+import { logger } from '../../src/utils/logger';
+import * as sentry from '../../src/utils/sentry';
 
 const ADMIN_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const PLAYER_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -51,17 +53,28 @@ const EXTERNAL_URL = 'https://workos.example/photo.jpg';
 const AUTH = { Authorization: 'Bearer token' };
 const EXPIRED_BODY = { error: 'That photo upload expired. Please choose it again.', code: 'upload_expired' };
 
-const taggedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObjectTagging').map((c) => c.input.Key);
+/** `[kind, key]` of every S3 call, in order. */
+const s3Calls = (): [string, unknown][] =>
+  mockS3Send.mock.calls.map(([cmd]) => {
+    const c = cmd as { kind: string; input: Record<string, unknown> };
+    return [c.kind, c.input.Key];
+  });
 const deletedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObject').map((c) => c.input.Key);
-const revertedKeys = (): unknown[] => sentOfKind(mockS3Send, 'PutObjectTagging').map((c) => c.input.Key);
 const prismaError = (code: string): Error =>
   new Prisma.PrismaClientKnownRequestError(code, { code, clientVersion: 'test' });
 const expireUpload = (): void => {
-  mockS3Send.mockRejectedValueOnce(s3Error('NoSuchKey', 404, 'The specified key does not exist.'));
+  mockS3Send.mockRejectedValueOnce(s3Error('NotFound', 404, 'Not Found'));
 };
-/** True when the S3 promotion happened before `write` was first called. */
-const promotedBefore = (write: jest.Mock): boolean =>
-  mockS3Send.mock.invocationCallOrder[0] < write.mock.invocationCallOrder[0];
+/** HEAD before the write, untag after it: the order #1005 relies on. */
+const checkedThenUntagged = (write: jest.Mock): void => {
+  expect(s3Calls()).toEqual([
+    ['HeadObject', KEY],
+    ['DeleteObjectTagging', KEY],
+  ]);
+  const writeAt = write.mock.invocationCallOrder[0];
+  expect(mockS3Send.mock.invocationCallOrder[0]).toBeLessThan(writeAt);
+  expect(mockS3Send.mock.invocationCallOrder[1]).toBeGreaterThan(writeAt);
+};
 
 const playerRow = (profilePictureUrl: string | null): Record<string, unknown> => ({
   id: PLAYER_ID,
@@ -81,9 +94,7 @@ const playerRow = (profilePictureUrl: string | null): Record<string, unknown> =>
 beforeEach(() => {
   mockS3Send.mockReset();
   mockS3Send.mockResolvedValue({});
-  // The revert's reference check: no row stores the upload unless a test says so
-  (mockPrisma.user.findMany as jest.Mock).mockReset();
-  (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+  delete process.env.AVATAR_PENDING_TAG_ENABLED;
 });
 
 afterAll((done) => {
@@ -99,18 +110,17 @@ describe('POST /api/v1/players', () => {
     }));
   });
 
-  it('promotes the upload before the player row is created', async () => {
+  it('checks the upload before the create and untags it after', async () => {
     const res = await request(app)
       .post('/api/v1/players')
       .set(AUTH)
       .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(201);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(promotedBefore(mockPrisma.user.create as jest.Mock)).toBe(true);
+    checkedThenUntagged(mockPrisma.user.create as jest.Mock);
   });
 
-  it('answers 400 upload_expired and creates nothing when the upload is gone', async () => {
+  it('answers 400 upload_expired and creates nothing when HeadObject says 404', async () => {
     expireUpload();
     const res = await request(app)
       .post('/api/v1/players')
@@ -120,9 +130,10 @@ describe('POST /api/v1/players', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual(EXPIRED_BODY);
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
   });
 
-  it('reverts the promoted upload to pending when the create fails (P2002), deleting nothing', async () => {
+  it('a failed create (P2002) makes no S3 call after the check', async () => {
     (mockPrisma.user.create as jest.Mock).mockRejectedValue(prismaError('P2002'));
     const res = await request(app)
       .post('/api/v1/players')
@@ -130,35 +141,42 @@ describe('POST /api/v1/players', () => {
       .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(409);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(revertedKeys()).toEqual([KEY]);
+    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
     expect(deletedKeys()).toHaveLength(0);
   });
 
-  it('leaves a shared upload untagged when the create fails: another row (player A) stores it', async () => {
-    (mockPrisma.user.create as jest.Mock).mockRejectedValue(prismaError('P2002'));
-    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([{ profilePictureUrl: UPLOAD_URL }]);
+  it('an untag that keeps failing after the commit retries 3 times, reports to Sentry, and still answers 201', async () => {
+    const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockS3Send.mockImplementation(async (cmd: { kind: string }) => {
+      if (cmd.kind === 'DeleteObjectTagging') throw s3Error('InternalError', 500);
+      return {};
+    });
 
     const res = await request(app)
       .post('/api/v1/players')
       .set(AUTH)
-      .send({ name: 'Kid B', email: 'kid-b@example.test', profilePictureUrl: UPLOAD_URL });
+      .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
 
-    expect(res.status).toBe(409);
-    expect(taggedKeys()).toEqual([KEY]);
-    // A's photo is in use: never put back to pending, never deleted
-    expect(revertedKeys()).toHaveLength(0);
-    expect(deletedKeys()).toHaveLength(0);
+    expect(res.status).toBe(201);
+    expect(s3Calls()).toEqual([
+      ['HeadObject', KEY],
+      ['DeleteObjectTagging', KEY],
+      ['DeleteObjectTagging', KEY],
+      ['DeleteObjectTagging', KEY],
+    ]);
+    expect(captureSpy).toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
+    captureSpy.mockRestore();
   });
 
-  it('skips promotion for an external URL', async () => {
+  it('makes no S3 call for an external URL', async () => {
     const res = await request(app)
       .post('/api/v1/players')
       .set(AUTH)
       .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: EXTERNAL_URL });
 
     expect(res.status).toBe(201);
-    expect(taggedKeys()).toHaveLength(0);
+    expect(s3Calls()).toHaveLength(0);
   });
 });
 
@@ -173,7 +191,7 @@ describe('PATCH /api/v1/players/:id', () => {
     }));
   }
 
-  it('promotes a new upload before the row is updated', async () => {
+  it('checks a new upload before the update and untags it after', async () => {
     arm(null);
     const res = await request(app)
       .patch(`/api/v1/players/${PLAYER_ID}`)
@@ -181,11 +199,10 @@ describe('PATCH /api/v1/players/:id', () => {
       .send({ profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(200);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(promotedBefore(mockPrisma.user.update as jest.Mock)).toBe(true);
+    checkedThenUntagged(mockPrisma.user.update as jest.Mock);
   });
 
-  it('answers 400 upload_expired and updates nothing when the upload is gone', async () => {
+  it('answers 400 upload_expired and updates nothing when HeadObject says 404', async () => {
     arm(null);
     expireUpload();
     const res = await request(app)
@@ -198,7 +215,7 @@ describe('PATCH /api/v1/players/:id', () => {
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('reverts the promoted upload to pending when the update hits a tombstone (P2025 → 404)', async () => {
+  it('a failed update (P2025, a tombstone) makes no S3 call after the check', async () => {
     arm(null);
     (mockPrisma.user.update as jest.Mock).mockRejectedValue(prismaError('P2025'));
     const res = await request(app)
@@ -207,12 +224,10 @@ describe('PATCH /api/v1/players/:id', () => {
       .send({ profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(404);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(revertedKeys()).toEqual([KEY]);
-    expect(deletedKeys()).toHaveLength(0);
+    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
   });
 
-  it('skips promotion for an external URL and for the URL already stored', async () => {
+  it('makes no S3 call for an external URL or for the URL already stored', async () => {
     arm(UPLOAD_URL);
     const external = await request(app)
       .patch(`/api/v1/players/${PLAYER_ID}`)
@@ -225,7 +240,8 @@ describe('PATCH /api/v1/players/:id', () => {
 
     expect(external.status).toBe(200);
     expect(same.status).toBe(200);
-    expect(taggedKeys()).toHaveLength(0);
+    // (Replacing the stored photo with the external one deletes the old object, as before #1005)
+    expect(s3Calls().filter(([kind]) => kind !== 'DeleteObject')).toHaveLength(0);
   });
 });
 
@@ -244,18 +260,17 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     });
   });
 
-  it('case 1: promotes the upload before the managed player is created', async () => {
+  it('case 1: checks the upload before the managed player is created and untags it after', async () => {
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
       .set(AUTH)
       .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(201);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(promotedBefore(mockPrisma.user.create as jest.Mock)).toBe(true);
+    checkedThenUntagged(mockPrisma.teamMember.create as jest.Mock);
   });
 
-  it('case 1: answers 400 upload_expired and writes nothing when the upload is gone', async () => {
+  it('case 1: answers 400 upload_expired and writes nothing when HeadObject says 404', async () => {
     expireUpload();
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
@@ -265,7 +280,6 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual(EXPIRED_BODY);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-    expect(mockPrisma.user.create).not.toHaveBeenCalled();
   });
 
   it('case 2: answers 400 upload_expired before any row or invitation is written', async () => {
@@ -280,7 +294,7 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('case 1: reverts the promoted upload to pending when the transaction fails', async () => {
+  it('case 1: a failed transaction makes no S3 call after the check', async () => {
     (mockPrisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('connection reset'));
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
@@ -288,26 +302,11 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
       .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(500);
-    expect(taggedKeys()).toEqual([KEY]);
-    expect(revertedKeys()).toEqual([KEY]);
+    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
     expect(deletedKeys()).toHaveLength(0);
   });
 
-  it('answers 5xx and writes nothing when S3 denies the promotion (no fail-open)', async () => {
-    mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
-    const res = await request(app)
-      .post(`/api/v1/teams/${TEAM_ID}/players`)
-      .set(AUTH)
-      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
-
-    expect(res.status).toBe(500);
-    expect(res.body.code).toBeUndefined();
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-    expect(deletedKeys()).toHaveLength(0);
-    expect(revertedKeys()).toHaveLength(0);
-  });
-
-  it('case 2: a retry after a commit (the reused row already stores this URL) leaves the object untagged on failure', async () => {
+  it('case 2: a retry after a commit (the reused row already stores this URL) makes no S3 call', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
       id: PLAYER_ID,
       email: 'kid@example.test',
@@ -324,18 +323,43 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
       .send({ name: 'Kid', playerEmail: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(500);
-    expect(taggedKeys()).toHaveLength(0);
-    expect(revertedKeys()).toHaveLength(0);
-    expect(deletedKeys()).toHaveLength(0);
+    expect(s3Calls()).toHaveLength(0);
   });
 
-  it('skips promotion for an external URL', async () => {
+  it('with the flag off, AccessDenied on the check is logged and the save proceeds', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(201);
+    expect(mockPrisma.teamMember.create).toHaveBeenCalled();
+  });
+
+  it('with the flag on, AccessDenied on the check is a 5xx and nothing is written', async () => {
+    process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+    const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+    mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBeUndefined();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    captureSpy.mockRestore();
+  });
+
+  it('makes no S3 call for an external URL', async () => {
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
       .set(AUTH)
       .send({ name: 'Kid', profilePictureUrl: EXTERNAL_URL });
 
     expect(res.status).toBe(201);
-    expect(taggedKeys()).toHaveLength(0);
+    expect(s3Calls()).toHaveLength(0);
   });
 });

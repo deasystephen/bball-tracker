@@ -85,7 +85,7 @@ npx prisma migrate dev
 npm run dev
 ```
 
-Avatar uploads use a real S3 bucket. The AWS user in `.env` needs `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:PutObjectTagging` and `s3:DeleteObjectTagging` on the dev bucket's objects, plus `s3:ListBucket` on the bucket. Without the tagging and list grants, avatar saves (and, once `AVATAR_PENDING_TAG_ENABLED` is on, uploads) fail with a 5xx (`docs/architecture/backend-services.md`, "Unsaved uploads expire").
+Avatar uploads use a real S3 bucket. The AWS user in `.env` needs `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:PutObjectTagging` and `s3:DeleteObjectTagging` on the dev bucket's objects, plus `s3:ListBucket` on the bucket. With `AVATAR_PENDING_TAG_ENABLED` off (the default), a missing tagging or list grant only logs warnings; with it on, avatar uploads and saves fail with a 5xx (`docs/architecture/backend-services.md`, "Unsaved uploads expire").
 
 4. Start the mobile app:
 ```bash

@@ -5,24 +5,23 @@
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
-  // Like the real one: nothing to promote for an empty value
-  promoteAvatarUpload: jest.fn(async (url: unknown) => Boolean(url)),
-  revertAvatarToPending: jest.fn().mockResolvedValue(undefined),
-  // The real wrapper's contract over the mocked promote/revert (#1005):
-  // promote, write, and revert to pending when the write throws.
-  withPromotedAvatar: jest.fn(async (url: unknown, write: () => Promise<unknown>) => {
-    const m = jest.requireMock('../../src/services/upload-service') as {
-      promoteAvatarUpload: (u: unknown) => Promise<boolean>;
-      revertAvatarToPending: (u: unknown) => Promise<void>;
-    };
-    const promoted = await m.promoteAvatarUpload(url);
-    try {
-      return await write();
-    } catch (err) {
-      if (promoted) await m.revertAvatarToPending(url);
-      throw err;
+  // Like the real one: a key for an upload of ours, null for nothing to do
+  checkAvatarUpload: jest.fn(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
+  untagAvatarUpload: jest.fn().mockResolvedValue(undefined),
+  // The real wrapper's order over the mocked steps (#1005): check, write,
+  // then untag only after the write resolved and kept the URL.
+  withPromotedAvatar: jest.fn(
+    async (url: unknown, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
+      const m = jest.requireMock('../../src/services/upload-service') as {
+        checkAvatarUpload: (u: unknown) => Promise<string | null>;
+        untagAvatarUpload: (k: string) => Promise<void>;
+      };
+      const key = await m.checkAvatarUpload(url);
+      const result = await write();
+      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
+      return result;
     }
-  }),
+  ),
 }));
 
 // Only reached by the deletePlayer cases that run the real
@@ -55,8 +54,8 @@ import {
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
-import { assertOwnUploadUrl, deletePreviousAvatar, promoteAvatarUpload } from '../../src/services/upload-service';
-const mockPromote = promoteAvatarUpload as jest.Mock;
+import { assertOwnUploadUrl, deletePreviousAvatar, checkAvatarUpload } from '../../src/services/upload-service';
+const mockCheck = checkAvatarUpload as jest.Mock;
 
 const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typeof deletePreviousAvatar>;
 const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
@@ -151,8 +150,8 @@ describe('PlayerService', () => {
 
       await PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: url }, ADMIN_CALLER);
 
-      expect(mockPromote).toHaveBeenCalledWith(url);
-      expect(mockPromote.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(mockCheck).toHaveBeenCalledWith(url);
+      expect(mockCheck.mock.invocationCallOrder[0]).toBeLessThan(
         (mockPrisma.user.create as jest.Mock).mock.invocationCallOrder[0]
       );
     });
@@ -160,7 +159,7 @@ describe('PlayerService', () => {
     it('writes nothing when the upload has expired (400 upload_expired, #1005)', async () => {
       const url = `https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/${ADMIN_CALLER.id}/pic.jpg`;
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
-      mockPromote.mockRejectedValueOnce(new UploadExpiredError());
+      mockCheck.mockRejectedValueOnce(new UploadExpiredError());
 
       await expect(
         PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: url }, ADMIN_CALLER)
@@ -656,8 +655,8 @@ describe('PlayerService', () => {
 
       expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(url, coach.id);
       // A new upload leaves the pending state before the write (#1005)
-      expect(mockPromote).toHaveBeenCalledWith(url);
-      expect(mockPromote.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(mockCheck).toHaveBeenCalledWith(url);
+      expect(mockCheck.mock.invocationCallOrder[0]).toBeLessThan(
         (mockPrisma.user.update as jest.Mock).mock.invocationCallOrder[0]
       );
     });
@@ -673,8 +672,8 @@ describe('PlayerService', () => {
       await PlayerService.updatePlayer(player.id, { profilePictureUrl: url }, player.id);
 
       // The write still goes through the wrapper, with nothing to promote
-      expect(mockPromote).not.toHaveBeenCalledWith(url);
-      expect(mockPromote).toHaveBeenCalledWith(null);
+      expect(mockCheck).not.toHaveBeenCalledWith(url);
+      expect(mockCheck).toHaveBeenCalledWith(null);
     });
 
     it('writes nothing when the new upload has expired (400 upload_expired, #1005)', async () => {
@@ -682,7 +681,7 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(player)
         .mockResolvedValueOnce(player);
-      mockPromote.mockRejectedValueOnce(new UploadExpiredError());
+      mockCheck.mockRejectedValueOnce(new UploadExpiredError());
 
       await expect(
         PlayerService.updatePlayer(

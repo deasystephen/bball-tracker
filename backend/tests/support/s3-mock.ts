@@ -25,7 +25,7 @@ export function mockS3ClientModule(send: Send): Record<string, unknown> {
     S3Client: jest.fn().mockImplementation(() => ({ send })),
     DeleteObjectCommand: command('DeleteObject'),
     DeleteObjectTaggingCommand: command('DeleteObjectTagging'),
-    PutObjectTaggingCommand: command('PutObjectTagging'),
+    HeadObjectCommand: command('HeadObject'),
   };
 }
 

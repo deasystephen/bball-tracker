@@ -37,7 +37,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { assertOwnUploadUrl, discardOwnAvatar, revertAvatarToPending, withPromotedAvatar } from './upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar, withPromotedAvatar } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1126,9 +1126,8 @@ export class InvitationService {
     let playerId: string;
 
     if (!data.playerEmail) {
-      // Case 1 — roster-only managed player. The photo leaves the pending
-      // state before the rows are written and goes back to pending if the
-      // transaction fails (#1005).
+      // Case 1 — roster-only managed player. The upload is checked before the
+      // rows are written and untagged only after they commit (#1005).
       const rosterManaged = (): Promise<AddedTeamMember> => prisma.$transaction(async (tx) => {
         const managedUser = await tx.user.create({
           data: {
@@ -1176,23 +1175,28 @@ export class InvitationService {
         // the loser's user.create aborts the transaction with P2002 and we
         // retry once against the row that now exists.
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
-        // The photo leaves the pending state right before the rows are written
-        // and goes back to pending if that write fails (#1005). Not when the
-        // reused row already stores this exact URL (a retry after a commit):
-        // that object is already saved.
+        // Each roster attempt checks the upload before its rows are written and
+        // untags it only after they commit (#1005); a failed attempt leaves it
+        // for the lifecycle rule. Skipped when the reused row already stores
+        // this exact URL (a retry after a commit): saves two S3 calls.
         const upload = existing?.profilePictureUrl === data.profilePictureUrl ? null : data.profilePictureUrl;
         const roster = (
           reuse: { id: string; managedById: string | null } | null
         ): ReturnType<typeof InvitationService.createRosteredInvitedPlayer> =>
-          withPromotedAvatar(upload, () => this.createRosteredInvitedPlayer(teamId, data, userId, reuse, email));
+          withPromotedAvatar(
+            upload,
+            () => this.createRosteredInvitedPlayer(teamId, data, userId, reuse, email),
+            // Untag only when the row took the photo (decided under the lock, #618)
+            (created) => created.photoApplied
+          );
         try {
           created = await roster(existing);
         } catch (err) {
           // The reuse target completed WorkOS signup mid-transaction — it is a
           // claimed account now, so fall back to case 3 (red-team RT4).
           if (err instanceof ClaimedMidCreateError) {
-            // The upload is already back to pending (the failed write reverted
-            // it): leave it for the lifecycle rule, no promote-then-delete.
+            // The failed roster write left the upload untouched: leave it for
+            // the lifecycle rule (#1005) rather than deleting it.
             const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId, { discardUpload: false });
             result.invitation = case3.invitation;
             result.invited = true;
@@ -1219,12 +1223,9 @@ export class InvitationService {
         result.rostered = true;
         result.invited = true;
         playerId = created.member.playerId;
-        if (upload && !created.photoApplied) {
-          // The reused row kept its own photo (#618), decided under the lock:
-          // the upload goes back to pending for the lifecycle rule (#1005), not
-          // deleted, and not at all while any row stores it.
-          await revertAvatarToPending(upload);
-        }
+        // When the reused row kept its own photo (photoApplied false), the
+        // upload was not untagged: nothing is done with it and the lifecycle
+        // rule expires it (#1005).
         result.emails.player =
           (await this.deliverInvitationEmail(created.invitation, created.token, 'added')) ??
           undefined;
@@ -1264,8 +1265,8 @@ export class InvitationService {
     // The client uploads the avatar before calling us, but a claimed account
     // keeps its own photo: discard the object so it is not orphaned in S3
     // (#419). Ownership-checked because the URL is client-supplied. Not on
-    // case 2's fallbacks: there the upload was promoted, then reverted to
-    // pending, and the lifecycle rule removes it (#1005).
+    // case 2's fallbacks: there the upload is left untouched for the
+    // lifecycle rule (#1005).
     if (discardUpload && data.profilePictureUrl) {
       await discardOwnAvatar(data.profilePictureUrl, userId);
     }

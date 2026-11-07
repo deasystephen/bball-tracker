@@ -1,7 +1,6 @@
-import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand, PutObjectTaggingCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
-import prisma from '../models';
 import { BadRequestError, UploadExpiredError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
@@ -20,10 +19,11 @@ export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const UPLOAD_EXPIRES_SECONDS = 300;
 
 /**
- * Every upload is born tagged `pending=true` (#1005). The profile write that
- * stores its URL removes the tag (`promoteAvatarUpload`); the bucket's
- * lifecycle rule (`infra/s3.tf`, `expire-pending-avatars`) deletes whatever is
- * still pending 3 days after upload. Tag key and value must match that rule.
+ * Once `AVATAR_PENDING_TAG_ENABLED` is on, every upload is born tagged
+ * `pending=true` (#1005). The profile write that stores its URL removes the
+ * tag after it commits (`withPromotedAvatar`); the bucket's lifecycle rule
+ * (`infra/s3.tf`, `expire-pending-avatars`) deletes whatever is still pending
+ * 3 days after upload. Tag key and value must match that rule.
  */
 export const PENDING_TAG_KEY = 'pending';
 export const PENDING_TAG_VALUE = 'true';
@@ -45,22 +45,24 @@ export interface AvatarUploadTarget {
 }
 
 /**
+ * Whether new uploads are born `pending=true` (#1005). Off unless
+ * `AVATAR_PENDING_TAG_ENABLED=true`. The check before a save and the untag
+ * after it run regardless (untagging an untagged object is harmless), so the
+ * rollout is: apply the IAM and lifecycle rule, deploy the code (saves untag,
+ * nothing is tagged yet), then set the flag. Rolling the flag back lands on
+ * code that still untags.
+ */
+export function pendingTagEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AVATAR_PENDING_TAG_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+/**
  * Create a presigned S3 POST (not PUT) for an avatar upload.
  *
  * A presigned PUT cannot bind `Content-Length` (SigV4 never signs it), so the
  * object size was unbounded. A POST policy carries a `content-length-range`
  * condition that S3 enforces server-side, plus an exact `Content-Type` match.
  */
-/**
- * Whether new uploads are born `pending=true` (#1005). Off unless
- * `AVATAR_PENDING_TAG_ENABLED=true`. Promotion and revert run regardless, and
- * untagging an untagged object is harmless, so the rollout is: apply the IAM
- * and lifecycle rule, deploy the code (saves untag, nothing is tagged yet),
- * then set the flag. Rolling the flag back lands on code that still untags.
- */
-export function pendingTagEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AVATAR_PENDING_TAG_ENABLED?.trim().toLowerCase() === 'true';
-}
 
 export async function generateAvatarUploadUrl(
   userId: string,
@@ -110,8 +112,8 @@ export function isManagedAvatarUrl(imageUrl: string | null | undefined): imageUr
 /**
  * The path of `imageUrl` as the URL parser normalises it, or `null` when it
  * does not parse. Every ownership and shape check below runs on THIS value,
- * never on the raw string: `deleteAvatar` derives the object key from
- * `URL.pathname`, which collapses `..` and `%2e%2e` segments, so a raw
+ * never on the raw string: the object key comes from `URL.pathname`
+ * (`issuedAvatarKey`), which collapses `..` and `%2e%2e` segments, so a raw
  * `avatars/<me>/../<other>/x.jpg` passes a string prefix check and names
  * `<other>`'s object.
  */
@@ -176,7 +178,7 @@ export type AvatarDeletion = 'deleted' | 'failed' | 'not_ours';
  * The object key a stored or submitted URL names, when it is one of ours and
  * has the exact issued shape `/avatars/<id>/<file>` on the PARSED path, or why
  * not. The one place that turns a URL into a key we may act on: shared by
- * `deleteAvatarObject` and `promoteAvatarUpload` (#1005).
+ * `deleteAvatarObject`, `discardOwnAvatar` and the #1005 check and untag.
  */
 type IssuedAvatarKey =
   | { key: string }
@@ -302,43 +304,64 @@ function s3ErrorCode(err: unknown): string | undefined {
   return typeof e.name === 'string' ? e.name : undefined;
 }
 
+/** Attempts and the waits between them for the post-commit untag. */
+export const UNTAG_ATTEMPTS = 3;
+const UNTAG_BACKOFF_MS = [100, 300];
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True for S3's answer to a missing object: 404 with `NoSuchKey`/`NotFound`, never `NoSuchBucket`. */
+function isMissingObject(err: unknown): boolean {
+  const code = s3ErrorCode(err);
+  if (code === 'NoSuchBucket') return false;
+  const status = (err as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata?.httpStatusCode;
+  return code === 'NoSuchKey' || code === 'NotFound' || status === 404;
+}
+
+function isAccessDenied(err: unknown): boolean {
+  const status = (err as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata?.httpStatusCode;
+  return s3ErrorCode(err) === 'AccessDenied' || status === 403;
+}
+
 /**
- * Mark an upload as saved: remove its `pending` tag so the lifecycle rule
- * never expires it (#1005). Callers go through `withPromotedAvatar`, which
- * runs this after `assertOwnUploadUrl` and BEFORE the database write.
- * Returns `true` when an object of ours was promoted, `false` for nothing to
- * do (an external URL, such as a WorkOS photo, or an empty value).
+ * Step A, before the write (#1005): `HeadObject` on the validated key of an
+ * upload in our bucket. Returns the key to untag after the commit, or `null`
+ * for nothing to do (an external URL, such as a WorkOS photo, or an empty
+ * value). Nothing is untagged here.
  *
- * - `NoSuchKey` (the lifecycle expired it): throws `UploadExpiredError`
- *   (400 `upload_expired`), so a dead URL is never stored. Only that code:
- *   S3 answers a missing key with `NoSuchKey` only when the role may list the
- *   bucket (`s3:ListBucket`, `infra/ecs.tf`); without it, it is a 403.
- * - Anything else (`AccessDenied`, `NoSuchBucket`, network, throttling) is a
- *   fault, not the user's: logged at error, captured to Sentry and rethrown,
- *   so the route answers 5xx and writes nothing. There is no fail-open: the
- *   upload itself needs the tagging grant, so the IAM apply always precedes
- *   the deploy, and storing a URL that silently expires in 3 days is worse
- *   than a failed save.
+ * - Missing (404; the role has `s3:ListBucket`, so a missing key is a 404):
+ *   throws `UploadExpiredError` (400 `upload_expired`), nothing is written.
+ * - `AccessDenied` while `AVATAR_PENDING_TAG_ENABLED` is off: logged at warn
+ *   and the save proceeds (nothing is tagged then, so nothing can expire),
+ *   which lets the code deploy ahead of the IAM apply.
+ * - Anything else (and `AccessDenied` with the flag on): logged at error,
+ *   captured to Sentry (`flow: avatar-promote`) and rethrown, a 5xx.
  */
-export async function promoteAvatarUpload(imageUrl: string | null | undefined): Promise<boolean> {
+export async function checkAvatarUpload(imageUrl: string | null | undefined): Promise<string | null> {
   const issued = issuedAvatarKey(imageUrl);
   if ('reason' in issued) {
     if (issued.reason === 'not_managed') {
-      return false;
+      return null;
     }
     // `assertOwnUploadUrl` has already refused this shape on every write path.
     throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
   }
 
   try {
-    await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: issued.key }));
-    return true;
+    await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: issued.key }));
   } catch (err) {
-    if (s3ErrorCode(err) === 'NoSuchKey') {
+    if (isMissingObject(err)) {
       throw new UploadExpiredError();
     }
-    logger.error('Avatar promotion failed', {
-      operation: 'DeleteObjectTagging',
+    if (isAccessDenied(err) && !pendingTagEnabled()) {
+      logger.warn('Avatar upload check denied; saving anyway (pending tagging is off)', {
+        operation: 'HeadObject',
+        key: issued.key,
+      });
+      return issued.key;
+    }
+    logger.error('Avatar upload check failed', {
+      operation: 'HeadObject',
       key: issued.key,
       code: s3ErrorCode(err),
       error: err instanceof Error ? err.message : String(err),
@@ -346,114 +369,81 @@ export async function promoteAvatarUpload(imageUrl: string | null | undefined): 
     captureException(err, { flow: 'avatar-promote' });
     throw err;
   }
+  return issued.key;
 }
 
 /**
- * Every object key a stored `profilePictureUrl` could name. Over-inclusive on
- * purpose, because a miss would let a revert expire a photo in use: the host
- * is ignored (a regional or path-style URL to our bucket still counts), both
- * the raw and the percent-decoded path count, and a key is taken from every
- * `avatars/` occurrence in the path.
+ * Step C, only AFTER the write committed (#1005): remove the `pending` tag so
+ * the lifecycle rule never expires the saved photo. Up to `UNTAG_ATTEMPTS`
+ * tries with a short backoff. Never throws: the request already succeeded.
+ *
+ * - Still failing: logged at error with the key and captured to Sentry
+ *   (`flow: avatar-promote`); an operator removes the tag by hand
+ *   (`docs/runbooks/data-subject-requests.md`), or the photo expires.
+ * - Missing (it expired between the check and now, which takes a 3-day-old
+ *   upload): logged at error, no retry.
+ * - `AccessDenied` while the flag is off: logged at warn (nothing is tagged).
  */
-export function referencedAvatarKeys(storedUrl: string): string[] {
-  const pathname = parsedPath(storedUrl) ?? storedUrl.split(/[?#]/)[0];
-  const paths = new Set<string>([pathname]);
-  try {
-    paths.add(decodeURIComponent(pathname));
-  } catch {
-    // Malformed escape: the raw form is already in the set.
-  }
-  const keys = new Set<string>();
-  for (const path of paths) {
-    for (let at = path.indexOf('avatars/'); at !== -1; at = path.indexOf('avatars/', at + 1)) {
-      keys.add(path.slice(at));
+export async function untagAvatarUpload(
+  key: string,
+  sleep: (ms: number) => Promise<void> = defaultSleep
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= UNTAG_ATTEMPTS; attempt += 1) {
+    try {
+      await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
+      return;
+    } catch (err) {
+      lastError = err;
+      if (isMissingObject(err)) {
+        logger.error('Saved avatar upload expired before it was untagged', { operation: 'DeleteObjectTagging', key });
+        return;
+      }
+      if (isAccessDenied(err) && !pendingTagEnabled()) {
+        logger.warn('Avatar untag denied (pending tagging is off; nothing to untag)', {
+          operation: 'DeleteObjectTagging',
+          key,
+        });
+        return;
+      }
+      if (attempt < UNTAG_ATTEMPTS) {
+        await sleep(UNTAG_BACKOFF_MS[attempt - 1]);
+      }
     }
   }
-  return [...keys];
-}
-
-/** A key's file segment is safe as a LIKE fragment (no `%`, `_` or `\`). */
-const LIKE_SAFE = /^[^%_\\]+$/;
-
-/**
- * True when any `User.profilePictureUrl` (tombstones included) names `key`.
- * Narrowed by the key's file segment (`<uuid>.<ext>`, unique per upload and
- * never percent-encoded), then matched with `referencedAvatarKeys`. When the
- * answer is unknown (a database error, or a segment LIKE would misread) it
- * says "referenced", the safe direction for a caller about to re-tag.
- */
-async function isAvatarKeyReferenced(key: string): Promise<boolean> {
-  const file = key.slice(key.lastIndexOf('/') + 1);
-  if (!LIKE_SAFE.test(file)) {
-    return true;
-  }
-  try {
-    const rows = await prisma.user.findMany({
-      where: { profilePictureUrl: { contains: file } },
-      select: { profilePictureUrl: true },
-    });
-    return rows.some((r) => r.profilePictureUrl !== null && referencedAvatarKeys(r.profilePictureUrl).includes(key));
-  } catch (err) {
-    logger.error('Could not check avatar references; not reverting to pending', {
-      key,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return true;
-  }
+  logger.error('Could not untag a saved avatar upload; it will expire unless untagged by hand', {
+    operation: 'DeleteObjectTagging',
+    key,
+    attempts: UNTAG_ATTEMPTS,
+    code: s3ErrorCode(lastError),
+    error: lastError instanceof Error ? lastError.message : String(lastError),
+  });
+  captureException(lastError, { flow: 'avatar-promote' });
 }
 
 /**
- * Put an upload back in the pending state (`pending=true`), so the lifecycle
- * rule expires it in 3 days unless a later save promotes it again (#1005).
- * Used when a promoted upload ends up stored nowhere: the write failed, or
- * Add Player kept the row's own photo. Never while ANY row stores the URL (a
- * retry after a commit, the same upload on a second player or team): that
- * photo is in use, so it stays untagged, logged at info with the key only.
- * Never deletes, never throws: a failure is logged at error and captured.
+ * Save a `profilePictureUrl` in the order that leaves nothing to undo (#1005):
+ * A. `checkAvatarUpload` (HeadObject; 400 `upload_expired` when it is gone),
+ * B. `write`, the database work that stores it,
+ * C. `untagAvatarUpload`, only after `write` resolved (committed).
+ * A failed write touches S3 no further, and neither does a committed write
+ * that did not keep the URL (`stored` returns false): the upload stays as it
+ * was (pending, once tagging is enabled) and the lifecycle rule expires it. So a double
+ * submit is safe: whichever request commits untags afterwards, and the one
+ * that fails changes nothing.
  */
-export async function revertAvatarToPending(imageUrl: string | null | undefined): Promise<void> {
-  const issued = issuedAvatarKey(imageUrl);
-  if ('reason' in issued) {
-    return;
+export async function withPromotedAvatar<T>(
+  imageUrl: string | null | undefined,
+  write: () => Promise<T>,
+  stored: (result: T) => boolean = () => true
+): Promise<T> {
+  const key = await checkAvatarUpload(imageUrl);
+  const result = await write();
+  // `stored` says whether the committed write actually kept the URL (Add
+  // Player case 2 may keep a reused row's own photo): if not, the upload is
+  // left as it was, for the lifecycle rule.
+  if (key !== null && stored(result)) {
+    await untagAvatarUpload(key);
   }
-  if (await isAvatarKeyReferenced(issued.key)) {
-    logger.info('Avatar upload still referenced; not reverted to pending', { key: issued.key });
-    return;
-  }
-  try {
-    await s3Client.send(
-      new PutObjectTaggingCommand({
-        Bucket: BUCKET_NAME,
-        Key: issued.key,
-        Tagging: { TagSet: [{ Key: PENDING_TAG_KEY, Value: PENDING_TAG_VALUE }] },
-      })
-    );
-  } catch (err) {
-    logger.error('Could not revert avatar upload to pending', {
-      operation: 'PutObjectTagging',
-      key: issued.key,
-      code: s3ErrorCode(err),
-      error: err instanceof Error ? err.message : String(err),
-    });
-    captureException(err, { flow: 'avatar-revert' });
-  }
-}
-
-/**
- * Promote `imageUrl` (see `promoteAvatarUpload`), run `write`, the database
- * work that stores it, and REVERT the upload TO PENDING (`revertAvatarToPending`)
- * when `write` throws: P2002, P2025 on a tombstone, a refused transaction…
- * The lifecycle rule then expires it; nothing is deleted here. The one place
- * every write site promotes and reverts.
- */
-export async function withPromotedAvatar<T>(imageUrl: string | null | undefined, write: () => Promise<T>): Promise<T> {
-  const promoted = await promoteAvatarUpload(imageUrl);
-  try {
-    return await write();
-  } catch (err) {
-    if (promoted) {
-      await revertAvatarToPending(imageUrl);
-    }
-    throw err;
-  }
+  return result;
 }

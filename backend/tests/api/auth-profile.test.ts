@@ -15,7 +15,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
     return { input };
   }),
   DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
-  PutObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'PutObjectTagging', input })),
+  HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
 }));
 
 import request from 'supertest';
@@ -122,28 +122,28 @@ describe('PATCH /api/v1/auth/me', () => {
     ]);
   });
 
-  describe('pending upload promotion (#1005)', () => {
+  describe('pending upload save order (#1005)', () => {
     type Sent = { kind?: string; input: Record<string, unknown> };
-    const taggingCalls = (): Sent[] =>
-      mockS3Send.mock.calls.map(([cmd]) => cmd as Sent).filter((cmd) => cmd.kind === 'DeleteObjectTagging');
+    const s3Kinds = (): (string | undefined)[] => mockS3Send.mock.calls.map(([cmd]) => (cmd as Sent).kind);
+    const NEW_KEY = `avatars/${TEST_USER_ID}/new.jpg`;
 
-    it('removes the pending tag of a new upload before the row is written', async () => {
+    it('checks the upload before the write and untags it only after the write', async () => {
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 
       expect(res.status).toBe(200);
-      expect(taggingCalls().map((c) => c.input)).toEqual([
-        { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/new.jpg` },
+      const calls = mockS3Send.mock.calls.map(([cmd]) => cmd as Sent);
+      expect(calls.filter((c) => c.kind !== undefined).map((c) => [c.kind, c.input.Key])).toEqual([
+        ['HeadObject', NEW_KEY],
+        ['DeleteObjectTagging', NEW_KEY],
       ]);
-      const tagAt = mockS3Send.mock.invocationCallOrder[0];
-      expect(tagAt).toBeLessThan((mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0]);
+      const writeAt = (mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0];
+      expect(mockS3Send.mock.invocationCallOrder[0]).toBeLessThan(writeAt);
+      expect(mockS3Send.mock.invocationCallOrder[1]).toBeGreaterThan(writeAt);
     });
 
-    it('answers 400 upload_expired and writes nothing when the upload is gone', async () => {
+    it('answers 400 upload_expired and writes nothing when the upload is gone (HeadObject 404)', async () => {
       mockS3Send.mockRejectedValueOnce(
-        Object.assign(new Error('The specified key does not exist.'), {
-          name: 'NoSuchKey',
-          $metadata: { httpStatusCode: 404 },
-        })
+        Object.assign(new Error('Not Found'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } })
       );
 
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
@@ -154,45 +154,34 @@ describe('PATCH /api/v1/auth/me', () => {
         code: 'upload_expired',
       });
       expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(s3Kinds()).toEqual(['HeadObject']);
     });
 
-    it('reverts the promoted upload to pending, deleting nothing, when the account was deleted underneath the request (401)', async () => {
+    it('a failed write (account deleted underneath, 401) makes no S3 call after the check', async () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 
       expect(res.status).toBe(401);
-      expect(taggingCalls()).toHaveLength(1);
-      const reverts = mockS3Send.mock.calls
-        .map(([cmd]) => cmd as Sent)
-        .filter((cmd) => cmd.kind === 'PutObjectTagging');
-      expect(reverts.map((c) => c.input)).toEqual([
-        {
-          Bucket: 'bball-tracker-avatars-dev',
-          Key: `avatars/${TEST_USER_ID}/new.jpg`,
-          Tagging: { TagSet: [{ Key: 'pending', Value: 'true' }] },
-        },
-      ]);
+      expect(s3Kinds()).toEqual(['HeadObject']);
       expect(deleteObjectCalls).toHaveLength(0);
     });
 
-    it('skips promotion for an external URL', async () => {
+    it('makes no S3 call for an external URL', async () => {
       const res = await request(app)
         .patch('/api/v1/auth/me')
         .set(AUTH)
         .send({ profilePictureUrl: 'https://workos.example/photo.jpg' });
 
       expect(res.status).toBe(200);
-      expect(taggingCalls()).toHaveLength(0);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toHaveLength(0);
     });
 
-    it('skips promotion when the request re-sends the URL already stored', async () => {
+    it('makes no S3 call when the request re-sends the URL already stored', async () => {
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_OLD });
 
       expect(res.status).toBe(200);
-      expect(taggingCalls()).toHaveLength(0);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toHaveLength(0);
     });
   });
 

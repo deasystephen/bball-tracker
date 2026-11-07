@@ -179,9 +179,8 @@ export class PlayerService {
       throw new BadRequestError('A user with this email already exists');
     }
 
-    // Out of the pending state before it is stored (#1005); 400 `upload_expired`
-    // when the upload is gone, and nothing is written; a failed create (P2002…)
-    // reverts the upload to pending.
+    // Checked before it is stored (#1005): 400 `upload_expired` when the
+    // upload is gone, and nothing is written; untagged only after the create.
     const player = await withPromotedAvatar(data.profilePictureUrl, async () => {
       try {
         // Create the player (as a User with role PLAYER)
@@ -463,10 +462,9 @@ export class PlayerService {
       }
     }
 
-    // A new upload leaves the pending state before it is stored (#1005): an
-    // expired one is a 400 `upload_expired` with nothing written, and a failed
-    // write (P2025 on a tombstone, P2002…) reverts it to pending. Re-sending the
-    // stored URL needs nothing.
+    // A new upload is checked before it is stored (#1005): an expired one is
+    // a 400 `upload_expired` with nothing written; it is untagged only after
+    // the update. Re-sending the stored URL needs nothing.
     const newUpload =
       data.profilePictureUrl && data.profilePictureUrl !== player.profilePictureUrl ? data.profilePictureUrl : null;
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
