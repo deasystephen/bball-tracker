@@ -79,13 +79,21 @@ export async function isGuardianOfTeamMember(userId: string, teamId: string): Pr
   return !!link;
 }
 
+/** A caller's flags on a team plus whether they may manage its staff (`canManageStaff`). */
+export interface TeamAccess {
+  permissions: TeamPermissions;
+  /** System ADMIN, an admin of the team's league, or a HEAD_COACH-type staff row. */
+  canManageStaff: boolean;
+}
+
 /**
- * Get a user's permissions for a specific team
+ * The caller's permissions on a team AND whether they may manage its staff,
+ * from ONE set of reads (the facts `canManageStaff` checks are the same ones
+ * the permission flags are built from: system ADMIN, league admin, the staff
+ * row's role). `GET /teams/:id` uses it to decide whether to compute
+ * `isLatestInLineage` (#461) without another round trip.
  */
-export async function getTeamPermissions(
-  userId: string,
-  teamId: string
-): Promise<TeamPermissions> {
+export async function getTeamAccess(userId: string, teamId: string): Promise<TeamAccess> {
   // First check if user is a system admin
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -93,7 +101,7 @@ export async function getTeamPermissions(
   });
 
   if (user?.role === UserRole.ADMIN) {
-    return ALL_PERMISSIONS;
+    return { permissions: ALL_PERMISSIONS, canManageStaff: true };
   }
 
   // Check if user is a league admin for this team's league
@@ -115,14 +123,14 @@ export async function getTeamPermissions(
   });
 
   if (team?.season?.league?.admins && team.season.league.admins.length > 0) {
-    return ALL_PERMISSIONS;
+    return { permissions: ALL_PERMISSIONS, canManageStaff: true };
   }
 
   // Team staff: one row per user per team (`@@unique([teamId, userId])`, #463),
   // so the user's permissions are exactly that row's role flags.
   const staff = await prisma.teamStaff.findUnique({
     where: { teamId_userId: { teamId, userId } },
-    select: { role: { select: STAFF_ROLE_FLAGS_SELECT } },
+    select: { role: { select: { ...STAFF_ROLE_FLAGS_SELECT, type: true } } },
   });
 
   if (!staff) {
@@ -137,18 +145,26 @@ export async function getTeamPermissions(
     });
 
     if (isMember) {
-      return VIEW_ONLY_PERMISSIONS;
+      return { permissions: VIEW_ONLY_PERMISSIONS, canManageStaff: false };
     }
 
     // Guardian of a current member (PARENT role) — read-only, like a member.
     if (await isGuardianOfTeamMember(userId, teamId)) {
-      return VIEW_ONLY_PERMISSIONS;
+      return { permissions: VIEW_ONLY_PERMISSIONS, canManageStaff: false };
     }
 
-    return NO_PERMISSIONS;
+    return { permissions: NO_PERMISSIONS, canManageStaff: false };
   }
 
-  return { ...staff.role };
+  const { type, ...flags } = staff.role;
+  return { permissions: flags, canManageStaff: type === 'HEAD_COACH' };
+}
+
+/**
+ * Get a user's permissions for a specific team (the flags of `getTeamAccess`).
+ */
+export async function getTeamPermissions(userId: string, teamId: string): Promise<TeamPermissions> {
+  return (await getTeamAccess(userId, teamId)).permissions;
 }
 
 /**
@@ -282,8 +298,8 @@ export async function getPlayerTeamAccess(
 /**
  * Check if user is a system admin
  */
-export async function isSystemAdmin(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
+export async function isSystemAdmin(userId: string, db: Db = prisma): Promise<boolean> {
+  const user = await db.user.findUnique({
     where: { id: userId },
     select: { role: true },
   });
@@ -294,13 +310,13 @@ export async function isSystemAdmin(userId: string): Promise<boolean> {
 /**
  * Check if user is a league admin for a specific league
  */
-export async function isLeagueAdmin(userId: string, leagueId: string): Promise<boolean> {
+export async function isLeagueAdmin(userId: string, leagueId: string, db: Db = prisma): Promise<boolean> {
   // System admin is also a league admin
-  if (await isSystemAdmin(userId)) {
+  if (await isSystemAdmin(userId, db)) {
     return true;
   }
 
-  const leagueAdmin = await prisma.leagueAdmin.findUnique({
+  const leagueAdmin = await db.leagueAdmin.findUnique({
     where: {
       leagueId_userId: {
         leagueId,
@@ -463,8 +479,8 @@ export async function canReadLeague(userId: string, leagueId: string): Promise<b
  * to another season") is keyed off the role TYPE instead — no schema change
  * needed. See `canManageStaff`.
  */
-export async function isHeadCoach(userId: string, teamId: string): Promise<boolean> {
-  const row = await prisma.teamStaff.findFirst({
+export async function isHeadCoach(userId: string, teamId: string, db: Db = prisma): Promise<boolean> {
+  const row = await db.teamStaff.findFirst({
     where: { teamId, userId, role: { type: 'HEAD_COACH' } },
     select: { id: true },
   });
@@ -478,19 +494,22 @@ export async function isHeadCoach(userId: string, teamId: string): Promise<boole
  * Allowed: system ADMIN, an admin of the team's league, or a HEAD_COACH-type
  * staff member. Assistant coaches keep manageTeam/roster/track/view/share but
  * are NOT allowed here.
+ *
+ * `db` defaults to the shared client; a transaction passes its own so the
+ * check reads through it behind the locks it holds (season rollover, #461).
  */
-export async function canManageStaff(userId: string, teamId: string): Promise<boolean> {
-  if (await isSystemAdmin(userId)) {
+export async function canManageStaff(userId: string, teamId: string, db: Db = prisma): Promise<boolean> {
+  if (await isSystemAdmin(userId, db)) {
     return true;
   }
 
-  const team = await prisma.team.findUnique({
+  const team = await db.team.findUnique({
     where: { id: teamId },
     select: { season: { select: { leagueId: true } } },
   });
 
   if (team?.season) {
-    const leagueAdmin = await prisma.leagueAdmin.findUnique({
+    const leagueAdmin = await db.leagueAdmin.findUnique({
       where: { leagueId_userId: { leagueId: team.season.leagueId, userId } },
     });
     if (leagueAdmin) {
@@ -498,19 +517,27 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
     }
   }
 
-  return isHeadCoach(userId, teamId);
+  return isHeadCoach(userId, teamId, db);
 }
 
 /**
- * Number of DISTINCT teams the user is staff on.
+ * Number of DISTINCT teams the user is staff on, where a team is its LINEAGE
+ * (#461): every season of one team counts once.
  *
- * A tier's team cap counts teams, not staff rows (audit B2.8). Since #463
- * `TeamStaff` is unique on `[teamId, userId]`, so one row is one team and a
- * plain count is exact. Accepts a transaction client so the create-team
- * transaction can recount behind its row lock.
+ * A `Team` row is a team-season (#462), so counting staff rows (one per
+ * team-season since #463) would charge a coach for every past season and a
+ * capped coach could never continue their own team into the next one. A new
+ * team always starts a new lineage, so a plain `POST /teams` adds exactly one,
+ * as before; a season rollover adds none for anyone carried. Accepts a
+ * transaction client so the create-team transaction can recount behind its
+ * row lock.
  */
 export async function countDistinctStaffTeams(userId: string, db: Db = prisma): Promise<number> {
-  return db.teamStaff.count({ where: { userId } });
+  const lineages = await db.team.groupBy({
+    by: ['lineageId'],
+    where: { staff: { some: { userId } } },
+  });
+  return lineages.length;
 }
 
 export interface LastHeadCoachOptions {

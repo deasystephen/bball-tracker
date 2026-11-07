@@ -60,6 +60,11 @@ const ALLOWED: Record<string, string> = {
     'status-guarded PENDING exit inside accept/reject/cancel, which log `Invitation accepted` / `declined` / `cancelled`',
   'invitation-service.ts#stripUnclaimedEmail':
     'consent guard inside rejectInvitation, which logs `Invitation declined`',
+  // Callers whose write is the shared helper: the helper logs the event.
+  'league-service.ts#createSeason':
+    'POST /leagues/:id/seasons writes through season-service findOrCreateSeason, which logs `Season created` when it inserts',
+  'season-service.ts#createSeason':
+    'POST /seasons writes through findOrCreateSeason, which logs `Season created` when it inserts',
   'invitation-service.ts#expireOldInvitations':
     'bulk expiry kept for a future maintenance job; nothing calls it today',
   // The SES event consumer (#449): background work driven by SES

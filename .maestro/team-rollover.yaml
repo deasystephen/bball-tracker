@@ -1,0 +1,74 @@
+appId: com.bballtracker.mobile
+---
+# Season rollover (#461): Frank Vogel (head coach of the seeded Lakers, in
+# "Spring 2024") starts the next season. The form lists the league's seasons
+# and preselects "Spring 2025" (seeded, team-less: Frank is not a league
+# admin, so he picks an existing season and is never offered a new one). The new team-season opens
+# with the roster carried over, and a player's career view still lists last
+# season's Lakers row.
+#
+# Mutates data: the new Lakers row is removed by the seed's "Frank's teams
+# other than the seeded Lakers" reset. Run `npx prisma db seed` first.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Teams tab"
+- assertVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+# The head-coach action sits under the Announcements button.
+- scrollUntilVisible:
+    element:
+      id: "team-start-next-season"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "team-start-next-season"
+
+# The form explains what carries over and preselects the league's next
+# season. Frank cannot create seasons, so there is no "New season" option.
+- assertVisible: "Start next season"
+- assertVisible: ".*stay with Spring 2024.*"
+- assertVisible:
+    text: "Spring 2025"
+    selected: true
+- assertNotVisible: "New season"
+- tapOn:
+    id: "next-season-submit"
+
+# Replaced by the new team-season: same team, next season, roster carried.
+- extendedWaitUntil:
+    visible: ".*Spring 2025.*"
+    timeout: 10000
+- assertVisible: "Lakers"
+- scrollUntilVisible:
+    element:
+      text: "LeBron James"
+    direction: DOWN
+    timeout: 10000
+
+# Last season's stats stay on last season's row: the career view counts both
+# team-seasons and keeps last season's game. The per-team rows (league and
+# season name) sit below the averages and totals, so scroll to each.
+- tapOn: "LeBron James"
+- extendedWaitUntil:
+    visible: ".*2 teams.*"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: ".*Spring 2024.*"
+    direction: DOWN
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: ".*Spring 2025.*"
+    direction: DOWN
+    timeout: 15000

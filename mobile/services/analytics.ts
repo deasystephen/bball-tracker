@@ -32,6 +32,7 @@ export const AnalyticsEvents = {
   TEAM_CREATED: 'team_created',
   TEAM_UPDATED: 'team_updated',
   TEAM_DELETED: 'team_deleted',
+  TEAM_ROLLED_OVER: 'team_rolled_over',
   ROSTER_PLAYER_ADDED: 'roster_player_added',
   ROSTER_PLAYER_UPDATED: 'roster_player_updated',
   ROSTER_PLAYER_REMOVED: 'roster_player_removed',
@@ -121,6 +122,14 @@ export interface AnalyticsEventProps {
   team_created: { team_id: string; league_scope: 'personal' | 'league'; has_bracket: boolean };
   team_updated: { team_id: string; fields: string };
   team_deleted: { team_id: string };
+  /**
+   * Season rollover (#461): `team_id` is the new team-season, `from_team_id`
+   * the one it continues; `created` is false when the lineage already had a
+   * row in that season (a repeat returns it); `new_season` when this request
+   * created the season (the server's `seasonCreated`; a typed name that
+   * matched an existing season is false).
+   */
+  team_rolled_over: { team_id: string; from_team_id: string; created: boolean; new_season: boolean };
   roster_player_added: {
     team_id: string;
     rostered: boolean;

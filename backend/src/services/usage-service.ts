@@ -11,8 +11,9 @@
  * Design decisions:
  * - Counts are derived from existing data at read time (no separate counter
  *   table to drift out of sync). A user's "team count" = the number of
- *   DISTINCT teams they are staff on (a user holding two roles on one team has
- *   two `TeamStaff` rows but one team — audit B2.8).
+ *   DISTINCT teams they are staff on, a team being its lineage: every season
+ *   of one team counts once (#461), so continuing a team into a new season
+ *   never uses up the cap.
  * - Counts are cached in Redis with a short TTL (USAGE_CACHE_TTL_SECONDS) to
  *   absorb repeated reads, and explicitly invalidated on relevant writes
  *   (e.g. team create / delete). The cache is best-effort — a Redis outage
@@ -97,15 +98,17 @@ function toMetric(count: number, limit: number): UsageMetric {
  * Exported for testing; prefer `getUsage` for normal use (it adds caching).
  */
 export async function computeCounts(userId: string): Promise<CachedCounts> {
-  // One query: every staff row with its team + season. A user holds one row
-  // per team (#463), so rows are teams; seasons are distinct-ified in JS since
-  // several teams can share one. The team Set keeps the count honest anyway.
+  // One query: every staff row with its team-season's lineage and season. A
+  // team is its LINEAGE (#461): a `Team` row is one team-season, so each
+  // season of one team counts once, the same rule as the cap's
+  // `countDistinctStaffTeams`. Seasons are distinct-ified in JS since several
+  // teams can share one.
   const staffRows = await prisma.teamStaff.findMany({
     where: { userId },
-    select: { teamId: true, team: { select: { seasonId: true } } },
+    select: { team: { select: { lineageId: true, seasonId: true } } },
   });
 
-  const distinctTeams = new Set(staffRows.map((s) => s.teamId));
+  const distinctTeams = new Set(staffRows.map((s) => s.team.lineageId));
   const distinctSeasons = new Set(staffRows.map((s) => s.team.seasonId));
 
   return { teams: distinctTeams.size, seasons: distinctSeasons.size };

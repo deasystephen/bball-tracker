@@ -16,7 +16,7 @@ import { TeamService } from '../../src/services/team-service';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { Feature, featureCode, getRequiredTier } from '../../src/services/entitlements';
 import { prismaMock } from '../setup';
-import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
+import { TEST_TEAM_LIMIT, lineageRows, withFiniteFreeTeamLimit } from '../helpers';
 
 const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
@@ -62,10 +62,10 @@ describe('GET /api/v1/auth/me/usage', () => {
       subscriptionExpiresAt: null,
     });
     (prismaMock.teamStaff.findMany as jest.Mock).mockResolvedValue([
-      { teamId: 'team-0', team: { seasonId: 's1' } },
-      { teamId: 'team-1', team: { seasonId: 's1' } },
-      { teamId: 'team-2', team: { seasonId: 's2' } },
-      { teamId: 'team-3', team: { seasonId: 's2' } },
+      { team: { lineageId: 'lineage-0', seasonId: 's1' } },
+      { team: { lineageId: 'lineage-1', seasonId: 's1' } },
+      { team: { lineageId: 'lineage-2', seasonId: 's2' } },
+      { team: { lineageId: 'lineage-3', seasonId: 's2' } },
     ]);
 
     const response = await request(app)
@@ -139,7 +139,7 @@ describe('POST /api/v1/teams — tier limit enforcement', () => {
   // (The exhaustive PREMIUM/LEAGUE/grandfather matrix lives in teams.test.ts.)
 
   it('lets a FREE user create a 4th team and invalidates cached usage (#445)', async () => {
-    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(3);
+    (prismaMock.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(3));
     mockTeamService.createTeam.mockResolvedValue(createdTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
     const response = await request(app)
@@ -170,7 +170,7 @@ describe('POST /api/v1/teams — finite tier limit enforcement', () => {
   withFiniteFreeTeamLimit();
 
   it('creates the team and invalidates cached usage when under the cap', async () => {
-    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(1);
+    (prismaMock.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(1));
     mockTeamService.createTeam.mockResolvedValue(createdTeam as unknown as Awaited<ReturnType<typeof mockTeamService.createTeam>>);
 
     const response = await request(app)
@@ -186,7 +186,7 @@ describe('POST /api/v1/teams — finite tier limit enforcement', () => {
   });
 
   it('blocks with 402 upgrade_required when the FREE-tier user is at/over the cap', async () => {
-    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+    (prismaMock.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
     const infoSpy = spyOnInfo();
 
     const response = await request(app)
@@ -222,12 +222,12 @@ describe('POST /api/v1/teams — finite tier limit enforcement', () => {
       .send(validBody);
 
     expect(response.status).toBe(201);
-    expect(prismaMock.teamStaff.count).not.toHaveBeenCalled();
+    expect(prismaMock.team.groupBy).not.toHaveBeenCalled();
     expect(mockTeamService.createTeam).toHaveBeenCalled();
   });
 
   it('still validates the body (400) for an under-cap user with bad input', async () => {
-    (prismaMock.teamStaff.count as jest.Mock).mockResolvedValue(0);
+    (prismaMock.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(0));
 
     const response = await request(app)
       .post('/api/v1/teams')

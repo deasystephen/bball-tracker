@@ -154,6 +154,63 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
 }
 
 /**
+ * 409 — a season rollover (#461) found the lineage already has a team-season
+ * in that season, and the caller may not manage that row (no
+ * `canManageRoster` on it, e.g. a coach removed from it). The body carries no
+ * id: naming the row would tell a caller about a team they cannot see. A
+ * caller who may manage it gets the row itself (200 `created: false`).
+ */
+export class TeamSeasonExistsError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('team_season_exists', {}, 'This team already has a team-season in that season', 409);
+    Object.setPrototypeOf(this, TeamSeasonExistsError.prototype);
+  }
+}
+
+/**
+ * 409 — a season rollover (#461) was asked of a team-season that is not its
+ * lineage's latest (`latestTeamSeasonId`). Only the latest row continues a
+ * team: otherwise a coach removed from this season could roll last season's
+ * row forward and come back as head coach. No ids in the body.
+ */
+export class NotLatestSeasonError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'not_latest_season',
+      {},
+      "Only the team's most recent season can start the next one",
+      409
+    );
+    Object.setPrototypeOf(this, NotLatestSeasonError.prototype);
+  }
+}
+
+/**
+ * 409 — a season rollover (#461) resolved to a season of the league that is
+ * archived (`isActive: false`), by name or by id. A team is never rolled
+ * into an archived season; the coach picks or names an active one. No ids.
+ */
+export class SeasonArchivedError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('season_archived', {}, 'That season is archived; pick or name an active season', 409);
+    Object.setPrototypeOf(this, SeasonArchivedError.prototype);
+  }
+}
+
+/**
+ * 400 — a season rollover (#461) named or picked a season that starts no later
+ * than the team's current one (`isSeasonAfter`, enforced only when both have
+ * a start date). Rolling into an older season would make an old team-season
+ * the newest row and lock the real current one. No ids.
+ */
+export class SeasonNotAfterSourceError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('season_not_after_source', {}, "The next season must come after the team's current season", 400);
+    Object.setPrototypeOf(this, SeasonNotAfterSourceError.prototype);
+  }
+}
+
+/**
  * 400 `upload_expired` — the avatar upload a profile write names no longer
  * exists: it was never saved within the pending window and the bucket's
  * lifecycle rule expired it (#1005). Nothing was written; the client asks the

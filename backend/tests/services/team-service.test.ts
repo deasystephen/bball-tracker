@@ -34,6 +34,7 @@ import {
   expectForbiddenError,
   TEST_TEAM_LIMIT,
   withFiniteFreeTeamLimit,
+  lineageRows,
 } from '../helpers';
 
 /** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
@@ -127,7 +128,7 @@ describe('TeamService', () => {
 
       it('lets a FREE user create a 4th team without a recount: no tier is capped (#445)', async () => {
         const { coach, season } = mockCreatePath({});
-        (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(3);
+        (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(3));
 
         await expect(
           TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
@@ -135,7 +136,7 @@ describe('TeamService', () => {
         // The row lock still serializes concurrent creates by the same user.
         expect(mockPrisma.$queryRaw).toHaveBeenCalled();
         expect(mockPrisma.team.create).toHaveBeenCalled();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
 
       it('lets a lapsed PREMIUM user (effective tier FREE) create a team (#445)', async () => {
@@ -157,7 +158,7 @@ describe('TeamService', () => {
           const { coach, season } = mockCreatePath({});
           // The recount happens inside the transaction, after the lock: a
           // concurrent create that committed first is visible here.
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           try {
             await TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id);
@@ -174,13 +175,16 @@ describe('TeamService', () => {
           expect(mockPrisma.$queryRaw).toHaveBeenCalled();
           expect(mockPrisma.team.create).not.toHaveBeenCalled();
           expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
-          // Cap counts teams (audit B2.8): one staff row per team since #463.
-          expect(mockPrisma.teamStaff.count).toHaveBeenCalledWith({ where: { userId: coach.id } });
+          // Cap counts teams (audit B2.8), a team being its lineage (#461).
+          expect(mockPrisma.team.groupBy).toHaveBeenCalledWith({
+            by: ['lineageId'],
+            where: { staff: { some: { userId: coach.id } } },
+          });
         });
 
         it('allows a FREE user under the cap', async () => {
           const { coach, season } = mockCreatePath({});
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT - 1);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT - 1));
 
           await expect(
             TeamService.createTeam({ name: 'Third', seasonId: season.id }, coach.id)
@@ -193,7 +197,7 @@ describe('TeamService', () => {
             subscriptionTier: 'PREMIUM',
             subscriptionExpiresAt: new Date('2000-01-01'),
           });
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           await expect(
             TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
@@ -210,7 +214,7 @@ describe('TeamService', () => {
         await expect(
           TeamService.createTeam({ name: 'Tenth', seasonId: season.id }, coach.id)
         ).resolves.toBeDefined();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
 
       it('skips the cap for system admins', async () => {
@@ -232,7 +236,7 @@ describe('TeamService', () => {
         await expect(
           TeamService.createTeam({ name: 'Admin team', seasonId: season.id }, admin.id)
         ).resolves.toBeDefined();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
     });
 
@@ -276,6 +280,10 @@ describe('TeamService', () => {
     // #442: WHO may create x WHERE they may create
     // ---------------------------------------------------------------------
     describe('authorization (#442)', () => {
+      afterEach(() => {
+        (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
+      });
+
       function personalProvisionMocks(user: { id: string; name: string }): { id: string; name: string; seasonId: string } {
         const team = createTeam({ seasonId: 'season-personal' });
         const headCoachRole = createTeamRole({
@@ -287,7 +295,13 @@ describe('TeamService', () => {
         (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: 'league-personal' });
         (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
-        (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: 'season-personal' });
+        // The personal season goes through findOrCreateSeason (#461): no
+        // season by that name yet, then ON CONFLICT DO NOTHING + read-back.
+        (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+          Promise.resolve(strings.join('?').includes('FROM "Season"') ? [] : [{ id: 'locked' }])
+        );
+        (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 'season-personal', isActive: true });
         (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
         (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -322,9 +336,11 @@ describe('TeamService', () => {
         // The owner gets a real LeagueAdmin row so they can rename the league
         // and add next year's season.
         expect(mockPrisma.leagueAdmin.upsert).toHaveBeenCalled();
-        expect(mockPrisma.season.upsert).toHaveBeenCalledWith(
-          expect.objectContaining({ create: expect.objectContaining({ isActive: true }) })
-        );
+        // Through the one season-create path, with the same name rule.
+        expect(mockPrisma.season.createMany).toHaveBeenCalledWith({
+          data: [expect.objectContaining({ leagueId: 'league-personal', name: String(new Date().getFullYear()), isActive: true })],
+          skipDuplicates: true,
+        });
         expect(mockPrisma.team.create).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({ seasonId: 'season-personal' }),
@@ -428,6 +444,48 @@ describe('TeamService', () => {
   });
 
   describe('getTeamById', () => {
+    it("says whether the row is its lineage's newest team-season, to a staff manager only (isLatestInLineage, #461)", async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [],
+        games: [],
+        invitations: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      try {
+        // Head coach: the staff row read for the flags also says "manages staff".
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+        (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue({ id: team.id });
+        await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: true });
+        expect(mockPrisma.team.findFirst).toHaveBeenCalledWith({
+          where: { lineageId: team.lineageId },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          select: { id: true },
+        });
+
+        (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue({ id: 'a-newer-team-season' });
+        await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: false });
+
+        // An assistant coach (same flags, not a staff manager) gets no such key
+        // and costs no query; no separate canManageStaff read either.
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+          ...coachStaff,
+          role: { ...headCoachRole, type: 'ASSISTANT_COACH' },
+        });
+        (mockPrisma.team.findFirst as jest.Mock).mockClear();
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockClear();
+        const view = await TeamService.getTeamById(team.id, coach.id);
+        expect('isLatestInLineage' in view).toBe(false);
+        expect(mockPrisma.team.findFirst).not.toHaveBeenCalled();
+      } finally {
+        (mockPrisma.team.findFirst as jest.Mock).mockReset();
+      }
+    });
+
     it('should return team for staff member', async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
 
@@ -2536,7 +2594,7 @@ describe('TeamService', () => {
           (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
           (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
           (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           await expect(
             TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)

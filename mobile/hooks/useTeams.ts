@@ -7,6 +7,7 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents, changedFields, setUserProperties } from '../services/analytics';
 import { useAuthStore } from '../store/auth-store';
 import { usageKeys } from './useUsage';
+import { seasonKeys } from './useSeasons';
 import {
   gameKeys,
   playerKeys,
@@ -78,6 +79,12 @@ export interface Team {
    * with the same lineageId; screens never move a team's seasonId on history.
    */
   lineageId?: string;
+  /**
+   * `GET /teams/:id` only: whether this row is its lineage's latest
+   * team-season (#461). Only that row may start the next season; absent from
+   * a backend that predates it, which the screens treat as "no".
+   */
+  isLatestInLineage?: boolean;
   /** Per-season bracket (#462): trimmed free text, max 20 chars. */
   ageGroup?: string | null;
   gender?: TeamGender | null;
@@ -91,6 +98,9 @@ export interface Team {
      * season); `GET /teams` list items select `{ id, name, league }` only.
      */
     isActive?: boolean;
+    /** Detail only, like `isActive`; the rollover picker orders seasons by them (#461). */
+    startDate?: string | null;
+    createdAt?: string;
     league: {
       id: string;
       name: string;
@@ -141,6 +151,21 @@ export interface UpdateTeamInput {
   seasonId?: string;
   chatLink?: string | null;
   /** `null` clears (server rule shared with jersey/position). */
+  ageGroup?: string | null;
+  gender?: TeamGender | null;
+}
+
+/**
+ * Season rollover — `POST /teams/:id/rollover` (#461). Exactly one of
+ * `seasonId` (an existing season in the team's league) or `seasonName` (found
+ * by name in the team's league, created when missing; creating one needs a
+ * league admin, which a personal-league owner is). Bracket fields: absent
+ * carries last season's value, `null` clears.
+ */
+export interface RolloverTeamInput {
+  seasonId?: string;
+  seasonName?: string;
+  name?: string;
   ageGroup?: string | null;
   gender?: TeamGender | null;
 }
@@ -358,6 +383,54 @@ export function useDeleteTeam() {
       // fed season totals (#729).
       queryClient.invalidateQueries({ queryKey: gameKeys.lists() });
       queryClient.invalidateQueries({ queryKey: statsKeys.all });
+    },
+  });
+}
+
+/**
+ * Start the next season of a team (#461). Resolves with the new team-season,
+ * `created` (false when the lineage already had a row in that season; the
+ * backend then returns that row, so a repeated tap is harmless) and
+ * `seasonCreated` (this request created the season).
+ */
+export function useRolloverTeam() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ teamId, data }: { teamId: string; data: RolloverTeamInput }) => {
+      const response = await apiClient.post<{
+        success: boolean;
+        created: boolean;
+        seasonCreated?: boolean;
+        team: Team;
+      }>(`/teams/${teamId}/rollover`, data);
+      return {
+        team: response.data.team,
+        created: response.data.created,
+        seasonCreated: response.data.seasonCreated === true,
+      };
+    },
+    onSuccess: ({ team, created, seasonCreated }, variables) => {
+      trackEvent(AnalyticsEvents.TEAM_ROLLED_OVER, {
+        team_id: team.id,
+        from_team_id: variables.teamId,
+        created,
+        // What the server did, not what was sent: a typed name that matched
+        // an existing season created nothing.
+        new_season: seasonCreated,
+      });
+      queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      // The source row is no longer its lineage's latest (`isLatestInLineage`),
+      // so its cached detail would still offer "Start next season".
+      queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+      // A new staff row per carried coach feeds the Profile usage meter (#43),
+      // and a named season may be a new one.
+      queryClient.invalidateQueries({ queryKey: usageKeys.all });
+      queryClient.invalidateQueries({ queryKey: seasonKeys.lists() });
+      // Every carried player's career view gains the new team-season, and a
+      // player's detail lists their teams.
+      queryClient.invalidateQueries({ queryKey: statsKeys.playerOveralls() });
+      queryClient.invalidateQueries({ queryKey: playerKeys.details() });
     },
   });
 }

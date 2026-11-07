@@ -4,9 +4,21 @@
 
 import { LeagueService } from '../../src/services/league-service';
 import { mockPrisma } from '../setup';
-import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer, uniqueViolation } from '../factories';
+import { BadRequestError } from '../../src/utils/errors';
+import { createLeague, createSeason, createTeam, createCoach, createAdmin, createPlayer } from '../factories';
 import { expectNotFoundError, expectBadRequestError, expectForbiddenError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
+
+/** `$queryRaw`: the season-name lookup answers `rows`; the League lock finds its row. */
+function mockSeasonRaw(rows: { id: string; isActive: boolean }[]): void {
+  (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('?').includes('FROM "Season"') ? rows : [{ id: 'league' }])
+  );
+}
+
+afterEach(() => {
+  (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
+});
 
 describe('LeagueService', () => {
   describe('createLeague', () => {
@@ -623,20 +635,19 @@ describe('LeagueService', () => {
   });
 
   describe('createSeason', () => {
-    it('should create a season when caller is a system admin', async () => {
+    it('should create a season when caller is a system admin, through findOrCreateSeason', async () => {
       const sysAdmin = createAdmin();
       const league = createLeague();
       const startDate = new Date('2026-03-01');
       const endDate = new Date('2026-06-30');
+      const createdSeason = createSeason({ leagueId: league.id, name: 'Summer', startDate, endDate });
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
-      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-      const createdSeason = createSeason({ leagueId: league.id, name: 'Summer', startDate, endDate });
-      (mockPrisma.season.create as jest.Mock).mockResolvedValue({
-        ...createdSeason,
-        league,
-        teams: [],
-      });
+      mockSeasonRaw([]);
+      (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.season.findUniqueOrThrow as jest.Mock)
+        .mockResolvedValueOnce({ id: createdSeason.id, isActive: true })
+        .mockResolvedValueOnce({ ...createdSeason, league, teams: [] });
 
       const result = await LeagueService.createSeason(
         league.id,
@@ -645,17 +656,10 @@ describe('LeagueService', () => {
       );
 
       expect(result.name).toBe('Summer');
-      expect(mockPrisma.season.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: {
-            leagueId: league.id,
-            name: 'Summer',
-            startDate,
-            endDate,
-            isActive: true,
-          },
-        })
-      );
+      expect(mockPrisma.season.createMany).toHaveBeenCalledWith({
+        data: [{ leagueId: league.id, name: 'Summer', startDate, endDate, isActive: true }],
+        skipDuplicates: true,
+      });
     });
 
     it('should throw BadRequestError when caller is not a league admin', async () => {
@@ -671,48 +675,45 @@ describe('LeagueService', () => {
       } catch (error) {
         expectForbiddenError(error, 'You do not have permission to create seasons for this league');
       }
-      expect(mockPrisma.season.create).not.toHaveBeenCalled();
+      expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
     });
 
-    it('should throw BadRequestError if a season with the same name already exists', async () => {
+    it('answers the duplicate-name 400 for a name an existing season has, ignoring case and surrounding spaces', async () => {
       const sysAdmin = createAdmin();
       const league = createLeague();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
-      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(
-        createSeason({ leagueId: league.id, name: 'Duplicate' })
-      );
+      mockSeasonRaw([{ id: 'existing', isActive: true }]);
 
-      try {
-        await LeagueService.createSeason(league.id, { name: 'Duplicate' }, sysAdmin.id);
-        fail('Expected BadRequestError');
-      } catch (error) {
-        expectBadRequestError(error, 'A season with this name already exists in this league');
-      }
-      expect(mockPrisma.season.create).not.toHaveBeenCalled();
+      const error = await LeagueService.createSeason(league.id, { name: ' DUPLICATE ' }, sysAdmin.id).catch((e) => e);
+
+      expect(error).toBeInstanceOf(BadRequestError);
+      expect(error.message).toBe('A season with this name already exists in this league');
+      expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
     });
 
-    it('answers the duplicate-name 400 when a concurrent create wins the unique index (P2002, #727)', async () => {
+    it('answers the duplicate-name 400 when a concurrent create of the exact name wins', async () => {
       const sysAdmin = createAdmin();
       const league = createLeague();
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
-      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.season.create as jest.Mock).mockRejectedValue(uniqueViolation('Season_leagueId_name_key'));
+      mockSeasonRaw([]);
+      (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 'theirs', isActive: true });
 
       const error = await LeagueService.createSeason(league.id, { name: 'Summer' }, sysAdmin.id).catch((e) => e);
 
-      expectBadRequestError(error, 'A season with this name already exists in this league');
+      expect(error).toBeInstanceOf(BadRequestError);
     });
 
-    it('propagates a season create failure that is not P2002', async () => {
+    it('propagates a season create failure', async () => {
       const sysAdmin = createAdmin();
       const league = createLeague();
       const boom = new Error('connection reset');
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
-      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.season.create as jest.Mock).mockRejectedValue(boom);
+      mockSeasonRaw([]);
+      (mockPrisma.season.createMany as jest.Mock).mockRejectedValue(boom);
 
       await expect(LeagueService.createSeason(league.id, { name: 'Summer' }, sysAdmin.id)).rejects.toBe(boom);
     });

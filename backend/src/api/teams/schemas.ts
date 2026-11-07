@@ -53,6 +53,37 @@ export const updateTeamSchema = z.object({
 });
 
 /**
+ * Schema for `POST /teams/:id/rollover` (#461): start the next season of a
+ * team, carrying its roster and staff.
+ *
+ * The target season is EXACTLY ONE of:
+ *   - `seasonId`: an existing season, which must be in the team's own league;
+ *   - `seasonName`: a season of the team's league found by name, created when
+ *     none has that name yet (creating one needs a league admin, the same rule
+ *     as `POST /seasons`).
+ *
+ * `name`, `ageGroup` and `gender` default to the current team-season's values
+ * (a U12 team is U13 next year, so the client may send the new bracket);
+ * `null` on `ageGroup` / `gender` clears the carried value.
+ */
+export const rolloverTeamSchema = z
+  .object({
+    seasonId: z.string().uuid('Invalid season ID format').optional(),
+    seasonName: z
+      .string()
+      .trim()
+      .min(1, 'Season name is required')
+      .max(100, 'Season name too long')
+      .optional(),
+    name: z.string().trim().min(1, 'Team name is required').max(100, 'Team name too long').optional(),
+    ageGroup: teamAgeGroupSchema.nullable().optional(),
+    gender: teamGenderSchema.nullable().optional(),
+  })
+  .refine((data) => (data.seasonId === undefined) !== (data.seasonName === undefined), {
+    message: 'Provide exactly one of seasonId or seasonName',
+  });
+
+/**
  * Schema for adding a player to a team
  */
 export const addPlayerSchema = z.object({
@@ -174,6 +205,7 @@ export const addRosterPlayerSchema = z
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
 export type AddRosterPlayerInput = z.infer<typeof addRosterPlayerSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
+export type RolloverTeamInput = z.infer<typeof rolloverTeamSchema>;
 export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
 export type UpdateTeamMemberInput = z.infer<typeof updateTeamMemberSchema>;
 export type StaffRoleType = z.infer<typeof staffRoleTypeSchema>;
