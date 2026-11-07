@@ -39,8 +39,10 @@ export type AgeGateColumns = Pick<AuthUserRow, 'ageConfirmedAt' | 'ageRefusedAt'
  * operator) is never allowed, flag or no flag: the refusal is final.
  */
 export function isAgeConfirmed(user: AgeGateColumns): boolean {
-  if (user.ageRefusedAt !== null && user.ageRefusedAt !== undefined) return false;
-  return user.ageConfirmedAt !== null || !ageGateEnforced();
+  // Both checks fail closed on an absent column: a row read through a select
+  // that forgot the gate columns is refused, never waved through.
+  if (user.ageRefusedAt != null) return false;
+  return user.ageConfirmedAt != null || !ageGateEnforced();
 }
 
 /**

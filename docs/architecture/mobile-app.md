@@ -146,8 +146,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   pills (`SortPills`, labelled "Month: <name>"), a four-digit year field, a confirmation step that
   repeats the entry, then `POST /auth/age-confirmation` through `hooks/useConfirmAge.ts`. Old
   enough: `completeAgeConfirmation` on the store, `age_confirmed`, and `postLoginRoute` again. Under
-  the minimum: the server has already undone the sign-in; the screen explains and Done runs
-  `clearSession('age_refused')` (no analytics event). Push registration (`useNotificationSetup`) and
+  the minimum: the server has already undone the sign-in; the session ends at once
+  (`clearSession('age_refused')`, no analytics event), the screen explains (with a support pointer
+  when the body says `pendingOperator`, i.e. nothing was deleted and an operator will finish) and
+  Done goes to sign-in. A `connect_error: age_confirmation_required` on the live-game socket marks
+  the stored user unconfirmed instead of refreshing tokens (`services/socket.ts`). Push registration (`useNotificationSetup`) and
   the sign-in analytics (`setUser` → `pendingLogin`) wait for the flag. Strings under
   `ageOnboarding.*`; tests `__tests__/app/onboarding-age.test.tsx`, `__tests__/utils/age-gate.test.ts`;
   Maestro `.maestro/age-gate.yaml`. Posture and rationale: `docs/architecture/children-and-age.md`.

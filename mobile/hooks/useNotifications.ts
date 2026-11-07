@@ -13,7 +13,6 @@ import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { requestPattern } from '../services/request-pattern';
 import { log } from '../services/log';
 import { useIsAuthenticated, useAuthUser } from '../store/auth-store';
-import { needsAgeConfirmation } from '../utils/age-gate';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -129,8 +128,10 @@ export function useNotificationSetup() {
   // push token (audit #62).
   const isAuthenticated = useIsAuthenticated();
   // Nothing is collected from an account before it has answered the age
-  // question (#981): no permission prompt, no push token.
-  const ageConfirmed = !needsAgeConfirmation(useAuthUser());
+  // question (#981): no permission prompt, no push token. A definite `true`
+  // only: a session persisted before the flag existed waits for the
+  // launch-time /auth/me sync rather than reading an absent flag as a yes.
+  const ageConfirmed = useAuthUser()?.ageConfirmed === true;
 
   useEffect(() => {
     if (!isAuthenticated || !ageConfirmed) return;

@@ -892,7 +892,8 @@
     "refusedTitle": "Gracias por avisarnos",
     "refusedBody": "Las cuentas de Hooplings son para mayores de 13 años (16 en la UE, el Reino Unido y Suiza). Un padre, una madre, un tutor o un entrenador puede añadirte a la plantilla de un equipo.",
     "saveFailedTitle": "No se pudo guardar",
-    "saveFailedBody": "Inténtalo de nuevo."
+    "saveFailedBody": "Inténtalo de nuevo.",
+    "refusedOperatorBody": "Tu respuesta no se pudo aplicar automáticamente porque esta cuenta gestiona un equipo, una plantilla o la ficha de un menor. No se ha borrado nada. Si fue un error, escribe a {{email}} desde la dirección de esta cuenta y lo corregiremos; si no, terminaremos en un plazo de 5 días laborables."
   },
   "about": {
     "title": "Acerca de",

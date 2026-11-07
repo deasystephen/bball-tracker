@@ -26,7 +26,8 @@ import { useAuthActions, useAuthUser } from '../../store/auth-store';
 import { useConfirmAge } from '../../hooks/useConfirmAge';
 import { log } from '../../services/log';
 import { formatMonthName } from '../../utils/format-date';
-import { isUnderMinimumAgeError, parseBirthYear } from '../../utils/age-gate';
+import { isPendingOperatorRefusal, isUnderMinimumAgeError, parseBirthYear } from '../../utils/age-gate';
+import { SUPPORT_EMAIL } from '../../config/env';
 import { postLoginRoute } from '../../utils/role-onboarding';
 import { spacing } from '../../theme';
 import { useTranslation } from '../../i18n';
@@ -53,6 +54,9 @@ export default function AgeConfirmationScreen() {
   const [yearText, setYearText] = useState('');
   const [yearError, setYearError] = useState<string | undefined>();
   const [step, setStep] = useState<Step>('ask');
+  // The refusal could not be applied automatically (an account with adult
+  // signals, far more likely a typo): point at support, not at a parent.
+  const [pendingOperator, setPendingOperator] = useState(false);
 
   const year = parseBirthYear(yearText);
   // Four digits enable Continue; the range is checked on press so an
@@ -93,9 +97,11 @@ export default function AgeConfirmationScreen() {
       router.replace(await postLoginRoute(confirmed ? { ...confirmed, ageConfirmed: true } : null));
     } catch (error) {
       if (isUnderMinimumAgeError(error)) {
-        // The account is gone on the server. End the session now, so no
-        // background request meets a 401 and records a sign-out on an
-        // identity that was never recorded; the explanation stays on screen.
+        // The account is gone on the server (or held for the operator). End
+        // the session now, so no background request meets a 401 and records
+        // a sign-out on an identity that was never recorded; the explanation
+        // stays on screen.
+        setPendingOperator(isPendingOperatorRefusal(error));
         clearSession('age_refused');
         setStep('refused');
         return;
@@ -119,7 +125,9 @@ export default function AgeConfirmationScreen() {
             {t('ageOnboarding.refusedTitle')}
           </ThemedText>
           <ThemedText variant="body" color="textSecondary">
-            {t('ageOnboarding.refusedBody')}
+            {pendingOperator
+              ? t('ageOnboarding.refusedOperatorBody', { email: SUPPORT_EMAIL })
+              : t('ageOnboarding.refusedBody')}
           </ThemedText>
         </View>
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>

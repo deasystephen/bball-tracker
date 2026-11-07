@@ -510,9 +510,10 @@ router.get('/me', authenticate, async (req, res) => {
  * - Under the minimum: `AccountService.refuseUnderage` undoes the sign-in (a
  *   claimed roster record is un-claimed, anything else is erased or deleted;
  *   a sole head coach is marked refused for the operator) and deletes the
- *   WorkOS user; 403 `under_minimum_age`, the same body in every branch, and
- *   again on any later call for a refused account. Nothing about the answer
- *   is stored or logged.
+ *   WorkOS user; 403 `under_minimum_age` in every branch, with
+ *   `pendingOperator: true` when the operator must finish (the client then
+ *   points at support), and again on any later call for a refused account.
+ *   Nothing about the answer is stored or logged.
  * - 400 on a malformed body (field names in the message, never the values).
  */
 router.post('/age-confirmation', authenticate, async (req, res) => {
@@ -524,7 +525,7 @@ router.post('/age-confirmation', authenticate, async (req, res) => {
     if (req.user!.ageRefusedAt !== null) {
       // An earlier answer was final and the account awaits the operator; no
       // second answer is evaluated.
-      throw new UnderMinimumAgeError();
+      throw new UnderMinimumAgeError(true);
     }
     if (req.user!.ageConfirmedAt !== null) {
       res.json({ confirmed: true, alreadyConfirmed: true });
@@ -538,8 +539,8 @@ router.post('/age-confirmation', authenticate, async (req, res) => {
       return;
     }
 
-    await AccountService.refuseUnderage(req.user!.id, { sessionId: await sessionIdOf(req) });
-    throw new UnderMinimumAgeError();
+    const refused = await AccountService.refuseUnderage(req.user!.id, { sessionId: await sessionIdOf(req) });
+    throw new UnderMinimumAgeError(refused.outcome === 'pending_operator');
   } catch (error) {
     respondWithError(res, error, {
       log: 'Error confirming age',
@@ -647,12 +648,13 @@ router.patch('/me/role', authenticate, async (req, res) => {
     }
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },
-      select: { id: true, email: true, name: true, role: true, createdAt: true },
+      select: SESSION_USER_SELECT,
     });
 
     logger.info('User changed role', { userId: user.id, from: current, to: user.role });
 
-    res.json({ success: true, user });
+    // The same shape as every other session payload (#768, #981).
+    res.json({ success: true, user: pickSessionUser(user) });
   } catch (error) {
     respondWithError(res, error, {
       log: 'Error updating role',

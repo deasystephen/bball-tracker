@@ -158,8 +158,9 @@ describe('the age gate and POST /api/v1/auth/age-confirmation', () => {
       const res = await request(app).post('/api/v1/auth/age-confirmation').set(AUTH).send(CHILD);
       expect(res.status).toBe(403);
       expect(res.body).toEqual({
-        error: 'Hooplings accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
+        error: 'Accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
         code: 'under_minimum_age',
+        pendingOperator: false,
       });
       expect(mockAccount.refuseUnderage).toHaveBeenCalledWith(USER_ID, { sessionId: 'sess_1' });
       expect(mockAccount.confirmAge).not.toHaveBeenCalled();
@@ -175,16 +176,25 @@ describe('the age gate and POST /api/v1/auth/age-confirmation', () => {
       expect(none.status).toBe(200);
     });
 
-    it('answers the same 403 whatever refuseUnderage did (erased, unclaimed, pending operator)', async () => {
-      for (const outcome of ['unclaimed', 'deleted', 'pending_operator'] as const) {
+    it('answers 403 whatever refuseUnderage did, with pendingOperator only when the operator must finish', async () => {
+      for (const outcome of ['unclaimed', 'deleted', 'erased'] as const) {
         mockAccount.refuseUnderage.mockResolvedValueOnce({ outcome, identityDeleted: false });
         const res = await request(app).post('/api/v1/auth/age-confirmation').set(AUTH).send(CHILD);
         expect(res.status).toBe(403);
         expect(res.body).toEqual({
-          error: 'Hooplings accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
+          error: 'Accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
           code: 'under_minimum_age',
+          pendingOperator: false,
         });
       }
+      mockAccount.refuseUnderage.mockResolvedValueOnce({ outcome: 'pending_operator', identityDeleted: false });
+      const held = await request(app).post('/api/v1/auth/age-confirmation').set(AUTH).send(CHILD);
+      expect(held.status).toBe(403);
+      expect(held.body).toEqual({
+        error: 'Accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
+        code: 'under_minimum_age',
+        pendingOperator: true,
+      });
     });
 
     it('refuses a second answer, whatever it says, once a refusal awaits the operator (no retry within the token lifetime)', async () => {
@@ -192,6 +202,7 @@ describe('the age gate and POST /api/v1/auth/age-confirmation', () => {
       const res = await request(app).post('/api/v1/auth/age-confirmation').set(AUTH).send(ADULT);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('under_minimum_age');
+      expect(res.body.pendingOperator).toBe(true);
       expect(mockAccount.confirmAge).not.toHaveBeenCalled();
       expect(mockAccount.refuseUnderage).not.toHaveBeenCalled();
       // And every other route stays shut, flag or no flag.

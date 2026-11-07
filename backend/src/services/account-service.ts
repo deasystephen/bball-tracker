@@ -450,8 +450,11 @@ export class AccountService {
         where: { id: userId },
         select: { deletedAt: true, ageRefusedAt: true },
       });
-      if (!preview || preview.deletedAt !== null) {
+      if (!preview) {
         throw new NotFoundError('Account not found');
+      }
+      if (preview.deletedAt !== null) {
+        return { kind: 'already_gone' as const };
       }
       if (preview.ageRefusedAt !== null) {
         // Already refused and awaiting the operator: nothing more to undo.
@@ -471,7 +474,13 @@ export class AccountService {
         FOR UPDATE`;
       const row = locked.find((candidate) => candidate.id === userId);
       if (!row || row.deletedAt !== null) {
-        throw new NotFoundError('Account not found');
+        // Gone between the preview and the lock: a racing submission already
+        // undid the sign-in. Same outcome for the caller.
+        return { kind: 'already_gone' as const };
+      }
+      const underLock = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { ageRefusedAt: true } });
+      if (underLock.ageRefusedAt !== null) {
+        return { kind: 'already_refused' as const };
       }
 
       // 3. The branch again, under the lock.
@@ -503,6 +512,10 @@ export class AccountService {
     if (decision.kind === 'already_refused') {
       logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', identityDeleted: false, repeat: true });
       return { outcome: 'pending_operator', identityDeleted: false };
+    }
+    if (decision.kind === 'already_gone') {
+      logger.info('Under-age answer refused', { userId, outcome: 'erased', identityDeleted: true, repeat: true });
+      return { outcome: 'erased', identityDeleted: true };
     }
 
     if (decision.kind === 'operator') {

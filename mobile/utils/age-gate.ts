@@ -35,6 +35,18 @@ export const isUnderMinimumAgeError = (error: unknown): boolean =>
   apiErrorCode(error) === UNDER_MINIMUM_AGE_CODE;
 
 /**
+ * True when the refusal could not be applied automatically and an operator
+ * will finish (`pendingOperator` in the body): the account showed adult
+ * signals, so the screen points at support instead of saying the service is
+ * for 13 and up.
+ */
+export const isPendingOperatorRefusal = (error: unknown): boolean => {
+  if (!isUnderMinimumAgeError(error)) return false;
+  const details = (error as { apiError?: { pendingOperator?: unknown } }).apiError;
+  return details?.pendingOperator === true;
+};
+
+/**
  * The device's region setting (ISO 3166-1 alpha-2), which decides the
  * threshold on the server (13, or 16 in the EU, UK and Switzerland). Sent
  * with the answer only; `undefined` when the device reports none.

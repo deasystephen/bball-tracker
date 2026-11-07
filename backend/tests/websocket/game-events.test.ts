@@ -13,6 +13,7 @@ jest.mock('../../src/utils/sentry', () => ({
 }));
 
 import {
+  AGE_CONFIRMATION_REQUIRED_MESSAGE,
   authenticateSocket,
   buildGameSnapshot,
   handleJoinGame,
@@ -22,7 +23,7 @@ import {
   type GameSocket,
 } from '../../src/websocket/game-events';
 import { WorkOSService } from '../../src/services/workos-service';
-import { ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
+import { AgeConfirmationRequiredError, ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
 import { mockPrisma } from '../setup';
 import { devToken } from '../support/auth-fixtures';
@@ -252,6 +253,8 @@ describe('websocket/game-events', () => {
         email: null,
         name: 'Coach',
         role: 'COACH',
+        ageConfirmedAt: new Date(),
+        ageRefusedAt: null,
       });
       const resolved = await resolveSocketSession('Bearer some.jwt.token');
       expect(resolved?.expiresAt).toBe(1_800_000_000_000);
@@ -274,6 +277,8 @@ describe('websocket/game-events', () => {
           email: user.email,
           name: user.name,
           role: user.role,
+          ageConfirmedAt: new Date(),
+          ageRefusedAt: null,
         });
 
         const exp = Date.now() + 60_000;
@@ -302,7 +307,7 @@ describe('websocket/game-events', () => {
       else process.env.AGE_GATE_ENFORCED = originalFlag;
     });
 
-    it('refuses an account that has not answered the age question', async () => {
+    it('refuses an account that has not answered the age question with its own reason, not Unauthorized', async () => {
       delete process.env.AGE_GATE_ENFORCED;
       jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000 });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
@@ -311,8 +316,15 @@ describe('websocket/game-events', () => {
         name: 'Newcomer',
         role: 'PLAYER',
         ageConfirmedAt: null,
+        ageRefusedAt: null,
       });
-      expect(await resolveSocketSession('Bearer some.jwt.token')).toBeNull();
+      await expect(resolveSocketSession('Bearer some.jwt.token')).rejects.toBeInstanceOf(AgeConfirmationRequiredError);
+
+      const next = jest.fn();
+      const socket = { id: 's1', handshake: { auth: { token: 'some.jwt.token' }, headers: {} }, data: {} };
+      await authenticateSocket(socket as unknown as GameSocket, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ message: AGE_CONFIRMATION_REQUIRED_MESSAGE }));
+      expect(captureException).not.toHaveBeenCalled();
     });
 
     it('admits a confirmed account and keeps the timestamp off the socket', async () => {
@@ -324,6 +336,7 @@ describe('websocket/game-events', () => {
         name: 'Coach',
         role: 'COACH',
         ageConfirmedAt: new Date(),
+        ageRefusedAt: null,
       });
       const resolved = await resolveSocketSession('Bearer some.jwt.token');
       expect(resolved?.user).toEqual({ id: 'u1', email: null, name: 'Coach', role: 'COACH' });
@@ -338,6 +351,7 @@ describe('websocket/game-events', () => {
         name: 'Newcomer',
         role: 'PLAYER',
         ageConfirmedAt: null,
+        ageRefusedAt: null,
       });
       expect((await resolveSocketSession('Bearer some.jwt.token'))?.user.id).toBe('u1');
     });

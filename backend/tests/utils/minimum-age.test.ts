@@ -36,25 +36,26 @@ describe('minimumAgeFor', () => {
 });
 
 describe('ageInYears', () => {
-  it('counts whole years, treating the birth month as reached on its first day', () => {
-    expect(ageInYears({ birthMonth: 11, birthYear: 2013 }, NOW)).toBe(13);
+  it('counts whole years, treating the birth month as reached only once it is over (the day is unknown)', () => {
+    expect(ageInYears({ birthMonth: 10, birthYear: 2013 }, NOW)).toBe(13);
+    expect(ageInYears({ birthMonth: 11, birthYear: 2013 }, NOW)).toBe(12);
     expect(ageInYears({ birthMonth: 12, birthYear: 2013 }, NOW)).toBe(12);
     expect(ageInYears({ birthMonth: 1, birthYear: 2013 }, NOW)).toBe(13);
-    expect(ageInYears({ birthMonth: 11, birthYear: 2014 }, NOW)).toBe(12);
+    expect(ageInYears({ birthMonth: 10, birthYear: 2014 }, NOW)).toBe(12);
   });
 
   it('uses the UTC date', () => {
     // 23:30 UTC on 30 November is still November in UTC even where it is already December.
     const lateNovember = new Date('2026-11-30T23:30:00Z');
-    expect(ageInYears({ birthMonth: 12, birthYear: 2013 }, lateNovember)).toBe(12);
-    expect(ageInYears({ birthMonth: 12, birthYear: 2013 }, new Date('2026-12-01T00:00:00Z'))).toBe(13);
+    expect(ageInYears({ birthMonth: 11, birthYear: 2013 }, lateNovember)).toBe(12);
+    expect(ageInYears({ birthMonth: 11, birthYear: 2013 }, new Date('2026-12-01T00:00:00Z'))).toBe(13);
   });
 });
 
 describe('meetsMinimumAge', () => {
   it('passes 13 in the US and refuses 12', () => {
-    expect(meetsMinimumAge({ birthMonth: 11, birthYear: 2013 }, 'US', NOW)).toBe(true);
-    expect(meetsMinimumAge({ birthMonth: 12, birthYear: 2013 }, 'US', NOW)).toBe(false);
+    expect(meetsMinimumAge({ birthMonth: 10, birthYear: 2013 }, 'US', NOW)).toBe(true);
+    expect(meetsMinimumAge({ birthMonth: 11, birthYear: 2013 }, 'US', NOW)).toBe(false);
     expect(meetsMinimumAge({ birthMonth: 6, birthYear: 1990 }, undefined, NOW)).toBe(true);
   });
 
@@ -62,7 +63,7 @@ describe('meetsMinimumAge', () => {
     const fifteen = { birthMonth: 5, birthYear: 2011 };
     expect(meetsMinimumAge(fifteen, 'US', NOW)).toBe(true);
     expect(meetsMinimumAge(fifteen, 'DE', NOW)).toBe(false);
-    expect(meetsMinimumAge({ birthMonth: 11, birthYear: 2010 }, 'DE', NOW)).toBe(true);
-    expect(meetsMinimumAge({ birthMonth: 12, birthYear: 2010 }, 'GB', NOW)).toBe(false);
+    expect(meetsMinimumAge({ birthMonth: 10, birthYear: 2010 }, 'DE', NOW)).toBe(true);
+    expect(meetsMinimumAge({ birthMonth: 11, birthYear: 2010 }, 'GB', NOW)).toBe(false);
   });
 });

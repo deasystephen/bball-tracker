@@ -35,6 +35,7 @@ import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { JWT_CLOCK_TOLERANCE_SECONDS, WorkOSService } from '../services/workos-service';
 import { AUTH_USER_SELECT, isAgeConfirmed, type AuthUserRow } from '../api/auth/middleware';
 import { logger } from '../utils/logger';
+import { AgeConfirmationRequiredError } from '../utils/errors';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
@@ -186,10 +187,10 @@ async function resolveSessionFromToken(
         where: { id: decoded.userId, deletedAt: null },
         select: SOCKET_USER_SELECT,
       });
+      if (!user) return null;
+      if (!socketUserAllowed(user)) throw new AgeConfirmationRequiredError();
       // Dev token `exp` is epoch milliseconds.
-      return user && socketUserAllowed(user)
-        ? { user: sessionUser(user), expiresAt: decoded.exp, lifetimeMs: null }
-        : null;
+      return { user: sessionUser(user), expiresAt: decoded.exp, lifetimeMs: null };
     } catch {
       return null;
     }
@@ -210,10 +211,17 @@ async function resolveSessionFromToken(
     typeof workosUser.issuedAt === 'number'
       ? (workosUser.expiresAt - workosUser.issuedAt) * 1000
       : null;
-  return user && socketUserAllowed(user)
-    ? { user: sessionUser(user), expiresAt: workosUser.expiresAt * 1000, lifetimeMs }
-    : null;
+  if (!user) return null;
+  if (!socketUserAllowed(user)) throw new AgeConfirmationRequiredError();
+  return { user: sessionUser(user), expiresAt: workosUser.expiresAt * 1000, lifetimeMs };
 }
+
+/**
+ * The handshake `connect_error` message for an account that has not answered
+ * the age question (#981). Distinct from `Unauthorized` so the client does
+ * not spend refresh-token rotations on it: no new token changes the answer.
+ */
+export const AGE_CONFIRMATION_REQUIRED_MESSAGE = 'age_confirmation_required';
 
 /**
  * The handshake selects what `authenticate` selects (`AUTH_USER_SELECT`), so a
@@ -225,9 +233,11 @@ const SOCKET_USER_SELECT = AUTH_USER_SELECT;
  * The age gate for sockets (#981): an account that has not answered the age
  * question (or whose answer was refused) joins no game room, as the REST gate
  * refuses it every non-exempt route (`isAgeConfirmed`, the same predicate).
- * Refused as "Unauthorized" like any other dead session; the client never
- * opens a socket before the age screen is passed, so this only stops a client
- * that bypasses it.
+ * `resolveSessionFromToken` throws `AgeConfirmationRequiredError` for it,
+ * which the handshake answers as `age_confirmation_required` (not
+ * `Unauthorized`: a refreshed token changes nothing) and the re-verification
+ * path treats as a rejected session. The client never opens a socket before
+ * the age screen is passed, so this only stops a stale or bypassing client.
  */
 function socketUserAllowed(user: AuthUserRow): boolean {
   return isAgeConfirmed(user);
@@ -275,6 +285,10 @@ export async function authenticateSocket(
     // the database failing over. Middleware errors never reach the Express
     // chain (sentryErrorHandler), so report the latter here, the way the REST
     // path reports the same ServiceUnavailableError as a 503 (#672).
+    if (error instanceof AgeConfirmationRequiredError) {
+      next(new Error(AGE_CONFIRMATION_REQUIRED_MESSAGE));
+      return;
+    }
     if (isExpectedClientError(error)) {
       next(new Error('Unauthorized'));
       return;

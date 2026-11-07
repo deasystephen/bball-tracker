@@ -441,8 +441,9 @@ const createApiClient = (): AxiosInstance => {
         const startedAt = (((error as AxiosError).config as RetriableConfig | undefined)?._startedAt) ?? Infinity;
         const confirmedAt = useAuthStore.getState().ageConfirmedLocalAt;
         // A 403 for a request sent before this device answered is stale.
-        if (confirmedAt === null || startedAt >= confirmedAt) {
-          useAuthStore.getState().updateUser({ ageConfirmed: false });
+        const { user, updateUser } = useAuthStore.getState();
+        if ((confirmedAt === null || startedAt >= confirmedAt) && user && user.ageConfirmed !== false) {
+          updateUser({ ageConfirmed: false });
         }
       }
       return Promise.reject(error);

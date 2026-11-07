@@ -1,5 +1,4 @@
 import { DEFAULT_MINIMUM_AGE, GDPR_MINIMUM_AGE } from './minimum-age';
-import { APP_NAME } from '../services/mailer/templates/brand';
 
 /**
  * Custom error classes for the application
@@ -177,12 +176,22 @@ export class AgeConfirmationRequiredError extends DetailedError<Record<string, n
  * neither could be done automatically, the session is revoked and an operator
  * finishes by the runbook. The body carries no detail about the answer.
  */
-export class UnderMinimumAgeError extends DetailedError<Record<string, never>> {
-  constructor() {
+export interface UnderMinimumAgeDetails extends Record<string, unknown> {
+  /**
+   * True when the account could not be removed automatically and an operator
+   * will finish (an account with adult signals, far more likely a typo than a
+   * child): the client points the person at support instead of telling them
+   * the service is for 13 and up.
+   */
+  pendingOperator: boolean;
+}
+
+export class UnderMinimumAgeError extends DetailedError<UnderMinimumAgeDetails> {
+  constructor(pendingOperator = false) {
     super(
       'under_minimum_age',
-      {},
-      `${APP_NAME} accounts are for ages ${DEFAULT_MINIMUM_AGE} and up (${GDPR_MINIMUM_AGE} in the EU, UK and Switzerland)`,
+      { pendingOperator },
+      `Accounts are for ages ${DEFAULT_MINIMUM_AGE} and up (${GDPR_MINIMUM_AGE} in the EU, UK and Switzerland)`,
       403
     );
     Object.setPrototypeOf(this, UnderMinimumAgeError.prototype);

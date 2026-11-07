@@ -105,11 +105,16 @@ const mockedAddListener =
   Notifications.addNotificationResponseReceivedListener as jest.Mock;
 
 // Helper: set authenticated state directly (bypasses analytics in setUser).
-function setAuthenticated(token: string | null) {
+// The user has answered the age question (#981): registration waits for a
+// definite `ageConfirmed: true`.
+function setAuthenticated(token: string | null, ageConfirmed: boolean | 'absent' = true) {
+  const user = { id: 'u-push', email: 'push@example.com', name: 'Push', role: 'COACH' } as Record<string, unknown>;
+  if (ageConfirmed !== 'absent') user.ageConfirmed = ageConfirmed;
   useAuthStore.setState({
     accessToken: token,
     isAuthenticated: token !== null,
     isLoading: false,
+    user: token === null ? null : (user as never),
   });
 }
 
@@ -589,5 +594,27 @@ describe('useNotificationSetup runtime', () => {
 
     unmount();
     expect(mockNotificationsState.removeMock).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the age gate (#981)', () => {
+    it('registers nothing until the account has answered the age question', async () => {
+      mockedGetPermissions.mockResolvedValue({ status: 'granted' });
+      mockedGetToken.mockResolvedValue({ data: 'ExponentPushToken[age]' });
+      setAuthenticated('t', false);
+      renderHook(() => useNotificationSetup());
+      await act(async () => {});
+      expect(mockedGetPermissions).not.toHaveBeenCalled();
+      expect(mockedPost).not.toHaveBeenCalled();
+    });
+
+    it('waits for a definite yes: a session persisted before the flag existed reads as not yet confirmed', async () => {
+      mockedGetPermissions.mockResolvedValue({ status: 'granted' });
+      mockedGetToken.mockResolvedValue({ data: 'ExponentPushToken[age]' });
+      setAuthenticated('t', 'absent');
+      renderHook(() => useNotificationSetup());
+      await act(async () => {});
+      expect(mockedGetPermissions).not.toHaveBeenCalled();
+      expect(mockedPost).not.toHaveBeenCalled();
+    });
   });
 });

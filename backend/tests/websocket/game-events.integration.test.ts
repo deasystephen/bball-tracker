@@ -171,6 +171,8 @@ describe('websocket integration (socket.io-client)', () => {
           email: coach.email,
           name: coach.name,
           role: coach.role,
+          ageConfirmedAt: coach.ageConfirmedAt,
+          ageRefusedAt: null,
         });
       }
       return Promise.resolve(coach);
@@ -254,6 +256,8 @@ describe('websocket integration (socket.io-client)', () => {
         email: null,
         name: 'Coach',
         role: 'COACH',
+        ageConfirmedAt: new Date(),
+        ageRefusedAt: null,
       });
     }
 

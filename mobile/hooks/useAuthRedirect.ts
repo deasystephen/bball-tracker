@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'expo-router';
 import { useAuthStore, useAuthUser, useIsAuthenticated } from '../store/auth-store';
 import { AGE_CONFIRMATION_ROUTE, needsAgeConfirmation } from '../utils/age-gate';
+import { isSafeReturnPath, setPendingReturnPath } from '../utils/return-path';
 
 /**
  * Sends the user to the login screen whenever an authenticated session is
@@ -46,6 +47,9 @@ export function useAuthRedirect(): void {
     // The sign-in paths route through `postLoginRoute` themselves; replacing
     // here as well would mount the age screen twice.
     if (mustConfirmAge && !POST_LOGIN_OWNED.has(pathname)) {
+      // A deep link (an invitation, a game) survives the question: it is the
+      // pending return path `postLoginRoute` consumes after the answer.
+      if (isSafeReturnPath(pathname)) void setPendingReturnPath(pathname);
       router.replace(AGE_CONFIRMATION_ROUTE);
     }
   }, [mustConfirmAge, pathname, router]);

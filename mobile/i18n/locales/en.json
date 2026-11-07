@@ -892,7 +892,8 @@
     "refusedTitle": "Thanks for letting us know",
     "refusedBody": "Hooplings accounts are for ages 13 and up (16 in the EU, UK and Switzerland). A parent, guardian or coach can add you to a team roster instead.",
     "saveFailedTitle": "Couldn't save",
-    "saveFailedBody": "Please try again."
+    "saveFailedBody": "Please try again.",
+    "refusedOperatorBody": "Your answer could not be applied automatically because this account manages a team, a roster or a child's record. Nothing has been deleted. If this was a mistake, email {{email}} from this account's address and we will put it right; otherwise we will finish within 5 business days."
   },
   "about": {
     "title": "About",

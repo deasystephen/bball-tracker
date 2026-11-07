@@ -46,17 +46,16 @@ export interface BirthMonthYear {
 
 /**
  * Whole years since the birth month, as of `now` (UTC). The day is unknown, so
- * the birthday counts as reached once the calendar reaches the birth month:
- * someone born in March 2013 is 13 from 1 March 2026. The alternative (counting
- * the month only once it is over) would refuse, and un-claim or erase, the
- * account of a person who is already old enough for most of their birth month;
- * the rounding runs the other way for at most 30 days, once, which the FTC's
- * "actual knowledge" standard does not reach. Documented in
- * `docs/architecture/children-and-age.md`.
+ * the birthday counts as reached only once the birth month is over: someone
+ * born in March 2013 is 13 from 1 April 2026. The server then never holds an
+ * account for a person it knows may still be under the minimum; the cost is
+ * that a person already old enough earlier in their birth month is asked to
+ * sign up again next month (a fresh sign-up with no history is erased, nothing
+ * is kept). Documented in `docs/architecture/children-and-age.md`.
  */
 export function ageInYears({ birthMonth, birthYear }: BirthMonthYear, now: Date = new Date()): number {
   const years = now.getUTCFullYear() - birthYear;
-  return now.getUTCMonth() + 1 < birthMonth ? years - 1 : years;
+  return now.getUTCMonth() + 1 <= birthMonth ? years - 1 : years;
 }
 
 /** True when the answer meets the minimum age for the region. */

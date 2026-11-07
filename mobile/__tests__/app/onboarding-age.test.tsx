@@ -51,11 +51,15 @@ const newcomer = {
 };
 
 /** An axios-shaped 403 the api-client would have normalised. */
-function refusal(): Error & { isAxiosError: boolean; response: { status: number }; apiError: { code: string; status: number } } {
-  return Object.assign(new Error('Hooplings accounts are for ages 13 and up'), {
+function refusal(): Error & {
+  isAxiosError: boolean;
+  response: { status: number };
+  apiError: { code: string; status: number; pendingOperator?: boolean };
+} {
+  return Object.assign(new Error('Accounts are for ages 13 and up'), {
     isAxiosError: true,
-    response: { status: 403, data: { code: 'under_minimum_age' } },
-    apiError: { code: 'under_minimum_age', status: 403 },
+    response: { status: 403, data: { code: 'under_minimum_age', pendingOperator: false } },
+    apiError: { code: 'under_minimum_age', status: 403, pendingOperator: false },
   });
 }
 
@@ -168,6 +172,21 @@ describe('AgeConfirmationScreen', () => {
     fireEvent.press(screen.getByTestId('age-refused-done'));
     expect(mockRouter.replace).toHaveBeenCalledWith('/login');
     expect(trackEvent).not.toHaveBeenCalled();
+  });
+
+  it('a refusal held for the operator says nothing was deleted and points at support', async () => {
+    const held = refusal();
+    held.apiError = { ...held.apiError, pendingOperator: true } as typeof held.apiError;
+    mockPost.mockRejectedValue(held);
+    const screen = renderScreen();
+    answer(screen, String(new Date().getUTCFullYear() - 8));
+    fireEvent.press(screen.getByTestId('age-confirm-submit'));
+
+    await waitFor(() => expect(screen.getByText('Thanks for letting us know')).toBeTruthy());
+    expect(screen.getByText(/Nothing has been deleted/)).toBeTruthy();
+    expect(screen.getByText(/support@hooplings\.com/)).toBeTruthy();
+    expect(screen.queryByText(/ages 13 and up/)).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 
   it('any other failure keeps the question and the session', async () => {

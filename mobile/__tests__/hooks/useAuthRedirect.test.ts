@@ -8,6 +8,7 @@ import { renderHook, act } from '@testing-library/react-native';
 import { useAuthRedirect } from '../../hooks/useAuthRedirect';
 import { useAuthStore } from '../../store/auth-store';
 import { setSessionHooks } from '../../store/session-hooks';
+import { consumePendingReturnPath } from '../../utils/return-path';
 
 const mockReplace = jest.fn();
 let mockPathname = '/(tabs)/home';
@@ -82,6 +83,14 @@ describe('useAuthRedirect', () => {
         renderHook(() => useAuthRedirect());
       }
       expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('keeps a deep link as the pending return path before replacing to the age screen', async () => {
+      mockPathname = '/invite/abc123';
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });
+      renderHook(() => useAuthRedirect());
+      expect(mockReplace).toHaveBeenCalledWith('/onboarding/age');
+      await expect(consumePendingReturnPath()).resolves.toBe('/invite/abc123');
     });
 
     it('does nothing while already on the age screen', () => {
