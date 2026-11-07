@@ -16,6 +16,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:db": "jest tests/integration",
+    "test:redis": "jest --testPathIgnorePatterns /node_modules/ --testPathPattern \"\\.redis\\.test\\.ts$\"",
     "db:seed": "npx prisma db seed",
     "db:reset": "tsx prisma/reset.ts",
     "db:fresh": "tsx prisma/reset.ts && npx prisma db seed"
@@ -38,13 +39,14 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@sentry/node": "^10.76.2",
+    "@socket.io/redis-adapter": "^8.3.0",
     "@workos-inc/node": "^8.13.0",
     "cors": "^2.8.5",
     "csv-stringify": "^6.9.0",
     "dotenv": "^17.4.2",
     "expo-server-sdk": "^6.1.0",
     "express": "^5.3.0",
-    "express-rate-limit": "^8.7.1",
+    "express-rate-limit": "^8.7.3",
     "helmet": "^8.3.0",
     "ics": "^3.12.1",
     "ioredis": "^5.11.1",
@@ -52,6 +54,7 @@
     "pdfkit": "^0.20.2",
     "pg": "^8.23.1",
     "prisma": "^7.10.0",
+    "rate-limit-redis": "^6.0.2",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
@@ -87,6 +90,6 @@
     "ts-jest": "^29.4.15",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.0"
+    "typescript-eslint": "^8.72.1"
   }
 }

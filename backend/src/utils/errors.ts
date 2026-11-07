@@ -178,6 +178,33 @@ export class ConflictError extends AppError {
   }
 }
 
+/** Why `AccountService.convertToManaged` refused (#983). Stable: the operator CLI maps each to advice. */
+export type ConvertRefusalCode =
+  | 'already_managed'
+  | 'never_signed_in'
+  | 'adult_account'
+  | 'personal_league_in_use'
+  | 'coach_not_on_team'
+  | 'no_active_team'
+  | 'no_head_coach'
+  | 'several_head_coaches'
+  | 'coach_unavailable'
+  | 'coaches_changed';
+
+/**
+ * 409 — an account cannot be converted to a managed roster record (#983).
+ * The message describes the state, never a CLI flag; the operator script maps
+ * `code` to what to do next.
+ */
+export class ConvertRefusedError extends DetailedError<Record<string, unknown>> {
+  declare readonly code: ConvertRefusalCode;
+
+  constructor(code: ConvertRefusalCode, message: string) {
+    super(code, {}, message, 409);
+    Object.setPrototypeOf(this, ConvertRefusedError.prototype);
+  }
+}
+
 
 /**
  * 503 — a transaction was cancelled while it waited on a row lock (#908):

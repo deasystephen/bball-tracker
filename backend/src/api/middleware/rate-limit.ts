@@ -1,16 +1,31 @@
 /**
- * Rate limiting middleware for sensitive endpoints
+ * Rate limiting middleware for sensitive endpoints. Counters live in Redis,
+ * shared by every API task, with an in-memory fallback
+ * (`rate-limit-store.ts`, #452).
  */
 
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
 import { createHash } from 'crypto';
+import { SharedRateLimitStore } from './rate-limit-store';
+
+/**
+ * Every limiter counts in the shared Redis store (#452), so the budgets below
+ * hold across API tasks; each gets its own store and Redis key prefix
+ * (`rl:<name>:`). The store falls back to process memory while Redis is
+ * unavailable and never fails a request because of Redis; `passOnStoreError`
+ * is the second line of that rule, should the store itself ever throw.
+ */
+function sharedStore(name: string): { store: SharedRateLimitStore; passOnStoreError: true } {
+  return { store: new SharedRateLimitStore(name), passOnStoreError: true };
+}
 
 /**
  * Strict rate limit for authentication endpoints (login, callback, dev-login)
  * 20 requests per 15 minutes per IP in production, relaxed in development for E2E testing
  */
 export const authRateLimit = rateLimit({
+  ...sharedStore('auth'),
   windowMs: 15 * 60 * 1000,
   max: process.env.NODE_ENV === 'development' ? 100 : 20,
   standardHeaders: true,
@@ -32,6 +47,7 @@ export const authRateLimit = rateLimit({
  * retries later) rather than logging the user out.
  */
 export const refreshRateLimit = rateLimit({
+  ...sharedStore('refresh'),
   windowMs: 15 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -69,6 +85,7 @@ export function skipGlobalApiLimit(req: Request): boolean {
  * see `skipGlobalApiLimit`)
  */
 export const apiRateLimit = rateLimit({
+  ...sharedStore('api'),
   windowMs: 60 * 1000,
   max: 100,
   standardHeaders: true,
@@ -92,6 +109,7 @@ export const apiRateLimit = rateLimit({
  * one more widely is a behaviour change and needs its own issue.
  */
 export const inviteAcceptRateLimit = rateLimit({
+  ...sharedStore('invite-accept'),
   windowMs: 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -107,10 +125,14 @@ export const inviteAcceptRateLimit = rateLimit({
  * would start returning 429 ("Invitation Not Found") for everyone after a
  * handful of views (audit #36). Keying on the token still bounds per-token
  * polling, and tokens are 256-bit random so enumeration is not a concern.
+ * The key carries the token's SHA-256, never the token.
  */
 export function invitationTokenKey(req: Request): string {
   const token = typeof req.params.token === 'string' ? req.params.token : '';
-  return `invite-token:${token}`;
+  // Hashed: the token is a bearer secret and the counter now lives in Redis
+  // (#452), which must never hold it in the clear. Same bucketing as the raw
+  // token, like `refreshRateLimit`'s key.
+  return `invite-token:${createHash('sha256').update(token).digest('hex')}`;
 }
 
 /**
@@ -124,6 +146,7 @@ export function invitationTokenKey(req: Request): string {
 export const INVITATION_LOOKUP_IP_MAX_PER_15_MIN = 600;
 
 export const invitationLookupIpRateLimit = rateLimit({
+  ...sharedStore('invitation-lookup-ip'),
   windowMs: 15 * 60 * 1000,
   max: INVITATION_LOOKUP_IP_MAX_PER_15_MIN,
   standardHeaders: true,
@@ -136,6 +159,7 @@ export const invitationLookupIpRateLimit = rateLimit({
  * 30 requests per 15 minutes per token (the page is fetched once per view).
  */
 export const invitationTokenRateLimit = rateLimit({
+  ...sharedStore('invitation-token'),
   windowMs: 15 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -153,6 +177,7 @@ export const invitationTokenRateLimit = rateLimit({
  * 15-60 minutes, so 60 requests per hour per IP is generous for legitimate use.
  */
 export const calendarFeedRateLimit = rateLimit({
+  ...sharedStore('calendar-feed'),
   windowMs: 60 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -190,6 +215,7 @@ export const exportUserKey = userKey('export-user');
  * downloading a season's worth of box scores stays well under the ceiling.
  */
 export const exportRateLimit = rateLimit({
+  ...sharedStore('export'),
   windowMs: 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -213,6 +239,7 @@ export const inviteUserKey = userKey('invite-user');
  * `authenticate`, so `req.user` is set.
  */
 export const inviteRateLimit = rateLimit({
+  ...sharedStore('invite'),
   windowMs: 60 * 60 * 1000,
   max: 60,
   standardHeaders: true,

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { SUPPORT_EMAIL } from '../../lib/site';
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from '../../lib/site';
 
 export const metadata: Metadata = {
   title: 'Support · Hooplings',
@@ -33,6 +33,12 @@ export default function SupportPage() {
         <p>
           In the app, go to <strong>Profile → Delete account</strong>. If you can no longer sign in, email us
           from the address on the account and we will handle the request.
+        </p>
+        <h3>My child is under 13 and has their own account</h3>
+        <p>
+          Hooplings accounts are for ages 13 and up; a younger player belongs on the roster as a record a coach
+          or parent keeps. Email <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a> with the email address
+          on the account and we will turn it into a roster record or delete it, as you prefer.
         </p>
         <h3>I am a parent. How do I follow my child&apos;s team?</h3>
         <p>

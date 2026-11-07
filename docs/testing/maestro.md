@@ -32,6 +32,14 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   other fixture and the flow fails on "Invitation Not Found". Setting it for every flow in a suite run
   is harmless. The by-token lookup is rate limited to 30 per token per 15 minutes, so loop the flow no
   more than about ten times in that window.
+- **Rate limits survive a backend restart (#452).** With `REDIS_URL` in `backend/.env` (the
+  docker-compose Redis), every limiter counts in Redis, so a tripped limit (a 429 on dev-login after
+  many flows, `authRateLimit` is 100 per 15 minutes per IP in development, or the invite lookup above)
+  stays tripped after `npm run dev` restarts, and `npx prisma db seed` does not clear it. Clear only
+  the rate-limit counters (keys `rl:*`, which include the Socket.io handshake window `rl:ws-hs:*`;
+  the cache and everything else stay):
+  `docker exec bball-tracker-redis sh -c "redis-cli --scan --pattern 'rl:*' | xargs -r redis-cli del"`.
+  Without `REDIS_URL` the counters are in process memory and a restart clears them, as before.
 - Use `accessibilityLabel` for tab bar navigation (e.g., `"Teams tab"`, `"Profile tab"`) since inactive tabs are icon-only
 - When an `accessibilityLabel` exists on a parent element, Maestro uses that instead of inner text (e.g., `"Toggle dark mode"` not `"Appearance"`)
 - **`text:` is a FULL-MATCH regex against the element's accessibility text, not a substring search.**
