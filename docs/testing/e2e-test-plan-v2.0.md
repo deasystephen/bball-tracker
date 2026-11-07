@@ -367,6 +367,9 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   2. **Name only:** enter `Test Player 1`, jersey `99` → "Add Player"
   3. **With email:** repeat with name + a verified sandbox email
   4. **With parent email:** repeat with a parent email + relationship chip
+  5. **Under 13 (#982):** open the form, answer **No** to "Is this player 13 or
+     older?", enter a name and a parent email → "Add Player". Repeat on a team
+     whose age group is `U10` and check No is preselected.
 - **Expected:**
   - Every added player appears on the roster **immediately** (2) with a
     "Not invited" chip; (3) shows "Invited"; the invite email uses the
@@ -376,6 +379,11 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
     appears in the separate "Invited" section (not the roster) until accept.
   - (4) parent gets a guardian invitation in the same step (rostered cases
     only; for an existing-account player the toast explains the deferral).
+  - The player-email field appears only after **Yes**; the form will not submit
+    until the age question is answered. (5) **No** hides and clears the player
+    email, requires a valid parent email and shows the "Players under 13 don't
+    get their own login" hint; the player is rostered "Not invited" and only the
+    parent is emailed. The answer is not sent to the API.
   - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
 - **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the
   old managed-players route and the create-and-invite arm were removed in #418).

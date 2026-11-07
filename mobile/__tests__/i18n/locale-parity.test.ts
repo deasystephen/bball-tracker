@@ -53,6 +53,7 @@ const IDENTICAL_TO_ENGLISH: Record<string, Record<string, string>> = {
     'tracker.stat.assistShort': 'AST appears in Spanish-language box scores too; on the native-speaker review list (#671)',
     'profile.role.ADMIN': 'ADMIN is the role name in Spanish too',
     'about.version': 'the "v" version prefix is the same in Spanish',
+    'roster.ageNo': 'Spanish "No" is spelled the same',
   },
 };
 
