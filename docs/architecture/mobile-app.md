@@ -32,7 +32,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   i18n key for the screen instead (`utils/upload-error.ts#AvatarUploadError.userMessageKey`, shown via
   `uploadAwareErrorMessage`), so one failure groups as one Sentry issue in every language. This changed
   English too: a rejected S3 upload used to show its diagnostic ("Avatar upload failed (403 …)") and now
-  shows "Failed to upload photo"; the detail stays in Sentry. The About screen's Share / support-mail
+  shows "Failed to upload photo"; the detail stays in Sentry. The server's 400 `upload_expired` (an
+  unsaved upload S3 already expired, backend #1005) maps to `avatar.uploadExpired` through the same
+  `uploadErrorMessageKey`, so the profile and Add Player screens ask the user to choose the photo again. The About screen's Share / support-mail
   diagnostics stay English on purpose (support reads them); the screen itself is translated.
 - **Shared components resolve their own defaults through `t()`**: `ErrorState` (title, Try Again, Go
   back, the `Error: {title}. {message}` region label), `ActionMenu` (Close, Close menu),

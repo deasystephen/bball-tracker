@@ -156,12 +156,34 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
     Statement = [
       {
         Effect = "Allow"
+        # PutObjectTagging: once AVATAR_PENDING_TAG_ENABLED is on, the presigned
+        # POST carries a `tagging` field (pending=true, #1005) and S3 checks the
+        # SIGNER for it, so without it every avatar upload fails.
+        # DeleteObjectTagging: the profile write removes the tag. With the flag
+        # off neither is used, so both must be live before the FLAG is turned
+        # on (not before this code deploys).
         Action = [
           "s3:PutObject",
           "s3:GetObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:PutObjectTagging",
+          "s3:DeleteObjectTagging"
         ]
         Resource = "${aws_s3_bucket.avatars.arn}/*"
+      },
+      {
+        # Without ListBucket, S3 answers a request for a missing key with 403
+        # AccessDenied instead of 404 NoSuchKey, so an expired upload would
+        # look like a permissions fault and never reach 400 `upload_expired`
+        # (#1005); HeadBucket (telling a missing key from a missing bucket)
+        # needs it too. Deliberately NO s3:prefix condition: an object-level
+        # request carries no s3:prefix key, so a conditioned grant would never
+        # apply to it and the 403 would stay. The breadth is acceptable: the
+        # role can already Get and Delete any key here, so listing adds only
+        # enumeration, and the bucket holds only avatars.
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.avatars.arn
       }
     ]
   })

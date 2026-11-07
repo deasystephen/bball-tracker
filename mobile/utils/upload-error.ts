@@ -1,3 +1,5 @@
+import { apiErrorCode } from './api-error-code';
+
 /**
  * A failed avatar upload (#671). `message` stays English: it goes to Sentry as is,
  * so one failure groups as one issue whatever the device language. Screens show
@@ -5,7 +7,18 @@
  * so screen tests that mock the service still get a working check.
  */
 /** The i18n keys an upload failure can show. */
-export type AvatarUploadMessageKey = 'avatar.unreadable' | 'avatar.tooLarge' | 'avatar.uploadFailed';
+export type AvatarUploadMessageKey =
+  | 'avatar.unreadable'
+  | 'avatar.tooLarge'
+  | 'avatar.uploadFailed'
+  | 'avatar.uploadExpired';
+
+/**
+ * The server's 400 `code` when a profile write names an upload that no longer
+ * exists: it was never saved within the pending window and S3 expired it
+ * (backend #1005). The user has to choose the photo again.
+ */
+export const UPLOAD_EXPIRED_CODE = 'upload_expired';
 
 type Translate = (key: string) => string;
 
@@ -19,9 +32,15 @@ export class AvatarUploadError extends Error {
   }
 }
 
-/** The i18n key to show for an upload failure, or `undefined` for any other error. */
+/**
+ * The i18n key to show for an upload failure, or `undefined` for any other error:
+ * a client-side `AvatarUploadError`, or the server's `upload_expired` refusal. The
+ * server code is read with `apiErrorCode`, the same helper `isUpgradeRequiredError`
+ * uses.
+ */
 export function uploadErrorMessageKey(error: unknown): AvatarUploadMessageKey | undefined {
-  return error instanceof AvatarUploadError ? error.userMessageKey : undefined;
+  if (error instanceof AvatarUploadError) return error.userMessageKey;
+  return apiErrorCode(error) === UPLOAD_EXPIRED_CODE ? 'avatar.uploadExpired' : undefined;
 }
 
 /**
