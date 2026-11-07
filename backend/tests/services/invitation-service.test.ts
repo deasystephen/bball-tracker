@@ -23,18 +23,26 @@ jest.mock('../../src/services/upload-service', () => ({
   // Like the real one: a key for an upload of ours, null for nothing to do
   checkAvatarUpload: jest.fn(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
   untagAvatarUpload: jest.fn().mockResolvedValue(undefined),
-  // The real wrapper's order over the mocked steps (#1005): check, write,
-  // then untag only after the write resolved and kept the URL.
+  avatarUploadKey: jest.fn((url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
+  // The real wrappers' order over the mocked steps (#1005): write, then untag
+  // only after the write resolved and kept the URL; the promoted one checks first.
+  withCheckedAvatar: jest.fn(
+    async (key: string | null, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
+      const m = jest.requireMock('../../src/services/upload-service') as {
+        untagAvatarUpload: (k: string) => Promise<void>;
+      };
+      const result = await write();
+      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
+      return result;
+    }
+  ),
   withPromotedAvatar: jest.fn(
     async (url: unknown, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
       const m = jest.requireMock('../../src/services/upload-service') as {
         checkAvatarUpload: (u: unknown) => Promise<string | null>;
-        untagAvatarUpload: (k: string) => Promise<void>;
+        withCheckedAvatar: (k: string | null, w: () => Promise<unknown>, s: (r: unknown) => boolean) => Promise<unknown>;
       };
-      const key = await m.checkAvatarUpload(url);
-      const result = await write();
-      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
-      return result;
+      return m.withCheckedAvatar(await m.checkAvatarUpload(url), write, stored);
     }
   ),
 }));
@@ -2000,11 +2008,8 @@ describe('InvitationService', () => {
       // X wins the guarded photo write (zero rows), as the pre-read predicted
       const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
       setupReuseTx(team, coach, unclaimed, txUserUpdate);
-      // Were the check asked, the upload would be expired
-      mockCheck.mockImplementation(async (url: unknown) => {
-        if (url) throw new UploadExpiredError();
-        return null;
-      });
+      // The check says the upload expired
+      mockCheck.mockRejectedValueOnce(new UploadExpiredError());
 
       const result = await InvitationService.addRosterPlayer(
         team.id,
@@ -2012,14 +2017,14 @@ describe('InvitationService', () => {
         coach.id
       );
 
+      // Tolerated because the pre-read row has a photo: the add proceeds without a key
       expect(result.rostered).toBe(true);
-      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
       expect(mockUntag).not.toHaveBeenCalled();
       expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
-      mockCheck.mockImplementation(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null));
     });
 
-    it('middle case — accepted stale pre-read: the row read with photo X lost it before the write, so the upload is stored unchecked and not untagged (#1005)', async () => {
+    it('middle case — stale pre-read: the row read with photo X lost it before the write, so the upload is stored and untagged (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = {
         ...createPlayer({ email: 'jane@example.com' }),
@@ -2037,9 +2042,10 @@ describe('InvitationService', () => {
         coach.id
       );
 
-      // Documented rare case: with the flag on, this photo stays pending and expires
-      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
-      expect(mockUntag).not.toHaveBeenCalled();
+      // The real URL is always checked; the untag follows the write's own result
+      expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockUntag).toHaveBeenCalledTimes(1);
+      expect(mockUntag.mock.invocationCallOrder[0]).toBeGreaterThan(txUserUpdate.mock.invocationCallOrder[1]);
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
@@ -2062,12 +2068,13 @@ describe('InvitationService', () => {
       );
 
       expect(result.rostered).toBe(true);
-      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
+      // The guarded write kept the row's photo (this same URL): no untag, and no discard of the row's own photo
       expect(mockUntag).not.toHaveBeenCalled();
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
-    it('case 2 — a retry after a commit (the reused row already stores this URL) makes no S3 call (#1005)', async () => {
+    it('case 2 — a retry after a commit (the reused row already stores this URL) that fails: no untag, no discard (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const committed = {
         ...createPlayer({ email: 'jane@example.com' }),
@@ -2086,8 +2093,8 @@ describe('InvitationService', () => {
         )
       ).rejects.toThrow();
 
-      // The object stays untagged: it is the saved photo of the committed row
-      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
+      // The check runs (the object exists); the failed write touches S3 no further
+      expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
       expect(mockUntag).not.toHaveBeenCalled();
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
@@ -2297,7 +2304,7 @@ describe('InvitationService', () => {
       expect(result2.guardianReason).toBe('Failed to invite guardian');
     });
 
-    it('P2002 retry: the skip is computed against the race winner, so when the winner takes the photo it is checked and untagged (#1005)', async () => {
+    it('P2002 retry: the upload is checked once for both attempts, and untagged when the race winner takes the photo (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       // The pre-read row already stores this URL (so the first attempt skips the
       // S3 calls); the race winner has no photo and takes it on the retry.
@@ -2344,8 +2351,8 @@ describe('InvitationService', () => {
       );
 
       expect(result.rostered).toBe(true);
-      // First attempt: target stores the URL, so no check; the retry against the winner checks
-      expect(mockCheck.mock.calls.map(([url]) => url)).toEqual([null, AVATAR_URL]);
+      // One check before the try, reused by both attempts
+      expect(mockCheck.mock.calls.map(([url]) => url)).toEqual([AVATAR_URL]);
       expect(mockUntag).toHaveBeenCalledTimes(1);
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });

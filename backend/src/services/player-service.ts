@@ -15,7 +15,14 @@ import {
   ForbiddenError,
   ConflictError,
 } from '../utils/errors';
-import { assertOwnUploadUrl, deletePreviousAvatar, withPromotedAvatar } from './upload-service';
+import {
+  assertOwnUploadUrl,
+  avatarUploadKey,
+  checkAvatarUpload,
+  deletePreviousAvatar,
+  withCheckedAvatar,
+  withPromotedAvatar,
+} from './upload-service';
 import {
   getGuardianChildIds,
   getPlayerTeamAccess,
@@ -464,13 +471,16 @@ export class PlayerService {
 
     // A new upload is checked before it is stored (#1005): an expired one is
     // a 400 `upload_expired` with nothing written; it is untagged only after
-    // the update. Re-sending the stored URL needs nothing.
-    const newUpload =
-      data.profilePictureUrl && data.profilePictureUrl !== player.profilePictureUrl ? data.profilePictureUrl : null;
+    // the update. Re-sending the stored URL skips the check but is untagged
+    // again, which repairs a failed earlier untag.
+    const resave = Boolean(data.profilePictureUrl) && data.profilePictureUrl === player.profilePictureUrl;
+    const uploadKey = resave
+      ? avatarUploadKey(data.profilePictureUrl)
+      : await checkAvatarUpload(data.profilePictureUrl);
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
     // deletion that commits in between matches no row (P2025, a 404) instead
     // of rewriting the tombstone. One statement: write and returned row agree.
-    const updatedPlayer: Player = await withPromotedAvatar(newUpload, async () => {
+    const updatedPlayer: Player = await withCheckedAvatar(uploadKey, async () => {
       try {
         return await prisma.user.update({
           where: { id: playerId, deletedAt: null },

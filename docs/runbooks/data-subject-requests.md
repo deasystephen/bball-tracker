@@ -370,6 +370,32 @@ aws s3api delete-object-tagging --bucket bball-tracker-avatars-production --key 
 
 If it already expired, the profile shows a broken image; ask the person to choose the photo again.
 
+## Turning pending-upload expiry off
+
+With `AVATAR_PENDING_TAG_ENABLED=true`, every new avatar upload is tagged `pending=true` and the
+`expire-pending-avatars` lifecycle rule deletes it 3 days after upload unless a save removed the
+tag (#1005). With the flag off, saves no longer remove tags. So any upload made while the flag was
+on, and saved after it went off, would still expire. To turn it off:
+
+1. Ideally, pick a quiet time with no new uploads (or accept that a handful of fresh uploads may
+   need the step below again).
+2. Deploy `AVATAR_PENDING_TAG_ENABLED` unset (or `false`) in `infra/task-definition.json`.
+3. Untag every avatar a profile stores. Untagging an untagged object is harmless, so there is no
+   need to work out which ones were uploaded in the window. From a shell with production database
+   and AWS access:
+
+   ```bash
+   BUCKET=bball-tracker-avatars-production
+   psql "$DATABASE_URL" -At -c \
+     "SELECT \"profilePictureUrl\" FROM \"User\" WHERE \"profilePictureUrl\" LIKE 'https://$BUCKET.s3.amazonaws.com/avatars/%'" |
+     sed "s#^https://$BUCKET.s3.amazonaws.com/##" |
+     while read -r key; do aws s3api delete-object-tagging --bucket "$BUCKET" --key "$key"; done
+   ```
+
+4. Run step 3 again once a day for the next 3 days. That catches uploads made just before the
+   switch and saved afterwards. Or disable the `expire-pending-avatars` rule (`terraform apply`
+   with its `status = "Disabled"`) if the flag is off for good.
+
 ## Reversal
 
 There is none. The transaction is not reversible after commit; the only copy of the pre-deletion

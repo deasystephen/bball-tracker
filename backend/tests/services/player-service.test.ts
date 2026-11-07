@@ -8,18 +8,26 @@ jest.mock('../../src/services/upload-service', () => ({
   // Like the real one: a key for an upload of ours, null for nothing to do
   checkAvatarUpload: jest.fn(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
   untagAvatarUpload: jest.fn().mockResolvedValue(undefined),
-  // The real wrapper's order over the mocked steps (#1005): check, write,
-  // then untag only after the write resolved and kept the URL.
+  avatarUploadKey: jest.fn((url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
+  // The real wrappers' order over the mocked steps (#1005): write, then untag
+  // only after the write resolved and kept the URL; the promoted one checks first.
+  withCheckedAvatar: jest.fn(
+    async (key: string | null, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
+      const m = jest.requireMock('../../src/services/upload-service') as {
+        untagAvatarUpload: (k: string) => Promise<void>;
+      };
+      const result = await write();
+      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
+      return result;
+    }
+  ),
   withPromotedAvatar: jest.fn(
     async (url: unknown, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
       const m = jest.requireMock('../../src/services/upload-service') as {
         checkAvatarUpload: (u: unknown) => Promise<string | null>;
-        untagAvatarUpload: (k: string) => Promise<void>;
+        withCheckedAvatar: (k: string | null, w: () => Promise<unknown>, s: (r: unknown) => boolean) => Promise<unknown>;
       };
-      const key = await m.checkAvatarUpload(url);
-      const result = await write();
-      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
-      return result;
+      return m.withCheckedAvatar(await m.checkAvatarUpload(url), write, stored);
     }
   ),
 }));
@@ -54,8 +62,9 @@ import {
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
-import { assertOwnUploadUrl, deletePreviousAvatar, checkAvatarUpload } from '../../src/services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar, checkAvatarUpload, untagAvatarUpload } from '../../src/services/upload-service';
 const mockCheck = checkAvatarUpload as jest.Mock;
+const mockUntag = untagAvatarUpload as jest.Mock;
 
 const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typeof deletePreviousAvatar>;
 const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
@@ -661,7 +670,7 @@ describe('PlayerService', () => {
       );
     });
 
-    it('does not promote when the request re-sends the URL already stored (#1005)', async () => {
+    it('a re-save of the stored URL skips the check but untags again (#1005)', async () => {
       const url = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/p/same.jpg';
       const player = createPlayer({ profilePictureUrl: url });
       (mockPrisma.user.findUnique as jest.Mock)
@@ -671,9 +680,9 @@ describe('PlayerService', () => {
 
       await PlayerService.updatePlayer(player.id, { profilePictureUrl: url }, player.id);
 
-      // The write still goes through the wrapper, with nothing to promote
-      expect(mockCheck).not.toHaveBeenCalledWith(url);
-      expect(mockCheck).toHaveBeenCalledWith(null);
+      // A re-save skips the check but is still untagged after the write (repairs a failed untag)
+      expect(mockCheck).not.toHaveBeenCalled();
+      expect(mockUntag).toHaveBeenCalledWith('avatars/k/v.jpg');
     });
 
     it('writes nothing when the new upload has expired (400 upload_expired, #1005)', async () => {

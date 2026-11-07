@@ -156,10 +156,12 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
     Statement = [
       {
         Effect = "Allow"
-        # PutObjectTagging: the presigned POST carries a `tagging` field
-        # (pending=true, #1005) and S3 checks the SIGNER for it, so without it
-        # every avatar upload fails. DeleteObjectTagging: the profile write
-        # removes the tag. Both must be live before the code that uses them.
+        # PutObjectTagging: once AVATAR_PENDING_TAG_ENABLED is on, the presigned
+        # POST carries a `tagging` field (pending=true, #1005) and S3 checks the
+        # SIGNER for it, so without it every avatar upload fails.
+        # DeleteObjectTagging: the profile write removes the tag. With the flag
+        # off neither is used, so both must be live before the FLAG is turned
+        # on (not before this code deploys).
         Action = [
           "s3:PutObject",
           "s3:GetObject",

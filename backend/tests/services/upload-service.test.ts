@@ -47,6 +47,8 @@ import {
   pendingTagEnabled,
   checkAvatarUpload,
   untagAvatarUpload,
+  avatarUploadKey,
+  withCheckedAvatar,
   withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
@@ -507,8 +509,24 @@ describe('Upload Service', () => {
       });
     });
 
+    describe('avatarUploadKey', () => {
+      it('validates without S3: the key, null for external/empty, 400 for a misshaped URL', () => {
+        expect(avatarUploadKey(OWN)).toBe(KEY);
+        expect(avatarUploadKey('https://workos.example/p.jpg')).toBeNull();
+        expect(avatarUploadKey(undefined)).toBeNull();
+        expect(() => avatarUploadKey(`${BUCKET_BASE}u1/nested/pic.jpg`)).toThrow(BadRequestError);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+    });
+
     describe('untagAvatarUpload (step C)', () => {
-      it('removes the tags of the key in one call, whatever the flag', async () => {
+      it('with the flag off, makes no S3 call at all', async () => {
+        await untagAvatarUpload(KEY);
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('with the flag on, removes the tags of the key in one call', async () => {
+        flagOn();
         await untagAvatarUpload(KEY);
         expect(mockSend).toHaveBeenCalledTimes(1);
         expect(mockSend.mock.calls[0][0]).toEqual({
@@ -518,13 +536,12 @@ describe('Upload Service', () => {
       });
 
       it.each([
-        ['InternalError', 500, false],
-        ['AccessDenied', 403, false],
-        ['AccessDenied', 403, true],
-        ['NoSuchKey', 404, false],
-      ])('ANY failure (%s, flag on: %s) is logged at error and captured, never thrown', async (name, status, on) => {
-        if (on) flagOn();
-        const fault = sdkError(name, status as number);
+        ['InternalError', 500],
+        ['AccessDenied', 403],
+        ['NoSuchKey', 404],
+      ])('ANY failure (%s) is logged at error and captured, never thrown', async (name, status) => {
+        flagOn();
+        const fault = sdkError(name, status);
         mockSend.mockRejectedValueOnce(fault);
 
         await expect(untagAvatarUpload(KEY)).resolves.toBeUndefined();
@@ -541,6 +558,7 @@ describe('Upload Service', () => {
       });
 
       it('stringifies a non-Error failure', async () => {
+        flagOn();
         mockSend.mockRejectedValueOnce('boom');
         await untagAvatarUpload(KEY);
         expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
@@ -557,11 +575,22 @@ describe('Upload Service', () => {
         expect(mockSend.mock.invocationCallOrder[1]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
       });
 
-      it('flag off: no check, but the untag still runs after the write (a flag-on upload may be tagged)', async () => {
+      it('flag off: no S3 call at all, the write still runs', async () => {
         const write = jest.fn().mockResolvedValue('row');
-        await withPromotedAvatar(OWN, write);
+        await expect(withPromotedAvatar(OWN, write)).resolves.toBe('row');
+        expect(write).toHaveBeenCalled();
+        expect(mockSend).not.toHaveBeenCalled();
+      });
+
+      it('withCheckedAvatar: no check, write, then untag (a re-save repairs a failed untag)', async () => {
+        flagOn();
+        const write = jest.fn().mockResolvedValue('row');
+        await withCheckedAvatar(KEY, write);
         expect(kinds()).toEqual(['DeleteObjectTagging']);
         expect(mockSend.mock.invocationCallOrder[0]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
+        mockSend.mockClear();
+        await withCheckedAvatar(null, write);
+        expect(mockSend).not.toHaveBeenCalled();
       });
 
       it('a failed write makes no S3 call after the check, and rethrows', async () => {

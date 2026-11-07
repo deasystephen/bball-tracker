@@ -27,7 +27,13 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
-import { assertOwnUploadUrl, deletePreviousAvatar, withPromotedAvatar } from '../../services/upload-service';
+import {
+  assertOwnUploadUrl,
+  avatarUploadKey,
+  checkAvatarUpload,
+  deletePreviousAvatar,
+  withCheckedAvatar,
+} from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
 import { emailEquals } from '../../utils/email-match';
@@ -486,11 +492,11 @@ router.patch('/me', authenticate, async (req, res) => {
         : null;
     // A new upload is checked before it is stored (#1005): an expired one is
     // a 400 `upload_expired` and nothing is written; its pending tag is removed
-    // only after the write committed. Re-sending the URL already stored needs
-    // nothing.
-    const newUpload =
-      profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl ? profilePictureUrl : null;
-    await withPromotedAvatar(newUpload, async () => {
+    // only after the write committed. Re-sending the URL already stored skips
+    // the check but is untagged again, which repairs a failed earlier untag.
+    const resave = Boolean(profilePictureUrl) && profilePictureUrl === previous?.profilePictureUrl;
+    const uploadKey = resave ? avatarUploadKey(profilePictureUrl) : await checkAvatarUpload(profilePictureUrl);
+    await withCheckedAvatar(uploadKey, async () => {
       // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
       // `authenticate` a moment before an account deletion committed must not
       // write a real name or photo back onto the tombstone. Zero rows → 401.

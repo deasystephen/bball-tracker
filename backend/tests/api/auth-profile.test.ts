@@ -186,11 +186,21 @@ describe('PATCH /api/v1/auth/me', () => {
       expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toHaveLength(0);
     });
 
-    it('makes no S3 call when the request re-sends the URL already stored', async () => {
+    it('a re-save of the stored URL skips the check but untags again after the write (repairs a failed untag)', async () => {
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_OLD });
 
       expect(res.status).toBe(200);
-      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toHaveLength(0);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toEqual(['DeleteObjectTagging']);
+      const untagAt = mockS3Send.mock.invocationCallOrder[0];
+      expect(untagAt).toBeGreaterThan((mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0]);
+    });
+
+    it('with the flag off, a photo save makes no S3 call at all', async () => {
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(200);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'HeadBucket' || k === 'DeleteObjectTagging')).toHaveLength(0);
     });
   });
 

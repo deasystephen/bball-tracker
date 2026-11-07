@@ -14,6 +14,7 @@ import {
   BadRequestError,
   ForbiddenError,
   AppError,
+  UploadExpiredError,
 } from '../utils/errors';
 import { assertResendCooldown } from '../utils/resend-cooldown';
 import { randomBytes } from 'crypto';
@@ -37,7 +38,13 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { assertOwnUploadUrl, discardOwnAvatar, withPromotedAvatar } from './upload-service';
+import {
+  assertOwnUploadUrl,
+  checkAvatarUpload,
+  discardOwnAvatar,
+  withCheckedAvatar,
+  withPromotedAvatar,
+} from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1175,22 +1182,28 @@ export class InvitationService {
         // the loser's user.create aborts the transaction with P2002 and we
         // retry once against the row that now exists.
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
-        // Each roster attempt checks the upload before its rows are written and
-        // untags it only after they commit (#1005). Both are skipped when that
-        // attempt's target row already has a photo: this exact URL (a retry
-        // after a commit), or another one, which wins the guarded write, so the
-        // upload is discarded below and an expired one must not fail the add.
-        // The target's photo comes from an unlocked read; a stale one is a rare
-        // accepted case (backend-services.md, "Unsaved uploads expire").
+        // The upload is checked once, before any roster attempt writes rows
+        // (#1005), and untagged only after an attempt commits AND its guarded
+        // write took the photo (photoApplied, decided under the lock, #618).
+        // An expired upload fails the add, except when the pre-read row
+        // already has a photo: that photo will almost certainly win, so the
+        // add proceeds and the upload is discarded below. (Sliver accepted in
+        // backend-services.md: the photo cleared between the read and the
+        // write AND the upload expired stores a dead URL.)
+        const uploadKey = await checkAvatarUpload(data.profilePictureUrl).catch((err: unknown) => {
+          if (err instanceof UploadExpiredError && existing?.profilePictureUrl) {
+            return null;
+          }
+          throw err;
+        });
         let targetPhoto: string | null | undefined = existing?.profilePictureUrl;
         const roster = (
           reuse: { id: string; managedById: string | null; profilePictureUrl?: string | null } | null
         ): ReturnType<typeof InvitationService.createRosteredInvitedPlayer> => {
           targetPhoto = reuse?.profilePictureUrl;
-          return withPromotedAvatar(
-            targetPhoto ? null : data.profilePictureUrl,
+          return withCheckedAvatar(
+            uploadKey,
             () => this.createRosteredInvitedPlayer(teamId, data, userId, reuse, email),
-            // Untag only when the row took the photo (decided under the lock, #618)
             (created) => created.photoApplied
           );
         };

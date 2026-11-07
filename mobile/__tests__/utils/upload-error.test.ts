@@ -5,7 +5,7 @@
  */
 import { AxiosError, AxiosHeaders } from 'axios';
 import { i18n } from '../../i18n';
-import { normalizeApiError } from '../../services/api-client';
+import { apiErrorCode, isUpgradeRequiredError, normalizeApiError } from '../../services/api-client';
 import {
   AvatarUploadError,
   UPLOAD_EXPIRED_CODE,
@@ -79,5 +79,20 @@ describe('upload_expired (#1005)', () => {
     expect(uploadErrorMessageKey(new AvatarUploadError('too big', 'avatar.tooLarge'))).toBe('avatar.tooLarge');
     expect(uploadErrorMessageKey(null)).toBeUndefined();
     expect(uploadErrorMessageKey('upload_expired')).toBeUndefined();
+  });
+});
+
+describe('apiErrorCode (shared with isUpgradeRequiredError)', () => {
+  it('reads the body code first, then the lifted code, and ignores non-strings', () => {
+    expect(apiErrorCode({ apiError: { code: 'a' }, code: 'b' })).toBe('a');
+    expect(apiErrorCode({ code: 'b' })).toBe('b');
+    expect(apiErrorCode({ apiError: { code: 7 } })).toBeUndefined();
+    expect(apiErrorCode(null)).toBeUndefined();
+    expect(apiErrorCode('upload_expired')).toBeUndefined();
+  });
+
+  it('isUpgradeRequiredError reads the code through it', () => {
+    expect(isUpgradeRequiredError(apiError(403, { error: 'x', code: 'upgrade_required' }))).toBe(true);
+    expect(isUpgradeRequiredError(apiError(403, { error: 'x', code: 'forbidden' }))).toBe(false);
   });
 });

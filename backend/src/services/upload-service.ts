@@ -345,24 +345,18 @@ function faultFields(err: unknown): { code: string | undefined; error: string } 
  * failure.
  */
 export async function checkAvatarUpload(imageUrl: string | null | undefined): Promise<string | null> {
-  const issued = issuedAvatarKey(imageUrl);
-  if ('reason' in issued) {
-    if (issued.reason === 'not_managed') {
-      return null;
-    }
-    // `assertOwnUploadUrl` has already refused this shape on every write path.
-    throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
-  }
-  if (!pendingTagEnabled()) {
-    return issued.key;
+  // `assertOwnUploadUrl` has already refused a misshaped URL on every write path.
+  const key = avatarUploadKey(imageUrl);
+  if (key === null || !pendingTagEnabled()) {
+    return key;
   }
 
   try {
-    await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: issued.key }));
-    return issued.key;
+    await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    return key;
   } catch (headError) {
     if (!isNotFound(headError)) {
-      logger.warn('Avatar upload check failed', { operation: 'HeadObject', key: issued.key, ...faultFields(headError) });
+      logger.warn('Avatar upload check failed', { operation: 'HeadObject', key, ...faultFields(headError) });
       throw headError;
     }
   }
@@ -378,21 +372,42 @@ export async function checkAvatarUpload(imageUrl: string | null | undefined): Pr
   if (bucketExists) {
     throw new UploadExpiredError();
   }
-  logger.warn('Avatar bucket check failed', { operation: 'HeadBucket', key: issued.key, ...faultFields(bucketError) });
+  logger.warn('Avatar bucket check failed', { operation: 'HeadBucket', key, ...faultFields(bucketError) });
   throw bucketError;
 }
 
 /**
+ * The validated key of an upload in our bucket, with no S3 call: `null` for
+ * an external URL or an empty value. For a URL already stored on the row
+ * being saved (a re-save), which needs no check but still gets untagged.
+ */
+export function avatarUploadKey(imageUrl: string | null | undefined): string | null {
+  const issued = issuedAvatarKey(imageUrl);
+  if ('reason' in issued) {
+    if (issued.reason === 'not_managed') {
+      return null;
+    }
+    throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
+  }
+  return issued.key;
+}
+
+/**
  * Step C, only AFTER the write committed (#1005): remove the `pending` tag so
- * the lifecycle rule never expires the saved photo. Runs whatever the flag:
- * an upload made while the flag was on may still be tagged. One call; the S3
- * client's own retries cover transient failures. Never throws: the request
- * already succeeded. ANY failure (AccessDenied and a missing object included)
- * is logged at error with the key and captured to Sentry (`flow:
- * avatar-promote`); an operator removes the tag by hand
- * (`docs/runbooks/data-subject-requests.md`), or the photo expires.
+ * the lifecycle rule never expires the saved photo. Only while
+ * `AVATAR_PENDING_TAG_ENABLED` is on: with it off there are no S3 calls at
+ * all (an upload left tagged from a flag-on window is handled by the
+ * rollback step in `docs/runbooks/data-subject-requests.md`). One call; the
+ * S3 client's own retries cover transient failures. Never throws: the
+ * request already succeeded. ANY failure (AccessDenied and a missing object
+ * included) is logged at error with the key and captured to Sentry (`flow:
+ * avatar-promote`); an operator removes the tag by hand, or a later re-save
+ * of the same URL repairs it.
  */
 export async function untagAvatarUpload(key: string): Promise<void> {
+  if (!pendingTagEnabled()) {
+    return;
+  }
   try {
     await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
   } catch (err) {
@@ -406,28 +421,38 @@ export async function untagAvatarUpload(key: string): Promise<void> {
 }
 
 /**
+ * Steps B and C for a key that is already checked (or needs no check): run
+ * `write`, then untag `key` only after it resolved and `stored(result)` says
+ * the committed write kept the URL. A failed write touches S3 no further.
+ */
+export async function withCheckedAvatar<T>(
+  key: string | null,
+  write: () => Promise<T>,
+  stored: (result: T) => boolean = () => true
+): Promise<T> {
+  const result = await write();
+  if (key !== null && stored(result)) {
+    await untagAvatarUpload(key);
+  }
+  return result;
+}
+
+/**
  * Save a `profilePictureUrl` in the order that leaves nothing to undo (#1005):
  * A. `checkAvatarUpload` (HeadObject; 400 `upload_expired` when it is gone),
  * B. `write`, the database work that stores it,
  * C. `untagAvatarUpload`, only after `write` resolved (committed).
  * A failed write touches S3 no further, and neither does a committed write
  * that did not keep the URL (`stored` returns false): the upload stays as it
- * was (pending, once tagging is enabled) and the lifecycle rule expires it. So a double
- * submit is safe: whichever request commits untags afterwards, and the one
- * that fails changes nothing.
+ * was (pending, once tagging is enabled) and the lifecycle rule expires it. So
+ * a double submit is safe: whichever request commits untags afterwards, and
+ * the one that fails changes nothing. With the flag off, neither A nor C
+ * calls S3.
  */
 export async function withPromotedAvatar<T>(
   imageUrl: string | null | undefined,
   write: () => Promise<T>,
   stored: (result: T) => boolean = () => true
 ): Promise<T> {
-  const key = await checkAvatarUpload(imageUrl);
-  const result = await write();
-  // `stored` says whether the committed write actually kept the URL (Add
-  // Player case 2 may keep a reused row's own photo): if not, the upload is
-  // left as it was, for the lifecycle rule.
-  if (key !== null && stored(result)) {
-    await untagAvatarUpload(key);
-  }
-  return result;
+  return withCheckedAvatar(await checkAvatarUpload(imageUrl), write, stored);
 }

@@ -253,21 +253,27 @@ describe('PATCH /api/v1/players/:id', () => {
     expect(s3Calls()).toEqual([['HeadObject', KEY]]);
   });
 
-  it('makes no S3 call for an external URL or for the URL already stored', async () => {
+  it('makes no S3 call for an external URL', async () => {
     arm(UPLOAD_URL);
     const external = await request(app)
       .patch(`/api/v1/players/${PLAYER_ID}`)
       .set(AUTH)
       .send({ profilePictureUrl: EXTERNAL_URL });
+
+    expect(external.status).toBe(200);
+    // (Replacing the stored photo with the external one deletes the old object, as before #1005)
+    expect(s3Calls().filter(([kind]) => kind !== 'DeleteObject')).toHaveLength(0);
+  });
+
+  it('a re-save of the stored URL skips the check but untags again after the update', async () => {
+    arm(UPLOAD_URL);
     const same = await request(app)
       .patch(`/api/v1/players/${PLAYER_ID}`)
       .set(AUTH)
       .send({ profilePictureUrl: UPLOAD_URL });
 
-    expect(external.status).toBe(200);
     expect(same.status).toBe(200);
-    // (Replacing the stored photo with the external one deletes the old object, as before #1005)
-    expect(s3Calls().filter(([kind]) => kind !== 'DeleteObject')).toHaveLength(0);
+    expect(s3Calls()).toEqual([['DeleteObjectTagging', KEY]]);
   });
 });
 
@@ -332,7 +338,7 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(deletedKeys()).toHaveLength(0);
   });
 
-  it('case 2: a retry after a commit (the reused row already stores this URL) makes no S3 call', async () => {
+  it('case 2: a retry after a commit (the reused row already stores this URL) that fails makes no S3 call after the check', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
       id: PLAYER_ID,
       email: 'kid@example.test',
@@ -349,10 +355,10 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
       .send({ name: 'Kid', playerEmail: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(500);
-    expect(s3Calls()).toHaveLength(0);
+    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
   });
 
-  it('with the flag off, the save makes no check (no expiry exists) and still untags after the write', async () => {
+  it('with the flag off, the save makes no S3 call at all', async () => {
     delete process.env.AVATAR_PENDING_TAG_ENABLED;
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
@@ -360,14 +366,16 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
       .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(201);
-    expect(s3Calls()).toEqual([['DeleteObjectTagging', KEY]]);
+    expect(s3Calls()).toHaveLength(0);
   });
 
-  it('with the flag off, an untag denied after the write is reported and the response is still 201', async () => {
-    delete process.env.AVATAR_PENDING_TAG_ENABLED;
+  it('with the flag on, an untag denied after the write is reported and the response is still 201', async () => {
     const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
     jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-    mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
+    mockS3Send.mockImplementation(async (cmd: { kind: string }) => {
+      if (cmd.kind === 'DeleteObjectTagging') throw s3Error('AccessDenied', 403);
+      return {};
+    });
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
       .set(AUTH)
