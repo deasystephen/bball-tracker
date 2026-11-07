@@ -8,7 +8,7 @@ import { SiteFooter } from '../app/site-footer';
 import SupportPage from '../app/support/page';
 import { AppStoreLink } from '../app/store-links';
 import { APP_STORE_URL } from '../lib/open-in-app';
-import { SUPPORT_EMAIL } from '../lib/site';
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from '../lib/site';
 
 const ROOT = path.resolve(__dirname, '../..');
 
@@ -26,6 +26,12 @@ describe('support page (#450)', () => {
   it('links the support address', () => {
     const html = renderToStaticMarkup(<SupportPage />);
     expect(html).toContain(`href="mailto:${SUPPORT_EMAIL}"`);
+  });
+
+  it('tells parents where to report a child’s account (#983)', () => {
+    const html = renderToStaticMarkup(<SupportPage />);
+    expect(html).toContain('under 13');
+    expect(html).toContain(`href="mailto:${PRIVACY_EMAIL}"`);
   });
 });
 

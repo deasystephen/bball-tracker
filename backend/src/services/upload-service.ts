@@ -159,45 +159,75 @@ export async function deleteAvatar(imageUrl: string): Promise<void> {
   await s3Client.send(command);
 }
 
+/** What happened to an avatar object a caller asked to remove. */
+export type AvatarDeletion = 'deleted' | 'failed' | 'not_ours';
+
+/**
+ * Throws unless the avatar bucket is configured explicitly. Without
+ * `S3_AVATARS_BUCKET` the module falls back to the dev bucket, so production
+ * avatar URLs would not be recognised as ours and nothing would be deleted.
+ * Operator scripts that delete avatars call this before writing anything.
+ */
+export function assertAvatarStorageConfig(env: NodeJS.ProcessEnv = process.env): void {
+  if (!env.S3_AVATARS_BUCKET) {
+    throw new Error('S3_AVATARS_BUCKET is not set: avatar objects cannot be deleted');
+  }
+}
+
+/**
+ * Removes one avatar object and says what happened: `not_ours` for a URL
+ * outside our bucket (a WorkOS profile photo, say) or one whose parsed path
+ * is not an issued upload key, `failed` when S3 refused (logged at warn,
+ * never thrown), `deleted` otherwise.
+ *
+ * Defence in depth behind `assertOwnUploadUrl` (#717): the stored URL may
+ * predate the write-time gate, so the delete is refused unless the parsed
+ * path has the exact issued shape `/avatars/<id>/<file>`. A URL whose `..`
+ * segments would collapse the key outside `avatars/` (or into a different
+ * shape) deletes nothing and leaves a warning. No owner id is checked here:
+ * the row's owner is not always the uploader (coach-uploaded player photos),
+ * which is why the gate sits at write time.
+ */
+export async function deleteAvatarObject(imageUrl: string | null | undefined): Promise<AvatarDeletion> {
+  if (!isManagedAvatarUrl(imageUrl)) {
+    return 'not_ours';
+  }
+
+  const path = parsedPath(imageUrl);
+  if (path === null || !ISSUED_KEY_PATH.test(path)) {
+    // Never the URL itself: it is client-supplied and this is the hostile case.
+    logger.warn('Avatar URL is not an issued upload key; not deleted', {
+      reason: path === null ? 'unparsable' : 'path outside avatars/<id>/<file>',
+    });
+    return 'not_ours';
+  }
+
+  try {
+    await deleteAvatar(imageUrl);
+    return 'deleted';
+  } catch (err) {
+    logger.warn('Failed to delete avatar object', {
+      url: imageUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 'failed';
+  }
+}
+
 /**
  * Best-effort removal of the avatar object that `nextUrl` replaces, so every
  * avatar change doesn't leave the previous object orphaned in S3 (audit #61).
- * Only objects in our bucket are touched; failures are logged, never thrown —
- * the profile update has already succeeded.
- *
- * Defence in depth behind `assertOwnUploadUrl` (#717): the stored URL may
- * predate the write-time gate, so the delete is also refused unless the
- * parsed path has the exact issued shape `/avatars/<id>/<file>`. A URL whose
- * `..` segments would collapse the key outside `avatars/` (or into a
- * different shape) deletes nothing and leaves a warning. No owner id is
- * checked here: the row's owner is not always the uploader (coach-uploaded
- * player photos), which is why the gate sits at write time.
+ * Only objects in our bucket are touched (`deleteAvatarObject`); failures are
+ * logged, never thrown — the profile update has already succeeded.
  */
 export async function deletePreviousAvatar(
   previousUrl: string | null | undefined,
   nextUrl: string | null | undefined
 ): Promise<void> {
-  if (!isManagedAvatarUrl(previousUrl) || previousUrl === nextUrl) {
+  if (previousUrl === nextUrl) {
     return;
   }
-
-  const path = parsedPath(previousUrl);
-  if (path === null || !ISSUED_KEY_PATH.test(path)) {
-    // Never the URL itself: it is client-supplied and this is the hostile case.
-    logger.warn('Previous avatar URL is not an issued upload key; not deleted', {
-      reason: path === null ? 'unparsable' : 'path outside avatars/<id>/<file>',
-    });
-    return;
-  }
-
-  try {
-    await deleteAvatar(previousUrl);
-  } catch (err) {
-    logger.warn('Failed to delete previous avatar object (ignored)', {
-      previousUrl,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await deleteAvatarObject(previousUrl);
 }
 
 /**

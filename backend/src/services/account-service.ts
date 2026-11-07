@@ -54,13 +54,19 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
-import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
+import { ConvertRefusedError, ForbiddenError, LastHeadCoachError, NotFoundError } from '../utils/errors';
 import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
-import { deletePreviousAvatar } from './upload-service';
+import {
+  type AvatarDeletion,
+  deleteAvatarObject,
+  deletePreviousAvatar,
+  isManagedAvatarUrl,
+  isOwnUploadUrl,
+} from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
 
@@ -223,8 +229,6 @@ export class AccountService {
       }
 
       // 3. Purge what only serves the person.
-      await tx.pushToken.deleteMany({ where: { userId } });
-      await tx.calendarFeedToken.deleteMany({ where: { userId } });
       await tx.teamStaff.deleteMany({ where: { userId } });
       await tx.gameRsvp.deleteMany({ where: { userId } });
 
@@ -243,16 +247,7 @@ export class AccountService {
       }
       await tx.guardian.deleteMany({ where: { childId: userId } });
 
-      await tx.teamInvitation.updateMany({
-        where: { playerId: userId, status: 'PENDING' },
-        data: { status: 'CANCELLED' },
-      });
-      // The invitation rows outlive the account; the hash of the address they
-      // were sent to (#715 resend cooldown) does not.
-      await tx.teamInvitation.updateMany({
-        where: { playerId: userId, recipientHash: { not: null } },
-        data: { recipientHash: null },
-      });
+      await purgeLoginBindings(tx, userId);
 
       const emailMatch: Prisma.GuardianInvitationWhereInput[] = row.email
         ? [{ invitedEmail: emailEquals(row.email) }]
@@ -262,13 +257,7 @@ export class AccountService {
         data: { status: 'EXPIRED' },
       });
       if (row.email) {
-        // D17: the address must not survive on ACCEPTED / EXPIRED rows either.
-        // Per-row sentinel keeps NOT NULL and cannot collide; the partial
-        // unique index covers PENDING rows only, and those were just expired.
-        await tx.$executeRaw`
-          UPDATE "GuardianInvitation"
-          SET "invitedEmail" = 'deleted-' || "id" || '@invalid'
-          WHERE lower("invitedEmail") = lower(${row.email})`;
+        await scrubInvitedEmail(tx, row.email);
       }
 
       // D16: the personal league carries the coach's name.
@@ -276,16 +265,18 @@ export class AccountService {
         where: { personalOwnerId: userId },
         select: { id: true },
       });
-      if (personal) {
-        const teamCount = await tx.team.count({ where: { season: { leagueId: personal.id } } });
-        if (teamCount === 0) {
-          await tx.league.delete({ where: { id: personal.id } });
-        } else {
-          await tx.league.update({
-            where: { id: personal.id },
-            data: { name: DELETED_LEAGUE_NAME, personalOwnerId: null },
-          });
-        }
+      if (
+        personal &&
+        !(await deletePersonalLeagueIfEmpty(
+          tx,
+          personal.id,
+          await tx.team.count({ where: { season: { leagueId: personal.id } } })
+        ))
+      ) {
+        await tx.league.update({
+          where: { id: personal.id },
+          data: { name: DELETED_LEAGUE_NAME, personalOwnerId: null },
+        });
       }
 
       // Real leagues the user administered that now have nobody (D18).
@@ -453,6 +444,539 @@ export class AccountService {
       announcementReplies,
     };
   }
+
+  /**
+   * Turns a signed-in account back into a managed roster record (#983): the
+   * operator path for an account holder we learn is under 13
+   * (`docs/runbooks/data-subject-requests.md`, "We learned an account holder
+   * is under 13"; `scripts/convert-to-managed.ts`).
+   *
+   *   $transaction
+   *   ┌──────────────────────────────────────────────────────────────────┐
+   *   │ 1  unlocked read: no live row ──────────────────────────► 404      │
+   *   │    never signed in, or already managed (a re-run) ──────► 409      │
+   *   │    any adult signal (assertPlayerAccount) ──────────────► 409      │
+   *   │    managing coach: the operator's choice or the one head coach,   │
+   *   │    staff on the player's active-season teams ──── else ─► 409      │
+   *   │ 2  SELECT … FOR UPDATE player + coach, one id-ordered statement   │
+   *   │    the step-1 checks again; coach tombstoned or the choice        │
+   *   │    changed ─────────────────────────────────────────────► 409      │
+   *   │ 3  adult signals again, one read, under the lock ───────► 409      │
+   *   │    an empty personal league the child started is deleted (D16)    │
+   *   │ 4  unclaimManagedRow (shared with the age screen, #981)           │
+   *   └──────────────────────────────────────────────────────────────────┘
+   *   after commit, best-effort, both reported: delete the cleared photo's
+   *   S3 object (photoDeletion), delete the WorkOS user (a 404 counts as
+   *   gone) (ends its WorkOS sessions and refresh tokens;
+   *   an open Socket.io connection lasts until its access token expires,
+   *   #1004); if that fails, revoke every active session and report
+   *   identityDeleted: false
+   *
+   * Locks. The player and the coach are locked FOR UPDATE in ONE statement in
+   * id order, the order and strength account deletion uses for a user and
+   * the children they guard, so this and a deletion of either can wait on
+   * each other but not deadlock. FOR UPDATE on the player blocks the
+   * key-share lock that a new `TeamStaff`, `LeagueAdmin`, `Guardian`,
+   * invitation, announcement or managed-player row naming the player takes,
+   * so the adult signals read in step 3 cannot change before commit. FOR
+   * UPDATE on the coach keeps the coach from being tombstoned before commit;
+   * a deletion after commit clears `managedById` as it does for every record
+   * that coach managed. The coach is chosen before the lock (the statement
+   * must name both rows) and the choice is re-checked under it. Staff rows
+   * are not locked: a coach removed from the team meanwhile still manages the
+   * record, as after any staff change.
+   */
+  static async convertToManaged(userId: string, options: ConvertToManagedOptions): Promise<ConvertToManagedResult> {
+    const { actorId } = options;
+
+    const committed = await prisma.$transaction(async (tx) => {
+      // 1. Unlocked: a mistyped id reads as "not found", a re-run as "already
+      // converted" and an adult as "adult account", all before the coach
+      // (whom the lock must name) is resolved: a re-run's team may have no
+      // head coach left, and an unrostered adult must not be told to "delete,
+      // no active team" on the strength of a coach lookup.
+      assertConvertible(
+        await tx.user.findUnique({
+          where: { id: userId },
+          select: { deletedAt: true, isManaged: true, workosUserId: true },
+        })
+      );
+      assertPlayerAccount(await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT }));
+      const managedById = await resolveManagingCoach(tx, userId, options.managedById);
+
+      // 2. Lock the player and the coach, then the checks again.
+      const locked = await tx.$queryRaw<LockedUserRow[]>`
+        SELECT "id", "email", "workosUserId", "isManaged", "profilePictureUrl", "deletedAt"
+        FROM "User"
+        WHERE "id" IN (${Prisma.join([userId, managedById])})
+        ORDER BY "id"
+        FOR UPDATE`;
+      const row = locked.find((candidate) => candidate.id === userId);
+      assertConvertible(row);
+      const coach = locked.find((candidate) => candidate.id === managedById);
+      if (!coach || coach.deletedAt !== null) {
+        throw new ConvertRefusedError('coach_unavailable', "The managing coach's account no longer exists");
+      }
+      if ((await resolveManagingCoach(tx, userId, options.managedById)) !== managedById) {
+        throw new ConvertRefusedError('coaches_changed', "The player's coaches changed while converting");
+      }
+
+      // 3. A player account, not an adult's: authoritative now, under the lock.
+      const signals = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: ADULT_SIGNALS_SELECT });
+      const emptyPersonalLeagueId = assertPlayerAccount(signals);
+      if (emptyPersonalLeagueId !== null) {
+        // Known empty: the team count came from the read above.
+        await deletePersonalLeagueIfEmpty(tx, emptyPersonalLeagueId, 0);
+      }
+
+      // 4. Un-claim.
+      const unclaimed = await unclaimManagedRow(tx, row, managedById);
+      return { ...unclaimed, workosUserId: row.workosUserId, managedById };
+    });
+
+    // The photo is a picture of the child that nobody could find once the row
+    // lets go of it: its deletion is reported, never silent.
+    const photoDeletion: PhotoDeletion =
+      committed.removedAvatar === null ? 'none' : await deleteAvatarObject(committed.removedAvatar);
+    if (photoDeletion === 'failed') {
+      logger.error('Failed to delete the photo object after converting an account to managed', { userId });
+    }
+
+    // A converted row always had a WorkOS identity: assertConvertible refuses
+    // an unclaimed one. The id is not personal data; it is logged on failure
+    // so the operator can finish the deletion without the terminal output.
+    const { workosUserId } = committed;
+    let identityDeleted = false;
+    let identityNote: IdentityNote | undefined;
+    let sessions: SessionRevocation | null = null;
+    try {
+      await WorkOSService.deleteUser(workosUserId);
+      identityDeleted = true;
+    } catch (error) {
+      if ((error as { status?: unknown }).status === 404) {
+        // WorkOS does not know this id: already deleted, or a Staging id left
+        // on the row after the production-key cutover (#24). Nothing is left
+        // to delete, so nothing to alarm on.
+        identityDeleted = true;
+        identityNote = 'not_found_at_workos';
+      } else {
+        logger.error('Failed to delete WorkOS user after converting an account to managed', {
+          userId,
+          workosUserId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        captureException(error, { flow: 'convert-to-managed', userId });
+        // The row no longer resolves the identity, but a refresh token would
+        // still mint access tokens until WorkOS ends the session.
+        try {
+          sessions = await WorkOSService.revokeAllSessions(workosUserId);
+        } catch (revokeError) {
+          logger.error('Failed to list WorkOS sessions after converting an account to managed', {
+            userId,
+            workosUserId,
+            error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+          });
+        }
+        if (sessions !== null && sessions.failed > 0) {
+          logger.error('Failed to revoke some WorkOS sessions after converting an account to managed', {
+            userId,
+            workosUserId,
+            revoked: sessions.revoked,
+            failed: sessions.failed,
+          });
+        }
+      }
+    }
+
+    logger.info('Account converted to managed', {
+      userId,
+      actorId,
+      managedById: committed.managedById,
+      identityDeleted,
+      ...(identityNote && { identityNote }),
+      ...(!identityDeleted && { workosUserId }),
+      photoDeletion,
+      deletedReplyCount: committed.deletedReplyCount,
+    });
+
+    return {
+      success: true,
+      managedById: committed.managedById,
+      identityDeleted,
+      ...(identityNote && { identityNote }),
+      photoDeletion,
+      expiredGuardianInvitations: committed.expiredGuardianInvitations,
+      deletedReplyCount: committed.deletedReplyCount,
+      // The operator needs the provider id to finish the deletion by hand: the
+      // row no longer holds it, nor the email to search by.
+      ...(!identityDeleted && { workosUserId, sessions }),
+    };
+  }
+}
+
+/** Why `identityDeleted` is true without a deletion having happened. */
+export type IdentityNote = 'not_found_at_workos';
+
+/**
+ * The cleared photo's S3 object after commit: `none` when no object was ours
+ * to delete (no photo, kept, external, or another row still shows it), else
+ * `deleteAvatarObject`'s outcome. `failed` must be finished by hand.
+ */
+export type PhotoDeletion = 'none' | AvatarDeletion;
+
+export interface ConvertToManagedOptions {
+  /** Who ran it; `operator` from the script. Logged, never stored. */
+  actorId: string;
+  /**
+   * The coach who manages the record from now on: staff on one of the
+   * player's teams in an active season. Optional: by default the one head
+   * coach of those teams.
+   */
+  managedById?: string;
+}
+
+/** Outcome of `WorkOSService.revokeAllSessions`. */
+export interface SessionRevocation {
+  revoked: number;
+  failed: number;
+}
+
+export interface ConvertToManagedResult {
+  success: true;
+  managedById: string;
+  /**
+   * `true`: the WorkOS user is gone (deleted now, or WorkOS answered 404, see
+   * `identityNote`). `false`: deleting it failed (finish by hand).
+   */
+  identityDeleted: boolean;
+  /** Set when WorkOS already had no such user (404): nothing was deleted. */
+  identityNote?: IdentityNote;
+  /** The cleared photo's S3 object; `failed` must be deleted by hand before replying. */
+  photoDeletion: PhotoDeletion;
+  /**
+   * PENDING guardian invitations sent to the child's address, for any child,
+   * expired by the conversion: the operator asks each child's coach to
+   * re-invite the parent at a parent's address.
+   */
+  expiredGuardianInvitations: ExpiredGuardianInvitation[];
+  /** Announcement replies the child wrote, deleted by the conversion. */
+  deletedReplyCount: number;
+  /** Only when `identityDeleted` is `false`: the id to delete by hand. */
+  workosUserId?: string;
+  /**
+   * Only with `workosUserId`: the session fallback's outcome, `null` when the
+   * sessions could not even be listed. Fully revoked only when `failed` is 0.
+   */
+  sessions?: SessionRevocation | null;
+}
+
+/** The checks that hold for a row about to be converted, before and under its lock. */
+function assertConvertible<T extends Pick<LockedUserRow, 'deletedAt' | 'isManaged' | 'workosUserId'>>(
+  row: T | null | undefined
+): asserts row is T & { workosUserId: string } {
+  if (!row || row.deletedAt !== null) {
+    throw new NotFoundError('Account not found');
+  }
+  if (row.workosUserId === null) {
+    throw row.isManaged
+      ? new ConvertRefusedError('already_managed', 'Account is already a managed roster record; nothing to do')
+      : new ConvertRefusedError('never_signed_in', 'Account has never signed in; nothing to convert');
+  }
+}
+
+/** The teams a player counts as "currently on": rostered, in an active season. */
+function currentTeamsOf(playerId: string): Prisma.TeamWhereInput {
+  return { season: { isActive: true }, members: { some: { playerId } } };
+}
+
+/**
+ * Who manages the converted record: staff on a team the player is rostered on
+ * in an active season. An operator-supplied id must qualify, so a typo cannot
+ * hand a child's record to a stranger or to a coach from a past season.
+ * Without one, the head coach of those teams, when exactly one person holds
+ * that role.
+ */
+async function resolveManagingCoach(
+  tx: Prisma.TransactionClient,
+  playerId: string,
+  requested: string | undefined
+): Promise<string> {
+  if (requested) {
+    const staff = await tx.teamStaff.findFirst({
+      where: { userId: requested, user: { deletedAt: null }, team: currentTeamsOf(playerId) },
+      select: { userId: true },
+    });
+    if (!staff) {
+      throw new ConvertRefusedError(
+        'coach_not_on_team',
+        "The chosen coach is not on the staff of any of this player's teams in an active season"
+      );
+    }
+    return staff.userId;
+  }
+
+  const heads = await tx.teamStaff.findMany({
+    where: { role: { type: 'HEAD_COACH' }, user: { deletedAt: null }, team: currentTeamsOf(playerId) },
+    select: { userId: true },
+    distinct: ['userId'],
+  });
+  if (heads.length === 1) {
+    return heads[0].userId;
+  }
+  if (heads.length > 1) {
+    throw new ConvertRefusedError('several_head_coaches', "The player's active teams have more than one head coach");
+  }
+  const onActiveTeam = await tx.team.count({ where: currentTeamsOf(playerId) });
+  throw onActiveTeam === 0
+    ? new ConvertRefusedError('no_active_team', 'The player is on no team in an active season: there is no roster to keep the record on')
+    : new ConvertRefusedError('no_head_coach', "No team the player is on in an active season has a head coach");
+}
+
+/** Invitations that were really sent; a cancelled one is a stray, not a sign of a coach. */
+const SENT_FOR_REAL = { where: { status: { not: 'CANCELLED' } } } satisfies {
+  where: Prisma.TeamInvitationWhereInput & Prisma.GuardianInvitationWhereInput;
+};
+
+/** Every adult signal in one read, taken under the player's FOR UPDATE lock. */
+const ADULT_SIGNALS_SELECT = {
+  role: true,
+  _count: {
+    select: {
+      teamStaff: true,
+      guardiansAsParent: true,
+      managedPlayers: true,
+      announcements: true,
+      sentInvitations: SENT_FOR_REAL,
+      sentGuardianInvitations: SENT_FOR_REAL,
+    },
+  },
+  leagueAdmins: { select: { leagueId: true } },
+  personalLeague: {
+    select: { id: true, _count: { select: { admins: true } }, seasons: { select: { _count: { select: { teams: true } } } } },
+  },
+} satisfies Prisma.UserSelect;
+
+type AdultSignals = Prisma.UserGetPayload<{ select: typeof ADULT_SIGNALS_SELECT }>;
+
+/**
+ * Refuses an account that is an adult's: the global ADMIN role, a staff
+ * role, a guardian-of link, players it manages, announcements it posted,
+ * team or guardian invitations it sent and did not cancel (a former coach
+ * still on some roster), admin of a league other than its own personal
+ * league, or a personal league that holds teams or has another admin.
+ * Returns the id of an empty personal league the child once started (the
+ * caller deletes it, D16), or `null`. Reads nothing and writes nothing.
+ */
+function assertPlayerAccount(signals: AdultSignals): string | null {
+  const personal = signals.personalLeague;
+  const adminElsewhere = signals.leagueAdmins.some(({ leagueId }) => leagueId !== personal?.id);
+  // The global role is read here as a refusal signal, never as an access
+  // check (the CLAUDE.md rule is about granting access): a system ADMIN is an
+  // adult by construction. COACH is not a signal: anyone, a child included,
+  // can pick it at onboarding; what a real coach did shows up as staff rows,
+  // invitations, announcements or a personal league with teams.
+  if (signals.role === 'ADMIN' || adminElsewhere || Object.values(signals._count).some((count) => count > 0)) {
+    throw new ConvertRefusedError(
+      'adult_account',
+      'Account is a system admin, or holds a staff or league admin role, guardian links, managed players, announcements or sent invitations: it is an adult account, not a player'
+    );
+  }
+  if (personal === null) {
+    return null;
+  }
+  const ownAdminRows = signals.leagueAdmins.filter(({ leagueId }) => leagueId === personal.id).length;
+  const teams = personal.seasons.reduce((sum, season) => sum + season._count.teams, 0);
+  if (teams > 0 || personal._count.admins > ownAdminRows) {
+    throw new ConvertRefusedError(
+      'personal_league_in_use',
+      'Account owns a personal league with teams or other admins: it is a coach, not a player'
+    );
+  }
+  return personal.id;
+}
+
+/**
+ * D16, shared by account deletion and the un-claim: a personal league with
+ * no teams is deleted (its seasons and admin rows go with it by cascade). The
+ * caller supplies the team count it read (deletion counts; the un-claim has
+ * it from its locked read). Returns whether it was deleted; one that holds
+ * teams is left to the caller.
+ */
+async function deletePersonalLeagueIfEmpty(
+  tx: Prisma.TransactionClient,
+  leagueId: string,
+  teamCount: number
+): Promise<boolean> {
+  if (teamCount > 0) {
+    return false;
+  }
+  await tx.league.delete({ where: { id: leagueId } });
+  return true;
+}
+
+/** The locked row `unclaimManagedRow` works from; the caller reads it under its lock. */
+export type UnclaimTarget = Pick<LockedUserRow, 'id' | 'email' | 'workosUserId' | 'profilePictureUrl'>;
+
+/**
+ * The un-claim write: a signed-in account becomes a managed roster record
+ * again, the state a coach's Add Player left it in before the child signed
+ * in (#983; the age screen's under-13 branch, #981, reuses it). The caller
+ * holds the row's FOR UPDATE lock, read `row` under it, has checked the row is
+ * live, claimable and not an adult's, and chose `managedById`; it also logs
+ * the domain event and, after commit, deletes the WorkOS user and the
+ * returned avatar.
+ *
+ * DELETED (what identifies or reaches the child, or what the child wrote):
+ * - login and contact: `workosUserId` and `email` (so a fresh sign-up with
+ *   the same address cannot claim the row again through `syncUser`'s email
+ *   match), `emailVerified`, the address's suppression state;
+ * - the photo, unless it is an upload under the `avatars/<id>/` prefix of the
+ *   managing coach or another live staff member of the player's
+ *   active-season teams (a photo the team took). External URLs are cleared
+ *   too: the identity provider's photo is copied at claim time and cannot be
+ *   told apart. A cleared photo in our bucket is returned as `removedAvatar`
+ *   for deletion, whoever uploaded it, unless another user row still shows it;
+ * - announcement replies the child wrote (the only free text a player can
+ *   author; announcements themselves are an adult signal the caller refused);
+ * - `purgeLoginBindings`: push tokens, calendar feed tokens, pending team
+ *   invitations (→ CANCELLED) and their recipient hash;
+ * - the child's address on every guardian invitation that carries it, any
+ *   status, any child (D17, `scrubInvitedEmail`), after every PENDING one is
+ *   expired. Every expired one is returned with its `childId`: accepting one
+ *   for this child would have created a PARENT account at the child's
+ *   address, and one for another child was waiting on the child as guardian,
+ *   so the operator asks each child's coach to re-invite at a parent's
+ *   address. An accepted `Guardian` link is a separate row and stays.
+ *
+ * RESET: `isManaged` true, `managedById` the coach, role `PLAYER`, free tier.
+ *
+ * KEPT: `name` (a roster record needs one, and it is what the coach entered
+ * or sees on the roster; the coach can edit it), and the team records:
+ * roster memberships, game events, stats, RSVPs, guardian links, and guardian
+ * invitations for the child at other addresses.
+ */
+export async function unclaimManagedRow(
+  tx: Prisma.TransactionClient,
+  row: UnclaimTarget,
+  managedById: string
+): Promise<UnclaimResult> {
+  const userId = row.id;
+  const photo = row.profilePictureUrl;
+  let clearPhoto = false;
+  let removedAvatar: string | null = null;
+  if (photo !== null) {
+    const staff = await tx.teamStaff.findMany({
+      where: { user: { deletedAt: null }, team: currentTeamsOf(userId) },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    const teamUploaders = new Set([managedById, ...staff.map((member) => member.userId)]);
+    teamUploaders.delete(userId);
+    const takenByTeam =
+      isManagedAvatarUrl(photo) && [...teamUploaders].some((uploaderId) => isOwnUploadUrl(photo, uploaderId));
+    clearPhoto = !takenByTeam;
+    if (clearPhoto && isManagedAvatarUrl(photo)) {
+      // A photo of the child in our bucket that nobody could find again once
+      // cleared: delete the object, whoever uploaded it, unless another row
+      // still shows it.
+      const sharedWith = await tx.user.count({ where: { profilePictureUrl: photo, id: { not: userId } } });
+      removedAvatar = sharedWith === 0 ? photo : null;
+    }
+  }
+
+  const updated = await tx.user.updateMany({
+    where: { id: userId, deletedAt: null },
+    data: {
+      workosUserId: null,
+      email: null,
+      ...EMAIL_SUPPRESSION_CLEARED,
+      emailVerified: false,
+      isManaged: true,
+      managedById,
+      role: 'PLAYER',
+      subscriptionTier: 'FREE',
+      subscriptionExpiresAt: null,
+      ...(clearPhoto && { profilePictureUrl: null }),
+    },
+  });
+  if (updated.count === 0) {
+    throw new NotFoundError('Account not found');
+  }
+
+  const replies = await tx.announcementReply.deleteMany({ where: { authorId: userId } });
+  await purgeLoginBindings(tx, userId);
+
+  let expiredGuardianInvitations: ExpiredGuardianInvitation[] = [];
+  if (row.email) {
+    expiredGuardianInvitations = await tx.guardianInvitation.findMany({
+      where: { status: 'PENDING', invitedEmail: emailEquals(row.email) },
+      select: { id: true, childId: true },
+      orderBy: { id: 'asc' },
+    });
+    await tx.guardianInvitation.updateMany({
+      where: { id: { in: expiredGuardianInvitations.map((invitation) => invitation.id) } },
+      data: { status: 'EXPIRED' },
+    });
+    await scrubInvitedEmail(tx, row.email);
+  }
+
+  return {
+    workosUserId: row.workosUserId,
+    removedAvatar,
+    expiredGuardianInvitations,
+    deletedReplyCount: replies.count,
+  };
+}
+
+/** A guardian invitation the un-claim expired, and the child it was for. */
+export interface ExpiredGuardianInvitation {
+  id: string;
+  childId: string;
+}
+
+export interface UnclaimResult {
+  workosUserId: string | null;
+  /** A photo object of the child to delete from S3 after commit. */
+  removedAvatar: string | null;
+  /** Every PENDING guardian invitation sent to the child's address (any child), expired here. */
+  expiredGuardianInvitations: ExpiredGuardianInvitation[];
+  /** Announcement replies the child wrote, deleted here. */
+  deletedReplyCount: number;
+}
+
+/**
+ * What lets a login or an inbox reach the person, removed by both account
+ * deletion and the un-claim: push tokens, calendar feed tokens, PENDING team
+ * invitations addressed to them (→ CANCELLED, they invite a sign-in), and the
+ * hash of the address every team invitation went to (#715 resend cooldown;
+ * the invitation rows themselves outlive the account).
+ */
+async function purgeLoginBindings(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.pushToken.deleteMany({ where: { userId } });
+  await tx.calendarFeedToken.deleteMany({ where: { userId } });
+  await tx.teamInvitation.updateMany({
+    where: { playerId: userId, status: 'PENDING' },
+    data: { status: 'CANCELLED' },
+  });
+  await tx.teamInvitation.updateMany({
+    where: { playerId: userId, recipientHash: { not: null } },
+    data: { recipientHash: null },
+  });
+}
+
+/**
+ * D17, shared by account deletion and the un-claim: the address must not
+ * survive on any guardian invitation, whatever its status or child.
+ * Per-row sentinel keeps NOT NULL and cannot collide; the partial unique
+ * index covers PENDING rows only, and the caller expired those first.
+ * Overwriting `invitedEmail` on an ACCEPTED row leaves the `Guardian` link it
+ * created untouched.
+ */
+async function scrubInvitedEmail(tx: Prisma.TransactionClient, email: string): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE "GuardianInvitation"
+    SET "invitedEmail" = 'deleted-' || "id" || '@invalid'
+    WHERE lower("invitedEmail") = lower(${email})`;
 }
 
 // Named select/include constants so the export type is explicit (CLAUDE.md
