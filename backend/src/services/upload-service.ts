@@ -1,4 +1,10 @@
-import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  DeleteObjectCommand,
+  DeleteObjectTaggingCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
 import { BadRequestError, UploadExpiredError } from '../utils/errors';
@@ -63,7 +69,6 @@ export function pendingTagEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  * object size was unbounded. A POST policy carries a `content-length-range`
  * condition that S3 enforces server-side, plus an exact `Content-Type` match.
  */
-
 export async function generateAvatarUploadUrl(
   userId: string,
   contentType: string,
@@ -304,23 +309,28 @@ function s3ErrorCode(err: unknown): string | undefined {
   return typeof e.name === 'string' ? e.name : undefined;
 }
 
-/** Attempts and the waits between them for the post-commit untag. */
-export const UNTAG_ATTEMPTS = 3;
-const UNTAG_BACKOFF_MS = [100, 300];
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** True for S3's answer to a missing object: 404 with `NoSuchKey`/`NotFound`, never `NoSuchBucket`. */
-function isMissingObject(err: unknown): boolean {
-  const code = s3ErrorCode(err);
-  if (code === 'NoSuchBucket') return false;
-  const status = (err as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata?.httpStatusCode;
-  return code === 'NoSuchKey' || code === 'NotFound' || status === 404;
+function httpStatus(err: unknown): unknown {
+  return (err as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata?.httpStatusCode;
 }
 
-function isAccessDenied(err: unknown): boolean {
-  const status = (err as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata?.httpStatusCode;
-  return s3ErrorCode(err) === 'AccessDenied' || status === 403;
+/** A 404 from S3 (`NoSuchKey`, or HEAD's bodiless `NotFound`), never `NoSuchBucket`. */
+function isNotFound(err: unknown): boolean {
+  const code = s3ErrorCode(err);
+  if (code === 'NoSuchBucket') return false;
+  return code === 'NoSuchKey' || code === 'NotFound' || httpStatus(err) === 404;
+}
+
+/**
+ * Only the `AccessDenied` error code. Other 403s (a bad signature, clock skew,
+ * expired credentials, KMS) are faults. A HEAD response has no body, so a 403
+ * on HeadObject arrives as `Forbidden` and is never this.
+ */
+function isAccessDeniedCode(err: unknown): boolean {
+  return s3ErrorCode(err) === 'AccessDenied';
+}
+
+function faultFields(err: unknown): { code: string | undefined; error: string } {
+  return { code: s3ErrorCode(err), error: err instanceof Error ? err.message : String(err) };
 }
 
 /**
@@ -329,13 +339,14 @@ function isAccessDenied(err: unknown): boolean {
  * for nothing to do (an external URL, such as a WorkOS photo, or an empty
  * value). Nothing is untagged here.
  *
- * - Missing (404; the role has `s3:ListBucket`, so a missing key is a 404):
- *   throws `UploadExpiredError` (400 `upload_expired`), nothing is written.
- * - `AccessDenied` while `AVATAR_PENDING_TAG_ENABLED` is off: logged at warn
- *   and the save proceeds (nothing is tagged then, so nothing can expire),
- *   which lets the code deploy ahead of the IAM apply.
- * - Anything else (and `AccessDenied` with the flag on): logged at error,
- *   captured to Sentry (`flow: avatar-promote`) and rethrown, a 5xx.
+ * - 404: a HEAD 404 cannot tell a missing key from a missing bucket, so one
+ *   `HeadBucket` settles it. Bucket there: the upload is gone (it expired),
+ *   `UploadExpiredError` (400 `upload_expired`), nothing written. Bucket
+ *   missing or unreadable: a configuration fault, 5xx with Sentry.
+ * - Error code `AccessDenied` while `AVATAR_PENDING_TAG_ENABLED` is off:
+ *   logged at warn and the save proceeds (nothing is tagged then).
+ * - Anything else, including every other 403: logged at error, captured to
+ *   Sentry (`flow: avatar-promote`) and rethrown, a 5xx.
  */
 export async function checkAvatarUpload(imageUrl: string | null | undefined): Promise<string | null> {
   const issued = issuedAvatarKey(imageUrl);
@@ -347,78 +358,74 @@ export async function checkAvatarUpload(imageUrl: string | null | undefined): Pr
     throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
   }
 
+  let failure: unknown;
+  let operation = 'HeadObject';
   try {
     await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: issued.key }));
+    return issued.key;
   } catch (err) {
-    if (isMissingObject(err)) {
+    failure = err;
+  }
+
+  if (isNotFound(failure)) {
+    try {
+      await s3Client.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
+    } catch (err) {
+      failure = err;
+      operation = 'HeadBucket';
+    }
+    if (operation === 'HeadObject') {
       throw new UploadExpiredError();
     }
-    if (isAccessDenied(err) && !pendingTagEnabled()) {
-      logger.warn('Avatar upload check denied; saving anyway (pending tagging is off)', {
-        operation: 'HeadObject',
-        key: issued.key,
-      });
-      return issued.key;
-    }
-    logger.error('Avatar upload check failed', {
-      operation: 'HeadObject',
+  } else if (isAccessDeniedCode(failure) && !pendingTagEnabled()) {
+    logger.warn('Avatar upload check denied; saving anyway (pending tagging is off)', {
+      operation,
       key: issued.key,
-      code: s3ErrorCode(err),
-      error: err instanceof Error ? err.message : String(err),
     });
-    captureException(err, { flow: 'avatar-promote' });
-    throw err;
+    return issued.key;
   }
-  return issued.key;
+
+  logger.error('Avatar upload check failed', { operation, key: issued.key, ...faultFields(failure) });
+  captureException(failure, { flow: 'avatar-promote' });
+  throw failure;
 }
 
 /**
  * Step C, only AFTER the write committed (#1005): remove the `pending` tag so
- * the lifecycle rule never expires the saved photo. Up to `UNTAG_ATTEMPTS`
- * tries with a short backoff. Never throws: the request already succeeded.
+ * the lifecycle rule never expires the saved photo. One call; the S3 client's
+ * own retries cover transient failures. Never throws: the request already
+ * succeeded.
  *
- * - Still failing: logged at error with the key and captured to Sentry
+ * - Failing: logged at error with the key and captured to Sentry
  *   (`flow: avatar-promote`); an operator removes the tag by hand
  *   (`docs/runbooks/data-subject-requests.md`), or the photo expires.
  * - Missing (it expired between the check and now, which takes a 3-day-old
- *   upload): logged at error, no retry.
- * - `AccessDenied` while the flag is off: logged at warn (nothing is tagged).
+ *   upload): logged at error.
+ * - Error code `AccessDenied` while the flag is off: logged at warn (nothing
+ *   is tagged then).
  */
-export async function untagAvatarUpload(
-  key: string,
-  sleep: (ms: number) => Promise<void> = defaultSleep
-): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= UNTAG_ATTEMPTS; attempt += 1) {
-    try {
-      await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
+export async function untagAvatarUpload(key: string): Promise<void> {
+  try {
+    await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
+  } catch (err) {
+    if (isNotFound(err)) {
+      logger.error('Saved avatar upload expired before it was untagged', { operation: 'DeleteObjectTagging', key });
       return;
-    } catch (err) {
-      lastError = err;
-      if (isMissingObject(err)) {
-        logger.error('Saved avatar upload expired before it was untagged', { operation: 'DeleteObjectTagging', key });
-        return;
-      }
-      if (isAccessDenied(err) && !pendingTagEnabled()) {
-        logger.warn('Avatar untag denied (pending tagging is off; nothing to untag)', {
-          operation: 'DeleteObjectTagging',
-          key,
-        });
-        return;
-      }
-      if (attempt < UNTAG_ATTEMPTS) {
-        await sleep(UNTAG_BACKOFF_MS[attempt - 1]);
-      }
     }
+    if (isAccessDeniedCode(err) && !pendingTagEnabled()) {
+      logger.warn('Avatar untag denied (pending tagging is off; nothing to untag)', {
+        operation: 'DeleteObjectTagging',
+        key,
+      });
+      return;
+    }
+    logger.error('Could not untag a saved avatar upload; it will expire unless untagged by hand', {
+      operation: 'DeleteObjectTagging',
+      key,
+      ...faultFields(err),
+    });
+    captureException(err, { flow: 'avatar-promote' });
   }
-  logger.error('Could not untag a saved avatar upload; it will expire unless untagged by hand', {
-    operation: 'DeleteObjectTagging',
-    key,
-    attempts: UNTAG_ATTEMPTS,
-    code: s3ErrorCode(lastError),
-    error: lastError instanceof Error ? lastError.message : String(lastError),
-  });
-  captureException(lastError, { flow: 'avatar-promote' });
 }
 
 /**

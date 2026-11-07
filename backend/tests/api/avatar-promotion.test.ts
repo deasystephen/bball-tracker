@@ -130,7 +130,11 @@ describe('POST /api/v1/players', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual(EXPIRED_BODY);
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
-    expect(s3Calls()).toEqual([['HeadObject', KEY]]);
+    // The HEAD 404 is told apart from a missing bucket by one HeadBucket
+    expect(s3Calls()).toEqual([
+      ['HeadObject', KEY],
+      ['HeadBucket', undefined],
+    ]);
   });
 
   it('a failed create (P2002) makes no S3 call after the check', async () => {
@@ -145,7 +149,7 @@ describe('POST /api/v1/players', () => {
     expect(deletedKeys()).toHaveLength(0);
   });
 
-  it('an untag that keeps failing after the commit retries 3 times, reports to Sentry, and still answers 201', async () => {
+  it('an untag that fails after the commit is one call, reported to Sentry, and the response is still 201', async () => {
     const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
     jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     mockS3Send.mockImplementation(async (cmd: { kind: string }) => {
@@ -162,8 +166,6 @@ describe('POST /api/v1/players', () => {
     expect(s3Calls()).toEqual([
       ['HeadObject', KEY],
       ['DeleteObjectTagging', KEY],
-      ['DeleteObjectTagging', KEY],
-      ['DeleteObjectTagging', KEY],
     ]);
     expect(captureSpy).toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
     captureSpy.mockRestore();
@@ -177,6 +179,24 @@ describe('POST /api/v1/players', () => {
 
     expect(res.status).toBe(201);
     expect(s3Calls()).toHaveLength(0);
+  });
+  it('a HEAD 404 with the bucket missing is a 5xx, not upload_expired, and creates nothing', async () => {
+    const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockS3Send
+      .mockRejectedValueOnce(s3Error('NotFound', 404, 'Not Found'))
+      .mockRejectedValueOnce(s3Error('NotFound', 404, 'Not Found'));
+
+    const res = await request(app)
+      .post('/api/v1/players')
+      .set(AUTH)
+      .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBeUndefined();
+    expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    expect(captureSpy).toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
+    captureSpy.mockRestore();
   });
 });
 

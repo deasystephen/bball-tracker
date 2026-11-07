@@ -360,7 +360,7 @@ dashboard (User Management → the email → Delete). Two known causes:
 ## When a saved avatar upload is still pending
 
 After a profile photo is saved, the API removes the upload's `pending=true` tag (#1005). If that
-still fails after its retries, Sentry reports it (`flow: avatar-promote`). The API log line
+fails, Sentry reports it (`flow: avatar-promote`). The API log line
 `Could not untag a saved avatar upload; it will expire unless untagged by hand` carries the object
 `key`. Remove the tag within 3 days of the upload, or S3 deletes the photo:
 

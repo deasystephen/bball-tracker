@@ -26,6 +26,7 @@ export function mockS3ClientModule(send: Send): Record<string, unknown> {
     DeleteObjectCommand: command('DeleteObject'),
     DeleteObjectTaggingCommand: command('DeleteObjectTagging'),
     HeadObjectCommand: command('HeadObject'),
+    HeadBucketCommand: command('HeadBucket'),
   };
 }
 

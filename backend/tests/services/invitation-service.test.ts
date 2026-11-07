@@ -1961,7 +1961,7 @@ describe('InvitationService', () => {
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
-    it('middle case — a reused row that already has a photo keeps it and the upload is left tagged for the lifecycle rule (#618, #1005)', async () => {
+    it('middle case — a reused row that already has a photo keeps it; the upload is never untagged and is discarded (#618, #1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
       // First updateMany = flags (row still unclaimed); second = photo guard, zero rows (already has one)
@@ -1982,10 +1982,11 @@ describe('InvitationService', () => {
         data: { isManaged: true, managedById: coach.id },
       });
       // Decided under the lock (the guarded photo write matched no row): the
-      // upload was checked, never untagged, never deleted (#1005)
+      // upload was checked, never untagged (#1005), and discarded as before (#618)
       expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
       expect(mockUntag).not.toHaveBeenCalled();
-      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
     });
 
     it('middle case — the pre-transaction read never decides: the guarded write applies the photo, so it is untagged after commit (#1005)', async () => {
@@ -2264,6 +2265,59 @@ describe('InvitationService', () => {
         coach.id
       );
       expect(result2.guardianReason).toBe('Failed to invite guardian');
+    });
+
+    it('P2002 retry: the skip is computed against the race winner, so when the winner takes the photo it is checked and untagged (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      // The pre-read row already stores this URL (so the first attempt skips the
+      // S3 calls); the race winner has no photo and takes it on the retry.
+      const preRead = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null, profilePictureUrl: AVATAR_URL };
+      const raceWinner = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: 'other-coach', profilePictureUrl: null };
+      let emailLookups = 0;
+      (mockPrisma.user.findFirst as jest.Mock).mockImplementation(() => {
+        emailLookups += 1;
+        return Promise.resolve(emailLookups === 1 ? preRead : raceWinner);
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      let attempt = 0;
+      const txUserUpdate = jest.fn().mockResolvedValue({ count: 1 }); // flags, then the photo: applied
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        attempt += 1;
+        if (attempt === 1) {
+          throw uniqueViolation('User_email_key');
+        }
+        return cb({
+          user: { updateMany: txUserUpdate },
+          teamMember: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({
+              teamId: team.id,
+              playerId: raceWinner.id,
+              player: { id: raceWinner.id, name: raceWinner.name, email: raceWinner.email, isManaged: true, managedById: 'other-coach' },
+              team: { id: team.id, name: team.name },
+            }),
+          },
+          teamInvitation: {
+            findFirst: jest.fn().mockResolvedValue(null),
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            create: jest
+              .fn()
+              .mockResolvedValue(invitationRow(team.id, raceWinner.id, { id: raceWinner.id, name: raceWinner.name, email: raceWinner.email })),
+          },
+        });
+      });
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(true);
+      // First attempt: target stores the URL, so no check; the retry against the winner checks
+      expect(mockCheck.mock.calls.map(([url]) => url)).toEqual([null, AVATAR_URL]);
+      expect(mockUntag).toHaveBeenCalledTimes(1);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
     it('retries once against the winner when two coaches race the same new email (P2002)', async () => {
@@ -3138,10 +3192,10 @@ describe('InvitationService', () => {
       expect(result.invited).toBe(true);
       expect(result.guardianInvited).toBe(false);
       expect(result.guardianReason).toMatch(/after the player accepts/i);
-      // The failed case-2 write left the upload untouched, and the fallback
-      // leaves it for the lifecycle rule: nothing untagged, nothing deleted (#1005)
+      // The failed case-2 write never untagged the upload (#1005); the
+      // fallback lands in createCase3Invitation, which discards it (#419)
       expect(mockUntag).not.toHaveBeenCalled();
-      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
     });
 
     it('addRosterPlayer rethrows the P2002 when the refetch finds nobody', async () => {
@@ -3231,10 +3285,10 @@ describe('InvitationService', () => {
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({ variables: expect.objectContaining({ variant: 'invited' }) })
       );
-      // RT4: the failed write left the upload untouched; the fallback leaves it
-      // for the lifecycle rule instead of deleting it (#1005)
+      // RT4: the failed write never untagged the upload (#1005), and the
+      // fallback discards it (#419)
       expect(mockUntag).not.toHaveBeenCalled();
-      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
       expect(reRead).toHaveBeenCalledWith({ where: { id: unclaimed.id }, select: { deletedAt: true } });
     });
 

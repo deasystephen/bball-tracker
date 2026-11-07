@@ -20,6 +20,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   }),
   DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
   HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
+  HeadBucketCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadBucket', input })),
 }));
 
 jest.mock('../../src/api/auth/middleware', () => ({

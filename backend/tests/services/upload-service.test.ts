@@ -20,6 +20,7 @@ jest.mock('@aws-sdk/client-s3', () => {
     }),
     DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
     HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
+    HeadBucketCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadBucket', input })),
   };
 });
 
@@ -46,7 +47,6 @@ import {
   pendingTagEnabled,
   checkAvatarUpload,
   untagAvatarUpload,
-  UNTAG_ATTEMPTS,
   withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
@@ -377,7 +377,6 @@ describe('Upload Service', () => {
     const sdkError = (name: string, status: number): Error =>
       Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } });
     const kinds = (): string[] => mockSend.mock.calls.map(([cmd]) => (cmd as { kind: string }).kind);
-    const noSleep = (): Promise<void> => Promise.resolve();
     let errorSpy: jest.SpyInstance;
     let warnSpy: jest.SpyInstance;
     let captureSpy: jest.SpyInstance;
@@ -424,29 +423,54 @@ describe('Upload Service', () => {
       it.each([
         ['NotFound', 404],
         ['NoSuchKey', 404],
-      ])('answers 400 upload_expired on a missing object (%s)', async (name, status) => {
-        mockSend.mockRejectedValueOnce(sdkError(name, status));
+      ])('a HEAD 404 (%s) with the bucket present is 400 upload_expired', async (name, status) => {
+        mockSend.mockRejectedValueOnce(sdkError(name, status)).mockResolvedValueOnce({});
         const err = await checkAvatarUpload(OWN).catch((e: unknown) => e);
         expect(err).toBeInstanceOf(UploadExpiredError);
         expect((err as UploadExpiredError).body()).toEqual({
           error: 'That photo upload expired. Please choose it again.',
           code: 'upload_expired',
         });
+        expect(kinds()).toEqual(['HeadObject', 'HeadBucket']);
+        expect(mockSend.mock.calls[1][0]).toEqual({
+          kind: 'HeadBucket',
+          input: { Bucket: 'bball-tracker-avatars-dev' },
+        });
         expect(captureSpy).not.toHaveBeenCalled();
       });
 
       it('treats a bare 404 as missing too', async () => {
-        mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { $metadata: { httpStatusCode: 404 } }));
+        mockSend
+          .mockRejectedValueOnce(Object.assign(new Error('x'), { $metadata: { httpStatusCode: 404 } }))
+          .mockResolvedValueOnce({});
         await expect(checkAvatarUpload(OWN)).rejects.toBeInstanceOf(UploadExpiredError);
+      });
+
+      it('a HEAD 404 with the bucket missing is a 5xx fault with Sentry, not upload_expired', async () => {
+        const noBucket = sdkError('NotFound', 404);
+        mockSend.mockRejectedValueOnce(sdkError('NotFound', 404)).mockRejectedValueOnce(noBucket);
+
+        await expect(checkAvatarUpload(OWN)).rejects.toBe(noBucket);
+
+        expect(kinds()).toEqual(['HeadObject', 'HeadBucket']);
+        expect(errorSpy).toHaveBeenCalledWith(
+          'Avatar upload check failed',
+          expect.objectContaining({ operation: 'HeadBucket', key: KEY, code: 'NotFound' })
+        );
+        expect(captureSpy).toHaveBeenCalledWith(noBucket, { flow: 'avatar-promote' });
       });
 
       it.each([
         ['NoSuchBucket', 404],
         ['InternalError', 500],
-      ])('treats %s as a fault: error log, Sentry, rethrown', async (name, status) => {
+        ['Forbidden', 403],
+        ['SignatureDoesNotMatch', 403],
+        ['ExpiredToken', 403],
+      ])('treats %s (%i) as a fault even with the flag off: error log, Sentry, rethrown', async (name, status) => {
         const fault = sdkError(name, status);
         mockSend.mockRejectedValueOnce(fault);
         await expect(checkAvatarUpload(OWN)).rejects.toBe(fault);
+        expect(kinds()).toEqual(['HeadObject']);
         expect(errorSpy).toHaveBeenCalledWith(
           'Avatar upload check failed',
           expect.objectContaining({ operation: 'HeadObject', key: KEY, code: name })
@@ -484,77 +508,64 @@ describe('Upload Service', () => {
     });
 
     describe('untagAvatarUpload (step C)', () => {
-      it('removes the tags of the key', async () => {
-        await untagAvatarUpload(KEY, noSleep);
+      it('removes the tags of the key in one call (the S3 client retries transient failures itself)', async () => {
+        await untagAvatarUpload(KEY);
+        expect(mockSend).toHaveBeenCalledTimes(1);
         expect(mockSend.mock.calls[0][0]).toEqual({
           kind: 'DeleteObjectTagging',
           input: { Bucket: 'bball-tracker-avatars-dev', Key: KEY },
         });
       });
 
-      it('retries with a backoff and succeeds on a later attempt', async () => {
-        const sleep = jest.fn().mockResolvedValue(undefined);
-        mockSend.mockRejectedValueOnce(sdkError('SlowDown', 503)).mockResolvedValueOnce({});
-        await untagAvatarUpload(KEY, sleep);
-        expect(kinds()).toEqual(['DeleteObjectTagging', 'DeleteObjectTagging']);
-        expect(sleep).toHaveBeenCalledWith(100);
-        expect(captureSpy).not.toHaveBeenCalled();
-      });
-
-      it(`gives up after ${UNTAG_ATTEMPTS} attempts: error log with the key, Sentry, never throws`, async () => {
-        const sleep = jest.fn().mockResolvedValue(undefined);
+      it('on failure: one call, error log with the key, Sentry, never throws', async () => {
         const fault = sdkError('InternalError', 500);
-        mockSend.mockRejectedValue(fault);
+        mockSend.mockRejectedValueOnce(fault);
 
-        await expect(untagAvatarUpload(KEY, sleep)).resolves.toBeUndefined();
+        await expect(untagAvatarUpload(KEY)).resolves.toBeUndefined();
 
-        expect(kinds()).toEqual(['DeleteObjectTagging', 'DeleteObjectTagging', 'DeleteObjectTagging']);
-        expect(sleep.mock.calls).toEqual([[100], [300]]);
+        expect(kinds()).toEqual(['DeleteObjectTagging']);
         expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Could not untag/), {
           operation: 'DeleteObjectTagging',
           key: KEY,
-          attempts: 3,
           code: 'InternalError',
           error: 'InternalError',
         });
         expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
       });
 
-      it('logs a missing object (expired between check and untag) without retrying', async () => {
+      it('logs a missing object (expired between check and untag)', async () => {
         mockSend.mockRejectedValueOnce(sdkError('NoSuchKey', 404));
-        await untagAvatarUpload(KEY, noSleep);
-        expect(kinds()).toEqual(['DeleteObjectTagging']);
+        await untagAvatarUpload(KEY);
         expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/expired before it was untagged/), {
           operation: 'DeleteObjectTagging',
           key: KEY,
         });
+        expect(captureSpy).not.toHaveBeenCalled();
       });
 
-      it('with the flag off, AccessDenied is logged at warn without retrying or Sentry', async () => {
+      it('with the flag off, error code AccessDenied is logged at warn without Sentry', async () => {
         mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
-        await untagAvatarUpload(KEY, noSleep);
-        expect(kinds()).toEqual(['DeleteObjectTagging']);
+        await untagAvatarUpload(KEY);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/untag denied/), expect.objectContaining({ key: KEY }));
         expect(captureSpy).not.toHaveBeenCalled();
       });
 
-      it('with the flag on, AccessDenied is retried and reported', async () => {
-        process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
-        mockSend.mockRejectedValue(sdkError('AccessDenied', 403));
-        await untagAvatarUpload(KEY, noSleep);
-        expect(kinds()).toHaveLength(3);
+      it('with the flag off, any other 403 is still reported', async () => {
+        mockSend.mockRejectedValueOnce(sdkError('SignatureDoesNotMatch', 403));
+        await untagAvatarUpload(KEY);
         expect(captureSpy).toHaveBeenCalled();
       });
 
-      it('uses a real (short) backoff by default', async () => {
-        mockSend.mockRejectedValueOnce(sdkError('SlowDown', 503)).mockResolvedValueOnce({});
+      it('with the flag on, AccessDenied is reported', async () => {
+        process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+        mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
         await untagAvatarUpload(KEY);
-        expect(kinds()).toHaveLength(2);
+        expect(captureSpy).toHaveBeenCalled();
       });
 
-      it('stringifies a non-Error final failure', async () => {
-        mockSend.mockRejectedValue('boom');
-        await untagAvatarUpload(KEY, noSleep);
+      it('stringifies a non-Error failure', async () => {
+        mockSend.mockRejectedValueOnce('boom');
+        await untagAvatarUpload(KEY);
         expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
       });
     });

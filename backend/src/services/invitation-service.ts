@@ -1176,28 +1176,28 @@ export class InvitationService {
         // retry once against the row that now exists.
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
         // Each roster attempt checks the upload before its rows are written and
-        // untags it only after they commit (#1005); a failed attempt leaves it
-        // for the lifecycle rule. Skipped when the reused row already stores
-        // this exact URL (a retry after a commit): saves two S3 calls.
-        const upload = existing?.profilePictureUrl === data.profilePictureUrl ? null : data.profilePictureUrl;
+        // untags it only after they commit (#1005). Both are skipped when that
+        // attempt's target row already stores this exact URL (a retry after a
+        // commit), which saves two S3 calls.
+        let targetPhoto: string | null | undefined = existing?.profilePictureUrl;
         const roster = (
-          reuse: { id: string; managedById: string | null } | null
-        ): ReturnType<typeof InvitationService.createRosteredInvitedPlayer> =>
-          withPromotedAvatar(
-            upload,
+          reuse: { id: string; managedById: string | null; profilePictureUrl?: string | null } | null
+        ): ReturnType<typeof InvitationService.createRosteredInvitedPlayer> => {
+          targetPhoto = reuse?.profilePictureUrl;
+          return withPromotedAvatar(
+            targetPhoto === data.profilePictureUrl ? null : data.profilePictureUrl,
             () => this.createRosteredInvitedPlayer(teamId, data, userId, reuse, email),
             // Untag only when the row took the photo (decided under the lock, #618)
             (created) => created.photoApplied
           );
+        };
         try {
           created = await roster(existing);
         } catch (err) {
           // The reuse target completed WorkOS signup mid-transaction — it is a
           // claimed account now, so fall back to case 3 (red-team RT4).
           if (err instanceof ClaimedMidCreateError) {
-            // The failed roster write left the upload untouched: leave it for
-            // the lifecycle rule (#1005) rather than deleting it.
-            const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId, { discardUpload: false });
+            const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId);
             result.invitation = case3.invitation;
             result.invited = true;
             result.emails.player = case3.emailSent ?? undefined;
@@ -1207,7 +1207,7 @@ export class InvitationService {
           }
           const raced = await this.resolveEmailRaceWinner(email, err);
           if (raced.workosUserId) {
-            const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId, { discardUpload: false });
+            const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId);
             result.invitation = case3.invitation;
             result.invited = true;
             result.emails.player = case3.emailSent ?? undefined;
@@ -1223,9 +1223,12 @@ export class InvitationService {
         result.rostered = true;
         result.invited = true;
         playerId = created.member.playerId;
-        // When the reused row kept its own photo (photoApplied false), the
-        // upload was not untagged: nothing is done with it and the lifecycle
-        // rule expires it (#1005).
+        if (data.profilePictureUrl && !created.photoApplied && targetPhoto !== data.profilePictureUrl) {
+          // The reused row kept its own photo: the object the app uploaded
+          // before this request would otherwise be orphaned in S3 (#618). Not
+          // when the row's own photo IS this URL (a retry after a commit, #1005).
+          await discardOwnAvatar(data.profilePictureUrl, userId);
+        }
         result.emails.player =
           (await this.deliverInvitationEmail(created.invitation, created.token, 'added')) ??
           undefined;
@@ -1242,8 +1245,7 @@ export class InvitationService {
     teamId: string,
     playerId: string,
     data: AddRosterPlayerInput,
-    userId: string,
-    { discardUpload = true }: { discardUpload?: boolean } = {}
+    userId: string
   ): Promise<{ invitation: InvitationSummary; emailSent: boolean | null }> {
     await this.assertInvitable(teamId, playerId);
 
@@ -1264,10 +1266,8 @@ export class InvitationService {
     const emailSent = await this.deliverInvitationEmail(invitation, token, 'invited');
     // The client uploads the avatar before calling us, but a claimed account
     // keeps its own photo: discard the object so it is not orphaned in S3
-    // (#419). Ownership-checked because the URL is client-supplied. Not on
-    // case 2's fallbacks: there the upload is left untouched for the
-    // lifecycle rule (#1005).
-    if (discardUpload && data.profilePictureUrl) {
+    // (#419). Ownership-checked because the URL is client-supplied.
+    if (data.profilePictureUrl) {
       await discardOwnAvatar(data.profilePictureUrl, userId);
     }
     return { invitation: this.toSummary(invitation), emailSent };

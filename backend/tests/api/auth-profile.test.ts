@@ -16,6 +16,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   }),
   DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
   HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
+  HeadBucketCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadBucket', input })),
 }));
 
 import request from 'supertest';
@@ -154,7 +155,7 @@ describe('PATCH /api/v1/auth/me', () => {
         code: 'upload_expired',
       });
       expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
-      expect(s3Kinds()).toEqual(['HeadObject']);
+      expect(s3Kinds()).toEqual(['HeadObject', 'HeadBucket']);
     });
 
     it('a failed write (account deleted underneath, 401) makes no S3 call after the check', async () => {
