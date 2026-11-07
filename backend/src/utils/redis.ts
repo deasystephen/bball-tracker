@@ -1,7 +1,8 @@
 /**
  * Redis client and lightweight JSON cache helpers.
  *
- * Redis is used as a best-effort cache layer: if the connection is unavailable
+ * Redis is used as a best-effort cache layer and as the shared rate-limit
+ * store (`api/middleware/rate-limit-store.ts`, `websocket/rate-limit.ts`): if the connection is unavailable
  * the helpers degrade gracefully (cache reads return `null`, writes/deletes are
  * no-ops) so that a Redis outage never takes down a request path. Callers must
  * always be able to recompute the value from the source of truth.
@@ -15,14 +16,27 @@
  * (e.g. local dev / tests).
  */
 
-import Redis from 'ioredis';
+import Redis, { type RedisOptions } from 'ioredis';
 import { logger } from './logger';
 
 let client: Redis | null = null;
 let connectionErrorLogged = false;
+/**
+ * Set by `closeRedis()` (shutdown): from then on no client is created again,
+ * so a rate-limit check or cache call that races the shutdown gets `null`
+ * (fail-open) instead of opening a fresh connection the process then waits on.
+ */
+let closed = false;
 
 const RETRY_BASE_MS = 200;
 const RETRY_MAX_MS = 30_000;
+
+/**
+ * Upper bound on one command (#452). The rate limiters sit on every request
+ * now, so a Redis that accepts the connection but stops answering must fail
+ * the command (and the caller falls back) rather than hold the request open.
+ */
+export const REDIS_COMMAND_TIMEOUT_MS = 500;
 
 /**
  * ioredis `retryStrategy`: always returns a delay (never `null`), doubling from
@@ -35,12 +49,29 @@ export function redisRetryDelay(times: number): number {
 }
 
 /**
+ * The connection options every request-path Redis client in the API uses: the
+ * cache and rate-limit client below and the Socket.io adapter's publisher
+ * (`websocket/redis-adapter.ts`). TLS and AUTH come from the URL itself
+ * (`rediss://:<token>@host:port`, #755), so a URL change is the only switch.
+ */
+export function redisClientOptions(): RedisOptions {
+  return {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    retryStrategy: redisRetryDelay,
+    enableOfflineQueue: false,
+    commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
+  };
+}
+
+/**
  * Get (or lazily create) the shared Redis client.
  *
- * Returns `null` when no `REDIS_URL` is configured, signalling callers to skip
- * caching entirely.
+ * Returns `null` when no `REDIS_URL` is configured, or after `closeRedis()`,
+ * signalling callers to skip Redis entirely.
  */
 export function getRedisClient(): Redis | null {
+  if (closed) return null;
   if (client) return client;
 
   const url = process.env.REDIS_URL;
@@ -48,12 +79,7 @@ export function getRedisClient(): Redis | null {
     return null;
   }
 
-  const instance = new Redis(url, {
-    lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    retryStrategy: redisRetryDelay,
-    enableOfflineQueue: false,
-  });
+  const instance = new Redis(url, redisClientOptions());
   client = instance;
 
   instance.on('error', (err) => {
@@ -72,13 +98,32 @@ export function getRedisClient(): Redis | null {
   // `end` fires when ioredis will not reconnect on its own (e.g. after
   // `quit()`). Drop the dead client so the next cache access creates a fresh one.
   instance.on('end', () => {
-    if (client === instance) {
+    if (client === instance && !closed) {
       client = null;
       logger.warn('Redis connection ended — a new client will be created on next use');
     }
   });
 
   return instance;
+}
+
+/**
+ * The shared client when it is connected and ready for commands, else `null`.
+ * A client that has not connected yet (`lazyConnect`) is told to connect, so
+ * the next call finds it ready. For callers on the request path that must not
+ * spend a failed command (and its log line) on a connection still being made:
+ * the rate limiters, which count in memory meanwhile.
+ */
+export function getReadyRedisClient(): Redis | null {
+  const redis = getRedisClient();
+  if (!redis) return null;
+  if (redis.status === 'ready') return redis;
+  if (redis.status === 'wait') {
+    redis.connect().catch(() => {
+      // Logged by the 'error' listener; retried by the retry strategy.
+    });
+  }
+  return null;
 }
 
 /**
@@ -142,12 +187,14 @@ export async function cacheDelete(...keys: string[]): Promise<void> {
  * `utils/shutdown.ts` (wired in `src/index.ts`) and by test cleanup.
  */
 export async function closeRedis(): Promise<void> {
+  closed = true;
   if (client) {
+    const closing = client;
+    client = null;
     try {
-      await client.quit();
+      await closing.quit();
     } catch {
       // Ignore — we're shutting down anyway.
     }
-    client = null;
   }
 }

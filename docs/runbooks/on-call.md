@@ -340,4 +340,6 @@ outside this repository.
 ## Not covered
 
 Not covered by any alarm today: a failed automated RDS backup, and Redis memory or
-evictions (the cache is best-effort and fails open).
+evictions (the cache and the shared rate-limit counters are best-effort and fail open: while Redis
+is down each task counts rate limits in its own memory and logs `Rate limit store: Redis
+unavailable, counting in memory` once, #452).
