@@ -39,7 +39,6 @@
         { "name": "DEFAULT_TIMEZONE", "value": "America/Los_Angeles" },
         { "name": "S3_AVATARS_BUCKET", "value": "bball-tracker-avatars-production" },
         { "name": "AVATAR_PENDING_TAG_ENABLED", "value": "true" },
-        { "name": "AGE_GATE_ENFORCED", "value": "false" },
         { "name": "AWS_REGION", "value": "us-east-1" }
       ],
       "secrets": [
