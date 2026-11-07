@@ -15,7 +15,7 @@ const mockAssertWorkOSConfig = jest.fn();
 
 import { Prisma } from '@prisma/client';
 import { WorkOSService } from '../../src/services/workos-service';
-import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError } from '../../src/utils/errors';
+import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { logger } from '../../src/utils/logger';
 import { mockPrisma } from '../setup';
@@ -224,6 +224,49 @@ describe('WorkOSService', () => {
     });
   });
 
+  describe('revokeAllSessions (#983)', () => {
+    it('revokes every active session of the user and skips ended ones', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockResolvedValue({
+        autoPagination: jest.fn().mockResolvedValue([
+          { id: 'session_a', status: 'active' },
+          { id: 'session_b', status: 'revoked' },
+          { id: 'session_c', status: 'active' },
+        ]),
+      });
+      mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).resolves.toEqual({ revoked: 2, failed: 0 });
+
+      expect(mockWorkOSClient.userManagement.listSessions).toHaveBeenCalledWith('user_123');
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledTimes(2);
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_a' });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_c' });
+    });
+
+    it('attempts every revocation and counts the ones that failed', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockResolvedValue({
+        autoPagination: jest.fn().mockResolvedValue([
+          { id: 'session_a', status: 'active' },
+          { id: 'session_b', status: 'active' },
+          { id: 'session_c', status: 'active' },
+        ]),
+      });
+      mockWorkOSClient.userManagement.revokeSession
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('WorkOS down'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).resolves.toEqual({ revoked: 2, failed: 1 });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledTimes(3);
+    });
+
+    it('propagates a failure to list the sessions', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockRejectedValue(new Error('WorkOS down'));
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).rejects.toThrow('WorkOS down');
+    });
+  });
+
   describe('revokeSession', () => {
     it('revokes the WorkOS session by id', async () => {
       mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
@@ -382,9 +425,10 @@ describe('WorkOSService', () => {
       expect(result).toHaveProperty('name', 'Edited In App');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
       // Guarded write (#444 D9): a row deleted between the read and this write
-      // must not be re-identified, so the update is conditioned on deletedAt.
+      // must not be re-identified, so the update is conditioned on deletedAt;
+      // and on the WorkOS id, so a row un-linked meanwhile (#983) is not either.
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: existingUser.id, deletedAt: null },
+        where: { id: existingUser.id, deletedAt: null, workosUserId: 'workos_123' },
         data: { emailVerified: true },
       });
     });
@@ -457,6 +501,38 @@ describe('WorkOSService', () => {
       expect(result).toHaveProperty('id', 'fresh-id');
       expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a sign-in whose linked row lost this login meanwhile, writing nothing (#983)', async () => {
+      const existingUser = createPlayer({ email: 'kid@example.com', workosUserId: 'workos_kid' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId, read before the conversion committed
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: null }); // re-read: live, but un-linked
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await expect(
+        WorkOSService.syncUser({ id: 'workos_kid', email: 'kid@example.com', emailVerified: true })
+      ).rejects.toThrow(UnauthorizedError);
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('continues to the email branches when the linked row was relinked to another login meanwhile', async () => {
+      const existingUser = createPlayer({ email: 'moved@example.com', workosUserId: 'workos_old' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId, before the relink committed
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'workos_other' }); // re-read: relinked
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      // The email lookup finds the row, now bound to the other identity: the
+      // usual refusal for an email owned by another login.
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([{ ...existingUser, workosUserId: 'workos_other' }]);
+
+      await expect(
+        WorkOSService.syncUser({ id: 'workos_old', email: 'moved@example.com', emailVerified: true })
+      ).rejects.toThrow(ConflictError);
+      expect(mockPrisma.user.findMany).toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
     it('should claim a pre-provisioned row by email and clear managed-player ownership (audit #2)', async () => {
@@ -598,7 +674,7 @@ describe('WorkOSService', () => {
 
         expect(result.claimedInvite).toBe(false);
         expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-          where: { id: linked.id, deletedAt: null },
+          where: { id: linked.id, deletedAt: null, workosUserId: 'workos_linked' },
           data: { emailVerified: false },
         });
       });
@@ -814,7 +890,7 @@ describe('WorkOSService', () => {
         await WorkOSService.syncUser({ id: 'workos_123', email: 'legacy@example.com', emailVerified: true });
 
         expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-          where: { id: existingUser.id, deletedAt: null },
+          where: { id: existingUser.id, deletedAt: null, workosUserId: 'workos_123' },
           data: { emailVerified: true },
         });
       });
