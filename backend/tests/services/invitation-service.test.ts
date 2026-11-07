@@ -1989,7 +1989,7 @@ describe('InvitationService', () => {
       expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
     });
 
-    it('middle case — the pre-transaction read never decides: the guarded write applies the photo, so it is untagged after commit (#1005)', async () => {
+    it('middle case — a reused row with another photo X: an expired upload does not fail the add, and it is discarded (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = {
         ...createPlayer({ email: 'jane@example.com' }),
@@ -1997,7 +1997,37 @@ describe('InvitationService', () => {
         managedById: null,
         profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/own.jpg',
       };
-      // The guarded write is what decides: here it applies (the photo was removed since the read)
+      // X wins the guarded photo write (zero rows), as the pre-read predicted
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+      // Were the check asked, the upload would be expired
+      mockCheck.mockImplementation(async (url: unknown) => {
+        if (url) throw new UploadExpiredError();
+        return null;
+      });
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(true);
+      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockUntag).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      mockCheck.mockImplementation(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null));
+    });
+
+    it('middle case — accepted stale pre-read: the row read with photo X lost it before the write, so the upload is stored unchecked and not untagged (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = {
+        ...createPlayer({ email: 'jane@example.com' }),
+        workosUserId: null,
+        managedById: null,
+        profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/own.jpg',
+      };
+      // The guarded write applies (the photo was removed since the unlocked read)
       const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
       setupReuseTx(team, coach, unclaimed, txUserUpdate);
 
@@ -2007,9 +2037,9 @@ describe('InvitationService', () => {
         coach.id
       );
 
-      expect(mockCheck).toHaveBeenCalledWith(AVATAR_URL);
-      expect(mockUntag).toHaveBeenCalledTimes(1);
-      expect(mockUntag.mock.invocationCallOrder[0]).toBeGreaterThan(txUserUpdate.mock.invocationCallOrder[1]);
+      // Documented rare case: with the flag on, this photo stays pending and expires
+      expect(mockCheck).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockUntag).not.toHaveBeenCalled();
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 

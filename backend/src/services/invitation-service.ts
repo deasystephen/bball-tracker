@@ -1177,15 +1177,18 @@ export class InvitationService {
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
         // Each roster attempt checks the upload before its rows are written and
         // untags it only after they commit (#1005). Both are skipped when that
-        // attempt's target row already stores this exact URL (a retry after a
-        // commit), which saves two S3 calls.
+        // attempt's target row already has a photo: this exact URL (a retry
+        // after a commit), or another one, which wins the guarded write, so the
+        // upload is discarded below and an expired one must not fail the add.
+        // The target's photo comes from an unlocked read; a stale one is a rare
+        // accepted case (backend-services.md, "Unsaved uploads expire").
         let targetPhoto: string | null | undefined = existing?.profilePictureUrl;
         const roster = (
           reuse: { id: string; managedById: string | null; profilePictureUrl?: string | null } | null
         ): ReturnType<typeof InvitationService.createRosteredInvitedPlayer> => {
           targetPhoto = reuse?.profilePictureUrl;
           return withPromotedAvatar(
-            targetPhoto === data.profilePictureUrl ? null : data.profilePictureUrl,
+            targetPhoto ? null : data.profilePictureUrl,
             () => this.createRosteredInvitedPlayer(teamId, data, userId, reuse, email),
             // Untag only when the row took the photo (decided under the lock, #618)
             (created) => created.photoApplied

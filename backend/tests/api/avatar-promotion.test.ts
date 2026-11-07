@@ -94,6 +94,11 @@ const playerRow = (profilePictureUrl: string | null): Record<string, unknown> =>
 beforeEach(() => {
   mockS3Send.mockReset();
   mockS3Send.mockResolvedValue({});
+  // The pre-write check only runs with pending tagging on; most cases test that mode.
+  process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+});
+
+afterAll(() => {
   delete process.env.AVATAR_PENDING_TAG_ENABLED;
 });
 
@@ -195,7 +200,8 @@ describe('POST /api/v1/players', () => {
     expect(res.status).toBe(500);
     expect(res.body.code).toBeUndefined();
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
-    expect(captureSpy).toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
+    // One report per failure: the route's handler, not checkAvatarUpload
+    expect(captureSpy).not.toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
     captureSpy.mockRestore();
   });
 });
@@ -346,8 +352,21 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(s3Calls()).toHaveLength(0);
   });
 
-  it('with the flag off, AccessDenied on the check is logged and the save proceeds', async () => {
-    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  it('with the flag off, the save makes no check (no expiry exists) and still untags after the write', async () => {
+    delete process.env.AVATAR_PENDING_TAG_ENABLED;
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(201);
+    expect(s3Calls()).toEqual([['DeleteObjectTagging', KEY]]);
+  });
+
+  it('with the flag off, an untag denied after the write is reported and the response is still 201', async () => {
+    delete process.env.AVATAR_PENDING_TAG_ENABLED;
+    const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
@@ -355,11 +374,11 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
       .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
 
     expect(res.status).toBe(201);
-    expect(mockPrisma.teamMember.create).toHaveBeenCalled();
+    expect(captureSpy).toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
+    captureSpy.mockRestore();
   });
 
   it('with the flag on, AccessDenied on the check is a 5xx and nothing is written', async () => {
-    process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
     const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
     mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
     const res = await request(app)
@@ -370,6 +389,7 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(res.status).toBe(500);
     expect(res.body.code).toBeUndefined();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(captureSpy).not.toHaveBeenCalledWith(expect.anything(), { flow: 'avatar-promote' });
     captureSpy.mockRestore();
   });
 

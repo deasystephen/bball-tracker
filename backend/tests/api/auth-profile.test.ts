@@ -128,6 +128,14 @@ describe('PATCH /api/v1/auth/me', () => {
     const s3Kinds = (): (string | undefined)[] => mockS3Send.mock.calls.map(([cmd]) => (cmd as Sent).kind);
     const NEW_KEY = `avatars/${TEST_USER_ID}/new.jpg`;
 
+    beforeEach(() => {
+      process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+    });
+
+    afterEach(() => {
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+    });
+
     it('checks the upload before the write and untags it only after the write', async () => {
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 
