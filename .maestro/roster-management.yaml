@@ -39,6 +39,13 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "add-player-button"
 - assertVisible: "Add Player"
+# Under-13 steer (#982): the player-email field stays hidden until the coach
+# answers the age question. Lakers has no age group, so nothing is preselected.
+# The pills are SortPills; their accessibility label is "<question> <answer>".
+- assertVisible: "Is this player 13 or older\\?"
+- assertNotVisible:
+    id: "add-player-email-input"
+- tapOn: "Is this player 13 or older\\? Yes"
 - assertVisible: "Player Email (optional)"
 - assertVisible: "Parent/Guardian Email (optional)"
 
@@ -46,6 +53,10 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "add-player-name-input"
 - inputText: "E2E Test Player"
+# Enter blurs the name field. The age question and the player-email field
+# (#982) made the form taller, so with the name keyboard up the jersey field
+# and submit sit under the keyboard and taps land on keys instead.
+- pressKey: Enter
 - tapOn:
     id: "add-player-jersey-input"
 - inputText: "99"
@@ -53,20 +64,29 @@ appId: com.bballtracker.mobile
 # Dismiss the keyboard so the submit button is tappable. The jersey field has
 # a NUMBER PAD, which has no return key, so Enter cannot blur it. The form's
 # ScrollView has keyboardShouldPersistTaps="handled", so tapping any
-# non-interactive text (the field's own label) dismisses the keyboard
-# deterministically. Never hideKeyboard: on iOS it cannot hide a number pad,
-# and since Maestro 2.11 that fails the flow instead of doing nothing (#584).
-- tapOn: "Jersey Number"
+# non-interactive text dismisses the keyboard deterministically. Tap the age
+# question heading: since #982 the form is tall enough that the number pad
+# covers the jersey field's own label, and a tap there lands on a key. Never
+# hideKeyboard: on iOS it cannot hide a number pad, and since Maestro 2.11
+# that fails the flow instead of doing nothing (#584).
+- tapOn: "Is this player 13 or older\\?"
 
-# Submit
+# Submit (below the fold since #982)
+- scrollUntilVisible:
+    element:
+      id: "add-player-submit"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "add-player-submit"
 
 # The player appears on the roster IMMEDIATELY with the "Not invited" chip
 # (row-anchored label — a bare "Not invited" could match another row's chip)
+# Scroll to the chip itself: a bare "E2E Test Player" also matches the name
+# field when the add did not go through.
 - scrollUntilVisible:
     element:
-      text: "E2E Test Player"
+      text: "E2E Test Player status: Not invited"
     direction: DOWN
     timeout: 10000
 - assertVisible: "E2E Test Player status: Not invited"
@@ -90,3 +110,55 @@ appId: com.bballtracker.mobile
 
 # The row subtitle re-renders with the new jersey and position
 - assertVisible: "#12 • Guard"
+
+# Under-13 branch (#982): answering No hides the player email and makes the
+# parent/guardian email required. The seed reset deletes this flow-created
+# managed player (removeFlowCreatedManagedPlayers), and its guardian invitation
+# cascades with it.
+- scrollUntilVisible:
+    element:
+      id: "add-player-button"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "add-player-button"
+- tapOn: "Is this player 13 or older\\? Yes"
+- tapOn:
+    id: "add-player-email-input"
+- inputText: "e2e-under13-kid@example.test"
+- pressKey: Enter
+# No clears the typed player email and removes the field
+- tapOn: "Is this player 13 or older\\? No"
+- assertNotVisible:
+    id: "add-player-email-input"
+- assertVisible: "Parent/Guardian Email"
+- assertVisible: "Players under 13 don't get their own login.*"
+- tapOn:
+    id: "add-player-name-input"
+- inputText: "E2E Under13 Player"
+- pressKey: Enter
+- scrollUntilVisible:
+    element:
+      id: "add-player-guardian-email-input"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "add-player-guardian-email-input"
+- inputText: "e2e-under13-parent@example.test"
+- pressKey: Enter
+# The relationship chips appear once a guardian email is typed; the default
+# (Guardian) is kept.
+- scrollUntilVisible:
+    element:
+      id: "add-player-submit"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "add-player-submit"
+- scrollUntilVisible:
+    element:
+      text: "E2E Under13 Player status: Not invited"
+    direction: DOWN
+    timeout: 10000
+# No player email went out: the row is a roster-only managed player
+- assertVisible: "E2E Under13 Player status: Not invited"
