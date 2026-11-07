@@ -42,7 +42,8 @@ import { logger } from '../../src/utils/logger';
 import { mockPrisma } from '../setup';
 import { devToken } from '../support/auth-fixtures';
 
-const USER = { id: 'user-1', email: null, name: 'Coach', role: 'COACH' };
+// The age gate (#981) fails closed on a missing column, so the row carries it.
+const USER = { id: 'user-1', email: null, name: 'Coach', role: 'COACH', ageConfirmedAt: new Date('2026-01-01T00:00:00Z'), ageRefusedAt: null };
 const MINUTE = 60_000;
 const mockCapture = captureException as jest.Mock;
 

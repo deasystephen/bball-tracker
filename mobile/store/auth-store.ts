@@ -15,9 +15,17 @@ import {
 } from '../services/analytics';
 import { log } from '../services/log';
 import { getRunningBuild } from '../services/app-build';
+import { needsAgeConfirmation } from '../utils/age-gate';
 import { getSessionHooks } from './session-hooks';
 
 export type LogoutReason = AnalyticsEventProps['user_logged_out']['reason'];
+
+/**
+ * Why a session ended. The analytics reasons are reported as
+ * `user_logged_out`; `age_refused` (#981) is not: the account was refused for
+ * being under the minimum age, and an under-age outcome is never recorded.
+ */
+export type SessionEndReason = LogoutReason | 'age_refused';
 
 /**
  * Amplitude user properties the auth store is the source for (#616): the
@@ -91,9 +99,34 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /**
+   * The sign-in outcome of an account that still owes the age question (#981):
+   * its `user_logged_in` and `identifyUser` are held back until
+   * `completeAgeConfirmation`, so an account refused for age is never
+   * identified in analytics. `null` when nothing is pending.
+   */
+  pendingLogin: LoginOutcome | null;
+  /**
+   * Why the last session ended (#981): `useAuthRedirect` sends a lost session
+   * to `/login`, except after `age_refused`, when the age screen stays to
+   * explain and sends the person on itself. Not persisted.
+   */
+  lastSessionEnd: SessionEndReason | null;
+  /**
+   * When this device confirmed the age question (epoch ms), so a stale
+   * `GET /auth/me` reply or a 403 from a request sent before the answer
+   * cannot move `ageConfirmed` back to false (#981). Not persisted.
+   */
+  ageConfirmedLocalAt: number | null;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
-  /** Sign-in only: store the user and fire `user_logged_in` with the response's outcome flags. */
+  /**
+   * Sign-in only: store the user and fire `user_logged_in` with the response's
+   * outcome flags, unless the account still owes the age question (#981), in
+   * which case the analytics wait for `completeAgeConfirmation`.
+   */
   setUser: (user: User, outcome?: LoginOutcome) => void;
+  /** The age question was answered and met the minimum: mark the user confirmed and fire the held-back sign-in analytics. */
+  completeAgeConfirmation: () => void;
   /** Merge fields into the current user without re-firing login analytics. */
   updateUser: (patch: Partial<User>) => void;
   /**
@@ -108,7 +141,7 @@ interface AuthState {
    * api-client interceptor. `reason` is the `user_logged_out` property;
    * the default is the api-client's case.
    */
-  clearSession: (reason?: LogoutReason) => void;
+  clearSession: (reason?: SessionEndReason) => void;
 }
 
 /**
@@ -128,6 +161,8 @@ const CLEARED_SESSION = {
   user: null,
   isAuthenticated: false,
   isLoading: false,
+  pendingLogin: null,
+  ageConfirmedLocalAt: null,
 } as const;
 
 /**
@@ -143,15 +178,38 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       isLoading: true,
+      pendingLogin: null,
+      lastSessionEnd: null,
+      ageConfirmedLocalAt: null,
 
       setAuthToken: (token: string, refreshToken: string | null = null) => {
         set({ accessToken: token, refreshToken, isAuthenticated: true });
       },
 
       setUser: (user: User, outcome?: LoginOutcome) => {
+        if (needsAgeConfirmation(user)) {
+          // Nothing is attributed to this account until it has answered the
+          // age question (#981); an answer under the minimum ends the session
+          // with no identify and no event.
+          set({ user, isAuthenticated: true, isLoading: false, pendingLogin: outcome ?? {} });
+          return;
+        }
         identifyUser(user.id, userPropertiesFrom(user));
         trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(outcome));
-        set({ user, isAuthenticated: true, isLoading: false });
+        set({ user, isAuthenticated: true, isLoading: false, pendingLogin: null });
+      },
+
+      completeAgeConfirmation: () => {
+        const { user, pendingLogin } = get();
+        if (!user) return;
+        const confirmed = { ...user, ageConfirmed: true };
+        set({ user: confirmed, pendingLogin: null, ageConfirmedLocalAt: Date.now() });
+        // Only a sign-in that was held back is reported now. An account that
+        // existed before the age column (asked once on its next launch) was
+        // identified when it signed in, and must not count a second time.
+        if (pendingLogin === null) return;
+        identifyUser(confirmed.id, userPropertiesFrom(confirmed));
+        trackEvent(AnalyticsEvents.USER_LOGGED_IN, loginEventPropsFrom(pendingLogin));
       },
 
       updateUser: (patch: Partial<User>) => {
@@ -159,13 +217,14 @@ export const useAuthStore = create<AuthState>()(
         if (!current) return;
         const user = { ...current, ...patch };
         set({ user });
-        // Only the fields the user properties are derived from refresh them.
-        if (patch.role !== undefined || patch.guardianOf !== undefined) {
+        // Only the fields the user properties are derived from refresh them,
+        // and nothing is attributed before the age question is answered (#981).
+        if ((patch.role !== undefined || patch.guardianOf !== undefined) && !needsAgeConfirmation(user)) {
           setUserProperties(userPropertiesFrom(user));
         }
       },
 
-      clearSession: (reason: LogoutReason = 'session_expired') => {
+      clearSession: (reason: SessionEndReason = 'session_expired') => {
         // Always: a refresh in flight must never resurrect a session (#41).
         logoutEpoch += 1;
 
@@ -183,10 +242,15 @@ export const useAuthStore = create<AuthState>()(
 
         const wasSignedIn = isAuthenticated || accessToken !== null;
         if (wasSignedIn) {
-          trackEvent(AnalyticsEvents.USER_LOGGED_OUT, { reason });
+          // An account refused for age (#981) was never identified and leaves
+          // no event; the identity is still reset so the next sign-in starts
+          // from a fresh device id.
+          if (reason !== 'age_refused') {
+            trackEvent(AnalyticsEvents.USER_LOGGED_OUT, { reason });
+          }
           resetUser();
         }
-        set(CLEARED_SESSION);
+        set({ ...CLEARED_SESSION, lastSessionEnd: reason });
         // Belt-and-braces: persist writes the cleared state too, but wipe the
         // keychain entries explicitly so a failed write can't leave a token.
         clearPersistedAuth(AUTH_STORAGE_KEY).catch(() => undefined);
@@ -223,6 +287,7 @@ export const useAuthStore = create<AuthState>()(
         refreshToken: state.refreshToken,
         user: state.user,
         isAuthenticated: state.isAuthenticated,
+        pendingLogin: state.pendingLogin,
       }),
       // Called with (state, undefined) on success and (undefined, error) when
       // AsyncStorage is unreadable/corrupt. Both branches must clear

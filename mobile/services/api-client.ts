@@ -1,4 +1,5 @@
 import { apiErrorCode } from '../utils/api-error-code';
+import { isAgeConfirmationRequiredError } from '../utils/age-gate';
 import { create as createAxiosInstance, AxiosInstance, AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
@@ -427,6 +428,27 @@ const createApiClient = (): AxiosInstance => {
   // error carries the server's message; before the 401 handler so a refresh
   // and replay shows up as two crumbs.
   client.interceptors.response.use(observeResponse, observeError);
+
+  // The age gate (#981): a 403 `age_confirmation_required` means the stored
+  // user is stale (an older payload without the flag, or a session restored
+  // before the launch-time /auth/me sync). Fold it into the store; the
+  // redirect hook sends the app to the age screen, and the request stays
+  // failed for its caller.
+  client.interceptors.response.use(
+    (response) => response,
+    (error: unknown) => {
+      if (isAgeConfirmationRequiredError(error)) {
+        const startedAt = (((error as AxiosError).config as RetriableConfig | undefined)?._startedAt) ?? Infinity;
+        const confirmedAt = useAuthStore.getState().ageConfirmedLocalAt;
+        // A 403 for a request sent before this device answered is stale.
+        const { user, updateUser } = useAuthStore.getState();
+        if ((confirmedAt === null || startedAt >= confirmedAt) && user && user.ageConfirmed !== false) {
+          updateUser({ ageConfirmed: false });
+        }
+      }
+      return Promise.reject(error);
+    }
+  );
 
   // Add response interceptor to handle errors
   client.interceptors.response.use(

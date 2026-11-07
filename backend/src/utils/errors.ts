@@ -1,3 +1,5 @@
+import { DEFAULT_MINIMUM_AGE, GDPR_MINIMUM_AGE } from './minimum-age';
+
 /**
  * Custom error classes for the application
  */
@@ -150,6 +152,49 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
       403
     );
     Object.setPrototypeOf(this, EmailNotVerifiedError.prototype);
+  }
+}
+
+/**
+ * 403 — the account holder has not yet answered the age question (#981). Every
+ * authenticated route other than the handful the age screen itself needs
+ * (`api/auth/middleware.ts#AGE_GATE_EXEMPT`) answers this until
+ * `POST /auth/age-confirmation` has set `User.ageConfirmedAt`. The mobile
+ * client routes to the age screen on this code.
+ */
+export class AgeConfirmationRequiredError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('age_confirmation_required', {}, 'Please confirm your age to continue', 403);
+    Object.setPrototypeOf(this, AgeConfirmationRequiredError.prototype);
+  }
+}
+
+/**
+ * 403 — the age answer is below the minimum for the account holder's region
+ * (#981). By the time this is sent the account is gone (erased, or un-claimed
+ * back into a managed roster record) and the WorkOS user with it, or, when
+ * neither could be done automatically, the session is revoked and an operator
+ * finishes by the runbook. The body carries no detail about the answer.
+ */
+export interface UnderMinimumAgeDetails extends Record<string, unknown> {
+  /**
+   * True when the account could not be removed automatically and an operator
+   * will finish (an account with adult signals, far more likely a typo than a
+   * child): the client points the person at support instead of telling them
+   * the service is for 13 and up.
+   */
+  pendingOperator: boolean;
+}
+
+export class UnderMinimumAgeError extends DetailedError<UnderMinimumAgeDetails> {
+  constructor(pendingOperator = false) {
+    super(
+      'under_minimum_age',
+      { pendingOperator },
+      `Accounts are for ages ${DEFAULT_MINIMUM_AGE} and up (${GDPR_MINIMUM_AGE} in the EU, UK and Switzerland)`,
+      403
+    );
+    Object.setPrototypeOf(this, UnderMinimumAgeError.prototype);
   }
 }
 

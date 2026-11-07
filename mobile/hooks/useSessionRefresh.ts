@@ -17,6 +17,7 @@ const SYNCED_FIELDS = [
   'name',
   'profilePictureUrl',
   'notifyOnReplies',
+  'ageConfirmed',
 ] as const;
 
 interface MeResponse {
@@ -65,9 +66,12 @@ export function useSessionRefresh(): void {
         for (const field of SYNCED_FIELDS) {
           if (skipProfileFields && (PROFILE_EDIT_FIELDS as readonly string[]).includes(field)) continue;
           const value = fresh[field];
-          if (value !== undefined) {
-            Object.assign(patch, { [field]: value });
-          }
+          if (value === undefined) continue;
+          // A reply that left before this device answered the age question
+          // must not undo the answer (#981); the API's 403 is the authority if
+          // the server really disagrees.
+          if (field === 'ageConfirmed' && value === false && useAuthStore.getState().ageConfirmedLocalAt !== null) continue;
+          Object.assign(patch, { [field]: value });
         }
         useAuthStore.getState().updateUser(patch);
       } catch {

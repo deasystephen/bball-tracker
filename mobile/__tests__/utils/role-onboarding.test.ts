@@ -129,3 +129,15 @@ describe('role-onboarding', () => {
     await expect(markRoleChosen('u1')).resolves.toBeUndefined();
   });
 });
+
+describe('postLoginRoute and the age question (#981)', () => {
+  it('sends an unconfirmed account to the age screen before the role step', async () => {
+    const user = { id: 'age-1', role: 'PLAYER', ageConfirmed: false };
+    await expect(postLoginRoute(user)).resolves.toBe('/onboarding/age');
+  });
+
+  it('leaves a confirmed account, or one from an older API, on the usual path', async () => {
+    await expect(postLoginRoute({ id: 'age-2', role: 'COACH', ageConfirmed: true })).resolves.toBe('/(tabs)/home');
+    await expect(postLoginRoute({ id: 'age-3', role: 'COACH' })).resolves.toBe('/(tabs)/home');
+  });
+});

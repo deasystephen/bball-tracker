@@ -94,10 +94,16 @@ flow.
    city, region and country, which is wanted for analytics, so **Location: Coarse Location** is
    declared above. Whether Amplitude also retains the raw IP address after the lookup is an
    Amplitude project setting, not visible in code; see section 4.
-4. **Children's data is entered by adults.** A coach can add a minor's name, photo and email to a
-   roster, and a guardian can be linked to a child's record. Whether this makes the answers
-   "data collected from children" depends on the age-rating and child-directed decisions in
-   section 4.
+4. **Children's data is entered by adults, and no child holds an account (#980).** A coach can add
+   a minor's name, photo and email to a roster, and a guardian can be linked to a child's record;
+   that is information adults enter about children, which the privacy labels do not count as
+   collected from children. Account holders must be 13 or older (16 in the EU/EEA/UK/CH): the
+   age screen at first sign-in (#981, `docs/architecture/children-and-age.md`) asks a neutral
+   birth month and year, the API refuses every route until it is answered, and an under-age answer
+   deletes or un-claims the account. **Answer "data collected from children": No**, once the
+   submission build carries the screen (it shipped as an OTA on runtime 1.7.0; build #37 and
+   later receive it, and the next binary embeds it). Nothing age-related is stored but the moment
+   of confirmation.
 5. **On-device only, not collected:** session tokens in the Keychain
    (`mobile/services/secure-storage.ts`), the sort preference, onboarding flags and the PKCE
    verifier in AsyncStorage.
@@ -173,8 +179,9 @@ issue named.
 
 | Decision | Why it is open | Tracked in |
 | --- | --- | --- |
-| Age rating | Depends on the intended audience; drives the "data collected from children" answers | #451 |
-| Whether the app is declared child-directed (Kids category, "Made for Kids") | Interacts with the COPPA read in the privacy policy work and must not be answered independently of it | #25, #451 |
+| Age rating | **Decided in part (#980, 2026-10-26):** answer Apple's content questionnaire on content alone (no user-generated public content, no violence, no gambling); the 13+ account rule does not force a 13+ rating. Record the resulting rating here when set. Texas SB 2420 also wants an age rating on every in-app purchase (none today) and treats a rating change as a "significant change" (#984) | #451 |
+| Whether the app is declared child-directed (Kids category, "Made for Kids") | **Decided (#980, 2026-10-26): Kids Category no, "Made for Kids" no.** Hooplings is a general-audience team app whose account holders are 13+; the Kids Category would declare it child-directed and pull every user into COPPA treatment. Keep every store term, screenshot and description aimed at coaches and parents (Guideline 5.1.4(b)). Rationale: `docs/architecture/children-and-age.md` | #451 |
+| Declared Age Range API (`com.apple.developer.declared-age-range`) | **Decided (#984, 2026-11-07): not in the GA binary**; the in-app age screen is the enforcement. California AB 1043 makes requesting the OS age signal mandatory from 2027-01-01 (installed apps by 2027-07-01), so the first post-GA binary must carry it; see the follow-up issue linked from #984 | #984 |
 | Privacy Policy URL | Required field; `https://hooplings.com/privacy` once the policy page (#25) is merged and the site is live (#30). The labels in section 2 must match it, including the retention statement in `docs/runbooks/data-subject-requests.md` | #25 |
 | Support URL | Required field. Enter `https://hooplings.com/support` (`web/app/support/page.tsx`, #30) once the site is live; it names `support@hooplings.com` (#555), as the app and every email do (#450) | #450, #30 |
 | Screenshots for the required device sizes | Not producible from code | #451 |

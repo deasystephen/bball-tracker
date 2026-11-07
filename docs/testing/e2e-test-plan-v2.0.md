@@ -77,6 +77,21 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** `PATCH /auth/me/role` 200 each time; ADMIN accounts never see the screen or the Profile row, and a guardian (non-empty `guardianOf`) has no "Change account type" row either (PARENT is derived — `PATCH /auth/me/role { role: 'PARENT' }` → 403). Maestro: `.maestro/onboarding-role.yaml` (dev-login as seeded PLAYER Steph Curry).
 - **Notes:** ___________
 
+### A.1c — Age screen at first sign-in (#981, part of #980)
+- [ ] Pass / Fail / Skipped
+- **Role:** new user (any role), and every existing account once after the column shipped
+- **Steps:**
+  1. Complete A.1 sign-up (or sign in as an account that has not answered yet)
+  2. The "When were you born?" screen appears before the account-type screen; it names no minimum age, offers twelve month pills and a four-digit year field, and Continue stays disabled until both are entered
+  3. Swipe back / hardware back: still on the question. Background and foreground the app, or open a `hooplings://teams` deep link: still on the question
+  4. Enter an adult month and year → Continue → the confirmation repeats the entry ("Born in March 1990?") → Change returns to the question with the entry kept → Yes, continue
+  5. The account-type screen (A.1b) follows; `GET /auth/me` → `ageConfirmed: true`; sign out and in again → the question does not reappear
+  6. Sign up again with a fresh email; answer a month and year under 13 (under 16 with the device region set to an EU country, the UK or Switzerland; the current month counts as not yet reached, so this month 13 years ago is also refused) → "Thanks for letting us know" → Done lands on sign-in; signing in again with the same email creates a brand-new account and asks again
+  6a. As a coach with a team, answer under 13 → the same title, but the body says nothing was deleted and names `support@hooplings.com`; the account is locked (every request 403) until an operator clears or deletes it by the runbook
+  7. A coach-added player (D-section Add Player with a player email) who signs in and answers under 13: the roster still lists the player (managed again, no email); the sign-in is refused on the next attempt until the coach adds an email again
+- **Expected:** before step 4, `curl -H "Authorization: Bearer <token>" https://api.hooplings.com/api/v1/teams` → 403 `{ "code": "age_confirmation_required" }` while `GET /auth/me` → 200 `ageConfirmed: false` (with `AGE_GATE_ENFORCED` on). The under-13 answer answers 403 `under_minimum_age`, deletes the WorkOS user (dashboard) and fires no Amplitude event; `age_confirmed` fires on the adult answer with no properties. Maestro: `.maestro/age-gate.yaml` (dev-login as Taylor Newman then Jamie Young; re-seed first).
+- **Notes:** ___________
+
 ### A.2 — Existing user login
 - [ ] Pass / Fail / Skipped
 - **Role:** any existing user

@@ -4,9 +4,7 @@ Guidance for Claude Code in this repository. This file holds **commands, hard ru
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`, ECS behind the API's ALB) that hosts the public `hooplings.com/invite/<token>` accept flow and the support, privacy and terms pages. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
-
-Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Prisma, Redis cache).
+Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`, ECS behind the API's ALB) that hosts the public `hooplings.com/invite/<token>` accept flow and the support, privacy and terms pages. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates. Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Prisma, Redis cache).
 
 ## Where the detail lives
 
@@ -21,6 +19,7 @@ Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Pr
 | Socket.io broadcast, server-derived score, tracker undo | `docs/architecture/live-games.md` |
 | Stats finalization, ties, team lineage | `docs/architecture/stats-and-lineage.md` |
 | Account deletion (as built) | `docs/architecture/account-deletion.md` |
+| Children, age and COPPA: adults-only accounts, the age screen and gate, state age laws | `docs/architecture/children-and-age.md` |
 | Email: SES events, bounces, complaints, audiences (invite funnel: `docs/architecture/web-funnel.md`) | `docs/architecture/email.md` |
 | Mobile app: routing, guards, permission gating, errors, pickers, analytics | `docs/architecture/mobile-app.md` |
 | Mobile analytics: Amplitude event catalogue, user properties, screen views, guard test | `docs/architecture/analytics.md` |
@@ -106,6 +105,7 @@ Layered: API routes → services → Prisma. Zod validates every input. Backend 
 - Structured error bodies come only from `DetailedError.body()`; entitlement denials are **402** `upgrade_required`. Tier limits are single-sourced in `services/entitlements/index.ts#USAGE_LIMITS`; every value is `Infinity`, and the cap machinery stays mounted so a finite value there is enforced with no other change.
 
 ### Data and invariants
+- **Account holders are 13+ (16 in the EU/EEA/UK/CH); children are roster records, never logins.** `User.ageConfirmedAt` is null until the neutral age screen is answered, and `authenticate` refuses every route but `AGE_GATE_EXEMPT` until then; an under-age answer un-claims or deletes the account. Never store a date of birth, an age or a bracket. Detail: `docs/architecture/children-and-age.md`.
 - A `Team` row **is a team-season** (`seasonId` required); persistent identity is `lineageId`. Rollover creates a new `Team` row with the same lineage, never moves `seasonId` on a row with history.
 - `Game.homeScore` is derived from `SHOT` events inside the same transaction, after `SELECT … FOR UPDATE`; `PATCH /games/:id { homeScore }` is honoured only while the game has no shot events. The mobile tracker never sends `homeScore`.
 - Stats: `finalizeGameStats` is idempotent and re-runs on any event change to a FINISHED game. Season shooting percentages are Σmade / Σattempted, never a mean of per-game percentages. Ties are `'T'`, never a loss.

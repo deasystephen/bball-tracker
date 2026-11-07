@@ -137,6 +137,23 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   permanently trapped under the bar (the pre-fix Profile bug).
 
 ### Mobile routing & guards
+- **The age screen comes first (#981).** `postLoginRoute` sends a user whose session payload says
+  `ageConfirmed: false` to `/onboarding/age` (`app/onboarding/age.tsx`) before the role step and the
+  name prompt, and `hooks/useAuthRedirect.ts` replaces any other route with it while the stored user
+  is unconfirmed (except the sign-in paths, which `postLoginRoute` owns), so a restored session, a deep link or a push tap cannot get past it; the api-client
+  folds the API's 403 `age_confirmation_required` into the store so the hook fires. The onboarding
+  stack sets `gestureEnabled: false` for the screen and a hardware back stays on it. Twelve month
+  pills (`SortPills`, labelled "Month: <name>"), a four-digit year field, a confirmation step that
+  repeats the entry, then `POST /auth/age-confirmation` through `hooks/useConfirmAge.ts`. Old
+  enough: `completeAgeConfirmation` on the store, `age_confirmed`, and `postLoginRoute` again. Under
+  the minimum: the server has already undone the sign-in; the session ends at once
+  (`clearSession('age_refused')`, no analytics event), the screen explains (with a support pointer
+  when the body says `pendingOperator`, i.e. nothing was deleted and an operator will finish) and
+  Done goes to sign-in. A `connect_error: age_confirmation_required` on the live-game socket marks
+  the stored user unconfirmed instead of refreshing tokens (`services/socket.ts`). Push registration (`useNotificationSetup`) and
+  the sign-in analytics (`setUser` → `pendingLogin`) wait for the flag. Strings under
+  `ageOnboarding.*`; tests `__tests__/app/onboarding-age.test.tsx`, `__tests__/utils/age-gate.test.ts`;
+  Maestro `.maestro/age-gate.yaml`. Posture and rationale: `docs/architecture/children-and-age.md`.
 - The `(tabs)` shell has no auth guard of its own. Screens reachable while logged out (the `/invite/<token>`
   deep link) must send unauthenticated users to `/login` themselves. Use `setPendingReturnPath(path)` from
   `utils/return-path.ts` before pushing `/login`; `postLoginRoute()` (used by login, the OAuth callback and

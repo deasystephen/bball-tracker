@@ -211,6 +211,23 @@ parent writes to `privacy@hooplings.com`, a coach tells support, or a support th
 age group makes it plain), we have actual knowledge under COPPA and must stop holding what was
 collected from the child. Follow these steps every time; no code is written at the time.
 
+The age screen (#981, `docs/architecture/children-and-age.md`) handles the self-reported case by
+itself: an answer under the minimum un-claims a rostered player's account or deletes the account
+and the WorkOS user, with no operator step. Two cases still reach you: a report from someone else
+(the steps below), and a Sentry event `flow: age-refusal` ("Under-age answer on an account with adult signals needs an
+operator", `reason: adult_account` or `last_head_coach`): the holder answered under the minimum but
+the account has a staff role, a league admin row, guardian links, managed players, announcements or
+sent invitations, so it was not undone automatically (a wrong year is far more likely than a child,
+and a deletion would take teams, rosters and guardian links with it). The row is marked
+`ageRefusedAt` (every request 403 whatever `AGE_GATE_ENFORCED` says, a second answer refused
+unread) and its session revoked, so nothing more is collected; within 5 business days run step
+4(b) after handing the team over (or deleting it) as for any last-head-coach refusal, and do not
+ask the child for anything. The conversion script refuses such an account (`adult_account`), so
+(b) is the path when the report holds; the tombstone clears the marker. When it turns out to be a
+typo by an adult (the usual case), clear it by hand:
+`UPDATE "User" SET "ageRefusedAt" = NULL WHERE "id" = '<userId>'` after the person confirms their
+age in writing from the account's address; the next sign-in asks the question again.
+
 1. **Acknowledge within 1 business day.** Reply to the reporter that we have received the report
    and will act within 5 business days. Do not ask the child for anything.
 2. **Verify the reporter** with the identity rules of [Operator procedure](#operator-procedure-request-by-email)
@@ -269,7 +286,8 @@ collected from the child. Follow these steps every time; no code is written at t
        child was waiting on this child to become that child's guardian;
      - an **empty** personal league the child once created.
 
-     **Reset:** role back to `PLAYER`, subscription to free.
+     **Reset:** role back to `PLAYER`, subscription to free, `ageConfirmedAt` and `ageRefusedAt`
+     cleared (the next person to claim the row answers the age question again, #981).
 
      **Kept:** the **name** (a roster record needs one, and it is what the coach entered or sees on
      the roster; the coach can edit it), roster memberships, game events, statistics, RSVPs,

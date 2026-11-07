@@ -13,6 +13,7 @@ import {
   formatLongDate,
   formatMonthDay,
   formatMonthShort,
+  formatMonthName,
   formatNumericDate,
   formatSeasonDate,
   formatShortDate,
@@ -129,5 +130,12 @@ describe('format-date', () => {
     withLocales(locales);
     expect(deviceLocale()).toBeUndefined();
     expect(formatNumericDate(DATE)).toBe(DATE.toLocaleDateString(undefined));
+  });
+});
+
+describe('formatMonthName (#981)', () => {
+  it('names a month from its number in the device locale', () => {
+    expect(formatMonthName(1)).toBe('January');
+    expect(formatMonthName(12)).toBe('December');
   });
 });

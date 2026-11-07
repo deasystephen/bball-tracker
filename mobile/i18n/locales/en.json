@@ -876,6 +876,25 @@
     "placeholder": "e.g. Dell Curry",
     "skip": "Skip for now"
   },
+  "ageOnboarding": {
+    "title": "When were you born?",
+    "subtitle": "We ask everyone this once. Just the month and year; we don't keep either.",
+    "monthLabel": "Month",
+    "monthPrefix": "Month: ",
+    "yearLabel": "Year",
+    "yearPlaceholder": "YYYY",
+    "yearInvalid": "Enter a four-digit year",
+    "continue": "Continue",
+    "confirmTitle": "Born in {{month}} {{year}}?",
+    "confirmBody": "Check it before you continue. It can't be changed later.",
+    "confirmYes": "Yes, continue",
+    "confirmChange": "Change",
+    "refusedTitle": "Thanks for letting us know",
+    "refusedBody": "Hooplings accounts are for ages 13 and up (16 in the EU, UK and Switzerland). A parent, guardian or coach can add you to a team roster instead.",
+    "saveFailedTitle": "Couldn't save",
+    "saveFailedBody": "Please try again.",
+    "refusedOperatorBody": "Your answer could not be applied automatically because this account manages a team, a roster or a child's record. Nothing has been deleted. If this was a mistake, email {{email}} from this account's address and we will put it right; otherwise we will finish within 5 business days."
+  },
   "about": {
     "title": "About",
     "unknown": "unknown",

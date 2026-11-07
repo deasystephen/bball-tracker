@@ -12,7 +12,7 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { requestPattern } from '../services/request-pattern';
 import { log } from '../services/log';
-import { useIsAuthenticated } from '../store/auth-store';
+import { useIsAuthenticated, useAuthUser } from '../store/auth-store';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -127,9 +127,14 @@ export function useNotificationSetup() {
   // every ~10 minutes must not re-run permission prompts and re-POST the
   // push token (audit #62).
   const isAuthenticated = useIsAuthenticated();
+  // Nothing is collected from an account before it has answered the age
+  // question (#981): no permission prompt, no push token. A definite `true`
+  // only: a session persisted before the flag existed waits for the
+  // launch-time /auth/me sync rather than reading an absent flag as a yes.
+  const ageConfirmed = useAuthUser()?.ageConfirmed === true;
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !ageConfirmed) return;
 
     // Register push token. Every step can reject (permission API, Expo push
     // service, backend) — none of it is critical, but an unhandled rejection
@@ -179,5 +184,5 @@ export function useNotificationSetup() {
     return () => {
       responseListener.current?.remove();
     };
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, ageConfirmed, router]);
 }

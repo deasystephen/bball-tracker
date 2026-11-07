@@ -8,7 +8,7 @@ import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { StatsService } from '../src/services/stats-service';
 import { removeTestRows } from '../tests/support/test-leftovers';
-import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
+import { AGE_GATE_FIXTURES, FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
 import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
@@ -300,6 +300,23 @@ async function main() {
     console.log(`  Created player: ${player.email}`);
   }
 
+  // Age-screen fixtures (#981, .maestro/age-gate.yaml). Both are brand-new
+  // sign-ups that have not answered the age question (`ageConfirmedAt` null,
+  // which the `update` branch restores after a run). Taylor answers an adult
+  // birth month/year and goes on to the role step; Jamie answers under 13,
+  // which erases the account (no roster, no history), and this upsert
+  // recreates it. Neither may be rostered or given any history: the under-13
+  // branch would then un-claim instead of erase, and the flow asserts the
+  // dev-login list no longer offers Jamie.
+  for (const fixture of AGE_GATE_FIXTURES) {
+    const row = await prisma.user.upsert({
+      where: { email: fixture.email },
+      update: { role: UserRole.PLAYER, name: fixture.name, ageConfirmedAt: null },
+      create: { email: fixture.email, name: fixture.name, role: UserRole.PLAYER, emailVerified: true },
+    });
+    console.log(`  Created age-screen fixture: ${row.email}`);
+  }
+
   // Parents
   const parentDell = await prisma.user.upsert({
     where: { email: 'dell.curry@example.com' },
@@ -336,6 +353,27 @@ async function main() {
     },
   });
   console.log(`  Created parent: ${parentGloria.email}`);
+
+  // Every other seeded login has answered the age question (#981): the API
+  // refuses an unanswered account every route but the age screen's own, and
+  // the flows sign in as these fixtures to test everything else. Runs after
+  // every user upsert above and before the age-screen fixtures are excluded,
+  // so a fixture added later is covered without a change here.
+  const confirmed = await prisma.user.updateMany({
+    where: {
+      ageConfirmedAt: null,
+      deletedAt: null,
+      // Logins only: a managed roster record (a coach-added player with an
+      // email) keeps null, so claiming one locally meets the age screen as
+      // it does in production.
+      isManaged: false,
+      email: { not: null, notIn: AGE_GATE_FIXTURES.map((fixture) => fixture.email) },
+    },
+    data: { ageConfirmedAt: new Date() },
+  });
+  if (confirmed.count > 0) {
+    console.log(`  Marked ${confirmed.count} seeded login(s) as age-confirmed`);
+  }
 
   // =========================================================================
   // GUARDIAN RELATIONSHIPS

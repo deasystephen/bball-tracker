@@ -3,11 +3,94 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { SubscriptionTier } from '@prisma/client';
+import { Prisma, SubscriptionTier } from '@prisma/client';
 import { WorkOSService } from '../../services/workos-service';
-import { UnauthorizedError } from '../../utils/errors';
+import { AgeConfirmationRequiredError, UnauthorizedError } from '../../utils/errors';
 import { setLogContextUser } from '../../utils/log-context';
 import prisma from '../../models';
+
+/**
+ * The columns `authenticate` attaches as `req.user`. Single-sourced for the
+ * dev-token and WorkOS branches (and mirrored by the socket handshake in
+ * `websocket/game-events.ts`), so a column added for a gate reaches both.
+ */
+export const AUTH_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  subscriptionTier: true,
+  subscriptionExpiresAt: true,
+  ageConfirmedAt: true,
+  ageRefusedAt: true,
+} satisfies Prisma.UserSelect;
+
+/** The row `authenticate` resolves; the socket handshake selects the same columns. */
+export type AuthUserRow = Prisma.UserGetPayload<{ select: typeof AUTH_USER_SELECT }>;
+
+/** The age-gate columns a session check needs (#981). */
+export type AgeGateColumns = Pick<AuthUserRow, 'ageConfirmedAt' | 'ageRefusedAt'>;
+
+/**
+ * True when the account may use the service as far as the age gate is
+ * concerned: it answered the question and met the minimum, or the gate is
+ * relaxed by `AGE_GATE_ENFORCED=false`. An account whose answer was refused
+ * but could not be removed automatically (`ageRefusedAt`, pending the
+ * operator) is never allowed, flag or no flag: the refusal is final.
+ */
+export function isAgeConfirmed(user: AgeGateColumns): boolean {
+  // Both checks fail closed on an absent column: a row read through a select
+  // that forgot the gate columns is refused, never waved through.
+  if (user.ageRefusedAt != null) return false;
+  return user.ageConfirmedAt != null || !ageGateEnforced();
+}
+
+/**
+ * Routes an account that has not yet answered the age question may call
+ * (#981): read who it is, answer the question, leave, and the two writes that
+ * end a session on the device (push-token removal runs inside the logout
+ * sequence, account deletion is the person's right whatever their age).
+ * Everything else is 403 `age_confirmation_required` while
+ * `AGE_GATE_ENFORCED` is on. Matched on the method and the path below
+ * `/api/v1/auth` (`req.baseUrl` + `req.path`, so a trailing slash or a query
+ * string does not matter).
+ */
+export const AGE_GATE_EXEMPT: ReadonlySet<string> = new Set([
+  'GET /auth/me',
+  'POST /auth/age-confirmation',
+  'POST /auth/logout',
+  'DELETE /auth/me',
+  'DELETE /auth/push-token',
+]);
+
+/**
+ * Whether unanswered accounts are refused (#981). `AGE_GATE_ENFORCED=false`
+ * in the task definition keeps the API permissive while the mobile update
+ * that carries the age screen reaches devices: an older client would
+ * otherwise see 403 on every screen. Read on each call so a test can flip it.
+ * Unset means enforced: the flag exists to relax, never to forget.
+ */
+export function ageGateEnforced(): boolean {
+  return process.env.AGE_GATE_ENFORCED !== 'false';
+}
+
+/** The `METHOD /path` key of a request, with the `/api/v1` prefix and any trailing slash removed. */
+function routeKey(req: Request): string {
+  // Express routes case-insensitively, so the key is lower-cased too.
+  const full = `${req.baseUrl}${req.path}`.toLowerCase().replace(/^\/api\/v1/, '').replace(/\/+$/, '');
+  return `${req.method.toUpperCase()} ${full}`;
+}
+
+/**
+ * The age gate (#981): an authenticated row whose `ageConfirmedAt` is null may
+ * reach only the exempt routes. Throws `AgeConfirmationRequiredError` (403)
+ * otherwise; `authenticate` calls it after attaching `req.user`.
+ */
+export function assertAgeConfirmed(req: Request, user: AgeGateColumns): void {
+  if (isAgeConfirmed(user)) return;
+  if (AGE_GATE_EXEMPT.has(routeKey(req))) return;
+  throw new AgeConfirmationRequiredError();
+}
 
 /**
  * Extend Express Request to include user
@@ -23,6 +106,10 @@ declare global {
         role: string;
         subscriptionTier: SubscriptionTier;
         subscriptionExpiresAt: Date | null;
+        /** Null until the age question is answered (#981); see `assertAgeConfirmed`. */
+        ageConfirmedAt: Date | null;
+        /** Set when the answer was refused but the account awaits the operator (#981). */
+        ageRefusedAt: Date | null;
       };
     }
   }
@@ -48,6 +135,7 @@ export async function authenticate(
     // Check for dev token (development only)
     if (process.env.NODE_ENV === 'development' && token.startsWith('dev_')) {
       const devTokenData = token.substring(4);
+      let gated: AgeGateColumns;
       try {
         const decoded = JSON.parse(Buffer.from(devTokenData, 'base64').toString());
 
@@ -62,14 +150,7 @@ export async function authenticate(
         // because deletion nulls `workosUserId`.
         const user = await prisma.user.findUnique({
           where: { id: decoded.userId, deletedAt: null },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            subscriptionTier: true,
-            subscriptionExpiresAt: true,
-          },
+          select: AUTH_USER_SELECT,
         });
 
         if (!user) {
@@ -78,10 +159,13 @@ export async function authenticate(
 
         req.user = user;
         setLogContextUser(user.id);
-        return next();
+        // Outside the try: the gate's 403 must not be rewritten as 401.
+        gated = user;
       } catch (_e) {
         throw new UnauthorizedError('Invalid dev token');
       }
+      assertAgeConfirmed(req, gated);
+      return next();
     }
 
     // Verify token with WorkOS
@@ -96,14 +180,7 @@ export async function authenticate(
     // `sub` never matches again; `deletedAt: null` is belt and braces.
     const user = await prisma.user.findUnique({
       where: { workosUserId: workosUser.id, deletedAt: null },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        subscriptionTier: true,
-        subscriptionExpiresAt: true,
-      },
+      select: AUTH_USER_SELECT,
     });
 
     if (!user) {
@@ -114,6 +191,8 @@ export async function authenticate(
     // while this request is handled carries the caller's id, #617).
     req.user = user;
     setLogContextUser(user.id);
+    // The age gate (#981) runs last, so its 403 carries the caller's id in the log context.
+    assertAgeConfirmed(req, user);
     next();
   } catch (error) {
     next(error);

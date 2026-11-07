@@ -65,6 +65,9 @@ describe('Auth API', () => {
     role: 'PLAYER' as const,
     subscriptionTier: 'FREE' as const,
     subscriptionExpiresAt: null,
+    // The age gate (#981) fails closed on a missing column.
+    ageConfirmedAt: new Date('2026-01-01T00:00:00Z'),
+    ageRefusedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

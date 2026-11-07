@@ -25,6 +25,8 @@ type TestUser = {
   role: string;
   subscriptionTier: 'FREE' | 'PREMIUM' | 'LEAGUE';
   subscriptionExpiresAt: Date | null;
+  ageConfirmedAt: Date | null;
+  ageRefusedAt: Date | null;
 };
 
 function buildUser(overrides: Partial<TestUser> = {}): TestUser {
@@ -35,6 +37,8 @@ function buildUser(overrides: Partial<TestUser> = {}): TestUser {
     role: 'COACH',
     subscriptionTier: 'FREE',
     subscriptionExpiresAt: null,
+    ageConfirmedAt: new Date(),
+    ageRefusedAt: null,
     ...overrides,
   };
 }

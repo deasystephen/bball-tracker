@@ -34,6 +34,9 @@ export interface UserData {
   role: UserRole;
   emailVerified: boolean;
   profilePictureUrl: string | null;
+  /** The age gate (#981) fails closed on a missing column, so every factory row answers it. */
+  ageConfirmedAt: Date | null;
+  ageRefusedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +49,8 @@ export interface CreateUserOptions {
   role?: UserRole;
   emailVerified?: boolean;
   profilePictureUrl?: string | null;
+  ageConfirmedAt?: Date | null;
+  ageRefusedAt?: Date | null;
 }
 
 export function createUser(options: CreateUserOptions = {}): UserData {
@@ -60,6 +65,8 @@ export function createUser(options: CreateUserOptions = {}): UserData {
     role: options.role || 'PLAYER',
     emailVerified: options.emailVerified ?? true,
     profilePictureUrl: options.profilePictureUrl ?? null,
+    ageConfirmedAt: options.ageConfirmedAt === undefined ? new Date('2026-01-01T00:00:00Z') : options.ageConfirmedAt,
+    ageRefusedAt: options.ageRefusedAt ?? null,
     createdAt: now,
     updatedAt: now,
   };

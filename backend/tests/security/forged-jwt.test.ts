@@ -19,7 +19,8 @@ import { authenticate } from '../../src/api/auth/middleware';
 
 describe('authenticate with forged tokens', () => {
   let privateKey: KeyLike;
-  const user = { id: 'u1', email: 'victim@example.com', name: 'Victim', role: 'ADMIN', subscriptionTier: 'FREE', subscriptionExpiresAt: null };
+  // The age gate (#981) fails closed on a missing column, so the row carries it.
+  const user = { id: 'u1', email: 'victim@example.com', name: 'Victim', role: 'ADMIN', subscriptionTier: 'FREE', subscriptionExpiresAt: null, ageConfirmedAt: new Date(), ageRefusedAt: null };
 
   const run = async (token: string): Promise<{ req: Partial<Request>; next: jest.Mock }> => {
     const req: Partial<Request> = { headers: { authorization: `Bearer ${token}` } };

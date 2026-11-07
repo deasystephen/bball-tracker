@@ -198,7 +198,8 @@ eng-review amendments recorded there).
   `useAddPlayerToTeam` are gone. Result handling: `rostered: false` (existing account) toasts an
   explanation; `emails.player/guardian === false` toasts an error (never silent);
   `guardianReason` surfaces as info.
-- **Players under 13 (#982, part of #980 adults-only accounts).** Before the player-email field
+- **Players under 13 (#982, part of #980 adults-only accounts; the whole posture and the age screen
+  that enforces it server-side: `docs/architecture/children-and-age.md`).** Before the player-email field
   the form asks "Is this player 13 or older?" (Yes / No, `components/SortPills` with
   `accessibilityState.selected`, labelled "<question> <answer>" via `labelPrefix`). **No** hides the
   player-email field, clears anything typed in it, never sends a `playerEmail`, and makes the

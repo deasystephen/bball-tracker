@@ -49,6 +49,8 @@ import { isTokenUnexpired, tokenExpiresAt, tokenIssuedAt } from '../utils/token-
 const getBaseURL = (): string => getApiUrl();
 
 export const UNAUTHORIZED_MESSAGE = 'Unauthorized';
+/** The handshake refusal for an account that has not answered the age question (#981); a new token changes nothing. */
+export const AGE_CONFIRMATION_REQUIRED_MESSAGE = 'age_confirmation_required';
 export const SERVICE_UNAVAILABLE_MESSAGE = 'Service unavailable';
 /** Backend socket rate limiter rejected the handshake (audit #16). */
 export const RATE_LIMITED_MESSAGE = 'Rate limited';
@@ -226,6 +228,17 @@ export function isSocketRecovering(): boolean {
  */
 export async function handleConnectError(target: Socket, err: Error): Promise<void> {
   if (target !== socket) return;
+
+  if (err.message === AGE_CONFIRMATION_REQUIRED_MESSAGE) {
+    // Not a dead token: the account owes the age question. Tell the store so
+    // the redirect hook shows the screen, and stop here; the screen's success
+    // path resets the socket.
+    socketCrumb('recovery abandoned: age confirmation required', undefined, 'warning');
+    recovering = false;
+    const { user, updateUser } = useAuthStore.getState();
+    if (user && user.ageConfirmed !== false) updateUser({ ageConfirmed: false });
+    return;
+  }
 
   if (err.message === UNAUTHORIZED_MESSAGE) {
     if (authRefreshes >= MAX_AUTH_REFRESHES) {
