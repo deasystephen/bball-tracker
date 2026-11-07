@@ -20,7 +20,15 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
-  promoteAvatarUpload: jest.fn().mockResolvedValue(undefined),
+  promoteAvatarUpload: jest.fn().mockResolvedValue(true),
+  // The real wrapper's contract, over the mocked promote (#1005): promote, then write.
+  withPromotedAvatar: jest.fn(async (url: unknown, _caller: unknown, write: () => Promise<unknown>) => {
+    const { promoteAvatarUpload: promote } = jest.requireMock('../../src/services/upload-service') as {
+      promoteAvatarUpload: (u: unknown) => Promise<boolean>;
+    };
+    await promote(url);
+    return write();
+  }),
 }));
 import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload } from '../../src/services/upload-service';
 const mockPromote = promoteAvatarUpload as jest.Mock;
@@ -1959,6 +1967,63 @@ describe('InvitationService', () => {
       });
       expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
       expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+    });
+
+    it('middle case — a reused row known to have a photo: the upload is not promoted, only discarded (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = {
+        ...createPlayer({ email: 'jane@example.com' }),
+        workosUserId: null,
+        managedById: null,
+        profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/own.jpg',
+      };
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+
+      await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(mockPromote).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+    });
+
+    it('case 2 — a failure before the rows exist discards the promoted upload and rethrows (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      const failure = new Error('connection reset');
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(failure);
+
+      await expect(
+        InvitationService.addRosterPlayer(
+          team.id,
+          { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+          coach.id
+        )
+      ).rejects.toThrow();
+
+      expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(mockedMailerSend).not.toHaveBeenCalled();
+    });
+
+    it('case 2 — nothing promoted (external URL) means nothing to discard on failure (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      mockPromote.mockResolvedValueOnce(false);
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        InvitationService.addRosterPlayer(
+          team.id,
+          { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: 'https://workos.example/p.jpg' },
+          coach.id
+        )
+      ).rejects.toThrow();
+
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
     it('middle case — no photo supplied means no photo write and no discard (#618)', async () => {

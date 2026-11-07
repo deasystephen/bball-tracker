@@ -55,6 +55,18 @@ describe('upload_expired (#1005)', () => {
     expect(es).toBe('La subida de esa foto caducó. Vuelve a elegirla.');
   });
 
+  it('reads apiError.code first, then the lifted code (both shapes)', () => {
+    // Only the body, as on an error that was never lifted
+    expect(uploadErrorMessageKey({ apiError: { code: UPLOAD_EXPIRED_CODE, status: 400 } })).toBe('avatar.uploadExpired');
+    // Only the lifted code
+    expect(uploadErrorMessageKey({ code: UPLOAD_EXPIRED_CODE })).toBe('avatar.uploadExpired');
+    // The body wins over axios' own code
+    expect(uploadErrorMessageKey({ apiError: { code: UPLOAD_EXPIRED_CODE }, code: 'ERR_BAD_REQUEST' })).toBe(
+      'avatar.uploadExpired'
+    );
+    expect(uploadErrorMessageKey({ apiError: { code: 'forbidden' }, code: UPLOAD_EXPIRED_CODE })).toBeUndefined();
+  });
+
   it('leaves other server refusals to their own message', () => {
     const forbidden = apiError(403, { error: 'You do not have permission', code: 'forbidden' });
     expect(uploadErrorMessageKey(forbidden)).toBeUndefined();

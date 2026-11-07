@@ -150,13 +150,12 @@ export function assertOwnUploadUrl(imageUrl: string | null | undefined, callerId
 export async function deleteAvatar(imageUrl: string): Promise<void> {
   const url = new URL(imageUrl);
   const key = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
+  await deleteObjectByKey(key);
+}
 
-  const command = new DeleteObjectCommand({
-    Bucket: BUCKET_NAME,
-    Key: key,
-  });
-
-  await s3Client.send(command);
+/** Delete one object of the avatars bucket by key. Throws on an S3 error. */
+async function deleteObjectByKey(key: string): Promise<void> {
+  await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
 }
 
 /** What happened to an avatar object a caller asked to remove. */
@@ -223,7 +222,7 @@ export async function deleteAvatarObject(imageUrl: string | null | undefined): P
   }
 
   try {
-    await deleteAvatar(imageUrl as string);
+    await deleteObjectByKey(issued.key);
     return 'deleted';
   } catch (err) {
     logger.warn('Failed to delete avatar object', {
@@ -267,12 +266,13 @@ export async function discardOwnAvatar(
 ): Promise<void> {
   // Same ownership rule as the write-time gate, on the parsed path (see
   // `isOwnUploadUrl`); a URL outside our bucket is not ours to delete.
-  if (!isManagedAvatarUrl(imageUrl) || !isOwnUploadUrl(imageUrl, userId)) {
+  const issued = issuedAvatarKey(imageUrl);
+  if ('reason' in issued || !isOwnUploadUrl(imageUrl, userId)) {
     return;
   }
 
   try {
-    await deleteAvatar(imageUrl);
+    await deleteObjectByKey(issued.key);
   } catch (err) {
     logger.warn('Failed to discard unreferenced avatar object (ignored)', {
       imageUrl,
@@ -281,66 +281,79 @@ export async function discardOwnAvatar(
   }
 }
 
-/** The SDK error's name / HTTP status, whatever shape the rejection takes. */
-function s3ErrorInfo(err: unknown): { name?: string; status?: number } {
-  if (typeof err !== 'object' || err === null) return {};
-  const e = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
-  return {
-    name: typeof e.name === 'string' ? e.name : undefined,
-    status: typeof e.$metadata?.httpStatusCode === 'number' ? e.$metadata.httpStatusCode : undefined,
-  };
+/** The S3 error code of an SDK rejection (`name`, or `Code` on some shapes). */
+function s3ErrorCode(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const e = err as { name?: unknown; Code?: unknown };
+  if (typeof e.Code === 'string') return e.Code;
+  return typeof e.name === 'string' ? e.name : undefined;
 }
 
 /**
  * Mark an upload as saved: remove its `pending` tag so the lifecycle rule
- * never expires it (#1005). Every write that stores a `profilePictureUrl`
- * calls this after `assertOwnUploadUrl` and BEFORE the database write.
+ * never expires it (#1005). Callers go through `withPromotedAvatar`, which
+ * runs this after `assertOwnUploadUrl` and BEFORE the database write.
+ * Returns `true` when an object of ours was promoted, `false` for nothing to
+ * do (an external URL, such as a WorkOS photo, or an empty value).
  *
- * - External URLs (WorkOS photos and the like) and empty values: nothing to do.
- * - The object is gone (`NoSuchKey`, the lifecycle expired it): throws
- *   `UploadExpiredError` (400 `upload_expired`), so a dead URL is never stored.
- * - `AccessDenied` fails OPEN: logged at error and reported to Sentry, and the
- *   write goes ahead with the URL. This covers the window where the code is
- *   live before the task role's `s3:DeleteObjectTagging` grant (the apply goes
- *   first; this is the safety net). The object then stays tagged and expires
- *   in 3 days, which the error makes visible.
- * - Anything else (network, throttling) throws, and the route answers 5xx:
- *   storing a URL that will silently expire is worse than a failed save.
- *
- * A write that fails after a successful promotion leaves an untagged,
- * unreferenced object; that is accepted (it is only kept, never exposed).
+ * - `NoSuchKey` (the lifecycle expired it): throws `UploadExpiredError`
+ *   (400 `upload_expired`), so a dead URL is never stored. Only that code:
+ *   S3 answers a missing key with `NoSuchKey` only when the role may list the
+ *   bucket (`s3:ListBucket`, `infra/ecs.tf`); without it, it is a 403.
+ * - Anything else (`AccessDenied`, `NoSuchBucket`, network, throttling) is a
+ *   fault, not the user's: logged at error, captured to Sentry and rethrown,
+ *   so the route answers 5xx and writes nothing. There is no fail-open: the
+ *   upload itself needs the tagging grant, so the IAM apply always precedes
+ *   the deploy, and storing a URL that silently expires in 3 days is worse
+ *   than a failed save.
  */
-export async function promoteAvatarUpload(imageUrl: string | null | undefined): Promise<void> {
+export async function promoteAvatarUpload(imageUrl: string | null | undefined): Promise<boolean> {
   const issued = issuedAvatarKey(imageUrl);
   if ('reason' in issued) {
     if (issued.reason === 'not_managed') {
-      return;
+      return false;
     }
     // `assertOwnUploadUrl` has already refused this shape on every write path.
     throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
   }
-  const { key } = issued;
 
   try {
-    await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
+    await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: issued.key }));
+    return true;
   } catch (err) {
-    const { name, status } = s3ErrorInfo(err);
-    if (name === 'NoSuchKey' || status === 404) {
+    if (s3ErrorCode(err) === 'NoSuchKey') {
       throw new UploadExpiredError();
     }
-    if (name === 'AccessDenied' || status === 403) {
-      logger.error('Avatar promotion denied; stored the URL still pending (expires in 3 days)', {
-        operation: 'DeleteObjectTagging',
-        error: err instanceof Error ? err.message : String(err),
-      });
-      captureException(err, { flow: 'avatar-promote' });
-      return;
-    }
-    // The route logs the 5xx too; this line names the S3 operation.
-    logger.warn('Avatar promotion failed', {
+    logger.error('Avatar promotion failed', {
       operation: 'DeleteObjectTagging',
+      code: s3ErrorCode(err),
       error: err instanceof Error ? err.message : String(err),
     });
+    captureException(err, { flow: 'avatar-promote' });
+    throw err;
+  }
+}
+
+/**
+ * Promote `imageUrl` (see `promoteAvatarUpload`), then run `write`, the
+ * database write that stores it. When `write` throws (P2002, P2025, a
+ * tombstone, a refused transaction…) the promoted upload is discarded, so a
+ * failed save never leaves an untagged, unreferenced object that no lifecycle
+ * rule would ever expire. `callerId` is the uploader: the discard is limited
+ * to the caller's own prefix, the same rule as `assertOwnUploadUrl`.
+ */
+export async function withPromotedAvatar<T>(
+  imageUrl: string | null | undefined,
+  callerId: string,
+  write: () => Promise<T>
+): Promise<T> {
+  const promoted = await promoteAvatarUpload(imageUrl);
+  try {
+    return await write();
+  } catch (err) {
+    if (promoted) {
+      await discardOwnAvatar(imageUrl, callerId);
+    }
     throw err;
   }
 }

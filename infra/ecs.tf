@@ -168,6 +168,18 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
           "s3:DeleteObjectTagging"
         ]
         Resource = "${aws_s3_bucket.avatars.arn}/*"
+      },
+      {
+        # Without ListBucket, S3 answers a request for a missing key with 403
+        # AccessDenied instead of 404 NoSuchKey, so an expired upload would
+        # look like a permissions fault and never reach 400 `upload_expired`
+        # (#1005). Listing only, and only under avatars/.
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.avatars.arn
+        Condition = {
+          StringLike = { "s3:prefix" = ["avatars/*"] }
+        }
       }
     ]
   })

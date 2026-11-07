@@ -34,6 +34,7 @@ jest.mock('../../src/utils/permissions', () => ({
   hasTeamPermission: jest.fn().mockResolvedValue(true),
 }));
 
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
@@ -50,6 +51,9 @@ const AUTH = { Authorization: 'Bearer token' };
 const EXPIRED_BODY = { error: 'That photo upload expired. Please choose it again.', code: 'upload_expired' };
 
 const taggedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObjectTagging').map((c) => c.input.Key);
+const deletedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObject').map((c) => c.input.Key);
+const prismaError = (code: string): Error =>
+  new Prisma.PrismaClientKnownRequestError(code, { code, clientVersion: 'test' });
 const expireUpload = (): void => {
   mockS3Send.mockRejectedValueOnce(s3Error('NoSuchKey', 404, 'The specified key does not exist.'));
 };
@@ -113,6 +117,18 @@ describe('POST /api/v1/players', () => {
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
   });
 
+  it('discards the promoted upload when the create fails (P2002), so no untagged orphan survives', async () => {
+    (mockPrisma.user.create as jest.Mock).mockRejectedValue(prismaError('P2002'));
+    const res = await request(app)
+      .post('/api/v1/players')
+      .set(AUTH)
+      .send({ name: 'Kid', email: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(409);
+    expect(taggedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toEqual([KEY]);
+  });
+
   it('skips promotion for an external URL', async () => {
     const res = await request(app)
       .post('/api/v1/players')
@@ -158,6 +174,19 @@ describe('PATCH /api/v1/players/:id', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual(EXPIRED_BODY);
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('discards the promoted upload when the update hits a tombstone (P2025 → 404)', async () => {
+    arm(null);
+    (mockPrisma.user.update as jest.Mock).mockRejectedValue(prismaError('P2025'));
+    const res = await request(app)
+      .patch(`/api/v1/players/${PLAYER_ID}`)
+      .set(AUTH)
+      .send({ profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(404);
+    expect(taggedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toEqual([KEY]);
   });
 
   it('skips promotion for an external URL and for the URL already stored', async () => {
@@ -226,6 +255,31 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual(EXPIRED_BODY);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('case 1: discards the promoted upload when the transaction fails', async () => {
+    (mockPrisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('connection reset'));
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(500);
+    expect(taggedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toEqual([KEY]);
+  });
+
+  it('answers 5xx and writes nothing when S3 denies the promotion (no fail-open)', async () => {
+    mockS3Send.mockRejectedValueOnce(s3Error('AccessDenied', 403));
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBeUndefined();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(deletedKeys()).toHaveLength(0);
   });
 
   it('skips promotion for an external URL', async () => {

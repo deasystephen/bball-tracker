@@ -5,7 +5,15 @@
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
-  promoteAvatarUpload: jest.fn().mockResolvedValue(undefined),
+  promoteAvatarUpload: jest.fn().mockResolvedValue(true),
+  // The real wrapper's contract, over the mocked promote (#1005): promote, then write.
+  withPromotedAvatar: jest.fn(async (url: unknown, _caller: unknown, write: () => Promise<unknown>) => {
+    const { promoteAvatarUpload: promote } = jest.requireMock('../../src/services/upload-service') as {
+      promoteAvatarUpload: (u: unknown) => Promise<boolean>;
+    };
+    await promote(url);
+    return write();
+  }),
 }));
 
 // Only reached by the deletePlayer cases that run the real
@@ -655,7 +663,9 @@ describe('PlayerService', () => {
 
       await PlayerService.updatePlayer(player.id, { profilePictureUrl: url }, player.id);
 
-      expect(mockPromote).not.toHaveBeenCalled();
+      // The write still goes through the wrapper, with nothing to promote
+      expect(mockPromote).not.toHaveBeenCalledWith(url);
+      expect(mockPromote).toHaveBeenCalledWith(null);
     });
 
     it('writes nothing when the new upload has expired (400 upload_expired, #1005)', async () => {

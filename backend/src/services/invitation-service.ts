@@ -37,7 +37,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload } from './upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload, withPromotedAvatar } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -472,686 +472,688 @@ export class InvitationService {
         // Every lock wait below is bounded by the pool-wide lock_timeout
         // (models/pool-config.ts#DB_LOCK_TIMEOUT_MS, #908 → #944).
         prisma.$transaction(async (tx) => {
-          const accepted = await tx.teamInvitation.findFirst({
-            where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
-            select: { id: true },
-          });
-          if (accepted) {
-            throw new BadRequestError('Player already has access to this team');
-          }
-
-          const latest = await this.latestAfterCooldown(
-            tx,
-            { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
-            recipientEmail
-          );
-
-          // A bare resend ({ playerId, supersede: true }) must not wipe the
-          // jersey/position/message the coach set at add time: for invite-only
-          // players (case 3) the roster row is born from the live invitation at
-          // accept, so a superseding row created without them would roster the
-          // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
-          // caller omits inherit from the row being superseded; explicitly
-          // provided values still win. The source is the newest row for the pair
-          // and only when it is PENDING (the row the updateMany below expires;
-          // at most one exists and nothing is created after it) or EXPIRED (a
-          // lapsed invitation the player's dead-link tap already flipped, #678).
-          // A newest row that is CANCELLED or REJECTED means the coach or the
-          // player ended it, so nothing older is revived.
-          const superseded =
-            latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
-
-          const { count: supersededCount } = await tx.teamInvitation.updateMany({
-            where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
-            data: { status: 'EXPIRED' },
-          });
-          if (supersededCount > 0) {
-            logger.info('Invitation superseded', {
-              teamId: data.teamId,
-              playerId: data.playerId,
-              invitedById: data.invitedById,
-              supersededCount,
+            const accepted = await tx.teamInvitation.findFirst({
+              where: { teamId: data.teamId, playerId: data.playerId, status: 'ACCEPTED' },
+              select: { id: true },
             });
-          }
+            if (accepted) {
+              throw new BadRequestError('Player already has access to this team');
+            }
 
-          return tx.teamInvitation.create({
-            data: {
-              ...data,
-              jerseyNumber:
-                data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
-              position: data.position === undefined ? superseded?.position : data.position,
-              message: data.message === undefined ? superseded?.message : data.message,
-            },
-            select: INVITATION_SELECT,
-          });
-        }),
-      PENDING_INVITATION_CONFLICT,
-      PENDING_INVITATION_INDEX
-    );
-  }
+            const latest = await this.latestAfterCooldown(
+              tx,
+              { teamId: data.teamId, playerId: data.playerId, invitedById: data.invitedById },
+              recipientEmail
+            );
 
-  /**
-   * The resend cooldown (#715), shared by both expire-and-recreate paths
-   * (supersede, and Add Player case 2 re-adding a known address). Reads the
-   * newest invitation row for the pair, of ANY status so a Cancel between
-   * resends does not reset the clock, and refuses with 429 when it is younger
-   * than INVITATION_RESEND_COOLDOWN_MS and went to the address the player
-   * still has (a row from before #715 has no hash and counts as the same
-   * address). No current address means no email goes out, so no cooldown.
-   * Returns the row so the caller can inherit from it. The window itself is
-   * `utils/resend-cooldown.ts`, shared with guardian invitations (#420).
-   */
-  private static async latestAfterCooldown(
-    tx: Prisma.TransactionClient,
-    ids: { teamId: string; playerId: string; invitedById: string },
-    recipientEmail: string | null
-  ): Promise<LatestInvitation | null> {
-    const latest = await tx.teamInvitation.findFirst({
-      where: { teamId: ids.teamId, playerId: ids.playerId },
-      orderBy: { createdAt: 'desc' },
-      select: LATEST_INVITATION_SELECT,
-    });
-    if (!latest || !recipientEmail) {
+            // A bare resend ({ playerId, supersede: true }) must not wipe the
+            // jersey/position/message the coach set at add time: for invite-only
+            // players (case 3) the roster row is born from the live invitation at
+            // accept, so a superseding row created without them would roster the
+            // player with no jersey (jersey-loss bug, 2026-08-29). Fields the
+            // caller omits inherit from the row being superseded; explicitly
+            // provided values still win. The source is the newest row for the pair
+            // and only when it is PENDING (the row the updateMany below expires;
+            // at most one exists and nothing is created after it) or EXPIRED (a
+            // lapsed invitation the player's dead-link tap already flipped, #678).
+            // A newest row that is CANCELLED or REJECTED means the coach or the
+            // player ended it, so nothing older is revived.
+            const superseded =
+              latest && (latest.status === 'PENDING' || latest.status === 'EXPIRED') ? latest : null;
+
+            const { count: supersededCount } = await tx.teamInvitation.updateMany({
+              where: { teamId: data.teamId, playerId: data.playerId, status: 'PENDING' },
+              data: { status: 'EXPIRED' },
+            });
+            if (supersededCount > 0) {
+              logger.info('Invitation superseded', {
+                teamId: data.teamId,
+                playerId: data.playerId,
+                invitedById: data.invitedById,
+                supersededCount,
+              });
+            }
+
+            return tx.teamInvitation.create({
+              data: {
+                ...data,
+                jerseyNumber:
+                  data.jerseyNumber === undefined ? superseded?.jerseyNumber : data.jerseyNumber,
+                position: data.position === undefined ? superseded?.position : data.position,
+                message: data.message === undefined ? superseded?.message : data.message,
+              },
+              select: INVITATION_SELECT,
+            });
+          }),
+        PENDING_INVITATION_CONFLICT,
+        PENDING_INVITATION_INDEX
+      );
+    }
+
+    /**
+     * The resend cooldown (#715), shared by both expire-and-recreate paths
+     * (supersede, and Add Player case 2 re-adding a known address). Reads the
+     * newest invitation row for the pair, of ANY status so a Cancel between
+     * resends does not reset the clock, and refuses with 429 when it is younger
+     * than INVITATION_RESEND_COOLDOWN_MS and went to the address the player
+     * still has (a row from before #715 has no hash and counts as the same
+     * address). No current address means no email goes out, so no cooldown.
+     * Returns the row so the caller can inherit from it. The window itself is
+     * `utils/resend-cooldown.ts`, shared with guardian invitations (#420).
+     */
+    private static async latestAfterCooldown(
+      tx: Prisma.TransactionClient,
+      ids: { teamId: string; playerId: string; invitedById: string },
+      recipientEmail: string | null
+    ): Promise<LatestInvitation | null> {
+      const latest = await tx.teamInvitation.findFirst({
+        where: { teamId: ids.teamId, playerId: ids.playerId },
+        orderBy: { createdAt: 'desc' },
+        select: LATEST_INVITATION_SELECT,
+      });
+      if (!latest || !recipientEmail) {
+        return latest;
+      }
+      const sameRecipient =
+        latest.recipientHash === null || latest.recipientHash === hashRecipient(recipientEmail);
+      if (sameRecipient) {
+        assertResendCooldown(latest.createdAt, 'player', {
+          onRefused: (retryAfterSeconds) =>
+            logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds }),
+        });
+      }
       return latest;
     }
-    const sameRecipient =
-      latest.recipientHash === null || latest.recipientHash === hashRecipient(recipientEmail);
-    if (sameRecipient) {
-      assertResendCooldown(latest.createdAt, 'player', {
-        onRefused: (retryAfterSeconds) =>
-          logger.info('Invitation resend refused (cooldown)', { ...ids, retryAfterSeconds }),
+
+    /**
+     * The supersede guard trio: an Active (claimed + rostered) member is
+     * refused; otherwise a live PENDING row is expired when superseding, and a
+     * rostered case-2 player is a legitimate target.
+     */
+    private static async assertSupersedeTarget(
+      teamId: string,
+      player: { id: string; workosUserId: string | null },
+      supersede: boolean | undefined
+    ): Promise<void> {
+      if (supersede) {
+        await this.assertNotActiveMember(teamId, player.id, player.workosUserId);
+      }
+      await this.assertInvitable(teamId, player.id, {
+        supersede,
+        allowExistingMember: supersede,
       });
     }
-    return latest;
-  }
 
-  /**
-   * The supersede guard trio: an Active (claimed + rostered) member is
-   * refused; otherwise a live PENDING row is expired when superseding, and a
-   * rostered case-2 player is a legitimate target.
-   */
-  private static async assertSupersedeTarget(
-    teamId: string,
-    player: { id: string; workosUserId: string | null },
-    supersede: boolean | undefined
-  ): Promise<void> {
-    if (supersede) {
-      await this.assertNotActiveMember(teamId, player.id, player.workosUserId);
+    /**
+     * A unique-email race lost inside a create transaction: verify the error is
+     * the P2002, refetch the winner row, rethrow when there is none.
+     */
+    private static async resolveEmailRaceWinner(
+      email: string,
+      err: unknown
+    ): Promise<Prisma.UserGetPayload<Record<string, never>>> {
+      if (!isUniqueViolation(err)) {
+        throw err;
+      }
+      const racedUser = await prisma.user.findFirst({
+        where: { email: emailEquals(email) },
+      });
+      if (!racedUser) {
+        throw err;
+      }
+      return racedUser;
     }
-    await this.assertInvitable(teamId, player.id, {
-      supersede,
-      allowExistingMember: supersede,
-    });
-  }
 
-  /**
-   * A unique-email race lost inside a create transaction: verify the error is
-   * the P2002, refetch the winner row, rethrow when there is none.
-   */
-  private static async resolveEmailRaceWinner(
-    email: string,
-    err: unknown
-  ): Promise<Prisma.UserGetPayload<Record<string, never>>> {
-    if (!isUniqueViolation(err)) {
-      throw err;
+    /**
+     * A claimed account that is already a member is Active — inviting it again
+     * (supersede path) is a coach mistake, not a resend.
+     */
+    private static async assertNotActiveMember(
+      teamId: string,
+      playerId: string,
+      workosUserId: string | null
+    ): Promise<void> {
+      if (!workosUserId) {
+        return;
+      }
+      const member = await prisma.teamMember.findUnique({
+        where: { teamId_playerId: { teamId, playerId } },
+      });
+      if (member) {
+        throw new BadRequestError('Player already has access to this team');
+      }
     }
-    const racedUser = await prisma.user.findFirst({
-      where: { email: emailEquals(email) },
-    });
-    if (!racedUser) {
-      throw err;
-    }
-    return racedUser;
-  }
 
-  /**
-   * A claimed account that is already a member is Active — inviting it again
-   * (supersede path) is a coach mistake, not a resend.
-   */
-  private static async assertNotActiveMember(
-    teamId: string,
-    playerId: string,
-    workosUserId: string | null
-  ): Promise<void> {
-    if (!workosUserId) {
-      return;
-    }
-    const member = await prisma.teamMember.findUnique({
-      where: { teamId_playerId: { teamId, playerId } },
-    });
-    if (member) {
-      throw new BadRequestError('Player already has access to this team');
-    }
-  }
-
-  /**
-   * Reject when the player is already rostered or already has a live PENDING
-   * invitation. A PENDING row whose expiresAt has passed is not a blocker:
-   * mark it EXPIRED and carry on (audit #23 — nothing else ever flips expired
-   * rows, so dedupe must). Under `supersede` the stale row is left for the
-   * supersede transaction to expire (#678).
-   *
-   * Options:
-   * - `supersede`: a live PENDING invitation is expired instead of throwing —
-   *   the "Resend" path (unification spec D4-as-amended).
-   * - `allowExistingMember`: skip the roster check — the unified Add Player
-   *   flow creates the membership and the invitation together, so the member
-   *   row legitimately exists (or is about to).
-   */
-  private static async assertInvitable(
-    teamId: string,
-    playerId: string,
-    options: { supersede?: boolean; allowExistingMember?: boolean } = {}
-  ): Promise<void> {
-    if (!options.allowExistingMember) {
-      const existingMember = await prisma.teamMember.findUnique({
-        where: {
-          teamId_playerId: {
-            teamId,
-            playerId,
+    /**
+     * Reject when the player is already rostered or already has a live PENDING
+     * invitation. A PENDING row whose expiresAt has passed is not a blocker:
+     * mark it EXPIRED and carry on (audit #23 — nothing else ever flips expired
+     * rows, so dedupe must). Under `supersede` the stale row is left for the
+     * supersede transaction to expire (#678).
+     *
+     * Options:
+     * - `supersede`: a live PENDING invitation is expired instead of throwing —
+     *   the "Resend" path (unification spec D4-as-amended).
+     * - `allowExistingMember`: skip the roster check — the unified Add Player
+     *   flow creates the membership and the invitation together, so the member
+     *   row legitimately exists (or is about to).
+     */
+    private static async assertInvitable(
+      teamId: string,
+      playerId: string,
+      options: { supersede?: boolean; allowExistingMember?: boolean } = {}
+    ): Promise<void> {
+      if (!options.allowExistingMember) {
+        const existingMember = await prisma.teamMember.findUnique({
+          where: {
+            teamId_playerId: {
+              teamId,
+              playerId,
+            },
           },
-        },
-      });
+        });
 
-      if (existingMember) {
-        throw new BadRequestError('Player is already on this team');
-      }
-    }
-
-    const existingInvitation = await prisma.teamInvitation.findFirst({
-      where: {
-        teamId,
-        playerId,
-        status: 'PENDING',
-      },
-    });
-
-    if (existingInvitation) {
-      const live = existingInvitation.expiresAt.getTime() > Date.now();
-      if (live && !options.supersede) {
-        throw new BadRequestError(PENDING_INVITATION_CONFLICT);
-      }
-      if (!live && !options.supersede) {
-        // Stale row on a plain create: lazy-expire it here (the old link is
-        // already dead and a plain create inherits nothing from it).
-        await this.markExpired(existingInvitation);
-      }
-      // supersede (live or stale): left PENDING — createInvitationRowSuperseding
-      // expires it in the same transaction as the replacement (red-team RT2),
-      // after reading the jersey/position/message it inherits (#678), and logs
-      // "Invitation superseded".
-    }
-  }
-
-  /**
-   * List invitations with optional filters
-   * @param params Query parameters
-   * @param userId User ID (for authorization)
-   */
-  static async listInvitations(
-    params: InvitationQueryParams,
-    userId: string
-  ): Promise<InvitationList> {
-    const { status, teamId, playerId, limit, offset } = params;
-
-    // Build where clause
-    const where: Prisma.TeamInvitationWhereInput = {};
-
-    if (status) {
-      where.status = status;
-    }
-
-    // Staff who can manage the roster see every invitation for the team
-    // (pending, rejected, expired, ...). Anyone else with team access (a
-    // rostered player) is scoped to their own rows, as before (audit #23).
-    let scopeToCaller = true;
-
-    if (teamId) {
-      // Verify user has access to this team
-      const hasAccess = await canAccessTeam(userId, teamId);
-      if (!hasAccess) {
-        throw new ForbiddenError('You do not have access to this team\'s invitations');
-      }
-
-      where.teamId = teamId;
-      scopeToCaller = !(await hasTeamPermission(userId, teamId, 'canManageRoster'));
-    }
-
-    if (playerId) {
-      // Another player's invitations are visible to system ADMINs, to the
-      // player's guardians (PARENT role), to roster managers of the requested
-      // team, or — with no teamId — to roster managers of a team that player
-      // is on, scoped to those teams. The self-selected global COACH role used
-      // to be enough, which let any user enumerate anyone's invitations (role
-      // matrix B2.4).
-      if (
-        playerId !== userId &&
-        !(await isSystemAdmin(userId)) &&
-        !(await isGuardianOf(userId, playerId))
-      ) {
-        if (teamId) {
-          if (scopeToCaller) {
-            throw new ForbiddenError('You can only view your own invitations');
-          }
-        } else {
-          const { manageableTeamIds } = await getPlayerTeamAccess(userId, playerId);
-          if (manageableTeamIds.length === 0) {
-            throw new ForbiddenError('You can only view your own invitations');
-          }
-          where.teamId = { in: manageableTeamIds };
+        if (existingMember) {
+          throw new BadRequestError('Player is already on this team');
         }
       }
 
-      where.playerId = playerId;
-    } else if (scopeToCaller) {
-      // If no playerId specified, default to the caller's own invitations plus
-      // those addressed to the caller's children (guardian).
-      const childIds = await GuardianService.getChildIds(userId);
-      where.playerId = childIds.length > 0 ? { in: [userId, ...childIds] } : userId;
-    }
-
-    // Get total count and invitations in parallel
-    const [total, invitations] = await Promise.all([
-      prisma.teamInvitation.count({ where }),
-      prisma.teamInvitation.findMany({
-        where,
-        select: INVITATION_SELECT,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset,
-      }),
-    ]);
-
-    return {
-      invitations,
-      pagination: {
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    };
-  }
-
-  /**
-   * Get an invitation by ID
-   * @param invitationId Invitation ID
-   * @param userId User ID (for authorization)
-   */
-  static async getInvitationById(
-    invitationId: string,
-    userId: string
-  ): Promise<InvitationDetailView> {
-    const invitation = await prisma.teamInvitation.findUnique({
-      where: { id: invitationId },
-      select: INVITATION_SELECT,
-    });
-
-    if (!invitation) {
-      throw new NotFoundError('Invitation not found');
-    }
-
-    // Verify user has access (team access or is the invited player)
-    const hasAccess = await canAccessTeam(userId, invitation.teamId);
-    const isPlayer = invitation.playerId === userId;
-
-    if (!hasAccess && !isPlayer) {
-      throw new ForbiddenError('You do not have access to this invitation');
-    }
-
-    // Roster-email rule (#679): the invited player and roster managers see
-    // player.email; every other team-access caller, guardians included, gets
-    // the player without it, as on GET /teams/:id, GET /games/:id and the RSVP
-    // payloads. Only the email goes; deletedAt (#642) stays.
-    const mayReadPlayerEmail =
-      isPlayer || (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
-    if (mayReadPlayerEmail) {
-      return invitation;
-    }
-    return { ...invitation, player: omitRosterManagerFields(invitation.player) };
-  }
-
-  /**
-   * Accept an invitation
-   * @param invitationId Invitation ID
-   * @param userId User ID (must be the invited player)
-   */
-  static async acceptInvitation(
-    invitationId: string,
-    userId: string
-  ): Promise<AcceptInvitationResult> {
-    const invitation = await prisma.teamInvitation.findUnique({
-      where: { id: invitationId },
-    });
-
-    if (!invitation) {
-      throw new NotFoundError('Invitation not found');
-    }
-
-    // Verify user is the invited player, or a guardian of the invited player
-    if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
-      throw new ForbiddenError('You can only accept your own invitations');
-    }
-
-    // Check invitation status
-    if (invitation.status !== 'PENDING') {
-      throw new BadRequestError(
-        `Cannot accept invitation with status: ${invitation.status}`
-      );
-    }
-
-    // Check if invitation has expired
-    if (new Date() > invitation.expiresAt) {
-      await this.markExpired(invitation);
-      throw new BadRequestError('This invitation has expired');
-    }
-
-    // Use transaction to ensure atomicity
-    const result = await prisma.$transaction(async (tx) => {
-      // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
-      // accepts (double-tap, web + app) race here; the loser sees 0 rows and
-      // gets a 400 instead of a P2002 500 from the TeamMember insert (audit #58).
-      const updatedInvitation = await this.transitionPending(
-        tx,
-        invitationId,
-        { status: 'ACCEPTED', acceptedAt: new Date() },
-        'accept',
-        INVITATION_SCALAR_SELECT
-      );
-
-      // Add player to team. Players added through the unified Add Player flow
-      // (unification spec, case 2) are rostered at creation, so the membership
-      // may already exist — accept then only flips the invitation; the
-      // roster row (and any coach-set jersey/position) is left untouched.
-      const teamMember = await tx.teamMember.upsert({
+      const existingInvitation = await prisma.teamInvitation.findFirst({
         where: {
-          teamId_playerId: {
+          teamId,
+          playerId,
+          status: 'PENDING',
+        },
+      });
+
+      if (existingInvitation) {
+        const live = existingInvitation.expiresAt.getTime() > Date.now();
+        if (live && !options.supersede) {
+          throw new BadRequestError(PENDING_INVITATION_CONFLICT);
+        }
+        if (!live && !options.supersede) {
+          // Stale row on a plain create: lazy-expire it here (the old link is
+          // already dead and a plain create inherits nothing from it).
+          await this.markExpired(existingInvitation);
+        }
+        // supersede (live or stale): left PENDING — createInvitationRowSuperseding
+        // expires it in the same transaction as the replacement (red-team RT2),
+        // after reading the jersey/position/message it inherits (#678), and logs
+        // "Invitation superseded".
+      }
+    }
+
+    /**
+     * List invitations with optional filters
+     * @param params Query parameters
+     * @param userId User ID (for authorization)
+     */
+    static async listInvitations(
+      params: InvitationQueryParams,
+      userId: string
+    ): Promise<InvitationList> {
+      const { status, teamId, playerId, limit, offset } = params;
+
+      // Build where clause
+      const where: Prisma.TeamInvitationWhereInput = {};
+
+      if (status) {
+        where.status = status;
+      }
+
+      // Staff who can manage the roster see every invitation for the team
+      // (pending, rejected, expired, ...). Anyone else with team access (a
+      // rostered player) is scoped to their own rows, as before (audit #23).
+      let scopeToCaller = true;
+
+      if (teamId) {
+        // Verify user has access to this team
+        const hasAccess = await canAccessTeam(userId, teamId);
+        if (!hasAccess) {
+          throw new ForbiddenError('You do not have access to this team\'s invitations');
+        }
+
+        where.teamId = teamId;
+        scopeToCaller = !(await hasTeamPermission(userId, teamId, 'canManageRoster'));
+      }
+
+      if (playerId) {
+        // Another player's invitations are visible to system ADMINs, to the
+        // player's guardians (PARENT role), to roster managers of the requested
+        // team, or — with no teamId — to roster managers of a team that player
+        // is on, scoped to those teams. The self-selected global COACH role used
+        // to be enough, which let any user enumerate anyone's invitations (role
+        // matrix B2.4).
+        if (
+          playerId !== userId &&
+          !(await isSystemAdmin(userId)) &&
+          !(await isGuardianOf(userId, playerId))
+        ) {
+          if (teamId) {
+            if (scopeToCaller) {
+              throw new ForbiddenError('You can only view your own invitations');
+            }
+          } else {
+            const { manageableTeamIds } = await getPlayerTeamAccess(userId, playerId);
+            if (manageableTeamIds.length === 0) {
+              throw new ForbiddenError('You can only view your own invitations');
+            }
+            where.teamId = { in: manageableTeamIds };
+          }
+        }
+
+        where.playerId = playerId;
+      } else if (scopeToCaller) {
+        // If no playerId specified, default to the caller's own invitations plus
+        // those addressed to the caller's children (guardian).
+        const childIds = await GuardianService.getChildIds(userId);
+        where.playerId = childIds.length > 0 ? { in: [userId, ...childIds] } : userId;
+      }
+
+      // Get total count and invitations in parallel
+      const [total, invitations] = await Promise.all([
+        prisma.teamInvitation.count({ where }),
+        prisma.teamInvitation.findMany({
+          where,
+          select: INVITATION_SELECT,
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          skip: offset,
+        }),
+      ]);
+
+      return {
+        invitations,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total,
+        },
+      };
+    }
+
+    /**
+     * Get an invitation by ID
+     * @param invitationId Invitation ID
+     * @param userId User ID (for authorization)
+     */
+    static async getInvitationById(
+      invitationId: string,
+      userId: string
+    ): Promise<InvitationDetailView> {
+      const invitation = await prisma.teamInvitation.findUnique({
+        where: { id: invitationId },
+        select: INVITATION_SELECT,
+      });
+
+      if (!invitation) {
+        throw new NotFoundError('Invitation not found');
+      }
+
+      // Verify user has access (team access or is the invited player)
+      const hasAccess = await canAccessTeam(userId, invitation.teamId);
+      const isPlayer = invitation.playerId === userId;
+
+      if (!hasAccess && !isPlayer) {
+        throw new ForbiddenError('You do not have access to this invitation');
+      }
+
+      // Roster-email rule (#679): the invited player and roster managers see
+      // player.email; every other team-access caller, guardians included, gets
+      // the player without it, as on GET /teams/:id, GET /games/:id and the RSVP
+      // payloads. Only the email goes; deletedAt (#642) stays.
+      const mayReadPlayerEmail =
+        isPlayer || (await hasTeamPermission(userId, invitation.teamId, 'canManageRoster'));
+      if (mayReadPlayerEmail) {
+        return invitation;
+      }
+      return { ...invitation, player: omitRosterManagerFields(invitation.player) };
+    }
+
+    /**
+     * Accept an invitation
+     * @param invitationId Invitation ID
+     * @param userId User ID (must be the invited player)
+     */
+    static async acceptInvitation(
+      invitationId: string,
+      userId: string
+    ): Promise<AcceptInvitationResult> {
+      const invitation = await prisma.teamInvitation.findUnique({
+        where: { id: invitationId },
+      });
+
+      if (!invitation) {
+        throw new NotFoundError('Invitation not found');
+      }
+
+      // Verify user is the invited player, or a guardian of the invited player
+      if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
+        throw new ForbiddenError('You can only accept your own invitations');
+      }
+
+      // Check invitation status
+      if (invitation.status !== 'PENDING') {
+        throw new BadRequestError(
+          `Cannot accept invitation with status: ${invitation.status}`
+        );
+      }
+
+      // Check if invitation has expired
+      if (new Date() > invitation.expiresAt) {
+        await this.markExpired(invitation);
+        throw new BadRequestError('This invitation has expired');
+      }
+
+      // Use transaction to ensure atomicity
+      const result = await prisma.$transaction(async (tx) => {
+        // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
+        // accepts (double-tap, web + app) race here; the loser sees 0 rows and
+        // gets a 400 instead of a P2002 500 from the TeamMember insert (audit #58).
+        const updatedInvitation = await this.transitionPending(
+          tx,
+          invitationId,
+          { status: 'ACCEPTED', acceptedAt: new Date() },
+          'accept',
+          INVITATION_SCALAR_SELECT
+        );
+
+        // Add player to team. Players added through the unified Add Player flow
+        // (unification spec, case 2) are rostered at creation, so the membership
+        // may already exist — accept then only flips the invitation; the
+        // roster row (and any coach-set jersey/position) is left untouched.
+        const teamMember = await tx.teamMember.upsert({
+          where: {
+            teamId_playerId: {
+              teamId: invitation.teamId,
+              playerId: invitation.playerId,
+            },
+          },
+          create: {
             teamId: invitation.teamId,
             playerId: invitation.playerId,
+            jerseyNumber: invitation.jerseyNumber,
+            position: invitation.position,
           },
-        },
-        create: {
-          teamId: invitation.teamId,
-          playerId: invitation.playerId,
-          jerseyNumber: invitation.jerseyNumber,
-          position: invitation.position,
-        },
-        update: {},
-        include: ACCEPTED_MEMBER_INCLUDE,
-      });
-
-      return { invitation: updatedInvitation, teamMember };
-    });
-
-    logger.info('Invitation accepted', {
-      invitationId,
-      teamId: invitation.teamId,
-      playerId: invitation.playerId,
-      userId,
-      via: 'app',
-    });
-
-    return result;
-  }
-
-  /**
-   * Lazily mark a PENDING invitation EXPIRED. Status-guarded so a concurrent
-   * accept/reject/cancel is never overwritten. Logs `Invitation expired` once
-   * per invitation it actually flips (ids only); a lost race logs nothing.
-   */
-  private static async markExpired(invitation: { id: string; teamId: string }): Promise<void> {
-    const { count } = await prisma.teamInvitation.updateMany({
-      where: { id: invitation.id, status: 'PENDING' },
-      data: { status: 'EXPIRED' },
-    });
-    if (count > 0) {
-      logger.info('Invitation expired', { invitationId: invitation.id, teamId: invitation.teamId });
-    }
-  }
-
-  /**
-   * Move an invitation out of PENDING with a status predicate, returning the
-   * updated row. Throws BadRequestError when the row is no longer PENDING —
-   * i.e. another request won the race.
-   */
-  private static async transitionPending<S extends Prisma.TeamInvitationSelect>(
-    tx: Prisma.TransactionClient,
-    invitationId: string,
-    data: Prisma.TeamInvitationUpdateManyMutationInput,
-    action: 'accept' | 'reject' | 'cancel',
-    // The caller's desired read-back shape — one SELECT, not two
-    select: S
-  ): Promise<Prisma.TeamInvitationGetPayload<{ select: S }>> {
-    const { count } = await tx.teamInvitation.updateMany({
-      where: { id: invitationId, status: 'PENDING' },
-      data,
-    });
-
-    if (count === 0) {
-      throw new BadRequestError(`Cannot ${action} invitation: it is no longer pending`);
-    }
-
-    return tx.teamInvitation.findUniqueOrThrow({
-      where: { id: invitationId },
-      select,
-    });
-  }
-
-  /**
-   * Consent guard (unification spec T1, narrowed by ship review): only the
-   * invitee's explicit REJECTION revokes claimability. `syncUser` links ANY
-   * unclaimed row by email on first WorkOS login (memberships kept), so an
-   * email surviving a rejection would turn a later, unrelated sign-up into
-   * silent team membership — auto-accept with extra steps. Strip the email
-   * while the account is unclaimed, unless another live PENDING or ACCEPTED
-   * invitation still references it. The roster entry survives (decision D1).
-   *
-   * Deliberately NOT stripped on CANCEL (a coach's own action must not
-   * destroy coach/admin-entered emails, and re-inviting would create a
-   * duplicate account) or on EXPIRY (the resend flow needs the address, and
-   * the invite email already informed that mailbox).
-   */
-  private static async stripUnclaimedEmail(
-    tx: Prisma.TransactionClient,
-    playerId: string
-  ): Promise<void> {
-    // ACCEPTED counts too: an accepted-but-unclaimed player (web-link accept,
-    // no WorkOS login yet) still needs the email to claim the account — another
-    // team's cancel must not orphan a completed accept (red-team RT3).
-    const otherLive = await tx.teamInvitation.count({
-      where: { playerId, status: { in: ['PENDING', 'ACCEPTED'] } },
-    });
-    if (otherLive > 0) {
-      return;
-    }
-    await tx.user.updateMany({
-      where: { id: playerId, workosUserId: null, deletedAt: null },
-      data: { email: null, ...EMAIL_SUPPRESSION_CLEARED },
-    });
-  }
-
-  /**
-   * Reject an invitation
-   * @param invitationId Invitation ID
-   * @param userId User ID (must be the invited player)
-   */
-  static async rejectInvitation(invitationId: string, userId: string): Promise<InvitationWithTeam> {
-    const invitation = await prisma.teamInvitation.findUnique({
-      where: { id: invitationId },
-    });
-
-    if (!invitation) {
-      throw new NotFoundError('Invitation not found');
-    }
-
-    // Verify user is the invited player, or a guardian of the invited player
-    if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
-      throw new ForbiddenError('You can only reject your own invitations');
-    }
-
-    // Check invitation status (fast path; transitionPending re-checks under
-    // the transaction so a racing accept can't be overwritten)
-    if (invitation.status !== 'PENDING') {
-      throw new BadRequestError(
-        `Cannot reject invitation with status: ${invitation.status}`
-      );
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const rejected = await this.transitionPending(
-        tx,
-        invitationId,
-        { status: 'REJECTED', rejectedAt: new Date() },
-        'reject',
-        INVITATION_TEAM_SELECT
-      );
-
-      await this.stripUnclaimedEmail(tx, invitation.playerId);
-
-      return rejected;
-    });
-
-    logger.info('Invitation declined', {
-      invitationId,
-      teamId: invitation.teamId,
-      playerId: invitation.playerId,
-      userId,
-    });
-
-    return updated;
-  }
-
-  /**
-   * Cancel an invitation (must have canManageRoster permission)
-   * @param invitationId Invitation ID
-   * @param userId User ID
-   */
-  static async cancelInvitation(invitationId: string, userId: string): Promise<InvitationSummary> {
-    const invitation = await prisma.teamInvitation.findUnique({
-      where: { id: invitationId },
-    });
-
-    if (!invitation) {
-      throw new NotFoundError('Invitation not found');
-    }
-
-    // Check permission
-    const canManageRoster = await hasTeamPermission(userId, invitation.teamId, 'canManageRoster');
-    if (!canManageRoster) {
-      throw new ForbiddenError('You do not have permission to cancel invitations for this team');
-    }
-
-    // Check invitation status (fast path; transitionPending re-checks under
-    // the transaction so a racing accept can't be overwritten)
-    if (invitation.status !== 'PENDING') {
-      throw new BadRequestError(
-        `Cannot cancel invitation with status: ${invitation.status}`
-      );
-    }
-
-    const cancelled = await prisma.$transaction(async (tx) => {
-      // No email strip on cancel — see stripUnclaimedEmail's docstring
-      // (rejection-only rule, ship review decision).
-      return this.transitionPending(
-        tx,
-        invitationId,
-        { status: 'CANCELLED' },
-        'cancel',
-        INVITATION_SCALAR_SELECT
-      );
-    });
-
-    logger.info('Invitation cancelled', {
-      invitationId,
-      teamId: invitation.teamId,
-      playerId: invitation.playerId,
-      userId,
-    });
-
-    return cancelled;
-  }
-
-  /**
-   * Unified Add Player — `POST /teams/:teamId/players` (roster/invite
-   * unification spec, docs/plans/roster-invite-unification-spec.md).
-   *
-   * Consent model:
-   *
-   * ```
-   * playerEmail?                              rows created (one transaction)
-   * ── none ────────────────► case 1: managed User + TeamMember
-   * ── no claimed account ──► case 2: managed User (reused if unclaimed row
-   *                                   exists) + TeamMember + TeamInvitation
-   * ── claimed account ─────► case 3: TeamInvitation only (membership on
-   *                                   accept; pre-consent membership would be
-   *                                   auto-accept, deferred by D2)
-   * ```
-   *
-   * `guardianEmail` additionally invites a parent/guardian, but only when the
-   * player got a roster entry (cases 1-2) — the guardian system requires
-   * membership. In case 3 the response carries `guardianInvited: false` and a
-   * reason instead of failing the whole add.
-   */
-  static async addRosterPlayer(
-    teamId: string,
-    data: AddRosterPlayerInput,
-    userId: string
-  ): Promise<AddRosterPlayerResult> {
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: { id: true },
-    });
-    if (!team) {
-      throw new NotFoundError('Team not found');
-    }
-
-    const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
-    if (!canManageRoster) {
-      throw new ForbiddenError("You do not have permission to manage this team's roster");
-    }
-    // Cases 1 and 2 persist the URL on the new or reused row; only the
-    // coach's own upload may be stored (#717). Case 3 discards it anyway.
-    if (data.profilePictureUrl) {
-      assertOwnUploadUrl(data.profilePictureUrl, userId);
-    }
-
-    const result: AddRosterPlayerResult = {
-      rostered: false,
-      invited: false,
-      member: null,
-      invitation: null,
-      guardianInvited: false,
-      emails: {},
-    };
-    let playerId: string;
-
-    if (!data.playerEmail) {
-      // Case 1 — roster-only managed player. The photo leaves the pending
-      // state before it is stored (#1005); expired → 400 `upload_expired`.
-      await promoteAvatarUpload(data.profilePictureUrl);
-      result.member = await prisma.$transaction(async (tx) => {
-        const managedUser = await tx.user.create({
-          data: {
-            name: data.name,
-            role: 'PLAYER',
-            isManaged: true,
-            managedById: userId,
-            email: null,
-            profilePictureUrl: data.profilePictureUrl,
-          },
-          select: { id: true },
+          update: {},
+          include: ACCEPTED_MEMBER_INCLUDE,
         });
 
-        return tx.teamMember.create({
-          data: {
-            teamId,
-            playerId: managedUser.id,
-            jerseyNumber: data.jerseyNumber,
-            position: data.position,
-          },
-          include: ADDED_MEMBER_INCLUDE,
-        });
+        return { invitation: updatedInvitation, teamMember };
       });
+
+      logger.info('Invitation accepted', {
+        invitationId,
+        teamId: invitation.teamId,
+        playerId: invitation.playerId,
+        userId,
+        via: 'app',
+      });
+
+      return result;
+    }
+
+    /**
+     * Lazily mark a PENDING invitation EXPIRED. Status-guarded so a concurrent
+     * accept/reject/cancel is never overwritten. Logs `Invitation expired` once
+     * per invitation it actually flips (ids only); a lost race logs nothing.
+     */
+    private static async markExpired(invitation: { id: string; teamId: string }): Promise<void> {
+      const { count } = await prisma.teamInvitation.updateMany({
+        where: { id: invitation.id, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
+      if (count > 0) {
+        logger.info('Invitation expired', { invitationId: invitation.id, teamId: invitation.teamId });
+      }
+    }
+
+    /**
+     * Move an invitation out of PENDING with a status predicate, returning the
+     * updated row. Throws BadRequestError when the row is no longer PENDING —
+     * i.e. another request won the race.
+     */
+    private static async transitionPending<S extends Prisma.TeamInvitationSelect>(
+      tx: Prisma.TransactionClient,
+      invitationId: string,
+      data: Prisma.TeamInvitationUpdateManyMutationInput,
+      action: 'accept' | 'reject' | 'cancel',
+      // The caller's desired read-back shape — one SELECT, not two
+      select: S
+    ): Promise<Prisma.TeamInvitationGetPayload<{ select: S }>> {
+      const { count } = await tx.teamInvitation.updateMany({
+        where: { id: invitationId, status: 'PENDING' },
+        data,
+      });
+
+      if (count === 0) {
+        throw new BadRequestError(`Cannot ${action} invitation: it is no longer pending`);
+      }
+
+      return tx.teamInvitation.findUniqueOrThrow({
+        where: { id: invitationId },
+        select,
+      });
+    }
+
+    /**
+     * Consent guard (unification spec T1, narrowed by ship review): only the
+     * invitee's explicit REJECTION revokes claimability. `syncUser` links ANY
+     * unclaimed row by email on first WorkOS login (memberships kept), so an
+     * email surviving a rejection would turn a later, unrelated sign-up into
+     * silent team membership — auto-accept with extra steps. Strip the email
+     * while the account is unclaimed, unless another live PENDING or ACCEPTED
+     * invitation still references it. The roster entry survives (decision D1).
+     *
+     * Deliberately NOT stripped on CANCEL (a coach's own action must not
+     * destroy coach/admin-entered emails, and re-inviting would create a
+     * duplicate account) or on EXPIRY (the resend flow needs the address, and
+     * the invite email already informed that mailbox).
+     */
+    private static async stripUnclaimedEmail(
+      tx: Prisma.TransactionClient,
+      playerId: string
+    ): Promise<void> {
+      // ACCEPTED counts too: an accepted-but-unclaimed player (web-link accept,
+      // no WorkOS login yet) still needs the email to claim the account — another
+      // team's cancel must not orphan a completed accept (red-team RT3).
+      const otherLive = await tx.teamInvitation.count({
+        where: { playerId, status: { in: ['PENDING', 'ACCEPTED'] } },
+      });
+      if (otherLive > 0) {
+        return;
+      }
+      await tx.user.updateMany({
+        where: { id: playerId, workosUserId: null, deletedAt: null },
+        data: { email: null, ...EMAIL_SUPPRESSION_CLEARED },
+      });
+    }
+
+    /**
+     * Reject an invitation
+     * @param invitationId Invitation ID
+     * @param userId User ID (must be the invited player)
+     */
+    static async rejectInvitation(invitationId: string, userId: string): Promise<InvitationWithTeam> {
+      const invitation = await prisma.teamInvitation.findUnique({
+        where: { id: invitationId },
+      });
+
+      if (!invitation) {
+        throw new NotFoundError('Invitation not found');
+      }
+
+      // Verify user is the invited player, or a guardian of the invited player
+      if (invitation.playerId !== userId && !(await isGuardianOf(userId, invitation.playerId))) {
+        throw new ForbiddenError('You can only reject your own invitations');
+      }
+
+      // Check invitation status (fast path; transitionPending re-checks under
+      // the transaction so a racing accept can't be overwritten)
+      if (invitation.status !== 'PENDING') {
+        throw new BadRequestError(
+          `Cannot reject invitation with status: ${invitation.status}`
+        );
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const rejected = await this.transitionPending(
+          tx,
+          invitationId,
+          { status: 'REJECTED', rejectedAt: new Date() },
+          'reject',
+          INVITATION_TEAM_SELECT
+        );
+
+        await this.stripUnclaimedEmail(tx, invitation.playerId);
+
+        return rejected;
+      });
+
+      logger.info('Invitation declined', {
+        invitationId,
+        teamId: invitation.teamId,
+        playerId: invitation.playerId,
+        userId,
+      });
+
+      return updated;
+    }
+
+    /**
+     * Cancel an invitation (must have canManageRoster permission)
+     * @param invitationId Invitation ID
+     * @param userId User ID
+     */
+    static async cancelInvitation(invitationId: string, userId: string): Promise<InvitationSummary> {
+      const invitation = await prisma.teamInvitation.findUnique({
+        where: { id: invitationId },
+      });
+
+      if (!invitation) {
+        throw new NotFoundError('Invitation not found');
+      }
+
+      // Check permission
+      const canManageRoster = await hasTeamPermission(userId, invitation.teamId, 'canManageRoster');
+      if (!canManageRoster) {
+        throw new ForbiddenError('You do not have permission to cancel invitations for this team');
+      }
+
+      // Check invitation status (fast path; transitionPending re-checks under
+      // the transaction so a racing accept can't be overwritten)
+      if (invitation.status !== 'PENDING') {
+        throw new BadRequestError(
+          `Cannot cancel invitation with status: ${invitation.status}`
+        );
+      }
+
+      const cancelled = await prisma.$transaction(async (tx) => {
+        // No email strip on cancel — see stripUnclaimedEmail's docstring
+        // (rejection-only rule, ship review decision).
+        return this.transitionPending(
+          tx,
+          invitationId,
+          { status: 'CANCELLED' },
+          'cancel',
+          INVITATION_SCALAR_SELECT
+        );
+      });
+
+      logger.info('Invitation cancelled', {
+        invitationId,
+        teamId: invitation.teamId,
+        playerId: invitation.playerId,
+        userId,
+      });
+
+      return cancelled;
+    }
+
+    /**
+     * Unified Add Player — `POST /teams/:teamId/players` (roster/invite
+     * unification spec, docs/plans/roster-invite-unification-spec.md).
+     *
+     * Consent model:
+     *
+     * ```
+     * playerEmail?                              rows created (one transaction)
+     * ── none ────────────────► case 1: managed User + TeamMember
+     * ── no claimed account ──► case 2: managed User (reused if unclaimed row
+     *                                   exists) + TeamMember + TeamInvitation
+     * ── claimed account ─────► case 3: TeamInvitation only (membership on
+     *                                   accept; pre-consent membership would be
+     *                                   auto-accept, deferred by D2)
+     * ```
+     *
+     * `guardianEmail` additionally invites a parent/guardian, but only when the
+     * player got a roster entry (cases 1-2) — the guardian system requires
+     * membership. In case 3 the response carries `guardianInvited: false` and a
+     * reason instead of failing the whole add.
+     */
+    static async addRosterPlayer(
+      teamId: string,
+      data: AddRosterPlayerInput,
+      userId: string
+    ): Promise<AddRosterPlayerResult> {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { id: true },
+      });
+      if (!team) {
+        throw new NotFoundError('Team not found');
+      }
+
+      const canManageRoster = await hasTeamPermission(userId, teamId, 'canManageRoster');
+      if (!canManageRoster) {
+        throw new ForbiddenError("You do not have permission to manage this team's roster");
+      }
+      // Cases 1 and 2 persist the URL on the new or reused row; only the
+      // coach's own upload may be stored (#717). Case 3 discards it anyway.
+      if (data.profilePictureUrl) {
+        assertOwnUploadUrl(data.profilePictureUrl, userId);
+      }
+
+      const result: AddRosterPlayerResult = {
+        rostered: false,
+        invited: false,
+        member: null,
+        invitation: null,
+        guardianInvited: false,
+        emails: {},
+      };
+      let playerId: string;
+
+      if (!data.playerEmail) {
+        // Case 1 — roster-only managed player. The photo leaves the pending
+        // state before it is stored (#1005): expired → 400 `upload_expired`, and
+        // a failed transaction discards the promoted upload again.
+        result.member = await withPromotedAvatar(data.profilePictureUrl, userId, () =>
+          prisma.$transaction(async (tx) => {
+          const managedUser = await tx.user.create({
+            data: {
+              name: data.name,
+              role: 'PLAYER',
+              isManaged: true,
+              managedById: userId,
+              email: null,
+              profilePictureUrl: data.profilePictureUrl,
+            },
+            select: { id: true },
+          });
+
+          return tx.teamMember.create({
+            data: {
+              teamId,
+              playerId: managedUser.id,
+              jerseyNumber: data.jerseyNumber,
+              position: data.position,
+            },
+            include: ADDED_MEMBER_INCLUDE,
+          });
+        })
+      );
       result.rostered = true;
       playerId = result.member.playerId;
     } else {
@@ -1175,35 +1177,47 @@ export class InvitationService {
         // the loser's user.create aborts the transaction with P2002 and we
         // retry once against the row that now exists.
         let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
-        // The photo may be stored on the new or reused row: out of the pending
-        // state first (#1005). If the row keeps its own photo, or the add falls
-        // back to case 3, the upload is discarded below as before.
-        await promoteAvatarUpload(data.profilePictureUrl);
+        // The photo is stored only on a new row or a reused row with no photo
+        // of its own. Then it leaves the pending state first (#1005; expired →
+        // 400 `upload_expired`). A reused row that already has a photo keeps it,
+        // so the upload is not promoted: it is discarded below (photoApplied is
+        // false) and, if the add fails, the lifecycle rule expires it. Not a
+        // `withPromotedAvatar` call because the case-3 fallbacks below return
+        // from the method; the outer try/catch is the same rule by hand: a
+        // failure before the rows exist discards a promoted upload again.
+        const promoted = existing?.profilePictureUrl ? false : await promoteAvatarUpload(data.profilePictureUrl);
         try {
-          created = await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email);
+          try {
+            created = await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email);
+          } catch (err) {
+            // The reuse target completed WorkOS signup mid-transaction — it is a
+            // claimed account now, so fall back to case 3 (red-team RT4).
+            if (err instanceof ClaimedMidCreateError) {
+              const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId);
+              result.invitation = case3.invitation;
+              result.invited = true;
+              result.emails.player = case3.emailSent ?? undefined;
+              playerId = err.playerId;
+              this.logRosterAdd(teamId, playerId, userId, result);
+              return this.attachGuardianInvite(teamId, playerId, data, userId, result);
+            }
+            const raced = await this.resolveEmailRaceWinner(email, err);
+            if (raced.workosUserId) {
+              const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId);
+              result.invitation = case3.invitation;
+              result.invited = true;
+              result.emails.player = case3.emailSent ?? undefined;
+              playerId = raced.id;
+              this.logRosterAdd(teamId, playerId, userId, result);
+              return this.attachGuardianInvite(teamId, playerId, data, userId, result);
+            }
+            created = await this.createRosteredInvitedPlayer(teamId, data, userId, raced, email);
+          }
         } catch (err) {
-          // The reuse target completed WorkOS signup mid-transaction — it is a
-          // claimed account now, so fall back to case 3 (red-team RT4).
-          if (err instanceof ClaimedMidCreateError) {
-            const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId);
-            result.invitation = case3.invitation;
-            result.invited = true;
-            result.emails.player = case3.emailSent ?? undefined;
-            playerId = err.playerId;
-            this.logRosterAdd(teamId, playerId, userId, result);
-            return this.attachGuardianInvite(teamId, playerId, data, userId, result);
+          if (promoted) {
+            await discardOwnAvatar(data.profilePictureUrl, userId);
           }
-          const raced = await this.resolveEmailRaceWinner(email, err);
-          if (raced.workosUserId) {
-            const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId);
-            result.invitation = case3.invitation;
-            result.invited = true;
-            result.emails.player = case3.emailSent ?? undefined;
-            playerId = raced.id;
-            this.logRosterAdd(teamId, playerId, userId, result);
-            return this.attachGuardianInvite(teamId, playerId, data, userId, result);
-          }
-          created = await this.createRosteredInvitedPlayer(teamId, data, userId, raced, email);
+          throw err;
         }
 
         result.member = created.member;

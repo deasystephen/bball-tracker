@@ -44,6 +44,7 @@ import {
   MAX_AVATAR_BYTES,
   PENDING_TAGGING_XML,
   promoteAvatarUpload,
+  withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
 import * as sentry from '../../src/utils/sentry';
@@ -362,14 +363,23 @@ describe('Upload Service', () => {
     const OWN = `${BUCKET_BASE}u1/pic.jpg`;
     const sdkError = (name: string, status: number): Error =>
       Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } });
+    let errorSpy: jest.SpyInstance;
+    let captureSpy: jest.SpyInstance;
 
     beforeEach(() => {
       mockSend.mockReset();
       mockSend.mockResolvedValue({});
+      errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
     });
 
-    it('removes the tags of an upload in our bucket', async () => {
-      await promoteAvatarUpload(OWN);
+    afterEach(() => {
+      errorSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    it('removes the tags of an upload in our bucket and says it promoted', async () => {
+      await expect(promoteAvatarUpload(OWN)).resolves.toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(1);
       expect(mockSend.mock.calls[0][0]).toEqual({
         kind: 'DeleteObjectTagging',
@@ -378,10 +388,10 @@ describe('Upload Service', () => {
     });
 
     it('skips external URLs and empty values', async () => {
-      await promoteAvatarUpload('https://workos.example/photo.jpg');
-      await promoteAvatarUpload(undefined);
-      await promoteAvatarUpload(null);
-      await promoteAvatarUpload('');
+      await expect(promoteAvatarUpload('https://workos.example/photo.jpg')).resolves.toBe(false);
+      await expect(promoteAvatarUpload(undefined)).resolves.toBe(false);
+      await expect(promoteAvatarUpload(null)).resolves.toBe(false);
+      await expect(promoteAvatarUpload('')).resolves.toBe(false);
       expect(mockSend).not.toHaveBeenCalled();
     });
 
@@ -393,7 +403,7 @@ describe('Upload Service', () => {
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('answers 400 upload_expired when the object is gone (NoSuchKey)', async () => {
+    it('answers 400 upload_expired when the object is gone (NoSuchKey by name)', async () => {
       mockSend.mockRejectedValueOnce(sdkError('NoSuchKey', 404));
       const err = await promoteAvatarUpload(OWN).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(UploadExpiredError);
@@ -402,48 +412,79 @@ describe('Upload Service', () => {
         error: 'That photo upload expired. Please choose it again.',
         code: 'upload_expired',
       });
+      expect(captureSpy).not.toHaveBeenCalled();
     });
 
-    it('treats a bare 404 as expired too', async () => {
-      mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { $metadata: { httpStatusCode: 404 } }));
+    it('also recognises NoSuchKey given as `Code`', async () => {
+      mockSend.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'S3ServiceException', Code: 'NoSuchKey' }));
       await expect(promoteAvatarUpload(OWN)).rejects.toBeInstanceOf(UploadExpiredError);
     });
 
-    it('fails open on AccessDenied: logs at error, reports to Sentry, and lets the write go ahead', async () => {
-      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-      const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
-      mockSend.mockRejectedValueOnce(sdkError('AccessDenied', 403));
+    it.each([
+      ['AccessDenied', 403],
+      ['NoSuchBucket', 404],
+      ['NotFound', 404],
+    ])('treats %s (%i) as a fault: logged at error, captured, rethrown, never upload_expired', async (name, status) => {
+      const fault = sdkError(name, status);
+      mockSend.mockRejectedValueOnce(fault);
 
-      await expect(promoteAvatarUpload(OWN)).resolves.toBeUndefined();
+      await expect(promoteAvatarUpload(OWN)).rejects.toBe(fault);
 
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/denied/),
-        expect.objectContaining({ operation: 'DeleteObjectTagging', error: 'AccessDenied' })
+        'Avatar promotion failed',
+        expect.objectContaining({ operation: 'DeleteObjectTagging', code: name })
       );
-      expect(captureSpy).toHaveBeenCalledWith(expect.any(Error), { flow: 'avatar-promote' });
-      errorSpy.mockRestore();
-      captureSpy.mockRestore();
+      expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
     });
 
-    it('rethrows any other failure (never stores a URL that would silently expire)', async () => {
-      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    it('rethrows a non-Error rejection as is', async () => {
       mockSend.mockRejectedValueOnce('socket hang up');
       await expect(promoteAvatarUpload(OWN)).rejects.toBe('socket hang up');
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(errorSpy).toHaveBeenCalledWith(
         'Avatar promotion failed',
-        expect.objectContaining({ operation: 'DeleteObjectTagging', error: 'socket hang up' })
+        expect.objectContaining({ code: undefined, error: 'socket hang up' })
       );
-      warnSpy.mockRestore();
+    });
+  });
+
+  describe('withPromotedAvatar (#1005)', () => {
+    const OWN = `${BUCKET_BASE}u1/pic.jpg`;
+
+    beforeEach(() => {
+      mockSend.mockReset();
+      mockSend.mockResolvedValue({});
+      deleteObjectCalls.length = 0;
     });
 
-    it('stringifies a non-Error AccessDenied-shaped rejection', async () => {
-      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-      const captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
-      mockSend.mockRejectedValueOnce({ name: 'AccessDenied' });
-      await expect(promoteAvatarUpload(OWN)).resolves.toBeUndefined();
-      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: '[object Object]' }));
-      errorSpy.mockRestore();
-      captureSpy.mockRestore();
+    it('promotes, then writes, and returns the write result', async () => {
+      const write = jest.fn().mockResolvedValue('row');
+      await expect(withPromotedAvatar(OWN, 'u1', write)).resolves.toBe('row');
+      expect(mockSend.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('discards the promoted upload when the write fails, and rethrows', async () => {
+      const failure = new Error('P2002');
+      await expect(withPromotedAvatar(OWN, 'u1', () => Promise.reject(failure))).rejects.toBe(failure);
+      expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u1/pic.jpg' }]);
+    });
+
+    it('discards only under the caller\'s own prefix', async () => {
+      await expect(withPromotedAvatar(OWN, 'someone-else', () => Promise.reject(new Error('x')))).rejects.toThrow();
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('does not write when promotion fails, and has nothing to discard for an external URL', async () => {
+      mockSend.mockRejectedValueOnce(Object.assign(new Error('gone'), { name: 'NoSuchKey' }));
+      const write = jest.fn();
+      await expect(withPromotedAvatar(OWN, 'u1', write)).rejects.toBeInstanceOf(UploadExpiredError);
+      expect(write).not.toHaveBeenCalled();
+
+      mockSend.mockClear();
+      await expect(
+        withPromotedAvatar('https://workos.example/p.jpg', 'u1', () => Promise.reject(new Error('x')))
+      ).rejects.toThrow('x');
+      expect(mockSend).not.toHaveBeenCalled();
     });
   });
 });

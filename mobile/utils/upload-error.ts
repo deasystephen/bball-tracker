@@ -32,15 +32,16 @@ export class AvatarUploadError extends Error {
 
 /**
  * The i18n key to show for an upload failure, or `undefined` for any other error:
- * a client-side `AvatarUploadError`, or the server's `upload_expired` refusal
- * (`normalizeApiError` lifts the body's `code` onto the axios error).
+ * a client-side `AvatarUploadError`, or the server's `upload_expired` refusal. The
+ * server code is read the way `isUpgradeRequiredError` reads it: the body's
+ * `apiError.code` first, then the `code` that `normalizeApiError` lifts onto the
+ * error (axios' own codes, such as `ERR_BAD_REQUEST`, never match).
  */
 export function uploadErrorMessageKey(error: unknown): AvatarUploadMessageKey | undefined {
   if (error instanceof AvatarUploadError) return error.userMessageKey;
-  if (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === UPLOAD_EXPIRED_CODE) {
-    return 'avatar.uploadExpired';
-  }
-  return undefined;
+  if (typeof error !== 'object' || error === null) return undefined;
+  const { apiError, code } = error as { apiError?: { code?: unknown }; code?: unknown };
+  return (apiError?.code ?? code) === UPLOAD_EXPIRED_CODE ? 'avatar.uploadExpired' : undefined;
 }
 
 /**

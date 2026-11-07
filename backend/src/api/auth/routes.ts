@@ -27,7 +27,7 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
-import { assertOwnUploadUrl, deletePreviousAvatar, promoteAvatarUpload } from '../../services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar, withPromotedAvatar } from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
 import { emailEquals } from '../../utils/email-match';
@@ -485,25 +485,27 @@ router.patch('/me', authenticate, async (req, res) => {
         ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
         : null;
     // A new upload is promoted out of the pending state before it is stored
-    // (#1005); an expired one is a 400 `upload_expired` and nothing is written.
-    // Re-sending the URL already stored needs nothing.
-    if (profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl) {
-      await promoteAvatarUpload(profilePictureUrl);
-    }
-    // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
-    // `authenticate` a moment before an account deletion committed must not
-    // write a real name or photo back onto the tombstone. Zero rows → 401.
-    const updated = await prisma.user.updateMany({
-      where: { id: req.user!.id, deletedAt: null },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
-        ...(notifyOnReplies !== undefined && { notifyOnReplies }),
-      },
+    // (#1005): an expired one is a 400 `upload_expired` and nothing is written,
+    // and a failed write discards it again. Re-sending the URL already stored
+    // needs nothing.
+    const newUpload =
+      profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl ? profilePictureUrl : null;
+    await withPromotedAvatar(newUpload, req.user!.id, async () => {
+      // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
+      // `authenticate` a moment before an account deletion committed must not
+      // write a real name or photo back onto the tombstone. Zero rows → 401.
+      const updated = await prisma.user.updateMany({
+        where: { id: req.user!.id, deletedAt: null },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
+          ...(notifyOnReplies !== undefined && { notifyOnReplies }),
+        },
+      });
+      if (updated.count === 0) {
+        throw new UnauthorizedError('User not found');
+      }
     });
-    if (updated.count === 0) {
-      throw new UnauthorizedError('User not found');
-    }
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },
       select: SESSION_USER_SELECT,
