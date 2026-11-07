@@ -189,7 +189,8 @@ Mobile builds use Expo Application Services (EAS):
   (`getSentryExpoConfig` in `mobile/metro.config.js`). An EAS build uploads the embedded
   bundle's maps and the dSYMs from the Xcode phases of the `@sentry/react-native/expo`
   plugin, and `npm run ota:production` uploads each OTA bundle's maps after `eas update`
-  (it needs `SENTRY_AUTH_TOKEN` in the publishing shell). The post-build hook
+  (it needs `SENTRY_AUTH_TOKEN` for that command, read from the macOS Keychain and never
+  exported from `~/.zshrc`; see the docs' "Publishing a production OTA: the Sentry token"). The post-build hook
   (`mobile/scripts/sentry-set-commits.js`) only attaches commits to the build's release.
   Detail: `docs/deployment/mobile-builds-and-ota.md`, "Sentry symbolication"
 

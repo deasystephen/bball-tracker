@@ -15,8 +15,9 @@ const raw = process.env.SENTRY_AUTH_TOKEN;
 if (!raw || !raw.trim()) {
   console.error(
     '[ota] SENTRY_AUTH_TOKEN is not set. The OTA would ship a bundle Sentry cannot symbolicate.\n' +
-      '      Export a Sentry auth token with project:write on satsun-ventures/bball-tracker-mobile, then rerun.\n' +
-      '      See docs/deployment/mobile-builds-and-ota.md, "Publishing a production OTA".'
+      '      Pass a satsun-ventures org token for this command only, from the macOS Keychain:\n' +
+      '      SENTRY_AUTH_TOKEN="$(security find-generic-password -a "$USER" -s sentry-auth-token -w)" npm run ota:production -- --message "…"\n' +
+      '      See docs/deployment/mobile-builds-and-ota.md, "Publishing a production OTA: the Sentry token".'
   );
   process.exit(1);
 }
