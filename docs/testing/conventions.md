@@ -217,6 +217,22 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   invitations they sent first (both `invitedById` foreign keys are `RESTRICT`, #783).
   `removeTestRows` and the seed's tombstone and managed-player resets use it.
 
+## Real-Redis suite (`backend/tests/redis/*.redis.test.ts`, #452)
+- **Not part of `npm test`.** Redis is not a prerequisite for the default suite, so `jest.config.js`
+  ignores `*.redis.test.ts`. Run it with `npm run test:redis` (overrides the ignore list) against the
+  docker-compose Redis (`docker-compose up -d`). CI's backend job starts `redis:7-alpine` and runs it
+  in its own step, "Run real-Redis tests", after the main suite.
+- Every other suite runs without Redis: `tests/setup.ts` sets `REDIS_URL` and
+  `REDIS_SOCKET_ADAPTER_URL` to empty strings (deleting them is not enough, `src/config/env.ts` re-runs
+  dotenv and `.env` points at the docker-compose Redis), so rate limiters count in memory and
+  counters never leak between workers or runs.
+- `tests/redis/socket-redis-adapter.redis.test.ts` reads `REDIS_TEST_URL` (default
+  `redis://localhost:6379`). It proves the Socket.io Redis adapter delivers across two servers, the
+  degradation with an unreachable Redis (including closing during a reconnect), and the shared
+  rate-limit counters (two stores and two Express apps sharing one budget, the handshake window seen
+  by a fresh task). Keys and rooms carry a per-run id and are deleted in `afterAll`. It fails rather
+  than skips when Redis is down.
+
 ## Migration backfill guard (#493)
 - `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The
   check **Migration backfill guard** (`.github/workflows/migration-backfill-guard.yml`) runs on
