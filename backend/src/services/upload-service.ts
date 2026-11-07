@@ -163,6 +163,30 @@ export async function deleteAvatar(imageUrl: string): Promise<void> {
 export type AvatarDeletion = 'deleted' | 'failed' | 'not_ours';
 
 /**
+ * The object key a stored or submitted URL names, when it is one of ours and
+ * has the exact issued shape `/avatars/<id>/<file>` on the PARSED path, or why
+ * not. The one place that turns a URL into a key we may act on: shared by
+ * `deleteAvatarObject` and `promoteAvatarUpload` (#1005).
+ */
+type IssuedAvatarKey =
+  | { key: string }
+  | { reason: 'not_managed' | 'unparsable' | 'path outside avatars/<id>/<file>' };
+
+function issuedAvatarKey(imageUrl: string | null | undefined): IssuedAvatarKey {
+  if (!isManagedAvatarUrl(imageUrl)) {
+    return { reason: 'not_managed' };
+  }
+  const path = parsedPath(imageUrl);
+  if (path === null) {
+    return { reason: 'unparsable' };
+  }
+  if (!ISSUED_KEY_PATH.test(path)) {
+    return { reason: 'path outside avatars/<id>/<file>' };
+  }
+  return { key: path.slice(1) };
+}
+
+/**
  * Throws unless the avatar bucket is configured explicitly. Without
  * `S3_AVATARS_BUCKET` the module falls back to the dev bucket, so production
  * avatar URLs would not be recognised as ours and nothing would be deleted.
@@ -189,21 +213,17 @@ export function assertAvatarStorageConfig(env: NodeJS.ProcessEnv = process.env):
  * which is why the gate sits at write time.
  */
 export async function deleteAvatarObject(imageUrl: string | null | undefined): Promise<AvatarDeletion> {
-  if (!isManagedAvatarUrl(imageUrl)) {
-    return 'not_ours';
-  }
-
-  const path = parsedPath(imageUrl);
-  if (path === null || !ISSUED_KEY_PATH.test(path)) {
-    // Never the URL itself: it is client-supplied and this is the hostile case.
-    logger.warn('Avatar URL is not an issued upload key; not deleted', {
-      reason: path === null ? 'unparsable' : 'path outside avatars/<id>/<file>',
-    });
+  const issued = issuedAvatarKey(imageUrl);
+  if ('reason' in issued) {
+    if (issued.reason !== 'not_managed') {
+      // Never the URL itself: it is client-supplied and this is the hostile case.
+      logger.warn('Avatar URL is not an issued upload key; not deleted', { reason: issued.reason });
+    }
     return 'not_ours';
   }
 
   try {
-    await deleteAvatar(imageUrl);
+    await deleteAvatar(imageUrl as string);
     return 'deleted';
   } catch (err) {
     logger.warn('Failed to delete avatar object', {
@@ -291,15 +311,15 @@ function s3ErrorInfo(err: unknown): { name?: string; status?: number } {
  * unreferenced object; that is accepted (it is only kept, never exposed).
  */
 export async function promoteAvatarUpload(imageUrl: string | null | undefined): Promise<void> {
-  if (!isManagedAvatarUrl(imageUrl)) {
-    return;
-  }
-  const path = parsedPath(imageUrl);
-  if (path === null || !ISSUED_KEY_PATH.test(path)) {
+  const issued = issuedAvatarKey(imageUrl);
+  if ('reason' in issued) {
+    if (issued.reason === 'not_managed') {
+      return;
+    }
     // `assertOwnUploadUrl` has already refused this shape on every write path.
     throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
   }
-  const key = path.slice(1);
+  const { key } = issued;
 
   try {
     await s3Client.send(new DeleteObjectTaggingCommand({ Bucket: BUCKET_NAME, Key: key }));
