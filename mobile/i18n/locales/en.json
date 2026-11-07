@@ -130,6 +130,7 @@
       "success": "{{season}} started",
       "alreadyExists": "This team already has {{season}}",
       "failed": "Could not start the next season",
+      "notLatest": "Only the team's most recent season can start the next one.",
       "notAllowed": "Only a head coach can start the next season."
     },
     "title": "Teams",

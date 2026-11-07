@@ -79,6 +79,12 @@ export interface Team {
    * with the same lineageId; screens never move a team's seasonId on history.
    */
   lineageId?: string;
+  /**
+   * `GET /teams/:id` only: whether this row is its lineage's latest
+   * team-season (#461). Only that row may start the next season; absent from
+   * a backend that predates it, which the screens treat as "no".
+   */
+  isLatestInLineage?: boolean;
   /** Per-season bracket (#462): trimmed free text, max 20 chars. */
   ageGroup?: string | null;
   gender?: TeamGender | null;

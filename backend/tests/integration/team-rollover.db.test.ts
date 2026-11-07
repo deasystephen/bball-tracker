@@ -12,7 +12,14 @@
 jest.unmock('../../src/models');
 
 import prisma from '../../src/models';
-import { BadRequestError, ForbiddenError, NotFoundError, TeamSeasonExistsError } from '../../src/utils/errors';
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  NotLatestSeasonError,
+  TeamSeasonExistsError,
+} from '../../src/utils/errors';
 import { TeamService } from '../../src/services/team-service';
 import { StatsService } from '../../src/services/stats-service';
 import { SeasonService } from '../../src/services/season-service';
@@ -221,7 +228,7 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
   });
 
-  it("names only the existing row's id to a coach who was removed from it", async () => {
+  it("answers team_season_exists with no id to a coach who was removed from the existing row", async () => {
     const c = await club('removed');
     await prisma.leagueAdmin.deleteMany({ where: { leagueId: c.org.leagueId, userId: c.coach } });
     const next = await prisma.season.create({
@@ -237,14 +244,56 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     expect((err as TeamSeasonExistsError).body()).toEqual({
       error: 'This team already has a team-season in that season',
       code: 'team_season_exists',
-      teamId: team.id,
     });
+  });
+
+  it("refuses a coach removed from this season who rolls last season's row forward (not_latest_season)", async () => {
+    const c = await club('regain');
+    const { team: current } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Now-${fx.run}` }, c.coach);
+    // The coach is removed from this season's row and is not a league admin;
+    // they are still head coach of last season's row.
+    await prisma.teamStaff.deleteMany({ where: { teamId: current.id, userId: c.coach } });
+    await prisma.leagueAdmin.deleteMany({ where: { leagueId: c.org.leagueId, userId: c.coach } });
+    const later = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Later-${fx.run}` },
+      select: { id: true },
+    });
+
+    const err = await TeamService.rolloverTeam(c.org.teamId, { seasonId: later.id }, c.coach).catch(
+      (e: unknown) => e
+    );
+
+    expect(err).toBeInstanceOf(NotLatestSeasonError);
+    expect((err as NotLatestSeasonError).body()).toEqual({
+      error: "Only the team's most recent season can start the next one",
+      code: 'not_latest_season',
+    });
+    expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(2);
+    expect(await prisma.teamStaff.count({ where: { userId: c.coach, team: { seasonId: later.id } } })).toBe(0);
+  });
+
+  it('marks only the latest team-season isLatestInLineage on GET /teams/:id', async () => {
+    const c = await club('latest');
+    const { team: current } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Now-${fx.run}` }, c.coach);
+
+    expect((await TeamService.getTeamById(c.org.teamId, c.coach)).isLatestInLineage).toBe(false);
+    expect((await TeamService.getTeamById(current.id, c.coach)).isLatestInLineage).toBe(true);
+  });
+
+  it('answers POST /seasons with 409 for a case or space variant of an existing season name', async () => {
+    const c = await club('variant');
+    await SeasonService.createSeason({ leagueId: c.org.leagueId, name: `Fall-${fx.run}` }, c.coach);
+
+    await expect(
+      SeasonService.createSeason({ leagueId: c.org.leagueId, name: ` FALL-${fx.run} ` }, c.coach)
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(await prisma.season.count({ where: { leagueId: c.org.leagueId } })).toBe(2);
   });
 
   it('counts a team once across its seasons: N team-seasons of one lineage are one team for the cap', async () => {
     const c = await club('count');
-    await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y1-${fx.run}` }, c.coach);
-    await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y2-${fx.run}` }, c.coach);
+    const { team: y1 } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y1-${fx.run}` }, c.coach);
+    await TeamService.rolloverTeam(y1.id, { seasonName: `Y2-${fx.run}` }, c.coach);
 
     expect(await prisma.teamStaff.count({ where: { userId: c.coach } })).toBe(3);
     expect(await countDistinctStaffTeams(c.coach)).toBe(1);

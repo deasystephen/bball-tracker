@@ -31,11 +31,16 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockShowToast }) }));
-jest.mock('../../hooks/useAccessGuard', () => ({ useAccessGuard: () => true }));
+const mockUseAccessGuard = jest.fn((..._args: unknown[]) => true);
+jest.mock('../../hooks/useAccessGuard', () => ({ useAccessGuard: (...args: unknown[]) => mockUseAccessGuard(...args) }));
+const mockUseSeasons = jest.fn();
 let mockSeasonList: { seasons: { id: string; name: string }[]; canCreate?: boolean };
 jest.mock('../../hooks/useSeasons', () => ({
   ...jest.requireActual('../../hooks/useSeasons'),
-  useSeasons: () => ({ data: mockSeasonList, isLoading: false, error: null, refetch: jest.fn() }),
+  useSeasons: (...args: unknown[]) => {
+    mockUseSeasons(...args);
+    return { data: mockSeasonList, isLoading: false, error: null, refetch: jest.fn() };
+  },
 }));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
@@ -61,6 +66,7 @@ function teamWithMyRole(type: TeamStaff['role']['type']): Team {
     name: 'Warriors',
     seasonId: 'se-1',
     lineageId: 'ln-1',
+    isLatestInLineage: true,
     ageGroup: 'U12',
     createdAt: '2026-08-01T00:00:00Z',
     updatedAt: '2026-08-01T00:00:00Z',
@@ -99,6 +105,23 @@ describe('team screen entry point', () => {
     expect(mockRouter.push).toHaveBeenCalledWith('/teams/t1/next-season');
   });
 
+  it("hides it on last season's row: only the latest team-season continues the team", () => {
+    mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: false };
+
+    const { queryByText, getByLabelText } = render(<TeamDetailsScreen />);
+
+    expect(getByLabelText('Edit team')).toBeTruthy();
+    expect(queryByText('Start next season')).toBeNull();
+  });
+
+  it('hides it when the payload does not say (a backend that predates isLatestInLineage)', () => {
+    mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: undefined };
+
+    const { queryByText } = render(<TeamDetailsScreen />);
+
+    expect(queryByText('Start next season')).toBeNull();
+  });
+
   it('hides it from an assistant coach, who shares the flags but not the head-coach action', () => {
     mockTeam = teamWithMyRole('ASSISTANT_COACH');
 
@@ -112,6 +135,39 @@ describe('team screen entry point', () => {
 });
 
 describe('NextSeasonScreen', () => {
+  it("asks for the league's ACTIVE seasons only, once the league is known", () => {
+    render(<NextSeasonScreen />);
+
+    expect(mockUseSeasons).toHaveBeenCalledWith({ leagueId: 'lg-1', isActive: true, limit: 100 }, { enabled: true });
+  });
+
+  it("never offers the team's own season, even when the list includes it", () => {
+    mockSeasonList = {
+      seasons: [
+        { id: 'se-1', name: '2026' },
+        { id: 'se-2', name: '2027' },
+      ],
+      canCreate: false,
+    };
+    const { queryByTestId, getByTestId } = render(<NextSeasonScreen />);
+
+    expect(queryByTestId('next-season-option-se-1')).toBeNull();
+    expect(getByTestId('next-season-option-se-2')).toBeTruthy();
+  });
+
+  it("guards a deep link to last season's row with the not-latest message", () => {
+    mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: false };
+
+    render(<NextSeasonScreen />);
+
+    expect(mockUseAccessGuard).toHaveBeenCalledWith(
+      true,
+      false,
+      "Only the team's most recent season can start the next one.",
+      { fallback: '/teams/t1' }
+    );
+  });
+
   it('offers "New season" with next year prefilled to a coach who may create one, and explains what carries over', () => {
     const { getByTestId, getByText, queryByTestId } = render(<NextSeasonScreen />);
 

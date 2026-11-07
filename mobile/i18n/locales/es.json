@@ -130,6 +130,7 @@
       "success": "Temporada {{season}} iniciada",
       "alreadyExists": "Este equipo ya tiene la temporada {{season}}",
       "failed": "No se pudo empezar la próxima temporada",
+      "notLatest": "Solo la temporada más reciente del equipo puede empezar la siguiente.",
       "notAllowed": "Solo un entrenador principal puede empezar la próxima temporada."
     },
     "title": "Equipos",

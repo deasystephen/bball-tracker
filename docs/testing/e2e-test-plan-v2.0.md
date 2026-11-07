@@ -295,7 +295,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Profile → "Leagues & Seasons" → tap the league from C.1 → "Add Season"
   2. Name `Spring 2026`, optionally pick start/end dates
-- **Expected:** Season appears under the league with "0 teams". Maestro: `.maestro/admin-season-manage.yaml`.
+- **Expected:** Season appears under the league with "0 teams". Adding ` spring 2026 ` (another case, extra spaces) is refused (409) with "A season with this name already exists in this league" (#461). Maestro: `.maestro/admin-season-manage.yaml`.
 - **Notes:** ___________
 
 ### C.2b — Season detail and edit (#614)
@@ -493,7 +493,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - [ ] Pass / Fail / Skipped
 - **Pre:** Seed fresh. Signed in as Frank Vogel (head coach of Lakers, Spring 2024; not a league admin). The seed holds an empty "Spring 2025" season in the same league.
 - **Steps:** Lakers → **Start next season** → the form shows "… stay with Spring 2024" and lists the league's seasons with **Spring 2025** preselected and no "New season" option (Frank cannot create seasons); keep the team name and age group → **Start season**.
-- **Expected:** The screen is replaced by the new Lakers team-season in Spring 2025 with the same roster (jersey numbers kept) and staff; no games, announcements or pending invitations. The Teams list shows both Lakers rows. A player's stats screen lists both the Spring 2024 row (with last season's stats) and the Spring 2025 row. Repeating the action answers with the same team ("This team already has Spring 2025"), never a duplicate. An assistant coach does not see the button. A coach in their own personal league sees "New season" preselected with next year's name ("2027"), and the season is created; typing a different case of an existing season's name reuses that season. A deep-linked form's back arrow and Cancel return to the team.
+- **Expected:** The screen is replaced by the new Lakers team-season in Spring 2025 with the same roster (jersey numbers kept) and staff; no games, announcements or pending invitations. The Teams list shows both Lakers rows. A player's stats screen lists both the Spring 2024 row (with last season's stats) and the Spring 2025 row. Repeating the action answers with the same team ("This team already has Spring 2025"), never a duplicate. An assistant coach does not see the button, and neither does anyone on last season's Lakers row (only the latest team-season continues a team). The season list shows active seasons only and never the team's own season. A coach in their own personal league sees "New season" preselected with next year's name ("2027"), and the season is created; typing a different case of an existing season's name reuses that season. A deep-linked form's back arrow and Cancel return to the team.
 - **Maestro:** `.maestro/team-rollover.yaml` (written, not yet run on a simulator).
 
 ## E. Invitations & accept flow (NEW v2.0) 📧

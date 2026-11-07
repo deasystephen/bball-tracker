@@ -432,6 +432,37 @@ describe('TeamService', () => {
   });
 
   describe('getTeamById', () => {
+    it("says whether the row is its lineage's latest team-season (isLatestInLineage, #461)", async () => {
+      const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [],
+        games: [],
+        invitations: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+      const latest = (id: string): jest.Mock =>
+        (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+          Promise.resolve(strings.join('?').includes('JOIN "Season"') ? [{ id }] : [{ '?column?': 1 }])
+        );
+
+      latest(team.id);
+      await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: true });
+
+      latest('a-later-team-season');
+      await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: false });
+
+      const [strings] = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([st]) =>
+        (st as TemplateStringsArray).join('?').includes('JOIN "Season"')
+      ) as [TemplateStringsArray];
+      expect(strings.join('?')).toMatch(/ORDER BY COALESCE\(s."startDate", s."createdAt"\) DESC, t."createdAt" DESC, t."id" DESC/);
+      (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
+    });
+
     it('should return team for staff member', async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
 

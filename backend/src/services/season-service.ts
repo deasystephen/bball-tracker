@@ -5,8 +5,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateSeasonInput, UpdateSeasonInput, SeasonQueryParams } from '../api/seasons/schemas';
-import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
-import { createOrConflict } from '../utils/prisma-errors';
+import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '../utils/errors';
 import {
   isLeagueAdmin,
   isSystemAdmin,
@@ -97,6 +96,90 @@ export interface SeasonList {
   canCreate?: boolean;
 }
 
+/** 409 body for a season whose name an existing season of the league already has. */
+export const SEASON_NAME_TAKEN_MESSAGE = 'A season with this name already exists in this league';
+
+/**
+ * The id of the season in `leagueId` whose name matches `name` ignoring case
+ * and surrounding whitespace, or null. The ONE definition of "this league
+ * already has that season": `findOrCreateSeason` (every season create path)
+ * and the season rollover (#461) read it. Raw SQL on purpose: Prisma's
+ * `mode: 'insensitive'` compiles to an unescaped ILIKE (see
+ * `utils/email-match.ts`), and an equality on `lower(trim())` has no wildcard
+ * to escape. Oldest first when near-duplicates already exist (rows written
+ * before this rule; there is no migration).
+ */
+export async function findSeasonIdByName(
+  db: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  leagueId: string,
+  name: string
+): Promise<string | null> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Season"
+    WHERE "leagueId" = ${leagueId} AND lower(trim("name")) = lower(trim(${name}))
+    ORDER BY "createdAt" ASC
+    LIMIT 1`;
+  return rows[0]?.id ?? null;
+}
+
+export interface NewSeason {
+  leagueId: string;
+  name: string;
+  startDate?: Date | null;
+  endDate?: Date | null;
+}
+
+/**
+ * The season of `leagueId` named `input.name` (ignoring case and surrounding
+ * whitespace), creating it when there is none. Shared by `POST /seasons`,
+ * `POST /leagues/:id/seasons` and the season rollover (#461), inside the
+ * caller's transaction; authorization and date validation stay with the
+ * caller.
+ *
+ * Takes `FOR NO KEY UPDATE` on the League row first, so two creates in one
+ * league serialize and two case variants of a name can never both be
+ * minted. The insert is `INSERT ... ON CONFLICT DO NOTHING` (`createMany`
+ * with `skipDuplicates`) and the row is read back by its exact name, so a
+ * writer that does not take the lock (the personal-league provisioning
+ * upsert) meeting this one on the same name converges instead of raising a
+ * P2002, which would abort the whole transaction. Logs `Season created` only
+ * when this call inserted the row.
+ */
+export async function findOrCreateSeason(
+  tx: Prisma.TransactionClient,
+  input: NewSeason,
+  userId: string
+): Promise<{ id: string; created: boolean }> {
+  await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${input.leagueId} FOR NO KEY UPDATE`;
+
+  const existing = await findSeasonIdByName(tx, input.leagueId, input.name);
+  if (existing) {
+    return { id: existing, created: false };
+  }
+
+  const inserted = await tx.season.createMany({
+    data: [
+      {
+        leagueId: input.leagueId,
+        name: input.name,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        isActive: true,
+      },
+    ],
+    skipDuplicates: true,
+  });
+  const season = await tx.season.findUniqueOrThrow({
+    where: { leagueId_name: { leagueId: input.leagueId, name: input.name } },
+    select: { id: true },
+  });
+  const created = inserted.count === 1;
+  if (created) {
+    logger.info('Season created', { seasonId: season.id, leagueId: input.leagueId, userId });
+  }
+  return { id: season.id, created };
+}
+
 export class SeasonService {
   /**
    * Create a new season
@@ -119,44 +202,26 @@ export class SeasonService {
       throw new ForbiddenError('You do not have permission to create seasons for this league');
     }
 
-    // Check if season with same name already exists in this league
-    const existing = await prisma.season.findUnique({
-      where: {
-        leagueId_name: {
-          leagueId: data.leagueId,
-          name: data.name,
-        },
-      },
-    });
-
-    if (existing) {
-      throw new BadRequestError('A season with this name already exists in this league');
-    }
-
     // Validate date range if both dates provided
     if (data.startDate && data.endDate && data.startDate > data.endDate) {
       throw new BadRequestError('Start date must be before end date');
     }
 
-    // Create the season; a lost race on @@unique([leagueId, name]) answers the
-    // pre-check's 400 (#727).
-    const season = await createOrConflict(
-      () =>
-        prisma.season.create({
-          data: {
-            leagueId: data.leagueId,
-            name: data.name,
-            startDate: data.startDate,
-            endDate: data.endDate,
-            isActive: true,
-          },
-          include: SEASON_INCLUDE,
-        }),
-      'A season with this name already exists in this league',
-      'Season_leagueId_name_key'
+    // One rule for every create path (`findOrCreateSeason`): a name that
+    // matches an existing season ignoring case and surrounding spaces is
+    // taken, 409.
+    const { id, created } = await prisma.$transaction((tx) =>
+      findOrCreateSeason(
+        tx,
+        { leagueId: data.leagueId, name: data.name, startDate: data.startDate, endDate: data.endDate },
+        userId
+      )
     );
+    if (!created) {
+      throw new ConflictError(SEASON_NAME_TAKEN_MESSAGE);
+    }
 
-    logger.info('Season created', { seasonId: season.id, leagueId: data.leagueId, userId });
+    const season = await prisma.season.findUniqueOrThrow({ where: { id }, include: SEASON_INCLUDE });
 
     return season;
   }

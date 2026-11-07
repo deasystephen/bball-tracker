@@ -282,8 +282,8 @@ export async function getPlayerTeamAccess(
 /**
  * Check if user is a system admin
  */
-export async function isSystemAdmin(userId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
+export async function isSystemAdmin(userId: string, db: Db = prisma): Promise<boolean> {
+  const user = await db.user.findUnique({
     where: { id: userId },
     select: { role: true },
   });
@@ -463,8 +463,8 @@ export async function canReadLeague(userId: string, leagueId: string): Promise<b
  * to another season") is keyed off the role TYPE instead — no schema change
  * needed. See `canManageStaff`.
  */
-export async function isHeadCoach(userId: string, teamId: string): Promise<boolean> {
-  const row = await prisma.teamStaff.findFirst({
+export async function isHeadCoach(userId: string, teamId: string, db: Db = prisma): Promise<boolean> {
+  const row = await db.teamStaff.findFirst({
     where: { teamId, userId, role: { type: 'HEAD_COACH' } },
     select: { id: true },
   });
@@ -478,19 +478,22 @@ export async function isHeadCoach(userId: string, teamId: string): Promise<boole
  * Allowed: system ADMIN, an admin of the team's league, or a HEAD_COACH-type
  * staff member. Assistant coaches keep manageTeam/roster/track/view/share but
  * are NOT allowed here.
+ *
+ * `db` defaults to the shared client; a transaction passes its own so the
+ * check reads through it behind the locks it holds (season rollover, #461).
  */
-export async function canManageStaff(userId: string, teamId: string): Promise<boolean> {
-  if (await isSystemAdmin(userId)) {
+export async function canManageStaff(userId: string, teamId: string, db: Db = prisma): Promise<boolean> {
+  if (await isSystemAdmin(userId, db)) {
     return true;
   }
 
-  const team = await prisma.team.findUnique({
+  const team = await db.team.findUnique({
     where: { id: teamId },
     select: { season: { select: { leagueId: true } } },
   });
 
   if (team?.season) {
-    const leagueAdmin = await prisma.leagueAdmin.findUnique({
+    const leagueAdmin = await db.leagueAdmin.findUnique({
       where: { leagueId_userId: { leagueId: team.season.leagueId, userId } },
     });
     if (leagueAdmin) {
@@ -498,7 +501,7 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
     }
   }
 
-  return isHeadCoach(userId, teamId);
+  return isHeadCoach(userId, teamId, db);
 }
 
 /**

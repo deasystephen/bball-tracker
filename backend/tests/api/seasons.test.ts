@@ -3,6 +3,7 @@
  */
 
 import request from 'supertest';
+import { ConflictError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { SeasonService, type SeasonList, type SeasonListItem } from '../../src/services/season-service';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../../src/utils/errors';
@@ -64,6 +65,19 @@ describe('Seasons API', () => {
   });
 
   describe('POST /api/v1/seasons', () => {
+    it('answers 409 when the service finds the name taken (case or space variant, #461)', async () => {
+      mockSeasonService.createSeason.mockRejectedValue(
+        new ConflictError('A season with this name already exists in this league')
+      );
+
+      const response = await request(app)
+        .post('/api/v1/seasons')
+        .send({ leagueId: TEST_LEAGUE_ID_UUID, name: ' spring 2024 ' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toBe('A season with this name already exists in this league');
+    });
+
     it('should create a season with UUID league ID', async () => {
       mockSeasonService.createSeason.mockResolvedValue(mockSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.createSeason>>);
 

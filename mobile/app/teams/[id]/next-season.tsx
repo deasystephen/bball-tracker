@@ -3,8 +3,10 @@
  * team-season row on the same lineage. Last season's row, games and stats stay
  * as they are; the player career view still reads them.
  *
- * The season is picked from the team's league (`GET /seasons?leagueId=`,
- * caller-scoped) and sent as `seasonId`. "New season" with a free-text name is
+ * The season is picked from the team's league's ACTIVE seasons
+ * (`GET /seasons?leagueId=&isActive=true`, caller-scoped; never the team's own
+ * season) and sent as `seasonId`. Only the lineage's latest team-season may
+ * start the next one (`isLatestInLineage`). "New season" with a free-text name is
  * offered only when that list says the caller may create one (`canCreate`:
  * league admin, which a personal-league owner is); a club coach picks a season
  * the club already made. The API stays the authority (403 / 404).
@@ -40,15 +42,18 @@ export default function NextSeasonScreen() {
   const { t } = useTranslation();
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const leagueId = team?.season?.league?.id;
-  const seasons = useSeasons({ leagueId, limit: SEASON_PAGE }, { enabled: !!leagueId });
+  // Active seasons only: an archived season is not one to start.
+  const seasons = useSeasons({ leagueId, isActive: true, limit: SEASON_PAGE }, { enabled: !!leagueId });
 
   // The backend gates rollover on `canManageStaff` (head coach, league admin,
   // system admin); the screen is deep-linkable, so it guards itself too.
   const user = useAuthUser();
+  // Only the lineage's latest team-season may start the next one (#461).
+  const isLatest = team?.isLatestInLineage === true;
   const allowed = useAccessGuard(
     !!user && !!team,
-    canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf),
-    t('teams.nextSeason.notAllowed'),
+    isLatest && canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf),
+    t(isLatest ? 'teams.nextSeason.notAllowed' : 'teams.nextSeason.notLatest'),
     { fallback: `/teams/${id}` }
   );
 

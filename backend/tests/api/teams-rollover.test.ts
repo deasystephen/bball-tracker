@@ -78,12 +78,20 @@ function mockTeamReads(sibling: { id: string } | null): void {
   );
 }
 
-/** Season-by-name lookups answer `seasonRows` in order; every lock finds its row. */
-function mockRaw(seasonRows: Array<{ id: string }[]> = [[], []]): void {
+/**
+ * Season-by-name lookups answer `seasonRows` in order; the latest-row query
+ * answers `latest` (default: the source team); a picked season's share lock
+ * finds it in the team's league; every other lock finds its row.
+ */
+function mockRaw(seasonRows: Array<{ id: string }[]> = [[], [], []], latest: string = TEAM_ID): void {
   const queue = [...seasonRows];
-  (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
-    Promise.resolve(strings.join('?').includes('FROM "Season"') ? (queue.shift() ?? []) : [{ id: 'locked' }])
-  );
+  (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) => {
+    const sql = strings.join('?');
+    if (sql.includes('JOIN "Season"')) return Promise.resolve([{ id: latest }]);
+    if (sql.includes('FOR KEY SHARE')) return Promise.resolve([{ leagueId: LEAGUE_ID }]);
+    if (sql.includes('FROM "Season"')) return Promise.resolve(queue.shift() ?? []);
+    return Promise.resolve([{ id: 'locked' }]);
+  });
 }
 
 let spies: Record<string, jest.SpyInstance> = {};
@@ -92,7 +100,6 @@ beforeEach(() => {
   spies = {
     canManageStaff: jest.spyOn(permissions, 'canManageStaff').mockResolvedValue(true),
     isLeagueAdmin: jest.spyOn(permissions, 'isLeagueAdmin').mockResolvedValue(true),
-    canAccessTeam: jest.spyOn(permissions, 'canAccessTeam').mockResolvedValue(true),
     hasTeamPermission: jest.spyOn(permissions, 'hasTeamPermission').mockResolvedValue(true),
   };
   mockTeamReads(null);
@@ -139,6 +146,7 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     // WHO ran for the authenticated caller, before and behind the team lock.
     expect(permissions.canManageStaff).toHaveBeenCalledTimes(2);
     expect(permissions.canManageStaff).toHaveBeenCalledWith(COACH_ID, TEAM_ID);
+    expect(permissions.canManageStaff).toHaveBeenLastCalledWith(COACH_ID, TEAM_ID, mockPrisma);
   });
 
   it('reuses a differently cased season instead of creating a near-duplicate', async () => {
@@ -163,11 +171,10 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(mockPrisma.team.create).not.toHaveBeenCalled();
   });
 
-  it('answers 409 with only the id when the coach was removed from the existing row', async () => {
+  it('answers 409 with no id when the coach was removed from the existing row', async () => {
     mockTeamReads({ id: NEW_TEAM_ID });
     (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({ id: NEXT_SEASON_ID, leagueId: LEAGUE_ID });
     // Head coach of last season's row, no longer on this season's.
-    spies.canAccessTeam.mockImplementation((_user: string, teamId: string) => Promise.resolve(teamId === TEAM_ID));
     spies.hasTeamPermission.mockImplementation((_user: string, teamId: string) => Promise.resolve(teamId === TEAM_ID));
 
     const response = await request(app)
@@ -178,8 +185,23 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(response.body).toEqual({
       error: 'This team already has a team-season in that season',
       code: 'team_season_exists',
-      teamId: NEW_TEAM_ID,
     });
+  });
+
+  it("answers 409 not_latest_season, no ids, when a coach removed from this season rolls last season's row", async () => {
+    // Last season's row (the caller is still its head coach); the lineage's
+    // latest row is this season's, and nothing exists yet in the target.
+    mockRaw([[], [], []], NEW_TEAM_ID);
+
+    const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: '2028' });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: "Only the team's most recent season can start the next one",
+      code: 'not_latest_season',
+    });
+    expect(mockPrisma.team.create).not.toHaveBeenCalled();
+    expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
   });
 
   it.each([

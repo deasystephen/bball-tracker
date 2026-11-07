@@ -76,7 +76,10 @@ export default function TeamDetailsScreen() {
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
   // Season rollover (#461) is a head-coach action, like a season move: the
   // backend gates it on `canManageStaff`, which an assistant coach fails.
-  const canStartNextSeason = canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
+  // Only the lineage's latest team-season continues it (the API answers 409
+  // `not_latest_season` otherwise), so last season's screen offers nothing.
+  const canStartNextSeason =
+    team?.isLatestInLineage === true && canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
 
   const staff = team?.staff ?? [];
   const headCoaches = staff.filter((s) => s.role.type === 'HEAD_COACH');

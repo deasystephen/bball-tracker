@@ -153,21 +153,35 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
   }
 }
 
-export interface TeamSeasonExistsDetails extends Record<string, unknown> {
-  /** The lineage's existing team-season in the requested season; its id only. */
-  teamId: string;
+/**
+ * 409 — a season rollover (#461) found the lineage already has a team-season
+ * in that season, and the caller may not manage that row (no
+ * `canManageRoster` on it, e.g. a coach removed from it). The body carries no
+ * id: naming the row would tell a caller about a team they cannot see. A
+ * caller who may manage it gets the row itself (200 `created: false`).
+ */
+export class TeamSeasonExistsError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('team_season_exists', {}, 'This team already has a team-season in that season', 409);
+    Object.setPrototypeOf(this, TeamSeasonExistsError.prototype);
+  }
 }
 
 /**
- * 409 — a season rollover (#461) found the lineage already has a team-season
- * in that season, and the caller may not read that row in full (no
- * `canManageRoster` on it, e.g. a coach removed from it). The body names the
- * row's id and nothing else; a caller who may manage it gets the row itself.
+ * 409 — a season rollover (#461) was asked of a team-season that is not its
+ * lineage's latest (`latestTeamSeasonId`). Only the latest row continues a
+ * team: otherwise a coach removed from this season could roll last season's
+ * row forward and come back as head coach. No ids in the body.
  */
-export class TeamSeasonExistsError extends DetailedError<TeamSeasonExistsDetails> {
-  constructor(teamId: string) {
-    super('team_season_exists', { teamId }, 'This team already has a team-season in that season', 409);
-    Object.setPrototypeOf(this, TeamSeasonExistsError.prototype);
+export class NotLatestSeasonError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'not_latest_season',
+      {},
+      "Only the team's most recent season can start the next one",
+      409
+    );
+    Object.setPrototypeOf(this, NotLatestSeasonError.prototype);
   }
 }
 
