@@ -11,6 +11,7 @@ import {
   getPlayerTeamAccess,
   canAccessTeam,
   getTeamPermissions,
+  getTeamAccess,
   isGuardianOf,
   isGuardianOfTeamMember,
   teamAccessWhere,
@@ -346,6 +347,7 @@ describe('permissions — guardian branches', () => {
               canTrackStats: true,
               canViewStats: true,
               canShareStats: true,
+              type: true,
             },
           },
         },
@@ -353,6 +355,42 @@ describe('permissions — guardian branches', () => {
       // No aggregation across rows any more, and no member/guardian fallback for staff.
       expect(mockPrisma.teamStaff.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.teamMember.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('getTeamAccess answers canManageStaff from the same reads: head coach yes, other staff no (#461)', async () => {
+      setPlainUser();
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ role: { ...TEAM_MANAGER_FLAGS, type: 'HEAD_COACH' } });
+      await expect(getTeamAccess('coach-1', TEAM_ID)).resolves.toEqual({
+        permissions: TEAM_MANAGER_FLAGS,
+        canManageStaff: true,
+      });
+
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ role: { ...TEAM_MANAGER_FLAGS, type: 'ASSISTANT_COACH' } });
+      await expect(getTeamAccess('asst-1', TEAM_ID)).resolves.toEqual({
+        permissions: TEAM_MANAGER_FLAGS,
+        canManageStaff: false,
+      });
+    });
+
+    it('getTeamAccess: a system ADMIN and a league admin manage staff; a member and a guardian do not', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(createUser({ role: 'ADMIN' }));
+      await expect(getTeamAccess('admin-1', TEAM_ID)).resolves.toMatchObject({ canManageStaff: true });
+
+      setPlainUser();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...createTeam({ id: TEAM_ID }),
+        season: { league: { admins: [{ id: 'la-1' }] } },
+      });
+      await expect(getTeamAccess('la-1', TEAM_ID)).resolves.toMatchObject({ canManageStaff: true });
+
+      setPlainUser();
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue({ id: 'm-1' });
+      await expect(getTeamAccess('player-1', TEAM_ID)).resolves.toMatchObject({ canManageStaff: false });
+
+      setPlainUser();
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.guardian.findFirst as jest.Mock).mockResolvedValue({ id: 'g-1' });
+      await expect(getTeamAccess('parent-1', TEAM_ID)).resolves.toMatchObject({ canManageStaff: false });
     });
 
     it('returns a copy, so a caller mutating the result cannot touch the row', async () => {

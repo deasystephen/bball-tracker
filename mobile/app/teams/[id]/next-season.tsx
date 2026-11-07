@@ -3,9 +3,9 @@
  * team-season row on the same lineage. Last season's row, games and stats stay
  * as they are; the player career view still reads them.
  *
- * The season is picked from the team's league's ACTIVE seasons
- * (`GET /seasons?leagueId=&isActive=true`, caller-scoped; never the team's own
- * season) and sent as `seasonId`. Only the lineage's latest team-season may
+ * The season is picked from the team's league's ACTIVE seasons that come
+ * AFTER the team's own (`GET /seasons?leagueId=&isActive=true`, caller-scoped,
+ * filtered by `utils/season-order.ts#isSeasonAfter`) and sent as `seasonId`. Only the lineage's latest team-season may
  * start the next one (`isLatestInLineage`). "New season" with a free-text name is
  * offered only when that list says the caller may create one (`canCreate`:
  * league admin, which a personal-league owner is); a club coach picks a season
@@ -28,6 +28,7 @@ import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { suggestNextSeasonName } from '../../../utils/season-name';
+import { isSeasonAfter } from '../../../utils/season-order';
 import { useGoBack } from '../../../hooks/useGoBack';
 import type { NormalizedApiError } from '../../../services/api-client';
 import { BackButton } from '../../../components/BackButton';
@@ -48,15 +49,27 @@ export default function NextSeasonScreen() {
   // Active seasons only: an archived season is not one to start.
   const seasons = useSeasons({ leagueId, isActive: true, limit: SEASON_PAGE }, { enabled: !!leagueId });
 
+  // Owned here, not by the form, so the guard below can see it.
+  const rollover = useRolloverTeam();
+
   // The backend gates rollover on `canManageStaff` (head coach, league admin,
   // system admin); the screen is deep-linkable, so it guards itself too.
+  // Only the lineage's latest team-season may start the next one (#461);
+  // `isLatestInLineage` is present only for a staff manager, so absent means
+  // "not allowed" and `false` means "not the latest".
   const user = useAuthUser();
-  // Only the lineage's latest team-season may start the next one (#461).
   const isLatest = team?.isLatestInLineage === true;
+  const deniedMessage =
+    team?.isLatestInLineage === false ? t('teams.nextSeason.notLatest') : t('teams.nextSeason.notAllowed');
+  // Once the rollover is in flight or done, the guard no longer reacts: the
+  // success path refetches this (source) team, which is then no longer the
+  // latest, and the screen is already replacing itself with the new one. A
+  // late flip must not toast an error or pop the stack.
+  const rolledOver = rollover.isPending || rollover.isSuccess;
   const allowed = useAccessGuard(
     !!user && !!team,
-    isLatest && canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf),
-    t(isLatest ? 'teams.nextSeason.notAllowed' : 'teams.nextSeason.notLatest'),
+    rolledOver || (isLatest && canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf)),
+    deniedMessage,
     { fallback: `/teams/${id}` }
   );
 
@@ -89,8 +102,14 @@ export default function NextSeasonScreen() {
     <NextSeasonForm
       key={team.id}
       team={team}
-      seasons={(seasons.data?.seasons ?? []).filter((season) => season.id !== team.seasonId)}
+      // Never the team's own season, and only seasons after it: rolling into
+      // an older one would make an old row the newest (the API answers 400
+      // `season_not_after_source`).
+      seasons={(seasons.data?.seasons ?? []).filter(
+        (season) => season.id !== team.seasonId && !!team.season && isSeasonAfter(season, team.season)
+      )}
       canCreateSeason={seasons.data?.canCreate === true}
+      rollover={rollover}
     />
   );
 }
@@ -99,9 +118,10 @@ interface NextSeasonFormProps {
   team: Team;
   seasons: { id: string; name: string }[];
   canCreateSeason: boolean;
+  rollover: ReturnType<typeof useRolloverTeam>;
 }
 
-function NextSeasonForm({ team, seasons, canCreateSeason }: NextSeasonFormProps) {
+function NextSeasonForm({ team, seasons, canCreateSeason, rollover }: NextSeasonFormProps) {
   const router = useRouter();
   const goBack = useGoBack(`/teams/${team.id}`);
   const { colors } = useTheme();
@@ -109,7 +129,6 @@ function NextSeasonForm({ team, seasons, canCreateSeason }: NextSeasonFormProps)
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const rollover = useRolloverTeam();
 
   const currentSeason = team.season?.name ?? '';
   const suggestion = suggestNextSeasonName(currentSeason);

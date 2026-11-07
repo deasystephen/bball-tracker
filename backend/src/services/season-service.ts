@@ -104,23 +104,46 @@ export interface SeasonList {
 export const SEASON_NAME_TAKEN_MESSAGE = 'A season with this name already exists in this league';
 
 /**
+ * The stored form of a season name: surrounding whitespace removed, exactly
+ * as zod's `.trim()` does on the create schema (`createSeasonSchema`). Every
+ * create path stores this, and `findSeasonByName` compares against it.
+ */
+export function normalizeSeasonName(name: string): string {
+  return name.trim();
+}
+
+/** A season as the name rule and the rollover (#461) read it. */
+export interface SeasonByName {
+  id: string;
+  isActive: boolean;
+  startDate: Date | null;
+  createdAt: Date;
+}
+
+/**
  * The season in `leagueId` whose name matches `name` ignoring case and
  * surrounding whitespace, or null. The ONE definition of "this league already
- * has that season": `findOrCreateSeason` (every season create path) and the
- * season rollover (#461) read it. Raw SQL on purpose: Prisma's
- * `mode: 'insensitive'` compiles to an unescaped ILIKE (see
- * `utils/email-match.ts`), and an equality on `lower(trim())` has no wildcard
- * to escape. Oldest first when near-duplicates already exist (rows written
- * before this rule; there is no migration).
+ * has that season": `findOrCreateSeason` (every season create path, the
+ * personal-league provisioning included) and the season rollover (#461) read
+ * it.
+ *
+ * The input is normalized in JS (`normalizeSeasonName`, zod's trim). The
+ * stored side strips leading and trailing whitespace with `regexp_replace`
+ * on `\s` (all whitespace, not just spaces as SQL `trim()` would), so rows
+ * written before names were normalized still match. Raw SQL on purpose:
+ * Prisma's `mode: 'insensitive'` compiles to an unescaped ILIKE (see
+ * `utils/email-match.ts`), and an equality has no wildcard to escape. Oldest
+ * first when near-duplicates already exist (there is no migration).
  */
 export async function findSeasonByName(
   db: Pick<Prisma.TransactionClient, '$queryRaw'>,
   leagueId: string,
   name: string
-): Promise<{ id: string; isActive: boolean } | null> {
-  const rows = await db.$queryRaw<{ id: string; isActive: boolean }[]>`
-    SELECT "id", "isActive" FROM "Season"
-    WHERE "leagueId" = ${leagueId} AND lower(trim("name")) = lower(trim(${name}))
+): Promise<SeasonByName | null> {
+  const rows = await db.$queryRaw<SeasonByName[]>`
+    SELECT "id", "isActive", "startDate", "createdAt" FROM "Season"
+    WHERE "leagueId" = ${leagueId}
+      AND lower(regexp_replace("name", '^\\s+|\\s+$', '', 'g')) = lower(${normalizeSeasonName(name)})
     ORDER BY "createdAt" ASC
     LIMIT 1`;
   return rows[0] ?? null;
@@ -156,7 +179,8 @@ export async function findOrCreateSeason(
 ): Promise<{ id: string; created: boolean; isActive: boolean }> {
   await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${input.leagueId} FOR NO KEY UPDATE`;
 
-  const existing = await findSeasonByName(tx, input.leagueId, input.name);
+  const name = normalizeSeasonName(input.name);
+  const existing = await findSeasonByName(tx, input.leagueId, name);
   if (existing) {
     return { id: existing.id, created: false, isActive: existing.isActive };
   }
@@ -165,7 +189,7 @@ export async function findOrCreateSeason(
     data: [
       {
         leagueId: input.leagueId,
-        name: input.name,
+        name,
         startDate: input.startDate,
         endDate: input.endDate,
         isActive: true,
@@ -174,7 +198,7 @@ export async function findOrCreateSeason(
     skipDuplicates: true,
   });
   const season = await tx.season.findUniqueOrThrow({
-    where: { leagueId_name: { leagueId: input.leagueId, name: input.name } },
+    where: { leagueId_name: { leagueId: input.leagueId, name } },
     select: { id: true, isActive: true },
   });
   const created = inserted.count === 1;

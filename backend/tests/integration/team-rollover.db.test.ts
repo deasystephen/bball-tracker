@@ -18,6 +18,7 @@ import {
   NotFoundError,
   NotLatestSeasonError,
   SeasonArchivedError,
+  SeasonNotAfterSourceError,
   TeamSeasonExistsError,
 } from '../../src/utils/errors';
 import { TeamService } from '../../src/services/team-service';
@@ -155,7 +156,7 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     const first = await TeamService.rolloverTeam(c.org.teamId, { seasonName }, c.coach);
     const second = await TeamService.rolloverTeam(c.org.teamId, { seasonName }, c.coach);
 
-    expect(second).toEqual({ team: expect.objectContaining({ id: first.team.id }), created: false });
+    expect(second).toEqual({ team: expect.objectContaining({ id: first.team.id }), created: false, seasonCreated: false });
     expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(2);
     expect(await prisma.teamMember.count({ where: { teamId: first.team.id } })).toBe(2);
   });
@@ -307,6 +308,58 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
       TeamService.rolloverTeam(c.org.teamId, { seasonName: ` old-${fx.run} ` }, c.coach)
     ).rejects.toBeInstanceOf(SeasonArchivedError);
     expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
+  });
+
+  it('refuses an older active season (400 season_not_after_source), so the current row stays the newest', async () => {
+    const c = await club('older');
+    await prisma.season.update({ where: { id: c.org.seasonId }, data: { startDate: new Date('2030-03-01') } });
+    const older = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Older-${fx.run}`, startDate: new Date('2029-03-01') },
+      select: { id: true },
+    });
+
+    await expect(
+      TeamService.rolloverTeam(c.org.teamId, { seasonId: older.id }, c.coach)
+    ).rejects.toBeInstanceOf(SeasonNotAfterSourceError);
+    expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
+  });
+
+  it('still answers the existing row after its season was archived (idempotency before the archived rule)', async () => {
+    const c = await club('archived-after');
+    const { team } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Next-${fx.run}` }, c.coach);
+    await prisma.season.update({ where: { id: team.seasonId }, data: { isActive: false } });
+
+    const again = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Next-${fx.run}` }, c.coach);
+
+    expect(again).toEqual(expect.objectContaining({ created: false, seasonCreated: false }));
+    expect(again.team.id).toBe(team.id);
+  });
+
+  it('matches a stored name with surrounding tabs or newlines (rows from before names were normalized)', async () => {
+    const c = await club('ws');
+    const legacy = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `\tWinter-${fx.run}\n` },
+      select: { id: true },
+    });
+
+    const { team } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `winter-${fx.run}` }, c.coach);
+
+    expect(team.seasonId).toBe(legacy.id);
+  });
+
+  it('personal-league provisioning reuses a case or whitespace variant of the year season', async () => {
+    const coach = await fx.user('personal', 'COACH');
+    const year = String(new Date().getFullYear());
+    const first = await TeamService.createTeam({ name: `P1-${fx.run}` }, coach);
+    const league = await prisma.league.findUniqueOrThrow({ where: { personalOwnerId: coach }, select: { id: true } });
+    // The coach renamed this year's season with stray whitespace.
+    await prisma.season.update({ where: { id: first!.seasonId }, data: { name: ` ${year}\t` } });
+
+    const second = await TeamService.createTeam({ name: `P2-${fx.run}` }, coach);
+
+    expect(second!.seasonId).toBe(first!.seasonId);
+    expect(await prisma.season.count({ where: { leagueId: league.id } })).toBe(1);
+    await prisma.league.delete({ where: { id: league.id } });
   });
 
   it('omits isLatestInLineage for a caller who cannot manage staff (a player)', async () => {

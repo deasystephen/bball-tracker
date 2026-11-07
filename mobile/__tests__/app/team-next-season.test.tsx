@@ -19,7 +19,7 @@ import type { Team, TeamStaff } from '../../hooks/useTeams';
 import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
-const mockRollover = { mutateAsync: jest.fn(), isPending: false };
+const mockRollover = { mutateAsync: jest.fn(), isPending: false, isSuccess: false };
 const mockShowToast = jest.fn();
 let mockTeam: Team;
 
@@ -35,12 +35,20 @@ jest.mock('../../components/Toast', () => ({ useToast: () => ({ showToast: mockS
 const mockUseAccessGuard = jest.fn((..._args: unknown[]) => true);
 jest.mock('../../hooks/useAccessGuard', () => ({ useAccessGuard: (...args: unknown[]) => mockUseAccessGuard(...args) }));
 const mockUseSeasons = jest.fn();
-let mockSeasonList: { seasons: { id: string; name: string }[]; canCreate?: boolean };
+let mockSeasonList: {
+  seasons: { id: string; name: string; startDate?: string | null; createdAt?: string }[];
+  canCreate?: boolean;
+};
 jest.mock('../../hooks/useSeasons', () => ({
   ...jest.requireActual('../../hooks/useSeasons'),
   useSeasons: (...args: unknown[]) => {
     mockUseSeasons(...args);
-    return { data: mockSeasonList, isLoading: false, error: null, refetch: jest.fn() };
+    // Seasons are created after the team's own unless a test says otherwise.
+    const data = {
+      ...mockSeasonList,
+      seasons: mockSeasonList.seasons.map((season) => ({ startDate: null, createdAt: '2099-01-01T00:00:00Z', ...season })),
+    };
+    return { data, isLoading: false, error: null, refetch: jest.fn() };
   },
 }));
 jest.mock('../../hooks/useTeams', () => ({
@@ -71,7 +79,14 @@ function teamWithMyRole(type: TeamStaff['role']['type']): Team {
     ageGroup: 'U12',
     createdAt: '2026-08-01T00:00:00Z',
     updatedAt: '2026-08-01T00:00:00Z',
-    season: { id: 'se-1', name: '2026', isActive: true, league: { id: 'lg-1', name: 'Mine' } },
+    season: {
+      id: 'se-1',
+      name: '2026',
+      isActive: true,
+      startDate: null,
+      createdAt: '2026-01-01T00:00:00Z',
+      league: { id: 'lg-1', name: 'Mine' },
+    },
     staff: [{ id: 'st-1', userId: 'coach-1', user: { id: 'coach-1', name: 'Coach', isManaged: false, deletedAt: null }, role: role(type) }],
     members: [],
     invitations: [],
@@ -81,6 +96,8 @@ function teamWithMyRole(type: TeamStaff['role']['type']): Team {
 beforeEach(() => {
   jest.clearAllMocks();
   mockRouter.canGoBack.mockReturnValue(true);
+  mockRollover.isPending = false;
+  mockRollover.isSuccess = false;
   mockTeam = teamWithMyRole('HEAD_COACH');
   // A personal league: only the current season so far, and the owner may create.
   mockSeasonList = { seasons: [{ id: 'se-1', name: '2026' }], canCreate: true };
@@ -156,6 +173,62 @@ describe('NextSeasonScreen', () => {
     expect(getByTestId('next-season-option-se-2')).toBeTruthy();
   });
 
+  it("offers only seasons after the team's own (an older active season is left out)", () => {
+    mockTeam = {
+      ...teamWithMyRole('HEAD_COACH'),
+      season: {
+        id: 'se-1',
+        name: 'Spring 2025',
+        isActive: true,
+        startDate: '2025-03-01',
+        createdAt: '2025-01-01T00:00:00Z',
+        league: { id: 'lg-1', name: 'Club' },
+      },
+    };
+    mockSeasonList = {
+      seasons: [
+        { id: 'se-old', name: 'Spring 2024', startDate: '2024-03-01' },
+        { id: 'se-next', name: 'Spring 2026', startDate: '2026-03-01' },
+      ],
+      canCreate: false,
+    };
+    const { queryByTestId, getByTestId } = render(<NextSeasonScreen />);
+
+    expect(queryByTestId('next-season-option-se-old')).toBeNull();
+    expect(getByTestId('next-season-option-se-next')).toBeTruthy();
+  });
+
+  it('guards a deep link from a caller who cannot manage staff with the not-allowed message', () => {
+    mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: undefined };
+
+    render(<NextSeasonScreen />);
+
+    expect(mockUseAccessGuard).toHaveBeenCalledWith(
+      true,
+      false,
+      'Only a head coach can start the next season.',
+      { fallback: '/teams/t1' }
+    );
+  });
+
+  it('stops guarding once the rollover is in flight or done, so the refetched source cannot bounce the screen', () => {
+    // Before submitting, a source that is not the latest is refused.
+    mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: false };
+    const screen = render(<NextSeasonScreen />);
+    expect(mockUseAccessGuard).toHaveBeenLastCalledWith(true, false, expect.any(String), { fallback: '/teams/t1' });
+
+    // The success path invalidates this team's detail; the refetch says it is
+    // no longer the latest. In flight, then succeeded: the guard stays satisfied.
+    mockRollover.isPending = true;
+    screen.rerender(<NextSeasonScreen />);
+    expect(mockUseAccessGuard).toHaveBeenLastCalledWith(true, true, expect.any(String), { fallback: '/teams/t1' });
+
+    mockRollover.isPending = false;
+    mockRollover.isSuccess = true;
+    screen.rerender(<NextSeasonScreen />);
+    expect(mockUseAccessGuard).toHaveBeenLastCalledWith(true, true, expect.any(String), { fallback: '/teams/t1' });
+  });
+
   it("guards a deep link to last season's row with the not-latest message", () => {
     mockTeam = { ...teamWithMyRole('HEAD_COACH'), isLatestInLineage: false };
 
@@ -202,7 +275,14 @@ describe('NextSeasonScreen', () => {
   it("lets a club coach pick the league's existing season, preselecting the suggested one, and sends its id", async () => {
     mockTeam = {
       ...teamWithMyRole('HEAD_COACH'),
-      season: { id: 'se-1', name: 'Spring 2024', isActive: true, league: { id: 'lg-1', name: 'Club' } },
+      season: {
+        id: 'se-1',
+        name: 'Spring 2024',
+        isActive: true,
+        startDate: null,
+        createdAt: '2024-01-01T00:00:00Z',
+        league: { id: 'lg-1', name: 'Club' },
+      },
     };
     mockSeasonList = {
       seasons: [
@@ -265,7 +345,10 @@ describe('NextSeasonScreen', () => {
   });
 
   it('refuses an empty new-season name without calling the API', async () => {
-    mockTeam = { ...teamWithMyRole('HEAD_COACH'), season: { id: 'se-1', name: 'Spring', isActive: true, league: { id: 'lg-1', name: 'Mine' } } };
+    mockTeam = {
+      ...teamWithMyRole('HEAD_COACH'),
+      season: { id: 'se-1', name: 'Spring', isActive: true, createdAt: '2026-01-01T00:00:00Z', league: { id: 'lg-1', name: 'Mine' } },
+    };
     const { getByTestId, getByText, findByText } = render(<NextSeasonScreen />);
 
     // No year in "Spring", so nothing is suggested.

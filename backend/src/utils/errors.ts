@@ -197,6 +197,19 @@ export class SeasonArchivedError extends DetailedError<Record<string, never>> {
   }
 }
 
+/**
+ * 400 — a season rollover (#461) named or picked a season that does not come
+ * after the team's current one (`isSeasonAfter`: start dates when both have
+ * one, else creation times). Rolling into an older season would make an old
+ * team-season the newest row and lock the real current one. No ids.
+ */
+export class SeasonNotAfterSourceError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('season_not_after_source', {}, "The next season must come after the team's current season", 400);
+    Object.setPrototypeOf(this, SeasonNotAfterSourceError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

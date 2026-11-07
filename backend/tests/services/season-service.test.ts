@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe('findSeasonByName / findOrCreateSeason (#461)', () => {
-  it('matches on lower(trim(name)) within the league, oldest first', async () => {
+  it('normalizes the input (trim) and strips all whitespace around the stored name, ignoring case, oldest first', async () => {
     mockSeasonRaw([{ id: 'oldest', isActive: true }]);
 
     await expect(findSeasonByName(mockPrisma as never, 'league-1', ' Spring 2025 ')).resolves.toEqual({
@@ -41,9 +41,29 @@ describe('findSeasonByName / findOrCreateSeason (#461)', () => {
 
     const [strings, ...values] = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0] as [TemplateStringsArray, ...unknown[]];
     const sql = strings.join('?');
-    expect(sql).toContain('lower(trim("name")) = lower(trim(');
+    // The regex reaches Postgres with its backslashes: all whitespace, not just spaces.
+    expect(sql).toContain(`lower(regexp_replace("name", '^\\s+|\\s+$', '', 'g')) = lower(?)`);
     expect(sql).toContain('ORDER BY "createdAt" ASC');
-    expect(values).toEqual(['league-1', ' Spring 2025 ']);
+    expect(values).toEqual(['league-1', 'Spring 2025']);
+  });
+
+  it('findOrCreateSeason stores the normalized (trimmed) name and reads it back by that name', async () => {
+    mockSeasonRaw([]);
+    (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 's-new', isActive: true });
+
+    await expect(
+      findOrCreateSeason(mockPrisma as never, { leagueId: 'league-1', name: '\t Fall 2027 \n' }, 'u')
+    ).resolves.toEqual({ id: 's-new', created: true, isActive: true });
+
+    expect(mockPrisma.season.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ leagueId: 'league-1', name: 'Fall 2027', isActive: true })],
+      skipDuplicates: true,
+    });
+    expect(mockPrisma.season.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { leagueId_name: { leagueId: 'league-1', name: 'Fall 2027' } },
+      select: { id: true, isActive: true },
+    });
   });
 
   it('answers null when nothing matches', async () => {
@@ -143,9 +163,9 @@ describe('SeasonService', () => {
       expect(error.message).toBe('A season with this name already exists in this league');
       expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
       const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([strings]) =>
-        (strings as TemplateStringsArray).join('?').includes('lower(trim("name"))')
+        (strings as TemplateStringsArray).join('?').includes('lower(regexp_replace("name"')
       );
-      expect(lookup?.slice(1)).toEqual([league.id, ' fall ']);
+      expect(lookup?.slice(1)).toEqual([league.id, 'fall']);
     });
 
     it('answers the duplicate-name 400 when a concurrent create of the exact name wins (ON CONFLICT DO NOTHING inserted nothing)', async () => {

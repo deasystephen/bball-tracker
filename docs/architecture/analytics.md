@@ -94,7 +94,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `team_created` | `POST /teams` succeeds | `team_id`, `league_scope`: `personal` / `league`, `has_bracket` | `hooks/useTeams.ts` |
 | `team_updated` | `PATCH /teams/:id` succeeds | `team_id`, `fields` | `hooks/useTeams.ts` |
 | `team_deleted` | `DELETE /teams/:id` succeeds | `team_id` | `hooks/useTeams.ts` |
-| `team_rolled_over` | `POST /teams/:id/rollover` succeeds ("Start next season", #461) | `team_id` (the new team-season), `from_team_id`, `created` (false when the lineage already had a row in that season and the backend returned it), `new_season` (the coach named the season rather than picking one) | `hooks/useTeams.ts` |
+| `team_rolled_over` | `POST /teams/:id/rollover` succeeds ("Start next season", #461) | `team_id` (the new team-season), `from_team_id`, `created` (false when the lineage already had a row in that season and the backend returned it), `new_season` (this request created the season: the response's `seasonCreated`, so a typed name that matched an existing season is false) | `hooks/useTeams.ts` |
 | `roster_player_added` | unified Add Player succeeds | `team_id`, `rostered`, `invited`, `guardian_invited`, `has_jersey`, `has_position`, `has_photo` | `hooks/useTeams.ts` |
 | `roster_player_updated` | a roster entry's jersey or position is edited | `team_id`, `fields` | `hooks/useTeams.ts` |
 | `roster_player_removed` | a player is removed from a roster | `team_id` | `hooks/useTeams.ts` |

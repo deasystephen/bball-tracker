@@ -13,7 +13,8 @@ jest.mock('../../src/services/usage-service', () => ({
 
 import * as permissions from '../../src/utils/permissions';
 import { invalidateUsage } from '../../src/services/usage-service';
-import { TeamService, SEASON_SIBLING_MESSAGE } from '../../src/services/team-service';
+import { TeamService, SEASON_SIBLING_MESSAGE, isSeasonAfter } from '../../src/services/team-service';
+import { logger } from '../../src/utils/logger';
 import { USAGE_LIMITS } from '../../src/services/entitlements';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { mockPrisma } from '../setup';
@@ -24,6 +25,7 @@ import {
   NotFoundError,
   NotLatestSeasonError,
   SeasonArchivedError,
+  SeasonNotAfterSourceError,
   TeamSeasonExistsError,
 } from '../../src/utils/errors';
 
@@ -50,10 +52,13 @@ const HEAD_ROLE = {
 const CUSTOM_ROLE = { ...HEAD_ROLE, type: 'CUSTOM', name: 'Scorekeeper', canManageTeam: false, canManageRoster: false };
 
 /** The source team-season as read behind the row lock. */
+const SOURCE_STARTS = new Date('2026-01-01T00:00:00Z');
+const NEXT_STARTS = new Date('2027-01-01T00:00:00Z');
+const OLDER_STARTS = new Date('2025-01-01T00:00:00Z');
 const SOURCE = {
   name: 'Hawks',
   seasonId: SEASON,
-  season: { leagueId: LEAGUE },
+  season: { leagueId: LEAGUE, startDate: SOURCE_STARTS, createdAt: SOURCE_STARTS },
   lineageId: LINEAGE,
   chatLink: 'https://chat.example.test/hawks',
   ageGroup: 'U12',
@@ -78,7 +83,12 @@ async function withLimit(body: () => Promise<void>): Promise<void> {
   }
 }
 
-type SeasonRow = { id: string; isActive: boolean };
+type SeasonRow = { id: string; isActive: boolean; startDate?: Date | null; createdAt?: Date };
+
+/** A season row as the name lookup returns it; next year's and active unless told otherwise. */
+function seasonRow(id: string, over: Partial<SeasonRow> = {}): Required<SeasonRow> {
+  return { id, isActive: true, startDate: NEXT_STARTS, createdAt: NEXT_STARTS, ...over } as Required<SeasonRow>;
+}
 
 /**
  * Raw statements by what they touch:
@@ -93,15 +103,16 @@ function mockRaw(
     seasonRows?: Array<SeasonRow[]>;
     teamLocked?: boolean;
     tombstones?: string[];
-    pickedSeason?: { leagueId: string; isActive: boolean } | null;
+    pickedSeason?: { leagueId: string; isActive: boolean; startDate?: Date | null; createdAt?: Date } | null;
   } = {}
 ): void {
   const seasonRows = [...(options.seasonRows ?? [[], []])];
   (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join('?');
     if (sql.includes('FROM "Season"') && sql.includes('FOR KEY SHARE')) {
-      const picked = options.pickedSeason === undefined ? { leagueId: LEAGUE, isActive: true } : options.pickedSeason;
-      return Promise.resolve(picked ? [picked] : []);
+      const picked =
+        options.pickedSeason === undefined ? { leagueId: LEAGUE, isActive: true } : options.pickedSeason;
+      return Promise.resolve(picked ? [{ startDate: NEXT_STARTS, createdAt: NEXT_STARTS, ...picked }] : []);
     }
     if (sql.includes('FROM "Season"')) return Promise.resolve(seasonRows.shift() ?? []);
     if (sql.includes('FROM "User"')) {
@@ -122,6 +133,7 @@ function mockTeamReads(sibling: { id: string } | null = null, finalRead = true):
       if (args.where.lineageId_seasonId) return Promise.resolve(sibling);
       if (args.select?.members) {
         return Promise.resolve({
+          lineageId: LINEAGE,
           staff: SOURCE.staff.map((row) => ({ userId: row.userId })),
           members: SOURCE.members.map((row) => ({ playerId: row.playerId })),
         });
@@ -129,7 +141,7 @@ function mockTeamReads(sibling: { id: string } | null = null, finalRead = true):
       if (args.include) {
         return Promise.resolve(finalRead ? { id: args.where.id, seasonId: NEXT_SEASON, staff: [], members: [] } : null);
       }
-      return Promise.resolve({ id: TEAM, lineageId: LINEAGE });
+      return Promise.resolve({ id: TEAM });
     }
   );
 }
@@ -174,7 +186,7 @@ describe('TeamService.rolloverTeam', () => {
 
     const result = await TeamService.rolloverTeam(TEAM, { seasonName: '2027', ageGroup: 'U13' }, USER);
 
-    expect(result).toEqual({ team: expect.objectContaining({ id: NEW_TEAM }), created: true });
+    expect(result).toEqual({ team: expect.objectContaining({ id: NEW_TEAM }), created: true, seasonCreated: true });
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
 
     // Nothing but the 404 read runs before the transaction: every raw
@@ -185,9 +197,9 @@ describe('TeamService.rolloverTeam', () => {
     expect(statements[0]).toMatch(/FROM "User".*ORDER BY "id".*FOR NO KEY UPDATE/s);
     expect(statements[1]).toMatch(/FROM "Team".*FOR NO KEY UPDATE/s);
     expect(statements[2]).toMatch(/FROM "TeamLineage".*FOR NO KEY UPDATE/s);
-    expect(statements[3]).toContain('lower(trim("name")) = lower(trim(');
+    expect(statements[3]).toContain('lower(regexp_replace("name", ');
     expect(statements[4]).toMatch(/FROM "League".*FOR NO KEY UPDATE/s);
-    expect(statements[5]).toContain('lower(trim("name")) = lower(trim(');
+    expect(statements[5]).toContain('lower(regexp_replace("name", ');
     const userLock = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][1] as { values: string[] };
     expect(userLock.values).toEqual([USER, ASSISTANT, PLAYER]);
 
@@ -254,7 +266,6 @@ describe('TeamService.rolloverTeam', () => {
       lineageId: LINEAGE,
       fromSeasonId: SEASON,
       toSeasonId: NEXT_SEASON,
-      created: true,
       seasonCreated: true,
       members: 1,
       staff: 2,
@@ -277,13 +288,13 @@ describe('TeamService.rolloverTeam', () => {
   });
 
   it('matches an existing season by name ignoring case and spaces, without needing league admin', async () => {
-    mockRaw({ seasonRows: [[{ id: NEXT_SEASON, isActive: true }]] });
+    mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON)]] });
     spies.isLeagueAdmin.mockResolvedValue(false);
 
     await TeamService.rolloverTeam(TEAM, { seasonName: 'spring 2025' }, USER);
 
     const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([st]) =>
-      (st as TemplateStringsArray).join('?').includes('lower(trim("name"))')
+      (st as TemplateStringsArray).join('?').includes('lower(regexp_replace("name"')
     ) as [TemplateStringsArray, ...unknown[]];
     expect(lookup.slice(1)).toEqual([LEAGUE, 'spring 2025']);
     expect(spies.isLeagueAdmin).not.toHaveBeenCalled();
@@ -311,7 +322,7 @@ describe('TeamService.rolloverTeam', () => {
   });
 
   it('reuses a season a concurrent create made between the lookup and the League lock', async () => {
-    mockRaw({ seasonRows: [[], [{ id: NEXT_SEASON, isActive: true }]] });
+    mockRaw({ seasonRows: [[], [seasonRow(NEXT_SEASON)]] });
 
     await TeamService.rolloverTeam(TEAM, { seasonName: '2027' }, USER);
 
@@ -335,7 +346,7 @@ describe('TeamService.rolloverTeam', () => {
 
   describe('archived seasons (409 season_archived, no ids)', () => {
     it('refuses a named season that matches an archived one', async () => {
-      mockRaw({ seasonRows: [[{ id: NEXT_SEASON, isActive: false }]] });
+      mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON, { isActive: false })]] });
 
       const err = await TeamService.rolloverTeam(TEAM, { seasonName: 'spring 2023' }, USER).catch((e: unknown) => e);
 
@@ -357,7 +368,7 @@ describe('TeamService.rolloverTeam', () => {
 
     it('refuses when an archived season of that name appears behind the League lock', async () => {
       (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 0 });
-      mockRaw({ seasonRows: [[], [{ id: NEXT_SEASON, isActive: false }]] });
+      mockRaw({ seasonRows: [[], [seasonRow(NEXT_SEASON, { isActive: false })]] });
 
       await expect(TeamService.rolloverTeam(TEAM, { seasonName: '2027' }, USER)).rejects.toBeInstanceOf(
         SeasonArchivedError
@@ -420,22 +431,36 @@ describe('TeamService.rolloverTeam', () => {
   describe('when the lineage already has a row in that season', () => {
     beforeEach(() => {
       mockTeamReads({ id: NEW_TEAM });
-      mockRaw({ seasonRows: [[{ id: NEXT_SEASON, isActive: true }]] });
+      mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON)]] });
     });
 
     it('returns it with created: false to a caller who may manage its roster, writing nothing', async () => {
       const info = spyOnInfo();
+      const debug = jest.spyOn(logger, 'debug').mockImplementation(() => undefined);
 
       const result = await TeamService.rolloverTeam(TEAM, { seasonName: '2027' }, USER);
 
-      expect(result).toEqual({ team: expect.objectContaining({ id: NEW_TEAM }), created: false });
+      expect(result).toEqual({ team: expect.objectContaining({ id: NEW_TEAM }), created: false, seasonCreated: false });
       expect(spies.hasTeamPermission).toHaveBeenCalledWith(USER, NEW_TEAM, 'canManageRoster');
       expect(mockPrisma.team.create).not.toHaveBeenCalled();
       expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
       expect(invalidateUsage).not.toHaveBeenCalled();
-      expect(domainEvent(info, 'Team rolled over')).toEqual(
-        expect.objectContaining({ teamId: NEW_TEAM, created: false, seasonCreated: false, members: 0, staff: 0 })
+      // A no-op is not a domain event: debug, not info.
+      expect(info.mock.calls.filter(([msg]) => msg === 'Team rolled over')).toHaveLength(0);
+      expect(debug).toHaveBeenCalledWith(
+        'Team rollover already done',
+        expect.objectContaining({ teamId: NEW_TEAM, seasonCreated: false, members: 0, staff: 0 })
       );
+      debug.mockRestore();
+    });
+
+    it('answers the existing row even when its season has since been archived (idempotency first)', async () => {
+      mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON, { isActive: false })]] });
+
+      const result = await TeamService.rolloverTeam(TEAM, { seasonName: '2027' }, USER);
+
+      expect(result.created).toBe(false);
+      expect(result.team.id).toBe(NEW_TEAM);
     });
 
     it("is idempotent from last season's row too: a repeat after the rollover returns the same row", async () => {
@@ -492,6 +517,45 @@ describe('TeamService.rolloverTeam', () => {
     });
   });
 
+  describe('the target season must come after the source season (400 season_not_after_source)', () => {
+    it('refuses a picked season that starts before the source season', async () => {
+      mockRaw({ pickedSeason: { leagueId: LEAGUE, isActive: true, startDate: OLDER_STARTS, createdAt: NEXT_STARTS } });
+
+      const err = await TeamService.rolloverTeam(TEAM, { seasonId: NEXT_SEASON }, USER).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(SeasonNotAfterSourceError);
+      expect((err as SeasonNotAfterSourceError).body()).toEqual({
+        error: "The next season must come after the team's current season",
+        code: 'season_not_after_source',
+      });
+      expect(mockPrisma.team.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a named season created before the source season when either has no start date', async () => {
+      mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON, { startDate: null, createdAt: OLDER_STARTS })]] });
+
+      await expect(TeamService.rolloverTeam(TEAM, { seasonName: 'Old' }, USER)).rejects.toBeInstanceOf(
+        SeasonNotAfterSourceError
+      );
+    });
+
+    it('accepts a dateless season created after the source season', async () => {
+      mockRaw({ seasonRows: [[seasonRow(NEXT_SEASON, { startDate: null, createdAt: NEXT_STARTS })]] });
+
+      await expect(TeamService.rolloverTeam(TEAM, { seasonName: 'Next' }, USER)).resolves.toMatchObject({
+        created: true,
+      });
+    });
+
+    it('isSeasonAfter: start dates when both have one, else creation times; equal is not after', () => {
+      const at = (iso: string): Date => new Date(iso);
+      expect(isSeasonAfter({ startDate: at('2027-01-01'), createdAt: at('2020-01-01') }, { startDate: at('2026-01-01'), createdAt: at('2030-01-01') })).toBe(true);
+      expect(isSeasonAfter({ startDate: at('2026-01-01'), createdAt: at('2030-01-01') }, { startDate: at('2026-01-01'), createdAt: at('2020-01-01') })).toBe(false);
+      expect(isSeasonAfter({ startDate: null, createdAt: at('2027-01-01') }, { startDate: at('2030-01-01'), createdAt: at('2026-01-01') })).toBe(true);
+      expect(isSeasonAfter({ startDate: at('2030-01-01'), createdAt: at('2025-01-01') }, { startDate: null, createdAt: at('2026-01-01') })).toBe(false);
+    });
+  });
+
   describe('refusals', () => {
     it('404s an unknown team at the cheap read, before any transaction', async () => {
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(null);
@@ -501,7 +565,7 @@ describe('TeamService.rolloverTeam', () => {
 
     it('404s when the source team is gone at the carried read', async () => {
       (mockPrisma.team.findUnique as jest.Mock).mockImplementation((args: { select?: Record<string, unknown> }) =>
-        Promise.resolve(args.select?.members ? null : { id: TEAM, lineageId: LINEAGE })
+        Promise.resolve(args.select?.members ? null : { id: TEAM })
       );
       await expect(TeamService.rolloverTeam(TEAM, { seasonName: '2027' }, USER)).rejects.toThrow('Team not found');
     });

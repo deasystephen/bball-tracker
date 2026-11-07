@@ -125,8 +125,9 @@ export interface AnalyticsEventProps {
   /**
    * Season rollover (#461): `team_id` is the new team-season, `from_team_id`
    * the one it continues; `created` is false when the lineage already had a
-   * row in that season (a repeat returns it); `new_season` when the coach
-   * named the season rather than picking an existing one.
+   * row in that season (a repeat returns it); `new_season` when this request
+   * created the season (the server's `seasonCreated`; a typed name that
+   * matched an existing season is false).
    */
   team_rolled_over: { team_id: string; from_team_id: string; created: boolean; new_season: boolean };
   roster_player_added: {

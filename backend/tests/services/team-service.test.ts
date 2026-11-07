@@ -10,7 +10,6 @@ jest.mock('../../src/services/usage-service', () => ({
 }));
 
 import { invalidateUsage } from '../../src/services/usage-service';
-import * as permissions from '../../src/utils/permissions';
 import { TeamService, ROSTER_MEMBERS_ORDER_BY, SEASON_SIBLING_MESSAGE, omitRosterManagerFields } from '../../src/services/team-service';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { Prisma } from '@prisma/client';
@@ -281,6 +280,10 @@ describe('TeamService', () => {
     // #442: WHO may create x WHERE they may create
     // ---------------------------------------------------------------------
     describe('authorization (#442)', () => {
+      afterEach(() => {
+        (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
+      });
+
       function personalProvisionMocks(user: { id: string; name: string }): { id: string; name: string; seasonId: string } {
         const team = createTeam({ seasonId: 'season-personal' });
         const headCoachRole = createTeamRole({
@@ -292,7 +295,13 @@ describe('TeamService', () => {
         (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: 'league-personal' });
         (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
-        (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: 'season-personal' });
+        // The personal season goes through findOrCreateSeason (#461): no
+        // season by that name yet, then ON CONFLICT DO NOTHING + read-back.
+        (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+          Promise.resolve(strings.join('?').includes('FROM "Season"') ? [] : [{ id: 'locked' }])
+        );
+        (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: 'season-personal', isActive: true });
         (mockPrisma.team.create as jest.Mock).mockResolvedValue(team);
         (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.teamRole.findUnique as jest.Mock).mockResolvedValue(headCoachRole);
@@ -327,9 +336,11 @@ describe('TeamService', () => {
         // The owner gets a real LeagueAdmin row so they can rename the league
         // and add next year's season.
         expect(mockPrisma.leagueAdmin.upsert).toHaveBeenCalled();
-        expect(mockPrisma.season.upsert).toHaveBeenCalledWith(
-          expect.objectContaining({ create: expect.objectContaining({ isActive: true }) })
-        );
+        // Through the one season-create path, with the same name rule.
+        expect(mockPrisma.season.createMany).toHaveBeenCalledWith({
+          data: [expect.objectContaining({ leagueId: 'league-personal', name: String(new Date().getFullYear()), isActive: true })],
+          skipDuplicates: true,
+        });
         expect(mockPrisma.team.create).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({ seasonId: 'season-personal' }),
@@ -445,9 +456,9 @@ describe('TeamService', () => {
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
-      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
-      const canManageStaff = jest.spyOn(permissions, 'canManageStaff').mockResolvedValue(true);
       try {
+        // Head coach: the staff row read for the flags also says "manages staff".
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
         (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue({ id: team.id });
         await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: true });
         expect(mockPrisma.team.findFirst).toHaveBeenCalledWith({
@@ -459,14 +470,18 @@ describe('TeamService', () => {
         (mockPrisma.team.findFirst as jest.Mock).mockResolvedValue({ id: 'a-newer-team-season' });
         await expect(TeamService.getTeamById(team.id, coach.id)).resolves.toMatchObject({ isLatestInLineage: false });
 
-        // Anyone who cannot manage staff gets no such key and costs no query.
-        canManageStaff.mockResolvedValue(false);
+        // An assistant coach (same flags, not a staff manager) gets no such key
+        // and costs no query; no separate canManageStaff read either.
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+          ...coachStaff,
+          role: { ...headCoachRole, type: 'ASSISTANT_COACH' },
+        });
         (mockPrisma.team.findFirst as jest.Mock).mockClear();
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockClear();
         const view = await TeamService.getTeamById(team.id, coach.id);
         expect('isLatestInLineage' in view).toBe(false);
         expect(mockPrisma.team.findFirst).not.toHaveBeenCalled();
       } finally {
-        canManageStaff.mockRestore();
         (mockPrisma.team.findFirst as jest.Mock).mockReset();
       }
     });

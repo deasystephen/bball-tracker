@@ -79,13 +79,21 @@ export async function isGuardianOfTeamMember(userId: string, teamId: string): Pr
   return !!link;
 }
 
+/** A caller's flags on a team plus whether they may manage its staff (`canManageStaff`). */
+export interface TeamAccess {
+  permissions: TeamPermissions;
+  /** System ADMIN, an admin of the team's league, or a HEAD_COACH-type staff row. */
+  canManageStaff: boolean;
+}
+
 /**
- * Get a user's permissions for a specific team
+ * The caller's permissions on a team AND whether they may manage its staff,
+ * from ONE set of reads (the facts `canManageStaff` checks are the same ones
+ * the permission flags are built from: system ADMIN, league admin, the staff
+ * row's role). `GET /teams/:id` uses it to decide whether to compute
+ * `isLatestInLineage` (#461) without another round trip.
  */
-export async function getTeamPermissions(
-  userId: string,
-  teamId: string
-): Promise<TeamPermissions> {
+export async function getTeamAccess(userId: string, teamId: string): Promise<TeamAccess> {
   // First check if user is a system admin
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -93,7 +101,7 @@ export async function getTeamPermissions(
   });
 
   if (user?.role === UserRole.ADMIN) {
-    return ALL_PERMISSIONS;
+    return { permissions: ALL_PERMISSIONS, canManageStaff: true };
   }
 
   // Check if user is a league admin for this team's league
@@ -115,14 +123,14 @@ export async function getTeamPermissions(
   });
 
   if (team?.season?.league?.admins && team.season.league.admins.length > 0) {
-    return ALL_PERMISSIONS;
+    return { permissions: ALL_PERMISSIONS, canManageStaff: true };
   }
 
   // Team staff: one row per user per team (`@@unique([teamId, userId])`, #463),
   // so the user's permissions are exactly that row's role flags.
   const staff = await prisma.teamStaff.findUnique({
     where: { teamId_userId: { teamId, userId } },
-    select: { role: { select: STAFF_ROLE_FLAGS_SELECT } },
+    select: { role: { select: { ...STAFF_ROLE_FLAGS_SELECT, type: true } } },
   });
 
   if (!staff) {
@@ -137,18 +145,26 @@ export async function getTeamPermissions(
     });
 
     if (isMember) {
-      return VIEW_ONLY_PERMISSIONS;
+      return { permissions: VIEW_ONLY_PERMISSIONS, canManageStaff: false };
     }
 
     // Guardian of a current member (PARENT role) — read-only, like a member.
     if (await isGuardianOfTeamMember(userId, teamId)) {
-      return VIEW_ONLY_PERMISSIONS;
+      return { permissions: VIEW_ONLY_PERMISSIONS, canManageStaff: false };
     }
 
-    return NO_PERMISSIONS;
+    return { permissions: NO_PERMISSIONS, canManageStaff: false };
   }
 
-  return { ...staff.role };
+  const { type, ...flags } = staff.role;
+  return { permissions: flags, canManageStaff: type === 'HEAD_COACH' };
+}
+
+/**
+ * Get a user's permissions for a specific team (the flags of `getTeamAccess`).
+ */
+export async function getTeamPermissions(userId: string, teamId: string): Promise<TeamPermissions> {
+  return (await getTeamAccess(userId, teamId)).permissions;
 }
 
 /**

@@ -83,7 +83,14 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     });
     (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: LEAGUE_ID });
     (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
-    (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: SEASON_ID });
+    // The personal season goes through findOrCreateSeason (#461): the User
+    // lock and League lock find their rows, no season by that name yet, then
+    // ON CONFLICT DO NOTHING inserts it and reads it back.
+    (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(strings.join('?').includes('FROM "Season"') ? [] : [{ id: 'locked' }])
+    );
+    (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: SEASON_ID, isActive: true });
     (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: LINEAGE_ID });
     (mockPrisma.team.create as jest.Mock).mockResolvedValue(createdTeam);
     (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
@@ -154,6 +161,10 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     expect(res.status).toBe(500);
     expect(mockInvalidateUsage).not.toHaveBeenCalled();
   });
+});
+
+afterEach(() => {
+  (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
 });
 
 afterAll((done) => {

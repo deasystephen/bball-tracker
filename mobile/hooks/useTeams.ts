@@ -98,6 +98,9 @@ export interface Team {
      * season); `GET /teams` list items select `{ id, name, league }` only.
      */
     isActive?: boolean;
+    /** Detail only, like `isActive`; the rollover picker orders seasons by them (#461). */
+    startDate?: string | null;
+    createdAt?: string;
     league: {
       id: string;
       name: string;
@@ -385,27 +388,36 @@ export function useDeleteTeam() {
 }
 
 /**
- * Start the next season of a team (#461). Resolves with the new team-season
- * and `created` (false when the lineage already had a row in that season; the
- * backend then returns that row, so a repeated tap is harmless).
+ * Start the next season of a team (#461). Resolves with the new team-season,
+ * `created` (false when the lineage already had a row in that season; the
+ * backend then returns that row, so a repeated tap is harmless) and
+ * `seasonCreated` (this request created the season).
  */
 export function useRolloverTeam() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ teamId, data }: { teamId: string; data: RolloverTeamInput }) => {
-      const response = await apiClient.post<{ success: boolean; created: boolean; team: Team }>(
-        `/teams/${teamId}/rollover`,
-        data
-      );
-      return { team: response.data.team, created: response.data.created };
+      const response = await apiClient.post<{
+        success: boolean;
+        created: boolean;
+        seasonCreated?: boolean;
+        team: Team;
+      }>(`/teams/${teamId}/rollover`, data);
+      return {
+        team: response.data.team,
+        created: response.data.created,
+        seasonCreated: response.data.seasonCreated === true,
+      };
     },
-    onSuccess: ({ team, created }, variables) => {
+    onSuccess: ({ team, created, seasonCreated }, variables) => {
       trackEvent(AnalyticsEvents.TEAM_ROLLED_OVER, {
         team_id: team.id,
         from_team_id: variables.teamId,
         created,
-        new_season: variables.data.seasonName !== undefined,
+        // What the server did, not what was sent: a typed name that matched
+        // an existing season created nothing.
+        new_season: seasonCreated,
       });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
       // The source row is no longer its lineage's latest (`isLatestInLineage`),

@@ -170,7 +170,8 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * Start the next season of a team (#461): a new team-season row with the same
  * lineage, carrying roster and staff. 201 with `created: true` when the row
  * was made; 200 with `created: false` and the existing row when the lineage
- * already has one in the target season (a repeated tap is idempotent).
+ * already has one in the target season (a repeated tap is idempotent). Both
+ * carry `seasonCreated`.
  *
  * Deliberately NOT behind `requireTeamCreateLimit`: the tier team cap counts
  * lineages (`countDistinctStaffTeams`, a team is its lineage), and a rollover
@@ -182,7 +183,9 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * 409 `team_season_exists` (no ids) when the lineage already has a row in
  * that season that the caller may not manage; 409 `not_latest_season` (no
  * ids) when this row is not the lineage's latest team-season; 409
- * `season_archived` (no ids) when the season resolves to an archived one.
+ * `season_archived` (no ids) when the season resolves to an archived one;
+ * 400 `season_not_after_source` (no ids) when it does not come after the
+ * team's current season.
  */
 router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
   try {
@@ -193,7 +196,7 @@ router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
       );
     }
 
-    const { team, created } = await TeamService.rolloverTeam(
+    const { team, created, seasonCreated } = await TeamService.rolloverTeam(
       req.params.id as string,
       validationResult.data,
       req.user!.id
@@ -202,6 +205,8 @@ router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
     res.status(created ? 201 : 200).json({
       success: true,
       created,
+      // Whether this request created the season (the client's analytics, #461).
+      seasonCreated,
       team,
     });
   } catch (error) {
