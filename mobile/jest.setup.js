@@ -53,7 +53,7 @@ jest.mock('expo-linking', () => ({
 jest.mock('expo-localization', () => ({
   // `languageTag` pins utils/format-date.ts, so date strings do not depend on
   // the developer machine's ICU default.
-  getLocales: () => [{ languageTag: 'en-US', languageCode: 'en', countryCode: 'US' }],
+  getLocales: () => [{ languageTag: 'en-US', languageCode: 'en', countryCode: 'US', regionCode: 'US' }],
   locale: 'en-US',
   timezone: 'America/New_York',
 }));

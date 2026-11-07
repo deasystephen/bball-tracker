@@ -1,0 +1,112 @@
+appId: com.bballtracker.mobile
+---
+# The age screen (#981, part of #980 adults-only accounts; E2E plan A.1c).
+#
+# !! RE-SEED BEFORE EVERY RUN:  cd backend && npx prisma db seed  !!
+#
+# Two seeded sign-ups owe the age question (ageConfirmedAt null, no roster,
+# no history; backend/tests/support/flow-fixtures.ts#AGE_GATE_FIXTURES):
+#   - Taylor Newman answers an adult month/year → confirmed → the role step
+#     (a PLAYER) follows as for any new sign-up.
+#   - Jamie Young answers under 13 → the API erases the account → the
+#     refusal screen → Done lands on sign-in, and the dev-login list no
+#     longer offers Jamie.
+# The seed puts Taylor back to unconfirmed and recreates Jamie, so a second
+# run without a re-seed fails: Taylor skips straight to the role step.
+#
+# The question is neutral, so this flow deliberately asserts that the
+# question screen names no minimum age.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+# Seeded PLAYERs sit below the coaches and parents (#584); scroll like
+# coach-onboarding.yaml does for Dana.
+- scrollUntilVisible:
+    element:
+      text: ".*taylor.newman@example.com.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+    centerElement: true
+- tapOn: ".*taylor.newman@example.com.*"
+
+# The age screen comes before everything else.
+- assertVisible: "When were you born?"
+- assertNotVisible: "13"
+# Month pills are labelled "Month: <name>" (SortPills labelPrefix).
+- tapOn: "Month: March"
+- tapOn:
+    id: "age-year-input"
+- inputText: "1990"
+- tapOn: "When were you born?"
+- tapOn:
+    id: "age-continue"
+# The confirmation repeats what was typed.
+- assertVisible: "Born in March 1990?"
+- tapOn:
+    id: "age-confirm-change"
+- assertVisible: "When were you born?"
+- tapOn:
+    id: "age-continue"
+- tapOn:
+    id: "age-confirm-submit"
+# Confirmed: a new PLAYER goes on to the role step.
+- assertVisible: "How will you use Hooplings?"
+- tapOn: "I play on a team"
+- tapOn: "Continue"
+- assertVisible: "Your Teams"
+
+# Second sign-up: the under-13 answer.
+- tapOn: "Profile tab"
+- scrollUntilVisible:
+    element:
+      text: "Logout"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+    centerElement: true
+- tapOn: "Logout"
+# Confirm the logout alert (its button is the second "Logout" on screen).
+- tapOn:
+    text: "Logout"
+    index: 1
+- extendedWaitUntil:
+    visible: "Developer login with test users"
+    timeout: 10000
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: ".*jamie.young@example.com.*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+    centerElement: true
+- tapOn: ".*jamie.young@example.com.*"
+- assertVisible: "When were you born?"
+- tapOn: "Month: June"
+- tapOn:
+    id: "age-year-input"
+- inputText: "2018"
+- tapOn: "When were you born?"
+- tapOn:
+    id: "age-continue"
+- assertVisible: "Born in June 2018?"
+- tapOn:
+    id: "age-confirm-submit"
+# Refused: the account is gone on the server; Done ends the session.
+- assertVisible: "Thanks for letting us know"
+- tapOn:
+    id: "age-refused-done"
+- extendedWaitUntil:
+    visible: "Developer login with test users"
+    timeout: 10000
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- assertNotVisible: ".*jamie.young@example.com.*"

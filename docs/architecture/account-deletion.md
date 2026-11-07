@@ -24,6 +24,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**
+- **The tombstone also clears `ageConfirmedAt`** (#981), and the age screen's under-minimum branch
+  (`AccountService.refuseUnderage`, `docs/architecture/children-and-age.md`) reuses `deleteAccount`
+  in `self` mode for an account that is not a rostered player, and `unclaimManagedRow` for one that is.
 - **Convert instead of delete (under 13, #983).** When we learn an account holder is under 13,
   the operator may turn the account back into a managed roster record instead of deleting it:
   `backend/scripts/convert-to-managed.ts <userId> [--coach <coachUserId>]` →

@@ -6,7 +6,7 @@ import type { Request } from 'express';
 
 export type AuthUser = NonNullable<Request['user']>;
 
-/** The six fields `authenticate` selects; a COACH on the FREE tier by default. */
+/** The fields `authenticate` selects (`AUTH_USER_SELECT`); a COACH on the FREE tier, age confirmed, by default. */
 export function authUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
     id: 'a1b2c3d4-e5f6-4890-a234-567890abcdef',
@@ -15,6 +15,7 @@ export function authUser(overrides: Partial<AuthUser> = {}): AuthUser {
     role: 'COACH',
     subscriptionTier: 'FREE',
     subscriptionExpiresAt: null,
+    ageConfirmedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   };
 }

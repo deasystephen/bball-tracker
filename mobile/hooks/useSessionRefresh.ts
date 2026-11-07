@@ -17,6 +17,7 @@ const SYNCED_FIELDS = [
   'name',
   'profilePictureUrl',
   'notifyOnReplies',
+  'ageConfirmed',
 ] as const;
 
 interface MeResponse {

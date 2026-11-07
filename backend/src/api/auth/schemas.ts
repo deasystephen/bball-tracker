@@ -113,3 +113,29 @@ export const devLoginSchema = z.object({
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
+
+/**
+ * `POST /auth/age-confirmation` (#981): the neutral age screen's answer. Month
+ * and year only, no day; `regionCode` is the device's region setting (ISO
+ * 3166-1 alpha-2), which decides the threshold (`utils/minimum-age.ts`).
+ * Nothing in this body is stored. The year's floor is generous (a typo is a
+ * typo, not a child) and its ceiling is this year.
+ */
+export const ageConfirmationSchema = z
+  .object({
+    birthMonth: z.number().int('Birth month must be a whole number').min(1, 'Birth month must be 1-12').max(12, 'Birth month must be 1-12'),
+    birthYear: z
+      .number()
+      .int('Birth year must be a whole number')
+      .min(1900, 'Birth year is out of range')
+      .refine((year) => year <= new Date().getUTCFullYear(), 'Birth year is out of range'),
+    regionCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/, 'Region code must be two letters')
+      .transform((code) => code.toUpperCase())
+      .optional(),
+  })
+  .strict();
+
+export type AgeConfirmationInput = z.infer<typeof ageConfirmationSchema>;

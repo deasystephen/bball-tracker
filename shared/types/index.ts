@@ -49,6 +49,13 @@ export interface User {
    * There is no `updatedAt` on any auth payload.
    */
   createdAt?: string;
+  /**
+   * Whether the account holder has answered the age question (#981). `false`
+   * routes to the age screen before anything else; the API refuses every
+   * other route until it is answered. Optional like the fields above: an API
+   * older than #981 omits it, and clients treat `undefined` as confirmed.
+   */
+  ageConfirmed?: boolean;
 }
 
 export type GuardianRelationship = 'MOTHER' | 'FATHER' | 'GUARDIAN' | 'OTHER';

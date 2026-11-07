@@ -154,6 +154,39 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
 }
 
 /**
+ * 403 — the account holder has not yet answered the age question (#981). Every
+ * authenticated route other than the handful the age screen itself needs
+ * (`api/auth/middleware.ts#AGE_GATE_EXEMPT`) answers this until
+ * `POST /auth/age-confirmation` has set `User.ageConfirmedAt`. The mobile
+ * client routes to the age screen on this code.
+ */
+export class AgeConfirmationRequiredError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('age_confirmation_required', {}, 'Please confirm your age to continue', 403);
+    Object.setPrototypeOf(this, AgeConfirmationRequiredError.prototype);
+  }
+}
+
+/**
+ * 403 — the age answer is below the minimum for the account holder's region
+ * (#981). By the time this is sent the account is gone (erased, or un-claimed
+ * back into a managed roster record) and the WorkOS user with it, or, when
+ * neither could be done automatically, the session is revoked and an operator
+ * finishes by the runbook. The body carries no detail about the answer.
+ */
+export class UnderMinimumAgeError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'under_minimum_age',
+      {},
+      'Hooplings accounts are for ages 13 and up (16 in the EU, UK and Switzerland)',
+      403
+    );
+    Object.setPrototypeOf(this, UnderMinimumAgeError.prototype);
+  }
+}
+
+/**
  * 409 — a season rollover (#461) found the lineage already has a team-season
  * in that season, and the caller may not manage that row (no
  * `canManageRoster` on it, e.g. a coach removed from it). The body carries no

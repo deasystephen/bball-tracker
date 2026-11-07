@@ -25,6 +25,7 @@ export const AnalyticsEvents = {
   SIGN_IN_FAILED: 'sign_in_failed',
   USER_LOGGED_IN: 'user_logged_in',
   USER_LOGGED_OUT: 'user_logged_out',
+  AGE_CONFIRMED: 'age_confirmed',
   ONBOARDING_STEP_COMPLETED: 'onboarding_step_completed',
   PROFILE_UPDATED: 'profile_updated',
   ACCOUNT_DELETED: 'account_deleted',
@@ -110,6 +111,12 @@ export interface AnalyticsEventProps {
    */
   user_logged_in: { claimed_invite?: boolean; was_managed?: boolean };
   user_logged_out: { reason: 'user' | 'session_expired' | 'account_deleted' };
+  /**
+   * The age question was answered and the answer met the minimum (#981). No
+   * properties: never the month, the year or the age. An answer under the
+   * minimum fires nothing at all, and the identity is reset.
+   */
+  age_confirmed: undefined;
   onboarding_step_completed: { step: 'name' | 'role'; role?: string };
   profile_updated: {
     name_changed: boolean;

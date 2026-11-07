@@ -4,8 +4,16 @@
 
 import { Router } from 'express';
 import { WorkOSService } from '../../services/workos-service';
-import { UnauthorizedError, BadRequestError, ForbiddenError, ConflictError } from '../../utils/errors';
 import {
+  UnauthorizedError,
+  BadRequestError,
+  ForbiddenError,
+  ConflictError,
+  UnderMinimumAgeError,
+} from '../../utils/errors';
+import { meetsMinimumAge } from '../../utils/minimum-age';
+import {
+  ageConfirmationSchema,
   updateRoleSchema,
   updateProfileSchema,
   SELF_SELECTABLE_ROLES,
@@ -53,17 +61,26 @@ const SESSION_USER_SELECT = {
   role: true,
   profilePictureUrl: true,
   notifyOnReplies: true,
+  ageConfirmedAt: true,
   createdAt: true,
 } satisfies Prisma.UserSelect;
 
 type SessionUserRow = Prisma.UserGetPayload<{ select: typeof SESSION_USER_SELECT }>;
 
 /**
- * Narrow a full `User` row (as `syncUser` returns in `.user`) to the session columns.
- * The return type makes a column added to `SESSION_USER_SELECT` a compile
- * error here until it is copied.
+ * The session user as every payload sends it: the row's columns, with the
+ * age-gate timestamp folded into `ageConfirmed: boolean` (#981). The moment of
+ * confirmation is an operator fact, not a client one, and a boolean is what
+ * the mobile router gates on.
  */
-function pickSessionUser(user: SessionUserRow): SessionUserRow {
+export type SessionUser = Omit<SessionUserRow, 'ageConfirmedAt'> & { ageConfirmed: boolean };
+
+/**
+ * Narrow a full `User` row (as `syncUser` returns in `.user`) to the session
+ * payload. The return type makes a column added to `SESSION_USER_SELECT` a
+ * compile error here until it is copied.
+ */
+function pickSessionUser(user: SessionUserRow): SessionUser {
   return {
     id: user.id,
     email: user.email,
@@ -71,6 +88,7 @@ function pickSessionUser(user: SessionUserRow): SessionUserRow {
     role: user.role,
     profilePictureUrl: user.profilePictureUrl,
     notifyOnReplies: user.notifyOnReplies,
+    ageConfirmed: user.ageConfirmedAt !== null,
     createdAt: user.createdAt,
   };
 }
@@ -98,7 +116,7 @@ async function getLeagueAdminOf(userId: string): Promise<string[]> {
   return rows.map(r => r.leagueId);
 }
 
-type SessionUserPayload = SessionUserRow & {
+type SessionUserPayload = SessionUser & {
   leagueAdminOf: string[];
   guardianOf: Awaited<ReturnType<typeof GuardianService.getGuardianOf>>;
 };
@@ -119,7 +137,7 @@ async function buildSessionUser(user: SessionUserRow): Promise<SessionUserPayloa
 // are polled by the app on every foreground/tab visit; with a 20-req/15-min
 // IP budget a family on one NAT would be locked out. Those routes fall under
 // the general API limiter applied in index.ts.
-router.use(['/login', '/callback', '/debug', '/dev-users', '/dev-login'], authRateLimit);
+router.use(['/login', '/callback', '/debug', '/dev-users', '/dev-login', '/age-confirmation'], authRateLimit);
 
 // /refresh is hit by every device whenever its ~10-minute access token expires,
 // so it gets its own limiter keyed by refresh token (not IP) — see rate-limit.ts.
@@ -464,6 +482,58 @@ router.get('/me', authenticate, async (req, res) => {
 });
 
 /**
+ * POST /api/v1/auth/age-confirmation  { birthMonth, birthYear, regionCode? }
+ * The age screen's answer (#981, part of #980). Exempt from the age gate (it
+ * is how the gate is passed); under the credential-route rate limit.
+ *
+ * - Meets the minimum for the region (`utils/minimum-age.ts`): sets
+ *   `ageConfirmedAt`, logs `Age confirmed` (id only). 200 `{ confirmed: true }`.
+ * - Already confirmed: nothing written. 200 `{ confirmed: true, alreadyConfirmed: true }`.
+ * - Under the minimum: `AccountService.refuseUnderage` undoes the sign-in (a
+ *   claimed roster record is un-claimed, anything else is erased or deleted)
+ *   and deletes the WorkOS user; 403 `under_minimum_age`, the same body in
+ *   every branch. Nothing about the answer is stored or logged.
+ * - 400 on a malformed body (field names in the message, never the values).
+ */
+router.post('/age-confirmation', authenticate, async (req, res) => {
+  try {
+    const parsed = ageConfirmationSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestError(parsed.error.issues.map((issue) => issue.message).join(', '));
+    }
+    if (req.user!.ageConfirmedAt !== null) {
+      res.json({ confirmed: true, alreadyConfirmed: true });
+      return;
+    }
+
+    const { birthMonth, birthYear, regionCode } = parsed.data;
+    if (meetsMinimumAge({ birthMonth, birthYear }, regionCode)) {
+      await AccountService.confirmAge(req.user!.id);
+      res.json({ confirmed: true });
+      return;
+    }
+
+    const token = req.headers.authorization!.substring(7);
+    let sessionId: string | undefined;
+    if (!token.startsWith('dev_')) {
+      try {
+        sessionId = (await WorkOSService.verifyToken(token))?.sessionId;
+      } catch {
+        // Already verified by `authenticate`; the sid is only a fallback for revocation.
+      }
+    }
+    await AccountService.refuseUnderage(req.user!.id, { sessionId });
+    throw new UnderMinimumAgeError();
+  } catch (error) {
+    respondWithError(res, error, {
+      log: 'Error confirming age',
+      fallback: 'Failed to confirm age',
+      sentryFlow: 'auth-age-confirmation',
+    });
+  }
+});
+
+/**
  * PATCH /api/v1/auth/me
  * Edit the current user's own profile (name, avatar) regardless of role.
  *
@@ -521,7 +591,7 @@ router.patch('/me', authenticate, async (req, res) => {
       await deletePreviousAvatar(previous?.profilePictureUrl, user.profilePictureUrl);
     }
 
-    res.json({ success: true, user });
+    res.json({ success: true, user: pickSessionUser(user) });
   } catch (error) {
     respondWithError(res, error, {
       log: 'Error updating profile',

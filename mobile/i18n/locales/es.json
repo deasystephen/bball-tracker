@@ -876,6 +876,24 @@
     "placeholder": "p. ej., Dell Curry",
     "skip": "Omitir por ahora"
   },
+  "ageOnboarding": {
+    "title": "¿Cuándo naciste?",
+    "subtitle": "Se lo preguntamos a todos una vez. Solo el mes y el año; no guardamos ninguno de los dos.",
+    "monthLabel": "Mes",
+    "monthPrefix": "Mes: ",
+    "yearLabel": "Año",
+    "yearPlaceholder": "AAAA",
+    "yearInvalid": "Escribe un año de cuatro cifras",
+    "continue": "Continuar",
+    "confirmTitle": "¿Naciste en {{month}} de {{year}}?",
+    "confirmBody": "Revísalo antes de continuar. No se puede cambiar después.",
+    "confirmYes": "Sí, continuar",
+    "confirmChange": "Cambiar",
+    "refusedTitle": "Gracias por avisarnos",
+    "refusedBody": "Las cuentas de Hooplings son para mayores de 13 años (16 en la UE, el Reino Unido y Suiza). Un padre, una madre, un tutor o un entrenador puede añadirte a la plantilla de un equipo.",
+    "saveFailedTitle": "No se pudo guardar",
+    "saveFailedBody": "Inténtalo de nuevo."
+  },
   "about": {
     "title": "Acerca de",
     "unknown": "desconocido",

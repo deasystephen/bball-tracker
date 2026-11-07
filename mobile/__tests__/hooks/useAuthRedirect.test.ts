@@ -10,8 +10,10 @@ import { useAuthStore } from '../../store/auth-store';
 import { setSessionHooks } from '../../store/session-hooks';
 
 const mockReplace = jest.fn();
+let mockPathname = '/(tabs)/home';
 jest.mock('expo-router', () => ({
   useRouter: () => ({ replace: mockReplace }),
+  usePathname: () => mockPathname,
 }));
 
 jest.mock('../../services/analytics', () => ({
@@ -26,6 +28,7 @@ jest.mock('../../services/analytics', () => ({
 describe('useAuthRedirect', () => {
   beforeEach(() => {
     mockReplace.mockClear();
+    mockPathname = '/(tabs)/home';
     setSessionHooks({ remoteLogout: () => Promise.resolve(), localCleanup: () => undefined });
     useAuthStore.setState({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false, isLoading: false });
   });
@@ -61,5 +64,38 @@ describe('useAuthRedirect', () => {
     });
 
     expect(mockReplace).toHaveBeenCalledWith('/login');
+  });
+
+  describe('the age gate (#981)', () => {
+    const unconfirmed = { id: 'u1', email: 'n@example.com', name: 'N', role: 'PLAYER' as const, ageConfirmed: false };
+
+    it('replaces to the age screen when the stored user has not answered the age question', () => {
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });
+      renderHook(() => useAuthRedirect());
+      expect(mockReplace).toHaveBeenCalledWith('/onboarding/age');
+    });
+
+    it('does nothing while already on the age screen', () => {
+      mockPathname = '/onboarding/age';
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });
+      renderHook(() => useAuthRedirect());
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('reacts when the flag arrives later (a /auth/me sync or a 403 folded into the store)', () => {
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: { ...unconfirmed, ageConfirmed: true } as never });
+      renderHook(() => useAuthRedirect());
+      expect(mockReplace).not.toHaveBeenCalled();
+      act(() => useAuthStore.getState().updateUser({ ageConfirmed: false }));
+      expect(mockReplace).toHaveBeenCalledWith('/onboarding/age');
+    });
+
+    it('never redirects a signed-out or confirmed user to the age screen', () => {
+      useAuthStore.setState({ accessToken: null, isAuthenticated: false, user: unconfirmed as never });
+      renderHook(() => useAuthRedirect());
+      useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: { ...unconfirmed, ageConfirmed: true } as never });
+      renderHook(() => useAuthRedirect());
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
   });
 });

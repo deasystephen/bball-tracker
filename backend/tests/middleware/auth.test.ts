@@ -3,7 +3,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { authenticate } from '../../src/api/auth/middleware';
+import { AGE_GATE_EXEMPT, assertAgeConfirmed, authenticate } from '../../src/api/auth/middleware';
 import { WorkOSService } from '../../src/services/workos-service';
 import { getLogContext, runWithLogContext } from '../../src/utils/log-context';
 import { mockPrisma } from '../setup';
@@ -213,6 +213,72 @@ describe('Auth Middleware', () => {
       );
 
       expect(nextFn).toHaveBeenCalledWith(expect.any(Error));
+    });
+  });
+
+  describe('the age gate (#981)', () => {
+    const originalFlag = process.env.AGE_GATE_ENFORCED;
+    const unconfirmed = { ageConfirmedAt: null };
+    const confirmed = { ageConfirmedAt: new Date() };
+
+    const requestFor = (method: string, baseUrl: string, path: string): Request =>
+      ({ method, baseUrl, path } as unknown as Request);
+
+    beforeEach(() => {
+      delete process.env.AGE_GATE_ENFORCED;
+    });
+
+    afterAll(() => {
+      if (originalFlag === undefined) delete process.env.AGE_GATE_ENFORCED;
+      else process.env.AGE_GATE_ENFORCED = originalFlag;
+    });
+
+    it('refuses an unconfirmed account on a protected route with 403 age_confirmation_required', () => {
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), unconfirmed)).toThrow(
+        expect.objectContaining({ statusCode: 403, code: 'age_confirmation_required' })
+      );
+      expect(() => assertAgeConfirmed(requestFor('PATCH', '/api/v1/auth', '/me'), unconfirmed)).toThrow(
+        expect.objectContaining({ code: 'age_confirmation_required' })
+      );
+    });
+
+    it('lets the exempt routes through, with or without a trailing slash', () => {
+      for (const key of AGE_GATE_EXEMPT) {
+        const [method, path] = key.split(' ');
+        const tail = path.replace('/auth', '');
+        expect(() => assertAgeConfirmed(requestFor(method, '/api/v1/auth', tail), unconfirmed)).not.toThrow();
+        expect(() => assertAgeConfirmed(requestFor(method, '/api/v1/auth', `${tail}/`), unconfirmed)).not.toThrow();
+      }
+    });
+
+    it('matches on the method too: a GET on the confirmation route is not exempt', () => {
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/auth', '/age-confirmation'), unconfirmed)).toThrow();
+      expect(() => assertAgeConfirmed(requestFor('PATCH', '/api/v1/auth', '/me'), unconfirmed)).toThrow();
+    });
+
+    it('never refuses a confirmed account', () => {
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), confirmed)).not.toThrow();
+    });
+
+    it('is relaxed only by AGE_GATE_ENFORCED=false', () => {
+      process.env.AGE_GATE_ENFORCED = 'false';
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), unconfirmed)).not.toThrow();
+      process.env.AGE_GATE_ENFORCED = 'off';
+      expect(() => assertAgeConfirmed(requestFor('GET', '/api/v1/teams', '/'), unconfirmed)).toThrow();
+    });
+
+    it('authenticate answers the gate\'s 403 through next(), not as a 401', async () => {
+      mockReq.headers = { authorization: 'Bearer valid-token' };
+      (mockReq as { method?: string; baseUrl?: string; path?: string }).method = 'GET';
+      (mockReq as { baseUrl?: string }).baseUrl = '/api/v1/teams';
+      (mockReq as { path?: string }).path = '/';
+      (WorkOSService.verifyToken as jest.Mock).mockResolvedValue({ id: 'workos-1', expiresAt: 0 });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(authUser({ ageConfirmedAt: null }));
+
+      await authenticate(mockReq as Request, mockRes as Response, nextFn as NextFunction);
+
+      expect(nextFn).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403, code: 'age_confirmation_required' }));
+      expect(mockReq.user).toMatchObject({ id: authUser().id, ageConfirmedAt: null });
     });
   });
 });

@@ -22,3 +22,13 @@ export const FLOW_CREATED_OPPONENTS = [
 export const FLOW_CREATED_ANNOUNCEMENT_TITLES = [
   'Reply Fixture', // announcement-reply.yaml
 ];
+
+/**
+ * The two sign-ups `.maestro/age-gate.yaml` signs in as (#981). Seeded with
+ * `ageConfirmedAt` null and nothing else: no roster row, no history. Taylor
+ * answers an adult birth month/year; Jamie answers under 13 and is erased.
+ */
+export const AGE_GATE_FIXTURES = [
+  { email: 'taylor.newman@example.com', name: 'Taylor Newman' },
+  { email: 'jamie.young@example.com', name: 'Jamie Young' },
+] as const;

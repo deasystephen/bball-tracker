@@ -84,6 +84,19 @@ export function formatMonthDay(value: Date | string): string {
   return toDate(value).toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' });
 }
 
+/**
+ * A month's full name from its number, 1–12, e.g. "October" / "octubre" (the
+ * age screen's month pills and confirmation, #981). The year is a leap year
+ * so every month has a first day; the day is fixed at the 1st, UTC noon, so
+ * no time zone can shift it into the month before.
+ */
+export function formatMonthName(month: number): string {
+  return new Date(Date.UTC(2000, month - 1, 1, 12)).toLocaleDateString(deviceLocale(), {
+    month: 'long',
+    timeZone: 'UTC',
+  });
+}
+
 /** Abbreviated month alone, e.g. "Oct" (the Games tab date badge). */
 export function formatMonthShort(value: Date | string): string {
   return toDate(value).toLocaleDateString(deviceLocale(), { month: 'short' });

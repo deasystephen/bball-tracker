@@ -82,6 +82,7 @@ function attachTestUser(app: express.Express): void {
         role: 'COACH',
         subscriptionTier: 'FREE',
         subscriptionExpiresAt: null,
+        ageConfirmedAt: new Date(),
       };
     }
     next();

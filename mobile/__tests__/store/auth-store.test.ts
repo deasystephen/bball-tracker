@@ -117,6 +117,47 @@ describe('auth-store', () => {
     expect(loggedInProps()).toStrictEqual({});
   });
 
+  describe('an account that still owes the age question (#981)', () => {
+    it('setUser stores the user and holds back identify and user_logged_in with the outcome', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: false }), { claimedInvite: true, wasManaged: true });
+
+      const state = useAuthStore.getState();
+      expect(state.isAuthenticated).toBe(true);
+      expect(state.user?.ageConfirmed).toBe(false);
+      expect(state.pendingLogin).toEqual({ claimedInvite: true, wasManaged: true });
+      expect(identifyUser).not.toHaveBeenCalled();
+      expect(trackEvent).not.toHaveBeenCalled();
+    });
+
+    it('completeAgeConfirmation flips the flag and fires the held-back analytics once', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: false }), { claimedInvite: true, wasManaged: false });
+      useAuthStore.getState().completeAgeConfirmation();
+
+      expect(useAuthStore.getState().user?.ageConfirmed).toBe(true);
+      expect(useAuthStore.getState().pendingLogin).toBeNull();
+      expect(identifyUser).toHaveBeenCalledTimes(1);
+      expect(identifyUser).toHaveBeenCalledWith('user-1', expect.objectContaining({ role: UserRole.COACH }));
+      expect(loggedInProps()).toStrictEqual({ claimed_invite: true, was_managed: false });
+    });
+
+    it('clearSession("age_refused") resets the identity but records no user_logged_out', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: false }));
+      useAuthStore.getState().setAuthToken('t');
+      useAuthStore.getState().clearSession('age_refused');
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
+      expect(useAuthStore.getState().pendingLogin).toBeNull();
+      expect(resetUser).toHaveBeenCalled();
+      expect(trackEvent).not.toHaveBeenCalled();
+    });
+
+    it('a confirmed user is identified at setUser as before, with nothing pending', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: true }));
+      expect(identifyUser).toHaveBeenCalledTimes(1);
+      expect(useAuthStore.getState().pendingLogin).toBeNull();
+    });
+  });
+
   describe('user_logged_in outcome flags (#790)', () => {
     it('carries claimed_invite: true and was_managed for a sign-in that claimed a pre-provisioned row', () => {
       useAuthStore.getState().setUser(makeUser(), { claimedInvite: true, wasManaged: true });

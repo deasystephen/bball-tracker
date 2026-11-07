@@ -33,6 +33,7 @@ import { UserRole, type GameEvent, type GameStatus, type Prisma } from '@prisma/
 import prisma from '../models';
 import { canAccessTeam, readableTeamsWhere } from '../utils/permissions';
 import { JWT_CLOCK_TOLERANCE_SECONDS, WorkOSService } from '../services/workos-service';
+import { ageGateEnforced } from '../api/auth/middleware';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
@@ -183,10 +184,12 @@ async function resolveSessionFromToken(
       // explicitly, as the REST middleware does (#667).
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId, deletedAt: null },
-        select: { id: true, email: true, name: true, role: true },
+        select: SOCKET_USER_SELECT,
       });
       // Dev token `exp` is epoch milliseconds.
-      return user ? { user, expiresAt: decoded.exp, lifetimeMs: null } : null;
+      return user && socketUserAllowed(user)
+        ? { user: sessionUser(user), expiresAt: decoded.exp, lifetimeMs: null }
+        : null;
     } catch {
       return null;
     }
@@ -200,14 +203,42 @@ async function resolveSessionFromToken(
   // Deletion nulls workosUserId, but `deletedAt` is the tombstone signal (#667).
   const user = await prisma.user.findUnique({
     where: { workosUserId: workosUser.id, deletedAt: null },
-    select: { id: true, email: true, name: true, role: true },
+    select: SOCKET_USER_SELECT,
   });
   // A WorkOS `exp` and `iat` are epoch seconds.
   const lifetimeMs =
     typeof workosUser.issuedAt === 'number'
       ? (workosUser.expiresAt - workosUser.issuedAt) * 1000
       : null;
-  return user ? { user, expiresAt: workosUser.expiresAt * 1000, lifetimeMs } : null;
+  return user && socketUserAllowed(user)
+    ? { user: sessionUser(user), expiresAt: workosUser.expiresAt * 1000, lifetimeMs }
+    : null;
+}
+
+/** The socket session's columns plus the age-gate timestamp the handshake checks (#981). */
+const SOCKET_USER_SELECT = { id: true, email: true, name: true, role: true, ageConfirmedAt: true } as const;
+
+interface SocketUserRow {
+  id: string;
+  email: string | null;
+  name: string;
+  role: UserRole;
+  ageConfirmedAt: Date | null;
+}
+
+/**
+ * The age gate for sockets (#981): an account that has not answered the age
+ * question joins no game room, as the REST gate refuses it every non-exempt
+ * route. Refused as "Unauthorized" like any other dead session; the client
+ * never opens a socket before the age screen is passed, so this only stops a
+ * client that bypasses it.
+ */
+function socketUserAllowed(user: SocketUserRow): boolean {
+  return user.ageConfirmedAt !== null || !ageGateEnforced();
+}
+
+function sessionUser(user: SocketUserRow): SocketSession['user'] {
+  return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
 
 /** The bearer token a socket presented at its handshake. */

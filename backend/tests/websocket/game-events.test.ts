@@ -293,6 +293,56 @@ describe('websocket/game-events', () => {
   });
 
   // #667: tombstoned accounts are refused at the handshake, as REST refuses them.
+  describe('resolveSocketSession and the age gate (#981)', () => {
+    const originalFlag = process.env.AGE_GATE_ENFORCED;
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+      if (originalFlag === undefined) delete process.env.AGE_GATE_ENFORCED;
+      else process.env.AGE_GATE_ENFORCED = originalFlag;
+    });
+
+    it('refuses an account that has not answered the age question', async () => {
+      delete process.env.AGE_GATE_ENFORCED;
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000 });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'u1',
+        email: null,
+        name: 'Newcomer',
+        role: 'PLAYER',
+        ageConfirmedAt: null,
+      });
+      expect(await resolveSocketSession('Bearer some.jwt.token')).toBeNull();
+    });
+
+    it('admits a confirmed account and keeps the timestamp off the socket', async () => {
+      delete process.env.AGE_GATE_ENFORCED;
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000 });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'u1',
+        email: null,
+        name: 'Coach',
+        role: 'COACH',
+        ageConfirmedAt: new Date(),
+      });
+      const resolved = await resolveSocketSession('Bearer some.jwt.token');
+      expect(resolved?.user).toEqual({ id: 'u1', email: null, name: 'Coach', role: 'COACH' });
+    });
+
+    it('admits an unconfirmed account while AGE_GATE_ENFORCED=false', async () => {
+      process.env.AGE_GATE_ENFORCED = 'false';
+      jest.spyOn(WorkOSService, 'verifyToken').mockResolvedValue({ id: 'user_x', expiresAt: 1_800_000_000 });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'u1',
+        email: null,
+        name: 'Newcomer',
+        role: 'PLAYER',
+        ageConfirmedAt: null,
+      });
+      expect((await resolveSocketSession('Bearer some.jwt.token'))?.user.id).toBe('u1');
+    });
+  });
+
   describe('resolveSocketSession and deleted accounts', () => {
     const verifyToken = (): jest.SpyInstance => jest.spyOn(WorkOSService, 'verifyToken');
 

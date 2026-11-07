@@ -11,6 +11,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserRole } from '../../shared/types';
 import { consumePendingReturnPath } from './return-path';
+import { AGE_CONFIRMATION_ROUTE, needsAgeConfirmation } from './age-gate';
 
 const KEY_PREFIX = 'roleChosen:';
 
@@ -94,17 +95,32 @@ export async function markNameAsked(userId: string): Promise<void> {
 /**
  * Where to send a freshly authenticated user.
  *
- * The role step always wins, then the one-time display-name prompt for
- * accounts still carrying the email-local-part placeholder. Otherwise a
- * pending return path (a deep link such as `/invite/<token>` that sent the
- * user to login — see `utils/return-path`) takes precedence over Home.
+ * The age question comes first (#981): an account the server marks
+ * `ageConfirmed: false` can reach nothing else. Then the role step, then the
+ * one-time display-name prompt for accounts still carrying the
+ * email-local-part placeholder. Otherwise a pending return path (a deep link
+ * such as `/invite/<token>` that sent the user to login — see
+ * `utils/return-path`) takes precedence over Home.
  */
 export async function postLoginRoute(
   user:
-    | { id: string; role: UserRole | string; name?: string | null; email?: string | null }
+    | {
+        id: string;
+        role: UserRole | string;
+        name?: string | null;
+        email?: string | null;
+        ageConfirmed?: boolean;
+      }
     | null
     | undefined
-): Promise<typeof ROLE_ONBOARDING_ROUTE | typeof NAME_ONBOARDING_ROUTE | typeof HOME_ROUTE | string> {
+): Promise<
+  | typeof AGE_CONFIRMATION_ROUTE
+  | typeof ROLE_ONBOARDING_ROUTE
+  | typeof NAME_ONBOARDING_ROUTE
+  | typeof HOME_ROUTE
+  | string
+> {
+  if (needsAgeConfirmation(user)) return AGE_CONFIRMATION_ROUTE;
   if (await needsRoleChoice(user)) return ROLE_ONBOARDING_ROUTE;
   if (await needsNamePrompt(user)) return NAME_ONBOARDING_ROUTE;
   return (await consumePendingReturnPath()) ?? HOME_ROUTE;
