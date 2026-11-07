@@ -112,6 +112,12 @@ interface AuthState {
    * explain and sends the person on itself. Not persisted.
    */
   lastSessionEnd: SessionEndReason | null;
+  /**
+   * When this device confirmed the age question (epoch ms), so a stale
+   * `GET /auth/me` reply or a 403 from a request sent before the answer
+   * cannot move `ageConfirmed` back to false (#981). Not persisted.
+   */
+  ageConfirmedLocalAt: number | null;
   setAuthToken: (token: string, refreshToken?: string | null) => void;
   /**
    * Sign-in only: store the user and fire `user_logged_in` with the response's
@@ -156,6 +162,7 @@ const CLEARED_SESSION = {
   isAuthenticated: false,
   isLoading: false,
   pendingLogin: null,
+  ageConfirmedLocalAt: null,
 } as const;
 
 /**
@@ -173,6 +180,7 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
       pendingLogin: null,
       lastSessionEnd: null,
+      ageConfirmedLocalAt: null,
 
       setAuthToken: (token: string, refreshToken: string | null = null) => {
         set({ accessToken: token, refreshToken, isAuthenticated: true });
@@ -195,7 +203,7 @@ export const useAuthStore = create<AuthState>()(
         const { user, pendingLogin } = get();
         if (!user) return;
         const confirmed = { ...user, ageConfirmed: true };
-        set({ user: confirmed, pendingLogin: null });
+        set({ user: confirmed, pendingLogin: null, ageConfirmedLocalAt: Date.now() });
         // Only a sign-in that was held back is reported now. An account that
         // existed before the age column (asked once on its next launch) was
         // identified when it signed in, and must not count a second time.
@@ -209,8 +217,9 @@ export const useAuthStore = create<AuthState>()(
         if (!current) return;
         const user = { ...current, ...patch };
         set({ user });
-        // Only the fields the user properties are derived from refresh them.
-        if (patch.role !== undefined || patch.guardianOf !== undefined) {
+        // Only the fields the user properties are derived from refresh them,
+        // and nothing is attributed before the age question is answered (#981).
+        if ((patch.role !== undefined || patch.guardianOf !== undefined) && !needsAgeConfirmation(user)) {
           setUserProperties(userPropertiesFrom(user));
         }
       },

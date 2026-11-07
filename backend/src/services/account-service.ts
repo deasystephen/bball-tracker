@@ -412,19 +412,27 @@ export class AccountService {
    *   ┌──────────────────────────────────────────────────────────────────┐
    *   │ no live row ───────────────────────────────────────────► 404      │
    *   │ already refused, awaiting the operator ────────────────► no-op    │
-   *   │ adult signals (assertPlayerAccount), or on no roster ──► DELETE   │
+   *   │ adult signals (assertPlayerAccount) ───► mark refused ──► OPERATOR│
+   *   │ a player on no roster ─────────────────────────────────► DELETE   │
    *   │ a player on a roster ──► un-claim (unclaimManagedRow) ─► UNCLAIMED│
    *   │     managing coach: the one head coach of the player's active-    │
    *   │     season teams, else null (an ADMIN can still edit the record)  │
    *   └──────────────────────────────────────────────────────────────────┘
+   *   OPERATOR: an account with a staff role, a league admin row, guardian
+   *   links, managed players, announcements, sent invitations or a personal
+   *   league with teams is an adult's by every signal we have, and a wrong
+   *   year on the form is far more likely than a child; it is never undone
+   *   on one submission. The answer is recorded as final (`ageRefusedAt`:
+   *   the gate stays shut flag or no flag and a second answer is refused,
+   *   so the live access token cannot confirm its way back in), the session
+   *   is revoked and an operator finishes by the runbook: outcome
+   *   `pending_operator`, logged at error and sent to Sentry.
    *   DELETE runs `deleteAccount` in `self` mode after the decision commits:
    *   erased when nothing references the row (a sign-up that answered the
-   *   question and left), tombstoned otherwise. A sole head coach of an
-   *   active-season team cannot be deleted that way; the answer is recorded
-   *   as final (`ageRefusedAt`: the gate stays shut and a second answer is
-   *   refused, so the live access token cannot confirm its way back in), the
-   *   session is revoked and an operator finishes by the runbook: outcome
-   *   `pending_operator`, logged at error and sent to Sentry.
+   *   question and left), tombstoned otherwise. The branch is chosen under
+   *   the lock but the deletion runs in its own transaction; a roster row
+   *   added in between leaves a "Deleted user" roster entry the coach can
+   *   remove, which is the state every deleted rostered account has.
    *   After an un-claim commits, best-effort: the cleared photo's S3 object,
    *   then the WorkOS user (a 404 counts as gone), falling back to revoking
    *   every session.
@@ -468,6 +476,12 @@ export class AccountService {
 
       // 3. The branch again, under the lock.
       const settled = await underageBranch(tx, userId);
+      if (settled.kind === 'operator') {
+        // Adult signals: record the answer as final here, under the lock, and
+        // leave everything else to the operator.
+        await tx.user.updateMany({ where: { id: userId, deletedAt: null }, data: { ageRefusedAt: new Date() } });
+        return { kind: 'operator' as const, reason: 'adult_account' as const };
+      }
       if (settled.kind === 'delete') {
         return { kind: 'delete' as const };
       }
@@ -491,6 +505,10 @@ export class AccountService {
       return { outcome: 'pending_operator', identityDeleted: false };
     }
 
+    if (decision.kind === 'operator') {
+      return handToOperator(userId, decision.reason, options.sessionId);
+    }
+
     if (decision.kind === 'delete') {
       try {
         const deleted = await AccountService.deleteAccount(userId, {
@@ -503,37 +521,10 @@ export class AccountService {
         return { outcome, identityDeleted: deleted.identityDeleted };
       } catch (error) {
         if (!(error instanceof LastHeadCoachError)) throw error;
-        // The account cannot go yet (live teams would be left headless). The
-        // answer is recorded as final: the gate stays shut on every route and
-        // a second answer is refused, so the holder cannot confirm their way
-        // back in while the access token lives. The operator takes it from here.
-        await prisma.user.updateMany({
-          where: { id: userId, deletedAt: null },
-          data: { ageRefusedAt: new Date() },
-        });
-        let sessionRevoked = false;
-        if (options.sessionId) {
-          try {
-            await WorkOSService.revokeSession(options.sessionId);
-            sessionRevoked = true;
-          } catch (revokeError) {
-            logger.error('Failed to revoke WorkOS session after an under-age answer', {
-              userId,
-              error: revokeError instanceof Error ? revokeError.message : String(revokeError),
-            });
-          }
-        }
-        logger.error('Under-age answer could not be applied automatically; operator action required', {
-          userId,
-          reason: 'last_head_coach',
-          sessionRevoked,
-        });
-        captureException(new Error('Under-age answer on a sole head coach account needs an operator'), {
-          flow: 'age-refusal',
-          userId,
-        });
-        logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', identityDeleted: false });
-        return { outcome: 'pending_operator', identityDeleted: false };
+        // A head coach role is an adult signal, so this is reached only when
+        // the role was granted between the two reads; same answer.
+        await prisma.user.updateMany({ where: { id: userId, deletedAt: null }, data: { ageRefusedAt: new Date() } });
+        return handToOperator(userId, 'last_head_coach', options.sessionId);
       }
     }
 
@@ -842,6 +833,47 @@ export interface ConvertToManagedResult {
   sessions?: SessionRevocation | null;
 }
 
+/**
+ * The age screen's `pending_operator` outcome (#981): `ageRefusedAt` is
+ * already set, so the gate stays shut on every route and a second answer is
+ * refused unread; here the session is revoked (the access token itself lives
+ * until it expires, verified locally), the case is logged at error and sent to
+ * Sentry, and the operator finishes by the runbook ("We learned an account
+ * holder is under 13"). `reason` is `adult_account` (staff, admin, guardian,
+ * manager, author or inviter: far more likely a typo than a child, and never
+ * deleted on one form submission) or `last_head_coach`.
+ */
+async function handToOperator(
+  userId: string,
+  reason: 'adult_account' | 'last_head_coach',
+  sessionId: string | undefined
+): Promise<RefuseUnderageResult> {
+  let sessionRevoked = false;
+  if (sessionId) {
+    try {
+      await WorkOSService.revokeSession(sessionId);
+      sessionRevoked = true;
+    } catch (revokeError) {
+      logger.error('Failed to revoke WorkOS session after an under-age answer', {
+        userId,
+        error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+      });
+    }
+  }
+  logger.error('Under-age answer could not be applied automatically; operator action required', {
+    userId,
+    reason,
+    sessionRevoked,
+  });
+  captureException(new Error('Under-age answer on an account with adult signals needs an operator'), {
+    flow: 'age-refusal',
+    userId,
+    reason,
+  });
+  logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', reason, identityDeleted: false });
+  return { outcome: 'pending_operator', identityDeleted: false };
+}
+
 /** What `deleteIdentityOrRevokeSessions` reports. */
 export interface IdentityTeardown {
   identityDeleted: boolean;
@@ -902,8 +934,22 @@ async function deleteIdentityOrRevokeSessions(
   }
 }
 
-/** Which way the age screen's under-minimum branch goes for a row (#981); read unlocked, then again under the lock. */
+/**
+ * Which way the age screen's under-minimum branch goes for a row (#981); read
+ * unlocked, then again under the lock.
+ * - `operator`: the account shows adult signals (a staff role, a league admin
+ *   row, guardian links, managed players, posted announcements, sent
+ *   invitations, a personal league with teams: `assertPlayerAccount`). An
+ *   under-minimum answer from such an account is far more likely a typo than
+ *   a child, and deleting it would take teams, rosters and guardian links
+ *   with it, so it is never undone automatically: the answer is recorded as
+ *   final, the gate stays shut, and the operator decides by the runbook.
+ * - `delete`: a player account on no roster (a sign-up that answered and
+ *   left): erased when nothing references it, tombstoned otherwise.
+ * - `unclaim`: a player on a roster goes back to being the coach's record.
+ */
 type UnderageBranch =
+  | { kind: 'operator' }
   | { kind: 'delete' }
   | { kind: 'unclaim'; managedById: string | null; emptyPersonalLeagueId: string | null };
 
@@ -913,7 +959,7 @@ async function underageBranch(tx: Prisma.TransactionClient, userId: string): Pro
   try {
     emptyPersonalLeagueId = assertPlayerAccount(signals);
   } catch (error) {
-    if (error instanceof ConvertRefusedError) return { kind: 'delete' };
+    if (error instanceof ConvertRefusedError) return { kind: 'operator' };
     throw error;
   }
   const onRoster = (await tx.teamMember.count({ where: { playerId: userId } })) > 0;

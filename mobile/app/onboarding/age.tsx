@@ -18,13 +18,13 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, StyleSheet, View } from 'react-native';
+import { Alert, BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Input, SortPills, ThemedText, ThemedView } from '../../components';
 import { useAuthActions, useAuthUser } from '../../store/auth-store';
-import { useConfirmAge } from '../../hooks/useAgeConfirmation';
-import { captureException } from '../../services/sentry';
+import { useConfirmAge } from '../../hooks/useConfirmAge';
+import { log } from '../../services/log';
 import { formatMonthName } from '../../utils/format-date';
 import { isUnderMinimumAgeError, parseBirthYear } from '../../utils/age-gate';
 import { postLoginRoute } from '../../utils/role-onboarding';
@@ -55,7 +55,9 @@ export default function AgeConfirmationScreen() {
   const [step, setStep] = useState<Step>('ask');
 
   const year = parseBirthYear(yearText);
-  const canContinue = month !== null && year !== null && !confirmAge.isPending;
+  // Four digits enable Continue; the range is checked on press so an
+  // impossible year gets a message instead of a silently disabled button.
+  const canContinue = month !== null && yearText.length === 4 && !confirmAge.isPending;
 
   // A hardware back never leaves the question (FTC: no back-button retry).
   // From the confirmation it returns to the question; elsewhere it does nothing.
@@ -98,7 +100,9 @@ export default function AgeConfirmationScreen() {
         setStep('refused');
         return;
       }
-      captureException(error, { flow: 'age-confirmation' });
+      // The api-client has already reported a network failure or a 5xx (#617);
+      // a 4xx is an expected refusal. Nothing more to capture here.
+      log.warn('Age confirmation failed', { error });
       Alert.alert(t('ageOnboarding.saveFailedTitle'), t('ageOnboarding.saveFailedBody'));
     }
   };
@@ -160,59 +164,79 @@ export default function AgeConfirmationScreen() {
     );
   }
 
+  // The year field opens a number pad, which has no Done key on iOS: the
+  // footer rides above the keyboard, picking a month dismisses it, and a
+  // drag on the content does too, so Continue is always reachable.
   return (
-    <ThemedView variant="background" style={[styles.container, { paddingTop: insets.top + spacing.xl }]}>
-      <View style={styles.header}>
-        <ThemedText variant="h1" heading style={styles.title}>
-          {t('ageOnboarding.title')}
-        </ThemedText>
-        <ThemedText variant="body" color="textSecondary">
-          {t('ageOnboarding.subtitle')}
-        </ThemedText>
-      </View>
+    <ThemedView variant="background" style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xl }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          <View style={styles.header}>
+            <ThemedText variant="h1" heading style={styles.title}>
+              {t('ageOnboarding.title')}
+            </ThemedText>
+            <ThemedText variant="body" color="textSecondary">
+              {t('ageOnboarding.subtitle')}
+            </ThemedText>
+          </View>
 
-      <ThemedText variant="bodyBold" style={styles.fieldLabel}>
-        {t('ageOnboarding.monthLabel')}
-      </ThemedText>
-      <SortPills
-        options={monthOptions}
-        selected={month === null ? null : (`${month}` as MonthKey)}
-        onSelect={(key) => setMonth(Number(key))}
-        labelPrefix={t('ageOnboarding.monthPrefix')}
-        style={styles.months}
-      />
+          <ThemedText variant="bodyBold" style={styles.fieldLabel}>
+            {t('ageOnboarding.monthLabel')}
+          </ThemedText>
+          <SortPills
+            options={monthOptions}
+            selected={month === null ? null : (`${month}` as MonthKey)}
+            onSelect={(key) => {
+              Keyboard.dismiss();
+              setMonth(Number(key));
+            }}
+            labelPrefix={t('ageOnboarding.monthPrefix')}
+            style={styles.months}
+          />
 
-      <Input
-        label={t('ageOnboarding.yearLabel')}
-        placeholder={t('ageOnboarding.yearPlaceholder')}
-        value={yearText}
-        onChangeText={(text) => {
-          setYearText(text.replace(/[^0-9]/g, '').slice(0, 4));
-          if (yearError) setYearError(undefined);
-        }}
-        error={yearError}
-        keyboardType="number-pad"
-        maxLength={4}
-        autoCorrect={false}
-        testID="age-year-input"
-      />
+          <Input
+            label={t('ageOnboarding.yearLabel')}
+            placeholder={t('ageOnboarding.yearPlaceholder')}
+            value={yearText}
+            onChangeText={(text) => {
+              setYearText(text.replace(/[^0-9]/g, '').slice(0, 4));
+              if (yearError) setYearError(undefined);
+            }}
+            error={yearError}
+            keyboardType="number-pad"
+            maxLength={4}
+            autoCorrect={false}
+            testID="age-year-input"
+          />
+        </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
-        <Button
-          title={t('ageOnboarding.continue')}
-          onPress={handleContinue}
-          disabled={!canContinue}
-          fullWidth
-          size="large"
-          testID="age-continue"
-        />
-      </View>
+        <View style={[styles.footer, styles.content, { paddingBottom: insets.bottom + spacing.lg }]}>
+          <Button
+            title={t('ageOnboarding.continue')}
+            onPress={handleContinue}
+            disabled={!canContinue}
+            fullWidth
+            size="large"
+            testID="age-continue"
+          />
+        </View>
+      </KeyboardAvoidingView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: spacing.lg },
+  flex: { flex: 1 },
+  content: { paddingHorizontal: 0 },
   header: { marginBottom: spacing.xl },
   title: { marginBottom: spacing.sm },
   fieldLabel: { marginBottom: spacing.sm },

@@ -176,6 +176,16 @@ describe('auth-store', () => {
       expect(useAuthStore.getState().lastSessionEnd).toBe('user');
     });
 
+    it('updateUser sends no user properties while the age question is owed', () => {
+      useAuthStore.getState().setUser(makeUser({ ageConfirmed: false }));
+      useAuthStore.getState().updateUser({ role: UserRole.PLAYER });
+      expect(setUserProperties).not.toHaveBeenCalled();
+      useAuthStore.getState().completeAgeConfirmation();
+      useAuthStore.getState().updateUser({ role: UserRole.COACH });
+      expect(setUserProperties).toHaveBeenCalledTimes(1);
+      expect(useAuthStore.getState().ageConfirmedLocalAt).toEqual(expect.any(Number));
+    });
+
     it('a confirmed user is identified at setUser as before, with nothing pending', () => {
       useAuthStore.getState().setUser(makeUser({ ageConfirmed: true }));
       expect(identifyUser).toHaveBeenCalledTimes(1);

@@ -75,6 +75,15 @@ describe('useAuthRedirect', () => {
       expect(mockReplace).toHaveBeenCalledWith('/onboarding/age');
     });
 
+    it('leaves the sign-in paths to postLoginRoute, so the age screen is not mounted twice', () => {
+      for (const path of ['/', '/login', '/auth/callback']) {
+        mockPathname = path;
+        useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });
+        renderHook(() => useAuthRedirect());
+      }
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
     it('does nothing while already on the age screen', () => {
       mockPathname = '/onboarding/age';
       useAuthStore.setState({ accessToken: 't', isAuthenticated: true, user: unconfirmed as never });

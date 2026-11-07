@@ -74,7 +74,8 @@ export function ageGateEnforced(): boolean {
 
 /** The `METHOD /path` key of a request, with the `/api/v1` prefix and any trailing slash removed. */
 function routeKey(req: Request): string {
-  const full = `${req.baseUrl}${req.path}`.replace(/^\/api\/v1/, '').replace(/\/+$/, '');
+  // Express routes case-insensitively, so the key is lower-cased too.
+  const full = `${req.baseUrl}${req.path}`.toLowerCase().replace(/^\/api\/v1/, '').replace(/\/+$/, '');
   return `${req.method.toUpperCase()} ${full}`;
 }
 

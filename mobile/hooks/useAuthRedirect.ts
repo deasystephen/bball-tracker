@@ -20,6 +20,9 @@ import { AGE_CONFIRMATION_ROUTE, needsAgeConfirmation } from '../utils/age-gate'
  * anywhere. Whenever the stored user says `ageConfirmed: false` and the app is
  * not already on the age screen, it is replaced there.
  */
+/** Routes where `postLoginRoute` decides the next screen (cold start, sign-in, the callback, the carousel) and the age screen itself. */
+const POST_LOGIN_OWNED: ReadonlySet<string> = new Set(['/', '/index', '/login', '/auth/callback', '/onboarding', AGE_CONFIRMATION_ROUTE]);
+
 export function useAuthRedirect(): void {
   const router = useRouter();
   const pathname = usePathname();
@@ -40,7 +43,9 @@ export function useAuthRedirect(): void {
 
   const mustConfirmAge = isAuthenticated && needsAgeConfirmation(user);
   useEffect(() => {
-    if (mustConfirmAge && pathname !== AGE_CONFIRMATION_ROUTE) {
+    // The sign-in paths route through `postLoginRoute` themselves; replacing
+    // here as well would mount the age screen twice.
+    if (mustConfirmAge && !POST_LOGIN_OWNED.has(pathname)) {
       router.replace(AGE_CONFIRMATION_ROUTE);
     }
   }, [mustConfirmAge, pathname, router]);

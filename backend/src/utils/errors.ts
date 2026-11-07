@@ -1,4 +1,5 @@
 import { DEFAULT_MINIMUM_AGE, GDPR_MINIMUM_AGE } from './minimum-age';
+import { APP_NAME } from '../services/mailer/templates/brand';
 
 /**
  * Custom error classes for the application
@@ -181,7 +182,7 @@ export class UnderMinimumAgeError extends DetailedError<Record<string, never>> {
     super(
       'under_minimum_age',
       {},
-      `Hooplings accounts are for ages ${DEFAULT_MINIMUM_AGE} and up (${GDPR_MINIMUM_AGE} in the EU, UK and Switzerland)`,
+      `${APP_NAME} accounts are for ages ${DEFAULT_MINIMUM_AGE} and up (${GDPR_MINIMUM_AGE} in the EU, UK and Switzerland)`,
       403
     );
     Object.setPrototypeOf(this, UnderMinimumAgeError.prototype);

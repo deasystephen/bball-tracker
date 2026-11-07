@@ -101,7 +101,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   month/year and reaches the role step; Jamie Young answers under 13, the API erases the account and
   the dev-login list no longer offers it. The seed resets Taylor to unconfirmed and recreates Jamie,
   and marks every other seeded login age-confirmed, so no other flow meets the screen. The year
-  field opens a number pad, which has no Enter: the flow dismisses it by tapping the heading.
+  field opens a number pad, which has no Done key and covers the Continue button: the flow types
+  the year first and then taps a month pill, which the screen answers with `Keyboard.dismiss()`
+  (a tap on the heading does nothing). Dev-user rows near the end of the list are scrolled to
+  without `centerElement`, like Steph in `onboarding-role.yaml`.
 - **Flows mutate the database, and `clearState: true` does not undo that.** Any flow that changes a
   role or creates rows needs a matching reset in `backend/prisma/seed.ts`, and `npx prisma db seed`
   must be run before each run. `.maestro/coach-onboarding.yaml` is the worked example: the seed puts

@@ -103,13 +103,19 @@ describe('AgeConfirmationScreen', () => {
     expect(screen.getByTestId('age-continue').props.accessibilityState?.disabled).toBe(true);
   });
 
-  it('keeps the year to four digits and refuses an out-of-range one', () => {
+  it('keeps the year to four digits and explains an out-of-range one on Continue', () => {
     const screen = renderScreen();
     fireEvent.changeText(screen.getByTestId('age-year-input'), '19a90x');
     expect(screen.getByTestId('age-year-input').props.value).toBe('1990');
     fireEvent.changeText(screen.getByTestId('age-year-input'), '1850');
     fireEvent.press(screen.getByLabelText('Month: May'));
-    expect(screen.getByTestId('age-continue').props.accessibilityState?.disabled).toBe(true);
+    expect(screen.getByTestId('age-continue').props.accessibilityState?.disabled).toBe(false);
+    fireEvent.press(screen.getByTestId('age-continue'));
+    expect(screen.getByText('Enter a four-digit year')).toBeTruthy();
+    expect(screen.queryByText(/Born in/)).toBeNull();
+    // Typing clears the message.
+    fireEvent.changeText(screen.getByTestId('age-year-input'), '1990');
+    expect(screen.queryByText('Enter a four-digit year')).toBeNull();
   });
 
   it('repeats the entered month and year before sending, and lets the person change it', () => {

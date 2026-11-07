@@ -214,15 +214,17 @@ collected from the child. Follow these steps every time; no code is written at t
 The age screen (#981, `docs/architecture/children-and-age.md`) handles the self-reported case by
 itself: an answer under the minimum un-claims a rostered player's account or deletes the account
 and the WorkOS user, with no operator step. Two cases still reach you: a report from someone else
-(the steps below), and a Sentry event `flow: age-refusal` ("Under-age answer on a sole head coach
-account needs an operator"): the holder answered under the minimum but is the only head coach of a
-team in an active season, so the account could not be deleted automatically. The row is marked
+(the steps below), and a Sentry event `flow: age-refusal` ("Under-age answer on an account with adult signals needs an
+operator", `reason: adult_account` or `last_head_coach`): the holder answered under the minimum but
+the account has a staff role, a league admin row, guardian links, managed players, announcements or
+sent invitations, so it was not undone automatically (a wrong year is far more likely than a child,
+and a deletion would take teams, rosters and guardian links with it). The row is marked
 `ageRefusedAt` (every request 403 whatever `AGE_GATE_ENFORCED` says, a second answer refused
 unread) and its session revoked, so nothing more is collected; within 5 business days run step
 4(b) after handing the team over (or deleting it) as for any last-head-coach refusal, and do not
-ask the child for anything. The conversion script refuses an account with a staff role
-(`adult_account`), so (b) is the path; the tombstone clears the marker. If the report turns out
-to be a typo by an adult (the most likely cause for a head coach), clear it by hand:
+ask the child for anything. The conversion script refuses such an account (`adult_account`), so
+(b) is the path when the report holds; the tombstone clears the marker. When it turns out to be a
+typo by an adult (the usual case), clear it by hand:
 `UPDATE "User" SET "ageRefusedAt" = NULL WHERE "id" = '<userId>'` after the person confirms their
 age in writing from the account's address; the next sign-in asks the question again.
 

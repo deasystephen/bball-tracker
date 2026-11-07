@@ -127,8 +127,8 @@ model User {
   notifyOnReplies       Boolean                 @default(true)
   // Set by POST /auth/age-confirmation (#981) when the account holder's
   // neutral birth month/year answer confirms the minimum age. NULL means the
-  // question is still owed: `requireAgeConfirmed` answers every other
-  // authenticated route 403 `age_confirmation_required` until then. The
+  // question is still owed: `authenticate` (`assertAgeConfirmed`) answers
+  // every other authenticated route 403 `age_confirmation_required` until then. The
   // answer itself is never stored. Cleared by the under-13 un-claim and by
   // account deletion. Not personal data by itself.
   ageConfirmedAt        DateTime?

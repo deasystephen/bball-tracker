@@ -23,26 +23,27 @@ appId: com.bballtracker.mobile
 - extendedWaitUntil:
     visible: "Select Test User"
     timeout: 10000
-# Seeded PLAYERs sit below the coaches and parents (#584); scroll like
-# coach-onboarding.yaml does for Dana.
+# Seeded PLAYERs sit below the coaches and parents (#584), near the END of
+# the list, so no centerElement (docs/testing/maestro.md): centering an
+# end-of-list row leaves the tap on the wrong card.
 - scrollUntilVisible:
     element:
       text: ".*taylor.newman@example.com.*"
     direction: DOWN
     timeout: 20000
     visibilityPercentage: 60
-    centerElement: true
 - tapOn: ".*taylor.newman@example.com.*"
 
 # The age screen comes before everything else.
 - assertVisible: "When were you born?"
 - assertNotVisible: "13"
-# Month pills are labelled "Month: <name>" (SortPills labelPrefix).
-- tapOn: "Month: March"
+# Year first: the number pad has no Done key, and picking a month dismisses
+# it (the screen calls Keyboard.dismiss on a month tap). Month pills are
+# labelled "Month: <name>" (SortPills labelPrefix).
 - tapOn:
     id: "age-year-input"
 - inputText: "1990"
-- tapOn: "When were you born?"
+- tapOn: "Month: March"
 - tapOn:
     id: "age-continue"
 # The confirmation repeats what was typed.
@@ -54,21 +55,28 @@ appId: com.bballtracker.mobile
     id: "age-continue"
 - tapOn:
     id: "age-confirm-submit"
-# Confirmed: a new PLAYER goes on to the role step.
+# Confirmed: a new PLAYER goes on to the role step, then Home (a player with
+# no team sees the empty state, not "Your Teams").
 - assertVisible: "How will you use Hooplings?"
 - tapOn: "I play on a team"
 - tapOn: "Continue"
-- assertVisible: "Your Teams"
+- assertVisible: "No teams yet. Your coach will add you to a team."
 
 # Second sign-up: the under-13 answer.
 - tapOn: "Profile tab"
-- scrollUntilVisible:
-    element:
-      text: "Logout"
-    direction: DOWN
-    timeout: 10000
-    visibilityPercentage: 60
-    centerElement: true
+- assertVisible: "Account"
+# Scroll down to the logout button the way logout.yaml does (explicit
+# coordinates, missing the centre Track button).
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+# A second swipe reaches the end of the content, so the button sits above
+# the translucent tab bar instead of behind it (a tap there hits the bar).
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
 - tapOn: "Logout"
 # Confirm the logout alert (its button is the second "Logout" on screen).
 - tapOn:
@@ -87,14 +95,12 @@ appId: com.bballtracker.mobile
     direction: DOWN
     timeout: 20000
     visibilityPercentage: 60
-    centerElement: true
 - tapOn: ".*jamie.young@example.com.*"
 - assertVisible: "When were you born?"
-- tapOn: "Month: June"
 - tapOn:
     id: "age-year-input"
 - inputText: "2018"
-- tapOn: "When were you born?"
+- tapOn: "Month: June"
 - tapOn:
     id: "age-continue"
 - assertVisible: "Born in June 2018?"

@@ -1,5 +1,5 @@
 /**
- * The age screen's one request (#981): `POST /auth/age-confirmation` with the
+ * `useConfirmAge`: the age screen's one request (#981): `POST /auth/age-confirmation` with the
  * birth month and year the person entered and the device's region code.
  *
  * On success the account is confirmed: the store flips `ageConfirmed` and

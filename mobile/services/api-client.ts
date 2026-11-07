@@ -438,7 +438,12 @@ const createApiClient = (): AxiosInstance => {
     (response) => response,
     (error: unknown) => {
       if (isAgeConfirmationRequiredError(error)) {
-        useAuthStore.getState().updateUser({ ageConfirmed: false });
+        const startedAt = (((error as AxiosError).config as RetriableConfig | undefined)?._startedAt) ?? Infinity;
+        const confirmedAt = useAuthStore.getState().ageConfirmedLocalAt;
+        // A 403 for a request sent before this device answered is stale.
+        if (confirmedAt === null || startedAt >= confirmedAt) {
+          useAuthStore.getState().updateUser({ ageConfirmed: false });
+        }
       }
       return Promise.reject(error);
     }

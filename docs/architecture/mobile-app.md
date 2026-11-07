@@ -140,11 +140,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **The age screen comes first (#981).** `postLoginRoute` sends a user whose session payload says
   `ageConfirmed: false` to `/onboarding/age` (`app/onboarding/age.tsx`) before the role step and the
   name prompt, and `hooks/useAuthRedirect.ts` replaces any other route with it while the stored user
-  is unconfirmed, so a restored session, a deep link or a push tap cannot get past it; the api-client
+  is unconfirmed (except the sign-in paths, which `postLoginRoute` owns), so a restored session, a deep link or a push tap cannot get past it; the api-client
   folds the API's 403 `age_confirmation_required` into the store so the hook fires. The onboarding
   stack sets `gestureEnabled: false` for the screen and a hardware back stays on it. Twelve month
   pills (`SortPills`, labelled "Month: <name>"), a four-digit year field, a confirmation step that
-  repeats the entry, then `POST /auth/age-confirmation` through `hooks/useAgeConfirmation.ts`. Old
+  repeats the entry, then `POST /auth/age-confirmation` through `hooks/useConfirmAge.ts`. Old
   enough: `completeAgeConfirmation` on the store, `age_confirmed`, and `postLoginRoute` again. Under
   the minimum: the server has already undone the sign-in; the screen explains and Done runs
   `clearSession('age_refused')` (no analytics event). Push registration (`useNotificationSetup`) and

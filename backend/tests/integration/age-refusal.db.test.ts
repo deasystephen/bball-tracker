@@ -191,7 +191,7 @@ describe('AccountService.refuseUnderage', () => {
     });
   });
 
-  it('deletes an adult account (an assistant coach with history) like a self-service deletion', async () => {
+  it('hands an account with adult signals (an assistant coach) to the operator instead of deleting it', async () => {
     const org = await fx.org('adult');
     const head = await fx.user('adultHead', 'COACH');
     await fx.staff(head, org);
@@ -214,18 +214,46 @@ describe('AccountService.refuseUnderage', () => {
 
     const result = await AccountService.refuseUnderage(adult, { sessionId: 'sess_adult' });
 
-    expect(result).toEqual({ outcome: 'deleted', identityDeleted: true });
+    // Far more likely a typo than a child: nothing is deleted, the answer is final, the operator decides.
+    expect(result).toEqual({ outcome: 'pending_operator', identityDeleted: false });
     expect(await prisma.user.findUniqueOrThrow({ where: { id: adult }, select: STATE_SELECT })).toMatchObject({
-      workosUserId: null,
-      email: null,
+      workosUserId: `workos-adultAssistant-${fx.run}`,
       ageConfirmedAt: null,
-      deletedAt: expect.any(Date),
+      ageRefusedAt: expect.any(Date),
+      deletedAt: null,
     });
-    expect(await prisma.teamStaff.count({ where: { userId: adult } })).toBe(0);
-    expect(deleteUser).toHaveBeenCalledWith(`workos-adultAssistant-${fx.run}`);
+    expect(await prisma.teamStaff.count({ where: { userId: adult } })).toBe(1);
+    expect(await prisma.announcement.count({ where: { authorId: adult } })).toBe(1);
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(revokeSession).toHaveBeenCalledWith('sess_adult');
+    expect(captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ flow: 'age-refusal', userId: adult, reason: 'adult_account' })
+    );
   });
 
-  it('leaves a sole head coach gated for the operator, revokes the session, and alarms', async () => {
+  it('tombstones a player account with history but no roster (announcement replies) rather than erasing it', async () => {
+    const org = await fx.org('replies');
+    const head = await fx.user('repliesHead', 'COACH');
+    await fx.staff(head, org);
+    const announcement = await prisma.announcement.create({
+      data: { teamId: org.teamId, authorId: head, title: `R-${fx.run}`, body: 'hi' },
+      select: { id: true },
+    });
+    const player = await signedIn('repliesPlayer');
+    await prisma.announcementReply.create({ data: { announcementId: announcement.id, authorId: player, body: 'ok' } });
+
+    const result = await AccountService.refuseUnderage(player, {});
+
+    expect(result).toEqual({ outcome: 'deleted', identityDeleted: true });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: player }, select: STATE_SELECT })).toMatchObject({
+      workosUserId: null,
+      email: null,
+      deletedAt: expect.any(Date),
+    });
+  });
+
+  it('leaves a sole head coach gated for the operator, revokes the session, and alarms; the refusal is final', async () => {
     const org = await fx.org('soleHead');
     const head = await signedIn('soleHead', { role: 'COACH' });
     await fx.staff(head, org);
