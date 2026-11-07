@@ -37,7 +37,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload, withPromotedAvatar } from './upload-service';
+import { assertOwnUploadUrl, discardOwnAvatar, revertAvatarToPending, withPromotedAvatar } from './upload-service';
 
 /**
  * Awaited email sends live in request paths so `emailSent` can be reported;
@@ -1128,8 +1128,8 @@ export class InvitationService {
       if (!data.playerEmail) {
         // Case 1 — roster-only managed player. The photo leaves the pending
         // state before it is stored (#1005): expired → 400 `upload_expired`, and
-        // a failed transaction discards the promoted upload again.
-        result.member = await withPromotedAvatar(data.profilePictureUrl, userId, () =>
+        // a failed transaction reverts the upload to pending.
+        result.member = await withPromotedAvatar(data.profilePictureUrl, () =>
           prisma.$transaction(async (tx) => {
           const managedUser = await tx.user.create({
             data: {
@@ -1173,52 +1173,22 @@ export class InvitationService {
       } else {
         // Case 2 — new email, or an unclaimed pre-provisioned row (the
         // "middle case"): managed player rostered immediately + invitation.
-        // Two coaches racing the same new email both pass the findUnique;
-        // the loser's user.create aborts the transaction with P2002 and we
-        // retry once against the row that now exists.
-        let created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>>;
-        // The photo is stored only on a new row or a reused row with no photo
-        // of its own. Then it leaves the pending state first (#1005; expired →
-        // 400 `upload_expired`). A reused row that already has a photo keeps it,
-        // so the upload is not promoted: it is discarded below (photoApplied is
-        // false) and, if the add fails, the lifecycle rule expires it. Not a
-        // `withPromotedAvatar` call because the case-3 fallbacks below return
-        // from the method; the outer try/catch is the same rule by hand: a
-        // failure before the rows exist discards a promoted upload again.
-        const promoted = existing?.profilePictureUrl ? false : await promoteAvatarUpload(data.profilePictureUrl);
-        try {
-          try {
-            created = await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email);
-          } catch (err) {
-            // The reuse target completed WorkOS signup mid-transaction — it is a
-            // claimed account now, so fall back to case 3 (red-team RT4).
-            if (err instanceof ClaimedMidCreateError) {
-              const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId);
-              result.invitation = case3.invitation;
-              result.invited = true;
-              result.emails.player = case3.emailSent ?? undefined;
-              playerId = err.playerId;
-              this.logRosterAdd(teamId, playerId, userId, result);
-              return this.attachGuardianInvite(teamId, playerId, data, userId, result);
-            }
-            const raced = await this.resolveEmailRaceWinner(email, err);
-            if (raced.workosUserId) {
-              const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId);
-              result.invitation = case3.invitation;
-              result.invited = true;
-              result.emails.player = case3.emailSent ?? undefined;
-              playerId = raced.id;
-              this.logRosterAdd(teamId, playerId, userId, result);
-              return this.attachGuardianInvite(teamId, playerId, data, userId, result);
-            }
-            created = await this.createRosteredInvitedPlayer(teamId, data, userId, raced, email);
-          }
-        } catch (err) {
-          if (promoted) {
-            await discardOwnAvatar(data.profilePictureUrl, userId);
-          }
-          throw err;
+        // The photo leaves the pending state before any row is written and
+        // goes back to pending if the add fails, through the same wrapper as
+        // every other write site (#1005); whether the row keeps its own photo
+        // is decided under the transaction's lock, not from the read above.
+        const outcome = await withPromotedAvatar(data.profilePictureUrl, () =>
+          this.rosterOrFallBackToCase3(teamId, data, userId, existing, email)
+        );
+        if (outcome.kind === 'case3') {
+          result.invitation = outcome.case3.invitation;
+          result.invited = true;
+          result.emails.player = outcome.case3.emailSent ?? undefined;
+          playerId = outcome.playerId;
+          this.logRosterAdd(teamId, playerId, userId, result);
+          return this.attachGuardianInvite(teamId, playerId, data, userId, result);
         }
+        const { created } = outcome;
 
         result.member = created.member;
         result.invitation = this.toSummary(created.invitation);
@@ -1226,9 +1196,11 @@ export class InvitationService {
         result.invited = true;
         playerId = created.member.playerId;
         if (data.profilePictureUrl && !created.photoApplied) {
-          // The reused row kept its own photo: the object the app uploaded
-          // before this request would otherwise be orphaned in S3 (#618).
-          await discardOwnAvatar(data.profilePictureUrl, userId);
+          // The reused row kept its own photo (#618): the upload is stored
+          // nowhere, so it goes back to pending and the lifecycle rule expires
+          // it (#1005). Reverting, not deleting, so a lost race never leaves a
+          // stored URL pointing at a deleted object.
+          await revertAvatarToPending(data.profilePictureUrl);
         }
         result.emails.player =
           (await this.deliverInvitationEmail(created.invitation, created.token, 'added')) ??
@@ -1239,6 +1211,43 @@ export class InvitationService {
     this.logRosterAdd(teamId, playerId, userId, result);
 
     return this.attachGuardianInvite(teamId, playerId, data, userId, result);
+  }
+
+  /**
+   * Case 2 body: roster the new or reused managed row with its invitation, or
+   * fall back to case 3 when the account turns out to be claimed. Returns
+   * which, so `addRosterPlayer` runs the whole thing inside
+   * `withPromotedAvatar` and the photo is promoted and reverted in one place.
+   * Two coaches racing the same new email both pass the pre-read; the loser's
+   * user.create aborts the transaction with P2002 and we retry once against
+   * the row that now exists.
+   */
+  private static async rosterOrFallBackToCase3(
+    teamId: string,
+    data: AddRosterPlayerInput,
+    userId: string,
+    existing: { id: string; managedById: string | null } | null,
+    email: string
+  ): Promise<
+    | { kind: 'rostered'; created: Awaited<ReturnType<typeof InvitationService.createRosteredInvitedPlayer>> }
+    | { kind: 'case3'; playerId: string; case3: { invitation: InvitationSummary; emailSent: boolean | null } }
+  > {
+    try {
+      return { kind: 'rostered', created: await this.createRosteredInvitedPlayer(teamId, data, userId, existing, email) };
+    } catch (err) {
+      // The reuse target completed WorkOS signup mid-transaction — it is a
+      // claimed account now, so fall back to case 3 (red-team RT4).
+      if (err instanceof ClaimedMidCreateError) {
+        const case3 = await this.createCase3Invitation(teamId, err.playerId, data, userId);
+        return { kind: 'case3', playerId: err.playerId, case3 };
+      }
+      const raced = await this.resolveEmailRaceWinner(email, err);
+      if (raced.workosUserId) {
+        const case3 = await this.createCase3Invitation(teamId, raced.id, data, userId);
+        return { kind: 'case3', playerId: raced.id, case3 };
+      }
+      return { kind: 'rostered', created: await this.createRosteredInvitedPlayer(teamId, data, userId, raced, email) };
+    }
   }
 
   /** Case 3 helper: invitation for a claimed account, "invited" email copy. */

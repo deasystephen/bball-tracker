@@ -15,6 +15,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
     return { input };
   }),
   DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
+  PutObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'PutObjectTagging', input })),
 }));
 
 import request from 'supertest';
@@ -156,16 +157,24 @@ describe('PATCH /api/v1/auth/me', () => {
       expect(deleteObjectCalls).toHaveLength(0);
     });
 
-    it('discards the promoted upload when the account was deleted underneath the request (401)', async () => {
+    it('reverts the promoted upload to pending, deleting nothing, when the account was deleted underneath the request (401)', async () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 
       expect(res.status).toBe(401);
       expect(taggingCalls()).toHaveLength(1);
-      expect(deleteObjectCalls).toEqual([
-        { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/new.jpg` },
+      const reverts = mockS3Send.mock.calls
+        .map(([cmd]) => cmd as Sent)
+        .filter((cmd) => cmd.kind === 'PutObjectTagging');
+      expect(reverts.map((c) => c.input)).toEqual([
+        {
+          Bucket: 'bball-tracker-avatars-dev',
+          Key: `avatars/${TEST_USER_ID}/new.jpg`,
+          Tagging: { TagSet: [{ Key: 'pending', Value: 'true' }] },
+        },
       ]);
+      expect(deleteObjectCalls).toHaveLength(0);
     });
 
     it('skips promotion for an external URL', async () => {

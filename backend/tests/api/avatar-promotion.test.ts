@@ -5,7 +5,8 @@
  *
  * Every upload is born tagged `pending=true`; the write removes the tag
  * (DeleteObjectTagging) BEFORE the row is written, answers 400
- * `upload_expired` and writes nothing when the object is gone, and skips
+ * `upload_expired` and writes nothing when the object is gone, puts the tag
+ * back (PutObjectTagging, never a delete) when the write fails, and skips
  * external URLs. PATCH /auth/me is covered in `auth-profile.test.ts`.
  */
 
@@ -52,6 +53,7 @@ const EXPIRED_BODY = { error: 'That photo upload expired. Please choose it again
 
 const taggedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObjectTagging').map((c) => c.input.Key);
 const deletedKeys = (): unknown[] => sentOfKind(mockS3Send, 'DeleteObject').map((c) => c.input.Key);
+const revertedKeys = (): unknown[] => sentOfKind(mockS3Send, 'PutObjectTagging').map((c) => c.input.Key);
 const prismaError = (code: string): Error =>
   new Prisma.PrismaClientKnownRequestError(code, { code, clientVersion: 'test' });
 const expireUpload = (): void => {
@@ -117,7 +119,7 @@ describe('POST /api/v1/players', () => {
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
   });
 
-  it('discards the promoted upload when the create fails (P2002), so no untagged orphan survives', async () => {
+  it('reverts the promoted upload to pending when the create fails (P2002), deleting nothing', async () => {
     (mockPrisma.user.create as jest.Mock).mockRejectedValue(prismaError('P2002'));
     const res = await request(app)
       .post('/api/v1/players')
@@ -126,7 +128,8 @@ describe('POST /api/v1/players', () => {
 
     expect(res.status).toBe(409);
     expect(taggedKeys()).toEqual([KEY]);
-    expect(deletedKeys()).toEqual([KEY]);
+    expect(revertedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toHaveLength(0);
   });
 
   it('skips promotion for an external URL', async () => {
@@ -176,7 +179,7 @@ describe('PATCH /api/v1/players/:id', () => {
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('discards the promoted upload when the update hits a tombstone (P2025 → 404)', async () => {
+  it('reverts the promoted upload to pending when the update hits a tombstone (P2025 → 404)', async () => {
     arm(null);
     (mockPrisma.user.update as jest.Mock).mockRejectedValue(prismaError('P2025'));
     const res = await request(app)
@@ -186,7 +189,8 @@ describe('PATCH /api/v1/players/:id', () => {
 
     expect(res.status).toBe(404);
     expect(taggedKeys()).toEqual([KEY]);
-    expect(deletedKeys()).toEqual([KEY]);
+    expect(revertedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toHaveLength(0);
   });
 
   it('skips promotion for an external URL and for the URL already stored', async () => {
@@ -257,7 +261,7 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('case 1: discards the promoted upload when the transaction fails', async () => {
+  it('case 1: reverts the promoted upload to pending when the transaction fails', async () => {
     (mockPrisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('connection reset'));
     const res = await request(app)
       .post(`/api/v1/teams/${TEAM_ID}/players`)
@@ -266,7 +270,8 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
 
     expect(res.status).toBe(500);
     expect(taggedKeys()).toEqual([KEY]);
-    expect(deletedKeys()).toEqual([KEY]);
+    expect(revertedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toHaveLength(0);
   });
 
   it('answers 5xx and writes nothing when S3 denies the promotion (no fail-open)', async () => {
@@ -280,6 +285,7 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(res.body.code).toBeUndefined();
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(deletedKeys()).toHaveLength(0);
+    expect(revertedKeys()).toHaveLength(0);
   });
 
   it('skips promotion for an external URL', async () => {

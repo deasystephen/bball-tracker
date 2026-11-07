@@ -6,13 +6,21 @@ jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
   promoteAvatarUpload: jest.fn().mockResolvedValue(true),
-  // The real wrapper's contract, over the mocked promote (#1005): promote, then write.
-  withPromotedAvatar: jest.fn(async (url: unknown, _caller: unknown, write: () => Promise<unknown>) => {
-    const { promoteAvatarUpload: promote } = jest.requireMock('../../src/services/upload-service') as {
+  revertAvatarToPending: jest.fn().mockResolvedValue(undefined),
+  // The real wrapper's contract over the mocked promote/revert (#1005):
+  // promote, write, and revert to pending when the write throws.
+  withPromotedAvatar: jest.fn(async (url: unknown, write: () => Promise<unknown>) => {
+    const m = jest.requireMock('../../src/services/upload-service') as {
       promoteAvatarUpload: (u: unknown) => Promise<boolean>;
+      revertAvatarToPending: (u: unknown) => Promise<void>;
     };
-    await promote(url);
-    return write();
+    const promoted = await m.promoteAvatarUpload(url);
+    try {
+      return await write();
+    } catch (err) {
+      if (promoted) await m.revertAvatarToPending(url);
+      throw err;
+    }
   }),
 }));
 

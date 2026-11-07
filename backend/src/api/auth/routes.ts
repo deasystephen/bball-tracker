@@ -486,11 +486,11 @@ router.patch('/me', authenticate, async (req, res) => {
         : null;
     // A new upload is promoted out of the pending state before it is stored
     // (#1005): an expired one is a 400 `upload_expired` and nothing is written,
-    // and a failed write discards it again. Re-sending the URL already stored
+    // and a failed write reverts it to pending. Re-sending the URL already stored
     // needs nothing.
     const newUpload =
       profilePictureUrl && profilePictureUrl !== previous?.profilePictureUrl ? profilePictureUrl : null;
-    await withPromotedAvatar(newUpload, req.user!.id, async () => {
+    await withPromotedAvatar(newUpload, async () => {
       // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
       // `authenticate` a moment before an account deletion committed must not
       // write a real name or photo back onto the tombstone. Zero rows → 401.

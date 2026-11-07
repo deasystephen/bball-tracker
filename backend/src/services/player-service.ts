@@ -181,8 +181,8 @@ export class PlayerService {
 
     // Out of the pending state before it is stored (#1005); 400 `upload_expired`
     // when the upload is gone, and nothing is written; a failed create (P2002…)
-    // discards the promoted upload again.
-    const player = await withPromotedAvatar(data.profilePictureUrl, caller.id, async () => {
+    // reverts the upload to pending.
+    const player = await withPromotedAvatar(data.profilePictureUrl, async () => {
       try {
         // Create the player (as a User with role PLAYER)
         return await prisma.user.create({
@@ -465,14 +465,14 @@ export class PlayerService {
 
     // A new upload leaves the pending state before it is stored (#1005): an
     // expired one is a 400 `upload_expired` with nothing written, and a failed
-    // write (P2025 on a tombstone, P2002…) discards it again. Re-sending the
+    // write (P2025 on a tombstone, P2002…) reverts it to pending. Re-sending the
     // stored URL needs nothing.
     const newUpload =
       data.profilePictureUrl && data.profilePictureUrl !== player.profilePictureUrl ? data.profilePictureUrl : null;
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
     // deletion that commits in between matches no row (P2025, a 404) instead
     // of rewriting the tombstone. One statement: write and returned row agree.
-    const updatedPlayer: Player = await withPromotedAvatar(newUpload, userId, async () => {
+    const updatedPlayer: Player = await withPromotedAvatar(newUpload, async () => {
       try {
         return await prisma.user.update({
           where: { id: playerId, deletedAt: null },

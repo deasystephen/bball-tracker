@@ -6,8 +6,8 @@
  *   - `infra/s3.tf` expires objects carrying that exact tag;
  *   - `infra/ecs.tf` lets the task role set the tag at upload
  *     (s3:PutObjectTagging, checked on the presign signer), remove it on
- *     save (s3:DeleteObjectTagging), and list avatars/ (s3:ListBucket, so a
- *     missing key is NoSuchKey rather than AccessDenied).
+ *     save (s3:DeleteObjectTagging), and list the bucket with no condition
+ *     (s3:ListBucket, so a missing key is NoSuchKey rather than AccessDenied).
  * A wrong tag in the rule expires nothing; a missing IAM action fails every
  * upload (PutObjectTagging) or every save (DeleteObjectTagging), and without
  * ListBucket an expired upload is a 5xx instead of 400 `upload_expired`.
@@ -52,12 +52,14 @@ describe('pending avatar expiry (#1005)', () => {
     expect(taskPolicy).toContain('${aws_s3_bucket.avatars.arn}/*');
   });
 
-  it('lets the task role list avatars/, so a missing key is NoSuchKey (404), not AccessDenied (403)', () => {
-    const statement = /\{[^{}]*"s3:ListBucket"[^{}]*Condition\s*=\s*\{([^{}]*\{[^{}]*\})[^{}]*\}[^{}]*\}/.exec(taskPolicy);
+  it('lets the task role list the bucket with no condition, so a missing key is NoSuchKey, not AccessDenied', () => {
+    const statement = /\{[^{}]*"s3:ListBucket"[^{}]*\}/.exec(taskPolicy);
     expect(statement).not.toBeNull();
     const text = statement![0];
     // On the bucket itself (ListBucket is a bucket action), not the objects.
     expect(text).toMatch(/Resource\s*=\s*aws_s3_bucket\.avatars\.arn\s/);
-    expect(text).toMatch(/StringLike\s*=\s*\{\s*"s3:prefix"\s*=\s*\["avatars\/\*"\]\s*\}/);
+    // An object-level request carries no s3:prefix key, so any condition here
+    // would keep the grant from ever applying to it.
+    expect(text).not.toMatch(/Condition/);
   });
 });

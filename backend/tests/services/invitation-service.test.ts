@@ -21,17 +21,31 @@ jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
   promoteAvatarUpload: jest.fn().mockResolvedValue(true),
-  // The real wrapper's contract, over the mocked promote (#1005): promote, then write.
-  withPromotedAvatar: jest.fn(async (url: unknown, _caller: unknown, write: () => Promise<unknown>) => {
-    const { promoteAvatarUpload: promote } = jest.requireMock('../../src/services/upload-service') as {
+  revertAvatarToPending: jest.fn().mockResolvedValue(undefined),
+  // The real wrapper's contract over the mocked promote/revert (#1005):
+  // promote, write, and revert to pending when the write throws.
+  withPromotedAvatar: jest.fn(async (url: unknown, write: () => Promise<unknown>) => {
+    const m = jest.requireMock('../../src/services/upload-service') as {
       promoteAvatarUpload: (u: unknown) => Promise<boolean>;
+      revertAvatarToPending: (u: unknown) => Promise<void>;
     };
-    await promote(url);
-    return write();
+    const promoted = await m.promoteAvatarUpload(url);
+    try {
+      return await write();
+    } catch (err) {
+      if (promoted) await m.revertAvatarToPending(url);
+      throw err;
+    }
   }),
 }));
-import { assertOwnUploadUrl, discardOwnAvatar, promoteAvatarUpload } from '../../src/services/upload-service';
+import {
+  assertOwnUploadUrl,
+  discardOwnAvatar,
+  promoteAvatarUpload,
+  revertAvatarToPending,
+} from '../../src/services/upload-service';
 const mockPromote = promoteAvatarUpload as jest.Mock;
+const mockRevert = revertAvatarToPending as jest.Mock;
 const mockDiscardOwnAvatar = discardOwnAvatar as jest.Mock;
 const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
 const AVATAR_URL = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/coach/photo.jpg';
@@ -1945,7 +1959,7 @@ describe('InvitationService', () => {
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
-    it('middle case — a reused row that already has a photo keeps it and the upload is discarded (#618)', async () => {
+    it('middle case — a reused row that already has a photo keeps it and the upload goes back to pending (#618, #1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
       // First updateMany = flags (row still unclaimed); second = photo guard, zero rows (already has one)
@@ -1965,11 +1979,15 @@ describe('InvitationService', () => {
         where: { id: unclaimed.id, workosUserId: null, deletedAt: null },
         data: { isManaged: true, managedById: coach.id },
       });
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledTimes(1);
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      // Decided under the lock (the guarded photo write matched no row), then
+      // reverted to pending for the lifecycle rule; never deleted (#1005)
+      expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockRevert).toHaveBeenCalledTimes(1);
+      expect(mockRevert).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
-    it('middle case — a reused row known to have a photo: the upload is not promoted, only discarded (#1005)', async () => {
+    it('middle case — the pre-transaction read never decides: a row read with a photo still promotes first (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       const unclaimed = {
         ...createPlayer({ email: 'jane@example.com' }),
@@ -1977,7 +1995,8 @@ describe('InvitationService', () => {
         managedById: null,
         profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/x/own.jpg',
       };
-      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      // The guarded write is what decides: here it applies (the photo was removed since the read)
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
       setupReuseTx(team, coach, unclaimed, txUserUpdate);
 
       await InvitationService.addRosterPlayer(
@@ -1986,11 +2005,12 @@ describe('InvitationService', () => {
         coach.id
       );
 
-      expect(mockPromote).not.toHaveBeenCalled();
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockRevert).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
-    it('case 2 — a failure before the rows exist discards the promoted upload and rethrows (#1005)', async () => {
+    it('case 2 — a failure reverts the promoted upload to pending and rethrows (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
       const failure = new Error('connection reset');
@@ -2005,11 +2025,12 @@ describe('InvitationService', () => {
       ).rejects.toThrow();
 
       expect(mockPromote).toHaveBeenCalledWith(AVATAR_URL);
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      expect(mockRevert).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
       expect(mockedMailerSend).not.toHaveBeenCalled();
     });
 
-    it('case 2 — nothing promoted (external URL) means nothing to discard on failure (#1005)', async () => {
+    it('case 2 — nothing promoted (external URL) means nothing to revert on failure (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
       mockPromote.mockResolvedValueOnce(false);
@@ -2023,6 +2044,7 @@ describe('InvitationService', () => {
         )
       ).rejects.toThrow();
 
+      expect(mockRevert).not.toHaveBeenCalled();
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 

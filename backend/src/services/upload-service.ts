@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand, PutObjectTaggingCommand } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
 import { BadRequestError, UploadExpiredError } from '../utils/errors';
@@ -68,13 +68,14 @@ export async function generateAvatarUploadUrl(
   const { url, fields } = await createPresignedPost(s3Client, {
     Bucket: BUCKET_NAME,
     Key: key,
-    // The policy pins the `tagging` field to the exact pending tag set, so a
-    // client cannot drop or change the tag and keep an unsaved upload forever.
-    // Every binary posts every field it is given, so no client change is needed.
+    // `tagging` carries the pending tag set (#1005). The SDK pins every entry
+    // of `Fields` in the signed policy as an exact match ({ tagging: … }), so a
+    // client cannot drop or change the tag and keep an unsaved upload forever
+    // (avatar-upload-policy.test.ts decodes the real policy to prove it).
+    // Every binary posts every field it is given: no client change is needed.
     Conditions: [
       ['content-length-range', 1, MAX_AVATAR_BYTES],
       ['eq', '$Content-Type', contentType],
-      ['eq', '$tagging', PENDING_TAGGING_XML],
     ],
     Fields: { 'Content-Type': contentType, tagging: PENDING_TAGGING_XML },
     Expires: UPLOAD_EXPIRES_SECONDS,
@@ -226,7 +227,8 @@ export async function deleteAvatarObject(imageUrl: string | null | undefined): P
     return 'deleted';
   } catch (err) {
     logger.warn('Failed to delete avatar object', {
-      url: imageUrl,
+      // The validated key (ids only), never the client-supplied URL.
+      key: issued.key,
       error: err instanceof Error ? err.message : String(err),
     });
     return 'failed';
@@ -275,7 +277,8 @@ export async function discardOwnAvatar(
     await deleteObjectByKey(issued.key);
   } catch (err) {
     logger.warn('Failed to discard unreferenced avatar object (ignored)', {
-      imageUrl,
+      // The validated key (ids only), never the client-supplied URL.
+      key: issued.key,
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -326,6 +329,7 @@ export async function promoteAvatarUpload(imageUrl: string | null | undefined): 
     }
     logger.error('Avatar promotion failed', {
       operation: 'DeleteObjectTagging',
+      key: issued.key,
       code: s3ErrorCode(err),
       error: err instanceof Error ? err.message : String(err),
     });
@@ -335,24 +339,54 @@ export async function promoteAvatarUpload(imageUrl: string | null | undefined): 
 }
 
 /**
- * Promote `imageUrl` (see `promoteAvatarUpload`), then run `write`, the
- * database write that stores it. When `write` throws (P2002, P2025, a
- * tombstone, a refused transaction…) the promoted upload is discarded, so a
- * failed save never leaves an untagged, unreferenced object that no lifecycle
- * rule would ever expire. `callerId` is the uploader: the discard is limited
- * to the caller's own prefix, the same rule as `assertOwnUploadUrl`.
+ * Put an upload back in the pending state (`pending=true`), so the lifecycle
+ * rule expires it in 3 days unless a later save promotes it again (#1005).
+ * Used when a promoted upload ends up stored nowhere: the write failed, or
+ * Add Player kept the row's own photo. Reverting instead of deleting carries
+ * no deletion hazard: if the URL is in fact stored somewhere (a write that
+ * committed and then threw, another row naming the same upload) it stays
+ * readable until a save promotes it again, and a client retry still works.
+ * Never throws: a failure is logged at error and captured, and nothing is
+ * deleted.
  */
-export async function withPromotedAvatar<T>(
-  imageUrl: string | null | undefined,
-  callerId: string,
-  write: () => Promise<T>
-): Promise<T> {
+export async function revertAvatarToPending(imageUrl: string | null | undefined): Promise<void> {
+  const issued = issuedAvatarKey(imageUrl);
+  if ('reason' in issued) {
+    return;
+  }
+  try {
+    await s3Client.send(
+      new PutObjectTaggingCommand({
+        Bucket: BUCKET_NAME,
+        Key: issued.key,
+        Tagging: { TagSet: [{ Key: PENDING_TAG_KEY, Value: PENDING_TAG_VALUE }] },
+      })
+    );
+  } catch (err) {
+    logger.error('Could not revert avatar upload to pending', {
+      operation: 'PutObjectTagging',
+      key: issued.key,
+      code: s3ErrorCode(err),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    captureException(err, { flow: 'avatar-revert' });
+  }
+}
+
+/**
+ * Promote `imageUrl` (see `promoteAvatarUpload`), run `write`, the database
+ * work that stores it, and REVERT the upload TO PENDING (`revertAvatarToPending`)
+ * when `write` throws: P2002, P2025 on a tombstone, a refused transaction…
+ * The lifecycle rule then expires it; nothing is deleted here. The one place
+ * every write site promotes and reverts.
+ */
+export async function withPromotedAvatar<T>(imageUrl: string | null | undefined, write: () => Promise<T>): Promise<T> {
   const promoted = await promoteAvatarUpload(imageUrl);
   try {
     return await write();
   } catch (err) {
     if (promoted) {
-      await discardOwnAvatar(imageUrl, callerId);
+      await revertAvatarToPending(imageUrl);
     }
     throw err;
   }

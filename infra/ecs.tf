@@ -173,13 +173,12 @@ resource "aws_iam_role_policy" "ecs_task_s3_avatars" {
         # Without ListBucket, S3 answers a request for a missing key with 403
         # AccessDenied instead of 404 NoSuchKey, so an expired upload would
         # look like a permissions fault and never reach 400 `upload_expired`
-        # (#1005). Listing only, and only under avatars/.
+        # (#1005). Deliberately NO s3:prefix condition: an object-level
+        # request carries no s3:prefix key, so a conditioned grant would never
+        # apply to it and the 403 would stay. The bucket holds only avatars.
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.avatars.arn
-        Condition = {
-          StringLike = { "s3:prefix" = ["avatars/*"] }
-        }
       }
     ]
   })

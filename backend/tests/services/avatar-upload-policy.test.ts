@@ -30,7 +30,7 @@ interface Policy {
 }
 
 describe('avatar upload POST policy (real SDK, #1005)', () => {
-  it('posts the pending tag set as a form field and pins it exactly in the signed policy', async () => {
+  it('posts the pending tag set as a form field, and the SDK pins it exactly in the signed policy', async () => {
     const { fields, uploadUrl, imageUrl } = await generateAvatarUploadUrl(USER_ID, 'image/jpeg');
 
     expect(fields.tagging).toBe(PENDING_TAGGING_XML);
@@ -41,7 +41,7 @@ describe('avatar upload POST policy (real SDK, #1005)', () => {
     const policy = JSON.parse(Buffer.from(fields.Policy, 'base64').toString('utf8')) as Policy;
     expect(policy.conditions).toEqual(
       expect.arrayContaining([
-        ['eq', '$tagging', PENDING_TAGGING_XML],
+        // Added by the SDK from Fields: an exact match, so the tag cannot be dropped or changed
         { tagging: PENDING_TAGGING_XML },
         ['content-length-range', 1, MAX_AVATAR_BYTES],
         ['eq', '$Content-Type', 'image/jpeg'],

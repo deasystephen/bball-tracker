@@ -19,6 +19,7 @@ jest.mock('@aws-sdk/client-s3', () => {
       return { input };
     }),
     DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
+    PutObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'PutObjectTagging', input })),
   };
 });
 
@@ -44,6 +45,7 @@ import {
   MAX_AVATAR_BYTES,
   PENDING_TAGGING_XML,
   promoteAvatarUpload,
+  revertAvatarToPending,
   withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
@@ -78,7 +80,7 @@ describe('Upload Service', () => {
       expect(result.imageUrl).toMatch(/\.png$/);
     });
 
-    it('caps the object size, pins the content type and pins the pending tag in the policy (#1005)', async () => {
+    it('caps the object size, pins the content type and sends the pending tag as a field (#1005)', async () => {
       await generateAvatarUploadUrl(userId, 'image/png');
 
       expect(mockCreatePresignedPost).toHaveBeenCalledWith(
@@ -89,7 +91,6 @@ describe('Upload Service', () => {
           Conditions: [
             ['content-length-range', 1, MAX_AVATAR_BYTES],
             ['eq', '$Content-Type', 'image/png'],
-            ['eq', '$tagging', PENDING_TAGGING_XML],
           ],
           Fields: { 'Content-Type': 'image/png', tagging: PENDING_TAGGING_XML },
           Expires: 300,
@@ -432,8 +433,9 @@ describe('Upload Service', () => {
 
       expect(errorSpy).toHaveBeenCalledWith(
         'Avatar promotion failed',
-        expect.objectContaining({ operation: 'DeleteObjectTagging', code: name })
+        expect.objectContaining({ operation: 'DeleteObjectTagging', code: name, key: 'avatars/u1/pic.jpg' })
       );
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('https://');
       expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-promote' });
     });
 
@@ -447,8 +449,71 @@ describe('Upload Service', () => {
     });
   });
 
+  describe('revertAvatarToPending (#1005)', () => {
+    const OWN = `${BUCKET_BASE}u1/pic.jpg`;
+    let errorSpy: jest.SpyInstance;
+    let captureSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      mockSend.mockReset();
+      mockSend.mockResolvedValue({});
+      deleteObjectCalls.length = 0;
+      errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      captureSpy = jest.spyOn(sentry, 'captureException').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+      captureSpy.mockRestore();
+    });
+
+    it('puts the pending=true tag back on the object', async () => {
+      await revertAvatarToPending(OWN);
+      expect(mockSend.mock.calls[0][0]).toEqual({
+        kind: 'PutObjectTagging',
+        input: {
+          Bucket: 'bball-tracker-avatars-dev',
+          Key: 'avatars/u1/pic.jpg',
+          Tagging: { TagSet: [{ Key: 'pending', Value: 'true' }] },
+        },
+      });
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('does nothing for an external, empty or misshaped URL', async () => {
+      await revertAvatarToPending('https://workos.example/p.jpg');
+      await revertAvatarToPending(null);
+      await revertAvatarToPending(`${BUCKET_BASE}u1/nested/pic.jpg`);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('never throws and never deletes: logs the key (never the URL) at error and captures', async () => {
+      const fault = Object.assign(new Error('denied'), { name: 'AccessDenied' });
+      mockSend.mockRejectedValueOnce(fault);
+
+      await expect(revertAvatarToPending(OWN)).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith('Could not revert avatar upload to pending', {
+        operation: 'PutObjectTagging',
+        key: 'avatars/u1/pic.jpg',
+        code: 'AccessDenied',
+        error: 'denied',
+      });
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('https://');
+      expect(captureSpy).toHaveBeenCalledWith(fault, { flow: 'avatar-revert' });
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('stringifies a non-Error failure', async () => {
+      mockSend.mockRejectedValueOnce('boom');
+      await revertAvatarToPending(OWN);
+      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'boom' }));
+    });
+  });
+
   describe('withPromotedAvatar (#1005)', () => {
     const OWN = `${BUCKET_BASE}u1/pic.jpg`;
+    const kinds = (): string[] => mockSend.mock.calls.map(([cmd]) => (cmd as { kind: string }).kind);
 
     beforeEach(() => {
       mockSend.mockReset();
@@ -458,31 +523,27 @@ describe('Upload Service', () => {
 
     it('promotes, then writes, and returns the write result', async () => {
       const write = jest.fn().mockResolvedValue('row');
-      await expect(withPromotedAvatar(OWN, 'u1', write)).resolves.toBe('row');
+      await expect(withPromotedAvatar(OWN, write)).resolves.toBe('row');
       expect(mockSend.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
-      expect(deleteObjectCalls).toHaveLength(0);
+      expect(kinds()).toEqual(['DeleteObjectTagging']);
     });
 
-    it('discards the promoted upload when the write fails, and rethrows', async () => {
+    it('reverts the upload to pending when the write fails, rethrows, and deletes nothing', async () => {
       const failure = new Error('P2002');
-      await expect(withPromotedAvatar(OWN, 'u1', () => Promise.reject(failure))).rejects.toBe(failure);
-      expect(deleteObjectCalls).toEqual([{ Bucket: 'bball-tracker-avatars-dev', Key: 'avatars/u1/pic.jpg' }]);
-    });
-
-    it('discards only under the caller\'s own prefix', async () => {
-      await expect(withPromotedAvatar(OWN, 'someone-else', () => Promise.reject(new Error('x')))).rejects.toThrow();
+      await expect(withPromotedAvatar(OWN, () => Promise.reject(failure))).rejects.toBe(failure);
+      expect(kinds()).toEqual(['DeleteObjectTagging', 'PutObjectTagging']);
       expect(deleteObjectCalls).toHaveLength(0);
     });
 
-    it('does not write when promotion fails, and has nothing to discard for an external URL', async () => {
+    it('does not write when promotion fails, and has nothing to revert for an external URL', async () => {
       mockSend.mockRejectedValueOnce(Object.assign(new Error('gone'), { name: 'NoSuchKey' }));
       const write = jest.fn();
-      await expect(withPromotedAvatar(OWN, 'u1', write)).rejects.toBeInstanceOf(UploadExpiredError);
+      await expect(withPromotedAvatar(OWN, write)).rejects.toBeInstanceOf(UploadExpiredError);
       expect(write).not.toHaveBeenCalled();
 
       mockSend.mockClear();
       await expect(
-        withPromotedAvatar('https://workos.example/p.jpg', 'u1', () => Promise.reject(new Error('x')))
+        withPromotedAvatar('https://workos.example/p.jpg', () => Promise.reject(new Error('x')))
       ).rejects.toThrow('x');
       expect(mockSend).not.toHaveBeenCalled();
     });
