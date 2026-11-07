@@ -1,13 +1,13 @@
 /**
  * Season order for the rollover picker (#461). Mirrors the backend's
- * `team-service.ts#isSeasonAfter`: `target` comes after `source` by start date
- * when both have one, else by when each season was created; equal is not
- * after. The picker offers only such seasons; the API refuses any other with
- * 400 `season_not_after_source`.
+ * `team-service.ts#isSeasonAfter`: when BOTH seasons have a start date, the
+ * target must start strictly later; when either has none there is nothing to
+ * order them by, so it is allowed (a season's creation time says nothing about
+ * when it is played). The API refuses a dated older season with 400
+ * `season_not_after_source`.
  */
 export interface OrderedSeason {
   startDate?: string | null;
-  createdAt?: string;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -22,9 +22,5 @@ export function isSeasonAfter(target: OrderedSeason, source: OrderedSeason): boo
   if (targetStart !== null && sourceStart !== null) {
     return targetStart > sourceStart;
   }
-  const targetCreated = time(target.createdAt);
-  const sourceCreated = time(source.createdAt);
-  // Without the facts to order them, leave the season out; the API decides.
-  if (targetCreated === null || sourceCreated === null) return false;
-  return targetCreated > sourceCreated;
+  return true;
 }

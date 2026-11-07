@@ -324,6 +324,29 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
   });
 
+  it('allows an undated later season after a dated one (nothing to order them by)', async () => {
+    const c = await club('undated-next');
+    await prisma.season.update({ where: { id: c.org.seasonId }, data: { startDate: new Date('2030-03-01') } });
+    const undated = await prisma.season.create({
+      data: { leagueId: c.org.leagueId, name: `Undated-${fx.run}` },
+      select: { id: true },
+    });
+
+    const { team, created } = await TeamService.rolloverTeam(c.org.teamId, { seasonId: undated.id }, c.coach);
+
+    expect(created).toBe(true);
+    expect(team.seasonId).toBe(undated.id);
+  });
+
+  it('refuses a non-manager with 403 and leaves nothing written', async () => {
+    const c = await club('nonmgr');
+
+    await expect(
+      TeamService.rolloverTeam(c.org.teamId, { seasonName: `Nope-${fx.run}` }, c.players[0])
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await prisma.team.count({ where: { lineageId: c.lineageId } })).toBe(1);
+  });
+
   it('still answers the existing row after its season was archived (idempotency before the archived rule)', async () => {
     const c = await club('archived-after');
     const { team } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Next-${fx.run}` }, c.coach);

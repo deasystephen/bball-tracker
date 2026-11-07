@@ -424,19 +424,21 @@ export async function latestTeamSeasonId(
 }
 
 /**
- * Whether `target` comes after `source` (#461 rollover): by `startDate` when
- * both seasons have one, else by when each season was created. Equal is not
- * after. Mobile mirrors it in `utils/season-order.ts#isSeasonAfter` to offer
- * only such seasons.
+ * Whether `target` may follow `source` in a rollover (#461): when BOTH seasons
+ * have a `startDate`, the target must start strictly later; when either has
+ * none there is nothing to order them by, so it is allowed (a season's
+ * creation time says nothing about when it is played: a club may create next
+ * season's row before this one's). Mobile mirrors it in
+ * `utils/season-order.ts#isSeasonAfter` to offer only such seasons.
  */
 export function isSeasonAfter(
-  target: { startDate: Date | null; createdAt: Date },
-  source: { startDate: Date | null; createdAt: Date }
+  target: { startDate: Date | null },
+  source: { startDate: Date | null }
 ): boolean {
   if (target.startDate && source.startDate) {
     return target.startDate.getTime() > source.startDate.getTime();
   }
-  return target.createdAt.getTime() > source.createdAt.getTime();
+  return true;
 }
 
 /** 400 body for a season move that would put two rows of one lineage in one season. */
@@ -891,9 +893,11 @@ export class TeamService {
    * The source row is left untouched and stays listed: its games and stats
    * are last season's, and the player career view reads them from it.
    *
-   * Every authorization and season decision is made ONCE, inside the
-   * transaction, behind the locks; outside it there is only a cheap 404
-   * existence read. In order:
+   * Before any lock: an unlocked existence read (404) and an unlocked
+   * `canManageStaff` (403), so a caller who may not manage the team cannot
+   * make the server lock its rows. Every decision is then made (again) inside
+   * the transaction, behind the locks, which are taken in the order league
+   * and season deletes use: Users -> League -> Team -> TeamLineage.
    *   1. lock every User the copy will reference (caller, staff, players) in
    *      id order (`lockUsers`, `FOR NO KEY UPDATE`, which conflicts with
    *      account deletion's `FOR UPDATE`). Deletion locks Users, then Teams;
@@ -901,14 +905,18 @@ export class TeamService {
    *      taking them before the team keeps one order and the two never
    *      deadlock. The ids come from an unlocked read: anyone added after it
    *      is not carried, and only locked users still live are.
-   *   2. lock the source Team row (`lockTeamRow`; a deleted source is 404),
-   *      then WHO: `canManageStaff` through the transaction (head coach,
-   *      league admin, system admin; an assistant coach is refused, as for a
-   *      season move). WHERE is implied: the target season must be in the
-   *      source's own league, and `canManageStaff` there implies
+   *   2. lock the team's League row (`FOR NO KEY UPDATE`), always: a season
+   *      may be created below, and taking it before the team matches the
+   *      deletes' order.
+   *   3. lock the source Team row (`lockTeamRow`; a deleted source is 404),
+   *      then WHO again through the transaction: `canManageStaff` (head
+   *      coach, league admin, system admin; an assistant coach is refused,
+   *      as for a season move). WHERE is implied: the target season must be
+   *      in the source's own league, and `canManageStaff` there implies
    *      `canWriteLeague`.
-   *   3. lock the lineage (`FOR NO KEY UPDATE`; rollovers of one team
-   *      serialize) and re-read the source.
+   *   3b. lock the lineage (`FOR NO KEY UPDATE`; rollovers of one team
+   *      serialize) and re-read the source; a move into another league since
+   *      the unlocked read is 400 (the League locked above is the wrong one).
    *   4. resolve the target season in the source's league: a picked
    *      `seasonId` under `FOR KEY SHARE` (gone or in another league: the
    *      same 404, so ids cannot be probed), a `seasonName` by
@@ -920,10 +928,11 @@ export class TeamService {
    *      only to a caller with `canManageRoster` on it and 409
    *      `team_season_exists` with no id to anyone else.
    *   6. a season that exists must be active (409 `season_archived`, no ids)
-   *      and must come AFTER the source's season (`isSeasonAfter`: start
-   *      dates when both have one, else creation times; 400
-   *      `season_not_after_source`, no ids). Rolling into an older season
-   *      would make an old row the newest and lock the real current one.
+   *      and, when both it and the source's season have a start date, must
+   *      start later (`isSeasonAfter`; 400 `season_not_after_source`, no
+   *      ids). Rolling into an older season would make an old row the newest
+   *      and lock the real current one. Without both dates there is nothing
+   *      to order by, so it is allowed.
    *   7. only the lineage's LATEST team-season (`latestTeamSeasonId`, the
    *      newest row) may continue it; any other row is 409
    *      `not_latest_season` with no ids. Otherwise a coach removed from this
@@ -952,21 +961,30 @@ export class TeamService {
     data: RolloverTeamInput,
     userId: string
   ): Promise<{ team: TeamWithRelations; created: boolean; seasonCreated: boolean }> {
-    // The only check outside the transaction: a cheap existence read.
+    // Unlocked gate before any lock: a signed-in user who may not manage this
+    // team must not be able to make the server lock its User and Team rows.
+    // 404 for a missing team, 403 for a caller who is not a staff manager;
+    // the same check is repeated behind the locks below.
     const exists = await prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
     if (!exists) {
       throw new NotFoundError('Team not found');
+    }
+    if (!(await canManageStaff(userId, teamId))) {
+      throw new ForbiddenError('Only a head coach can start the next season for this team');
     }
 
     const result = await createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
-          // 1. Users before the team. Unlocked read of who would be carried
-          // (and the lineage), then lock them all in id order.
+          // Lock order, the same as league and season deletes:
+          //   Users -> League -> Team -> TeamLineage.
+          // 1. Users. Unlocked read of who would be carried (and the team's
+          // lineage and league), then lock them all in id order.
           const candidates = await tx.team.findUnique({
             where: { id: teamId },
             select: {
               lineageId: true,
+              season: { select: { leagueId: true } },
               staff: { select: { userId: true } },
               members: { select: { playerId: true } },
             },
@@ -981,7 +999,13 @@ export class TeamService {
           ]);
           const liveUserIds = new Set(locked.filter((user) => user.deletedAt === null).map((user) => user.id));
 
-          // 2. The source team, then WHO.
+          // 2. The League, always (one cheap row): a season may be created
+          // below (`findOrCreateSeason` takes the same lock again), and taking
+          // it before the team keeps the order deletes use.
+          const leagueId = candidates.season.leagueId;
+          await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${leagueId} FOR NO KEY UPDATE`;
+
+          // 3. The source team, then WHO again behind the lock.
           if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
@@ -989,13 +1013,17 @@ export class TeamService {
             throw new ForbiddenError('Only a head coach can start the next season for this team');
           }
 
-          // 3. The lineage (it never changes on a row), then the source as it is now.
+          // 4. The lineage (it never changes on a row), then the source as it is now.
           await tx.$queryRaw`SELECT "id" FROM "TeamLineage" WHERE "id" = ${candidates.lineageId} FOR NO KEY UPDATE`;
           const source = await tx.team.findUniqueOrThrow({
             where: { id: teamId },
             select: ROLLOVER_SOURCE_SELECT,
           });
-          const leagueId = source.season.leagueId;
+          // A season move into another league between the unlocked read and
+          // the team lock means the League locked above is the wrong one.
+          if (source.season.leagueId !== leagueId) {
+            throw new BadRequestError('This team moved to another league; reload it and try again');
+          }
 
           // 4. The target season, if it exists yet.
           let target: SeasonByName | null;

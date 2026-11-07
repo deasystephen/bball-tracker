@@ -36,7 +36,7 @@ const mockUseAccessGuard = jest.fn((..._args: unknown[]) => true);
 jest.mock('../../hooks/useAccessGuard', () => ({ useAccessGuard: (...args: unknown[]) => mockUseAccessGuard(...args) }));
 const mockUseSeasons = jest.fn();
 let mockSeasonList: {
-  seasons: { id: string; name: string; startDate?: string | null; createdAt?: string }[];
+  seasons: { id: string; name: string; isActive?: boolean; startDate?: string | null; createdAt?: string }[];
   canCreate?: boolean;
 };
 jest.mock('../../hooks/useSeasons', () => ({
@@ -46,7 +46,12 @@ jest.mock('../../hooks/useSeasons', () => ({
     // Seasons are created after the team's own unless a test says otherwise.
     const data = {
       ...mockSeasonList,
-      seasons: mockSeasonList.seasons.map((season) => ({ startDate: null, createdAt: '2099-01-01T00:00:00Z', ...season })),
+      seasons: mockSeasonList.seasons.map((season) => ({
+        isActive: true,
+        startDate: null,
+        createdAt: '2099-01-01T00:00:00Z',
+        ...season,
+      })),
     };
     return { data, isLoading: false, error: null, refetch: jest.fn() };
   },
@@ -153,10 +158,46 @@ describe('team screen entry point', () => {
 });
 
 describe('NextSeasonScreen', () => {
-  it("asks for the league's ACTIVE seasons only, once the league is known", () => {
-    render(<NextSeasonScreen />);
+  it("asks for the league's seasons once the league is known, and offers only the active ones", () => {
+    mockSeasonList = {
+      seasons: [
+        { id: 'se-archived', name: 'Old Fall', isActive: false },
+        { id: 'se-next', name: 'Next Fall' },
+      ],
+      canCreate: false,
+    };
+    const { queryByTestId, getByTestId } = render(<NextSeasonScreen />);
 
-    expect(mockUseSeasons).toHaveBeenCalledWith({ leagueId: 'lg-1', isActive: true, limit: 100 }, { enabled: true });
+    expect(mockUseSeasons).toHaveBeenCalledWith({ leagueId: 'lg-1', limit: 100 }, { enabled: true });
+    expect(queryByTestId('next-season-option-se-archived')).toBeNull();
+    expect(getByTestId('next-season-option-se-next')).toBeTruthy();
+  });
+
+  it('does not default to "New season" with a name the league has but hides; it starts on the first offered season', () => {
+    // Suggested "2027" exists but is archived; "Fall 2027" is offered.
+    mockSeasonList = {
+      seasons: [
+        { id: 'se-2027', name: '2027', isActive: false },
+        { id: 'se-fall', name: 'Fall 2027' },
+      ],
+      canCreate: true,
+    };
+    const { getByTestId } = render(<NextSeasonScreen />);
+
+    expect(getByTestId('next-season-option-se-fall').props.accessibilityState).toEqual({ selected: true });
+    expect(getByTestId('next-season-option-new').props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('starts on nothing, with submit disabled, when the hidden match leaves nothing offered', () => {
+    mockSeasonList = { seasons: [{ id: 'se-2027', name: '2027', isActive: false }], canCreate: true };
+    const { getByTestId } = render(<NextSeasonScreen />);
+
+    expect(getByTestId('next-season-option-new').props.accessibilityState).toEqual({ selected: false });
+    expect(getByTestId('next-season-submit').props.accessibilityState).toMatchObject({ disabled: true });
+
+    // Choosing "New season" enables it.
+    fireEvent.press(getByTestId('next-season-option-new'));
+    expect(getByTestId('next-season-submit').props.accessibilityState).toMatchObject({ disabled: false });
   });
 
   it("never offers the team's own season, even when the list includes it", () => {
@@ -359,57 +400,68 @@ describe('NextSeasonScreen', () => {
     expect(mockRollover.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it('shows translated copy, not the English server message, for season_archived', async () => {
+  /** A refusal as the api-client hands it over: English message, body code, status. */
+  const refusal = (status: number, code?: string): Error =>
+    Object.assign(new Error('English text from the server'), { apiError: { status, ...(code ? { code } : {}) } });
+
+  it.each([
+    ['not_latest_season', refusal(409, 'not_latest_season'), "Only the team's most recent season can start the next one."],
+    [
+      'team_season_exists',
+      refusal(409, 'team_season_exists'),
+      "This team already has a team in that season, and you don't manage it. Ask its head coach.",
+    ],
+    ['season_not_after_source', refusal(400, 'season_not_after_source'), 'Pick a season that starts after this one.'],
+    ['season_archived', refusal(409, 'season_archived'), 'That season is archived. Pick an active season or name a new one.'],
+    [
+      'a 403',
+      refusal(403),
+      "You can't do that here. A head coach starts the next season, and only a league admin can add a new season.",
+    ],
+    ['a network failure', new Error('Network Error'), 'Could not start the next season'],
+  ])('shows translated copy for %s, never the server English, and stays on the form', async (_label, error, copy) => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    const archived = Object.assign(new Error('That season is archived; pick or name an active season'), {
-      apiError: { status: 409, code: 'season_archived' },
-    });
-    mockRollover.mutateAsync.mockRejectedValue(archived);
+    mockRollover.mutateAsync.mockRejectedValue(error);
     const { getByText } = render(<NextSeasonScreen />);
 
     fireEvent.press(getByText('Start season'));
 
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith('Error', 'That season is archived. Pick an active season or name a new one.')
-    );
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('Error', copy));
     expect(mockRouter.replace).not.toHaveBeenCalled();
     alert.mockRestore();
   });
 
-  it('shows the Spanish copy for season_archived on a Spanish device', async () => {
+  it.each([
+    ['not_latest_season', refusal(409, 'not_latest_season'), 'Solo la temporada más reciente del equipo puede empezar la siguiente.'],
+    [
+      'team_season_exists',
+      refusal(409, 'team_season_exists'),
+      'Este equipo ya tiene un equipo en esa temporada y tú no lo administras. Pídeselo a su entrenador principal.',
+    ],
+    ['season_not_after_source', refusal(400, 'season_not_after_source'), 'Elige una temporada que empiece después de esta.'],
+    [
+      'season_archived',
+      refusal(409, 'season_archived'),
+      'Esa temporada está archivada. Elige una temporada activa o ponle nombre a una nueva.',
+    ],
+    [
+      'a 403',
+      refusal(403),
+      'No puedes hacer eso aquí. El entrenador principal empieza la próxima temporada y solo un administrador de la liga puede añadir una temporada nueva.',
+    ],
+  ])('shows the Spanish copy for %s on a Spanish device', async (_label, error, copy) => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    mockRollover.mutateAsync.mockRejectedValue(
-      Object.assign(new Error('archived'), { apiError: { status: 409, code: 'season_archived' } })
-    );
+    mockRollover.mutateAsync.mockRejectedValue(error);
     await i18n.changeLanguage('es');
     try {
       const { getByText } = render(<NextSeasonScreen />);
       fireEvent.press(getByText('Empezar temporada'));
 
-      await waitFor(() =>
-        expect(alert).toHaveBeenCalledWith(
-          'Error',
-          'Esa temporada está archivada. Elige una temporada activa o ponle nombre a una nueva.'
-        )
-      );
+      await waitFor(() => expect(alert).toHaveBeenCalledWith('Error', copy));
     } finally {
       await i18n.changeLanguage('en');
       alert.mockRestore();
     }
-  });
-
-  it('shows the API error in an alert and stays on the form', async () => {
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    mockRollover.mutateAsync.mockRejectedValue(new Error('You do not have permission to create seasons for this league'));
-    const { getByText } = render(<NextSeasonScreen />);
-
-    fireEvent.press(getByText('Start season'));
-
-    await waitFor(() =>
-      expect(alert).toHaveBeenCalledWith('Error', 'You do not have permission to create seasons for this league')
-    );
-    expect(mockRouter.replace).not.toHaveBeenCalled();
-    alert.mockRestore();
   });
 
   it.each([

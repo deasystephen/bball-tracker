@@ -63,7 +63,9 @@ function mockTeamReads(sibling: { id: string } | null): void {
   (mockPrisma.team.findUnique as jest.Mock).mockImplementation(
     (args: { where: Record<string, unknown>; include?: unknown; select?: Record<string, unknown> }) => {
       if (args.where.lineageId_seasonId) return Promise.resolve(sibling);
-      if (args.select?.members) return Promise.resolve({ lineageId: LINEAGE_ID, staff: [], members: [] });
+      if (args.select?.members) {
+        return Promise.resolve({ lineageId: LINEAGE_ID, season: { leagueId: LEAGUE_ID }, staff: [], members: [] });
+      }
       if (args.include) {
         return Promise.resolve({
           id: args.where.id,
@@ -160,9 +162,10 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(mockPrisma.team.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ ageGroup: 'U13', lineageId: LINEAGE_ID }) })
     );
-    // WHO once, for the authenticated caller, through the transaction.
-    expect(permissions.canManageStaff).toHaveBeenCalledTimes(1);
-    expect(permissions.canManageStaff).toHaveBeenCalledWith(COACH_ID, TEAM_ID, mockPrisma);
+    // WHO for the authenticated caller: unlocked first, then through the transaction.
+    expect(permissions.canManageStaff).toHaveBeenCalledTimes(2);
+    expect(permissions.canManageStaff).toHaveBeenNthCalledWith(1, COACH_ID, TEAM_ID);
+    expect(permissions.canManageStaff).toHaveBeenNthCalledWith(2, COACH_ID, TEAM_ID, mockPrisma);
   });
 
   it('reuses a differently cased season instead of creating a near-duplicate', async () => {
@@ -272,12 +275,14 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     expect(response.status).toBe(400);
   });
 
-  it('answers 403 when the caller is not a head coach of the team, and creates nothing', async () => {
+  it('answers 403 to a non-manager before taking any lock (no transaction, no raw lock query)', async () => {
     spies.canManageStaff.mockResolvedValue(false);
 
     const response = await request(app).post(`/api/v1/teams/${TEAM_ID}/rollover`).send({ seasonName: '2027' });
 
     expect(response.status).toBe(403);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
     expect(mockPrisma.team.create).not.toHaveBeenCalled();
   });
 

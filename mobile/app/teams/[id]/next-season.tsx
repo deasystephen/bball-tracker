@@ -3,9 +3,10 @@
  * team-season row on the same lineage. Last season's row, games and stats stay
  * as they are; the player career view still reads them.
  *
- * The season is picked from the team's league's ACTIVE seasons that come
- * AFTER the team's own (`GET /seasons?leagueId=&isActive=true`, caller-scoped,
- * filtered by `utils/season-order.ts#isSeasonAfter`) and sent as `seasonId`. Only the lineage's latest team-season may
+ * The season is picked from the team's league's ACTIVE seasons that may
+ * follow the team's own (`GET /seasons?leagueId=`, caller-scoped, filtered by
+ * `isActive` and `utils/season-order.ts#isSeasonAfter`) and sent as
+ * `seasonId`. Every refusal the API can answer shows translated copy. Only the lineage's latest team-season may
  * start the next one (`isLatestInLineage`). "New season" with a free-text name is
  * offered only when that list says the caller may create one (`canCreate`:
  * league admin, which a personal-league owner is); a club coach picks a season
@@ -31,10 +32,27 @@ import { suggestNextSeasonName } from '../../../utils/season-name';
 import { isSeasonAfter } from '../../../utils/season-order';
 import { useGoBack } from '../../../hooks/useGoBack';
 import type { NormalizedApiError } from '../../../services/api-client';
+import { apiErrorCode } from '../../../utils/api-error-code';
 import { BackButton } from '../../../components/BackButton';
 
-/** 409 code for a season name that matches an archived season of the league (#461). */
-const SEASON_ARCHIVED_CODE = 'season_archived';
+/**
+ * Translated copy for every refusal `POST /teams/:id/rollover` can answer
+ * (#461), by the body's `code`; a 403 carries none. Anything else (network,
+ * 5xx) keeps the generic failure line.
+ */
+const ROLLOVER_ERROR_KEYS: Record<string, string> = {
+  not_latest_season: 'teams.nextSeason.notLatest',
+  team_season_exists: 'teams.nextSeason.teamSeasonExists',
+  season_not_after_source: 'teams.nextSeason.seasonNotAfter',
+  season_archived: 'teams.nextSeason.seasonArchived',
+};
+
+function rolloverErrorMessage(err: unknown, t: (key: string) => string): string {
+  const code = apiErrorCode(err);
+  if (code && ROLLOVER_ERROR_KEYS[code]) return t(ROLLOVER_ERROR_KEYS[code]);
+  if ((err as NormalizedApiError | undefined)?.apiError?.status === 403) return t('teams.nextSeason.forbidden');
+  return t('teams.nextSeason.failed');
+}
 /** The picker's "new season" choice; every other value is a season id. */
 const NEW_SEASON = 'new';
 /** The API's page ceiling; a league with more seasons than this is not a real case. */
@@ -46,8 +64,9 @@ export default function NextSeasonScreen() {
   const { t } = useTranslation();
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const leagueId = team?.season?.league?.id;
-  // Active seasons only: an archived season is not one to start.
-  const seasons = useSeasons({ leagueId, isActive: true, limit: SEASON_PAGE }, { enabled: !!leagueId });
+  // Every season of the league, so the form knows which names are taken but
+  // hidden (archived, or not after this one); only some are offered.
+  const seasons = useSeasons({ leagueId, limit: SEASON_PAGE }, { enabled: !!leagueId });
 
   // Owned here, not by the form, so the guard below can see it.
   const rollover = useRolloverTeam();
@@ -97,17 +116,21 @@ export default function NextSeasonScreen() {
     );
   }
 
+  // Offered: active seasons other than the team's own that may follow it
+  // (`isSeasonAfter`, the API's rule; the API answers 409 `season_archived`
+  // or 400 `season_not_after_source` otherwise). The rest are hidden but their
+  // names still matter for the default choice.
+  const all = (seasons.data?.seasons ?? []).filter((season) => season.id !== team.seasonId);
+  const offered = all.filter((season) => season.isActive && !!team.season && isSeasonAfter(season, team.season));
+  const hidden = all.filter((season) => !offered.includes(season));
+
   // Keyed by team id so the form re-seeds if a different team loads.
   return (
     <NextSeasonForm
       key={team.id}
       team={team}
-      // Never the team's own season, and only seasons after it: rolling into
-      // an older one would make an old row the newest (the API answers 400
-      // `season_not_after_source`).
-      seasons={(seasons.data?.seasons ?? []).filter(
-        (season) => season.id !== team.seasonId && !!team.season && isSeasonAfter(season, team.season)
-      )}
+      seasons={offered}
+      hiddenSeasons={hidden}
       canCreateSeason={seasons.data?.canCreate === true}
       rollover={rollover}
     />
@@ -116,12 +139,15 @@ export default function NextSeasonScreen() {
 
 interface NextSeasonFormProps {
   team: Team;
+  /** Seasons the coach may pick. */
   seasons: { id: string; name: string }[];
+  /** The league's other seasons (archived, or not after this one): never offered. */
+  hiddenSeasons: { id: string; name: string }[];
   canCreateSeason: boolean;
   rollover: ReturnType<typeof useRolloverTeam>;
 }
 
-function NextSeasonForm({ team, seasons, canCreateSeason, rollover }: NextSeasonFormProps) {
+function NextSeasonForm({ team, seasons, hiddenSeasons, canCreateSeason, rollover }: NextSeasonFormProps) {
   const router = useRouter();
   const goBack = useGoBack(`/teams/${team.id}`);
   const { colors } = useTheme();
@@ -133,14 +159,21 @@ function NextSeasonForm({ team, seasons, canCreateSeason, rollover }: NextSeason
   const currentSeason = team.season?.name ?? '';
   const suggestion = suggestNextSeasonName(currentSeason);
 
-  // Start on the season the suggestion names when the league has it, else on
-  // "new season" when the caller may create one, else on nothing.
+  // Start on the season the suggestion names when it is offered. When the
+  // suggestion names a season the league has but does not offer (archived,
+  // or not after this one), never default to "New season" with that name
+  // (the API would refuse it): start on the first offered season, or on
+  // nothing. Otherwise "New season" when the caller may create one.
   const initialChoice = useMemo(() => {
     const wanted = suggestion.trim().toLowerCase();
-    const match = wanted ? seasons.find((season) => season.name.trim().toLowerCase() === wanted) : undefined;
-    if (match) return match.id;
+    const matches = (season: { name: string }): boolean => !!wanted && season.name.trim().toLowerCase() === wanted;
+    const offered = seasons.find(matches);
+    if (offered) return offered.id;
+    if (hiddenSeasons.some(matches) || (team.season && matches(team.season))) {
+      return seasons[0]?.id ?? null;
+    }
     return canCreateSeason ? NEW_SEASON : null;
-  }, [seasons, suggestion, canCreateSeason]);
+  }, [seasons, hiddenSeasons, suggestion, canCreateSeason, team.season]);
 
   const [choice, setChoice] = useState<string | null>(initialChoice);
   const [newSeasonName, setNewSeasonName] = useState(suggestion);
@@ -178,16 +211,9 @@ function NextSeasonForm({ team, seasons, canCreateSeason, rollover }: NextSeason
       );
       router.replace(`/teams/${nextTeam.id}`);
     } catch (err) {
-      // The server's own message is English; a code the form knows gets its
-      // translated copy instead.
-      const code = (err as NormalizedApiError).apiError?.code;
-      const message =
-        code === SEASON_ARCHIVED_CODE
-          ? t('teams.nextSeason.seasonArchived')
-          : err instanceof Error
-            ? err.message
-            : t('teams.nextSeason.failed');
-      Alert.alert(t('common.error'), message);
+      // The server's own message is English: every answer this screen can get
+      // from the rollover has translated copy instead.
+      Alert.alert(t('common.error'), rolloverErrorMessage(err, t));
     }
   };
 
@@ -299,7 +325,7 @@ function NextSeasonForm({ team, seasons, canCreateSeason, rollover }: NextSeason
               title={t('teams.nextSeason.submit')}
               onPress={handleSubmit}
               loading={rollover.isPending}
-              disabled={rollover.isPending || options.length === 0}
+              disabled={rollover.isPending || options.length === 0 || choice === null}
               fullWidth
               testID="next-season-submit"
             />

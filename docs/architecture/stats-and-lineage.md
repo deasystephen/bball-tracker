@@ -117,8 +117,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   - **Body:** exactly one of `seasonId` or `seasonName`; optional `name`, `ageGroup`, `gender` (absent
     carries last season's value, `null` clears the bracket: a U12 team is U13 next year). Schema
     `rolloverTeamSchema`.
-  - **Every authorization and season decision is made once, inside the transaction, behind the
-    locks.** Outside it there is only a cheap 404 existence read of the team. In order:
+  - **Before any lock**, an unlocked existence read (404) and an unlocked `canManageStaff` (403), so a
+    signed-in user who may not manage the team cannot make the server lock its rows. Every decision is
+    then made (again) **inside the transaction, behind the locks**, taken in the order league and season
+    deletes use: **Users → League → Team → TeamLineage**.
     1. lock every `User` the copy will reference (the caller, the source's staff and players), read
        unlocked and then locked in id order with `lockUsers` (`FOR NO KEY UPDATE`, which conflicts with
        account deletion's `FOR UPDATE`). Account deletion locks Users and then Teams, and the copy's FK
@@ -126,14 +128,16 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
        order and the two never deadlock. **Only users in that locked set and still live (`deletedAt`
        null) are carried**: anyone added between the unlocked read and the lock is not carried (re-add
        them on the new team), and anyone deleted meanwhile is dropped.
-    2. lock the source `Team` row (`lockTeamRow`, the lock staff removals and role changes take; a
-       deleted source answers 404), then **WHO**: `canManageStaff` read **through the transaction**
-       (`db` parameter on `canManageStaff` / `isSystemAdmin` / `isHeadCoach` / `isLeagueAdmin`, default
-       the shared client): head coach, league admin or system admin; an assistant coach is refused, as
-       for a season move. WHERE is implied: the target season must be in the team's own league, and
-       anyone who passes `canManageStaff` there already passes `canWriteLeague`, so it is not called.
-    3. lock the `TeamLineage` row (`FOR NO KEY UPDATE`; rollovers of one team serialize) and re-read the
-       source, whose current league is the one used from here on.
+    2. lock the team's `League` row (`FOR NO KEY UPDATE`), always (one cheap row): a season may be
+       created below, and taking it before the team keeps the deletes' order.
+    3. lock the source `Team` row (`lockTeamRow`, the lock staff removals and role changes take; a
+       deleted source answers 404), then **WHO** again, read **through the transaction** (`db` parameter
+       on `canManageStaff` / `isSystemAdmin` / `isHeadCoach` / `isLeagueAdmin`, default the shared
+       client): head coach, league admin or system admin; an assistant coach is refused, as for a season
+       move. WHERE is implied: the target season must be in the team's own league, and anyone who passes
+       `canManageStaff` there already passes `canWriteLeague`, so it is not called. Then lock the
+       `TeamLineage` row (rollovers of one team serialize) and re-read the source; a move into another
+       league since the unlocked read answers 400 (the League locked above would be the wrong one).
     4. resolve the target season in that league. A picked `seasonId` is read under `FOR KEY SHARE`
        (which also holds it against a delete until commit); gone or in another league answers the
        **same 404** (`Season not found`), so ids cannot be probed. A `seasonName` is matched with
@@ -146,11 +150,12 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
        `team_season_exists`** with no id (`TeamSeasonExistsError`): naming the row would tell the caller
        about a team they cannot see, e.g. a coach removed from next season's row.
     6. an existing target season must be **active** (else **409 `season_archived`**, no ids,
-       `SeasonArchivedError`; a team is never rolled into an archived season) and must come **after the
-       source's season** (`team-service.ts#isSeasonAfter`: by `startDate` when both seasons have one,
-       else by season `createdAt`; equal is not after; else **400 `season_not_after_source`**, no ids,
-       `SeasonNotAfterSourceError`). Rolling into an older season would make an old team-season the
-       newest row and lock the real current one out of rolling over.
+       `SeasonArchivedError`; a team is never rolled into an archived season) and, **when both it and the
+       source's season have a `startDate`**, must start strictly later (`team-service.ts#isSeasonAfter`;
+       else **400 `season_not_after_source`**, no ids, `SeasonNotAfterSourceError`). Rolling into an
+       older season would make an old team-season the newest row and lock the real current one out of
+       rolling over. When either season has no start date there is nothing to order them by, so it is
+       allowed (a season's creation time says nothing about when it is played).
     7. **only the lineage's latest team-season may continue it.** `latestTeamSeasonId` is the lineage's
        **most recently created `Team` row** (`createdAt` desc, then `id` desc). A rollover always
        creates the newest row, so this is the row the team continues from; season dates are not used,
@@ -205,10 +210,13 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     when it is `false` "only the most recent season…"). The guard stops reacting once the rollover is
     in flight or done (the mutation lives in the screen, not the form): the success path refetches the
     source team, which is then no longer the latest, and a late flip must not toast an error or pop the
-    stack while the screen replaces itself. The season is a **picker** over the league's **active**
-    seasons that come **after the team's own** (`GET /seasons?leagueId=&isActive=true`, caller-scoped,
-    sent only once the league is known via `useSeasons(…, { enabled })`, filtered by
-    `utils/season-order.ts#isSeasonAfter`, which mirrors the API) and is sent as `seasonId`.
+    stack while the screen replaces itself. The season is a **picker** over the league's seasons
+    (`GET /seasons?leagueId=`, caller-scoped, sent only once the league is known via
+    `useSeasons(…, { enabled })`) that are **active** and may **follow the team's own**
+    (`utils/season-order.ts#isSeasonAfter`, which mirrors the API) and is sent as `seasonId`. The other
+    seasons are fetched too, only so that a suggested name matching a hidden one (archived, or not
+    after this one) never defaults to "New season" with that name: the form then starts on the first
+    offered season, or on nothing with submit disabled.
     "New season" with a free-text name (sent as `seasonName`, prefilled by
     `utils/season-name.ts#suggestNextSeasonName`, which moves every year forward: "2026" → "2027",
     "2026-27" → "2027-28", "Fall 2026 - Spring 2027" → "Fall 2027 - Spring 2028") is offered only when
@@ -216,8 +224,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     list, in the same `Promise.all`: `isLeagueAdmin`); a `leagueId`-filtered list does not hide
     personal-league seasons from a system ADMIN. The suggested season is preselected when the league
     has it (case-insensitive), else "New season" when offered; a club coach whose league has no other
-    season is told to ask a league admin. A `season_archived` answer shows translated copy
-    (`teams.nextSeason.seasonArchived`), not the English server message. Back and Cancel use
+    season is told to ask a league admin. **Every refusal shows translated copy, never the server's
+    English**: by `utils/api-error-code.ts#apiErrorCode`, `not_latest_season`, `team_season_exists`,
+    `season_not_after_source` and `season_archived` map to `teams.nextSeason.*` strings, a 403 to
+    `teams.nextSeason.forbidden`, anything else to the generic failure line. Back and Cancel use
     `useGoBack('/teams/<id>')`. `useRolloverTeam` fires `team_rolled_over` (`new_season` from the
     response's `seasonCreated`, i.e. what the server did) and invalidates the team
     lists, the **source team's detail** (its `isLatestInLineage` is stale), usage, season lists, every
