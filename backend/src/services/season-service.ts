@@ -238,7 +238,10 @@ export class SeasonService {
     }
 
     if (isAdmin) {
-      if (!query.includePersonal) {
+      // An explicit leagueId names the league the caller wants, personal or
+      // not (the rollover form, #461, lists a coach's personal league); the
+      // default hiding is only for the unfiltered admin listing.
+      if (!query.includePersonal && !query.leagueId) {
         conditions.push({ league: { personalOwnerId: null } });
       }
     } else {
@@ -257,8 +260,10 @@ export class SeasonService {
 
     const where: Prisma.SeasonWhereInput = conditions.length > 0 ? { AND: conditions } : {};
 
-    // Get total count and seasons in parallel
-    const [total, seasons] = await Promise.all([
+    // Count, page and (for a leagueId filter) the create hint in parallel. A
+    // caller who cannot read the league learns nothing from `canCreate:
+    // false`; the list is already empty for them.
+    const [total, seasons, canCreate] = await Promise.all([
       prisma.season.count({ where }),
       prisma.season.findMany({
         where,
@@ -271,11 +276,8 @@ export class SeasonService {
         take: query.limit,
         skip: query.offset,
       }),
+      query.leagueId ? isLeagueAdmin(caller.id, query.leagueId) : Promise.resolve(undefined),
     ]);
-
-    // A caller who cannot read the league learns nothing from `false`; the
-    // list above is already empty for them.
-    const canCreate = query.leagueId ? await isLeagueAdmin(caller.id, query.leagueId) : undefined;
 
     return {
       seasons,

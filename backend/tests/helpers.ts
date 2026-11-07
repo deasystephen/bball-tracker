@@ -380,6 +380,14 @@ export function expectUnauthorizedError(error: unknown, message?: string): void 
 export const TEST_TEAM_LIMIT = 3;
 
 /**
+ * What `countDistinctStaffTeams` reads for `count` teams: one `team.groupBy`
+ * row per lineage (#461; a team is its lineage, every season counts once).
+ */
+export function lineageRows(count: number): Array<{ lineageId: string }> {
+  return Array.from({ length: count }, (_, i) => ({ lineageId: `lineage-${i}` }));
+}
+
+/**
  * Give the FREE tier a finite team limit for every test in the enclosing
  * `describe` (put back after each test). Replaces the entry in `USAGE_LIMITS`
  * itself, so everything that reads the single source of truth sees it —

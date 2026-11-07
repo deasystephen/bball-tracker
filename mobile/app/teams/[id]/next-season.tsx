@@ -40,7 +40,7 @@ export default function NextSeasonScreen() {
   const { t } = useTranslation();
   const { data: team, isLoading, error, refetch } = useTeam(id);
   const leagueId = team?.season?.league?.id;
-  const seasons = useSeasons(leagueId ? { leagueId, limit: SEASON_PAGE } : undefined);
+  const seasons = useSeasons({ leagueId, limit: SEASON_PAGE }, { enabled: !!leagueId });
 
   // The backend gates rollover on `canManageStaff` (head coach, league admin,
   // system admin); the screen is deep-linkable, so it guards itself too.

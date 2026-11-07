@@ -34,6 +34,7 @@ import {
   expectForbiddenError,
   TEST_TEAM_LIMIT,
   withFiniteFreeTeamLimit,
+  lineageRows,
 } from '../helpers';
 
 /** Distinct-team rows as returned by `countDistinctStaffTeams` (audit B2.8). */
@@ -127,7 +128,7 @@ describe('TeamService', () => {
 
       it('lets a FREE user create a 4th team without a recount: no tier is capped (#445)', async () => {
         const { coach, season } = mockCreatePath({});
-        (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(3);
+        (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(3));
 
         await expect(
           TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
@@ -135,7 +136,7 @@ describe('TeamService', () => {
         // The row lock still serializes concurrent creates by the same user.
         expect(mockPrisma.$queryRaw).toHaveBeenCalled();
         expect(mockPrisma.team.create).toHaveBeenCalled();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
 
       it('lets a lapsed PREMIUM user (effective tier FREE) create a team (#445)', async () => {
@@ -157,7 +158,7 @@ describe('TeamService', () => {
           const { coach, season } = mockCreatePath({});
           // The recount happens inside the transaction, after the lock: a
           // concurrent create that committed first is visible here.
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           try {
             await TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id);
@@ -174,13 +175,16 @@ describe('TeamService', () => {
           expect(mockPrisma.$queryRaw).toHaveBeenCalled();
           expect(mockPrisma.team.create).not.toHaveBeenCalled();
           expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
-          // Cap counts teams (audit B2.8): one staff row per team since #463.
-          expect(mockPrisma.teamStaff.count).toHaveBeenCalledWith({ where: { userId: coach.id } });
+          // Cap counts teams (audit B2.8), a team being its lineage (#461).
+          expect(mockPrisma.team.groupBy).toHaveBeenCalledWith({
+            by: ['lineageId'],
+            where: { staff: { some: { userId: coach.id } } },
+          });
         });
 
         it('allows a FREE user under the cap', async () => {
           const { coach, season } = mockCreatePath({});
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT - 1);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT - 1));
 
           await expect(
             TeamService.createTeam({ name: 'Third', seasonId: season.id }, coach.id)
@@ -193,7 +197,7 @@ describe('TeamService', () => {
             subscriptionTier: 'PREMIUM',
             subscriptionExpiresAt: new Date('2000-01-01'),
           });
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           await expect(
             TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)
@@ -210,7 +214,7 @@ describe('TeamService', () => {
         await expect(
           TeamService.createTeam({ name: 'Tenth', seasonId: season.id }, coach.id)
         ).resolves.toBeDefined();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
 
       it('skips the cap for system admins', async () => {
@@ -232,7 +236,7 @@ describe('TeamService', () => {
         await expect(
           TeamService.createTeam({ name: 'Admin team', seasonId: season.id }, admin.id)
         ).resolves.toBeDefined();
-        expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+        expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
       });
     });
 
@@ -2536,7 +2540,7 @@ describe('TeamService', () => {
           (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
           (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
           (mockPrisma.team.count as jest.Mock).mockResolvedValue(1);
-          (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(TEST_TEAM_LIMIT);
+          (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(TEST_TEAM_LIMIT));
 
           await expect(
             TeamService.createTeam({ name: 'Fourth', seasonId: season.id }, coach.id)

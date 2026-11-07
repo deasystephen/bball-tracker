@@ -33,6 +33,7 @@ export const mockPrisma = {
   team: {
     findUnique: jest.fn(),
     findUniqueOrThrow: jest.fn(),
+    groupBy: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
@@ -73,6 +74,8 @@ export const mockPrisma = {
   },
   season: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+    createMany: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),

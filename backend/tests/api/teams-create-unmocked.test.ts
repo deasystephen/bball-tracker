@@ -11,7 +11,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
-import { withFiniteFreeTeamLimit } from '../helpers';
+import { lineageRows, withFiniteFreeTeamLimit } from '../helpers';
 
 const COACH_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -130,14 +130,14 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     withFiniteFreeTeamLimit();
 
     it('takes the User-row lock before the in-transaction cap re-check and before provisioning', async () => {
-      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(0));
 
       const res = await request(app).post('/api/v1/teams').send({ name: 'Hornets' });
 
       expect(res.status).toBe(201);
       // Two team counts: the route middleware's pre-check, then the service's
       // authoritative re-check inside the transaction.
-      const counts = (mockPrisma.teamStaff.count as jest.Mock).mock.invocationCallOrder;
+      const counts = (mockPrisma.team.groupBy as jest.Mock).mock.invocationCallOrder;
       expect(counts).toHaveLength(2);
       const lockOrder = expectUserRowLockFirst();
       expect(counts[0]).toBeLessThan(lockOrder);

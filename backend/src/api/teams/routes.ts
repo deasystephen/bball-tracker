@@ -172,18 +172,17 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
  * was made; 200 with `created: false` and the existing row when the lineage
  * already has one in the target season (a repeated tap is idempotent).
  *
- * A rollover adds a team for every carried coach, so the CALLER goes through
- * the same tier team cap as `POST /teams`: `requireTeamCreateLimit` here as
- * the cheap pre-check (402), and the authoritative re-check inside the
- * service's transaction. Every cap is unlimited today (#445); the machinery
- * enforces a finite one with no other change. Carried coaches other than the
- * caller are not checked (see `TeamService.rolloverTeam`). The service
- * invalidates every carried staff member's usage cache.
+ * Deliberately NOT behind `requireTeamCreateLimit`: the tier team cap counts
+ * lineages (`countDistinctStaffTeams`, a team is its lineage), and a rollover
+ * continues a lineage, so it adds no team to anyone's count. Counting
+ * team-season rows instead would charge a coach for every past season and a
+ * capped coach could never continue their own team. The service invalidates
+ * every carried staff member's usage cache (their season count changes).
  *
  * 409 `team_season_exists` `{ teamId }` when the lineage already has a row in
  * that season that the caller may not manage.
  */
-router.post('/:id/rollover', validateUuidParams('id'), requireTeamCreateLimit(), async (req, res) => {
+router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
   try {
     const validationResult = rolloverTeamSchema.safeParse(req.body);
     if (!validationResult.success) {

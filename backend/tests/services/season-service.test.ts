@@ -397,6 +397,17 @@ describe('SeasonService', () => {
       });
     });
 
+    it('does not hide personal-league seasons from an ADMIN who names the league (#461)', async () => {
+      (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);
+
+      await SeasonService.listSeasons({ leagueId: 'league-personal', limit: 20, offset: 0 }, ADMIN);
+
+      expect((mockPrisma.season.findMany as jest.Mock).mock.calls[0][0].where).toEqual({
+        AND: [{ leagueId: 'league-personal' }],
+      });
+    });
+
     it('lets an ADMIN opt into personal-league seasons', async () => {
       (mockPrisma.season.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.season.findMany as jest.Mock).mockResolvedValue([]);

@@ -15,6 +15,9 @@ import prisma from '../../src/models';
 import { BadRequestError, ForbiddenError, NotFoundError, TeamSeasonExistsError } from '../../src/utils/errors';
 import { TeamService } from '../../src/services/team-service';
 import { StatsService } from '../../src/services/stats-service';
+import { SeasonService } from '../../src/services/season-service';
+import { computeCounts } from '../../src/services/usage-service';
+import { countDistinctStaffTeams } from '../../src/utils/permissions';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
 jest.setTimeout(60000);
@@ -126,6 +129,9 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
       ])
     );
 
+    // The deleted player (tombstone) is not carried.
+    expect(members.map((m) => m.playerId)).not.toContain(c.tombstone);
+
     // Nothing season-bound comes along.
     expect(await prisma.game.count({ where: { teamId: team.id } })).toBe(0);
 
@@ -233,6 +239,33 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
       code: 'team_season_exists',
       teamId: team.id,
     });
+  });
+
+  it('counts a team once across its seasons: N team-seasons of one lineage are one team for the cap', async () => {
+    const c = await club('count');
+    await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y1-${fx.run}` }, c.coach);
+    await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y2-${fx.run}` }, c.coach);
+
+    expect(await prisma.teamStaff.count({ where: { userId: c.coach } })).toBe(3);
+    expect(await countDistinctStaffTeams(c.coach)).toBe(1);
+    expect(await computeCounts(c.coach)).toEqual({ teams: 1, seasons: 3 });
+  });
+
+  it('survives a POST /seasons creating the same name at the same moment, leaving one season', async () => {
+    const c = await club('season-race');
+    const name = `Race-season-${fx.run}`;
+
+    const [rolled] = await Promise.allSettled([
+      TeamService.rolloverTeam(c.org.teamId, { seasonName: name }, c.coach),
+      SeasonService.createSeason({ leagueId: c.org.leagueId, name }, c.coach),
+    ]);
+
+    expect(rolled.status).toBe('fulfilled');
+    const seasons = await prisma.season.findMany({ where: { leagueId: c.org.leagueId, name }, select: { id: true } });
+    expect(seasons).toHaveLength(1);
+    if (rolled.status === 'fulfilled') {
+      expect(rolled.value.team.seasonId).toBe(seasons[0].id);
+    }
   });
 
   it("keeps last season's stats in the player career view after a rollover", async () => {

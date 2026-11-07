@@ -53,8 +53,7 @@ function mockDbCounts(teamCount: number, seasonIds: string[]): void {
   // One staff row per distinct team; the first rows carry the given seasons,
   // any extra teams reuse the last season (seasons are distinct-counted).
   const rows = Array.from({ length: teamCount }, (_, i) => ({
-    teamId: `team-${i}`,
-    team: { seasonId: seasonIds[Math.min(i, seasonIds.length - 1)] ?? 's0' },
+    team: { lineageId: `lineage-${i}`, seasonId: seasonIds[Math.min(i, seasonIds.length - 1)] ?? 's0' },
   }));
   (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue(rows);
 }
@@ -75,21 +74,33 @@ describe('usage-service', () => {
       expect(counts).toEqual({ teams: 3, seasons: 2 });
       expect(mockPrisma.teamStaff.findMany).toHaveBeenCalledWith({
         where: { userId: USER_ID },
-        select: { teamId: true, team: { select: { seasonId: true } } },
+        select: { team: { select: { lineageId: true, seasonId: true } } },
       });
     });
 
     it('counts DISTINCT seasons: two teams in one season is one season (audit B2.8)', async () => {
       // One staff row per user per team (#463), so each row is a distinct team.
       (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
-        { teamId: 'team-a', team: { seasonId: 's1' } },
-        { teamId: 'team-b', team: { seasonId: 's1' } },
-        { teamId: 'team-c', team: { seasonId: 's2' } },
+        { team: { lineageId: 'lineage-a', seasonId: 's1' } },
+        { team: { lineageId: 'lineage-b', seasonId: 's1' } },
+        { team: { lineageId: 'lineage-c', seasonId: 's2' } },
       ]);
 
       const counts = await computeCounts(USER_ID);
 
       expect(counts).toEqual({ teams: 3, seasons: 2 });
+    });
+
+    it('counts a team once across its seasons: N team-seasons of one lineage are one team (#461)', async () => {
+      (mockPrisma.teamStaff.findMany as jest.Mock).mockResolvedValue([
+        { team: { lineageId: 'lineage-a', seasonId: 's2024' } },
+        { team: { lineageId: 'lineage-a', seasonId: 's2025' } },
+        { team: { lineageId: 'lineage-a', seasonId: 's2026' } },
+      ]);
+
+      const counts = await computeCounts(USER_ID);
+
+      expect(counts).toEqual({ teams: 1, seasons: 3 });
     });
 
     it('returns zero usage for a user with no teams', async () => {

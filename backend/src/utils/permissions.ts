@@ -502,15 +502,23 @@ export async function canManageStaff(userId: string, teamId: string): Promise<bo
 }
 
 /**
- * Number of DISTINCT teams the user is staff on.
+ * Number of DISTINCT teams the user is staff on, where a team is its LINEAGE
+ * (#461): every season of one team counts once.
  *
- * A tier's team cap counts teams, not staff rows (audit B2.8). Since #463
- * `TeamStaff` is unique on `[teamId, userId]`, so one row is one team and a
- * plain count is exact. Accepts a transaction client so the create-team
- * transaction can recount behind its row lock.
+ * A `Team` row is a team-season (#462), so counting staff rows (one per
+ * team-season since #463) would charge a coach for every past season and a
+ * capped coach could never continue their own team into the next one. A new
+ * team always starts a new lineage, so a plain `POST /teams` adds exactly one,
+ * as before; a season rollover adds none for anyone carried. Accepts a
+ * transaction client so the create-team transaction can recount behind its
+ * row lock.
  */
 export async function countDistinctStaffTeams(userId: string, db: Db = prisma): Promise<number> {
-  return db.teamStaff.count({ where: { userId } });
+  const lineages = await db.team.groupBy({
+    by: ['lineageId'],
+    where: { staff: { some: { userId } } },
+  });
+  return lineages.length;
 }
 
 export interface LastHeadCoachOptions {

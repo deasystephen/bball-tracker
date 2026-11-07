@@ -122,18 +122,32 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     the season (`isActive: true`). The team's current season is 400. Optional `name`, `ageGroup`,
     `gender`: absent carries last season's value, `null` clears the bracket (a U12 team is U13 next
     year). Schema `rolloverTeamSchema`.
-  - **Who:** two independent checks, like `POST /teams`. WHO is `canManageStaff` on the source team
-    (head coach, league admin, system admin; an assistant coach is refused, as for a season move).
-    WHERE is `canWriteLeague` on the league. **Creating** a season additionally needs `isLeagueAdmin`,
-    the `POST /seasons` rule, so a coach in a club league can roll into a season the club made but
-    never mint one; a personal-league owner holds a `LeagueAdmin` row (#442) and can. Moving a team to
-    another league is adoption (#459), not rollover.
-  - **Locks**, in order: the caller's `User` row (`FOR UPDATE`, for the tier-cap re-check), the source
-    `Team` row (`lockTeamRow`, the lock staff removals and role changes take; the source is **re-read
-    behind it**, so a concurrent staff edit, season move or delete is seen whole, and a deleted source
-    answers 404), the `TeamLineage` row (`FOR NO KEY UPDATE`, so two rollovers of one lineage
-    serialize), and the `League` row only when a season may be created (the name is re-matched behind
-    it, so two case variants cannot both be minted). User before Team matches account deletion.
+  - **Who:** `canManageStaff` on the source team (head coach, league admin, system admin; an assistant
+    coach is refused, as for a season move), checked first and **again behind the team row lock**.
+    WHERE is implied: the target season must be in the team's own league, and anyone who passes
+    `canManageStaff` there already passes `canWriteLeague` (a league admin directly, a head coach as
+    staff on a team in it, a system admin always), so the service does not call it. **Creating** a season
+    additionally needs `isLeagueAdmin`, the `POST /seasons` rule, so a coach in a club league can roll
+    into a season the club made but never mint one; a personal-league owner holds a `LeagueAdmin` row
+    (#442) and can. Moving a team to another league is adoption (#459), not rollover.
+  - **Season creation** is `createMany({ skipDuplicates: true })` (`INSERT … ON CONFLICT DO NOTHING` on
+    `@@unique([leagueId, name])`), then a read by the exact name, so a concurrent same-name create
+    (`POST /seasons`, the personal-league upsert) is reused instead of a P2002 500. `seasonCreated` in
+    the domain event says whether this rollover inserted it.
+  - **Locks**, in order, all in one transaction:
+    1. every `User` the copy will reference (the caller, the source's staff and players), read
+       unlocked and then locked in id order with `lockUsers` (`FOR NO KEY UPDATE`, which conflicts with
+       account deletion's `FOR UPDATE`). Account deletion locks Users and then Teams, and the copy's FK
+       inserts need a share lock on every carried User, so taking the Users before the team keeps one
+       order and the two never deadlock. **Only users in that locked set and still live (`deletedAt`
+       null) are carried**: a member or coach added between the unlocked read and the lock is simply
+       not carried (re-add them on the new team), and one deleted meanwhile is dropped.
+    2. the source `Team` row (`lockTeamRow`, the lock staff removals and role changes take); the source
+       is **re-read behind it**, so a staff edit, season move or delete is seen whole (a deleted source
+       answers 404; a move into another league since the pre-checks answers 400).
+    3. the `TeamLineage` row (`FOR NO KEY UPDATE`), so two rollovers of one lineage serialize.
+    4. the `League` row, only when a season may be created; the name is re-matched behind it, so two
+       rollovers cannot mint two case variants.
   - **Idempotent.** Behind the locks it probes `lineageId_seasonId`. When the lineage already has a row
     in the target season nothing is written, and the route answers **200 `{ created: false, team }`**
     with that row, but only to a caller with `canAccessTeam` and `canManageRoster` **on that row**
@@ -143,25 +157,25 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     transaction runs inside `createOrConflict` naming `Team_lineageId_seasonId_key` (or its columns), so
     a P2002 on that unique (a concurrent season move into the same season) answers the season move's
     400 (`SEASON_SIBLING_MESSAGE`) and a P2002 on any other unique propagates.
-  - **Entitlements:** a rollover adds a team for every carried coach, so the **caller** goes through the
-    same tier team cap as `POST /teams`: `requireTeamCreateLimit` on the route (cheap 402 pre-check) and
-    `assertUnderTeamCap` inside the transaction behind the User row lock (shared with `createTeam`).
-    Every cap is unlimited today (#445); the machinery enforces a finite one with no other change.
-    **Carried coaches other than the caller are not checked**: they did not ask for the team, and
-    refusing the head coach because an assistant is at their cap would block the rollover. Like the
-    grandfather rule, they keep the team and cannot create more. After commit the usage cache of the
-    caller and every carried staff member is invalidated. Note for a future finite cap:
-    `countDistinctStaffTeams` counts team-season rows, so past seasons count too; decide then whether
-    the cap should count active seasons only.
+  - **Entitlements: not metered.** The tier team cap counts distinct **lineages**
+    (`countDistinctStaffTeams`, a `team.groupBy` on `lineageId`; `usage-service.computeCounts` uses the
+    same rule), so a rollover adds no team to anyone's count, and the route is not behind
+    `requireTeamCreateLimit`. Counting team-season rows would charge a coach for every past season, and a
+    capped coach could never continue their own team; a new team is a new lineage, so `POST /teams`
+    counts exactly as before. After commit the usage cache of the caller and every carried staff member
+    is invalidated (their season count changes).
   - Domain event `Team rolled over` (`teamId` new row, `fromTeamId`, `lineageId`, `fromSeasonId`,
     `toSeasonId`, `created`, `seasonCreated`, `members`, `staff` counts).
   - **Mobile:** "Start next season" on the team screen for `canManageStaff` callers →
     `app/teams/[id]/next-season.tsx`. The season is a **picker** over the league's seasons
     (`GET /seasons?leagueId=`, caller-scoped; the current season is left out) and is sent as `seasonId`.
     "New season" with a free-text name (sent as `seasonName`, prefilled by
-    `utils/season-name.ts#suggestNextSeasonName`: "2026" → "2027", "2026-27" → "2027-28") is offered only
+    `utils/season-name.ts#suggestNextSeasonName`, which moves every year forward: "2026" → "2027",
+    "2026-27" → "2027-28", "Fall 2026 - Spring 2027" → "Fall 2027 - Spring 2028") is offered only
     when that list answers `canCreate: true` (`SeasonService.listSeasons` adds it to a
-    `leagueId`-filtered list: `isLeagueAdmin`, the `POST /seasons` rule). The suggested season is
+    `leagueId`-filtered list, computed in the same `Promise.all`: `isLeagueAdmin`, the `POST /seasons`
+    rule). The seasons request waits for the team's league (`useSeasons(…, { enabled })`), and a
+    `leagueId`-filtered list does not hide personal-league seasons from a system ADMIN. The suggested season is
     preselected when the league has it (case-insensitive), else "New season" when offered. A club coach
     whose league has no other season is told to ask a league admin. Team name and age group are
     prefilled and editable. Back and Cancel use `useGoBack('/teams/<id>')`. `useRolloverTeam` fires
@@ -169,10 +183,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     (`statsKeys.playerOveralls()`) and player details, then the form replaces itself with the new
     team-season.
   - Tests: `tests/services/team-rollover.test.ts`, `tests/api/teams-rollover.test.ts` (incl. the
-    removed-coach 409, the cross-league 404 and the route's 402), `rolloverTeamSchema` in
+    removed-coach 409, the cross-league 404 and no 402 at the cap), `rolloverTeamSchema` in
     `tests/schemas/teams.test.ts`, `canCreate` in `tests/services/season-service.test.ts` and
     `tests/api/seasons.test.ts`, the real-database suite above (copy, idempotence, concurrent
-    rollovers, case-insensitive match, cross-league 404, removed-coach 409, career view); mobile
+    rollovers, tombstones not carried, case-insensitive match, cross-league 404, removed-coach 409,
+    one lineage counting as one team, a same-name `POST /seasons` race, career view); mobile
     `__tests__/app/team-next-season.test.tsx`, `__tests__/hooks/useRolloverTeam.runtime.test.tsx`,
     `__tests__/utils/season-name.test.ts`; Maestro `.maestro/team-rollover.yaml`.
 - Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the

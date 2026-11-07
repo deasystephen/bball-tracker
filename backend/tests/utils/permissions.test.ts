@@ -105,26 +105,29 @@ describe('permissions helpers', () => {
   });
 
   describe('countDistinctStaffTeams', () => {
-    // One staff row per user per team (#463), so a row count is a team count.
-    it('counts the user\'s staff rows, one per team', async () => {
-      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(2);
+    // A team is its lineage (#461): every season of one team counts once.
+    it("counts the distinct lineages of the user's team-seasons", async () => {
+      (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue([{ lineageId: 'a' }, { lineageId: 'b' }]);
 
       await expect(countDistinctStaffTeams('u')).resolves.toBe(2);
-      expect(mockPrisma.teamStaff.count).toHaveBeenCalledWith({ where: { userId: 'u' } });
+      expect(mockPrisma.team.groupBy).toHaveBeenCalledWith({
+        by: ['lineageId'],
+        where: { staff: { some: { userId: 'u' } } },
+      });
     });
 
     it('uses the supplied transaction client', async () => {
-      const tx = { teamStaff: { count: jest.fn().mockResolvedValue(1) } };
+      const tx = { team: { groupBy: jest.fn().mockResolvedValue([{ lineageId: 'a' }]) } };
 
       await expect(
         countDistinctStaffTeams('u', tx as unknown as Parameters<typeof countDistinctStaffTeams>[1])
       ).resolves.toBe(1);
-      expect(tx.teamStaff.count).toHaveBeenCalled();
-      expect(mockPrisma.teamStaff.count).not.toHaveBeenCalled();
+      expect(tx.team.groupBy).toHaveBeenCalled();
+      expect(mockPrisma.team.groupBy).not.toHaveBeenCalled();
     });
 
     it('returns 0 for a user with no staff rows', async () => {
-      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue([]);
 
       await expect(countDistinctStaffTeams('u')).resolves.toBe(0);
     });

@@ -171,8 +171,9 @@ tell them apart. Staff management is keyed off the `TeamRole.type` enum instead
 system `ADMIN` **or** admin of the team's league **or** head coach.
 `canManageStaff` also gates the head-coach-only team actions: deleting the team, moving
 it to another season, and starting its next season (`POST /teams/:id/rollover`, #461,
-which additionally needs `canWriteLeague` on the league and, to create the season,
-`isLeagueAdmin`; detail in `stats-and-lineage.md`).
+checked again behind the team row lock; the target season must be in the team's own
+league, which `canManageStaff` there already lets the caller write, and creating the
+season needs `isLeagueAdmin`; detail in `stats-and-lineage.md`).
 
 **One role per user per team (#463).** `TeamStaff` is `@@unique([teamId, userId])`
 (index `TeamStaff_teamId_userId_key`): a user holds at most one staff row, and so one
@@ -246,12 +247,13 @@ Routes (all under `/api/v1/teams/:teamId`, bearer auth, UUID params validated):
 
 POST/DELETE call `invalidateUsage(<affected userId>)` — staff membership is what the usage meter (and any tier team cap) counts.
 
-**Distinct-teams cap fix (B2.8):** the team count (and any cap on it — none since #445) uses DISTINCT `teamId`s via
-`countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`) in
-`requireTeamCreateLimit`, `TeamService.createTeam` (inside the transaction) and
-`usage-service.computeCounts`. Since #463 a user holds at most one row per
-team, so rows and teams are the same count; the `distinct` stays as the
-statement of intent. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
+**Distinct-teams cap fix (B2.8), lineage count (#461):** the team count (and any cap on it — none since #445)
+counts DISTINCT **lineages** via `countDistinctStaffTeams(userId, db?)` (`utils/permissions.ts`, a
+`team.groupBy` on `lineageId` over the teams the user staffs) in `requireTeamCreateLimit` and
+`TeamService.createTeam` (inside the transaction); `usage-service.computeCounts` applies the same rule.
+A `Team` row is one team-season (#462), so counting staff rows would charge a coach once per past season
+and a capped coach could never continue their own team; a team is its lineage. A new team always starts
+a new lineage, so `POST /teams` adds exactly one, as before, and a season rollover adds none. (The legacy `api/auth/middleware.ts#requireUsageLimit` that counted raw
 `teamStaff` rows was removed along with `requireRole` / `requireFeature`.)
 
 ## Announcements and threaded replies (#34)
