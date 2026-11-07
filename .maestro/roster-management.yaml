@@ -53,6 +53,10 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "add-player-name-input"
 - inputText: "E2E Test Player"
+# Enter blurs the name field. The age question and the player-email field
+# (#982) made the form taller, so with the name keyboard up the jersey field
+# and submit sit under the keyboard and taps land on keys instead.
+- pressKey: Enter
 - tapOn:
     id: "add-player-jersey-input"
 - inputText: "99"
@@ -60,20 +64,29 @@ appId: com.bballtracker.mobile
 # Dismiss the keyboard so the submit button is tappable. The jersey field has
 # a NUMBER PAD, which has no return key, so Enter cannot blur it. The form's
 # ScrollView has keyboardShouldPersistTaps="handled", so tapping any
-# non-interactive text (the field's own label) dismisses the keyboard
-# deterministically. Never hideKeyboard: on iOS it cannot hide a number pad,
-# and since Maestro 2.11 that fails the flow instead of doing nothing (#584).
-- tapOn: "Jersey Number"
+# non-interactive text dismisses the keyboard deterministically. Tap the age
+# question heading: since #982 the form is tall enough that the number pad
+# covers the jersey field's own label, and a tap there lands on a key. Never
+# hideKeyboard: on iOS it cannot hide a number pad, and since Maestro 2.11
+# that fails the flow instead of doing nothing (#584).
+- tapOn: "Is this player 13 or older\\?"
 
-# Submit
+# Submit (below the fold since #982)
+- scrollUntilVisible:
+    element:
+      id: "add-player-submit"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "add-player-submit"
 
 # The player appears on the roster IMMEDIATELY with the "Not invited" chip
 # (row-anchored label — a bare "Not invited" could match another row's chip)
+# Scroll to the chip itself: a bare "E2E Test Player" also matches the name
+# field when the add did not go through.
 - scrollUntilVisible:
     element:
-      text: "E2E Test Player"
+      text: "E2E Test Player status: Not invited"
     direction: DOWN
     timeout: 10000
 - assertVisible: "E2E Test Player status: Not invited"
@@ -124,17 +137,27 @@ appId: com.bballtracker.mobile
     id: "add-player-name-input"
 - inputText: "E2E Under13 Player"
 - pressKey: Enter
+- scrollUntilVisible:
+    element:
+      id: "add-player-guardian-email-input"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "add-player-guardian-email-input"
 - inputText: "e2e-under13-parent@example.test"
 - pressKey: Enter
 # The relationship chips appear once a guardian email is typed; the default
 # (Guardian) is kept.
+- scrollUntilVisible:
+    element:
+      id: "add-player-submit"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "add-player-submit"
 - scrollUntilVisible:
     element:
-      text: "E2E Under13 Player"
+      text: "E2E Under13 Player status: Not invited"
     direction: DOWN
     timeout: 10000
 # No player email went out: the row is a roster-only managed player
