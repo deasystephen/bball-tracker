@@ -55,9 +55,20 @@ appId: com.bballtracker.mobile
     direction: DOWN
     timeout: 10000
 
-# Last season's stats stay on last season's row: the career view lists both.
+# Last season's stats stay on last season's row: the career view counts both
+# team-seasons and keeps last season's game. The per-team rows (league and
+# season name) sit below the averages and totals, so scroll to each.
 - tapOn: "LeBron James"
 - extendedWaitUntil:
-    visible: ".*Spring 2024.*"
+    visible: ".*2 teams.*"
     timeout: 10000
-- assertVisible: ".*Spring 2025.*"
+- scrollUntilVisible:
+    element:
+      text: ".*Spring 2024.*"
+    direction: DOWN
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: ".*Spring 2025.*"
+    direction: DOWN
+    timeout: 15000
